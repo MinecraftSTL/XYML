@@ -32,7 +32,6 @@ import org.jetbrains.annotations.Nullable;
 import java.lang.reflect.Type;
 import java.util.Objects;
 
-
 /// Persistent configuration for a game directory.
 @JsonAdapter(GameDirectory.Serializer.class)
 @NotNullByDefault
