@@ -88,6 +88,7 @@ HMCL 提供了一系列除錯選項，用於控制啟動器的行為。
 | `HMCL_ANIMATION_FRAME_RATE` |                                              | 設定 HMCL 的動畫幀率                  | `60`                                                                                                        |              |
 | `HMCL_LANGUAGE`             |                                              | 設定 HMCL 的預設語言                  | 使用系統預設語言                                                                                                    |
 | `HMCL_UI_SCALE`             |                                              | 設定 HMCL 的 UI 縮放比例               | 遵循系統目前的縮放比例                                                                                       | 支援倍數 (1.5)、百分比 (150%) 或 DPI (144dpi) |
+| `HMCL_SKIP_OFFLINE_USERNAME_CHECK` |                                      | 完全跳過非法離線使用者名稱檢查                 | `false`                                                                                                      | 設為 `true` 後啟用，會記錄警告，可能導致無法加入伺服器或遊戲崩潰。 |
 |                             | `-Dhmcl.dir=<path>`                          | 設定 HMCL 的目前資料存放位置               | `./.hmcl`                                                                                                   |              |
 |                             | `-Dhmcl.home=<path>`                         | 設定 HMCL 的使用者資料存放位置               | Windows: `%APPDATA%\.hmcl`<br>Linux/BSD: `$XDG_DATA_HOME/hmcl`<br>macOS: `~Library/Application Support/hmcl` |              |
 |                             | `-Dhmcl.self_integrity_check.disable=true`   | 檢查更新時不檢查程式完整性                  |                                                                                                             |              |
@@ -102,4 +103,3 @@ HMCL 提供了一系列除錯選項，用於控制啟動器的行為。
 |                             | `-Dhmcl.curseforge.apikey=<Api Key>`         | 設定 CurseForge API 金鑰           | 使用 HMCL 內建的 CurseForge API 金鑰                                                                               |              |
 |                             | `-Dhmcl.native.backend=<auto/jna/none>`      | 設定 HMCL 使用的本機後端                  | `auto`                                                                                                      |
 |                             | `-Dhmcl.hardware.fastfetch=<true/false>`     | 設定是否使用 fastfetch 檢測硬體資訊        | `true`                                                                                                      |
-
