@@ -167,7 +167,7 @@ case "$_HMCL_OS-$_HMCL_ARCH" in
 esac
 
 if [ "$_HMCL_USE_CHINESE" == true ]; then
-  _HMCL_WARNING_MESSAGE="运行 HMCL 需要 Java 运行时环境，请安装 Java 并设置环境变量后重试。"
+  _HMCL_WARNING_MESSAGE="运行 XYML 需要 Java 运行时环境，请安装 Java 并设置环境变量后重试。"
 
   if [ -n "$_HMCL_JAVA_DOWNLOAD_PAGE" ]; then
     show_warning_console "错误: $_HMCL_WARNING_MESSAGE\n你可以前往此处下载:\n$_HMCL_JAVA_DOWNLOAD_PAGE"
@@ -176,7 +176,7 @@ if [ "$_HMCL_USE_CHINESE" == true ]; then
     show_warning "错误" "$_HMCL_WARNING_MESSAGE\n你可以访问 https://docs.hmcl.net/help.html 页面寻求帮助。"
   fi
 else
-  _HMCL_WARNING_MESSAGE="The Java runtime environment is required to run HMCL.\nPlease install Java and set the environment variables and try again."
+  _HMCL_WARNING_MESSAGE="The Java runtime environment is required to run XYML.\nPlease install Java and set the environment variables and try again."
   if [ -n "$_HMCL_JAVA_DOWNLOAD_PAGE" ]; then
     show_warning_console "Error: $_HMCL_WARNING_MESSAGE\nYou can download it from here:\n$_HMCL_JAVA_DOWNLOAD_PAGE"
     show_warning_dialog  "Error" "$_HMCL_WARNING_MESSAGE\n\nDo you want to go to the Java download page?" "$_HMCL_JAVA_DOWNLOAD_PAGE"

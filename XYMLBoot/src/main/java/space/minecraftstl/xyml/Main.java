@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.util.SwingUtils;
 
 import javax.swing.*;
@@ -27,16 +29,26 @@ import java.security.CodeSource;
 import java.security.ProtectionDomain;
 import java.util.ResourceBundle;
 
-/**
- * @author Glavo
- */
+/// Validates the bootstrap runtime and delegates to the launcher entry point.
+///
+/// @author Glavo
+@NotNullByDefault
 public final class Main {
+    /// Oldest Java feature version capable of running the launcher.
     private static final int MINIMUM_JAVA_VERSION = 17;
+
+    /// Manual download page opened when the bootstrap updater cannot proceed.
     private static final String DOWNLOAD_PAGE = "https://hmcl.huangyuhui.net/download/";
 
+    /// Prevents construction of the bootstrap entry point.
     private Main() {
     }
 
+    /// Finds the end of a decimal digit run beginning at the requested index.
+    ///
+    /// @param str   the string to inspect
+    /// @param start the index where a digit run must begin
+    /// @return the first non-digit index, the string length, or `-1` when no digit run begins at `start`
     static int findFirstNotNumber(String str, int start) {
         if (start >= str.length())
             return -1;
@@ -53,7 +65,11 @@ public final class Main {
         return str.length();
     }
 
-    static int getJavaFeatureVersion(String javaVersion) {
+    /// Parses the Java feature version from a runtime version string.
+    ///
+    /// @param javaVersion the runtime version string, or `null` when unavailable
+    /// @return the parsed feature version, or `-1` when the value is missing or malformed
+    static int getJavaFeatureVersion(@Nullable String javaVersion) {
         if (javaVersion == null)
             return -1;
 
@@ -82,6 +98,9 @@ public final class Main {
         }
     }
 
+    /// Displays the applicable bootstrap failure and terminates the process.
+    ///
+    /// @param args launcher arguments used to detect an interrupted update
     static void showErrorAndExit(String[] args) {
         SwingUtils.initLookAndFeel();
 
@@ -107,9 +126,10 @@ public final class Main {
         System.exit(1);
     }
 
+    /// Rejects working or launcher paths containing an exclamation mark before startup.
     private static void checkDirectoryPath() {
         String currentDir = System.getProperty("user.dir", "");
-        String jarPath = getThisJarPath();
+        @Nullable String jarPath = getThisJarPath();
         if (currentDir.contains("!")) {
             SwingUtils.initLookAndFeel();
             System.err.println("The current working path contains an exclamation mark: " + currentDir);
@@ -120,17 +140,20 @@ public final class Main {
             SwingUtils.initLookAndFeel();
             System.err.println("The jar path contains an exclamation mark: " + jarPath);
             // No Chinese translation because both Swing and JavaFX cannot render Chinese character properly when exclamation mark exists in the path.
-            SwingUtils.showErrorDialog("Exclamation mark(!) is not allowed in the path where HMCL is in.\n" + "The path is " + jarPath);
+            SwingUtils.showErrorDialog("Exclamation mark(!) is not allowed in the path where XYML is in.\n" + "The path is " + jarPath);
             System.exit(1);
         }
     }
 
-    private static String getThisJarPath() {
-        ProtectionDomain protectionDomain = Main.class.getProtectionDomain();
+    /// Returns the normalized launcher JAR path when it can be resolved.
+    ///
+    /// @return the launcher JAR path, or `null` when unavailable
+    private static @Nullable String getThisJarPath() {
+        @Nullable ProtectionDomain protectionDomain = Main.class.getProtectionDomain();
         if (protectionDomain == null)
             return null;
 
-        CodeSource codeSource = protectionDomain.getCodeSource();
+        @Nullable CodeSource codeSource = protectionDomain.getCodeSource();
         if (codeSource == null || codeSource.getLocation() == null)
             return null;
 
@@ -141,6 +164,10 @@ public final class Main {
         }
     }
 
+    /// Validates the runtime and starts the real launcher entry point.
+    ///
+    /// @param args launcher arguments
+    /// @throws Throwable when the delegated launcher entry point fails
     public static void main(String[] args) throws Throwable {
         checkDirectoryPath();
         if (getJavaFeatureVersion(System.getProperty("java.version")) >= MINIMUM_JAVA_VERSION) {
