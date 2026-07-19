@@ -33,6 +33,7 @@ import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.layout.*;
+import javafx.scene.text.Text;
 import org.glavo.uuid.UUIDs;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
@@ -70,6 +71,7 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.unmodifiableList;
 import static javafx.beans.binding.Bindings.bindContent;
 import static javafx.beans.binding.Bindings.createBooleanBinding;
+import static javafx.beans.binding.Bindings.createDoubleBinding;
 import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 import static space.minecraftstl.xyml.setting.SettingsManager.getAuthlibInjectorServers;
 import static space.minecraftstl.xyml.ui.FXUtils.*;
@@ -702,6 +704,15 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
     /// Dialog that requires the user to reproduce the localized illegal-name warning.
     @NotNullByDefault
     private static final class InvalidUsernameConfirmationPane extends DialogPane implements DialogAware {
+        /// Width used to measure wrapped prompt text before the dialog completes its first layout.
+        private static final double PROMPT_FALLBACK_WIDTH = 400.0;
+
+        /// Horizontal room reserved for the text area's internal content insets.
+        private static final double PROMPT_HORIZONTAL_INSETS = 16.0;
+
+        /// Vertical room reserved for the text area's internal content insets.
+        private static final double PROMPT_VERTICAL_INSETS = 20.0;
+
         /// Action that continues creating the account after a valid confirmation.
         private final Runnable confirm;
 
@@ -728,11 +739,10 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
             JFXTextArea confirmationText = new JFXTextArea(confirmationPrompt);
             confirmationText.setEditable(false);
             confirmationText.setWrapText(true);
-            confirmationText.setPrefRowCount(8);
-            confirmationText.setMaxHeight(Region.USE_PREF_SIZE);
             confirmationText.setMaxWidth(Double.MAX_VALUE);
             confirmationText.setFocusTraversable(true);
             confirmationText.getStyleClass().add("illegal-username-confirmation-text");
+            fitHeightToContent(confirmationText);
             // Suppress the custom menu without disabling selection or keyboard copy shortcuts.
             confirmationText.setOnContextMenuRequested(event -> event.consume());
 
@@ -751,6 +761,26 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
             content.setFillWidth(true);
             setBody(content);
             setValid(false);
+        }
+
+        /// Binds a read-only text area's height to its wrapped content at the current width and font.
+        private static void fitHeightToContent(JFXTextArea textArea) {
+            Text measurement = new Text();
+            measurement.textProperty().bind(textArea.textProperty());
+            measurement.fontProperty().bind(textArea.fontProperty());
+            measurement.nodeOrientationProperty().bind(textArea.effectiveNodeOrientationProperty());
+            measurement.wrappingWidthProperty().bind(createDoubleBinding(() -> {
+                double width = textArea.getWidth() > PROMPT_HORIZONTAL_INSETS
+                        ? textArea.getWidth()
+                        : PROMPT_FALLBACK_WIDTH;
+                return width - PROMPT_HORIZONTAL_INSETS;
+            }, textArea.widthProperty()));
+
+            textArea.prefHeightProperty().bind(createDoubleBinding(
+                    () -> Math.ceil(measurement.getLayoutBounds().getHeight()) + PROMPT_VERTICAL_INSETS,
+                    measurement.layoutBoundsProperty()));
+            textArea.setMinHeight(Region.USE_PREF_SIZE);
+            textArea.setMaxHeight(Region.USE_PREF_SIZE);
         }
 
         /// Focuses the acknowledgement input when the confirmation dialog opens.
