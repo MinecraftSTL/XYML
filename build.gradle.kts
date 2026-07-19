@@ -1,13 +1,13 @@
-import org.jackhuang.hmcl.gradle.ci.CheckUpdate
-import org.jackhuang.hmcl.gradle.docs.UpdateDocuments
-import org.jackhuang.hmcl.gradle.l10n.ParseLanguageSubtagRegistry
+import space.minecraftstl.xyml.gradle.ci.CheckUpdate
+import space.minecraftstl.xyml.gradle.docs.UpdateDocuments
+import space.minecraftstl.xyml.gradle.l10n.ParseLanguageSubtagRegistry
 
 plugins {
     id("checkstyle")
     id("org.glavo.gradle-wrapper-neo") version "0.2.0"
 }
 
-group = "org.jackhuang"
+group = "space.minecraftstl"
 version = "3.0"
 
 subprojects {
@@ -76,15 +76,15 @@ subprojects {
     }
 }
 
-org.jackhuang.hmcl.gradle.javafx.JavaFXUtils.register(rootProject)
+space.minecraftstl.xyml.gradle.javafx.JavaFXUtils.register(rootProject)
 
 defaultTasks("clean", "build")
 
 tasks.register<ParseLanguageSubtagRegistry>("parseLanguageSubtagRegistry") {
     languageSubtagRegistryFile.set(layout.projectDirectory.file("language-subtag-registry"))
 
-    sublanguagesFile.set(layout.projectDirectory.file("HMCLCore/src/main/resources/assets/lang/sublanguages.csv"))
-    defaultScriptFile.set(layout.projectDirectory.file("HMCLCore/src/main/resources/assets/lang/default_script.csv"))
+    sublanguagesFile.set(layout.projectDirectory.file("XYMLCore/src/main/resources/assets/lang/sublanguages.csv"))
+    defaultScriptFile.set(layout.projectDirectory.file("XYMLCore/src/main/resources/assets/lang/default_script.csv"))
 }
 
 tasks.register<UpdateDocuments>("updateDocuments") {

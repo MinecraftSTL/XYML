@@ -27,28 +27,28 @@ language-subtag-registry
 
 # gradle build
 /build/
-/HMCL/build/
-/HMCLCore/build/
-/HMCLBoot/build/
-/minecraft/libraries/HMCLTransformerDiscoveryService/build/
-/minecraft/libraries/HMCLMultiMCBootstrap/build/
+/XYML/build/
+/XYMLCore/build/
+/XYMLBoot/build/
+/minecraft/libraries/XYMLTransformerDiscoveryService/build/
+/minecraft/libraries/XYMLMultiMCBootstrap/build/
 /buildSrc/build/
 
 # idea
 .idea
 /out/
-/HMCL/out/
-/HMCLCore/out/
-/minecraft/libraries/HMCLTransformerDiscoveryService/out/
-/minecraft/libraries/HMCLMultiMCBootstrap/out/
+/XYML/out/
+/XYMLCore/out/
+/minecraft/libraries/XYMLTransformerDiscoveryService/out/
+/minecraft/libraries/XYMLMultiMCBootstrap/out/
 
 # eclipse
 /bin/
-/HMCL/bin/
-/HMCLBoot/bin/
-/HMCLCore/bin/
-/minecraft/libraries/HMCLTransformerDiscoveryService/bin/
-/minecraft/libraries/HMCLMultiMCBootstrap/bin/
+/XYML/bin/
+/XYMLBoot/bin/
+/XYMLCore/bin/
+/minecraft/libraries/XYMLTransformerDiscoveryService/bin/
+/minecraft/libraries/XYMLMultiMCBootstrap/bin/
 .classpath
 .project
 .settings

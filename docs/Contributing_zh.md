@@ -67,7 +67,7 @@ OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
 ./gradlew clean makeExecutables
 ```
 
-构建出的 HMCL 程序文件位于根目录下的 `HMCL/build/libs` 子目录中。
+构建出的 XYML 程序文件位于根目录下的 `XYML/build/libs` 子目录中。
 
 ## 调试选项
 

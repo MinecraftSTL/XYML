@@ -33,24 +33,24 @@ jobs:
     - name: Upload JAR
       uses: actions/upload-artifact@v7
       with:
-        name: HMCL-${{ env.SHORT_SHA }}-jar
-        path: HMCL/build/libs/HMCL-*.jar
+        name: XYML-${{ env.SHORT_SHA }}-jar
+        path: XYML/build/libs/XYML-*.jar
         archive: false
     - name: Upload EXE
       uses: actions/upload-artifact@v7
       with:
-        name: HMCL-${{ env.SHORT_SHA }}-exe
-        path: HMCL/build/libs/HMCL-*.exe
+        name: XYML-${{ env.SHORT_SHA }}-exe
+        path: XYML/build/libs/XYML-*.exe
         archive: false
     - name: Upload SH
       uses: actions/upload-artifact@v7
       with:
-        name: HMCL-${{ env.SHORT_SHA }}-sh
-        path: HMCL/build/libs/HMCL-*.sh
+        name: XYML-${{ env.SHORT_SHA }}-sh
+        path: XYML/build/libs/XYML-*.sh
         archive: false
     - name: Upload DEB
       uses: actions/upload-artifact@v7
       with:
-        name: HMCL-${{ env.SHORT_SHA }}-deb
-        path: HMCL/build/libs/HMCL-*.deb
+        name: XYML-${{ env.SHORT_SHA }}-deb
+        path: XYML/build/libs/XYML-*.deb
         archive: false

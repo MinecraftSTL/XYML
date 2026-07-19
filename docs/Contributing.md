@@ -68,7 +68,7 @@ To build HMCL, switch to the root directory of the HMCL project and run the foll
 ./gradlew clean makeExecutables
 ```
 
-The built HMCL program files are located in the `HMCL/build/libs` subdirectory under the project root.
+The built XYML program files are located in the `XYML/build/libs` subdirectory under the project root.
 
 ## Debug Options
 

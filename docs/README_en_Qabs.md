@@ -1,5 +1,5 @@
 <div align="center">
-    <img src="/HMCL/src/main/resources/assets/img/icon@8x.png" alt="HMCL Logo" width="64" style="transform: rotate(180deg);"/>
+    <img src="/XYML/src/main/resources/assets/img/icon@8x.png" alt="HMCL Logo" width="64" style="transform: rotate(180deg);"/>
 </div>
 
 <h1 align="center">ɹǝɥɔunɐ˥ ¡ʇɟɐɹɔǝuᴉW ollǝH</h1>
