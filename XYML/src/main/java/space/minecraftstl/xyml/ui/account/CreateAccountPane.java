@@ -31,9 +31,13 @@ import javafx.scene.Node;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.layout.*;
 import org.glavo.uuid.UUIDs;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.auth.AccountFactory;
 import space.minecraftstl.xyml.auth.CharacterSelector;
@@ -45,6 +49,7 @@ import space.minecraftstl.xyml.auth.microsoft.MicrosoftAccountFactory;
 import space.minecraftstl.xyml.auth.offline.OfflineAccountFactory;
 import space.minecraftstl.xyml.auth.yggdrasil.GameProfile;
 import space.minecraftstl.xyml.auth.yggdrasil.YggdrasilService;
+import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.game.TexturesLoader;
 import space.minecraftstl.xyml.setting.Accounts;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -57,7 +62,6 @@ import space.minecraftstl.xyml.ui.construct.*;
 import space.minecraftstl.xyml.upgrade.IntegrityChecker;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.javafx.BindingMapping;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
@@ -73,8 +77,13 @@ import static space.minecraftstl.xyml.ui.FXUtils.*;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.util.javafx.ExtendedProperties.classPropertyFor;
 
+/// Dialog for creating offline, Microsoft, and authlib-injector accounts.
+@NotNullByDefault
 public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
     private static final Pattern USERNAME_CHECKER_PATTERN = Pattern.compile("^[A-Za-z0-9_]+$");
+    /// Localization key for the acknowledgement required by an illegal offline username.
+    private static final String INVALID_USERNAME_CONFIRMATION_KEY =
+            "account.methods.offline.name.invalid.confirmation";
 
     private boolean showMethodSwitcher;
     private AccountFactory<?> factory;
@@ -84,18 +93,18 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
     private final SpinnerPane spinner;
     private final Node body;
     private final HBox actions;
-    private Node detailsPane; // AccountDetailsInputPane for Offline / Mojang / authlib-injector, Label for Microsoft
+    private @Nullable Node detailsPane; // AccountDetailsInputPane for Offline / Mojang / authlib-injector, Label for Microsoft
     private final Pane detailsContainer;
 
     private final BooleanProperty logging = new SimpleBooleanProperty();
 
-    private TaskExecutor loginTask;
+    private @Nullable TaskExecutor loginTask;
 
     public CreateAccountPane() {
         this((AccountFactory<?>) null);
     }
 
-    public CreateAccountPane(AccountFactory<?> factory) {
+    public CreateAccountPane(@Nullable AccountFactory<?> factory) {
         if (factory == null) {
             if (AccountListPage.RESTRICTED.get()) {
                 showMethodSwitcher = false;
@@ -150,7 +159,7 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
 
         if (showMethodSwitcher) {
             TabControl.Tab<?>[] tabs = new TabControl.Tab[Accounts.FACTORIES.size()];
-            TabControl.Tab<?> selected = null;
+            @Nullable TabControl.Tab<?> selected = null;
             for (int i = 0; i < tabs.length; i++) {
                 AccountFactory<?> f = Accounts.FACTORIES.get(i);
                 tabs[i] = new TabControl.Tab<>(Accounts.getLoginType(f), Accounts.getLocalizedLoginTypeName(f));
@@ -198,6 +207,7 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
         this(Accounts.getAccountFactoryByAuthlibInjectorServer(authServer));
     }
 
+    /// Starts account creation and requests explicit confirmation for an illegal offline username.
     private void onAccept() {
         spinner.showSpinner();
         lblErrorMessage.setText("");
@@ -206,9 +216,9 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
             body.setDisable(true);
         }
 
-        String username;
-        String password;
-        Object additionalData;
+        @Nullable String username;
+        @Nullable String password;
+        @Nullable Object additionalData;
         if (detailsPane instanceof AccountDetailsInputPane) {
             AccountDetailsInputPane details = (AccountDetailsInputPane) detailsPane;
             username = details.getUsername();
@@ -247,16 +257,65 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
                     }).executor(true);
         };
 
-        if (factory instanceof OfflineAccountFactory && username != null && (!USERNAME_CHECKER_PATTERN.matcher(username).matches() || username.length() > 16)) {
-            Controllers.confirmWithCountdown(i18n("account.methods.offline.name.invalid"), i18n("message.warning"), 10,
-                    MessageDialogPane.MessageType.WARNING,
-                    doCreate, () -> {
-                        body.setDisable(false);
-                        spinner.hideSpinner();
-                    });
+        if (!Metadata.SKIP_OFFLINE_USERNAME_CHECK
+                && factory instanceof OfflineAccountFactory
+                && isInvalidOfflineUsername(username)) {
+            Controllers.dialog(new InvalidUsernameConfirmationPane(doCreate, () -> {
+                body.setDisable(false);
+                spinner.hideSpinner();
+            }));
         } else {
             doCreate.run();
         }
+    }
+
+    /// Returns whether a username violates the vanilla offline account name limits.
+    private static boolean isInvalidOfflineUsername(@Nullable String username) {
+        return username != null
+                && (!USERNAME_CHECKER_PATTERN.matcher(username).matches() || username.length() > 16);
+    }
+
+    /// Replaces Unicode punctuation with spaces before the confirmation text is displayed.
+    static String replacePunctuationWithSpaces(String text) {
+        StringBuilder result = new StringBuilder(text.length());
+        text.codePoints().forEach(codePoint -> {
+            if (isPunctuation(codePoint)) {
+                result.append(' ');
+            } else {
+                result.appendCodePoint(codePoint);
+            }
+        });
+        return result.toString();
+    }
+
+    /// Returns whether two confirmation strings match after ignoring all whitespace.
+    static boolean matchesConfirmation(String input, String expected) {
+        return removeWhitespace(input).contentEquals(removeWhitespace(expected));
+    }
+
+    /// Removes Unicode whitespace so line wrapping and copied spacing do not affect matching.
+    private static String removeWhitespace(String text) {
+        StringBuilder result = new StringBuilder(text.length());
+        text.codePoints().forEach(codePoint -> {
+            if (!Character.isWhitespace(codePoint) && !Character.isSpaceChar(codePoint)) {
+                result.appendCodePoint(codePoint);
+            }
+        });
+        return result.toString();
+    }
+
+    /// Returns whether a Unicode code point belongs to one of the punctuation categories.
+    private static boolean isPunctuation(int codePoint) {
+        return switch (Character.getType(codePoint)) {
+            case Character.CONNECTOR_PUNCTUATION,
+                 Character.DASH_PUNCTUATION,
+                 Character.START_PUNCTUATION,
+                 Character.END_PUNCTUATION,
+                 Character.INITIAL_QUOTE_PUNCTUATION,
+                 Character.FINAL_QUOTE_PUNCTUATION,
+                 Character.OTHER_PUNCTUATION -> true;
+            default -> false;
+        };
     }
 
     /// Adds the logged-in account, selects it, and closes the dialog.
@@ -306,9 +365,10 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
     private static class AccountDetailsInputPane extends GridPane {
 
         // ==== authlib-injector hyperlinks ====
-        private static final String[] ALLOWED_LINKS = {"homepage", "register"};
+        private static final String @Unmodifiable [] ALLOWED_LINKS = {"homepage", "register"};
 
-        private static List<Hyperlink> createHyperlinks(AuthlibInjectorServer server) {
+        /// Creates localized links exposed by an authlib-injector server.
+        private static @Unmodifiable List<Hyperlink> createHyperlinks(@Nullable AuthlibInjectorServer server) {
             if (server == null) {
                 return emptyList();
             }
@@ -545,7 +605,8 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
             return false;
         }
 
-        public Object getAdditionalData() {
+        /// Returns factory-specific UUID or authlib-injector data for account creation.
+        public @Nullable Object getAdditionalData() {
             if (factory instanceof AuthlibInjectorAccountFactory) {
                 return getAuthServer();
             } else if (factory instanceof OfflineAccountFactory) {
@@ -585,7 +646,8 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
         private final JFXButton cancel = new JFXButton();
 
         private final CountDownLatch latch = new CountDownLatch(1);
-        private GameProfile selectedProfile = null;
+        /// Profile selected by the player, or `null` until a profile is chosen.
+        private @Nullable GameProfile selectedProfile = null;
 
         public DialogCharacterSelector() {
             setStyle("-fx-padding: 8px;");
@@ -635,6 +697,83 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
             } finally {
                 Platform.runLater(() -> fireEvent(new DialogCloseEvent()));
             }
+        }
+    }
+
+    /// Dialog that requires the user to reproduce the localized illegal-name warning.
+    @NotNullByDefault
+    private static final class InvalidUsernameConfirmationPane extends DialogPane implements DialogAware {
+        /// Action that continues creating the account after a valid confirmation.
+        private final Runnable confirm;
+
+        /// Action that restores the account form when confirmation is cancelled.
+        private final Runnable cancel;
+
+        /// Input field containing the user's acknowledgement.
+        private final JFXTextField input;
+
+        /// Punctuation-free localized acknowledgement displayed above the input field.
+        private final String expectedText;
+
+        /// Creates a confirmation dialog and wires its accept and cancel actions.
+        private InvalidUsernameConfirmationPane(Runnable confirm, Runnable cancel) {
+            this.confirm = confirm;
+            this.cancel = cancel;
+            expectedText = replacePunctuationWithSpaces(i18n(INVALID_USERNAME_CONFIRMATION_KEY));
+
+            setTitle(i18n("message.warning"));
+
+            Label warning = new Label(i18n("account.methods.offline.name.invalid"));
+            warning.setWrapText(true);
+            warning.setMaxWidth(Double.MAX_VALUE);
+
+            Label instruction = new Label(i18n("account.methods.offline.name.invalid.confirmation.prompt"));
+            instruction.setWrapText(true);
+            instruction.setMaxWidth(Double.MAX_VALUE);
+
+            TextArea confirmationText = new TextArea(expectedText);
+            confirmationText.setEditable(false);
+            confirmationText.setWrapText(true);
+            confirmationText.setPrefRowCount(3);
+            confirmationText.setMinHeight(Region.USE_PREF_SIZE);
+            confirmationText.setMaxWidth(Double.MAX_VALUE);
+            confirmationText.setFocusTraversable(true);
+
+            input = new JFXTextField();
+            input.setPromptText(i18n("account.methods.offline.name.invalid.confirmation.input"));
+            input.setMaxWidth(Double.MAX_VALUE);
+            input.textProperty().addListener((observable, oldValue, newValue) ->
+                    setValid(newValue != null && matchesConfirmation(newValue, expectedText)));
+            input.setOnAction(event -> {
+                if (isValid()) {
+                    onAccept();
+                }
+            });
+
+            VBox content = new VBox(10, warning, instruction, confirmationText, input);
+            content.setFillWidth(true);
+            setBody(content);
+            setValid(false);
+        }
+
+        /// Focuses the acknowledgement input when the confirmation dialog opens.
+        @Override
+        public void onDialogShown() {
+            input.requestFocus();
+        }
+
+        /// Closes the confirmation dialog and continues account creation.
+        @Override
+        protected void onAccept() {
+            super.onAccept();
+            confirm.run();
+        }
+
+        /// Closes the confirmation dialog and restores the account form.
+        @Override
+        protected void onCancel() {
+            super.onCancel();
+            cancel.run();
         }
     }
 

@@ -88,6 +88,7 @@ HMCL 提供了一系列调试选项，用于控制启动器的行为。
 | `HMCL_ANIMATION_FRAME_RATE` |                                              | 指定 HMCL 的动画帧率                  | `60`                                                                                                        |              |
 | `HMCL_LANGUAGE`             |                                              | 指定 HMCL 的默认语言                  | 使用系统默认语言                                                                                                    |
 | `HMCL_UI_SCALE`             |                                              | 指定 HMCL 的 UI 缩放比例                 | 遵循系统当前的缩放比例                                                                                       | 支持倍数 (1.5)、百分比 (150%) 或 DPI (144dpi) |
+| `HMCL_SKIP_OFFLINE_USERNAME_CHECK` |                                      | 完全跳过非法离线用户名检查                 | `false`                                                                                                      | 设为 `true` 后启用，会记录警告，可能导致无法加入服务器或游戏崩溃。 |
 |                             | `-Dhmcl.dir=<path>`                          | 指定 HMCL 的当前数据文件夹               | `./.hmcl`                                                                                                   |              |
 |                             | `-Dhmcl.home=<path>`                         | 指定 HMCL 的用户数据文件夹               | Windows: `%APPDATA%\.hmcl`<br>Linux/BSD: `$XDG_DATA_HOME/hmcl`<br>macOS: `~Library/Application Support/hmcl` |              |
 |                             | `-Dhmcl.self_integrity_check.disable=true`   | 检查更新时不检查本体完整性                  |                                                                                                             |              |
@@ -102,4 +103,3 @@ HMCL 提供了一系列调试选项，用于控制启动器的行为。
 |                             | `-Dhmcl.curseforge.apikey=<Api Key>`         | 指定 CurseForge API 密钥           | 使用 HMCL 内置的 CurseForge API 密钥                                                                               |              |
 |                             | `-Dhmcl.native.backend=<auto/jna/none>`      | 指定HMCL使用的本机后端                  | `auto`                                                                                                      |
 |                             | `-Dhmcl.hardware.fastfetch=<true/false>`     | 指定是否使用 fastfetch 检测硬件信息        | `true`                                                                                                      |
-

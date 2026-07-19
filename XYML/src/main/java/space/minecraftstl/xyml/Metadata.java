@@ -88,6 +88,13 @@ public final class Metadata {
     /// Build channel embedded in the launcher artifact.
     public static final String BUILD_CHANNEL = JarUtils.getAttribute("hmcl.version.type", "nightly");
 
+    /// Environment variable that disables the confirmation for illegal offline usernames.
+    public static final String SKIP_OFFLINE_USERNAME_CHECK_ENVIRONMENT_VARIABLE = "HMCL_SKIP_OFFLINE_USERNAME_CHECK";
+
+    /// Whether the illegal offline username confirmation is disabled by the environment.
+    public static final boolean SKIP_OFFLINE_USERNAME_CHECK =
+            "true".equalsIgnoreCase(System.getenv(SKIP_OFFLINE_USERNAME_CHECK_ENVIRONMENT_VARIABLE));
+
     /// Source commit embedded in the launcher artifact, or `null` when unavailable.
     public static final @Nullable String GITHUB_SHA = JarUtils.getAttribute("hmcl.version.hash", null);
 

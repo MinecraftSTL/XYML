@@ -48,6 +48,8 @@ import space.minecraftstl.xyml.util.*;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.JarUtils;
 import space.minecraftstl.xyml.util.platform.*;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.IOException;
@@ -71,9 +73,12 @@ import static space.minecraftstl.xyml.util.DataSizeUnit.MEGABYTES;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// JavaFX application entry point for the launcher.
+@NotNullByDefault
 public final class Launcher extends Application {
     public static final CookieManager COOKIE_MANAGER = new CookieManager();
 
+    /// Initializes launcher services, displays startup warnings, and schedules the main window.
     @Override
     public void start(Stage primaryStage) {
         Thread.currentThread().setUncaughtExceptionHandler(CRASH_REPORTER);
@@ -109,6 +114,12 @@ public final class Launcher extends Application {
                 checkConfigOwner();
                 showAlert(AlertType.ERROR, i18n("fatal.config_loading_failure", SettingsManager.localConfigDirectory()));
                 EntryPoint.exit(1);
+            }
+
+            if (Metadata.SKIP_OFFLINE_USERNAME_CHECK) {
+                LOG.warning(Metadata.SKIP_OFFLINE_USERNAME_CHECK_ENVIRONMENT_VARIABLE
+                        + " is enabled; illegal offline usernames will not be checked.");
+                showAlert(AlertType.WARNING, i18n("account.methods.offline.name.check_disabled"));
             }
 
             // https://lapcatsoftware.com/articles/app-translocation.html
@@ -205,7 +216,8 @@ public final class Launcher extends Application {
                 .append(")");
     }
 
-    private static ButtonType showAlert(AlertType alertType, String contentText, ButtonType... buttons) {
+    /// Shows a blocking JavaFX alert and returns the selected button, if any.
+    private static @Nullable ButtonType showAlert(AlertType alertType, String contentText, ButtonType... buttons) {
         return new Alert(alertType, contentText, buttons).showAndWait().orElse(null);
     }
 
