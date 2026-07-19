@@ -18,6 +18,7 @@
     }
   ],
   "theme": {
+    "color": "#6B69D6",
     "background": {
       "type": "image",
       "path": "assets/background-light.png"

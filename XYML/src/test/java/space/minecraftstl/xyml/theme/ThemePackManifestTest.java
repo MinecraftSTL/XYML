@@ -90,9 +90,9 @@ public final class ThemePackManifestTest {
         assertNull(theme.appearance().windowTransparent());
     }
 
-    /// The bundled default theme selects distinct, available wallpapers for light and dark modes.
+    /// The bundled default theme selects its configured color and available wallpaper for each brightness mode.
     @Test
-    public void bundledDefaultThemeUsesBrightnessSpecificWallpapers() throws Exception {
+    public void bundledDefaultThemeUsesConfiguredColorsAndWallpapers() throws Exception {
         ThemePackManifest manifest;
         try (InputStream input = Objects.requireNonNull(ThemePackManifestTest.class.getResourceAsStream(
                 "/assets/themes/hmcl.default/manifest.json"))) {
@@ -103,18 +103,22 @@ public final class ThemePackManifestTest {
         ThemePackManager.InstalledThemePack themePack = new ThemePackManager.InstalledThemePack(
                 new ThemePackManager.ThemePackLocation.Builtin(manifest.id()),
                 manifest);
+        ThemeResolveContext lightContext = new ThemeResolveContext(Brightness.LIGHT, "windows", "zh-cn");
+        ThemeResolveContext darkContext = new ThemeResolveContext(Brightness.DARK, "windows", "zh-cn");
 
         ThemePackManager.ResolvedBackground lightBackground = ThemePackManager.resolveBackgroundAfterApplyingTheme(
                 themePack,
                 theme,
-                new ThemeResolveContext(Brightness.LIGHT, "windows", "zh-cn"));
+                lightContext);
         ThemePackManager.ResolvedBackground darkBackground = ThemePackManager.resolveBackgroundAfterApplyingTheme(
                 themePack,
                 theme,
-                new ThemeResolveContext(Brightness.DARK, "windows", "zh-cn"));
+                darkContext);
 
+        assertEquals("#6B69D6", Objects.requireNonNull(theme.resolve(lightContext).color()).resolveFallback().name());
         assertEquals(BackgroundType.CUSTOM, lightBackground.type());
         assertEquals("assets/background-light.png", Objects.requireNonNull(lightBackground.imageResource()).name());
+        assertEquals("#6B69D6", Objects.requireNonNull(theme.resolve(darkContext).color()).resolveFallback().name());
         assertEquals(BackgroundType.CUSTOM, darkBackground.type());
         assertEquals("assets/background-dark.png", Objects.requireNonNull(darkBackground.imageResource()).name());
     }
