@@ -23,6 +23,7 @@ import space.minecraftstl.xyml.util.gson.JsonUtils;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.Objects;
 
@@ -87,6 +88,35 @@ public final class ThemePackManifestTest {
         assertEquals(BackgroundType.DEFAULT, background.type());
         assertEquals(1.0, background.opacity(), 0.0);
         assertNull(theme.appearance().windowTransparent());
+    }
+
+    /// The bundled default theme selects distinct, available wallpapers for light and dark modes.
+    @Test
+    public void bundledDefaultThemeUsesBrightnessSpecificWallpapers() throws Exception {
+        ThemePackManifest manifest;
+        try (InputStream input = Objects.requireNonNull(ThemePackManifestTest.class.getResourceAsStream(
+                "/assets/themes/hmcl.default/manifest.json"))) {
+            manifest = JsonUtils.fromNonNullJsonFully(input, ThemePackManifest.class);
+        }
+
+        Theme theme = manifest.themes().get(0);
+        ThemePackManager.InstalledThemePack themePack = new ThemePackManager.InstalledThemePack(
+                new ThemePackManager.ThemePackLocation.Builtin(manifest.id()),
+                manifest);
+
+        ThemePackManager.ResolvedBackground lightBackground = ThemePackManager.resolveBackgroundAfterApplyingTheme(
+                themePack,
+                theme,
+                new ThemeResolveContext(Brightness.LIGHT, "windows", "zh-cn"));
+        ThemePackManager.ResolvedBackground darkBackground = ThemePackManager.resolveBackgroundAfterApplyingTheme(
+                themePack,
+                theme,
+                new ThemeResolveContext(Brightness.DARK, "windows", "zh-cn"));
+
+        assertEquals(BackgroundType.CUSTOM, lightBackground.type());
+        assertEquals("assets/background-light.png", Objects.requireNonNull(lightBackground.imageResource()).name());
+        assertEquals(BackgroundType.CUSTOM, darkBackground.type());
+        assertEquals("assets/background-dark.png", Objects.requireNonNull(darkBackground.imageResource()).name());
     }
 
 }

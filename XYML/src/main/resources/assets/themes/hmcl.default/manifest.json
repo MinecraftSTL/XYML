@@ -17,5 +17,21 @@
       "name": "HMCL"
     }
   ],
-  "theme": {}
+  "theme": {
+    "background": {
+      "type": "image",
+      "path": "assets/background-light.png"
+    },
+    "overrides": [
+      {
+        "condition": {
+          "brightness": "dark"
+        },
+        "background": {
+          "type": "image",
+          "path": "assets/background-dark.png"
+        }
+      }
+    ]
+  }
 }
