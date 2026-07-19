@@ -975,6 +975,7 @@
     -fx-text-fill: -monet-on-surface;
     -fx-font-weight: normal;
     -fx-padding: 0;
+    -fx-cursor: default;
     -jfx-focus-color: transparent;
     -jfx-unfocus-color: transparent;
 }
@@ -984,6 +985,7 @@
 .illegal-username-confirmation-text .content,
 .illegal-username-confirmation-text:focused .content {
     -fx-background-color: transparent;
+    -fx-cursor: default;
 }
 
 /*******************************************************************************

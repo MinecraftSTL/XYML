@@ -722,15 +722,19 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
 
             setTitle(i18n("message.warning"));
 
-            JFXTextArea confirmationText = new JFXTextArea(i18n(
-                    "account.methods.offline.name.invalid.confirmation.prompt", expectedText));
+            String confirmationPrompt = i18n("account.methods.offline.name.invalid")
+                    + "\n\n"
+                    + i18n("account.methods.offline.name.invalid.confirmation.prompt", expectedText);
+            JFXTextArea confirmationText = new JFXTextArea(confirmationPrompt);
             confirmationText.setEditable(false);
             confirmationText.setWrapText(true);
-            confirmationText.setPrefRowCount(3);
+            confirmationText.setPrefRowCount(8);
             confirmationText.setMaxHeight(Region.USE_PREF_SIZE);
             confirmationText.setMaxWidth(Double.MAX_VALUE);
             confirmationText.setFocusTraversable(true);
             confirmationText.getStyleClass().add("illegal-username-confirmation-text");
+            // Suppress the custom menu without disabling selection or keyboard copy shortcuts.
+            confirmationText.setOnContextMenuRequested(event -> event.consume());
 
             input = new JFXTextField();
             input.setPromptText(i18n("account.methods.offline.name.invalid.confirmation.input"));
