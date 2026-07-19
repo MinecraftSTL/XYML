@@ -116,6 +116,15 @@ final class SwingGameLogPanel extends JPanel {
     /// Automatic tail-following toggle.
     private final JCheckBox autoScroll = new JCheckBox(i18n("logwindow.autoscroll"), true);
 
+    /// Whether visible log rows wrap to the viewport width.
+    private final JCheckBox wrapText = new JCheckBox(i18n("logwindow.wrap_text"), false);
+
+    /// Scroll container whose horizontal policy follows the wrapping toggle.
+    private final JScrollPane logScrollPane = new JScrollPane(
+            logList,
+            ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+            ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+
     /// Always-on-top toggle delegated to the owning frame.
     private final JToggleButton alwaysOnTop = new JToggleButton(i18n("logwindow.always_on_top"));
 
@@ -238,6 +247,7 @@ final class SwingGameLogPanel extends JPanel {
         removeActionListeners(alwaysOnTop);
         removeActionListeners(lineLimit);
         removeActionListeners(autoScroll);
+        removeActionListeners(wrapText);
         removeActionListeners(exportLogs);
         removeActionListeners(terminateGame);
         removeActionListeners(exportDump);
@@ -277,6 +287,22 @@ final class SwingGameLogPanel extends JPanel {
     JCheckBox autoScrollControl() {
         EdtDispatcher.requireEventDispatchThread();
         return autoScroll;
+    }
+
+    /// Returns the text-wrapping control for deterministic panel tests.
+    ///
+    /// @return viewport-width wrapping checkbox
+    JCheckBox wrapTextControl() {
+        EdtDispatcher.requireEventDispatchThread();
+        return wrapText;
+    }
+
+    /// Returns the active horizontal scrollbar policy for deterministic panel tests.
+    ///
+    /// @return one of the `ScrollPaneConstants` horizontal policies
+    int horizontalScrollBarPolicy() {
+        EdtDispatcher.requireEventDispatchThread();
+        return logScrollPane.getHorizontalScrollBarPolicy();
     }
 
     /// Returns the retention-limit control for deterministic panel tests.
@@ -342,11 +368,7 @@ final class SwingGameLogPanel extends JPanel {
 
         add(createToolbar(), BorderLayout.NORTH);
         configureLogList();
-        JScrollPane scrollPane = new JScrollPane(
-                logList,
-                ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        add(scrollPane, BorderLayout.CENTER);
+        add(logScrollPane, BorderLayout.CENTER);
         add(createActionBar(), BorderLayout.SOUTH);
     }
 
@@ -381,7 +403,7 @@ final class SwingGameLogPanel extends JPanel {
     /// Configures selection, rendering, and the Ctrl+C clipboard shortcut.
     private void configureLogList() {
         logList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
-        logList.setCellRenderer(new LogCellRenderer());
+        logList.setCellRenderer(new LogCellRenderer(wrapText.isSelected()));
         logList.setFont(new Font(Font.MONOSPACED, Font.PLAIN, logList.getFont().getSize()));
         logList.getInputMap(JComponent.WHEN_FOCUSED).put(
                 KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK),
@@ -398,17 +420,30 @@ final class SwingGameLogPanel extends JPanel {
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.TRAILING, 6, 0));
         autoScroll.addActionListener(event -> scrollToTailIfEnabled());
+        wrapText.addActionListener(event -> updateTextWrapping());
         exportLogs.addActionListener(event -> exportLogs());
         terminateGame.addActionListener(event -> actions.terminateGame());
         exportDump.addActionListener(event -> exportDump());
         clearLogs.addActionListener(event -> clearLogs());
         buttons.add(autoScroll);
+        buttons.add(wrapText);
         buttons.add(exportLogs);
         buttons.add(terminateGame);
         buttons.add(exportDump);
         buttons.add(clearLogs);
         actionsPanel.add(buttons, BorderLayout.EAST);
         return actionsPanel;
+    }
+
+    /// Rebuilds row measurement and horizontal scrolling after the wrapping policy changes.
+    private void updateTextWrapping() {
+        boolean wrapping = wrapText.isSelected();
+        logList.setCellRenderer(new LogCellRenderer(wrapping));
+        logScrollPane.setHorizontalScrollBarPolicy(wrapping
+                ? ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+                : ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        logList.revalidate();
+        logList.repaint();
     }
 
     /// Applies a selected retention limit and forwards it to persistent settings.
@@ -647,19 +682,21 @@ final class SwingGameLogPanel extends JPanel {
         }
     }
 
-    /// Renders wrapped severity-colored rows without letting long messages resize the enclosing window.
+    /// Renders severity-colored rows with the user-selected wrapping policy.
     @NotNullByDefault
     private static final class LogCellRenderer implements ListCellRenderer<Log> {
         /// Fallback renderer used for standard selection colors and font state.
         private final DefaultListCellRenderer fallback = new DefaultListCellRenderer();
 
-        /// Reusable wrapped text component.
+        /// Reusable text component.
         private final JTextArea text = new JTextArea();
 
-        /// Creates the reusable wrapped renderer.
-        private LogCellRenderer() {
+        /// Creates the reusable renderer.
+        ///
+        /// @param wrapText whether rows wrap to the viewport width
+        private LogCellRenderer(boolean wrapText) {
             text.setEditable(false);
-            text.setLineWrap(true);
+            text.setLineWrap(wrapText);
             text.setWrapStyleWord(false);
             text.setBorder(BorderFactory.createEmptyBorder(3, 5, 3, 5));
         }
@@ -686,8 +723,12 @@ final class SwingGameLogPanel extends JPanel {
             text.setForeground(selected || value == null
                     ? baseline.getForeground()
                     : severityColor(value.getLevel(), baseline.getForeground()));
-            int width = Math.max(160, list.getWidth() - 24);
-            text.setSize(width, Short.MAX_VALUE);
+            if (text.getLineWrap()) {
+                int width = Math.max(160, list.getWidth() - 24);
+                text.setSize(width, Short.MAX_VALUE);
+            } else {
+                text.setSize(text.getPreferredSize());
+            }
             return text;
         }
 
