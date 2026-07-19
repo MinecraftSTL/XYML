@@ -36,7 +36,12 @@ val versionRoot = System.getenv("VERSION_ROOT") ?: projectConfig.getProperty("ve
 val microsoftAuthId = System.getenv("MICROSOFT_AUTH_ID") ?: ""
 val curseForgeApiKey = System.getenv("CURSEFORGE_API_KEY") ?: ""
 
-val launcherExe = System.getenv("HMCL_LAUNCHER_EXE") ?: ""
+// The bundled stub preserves the upstream launcher code and copyright metadata;
+// only its Windows icon resources differ for this fork.
+val launcherExe = System.getenv("HMCL_LAUNCHER_EXE")
+    ?.takeIf { it.isNotBlank() }
+    ?.let { file(it) }
+    ?: layout.projectDirectory.file("image/XYMLLauncher.windows.stub").asFile
 
 val buildNumber = System.getenv("BUILD_NUMBER")?.toInt()
 if (buildNumber != null) {
@@ -70,10 +75,6 @@ dependencies {
     implementation(libs.uuid.tools)
 
     testImplementation(libs.jimfs)
-
-    if (launcherExe.isBlank()) {
-        implementation(libs.hmclauncher)
-    }
 
     embedResources(libs.authlib.injector)
     embedResources(libs.lwjgl.unsafe.agent)
@@ -225,9 +226,9 @@ tasks.shadowJar {
         "Enable-Final-Field-Mutation" to "ALL-UNNAMED",
     )
 
-    if (launcherExe.isNotBlank()) {
-        into("assets") {
-            from(file(launcherExe))
+    into("assets") {
+        from(launcherExe) {
+            rename { "HMCLauncher.exe" }
         }
     }
 

@@ -1,0 +1,16 @@
+XYML Windows launcher stub provenance
+
+Derived from Maven artifact org.glavo.hmcl:HMCLauncher:3.7.0.1.
+The upstream executable code, numeric version, company name, and embedded
+copyright statement remain unchanged. RT_ICON resources 1-4 and RT_GROUP_ICON
+resource 107 were replaced for the XYML product icon. FileDescription,
+ProductName, InternalName, and OriginalFilename identify the XYML fork.
+
+Original executable SHA-256:
+07476d13694bdba5ffcbb4786acf213c26eec650b78e710e0cd95c23d0e4147e
+
+Patched executable SHA-256:
+b22a9968bf945352bc9e3e1290e113727542682110555512e3a16219443fc326
+
+Source icon SHA-256:
+5292a0db56d1959f5966f6386a523fbc484e56c34bc83c2f1719991e48b929cc
