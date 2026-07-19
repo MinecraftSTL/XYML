@@ -58,11 +58,17 @@ public final class AboutPage extends SpinnerPane {
 
         ComponentList about = new ComponentList();
         {
-            var launcher = LineButton.createExternalLinkButton(Metadata.PUBLISH_URL);
+            var launcher = LineButton.createExternalLinkButton("https://github.com/MinecraftSTL/XYML");
             launcher.setLargeTitle(true);
             launcher.setLeading(FXUtils.newBuiltinImage("/assets/img/icon.png"));
             launcher.setTitle(Metadata.FULL_NAME);
             launcher.setSubtitle(Metadata.VERSION);
+
+            var minecraftStl = LineButton.createExternalLinkButton("https://space.bilibili.com/2059457567");
+            minecraftStl.setLargeTitle(true);
+            minecraftStl.setLeading(FXUtils.newBuiltinImage("/assets/img/icon.png"));
+            minecraftStl.setTitle("MinecraftSTL");
+            minecraftStl.setSubtitle("bilibili @MinecraftSTL");
 
             var author = LineButton.createExternalLinkButton("https://space.bilibili.com/1445341");
             author.setLargeTitle(true);
@@ -70,7 +76,7 @@ public final class AboutPage extends SpinnerPane {
             author.setTitle("huanghongxun");
             author.setSubtitle(i18n("about.author.statement"));
 
-            about.getContent().setAll(launcher, author);
+            about.getContent().setAll(launcher, minecraftStl, author);
         }
 
         ComponentList thanks = loadIconedTwoLineList("/assets/about/thanks.json");

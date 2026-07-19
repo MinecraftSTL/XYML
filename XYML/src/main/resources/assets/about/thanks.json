@@ -86,7 +86,7 @@
     "externalLink" : "https://github.com/HMCL-dev/HMCL/graphs/contributors"
   },
   {
-    "image" : "/assets/img/icon.png",
+    "image" : "/assets/img/hmcl-icon.png",
     "titleLocalized" : "about.thanks_to.users",
     "subtitleLocalized" : "about.thanks_to.users.statement",
     "externalLink" : "https://docs.hmcl.net/groups.html"
