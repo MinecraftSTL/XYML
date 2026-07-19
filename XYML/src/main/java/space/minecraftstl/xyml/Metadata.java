@@ -82,8 +82,8 @@ public final class Metadata {
     /// Upstream end-user license agreement page.
     public static final String EULA_URL = DOCS_URL + "/eula/hmcl.html";
 
-    /// Upstream community group information page.
-    public static final String GROUPS_URL = "https://www.bilibili.com/opus/905435541874409529";
+    /// Official user QQ group invitation link.
+    public static final String GROUPS_URL = "https://qm.qq.com/cgi-bin/qm/qr?k=wz9sCQuIj4TiQBHUpeuBGM-pZ83f5ini&jump_from=webapi&authKey=VKucBpojFUOiDWF7OCbmvDI6Vfkjr+S1m4e7+unOBAuEfW/j1yXYTnf50c+z/NWs";
 
     /// Build channel embedded in the launcher artifact.
     public static final String BUILD_CHANNEL = JarUtils.getAttribute("hmcl.version.type", "nightly");

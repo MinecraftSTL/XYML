@@ -86,6 +86,12 @@
     "externalLink" : "https://github.com/HMCL-dev/HMCL/graphs/contributors"
   },
   {
+    "image" : "/assets/img/team-icon.png",
+    "title" : "IMMC成员",
+    "subtitle" : "感谢IMMC成员对开发的支持",
+    "externalLink" : "https://qm.qq.com/cgi-bin/qm/qr?k=wz9sCQuIj4TiQBHUpeuBGM-pZ83f5ini&jump_from=webapi&authKey=VKucBpojFUOiDWF7OCbmvDI6Vfkjr+S1m4e7+unOBAuEfW/j1yXYTnf50c+z/NWs"
+  },
+  {
     "image" : "/assets/img/hmcl-icon.png",
     "titleLocalized" : "about.thanks_to.users",
     "subtitleLocalized" : "about.thanks_to.users.statement",

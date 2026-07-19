@@ -19,6 +19,8 @@ package space.minecraftstl.xyml.ui.main;
 
 import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.VBox;
+import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.theme.Themes;
 import space.minecraftstl.xyml.ui.FXUtils;
 import space.minecraftstl.xyml.ui.WeakListenerHolder;
@@ -28,12 +30,14 @@ import space.minecraftstl.xyml.ui.construct.SpinnerPane;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-import space.minecraftstl.xyml.Metadata;
-
+/// Displays official community and issue-reporting links.
+@NotNullByDefault
 public class FeedbackPage extends SpinnerPane {
 
+    /// Retains the weak listener that updates the themed GitHub icon.
     private final WeakListenerHolder holder = new WeakListenerHolder();
 
+    /// Creates the feedback page with the current community and issue-reporting destinations.
     public FeedbackPage() {
         VBox content = new VBox();
         content.getStyleClass().add("spinner-pane-content");
@@ -50,18 +54,12 @@ public class FeedbackPage extends SpinnerPane {
             users.setTitle(i18n("contact.chat.qq_group"));
             users.setSubtitle(i18n("contact.chat.qq_group.statement"));
 
-            var discord = LineButton.createExternalLinkButton("https://discord.gg/jVvC7HfM6U");
-            discord.setLargeTitle(true);
-            discord.setLeading(FXUtils.newBuiltinImage("/assets/img/discord.png"));
-            discord.setTitle(i18n("contact.chat.discord"));
-            discord.setSubtitle(i18n("contact.chat.discord.statement"));
-
-            groups.getContent().setAll(users, discord);
+            groups.getContent().setAll(users);
         }
 
         ComponentList feedback = new ComponentList();
         {
-            var github = LineButton.createExternalLinkButton("https://github.com/HMCL-dev/HMCL/issues/new/choose");
+            var github = LineButton.createExternalLinkButton("https://github.com/MinecraftSTL/XYML/issues");
             github.setLargeTitle(true);
             github.setTitle(i18n("contact.feedback.github"));
             github.setSubtitle(i18n("contact.feedback.github.statement"));
