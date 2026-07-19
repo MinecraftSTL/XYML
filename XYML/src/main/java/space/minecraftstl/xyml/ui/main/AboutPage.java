@@ -66,7 +66,7 @@ public final class AboutPage extends SpinnerPane {
 
             var minecraftStl = LineButton.createExternalLinkButton("https://space.bilibili.com/2059457567");
             minecraftStl.setLargeTitle(true);
-            minecraftStl.setLeading(FXUtils.newBuiltinImage("/assets/img/icon.png"));
+            minecraftStl.setLeading(FXUtils.newBuiltinImage("/assets/img/minecraftstl.png"));
             minecraftStl.setTitle("MinecraftSTL");
             minecraftStl.setSubtitle("bilibili @MinecraftSTL");
 
