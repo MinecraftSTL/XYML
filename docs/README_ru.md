@@ -1,7 +1,7 @@
 <!-- #BEGIN COPY -->
 <!-- #PROPERTY NAME=TITLE -->
 <div align="center">
-    <img src="/HMCL/src/main/resources/assets/img/icon@8x.png" alt="HMCL Logo" width="64"/>
+    <img src="/XYML/src/main/resources/assets/img/icon@8x.png" alt="HMCL Logo" width="64"/>
 </div>
 
 <h1 align="center">Hello Minecraft! Launcher</h1>

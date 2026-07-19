@@ -125,12 +125,12 @@
 
     <module name="SuppressionSingleFilter">
         <property name="checks" value="RegexpHeader"/>
-        <property name="files" value="^(?!.*[\\/]org[\\/]jackhuang[\\/]hmcl[\\/]).*$"/>
+        <property name="files" value="^(?!.*[\\/]space[\\/]minecraftstl[\\/]xyml[\\/]).*$"/>
     </module>
 
     <module name="SuppressionSingleFilter">
         <property name="checks" value="RegexpHeader"/>
-        <property name="files" value=".*[\\/]org[\\/]jackhuang[\\/]hmcl[\\/]ui[\\/]skin[\\/].*"/>
+        <property name="files" value=".*[\\/]space[\\/]minecraftstl[\\/]xyml[\\/]ui[\\/]skin[\\/].*"/>
     </module>
 
     <module name="SuppressionSingleFilter">
@@ -140,7 +140,7 @@
 
     <module name="SuppressionSingleFilter">
         <property name="checks" value="FileLength"/>
-        <property name="files" value=".*[\\/]org[\\/]jackhuang[\\/]hmcl[\\/]ui[\\/]game[\\/]GameSettingsPage.java"/>
+        <property name="files" value=".*[\\/]space[\\/]minecraftstl[\\/]xyml[\\/]ui[\\/]game[\\/]GameSettingsPage.java"/>
     </module>
 
     <module name="RegexpHeader">

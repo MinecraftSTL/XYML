@@ -100,7 +100,7 @@ HMCL 欢迎任何人参与翻译和贡献。但是维护更多语言的翻译需
 
 ### 开始翻译
 
-如果你想为 HMCL 添加新的语言支持，请从翻译 [`I18N.properties`](../HMCL/src/main/resources/assets/lang/I18N.properties) 开始。
+如果你想为 XYML 添加新的语言支持，请从翻译 [`I18N.properties`](../XYML/src/main/resources/assets/lang/I18N.properties) 开始。
 HMCL 的绝大多数文本都位于这个文件中，翻译此文件就能翻译整个界面。
 
 这是一个 Java Properties 文件，格式非常简单。
@@ -109,7 +109,7 @@ HMCL 的绝大多数文本都位于这个文件中，翻译此文件就能翻译
 作为翻译的第一步，请从[这张表格](https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry)中查询这个语言对应的两字母或三字母语言标签。
 例如，英语的语言标签为 `en`。
 
-在确定了语言标签后，请在 [`I18N.properties` 文件旁](../HMCL/src/main/resources/assets/lang)创建 `I18N_<本地化文件后缀>.properties` (例如 `I18N_en.properties`) 文件。
+在确定了语言标签后，请在 [`I18N.properties` 文件旁](../XYML/src/main/resources/assets/lang)创建 `I18N_<本地化文件后缀>.properties` (例如 `I18N_en.properties`) 文件。
 随后，你就可以开始在这个文件中进行翻译工作了。
 
 `I18N.properties` 文件会遵循[资源回退机制](#资源回退机制)查询缺失的译文。
@@ -312,5 +312,5 @@ HMCL 总是会将 `zh-CN` 加入所有中文环境的搜索列表中，将 `zh-T
 **English** (**Standard**, [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | 中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 ```
 
-关于宏的更多内容，请见 [MacroProcessor.java](../buildSrc/src/main/java/org/jackhuang/hmcl/gradle/docs/MacroProcessor.java)。
+关于宏的更多内容，请见 [MacroProcessor.java](../buildSrc/src/main/java/space/minecraftstl/xyml/gradle/docs/MacroProcessor.java)。
 <!-- #END BLOCK -->

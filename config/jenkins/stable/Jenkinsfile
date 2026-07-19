@@ -15,7 +15,7 @@ pipeline {
             steps {
                 sh 'bash ./config/jenkins/config-jenkins.sh'
                 sh './gradlew clean makeExecutables makeDeb --stacktrace --no-daemon'
-                archiveArtifacts artifacts: 'HMCL/build/libs/*'
+                archiveArtifacts artifacts: 'XYML/build/libs/*'
             }
         }
     }

@@ -1,11 +1,11 @@
-rootProject.name = "HMCL3"
+rootProject.name = "XYML"
 include(
-    "HMCL",
-    "HMCLCore",
-    "HMCLBoot"
+    "XYML",
+    "XYMLCore",
+    "XYMLBoot"
 )
 
-val minecraftLibraries = listOf("HMCLTransformerDiscoveryService", "HMCLMultiMCBootstrap")
+val minecraftLibraries = listOf("XYMLTransformerDiscoveryService", "XYMLMultiMCBootstrap")
 include(minecraftLibraries)
 
 for (library in minecraftLibraries) {

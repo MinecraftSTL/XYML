@@ -1,0 +1,186 @@
+/*
+ * Hello Minecraft! Launcher
+ * Copyright (C) 2022  huangyuhui <huanghongxun2008@126.com> and contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package space.minecraftstl.xyml.ui.main;
+
+import com.google.gson.*;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.image.Image;
+import javafx.scene.layout.VBox;
+import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.theme.Themes;
+import space.minecraftstl.xyml.ui.FXUtils;
+import space.minecraftstl.xyml.ui.SVG;
+import space.minecraftstl.xyml.ui.WeakListenerHolder;
+import space.minecraftstl.xyml.ui.construct.ComponentList;
+import space.minecraftstl.xyml.ui.construct.ImageContainer;
+import space.minecraftstl.xyml.ui.construct.LineButton;
+import space.minecraftstl.xyml.ui.construct.SpinnerPane;
+import space.minecraftstl.xyml.util.gson.JsonUtils;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+
+import java.io.IOException;
+import java.io.InputStream;
+
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
+
+/// Displays launcher identity, upstream attribution, acknowledgements, dependencies, and legal links.
+@NotNullByDefault
+public final class AboutPage extends SpinnerPane {
+
+    /// Retains weak listeners used by dynamically themed acknowledgement entries.
+    private final WeakListenerHolder holder = new WeakListenerHolder();
+
+    /// Creates the about page and loads its bundled acknowledgement and dependency data.
+    public AboutPage() {
+        VBox content = new VBox();
+        content.getStyleClass().add("spinner-pane-content");
+        ScrollPane scrollPane = new ScrollPane(content);
+        scrollPane.setFitToWidth(true);
+        FXUtils.smoothScrolling(scrollPane);
+        setContent(scrollPane);
+
+        ComponentList about = new ComponentList();
+        {
+            var launcher = LineButton.createExternalLinkButton("https://github.com/MinecraftSTL/XYML");
+            launcher.setLargeTitle(true);
+            launcher.setLeading(FXUtils.newBuiltinImage("/assets/img/icon.png"));
+            launcher.setTitle(Metadata.FULL_NAME);
+            launcher.setSubtitle(Metadata.VERSION);
+
+            var minecraftStl = LineButton.createExternalLinkButton("https://space.bilibili.com/2059457567");
+            minecraftStl.setLargeTitle(true);
+            minecraftStl.setLeading(FXUtils.newBuiltinImage("/assets/img/minecraftstl.png"));
+            minecraftStl.setTitle("MinecraftSTL");
+            minecraftStl.setSubtitle("bilibili @MinecraftSTL");
+
+            var author = LineButton.createExternalLinkButton("https://space.bilibili.com/1445341");
+            author.setLargeTitle(true);
+            author.setLeading(FXUtils.newBuiltinImage("/assets/img/yellow_fish.png"));
+            author.setTitle("huanghongxun");
+            author.setSubtitle(i18n("about.author.statement"));
+
+            about.getContent().setAll(launcher, minecraftStl, author);
+        }
+
+        ComponentList thanks = loadIconedTwoLineList("/assets/about/thanks.json");
+
+        ComponentList deps = loadIconedTwoLineList("/assets/about/deps.json");
+
+        ComponentList legal = new ComponentList();
+        {
+            var copyright = new LineButton();
+            copyright.setLargeTitle(true);
+            copyright.setTitle(i18n("about.copyright"));
+            copyright.setSubtitle(i18n("about.copyright.statement"));
+
+            var claim = LineButton.createExternalLinkButton(Metadata.EULA_URL);
+            claim.setLargeTitle(true);
+            claim.setTitle(i18n("about.claim"));
+            claim.setSubtitle(i18n("about.claim.statement"));
+
+            var openSource = LineButton.createExternalLinkButton("https://github.com/HMCL-dev/HMCL");
+            openSource.setLargeTitle(true);
+            openSource.setTitle(i18n("about.open_source"));
+            openSource.setSubtitle(i18n("about.open_source.statement"));
+
+            legal.getContent().setAll(copyright, claim, openSource);
+        }
+
+        content.getChildren().setAll(
+                ComponentList.createComponentListTitle(i18n("about")),
+                about,
+                ComponentList.createComponentListTitle(i18n("about.thanks_to")),
+                thanks,
+                ComponentList.createComponentListTitle(i18n("about.dependency")),
+                deps,
+                ComponentList.createComponentListTitle(i18n("about.legal")),
+                legal
+        );
+    }
+
+    /// Loads an image from a bundled resource path or an external URL.
+    private static Image loadImage(String url) {
+        return url.startsWith("/")
+                ? FXUtils.newBuiltinImage(url)
+                : new Image(url);
+    }
+
+    /// Loads a bundled JSON list into link buttons with optional localized text and themed images.
+    private ComponentList loadIconedTwoLineList(String path) {
+        ComponentList componentList = new ComponentList();
+
+        @Nullable InputStream input = FXUtils.class.getResourceAsStream(path);
+        if (input == null) {
+            LOG.warning("Resources not found: " + path);
+            return componentList;
+        }
+
+        try {
+            JsonArray array = JsonUtils.fromJsonFully(input, JsonArray.class);
+
+            for (JsonElement element : array) {
+                JsonObject obj = element.getAsJsonObject();
+
+                var button = new LineButton();
+                button.setLargeTitle(true);
+
+                if (obj.get("externalLink") instanceof JsonPrimitive externalLink) {
+                    button.setTrailingIcon(SVG.OPEN_IN_NEW);
+
+                    String link = externalLink.getAsString();
+                    button.setOnAction(event -> FXUtils.openLink(link));
+                }
+
+                if (obj.has("image")) {
+                    JsonElement image = obj.get("image");
+                    if (image.isJsonPrimitive()) {
+                        var imageView = new ImageContainer(32, 32);
+                        imageView.setImage(loadImage(image.getAsString()));
+                        imageView.setMouseTransparent(true);
+
+
+                        button.setLeading(imageView);
+                    } else if (image.isJsonObject()) {
+                        holder.add(FXUtils.onWeakChangeAndOperate(Themes.darkModeProperty(), darkMode -> button.setLeading(darkMode
+                                ? loadImage(image.getAsJsonObject().get("dark").getAsString())
+                                : loadImage(image.getAsJsonObject().get("light").getAsString())
+                        )));
+                    }
+                }
+
+                if (obj.get("title") instanceof JsonPrimitive title)
+                    button.setTitle(title.getAsString());
+                else if (obj.get("titleLocalized") instanceof JsonPrimitive titleLocalized)
+                    button.setTitle(i18n(titleLocalized.getAsString()));
+
+                if (obj.get("subtitle") instanceof JsonPrimitive subtitle)
+                    button.setSubtitle(subtitle.getAsString());
+                else if (obj.get("subtitleLocalized") instanceof JsonPrimitive subtitleLocalized)
+                    button.setSubtitle(i18n(subtitleLocalized.getAsString()));
+
+                componentList.getContent().add(button);
+            }
+        } catch (IOException | JsonParseException e) {
+            LOG.warning("Failed to load list: " + path, e);
+        }
+
+        return componentList;
+    }
+}

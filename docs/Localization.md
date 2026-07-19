@@ -111,7 +111,7 @@ discuss with other contributors first, and determine the future maintenance plan
 
 ### Getting Started with Translation
 
-If you want to add support for a new language to HMCL, please start by translating [`I18N.properties`](../HMCL/src/main/resources/assets/lang/I18N.properties).
+If you want to add support for a new language to XYML, please start by translating [`I18N.properties`](../XYML/src/main/resources/assets/lang/I18N.properties).
 The vast majority of HMCL's texts are in this file, and translating it will translate the entire interface.
 
 This is a Java Properties file, which is very simple in format.
@@ -120,7 +120,7 @@ Before translating, please read the introduction to this format: [Properties fil
 As the first step of translation, please look up the two- or three-letter language tag for your language in [this table](https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry).
 For example, the language tag for English is `en`.
 
-After determining the language tag, please create a file named `I18N_<localization file suffix>.properties` (e.g., `I18N_en.properties`) next to the [`I18N.properties` file](../HMCL/src/main/resources/assets/lang).
+After determining the language tag, please create a file named `I18N_<localization file suffix>.properties` (e.g., `I18N_en.properties`) next to the [`I18N.properties` file](../XYML/src/main/resources/assets/lang).
 Then you can start translating in this file.
 
 The `I18N.properties` file follows the [resource fallback mechanism](#resource-fallback-mechanism) to look up missing translations.
@@ -333,5 +333,5 @@ After running `./gradlew updateDocuments`, these two lines will be automatically
 **English** (**Standard**, [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | 中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 ```
 
-For more about macros, see [MacroProcessor.java](../buildSrc/src/main/java/org/jackhuang/hmcl/gradle/docs/MacroProcessor.java).
+For more about macros, see [MacroProcessor.java](../buildSrc/src/main/java/space/minecraftstl/xyml/gradle/docs/MacroProcessor.java).
 <!-- #END BLOCK -->
