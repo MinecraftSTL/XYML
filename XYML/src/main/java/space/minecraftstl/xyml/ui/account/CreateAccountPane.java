@@ -31,7 +31,6 @@ import javafx.scene.Node;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
-import javafx.scene.control.TextArea;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.layout.*;
 import org.glavo.uuid.UUIDs;
@@ -723,21 +722,15 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
 
             setTitle(i18n("message.warning"));
 
-            Label warning = new Label(i18n("account.methods.offline.name.invalid"));
-            warning.setWrapText(true);
-            warning.setMaxWidth(Double.MAX_VALUE);
-
-            Label instruction = new Label(i18n("account.methods.offline.name.invalid.confirmation.prompt"));
-            instruction.setWrapText(true);
-            instruction.setMaxWidth(Double.MAX_VALUE);
-
-            TextArea confirmationText = new TextArea(expectedText);
+            JFXTextArea confirmationText = new JFXTextArea(i18n(
+                    "account.methods.offline.name.invalid.confirmation.prompt", expectedText));
             confirmationText.setEditable(false);
             confirmationText.setWrapText(true);
             confirmationText.setPrefRowCount(3);
-            confirmationText.setMinHeight(Region.USE_PREF_SIZE);
+            confirmationText.setMaxHeight(Region.USE_PREF_SIZE);
             confirmationText.setMaxWidth(Double.MAX_VALUE);
             confirmationText.setFocusTraversable(true);
+            confirmationText.getStyleClass().add("illegal-username-confirmation-text");
 
             input = new JFXTextField();
             input.setPromptText(i18n("account.methods.offline.name.invalid.confirmation.input"));
@@ -750,7 +743,7 @@ public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
                 }
             });
 
-            VBox content = new VBox(10, warning, instruction, confirmationText, input);
+            VBox content = new VBox(12, confirmationText, input);
             content.setFillWidth(true);
             setBody(content);
             setValid(false);

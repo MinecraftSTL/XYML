@@ -970,6 +970,22 @@
     -fx-text-fill: -monet-on-secondary-container;
 }
 
+.illegal-username-confirmation-text {
+    -fx-background-color: transparent;
+    -fx-text-fill: -monet-on-surface;
+    -fx-font-weight: normal;
+    -fx-padding: 0;
+    -jfx-focus-color: transparent;
+    -jfx-unfocus-color: transparent;
+}
+
+.illegal-username-confirmation-text .scroll-pane,
+.illegal-username-confirmation-text .scroll-pane .viewport,
+.illegal-username-confirmation-text .content,
+.illegal-username-confirmation-text:focused .content {
+    -fx-background-color: transparent;
+}
+
 /*******************************************************************************
 *                                                                              *
 * JFX List View                                                                *
