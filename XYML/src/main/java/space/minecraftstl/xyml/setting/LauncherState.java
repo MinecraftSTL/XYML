@@ -54,6 +54,15 @@ public final class LauncherState extends ObservableSetting implements JsonSchema
         register();
     }
 
+    /// Returns whether the changed field should trigger automatic persistence immediately.
+    @Override
+    public boolean shouldSaveImmediately(Object changedField) {
+        return changedField != x
+                && changedField != y
+                && changedField != width
+                && changedField != height;
+    }
+
     /// The schema used by this launcher state file.
     @SerializedName(JsonSchema.PROPERTY_SCHEMA)
     private final ObjectProperty<JsonSchema> schema = new SimpleObjectProperty<>(CURRENT_SCHEMA);

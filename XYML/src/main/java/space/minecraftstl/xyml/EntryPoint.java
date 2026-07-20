@@ -17,7 +17,6 @@
  */
 package space.minecraftstl.xyml;
 
-import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.SwingUtils;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.setting.SambaException;
@@ -94,7 +93,7 @@ public final class EntryPoint {
     ///
     /// @param exitCode process exit status
     public static void exit(int exitCode) {
-        FileSaver.shutdown();
+        SettingsManager.shutdown();
         LOG.shutdown();
         System.exit(exitCode);
     }

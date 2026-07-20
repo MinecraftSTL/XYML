@@ -155,7 +155,15 @@ final class JsonSettingFile<T extends ObservableSetting & JsonSchemaSetting> {
     ///
     /// @param value the settings object to observe
     void installAutoSave(T value) {
-        value.changes().subscribe(ignored -> save(value));
+        value.changedFields().subscribe(change -> {
+            Object changedField = Objects.requireNonNull(change.currentValue(), "changedField");
+            if (value.shouldSaveImmediately(changedField)) {
+                save(value);
+                value.setSavePending(false);
+            } else {
+                value.setSavePending(true);
+            }
+        });
     }
 
     /// Saves a settings object.

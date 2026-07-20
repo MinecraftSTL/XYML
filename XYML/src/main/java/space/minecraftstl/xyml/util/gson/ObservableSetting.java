@@ -30,6 +30,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.observable.collection.ObservableList;
 import space.minecraftstl.xyml.observable.collection.ObservableMap;
 import space.minecraftstl.xyml.observable.collection.ObservableSet;
@@ -115,6 +117,12 @@ public abstract class ObservableSetting {
     /// Monotonic aggregate revision shared by all persistent fields.
     private transient final SimpleLongProperty changes = new SimpleLongProperty(this, "changes");
 
+    /// Publishes the exact persistent field responsible for every aggregate revision.
+    private transient final ChangedFieldObservable changedFields = new ChangedFieldObservable();
+
+    /// Whether at least one deferred field change still needs to be saved.
+    private transient volatile boolean savePending;
+
     /// Prevents duplicate reflection registration and listener installation.
     private transient boolean registered;
 
@@ -134,6 +142,32 @@ public abstract class ObservableSetting {
     /// Returns the monotonic neutral revision incremented by every observed field change.
     public final ObservableValue<Long> changes() {
         return changes;
+    }
+
+    /// Returns a neutral observable that publishes the exact property or collection field that changed.
+    public final ObservableValue<Object> changedFields() {
+        return changedFields;
+    }
+
+    /// Returns whether a change to the supplied persistent field should be saved immediately.
+    ///
+    /// @param changedField exact property or collection field reported by [#changedFields()]
+    /// @return whether the change should trigger persistence immediately
+    public boolean shouldSaveImmediately(Object changedField) {
+        Objects.requireNonNull(changedField, "changedField");
+        return true;
+    }
+
+    /// Returns whether at least one deferred field change still needs to be saved.
+    public final boolean isSavePending() {
+        return savePending;
+    }
+
+    /// Sets whether at least one deferred field change still needs to be saved.
+    ///
+    /// @param savePending whether a deferred field change remains unsaved
+    public final void setSavePending(boolean savePending) {
+        this.savePending = savePending;
     }
 
     /// Subscribes to one toolkit-neutral property or collection field.
@@ -158,7 +192,36 @@ public abstract class ObservableSetting {
         synchronized (dirtyFields) {
             dirtyFields.add(fieldValue);
         }
+        changedFields.publish(fieldValue);
         incrementChanges();
+    }
+
+    /// Observable facade that preserves the identity of each changed field, including repeated changes to one field.
+    @NotNullByDefault
+    private final class ChangedFieldObservable implements ObservableValue<Object> {
+        /// Synchronous subscriptions sourced from this settings object.
+        private final ValueChangeSupport<Object> changeSupport = new ValueChangeSupport<>(ObservableSetting.this);
+
+        /// Most recently changed field, or null before the first persistent-field change.
+        private volatile @Nullable Object currentField;
+
+        /// Returns the most recently changed persistent field.
+        @Override
+        public @Nullable Object getValue() {
+            return currentField;
+        }
+
+        /// Registers a listener for exact persistent-field changes.
+        @Override
+        public Subscription subscribe(ValueChangeListener<Object> listener) {
+            return changeSupport.subscribe(listener);
+        }
+
+        /// Publishes one field identity even when the same field changed immediately beforehand.
+        private void publish(Object fieldValue) {
+            currentField = Objects.requireNonNull(fieldValue, "fieldValue");
+            changeSupport.fireChange(null, fieldValue);
+        }
     }
 
     /// Increments the aggregate revision while preserving strict publication order.

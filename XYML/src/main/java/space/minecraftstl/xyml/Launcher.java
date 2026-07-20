@@ -500,7 +500,7 @@ public final class Launcher {
             failure = closeCollecting(runtime, failure);
         }
         failure = runCollecting(Schedulers::shutdown, failure);
-        failure = runCollecting(FileSaver::shutdown, failure);
+        failure = runCollecting(SettingsManager::shutdown, failure);
         failure = runCollecting(LOG::shutdown, failure);
         rethrowCleanupFailure(failure);
     }
