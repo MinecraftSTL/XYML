@@ -155,6 +155,14 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         return displayedSnapshot;
     }
 
+    /// Returns the current lifecycle or empty-state text for focused tests.
+    ///
+    /// @return visible status text
+    String statusText() {
+        EdtDispatcher.requireEventDispatchThread();
+        return statusLabel.getText();
+    }
+
     /// Starts the first shallow scan after the host selects this tab.
     ///
     /// Repeated calls are harmless and do not restart an already activated page; the refresh command
@@ -407,7 +415,9 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
                     } else {
                         operationPending = false;
                         applySnapshot(snapshot);
-                        statusLabel.setText(Objects.requireNonNull(successStatus, "successStatus"));
+                        statusLabel.setText(snapshot.archives().isEmpty()
+                                ? i18n("world.backup.empty")
+                                : Objects.requireNonNull(successStatus, "successStatus"));
                         updateControls();
                     }
                 }));
