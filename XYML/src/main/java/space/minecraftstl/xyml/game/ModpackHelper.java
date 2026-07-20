@@ -290,7 +290,7 @@ public final class ModpackHelper {
                     .withStagesHints(new Task.StagesHint("xyml.modpack"), new Task.StagesHint("xyml.modpack.download", List.of("xyml.install.assets", "xyml.install.libraries")));
         else
             return modpack.getInstallTask(repository.getDependency(), zipFile, name, iconUrl)
-                    .whenComplete(Schedulers.ui(), success, failure)
+                    .whenComplete(Schedulers.defaultScheduler(), success, failure)
                     .withStagesHints(new Task.StagesHint("xyml.modpack"), new Task.StagesHint("xyml.modpack.download", List.of("xyml.install.assets", "xyml.install.libraries")));
     }
 
