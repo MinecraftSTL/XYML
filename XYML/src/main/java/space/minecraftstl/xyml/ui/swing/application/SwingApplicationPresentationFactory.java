@@ -429,7 +429,7 @@ public final class SwingApplicationPresentationFactory {
                 i18n("swing.versions.status.idle"),
                 i18n("message.downloading"),
                 i18n("swing.versions.status.ready"),
-                i18n("download.failed.no_results_found"),
+                i18n("search.no_results_found"),
                 i18n("download.failed.no_code"));
     }
 

@@ -195,7 +195,7 @@ public record RemoteAddonCatalogStrings(
                 i18n("message.doing"),
                 i18n("message.doing"),
                 i18n("download.failed.empty"),
-                i18n("download.failed.no_results_found"),
+                i18n("search.no_results_found"),
                 i18n("download.curseforge.unavailable"),
                 i18n("message.doing"),
                 i18n("instance.switch"),
