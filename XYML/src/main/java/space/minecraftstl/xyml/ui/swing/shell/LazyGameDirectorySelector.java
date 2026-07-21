@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementSna
 
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -52,6 +53,12 @@ import java.util.Objects;
 /// Compact game-directory selector with an MRU-ordered list and one command opening the complete list page.
 @NotNullByDefault
 final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
+    /// Outline icon used by inactive popup rows.
+    private static final Icon FOLDER_ICON = new FlatSVGIcon("assets/swing/icons/folder.svg", 18, 18);
+
+    /// Filled icon used by the process-wide current popup row.
+    private static final Icon SELECTED_FOLDER_ICON = new FlatSVGIcon("assets/swing/icons/folder-fill.svg", 18, 18);
+
     /// Stable list row height used to derive visible rows from actual popup space.
     private static final int ROW_HEIGHT = 38;
 
@@ -296,9 +303,12 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
             if (value instanceof GameDirectoryManagementEntry entry) {
                 setText(entry.displayName());
                 setToolTipText(entry.path().getPath());
+                setIcon(entry.selected() ? SELECTED_FOLDER_ICON : FOLDER_ICON);
+                setIconTextGap(8);
             } else {
                 setText("");
                 setToolTipText(null);
+                setIcon(null);
             }
             return component;
         }
