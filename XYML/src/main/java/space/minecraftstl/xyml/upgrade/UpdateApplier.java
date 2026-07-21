@@ -37,6 +37,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
@@ -125,7 +126,7 @@ public final class UpdateApplier {
                 currentRuntimeInputArguments(),
                 jar,
                 appArguments);
-        LOG.info("Starting process: " + commandLine);
+        LOG.info("Starting process: " + maskCommandLine(commandLine));
         new ProcessBuilder(commandLine)
                 .directory(Paths.get("").toAbsolutePath().toFile())
                 .inheritIO()
@@ -216,6 +217,54 @@ public final class UpdateApplier {
         commandLine.add(jar.toAbsolutePath().toString());
         commandLine.addAll(appArguments);
         return List.copyOf(commandLine);
+    }
+
+    /// Formats a child-process command line while masking inherited sensitive system properties.
+    ///
+    /// @param commandLine immutable command-line arguments
+    /// @return a space-delimited representation safe for launcher logs
+    static String maskCommandLine(@Unmodifiable List<String> commandLine) {
+        Objects.requireNonNull(commandLine, "commandLine");
+        return commandLine.stream()
+                .map(UpdateApplier::maskSystemProperty)
+                .collect(Collectors.joining(" "));
+    }
+
+    /// Masks one sensitive `-Dkey=value` argument without changing non-sensitive process arguments.
+    ///
+    /// @param argument process argument
+    /// @return argument text suitable for logging
+    private static String maskSystemProperty(String argument) {
+        if (!argument.startsWith("-D")) {
+            return argument;
+        }
+
+        int separator = argument.indexOf('=');
+        if (separator < 0) {
+            return argument;
+        }
+
+        String key = argument.substring(2, separator);
+        if (!isSensitiveSystemProperty(key)) {
+            return argument;
+        }
+
+        String value = argument.substring(separator + 1);
+        return "-D" + key + '=' + (value.isEmpty()
+                ? ""
+                : value.charAt(0) + "*".repeat(value.length() - 1));
+    }
+
+    /// Returns whether a system property may reveal proxy credentials or launcher service credentials.
+    ///
+    /// @param key system-property key without the `-D` prefix
+    /// @return whether its value must be masked in logs
+    private static boolean isSensitiveSystemProperty(String key) {
+        return key.contains("http.proxy")
+                || key.startsWith("https.proxy")
+                || key.startsWith("socksProxy")
+                || key.equals("xyml.microsoft.auth.id")
+                || key.equals("xyml.curseforge.apikey");
     }
 
     /// Determines the versioned filename to use after replacing an artifact.
