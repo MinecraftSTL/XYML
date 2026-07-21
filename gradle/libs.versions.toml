@@ -20,6 +20,8 @@ java-info = "1.0"
 authlib-injector = "1.2.8"
 lwjgl-unsafe-agent = "2.0"
 monet-fx = "0.4.0"
+flatlaf = "3.7.2"
+miglayout = "11.4.3"
 terracotta = "0.4.2"
 nayuki-qrcodegen = "1.8.0"
 jwebp = "0.2.0"
@@ -58,6 +60,9 @@ java-info = { module = "org.glavo:java-info", version.ref = "java-info" }
 authlib-injector = { module = "org.glavo.hmcl:authlib-injector", version.ref = "authlib-injector" }
 lwjgl-unsafe-agent = { module = "org.glavo:lwjgl-unsafe-agent", version.ref = "lwjgl-unsafe-agent" }
 monet-fx = { module = "org.glavo:MonetFX", version.ref = "monet-fx" }
+flatlaf = { module = "com.formdev:flatlaf", version.ref = "flatlaf" }
+flatlaf-extras = { module = "com.formdev:flatlaf-extras", version.ref = "flatlaf" }
+miglayout-swing = { module = "com.miglayout:miglayout-swing", version.ref = "miglayout" }
 nayuki-qrcodegen = { module = "io.nayuki:qrcodegen", version.ref = "nayuki-qrcodegen" }
 jwebp = { module = "org.glavo:webp", version.ref = "jwebp" }
 weburl = { module = "org.glavo:weburl", version.ref = "weburl" }

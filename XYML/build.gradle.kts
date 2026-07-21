@@ -71,6 +71,9 @@ dependencies {
     implementation(libs.fxsvgimage)
     implementation(libs.java.info)
     implementation(libs.monet.fx)
+    implementation(libs.flatlaf)
+    implementation(libs.flatlaf.extras)
+    implementation(libs.miglayout.swing)
     implementation(libs.nayuki.qrcodegen)
     implementation(libs.uuid.tools)
 
@@ -213,6 +216,8 @@ tasks.shadowJar {
         exclude(dependency("com.google.code.gson:.*:.*"))
         exclude(dependency("net.java.dev.jna:jna:.*"))
         exclude(dependency("libs:JFoenix:.*"))
+        exclude(dependency("com.formdev:flatlaf.*:.*"))
+        exclude(dependency("com.miglayout:.*:.*"))
         exclude(project(":XYMLBoot"))
     }
 
@@ -236,6 +241,33 @@ tasks.shadowJar {
         attachSignature(jarPath)
         createChecksum(jarPath)
     }
+}
+
+val requiredOfflineUiEntries = listOf(
+    "com/formdev/flatlaf/FlatLaf.class",
+    "com/formdev/flatlaf/extras/FlatSVGIcon.class",
+    "net/miginfocom/swing/MigLayout.class",
+)
+
+val verifyOfflineUiArtifact = tasks.register("verifyOfflineUiArtifact") {
+    group = "verification"
+    description = "Verifies that pure-Java Swing UI dependencies are embedded in the launcher artifact."
+
+    dependsOn(tasks.shadowJar)
+    inputs.file(jarPath)
+
+    doLast {
+        ZipFile(jarPath).use { jar ->
+            val missingEntries = requiredOfflineUiEntries.filter { jar.getEntry(it) == null }
+            if (missingEntries.isNotEmpty()) {
+                throw GradleException("Missing offline UI entries: ${missingEntries.joinToString()}")
+            }
+        }
+    }
+}
+
+tasks.check {
+    dependsOn(verifyOfflineUiArtifact)
 }
 
 tasks.processResources {
