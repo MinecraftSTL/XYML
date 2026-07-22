@@ -309,7 +309,7 @@ public final class TaskExecutorPresentationModel implements TaskPresentationMode
                     progress,
                     TaskStatus.RUNNING,
                     !cancellationRequested,
-                    isCancellation(failure) ? "" : StringUtils.getStackTrace(failure)));
+                    isCancellation(failure) ? "" : formatFailureDetails(failure)));
         }
         publishTransition(transition);
         if (progressSubscription != null) {
@@ -364,7 +364,7 @@ public final class TaskExecutorPresentationModel implements TaskPresentationMode
                     ? OptionalDouble.of(1.0)
                     : currentSnapshot.progress();
             String details = terminalStatus == TaskStatus.FAILED && terminalFailure != null
-                    ? StringUtils.getStackTrace(terminalFailure)
+                    ? formatFailureDetails(terminalFailure)
                     : "";
             transition = replaceSnapshotLocked(copyCurrent(
                     currentSnapshot.phase(),
@@ -502,6 +502,22 @@ public final class TaskExecutorPresentationModel implements TaskPresentationMode
     /// @return true for cancellation and interruption signals
     private static boolean isCancellation(@Nullable Throwable failure) {
         return failure instanceof CancellationException || failure instanceof InterruptedException;
+    }
+
+    /// Formats diagnostic details without allowing optional presentation work to interrupt lifecycle delivery.
+    ///
+    /// Custom throwable implementations may fail while rendering their stack trace. The executor remains the
+    /// authoritative failure source, so presentation falls back to empty details instead of blocking later listeners.
+    ///
+    /// @param failure failure whose stack trace should be shown
+    /// @return rendered stack trace, or an empty string when rendering fails
+    private static String formatFailureDetails(Throwable failure) {
+        Objects.requireNonNull(failure, "failure");
+        try {
+            return StringUtils.getStackTrace(failure);
+        } catch (RuntimeException | Error ignored) {
+            return "";
+        }
     }
 
     /// Creates a snapshot with the stable title and supplied mutable presentation fields.

@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
 
+import java.io.PrintWriter;
 import java.util.List;
 import java.util.OptionalDouble;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -162,6 +163,34 @@ public final class TaskExecutorPresentationModelTest {
             assertEquals(TaskStatus.FAILED, model.snapshot().status());
             assertTrue(model.snapshot().details().contains(AssertionError.class.getName()));
             assertTrue(model.snapshot().details().contains("native bridge failed"));
+        } finally {
+            model.close();
+        }
+    }
+
+    /// Verifies a throwable that rejects stack-trace rendering cannot block task or executor lifecycle mapping.
+    @Test
+    public void formattingFailureFallsBackToEmptyDetailsAndPreservesLifecycle() {
+        ProbeTaskExecutor executor = new ProbeTaskExecutor();
+        TaskExecutorPresentationModel model = new TaskExecutorPresentationModel(
+                executor,
+                "Launch game",
+                "Preparing");
+        ProbeTask task = new ProbeTask("Create process");
+        StackTraceThrowingError failure = new StackTraceThrowingError();
+        try {
+            executor.fireReady(task);
+            executor.fireFailed(task, failure);
+
+            assertEquals(TaskStatus.RUNNING, model.snapshot().status());
+            assertEquals("", model.snapshot().details());
+
+            executor.recordTerminalFailure(failure);
+            executor.fireStop(false);
+
+            assertEquals(TaskStatus.FAILED, model.snapshot().status());
+            assertFalse(model.snapshot().cancelable());
+            assertEquals("", model.snapshot().details());
         } finally {
             model.close();
         }
@@ -431,6 +460,23 @@ public final class TaskExecutorPresentationModelTest {
         /// @param progress normalized progress value
         private void publishProgress(double progress) {
             updateProgressImmediately(progress);
+        }
+    }
+
+    /// Error fixture that rejects stack-trace rendering through the writer API used by the presentation model.
+    @NotNullByDefault
+    private static final class StackTraceThrowingError extends AssertionError {
+        /// Creates one stable failure fixture.
+        private StackTraceThrowingError() {
+            super("stack trace unavailable");
+        }
+
+        /// Throws instead of rendering diagnostic text.
+        ///
+        /// @param writer ignored diagnostic destination
+        @Override
+        public void printStackTrace(PrintWriter writer) {
+            throw new AssertionError("test formatting failure");
         }
     }
 }
