@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.util.Lang;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Objects;
 import java.util.concurrent.*;
 
 import static space.minecraftstl.xyml.util.Lang.*;
@@ -46,31 +47,45 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     /// Starts one execution chain and returns this executor.
     ///
     /// The started flag is published before any listener notification so synchronous listener cancellation is valid.
+    /// Every constructed chain attempts exactly one terminal stop notification, including exceptional [Error] paths.
     /// Repeated calls retain the historical behavior of starting another chain and replacing [#future].
     @Override
     public TaskExecutor start() {
+        exception = null;
+        failure = null;
         started = true;
         taskListeners.forEach(TaskListener::onStart);
         future = executeTasks(null, Collections.singleton(firstTask))
-                .thenApplyAsync(exception -> {
-                    boolean success = exception == null;
+                .handleAsync((@Nullable Exception exception, @Nullable Throwable throwable) -> {
+                    boolean success = exception == null && throwable == null;
+                    try {
+                        if (throwable != null) {
+                            Throwable resolvedFailure = resolveException(throwable);
+                            failure = resolvedFailure;
+                            Lang.handleUncaughtException(resolvedFailure);
+                        } else {
+                            failure = exception;
+                            if (exception != null) {
+                                // We log exception stacktrace because some exceptions indicate launcher defects.
+                                LOG.warning("An exception occurred in task execution", exception);
 
-                    if (!success) {
-                        // We log exception stacktrace because some of exceptions occurred because of bugs.
-                        LOG.warning("An exception occurred in task execution", exception);
-
-                        Throwable resolvedException = resolveException(exception);
-                        if (resolvedException instanceof RuntimeException &&
-                                !(resolvedException instanceof CancellationException) &&
-                                !(resolvedException instanceof JsonParseException) &&
-                                !(resolvedException instanceof RejectedExecutionException)) {
-                            // Track uncaught RuntimeException which are thrown mostly by our mistake
-                            if (uncaughtExceptionHandler != null)
-                                uncaughtExceptionHandler.uncaughtException(Thread.currentThread(), resolvedException);
+                                Throwable resolvedException = resolveException(exception);
+                                if (resolvedException instanceof RuntimeException &&
+                                        !(resolvedException instanceof CancellationException) &&
+                                        !(resolvedException instanceof JsonParseException) &&
+                                        !(resolvedException instanceof RejectedExecutionException)) {
+                                    // Track unexpected RuntimeException without classifying known user failures.
+                                    @Nullable Thread.UncaughtExceptionHandler handler = uncaughtExceptionHandler;
+                                    if (handler != null)
+                                        handler.uncaughtException(
+                                                Thread.currentThread(), resolvedException);
+                                }
+                            }
                         }
+                    } finally {
+                        taskListeners.forEach(it -> it.onStop(success, this));
                     }
 
-                    taskListeners.forEach(it -> it.onStop(success, this));
                     return success;
                 })
                 .exceptionally(e -> {
@@ -85,7 +100,9 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     public boolean test() {
         start();
         try {
-            return future.get();
+            CompletableFuture<Boolean> terminalFuture = Objects.requireNonNull(
+                    future, "start() must create a terminal future before returning");
+            return terminalFuture.get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (ExecutionException ignore) {
@@ -110,18 +127,18 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     private CompletableFuture<@Nullable Void> executeTasksExceptionally(
             @Nullable Task<?> parentTask, @Nullable Collection<? extends Task<?>> tasks) {
         if (tasks == null || tasks.isEmpty())
-            return CompletableFuture.completedFuture(null);
+            return CompletableFuture.<@Nullable Void>completedFuture(null);
 
-        return CompletableFuture.completedFuture(null)
-                .thenComposeAsync(unused -> {
+        return CompletableFuture.<@Nullable Void>completedFuture(null)
+                .thenComposeAsync((@Nullable Void unused) -> {
                     if (isCancelled()) {
                         for (Task<?> task : tasks) task.setException(new CancellationException());
                         return CompletableFuture.runAsync(this::checkCancellation);
                     }
 
                     return CompletableFuture.allOf(tasks.stream()
-                            .map(task -> CompletableFuture.completedFuture(null)
-                                    .thenComposeAsync(unused2 -> executeTask(parentTask, task))
+                            .map(task -> CompletableFuture.<@Nullable Void>completedFuture(null)
+                                    .thenComposeAsync((@Nullable Void unused2) -> executeTask(parentTask, task))
                             ).toArray(CompletableFuture<?>[]::new));
                 });
     }
@@ -130,7 +147,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     private CompletableFuture<@Nullable Exception> executeTasks(
             @Nullable Task<?> parentTask, Collection<? extends Task<?>> tasks) {
         return executeTasksExceptionally(parentTask, tasks)
-                .thenApplyAsync(unused -> (Exception) null)
+                .thenApplyAsync((@Nullable Void unused) -> (Exception) null)
                 .exceptionally(throwable -> {
                     Throwable resolved = resolveException(throwable);
                     if (resolved instanceof Exception) {
@@ -145,8 +162,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     /// Executes a task whose body supplies its own possibly nullable completable-future result.
     private <T> CompletableFuture<@Nullable T> executeCompletableFutureTask(
             @Nullable Task<?> parentTask, CompletableFutureTask<T> task) {
-        return CompletableFuture.completedFuture(null)
-                .thenComposeAsync(unused -> {
+        return CompletableFuture.<@Nullable Void>completedFuture(null)
+                .thenComposeAsync((@Nullable Void unused) -> {
                     checkCancellation();
 
                     task.setCancelled(this::isCancelled);
@@ -173,7 +190,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                         }
                     });
                 })
-                .thenApplyAsync(result -> {
+                .thenApplyAsync((@Nullable T result) -> {
                     checkCancellation();
 
                     if (task.getSignificance().shouldLog()) {
@@ -217,8 +234,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
     /// Executes a regular task through pre-work, prerequisites, body, follow-ups, and post-work.
     private <T> CompletableFuture<@Nullable T> executeNormalTask(@Nullable Task<?> parentTask, Task<T> task) {
-        return CompletableFuture.completedFuture(null)
-                .thenComposeAsync(unused -> {
+        return CompletableFuture.<@Nullable Void>completedFuture(null)
+                .thenComposeAsync((@Nullable Void unused) -> {
                     checkCancellation();
 
                     task.setCancelled(this::isCancelled);
@@ -238,11 +255,11 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     if (task.doPreExecute()) {
                         return CompletableFuture.runAsync(wrap(task::preExecute), task.getExecutor());
                     } else {
-                        return CompletableFuture.completedFuture(null);
+                        return CompletableFuture.<@Nullable Void>completedFuture(null);
                     }
                 })
-                .thenComposeAsync(unused -> executeTasks(task, task.getDependents()))
-                .thenComposeAsync(dependentsException -> {
+                .thenComposeAsync((@Nullable Void unused) -> executeTasks(task, task.getDependents()))
+                .thenComposeAsync((@Nullable Exception dependentsException) -> {
                     boolean isDependentsSucceeded = dependentsException == null;
 
                     if (isDependentsSucceeded) {
@@ -259,13 +276,14 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                         task.setState(Task.TaskState.RUNNING);
                         taskListeners.forEach(it -> it.onRunning(task));
                         task.execute();
-                    }), task.getExecutor()).whenComplete((unused, throwable) -> {
+                    }), task.getExecutor()).whenComplete(
+                            (@Nullable Void unused, @Nullable Throwable throwable) -> {
                         task.setState(Task.TaskState.EXECUTED);
                         rethrow(throwable);
                     });
                 })
-                .thenComposeAsync(unused -> executeTasks(task, task.getDependencies()))
-                .thenComposeAsync(dependenciesException -> {
+                .thenComposeAsync((@Nullable Void unused) -> executeTasks(task, task.getDependencies()))
+                .thenComposeAsync((@Nullable Exception dependenciesException) -> {
                     boolean isDependenciesSucceeded = dependenciesException == null;
 
                     if (isDependenciesSucceeded)
@@ -273,12 +291,12 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
                     if (task.doPostExecute()) {
                         return CompletableFuture.runAsync(wrap(task::postExecute), task.getExecutor())
-                                .thenApply(unused -> dependenciesException);
+                                .thenApply((@Nullable Void unused) -> dependenciesException);
                     } else {
                         return CompletableFuture.completedFuture(dependenciesException);
                     }
                 })
-                .thenApplyAsync(dependenciesException -> {
+                .thenApplyAsync((@Nullable Exception dependenciesException) -> {
                     boolean isDependenciesSucceeded = dependenciesException == null;
 
                     if (!isDependenciesSucceeded) {

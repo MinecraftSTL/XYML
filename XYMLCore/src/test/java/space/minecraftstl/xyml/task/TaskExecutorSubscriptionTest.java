@@ -31,9 +31,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -107,6 +109,91 @@ public final class TaskExecutorSubscriptionTest {
 
         assertFalse(executor.test());
         assertTrue(executor.isCancelled());
+    }
+
+    /// Verifies a task error produces one failed stop notification for every normal terminal listener.
+    @Test
+    public void taskErrorPublishesFailedStopExactlyOnce() {
+        AssertionError taskFailure = new AssertionError("test task error");
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(new ErrorTask(taskFailure));
+        AtomicInteger stopDeliveries = new AtomicInteger();
+        AtomicInteger laterDeliveries = new AtomicInteger();
+        AtomicInteger errorReports = new AtomicInteger();
+        AtomicBoolean terminalSuccess = new AtomicBoolean(true);
+        AtomicReference<@Nullable Throwable> reportedError = new AtomicReference<>();
+        @Nullable Thread.UncaughtExceptionHandler previousHandler = Thread.getDefaultUncaughtExceptionHandler();
+        executor.subscribeTaskListener(new OutcomeStopTaskListener((success, ignoredExecutor) -> {
+            terminalSuccess.set(success);
+            stopDeliveries.incrementAndGet();
+        }));
+        executor.subscribeTaskListener(new OutcomeStopTaskListener(
+                (success, ignoredExecutor) -> laterDeliveries.incrementAndGet()));
+
+        Thread.setDefaultUncaughtExceptionHandler((thread, failure) -> {
+            errorReports.incrementAndGet();
+            reportedError.compareAndSet(null, failure);
+        });
+        try {
+            assertFalse(executor.test());
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(previousHandler);
+        }
+
+        assertFalse(terminalSuccess.get());
+        assertEquals(1, stopDeliveries.get());
+        assertEquals(1, laterDeliveries.get());
+        assertEquals(1, errorReports.get());
+        assertSame(taskFailure, reportedError.get());
+        assertSame(taskFailure, executor.getFailure());
+    }
+
+    /// Verifies Exception identity is preserved and a later successful repeated start clears terminal failure state.
+    @Test
+    public void exceptionIdentityAndRepeatedSuccessResetTerminalFailure() {
+        IllegalStateException taskFailure = new IllegalStateException("test task exception");
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(new FailOnceTask(taskFailure));
+
+        assertFalse(executor.test());
+        assertSame(taskFailure, executor.getException());
+        assertSame(taskFailure, executor.getFailure());
+
+        assertTrue(executor.test());
+        assertNull(executor.getException());
+        assertNull(executor.getFailure());
+    }
+
+    /// Verifies an error thrown by a stop listener still prevents later listener delivery after a task error.
+    @Test
+    public void stopListenerErrorRetainsErrorPropagationRuleAfterTaskError() {
+        AssertionError taskFailure = new AssertionError("test task error");
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(new ErrorTask(taskFailure));
+        AtomicInteger firstDeliveries = new AtomicInteger();
+        AtomicInteger laterDeliveries = new AtomicInteger();
+        AtomicInteger errorReports = new AtomicInteger();
+        AtomicReference<@Nullable Throwable> firstReportedError = new AtomicReference<>();
+        @Nullable Thread.UncaughtExceptionHandler previousHandler = Thread.getDefaultUncaughtExceptionHandler();
+        executor.subscribeTaskListener(new OutcomeStopTaskListener(
+                (success, ignoredExecutor) -> firstDeliveries.incrementAndGet()));
+        executor.subscribeTaskListener(new OutcomeStopTaskListener((success, ignoredExecutor) -> {
+            throw new AssertionError("test stop listener error");
+        }));
+        executor.subscribeTaskListener(new OutcomeStopTaskListener(
+                (success, ignoredExecutor) -> laterDeliveries.incrementAndGet()));
+
+        Thread.setDefaultUncaughtExceptionHandler((thread, failure) -> {
+            errorReports.incrementAndGet();
+            firstReportedError.compareAndSet(null, failure);
+        });
+        try {
+            assertFalse(executor.test());
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(previousHandler);
+        }
+
+        assertEquals(1, firstDeliveries.get());
+        assertEquals(0, laterDeliveries.get());
+        assertEquals(2, errorReports.get());
+        assertSame(taskFailure, firstReportedError.get());
     }
 
     /// Verifies concurrent cancellation, subscription, and terminal notification use a stable delivery snapshot.
@@ -309,6 +396,47 @@ public final class TaskExecutorSubscriptionTest {
         }
     }
 
+    /// Task that deterministically terminates by throwing one configured error.
+    @NotNullByDefault
+    private static final class ErrorTask extends Task<@Nullable Void> {
+        /// Error thrown from [#execute()].
+        private final AssertionError failure;
+
+        /// Creates a task that throws the supplied error.
+        private ErrorTask(AssertionError failure) {
+            this.failure = failure;
+        }
+
+        /// Throws the configured error.
+        @Override
+        public void execute() {
+            throw failure;
+        }
+    }
+
+    /// Task that throws one configured exception on its first execution and succeeds thereafter.
+    @NotNullByDefault
+    private static final class FailOnceTask extends Task<@Nullable Void> {
+        /// Exception thrown on the first execution.
+        private final RuntimeException failure;
+
+        /// Whether the configured failure has not yet been thrown.
+        private final AtomicBoolean failNextExecution = new AtomicBoolean(true);
+
+        /// Creates a task that fails once with the supplied exception.
+        private FailOnceTask(RuntimeException failure) {
+            this.failure = failure;
+        }
+
+        /// Throws the configured exception once and performs no work on later executions.
+        @Override
+        public void execute() {
+            if (failNextExecution.getAndSet(false)) {
+                throw failure;
+            }
+        }
+    }
+
     /// Task listener that invokes one callback at task-chain start.
     @NotNullByDefault
     private static final class StartTaskListener extends TaskListener {
@@ -342,6 +470,24 @@ public final class TaskExecutorSubscriptionTest {
         @Override
         public void onReady(Task<?> task) {
             callback.run();
+        }
+    }
+
+    /// Task listener that forwards terminal success and executor identity to one callback.
+    @NotNullByDefault
+    private static final class OutcomeStopTaskListener extends TaskListener {
+        /// Callback invoked for one terminal notification.
+        private final BiConsumer<Boolean, TaskExecutor> callback;
+
+        /// Creates a terminal listener backed by the supplied callback.
+        private OutcomeStopTaskListener(BiConsumer<Boolean, TaskExecutor> callback) {
+            this.callback = callback;
+        }
+
+        /// Forwards terminal state to the configured callback.
+        @Override
+        public void onStop(boolean success, TaskExecutor executor) {
+            callback.accept(success, executor);
         }
     }
 

@@ -351,9 +351,12 @@ public final class TaskExecutorPresentationModel implements TaskPresentationMode
             }
 
             detachActiveTasksLocked(progressSubscriptions);
-            @Nullable Throwable terminalFailure = lastFailure != null ? lastFailure : executor.getException();
-            boolean cancelled = !succeeded && (executor.isCancelled()
-                    || isCancellation(terminalFailure));
+            @Nullable Throwable executorFailure = sourceExecutor.getFailure();
+            @Nullable Throwable terminalFailure = executorFailure != null
+                    ? executorFailure
+                    : lastFailure != null ? lastFailure : sourceExecutor.getException();
+            boolean cancelled = !succeeded && (isCancellation(terminalFailure)
+                    || sourceExecutor.isCancelled() && terminalFailure == null);
             TaskStatus terminalStatus = succeeded
                     ? TaskStatus.SUCCEEDED
                     : cancelled ? TaskStatus.CANCELLED : TaskStatus.FAILED;

@@ -54,6 +54,9 @@ public abstract class TaskExecutor {
     /// Last task failure, or `null` when execution has not failed or was cancelled before recording a failure.
     protected @Nullable Exception exception;
 
+    /// Terminal chain failure including [Error] values, or null before a failed terminal outcome is recorded.
+    protected volatile @Nullable Throwable failure;
+
     /// Immutable stage metadata exposed to task-progress consumers.
     private final @Unmodifiable List<Task.StagesHint> hints;
 
@@ -87,6 +90,12 @@ public abstract class TaskExecutor {
     @Nullable
     public Exception getException() {
         return exception;
+    }
+
+    /// Returns the complete terminal failure, including [Error], or null after success and before termination.
+    public @Nullable Throwable getFailure() {
+        @Nullable Throwable terminalFailure = failure;
+        return terminalFailure != null ? terminalFailure : exception;
     }
 
     /// Starts this task execution chain asynchronously.

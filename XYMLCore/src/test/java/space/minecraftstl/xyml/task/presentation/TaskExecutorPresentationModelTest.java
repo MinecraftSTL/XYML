@@ -146,6 +146,27 @@ public final class TaskExecutorPresentationModelTest {
         }
     }
 
+    /// Verifies an executor-level error remains available to terminal presentation without an Exception surrogate.
+    @Test
+    public void mapsTerminalErrorDetailsFromExecutorFailure() {
+        ProbeTaskExecutor executor = new ProbeTaskExecutor();
+        TaskExecutorPresentationModel model = new TaskExecutorPresentationModel(
+                executor,
+                "Launch game",
+                "Preparing");
+        AssertionError failure = new AssertionError("native bridge failed");
+        try {
+            executor.recordTerminalFailure(failure);
+            executor.fireStop(false);
+
+            assertEquals(TaskStatus.FAILED, model.snapshot().status());
+            assertTrue(model.snapshot().details().contains(AssertionError.class.getName()));
+            assertTrue(model.snapshot().details().contains("native bridge failed"));
+        } finally {
+            model.close();
+        }
+    }
+
     /// Verifies idempotent cancellation forwarding and the cancelled terminal state.
     @Test
     public void forwardsCancellationOnceAndMapsCancelledStop() {
@@ -205,6 +226,29 @@ public final class TaskExecutorPresentationModelTest {
 
             assertEquals(TaskStatus.FAILED, model.snapshot().status());
             assertTrue(model.snapshot().details().contains("account unavailable"));
+        } finally {
+            model.close();
+        }
+    }
+
+    /// Verifies an accepted cancellation request cannot hide a concrete non-cancellation failure.
+    @Test
+    public void preservesRealFailureAfterAcceptedCancellation() {
+        ProbeTaskExecutor executor = new ProbeTaskExecutor();
+        TaskExecutorPresentationModel model = new TaskExecutorPresentationModel(
+                executor,
+                "Launch game",
+                "Preparing");
+        IllegalStateException launchFailure = new IllegalStateException("launch state is corrupt");
+        try {
+            executor.fireReady(new ProbeTask("Create process"));
+            model.requestCancellation();
+            executor.recordFailure(launchFailure);
+
+            executor.fireStop(false);
+
+            assertEquals(TaskStatus.FAILED, model.snapshot().status());
+            assertTrue(model.snapshot().details().contains("launch state is corrupt"));
         } finally {
             model.close();
         }
@@ -323,6 +367,13 @@ public final class TaskExecutorPresentationModelTest {
         /// @param failure failure to expose
         private void recordFailure(Exception failure) {
             exception = failure;
+        }
+
+        /// Stores a complete executor-level terminal failure, including an error.
+        ///
+        /// @param terminalFailure failure to expose
+        private void recordTerminalFailure(Throwable terminalFailure) {
+            failure = terminalFailure;
         }
 
         /// Returns the number of cancellation calls forwarded by the model.
