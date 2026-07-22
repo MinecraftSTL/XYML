@@ -133,6 +133,17 @@ public final class ViewportChoiceList<T extends Object> extends JScrollPane impl
         choiceModel.retry();
     }
 
+    /// Cancels stale work, clears sparse cached values, and reloads the current measured viewport.
+    ///
+    /// Use this after the source contents or exact item count change. The replacement request is still derived
+    /// from measured viewport geometry and observed latency rather than a fixed page size.
+    public void reloadData() {
+        requireEventDispatchThread();
+        choiceModel.invalidateData();
+        previousObservationNanos = 0L;
+        refreshLoadPlan();
+    }
+
     /// Re-measures the viewport and applies its resulting demand.
     public void refreshLoadPlan() {
         if (!SwingUtilities.isEventDispatchThread()) {

@@ -31,6 +31,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -80,6 +81,32 @@ public final class ViewportChoiceListModelTest {
         });
     }
 
+    /// Verifies that invalidation accepts a changed exact source count and issues fresh work for the next plan.
+    @Test
+    public void reloadsAfterExactItemCountChanges() throws Exception {
+        ResizableDataSource dataSource = new ResizableDataSource(3);
+        AtomicReference<@Nullable ViewportChoiceListModel<String>> modelReference = new AtomicReference<>();
+        ViewportLoadPlan initialPlan = new ViewportLoadPlan(
+                new IndexRange(0, 3), new IndexRange(0, 3), Set.of(),
+                ScrollDirection.STATIONARY, 0.0, 0);
+
+        SwingUtilities.invokeAndWait(() -> {
+            ViewportChoiceListModel<String> model = new ViewportChoiceListModel<>(dataSource);
+            modelReference.set(model);
+            model.applyPlan(initialPlan);
+            assertEquals(3, model.getSize());
+
+            dataSource.setItemCount(5);
+            model.invalidateData();
+            assertEquals(5, model.getSize());
+            model.applyPlan(new ViewportLoadPlan(
+                    new IndexRange(0, 5), new IndexRange(0, 5), Set.of(),
+                    ScrollDirection.STATIONARY, 0.0, 0));
+            assertEquals(2, dataSource.requestCount());
+            model.close();
+        });
+    }
+
     /// Waits until callbacks already queued on the Swing EDT have completed.
     private static void drainEventDispatchThread() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
@@ -112,6 +139,60 @@ public final class ViewportChoiceListModelTest {
             CompletableFuture<ChoicePage<String>> future = new CompletableFuture<>();
             requests.add(future);
             return future;
+        }
+    }
+
+    /// Bounded immediate source whose exact item count can change between invalidated generations.
+    @NotNullByDefault
+    private static final class ResizableDataSource implements ViewportChoiceDataSource<String> {
+        /// Current exact source size.
+        private final AtomicInteger itemCount;
+
+        /// Number of viewport requests received.
+        private final AtomicInteger requests = new AtomicInteger();
+
+        /// Creates a source with an initial exact size.
+        ///
+        /// @param initialItemCount initial item count
+        private ResizableDataSource(int initialItemCount) {
+            itemCount = new AtomicInteger(initialItemCount);
+        }
+
+        /// Returns the current exact source size.
+        @Override
+        public OptionalInt exactItemCount() {
+            return OptionalInt.of(itemCount.get());
+        }
+
+        /// Returns an immediate page covering the requested range.
+        @Override
+        public CompletionStage<ChoicePage<String>> load(
+                IndexRange desiredRange,
+                LoadCancellation cancellation) {
+            requests.incrementAndGet();
+            List<String> values = new ArrayList<>();
+            for (int index = desiredRange.startInclusive(); index < desiredRange.endExclusive(); index++) {
+                values.add(Integer.toString(index));
+            }
+            return CompletableFuture.completedFuture(new ChoicePage<>(
+                    desiredRange,
+                    values,
+                    OptionalInt.of(itemCount.get()),
+                    desiredRange.endExclusive() == itemCount.get()));
+        }
+
+        /// Replaces the exact source size.
+        ///
+        /// @param newItemCount new exact size
+        private void setItemCount(int newItemCount) {
+            itemCount.set(newItemCount);
+        }
+
+        /// Returns how many load requests were received.
+        ///
+        /// @return request count
+        private int requestCount() {
+            return requests.get();
         }
     }
 }

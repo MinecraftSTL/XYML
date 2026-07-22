@@ -42,6 +42,9 @@ import java.util.OptionalInt;
 public final class ViewportChoiceListModel<T extends Object>
         extends AbstractListModel<ChoiceListEntry<T>>
         implements ViewportLoadListener<T>, AutoCloseable {
+    /// Data source whose current boundary is re-read after explicit invalidation.
+    private final ViewportChoiceDataSource<T> dataSource;
+
     /// The coordinator that cancels and rejects superseded requests.
     private final ViewportRequestCoordinator<T> coordinator;
 
@@ -76,6 +79,7 @@ public final class ViewportChoiceListModel<T extends Object>
     ///
     /// @param dataSource the indexed choice data source
     public ViewportChoiceListModel(ViewportChoiceDataSource<T> dataSource) {
+        this.dataSource = dataSource;
         this.exactItemCount = dataSource.exactItemCount();
         this.exposedSize = exactItemCount.orElse(0);
         this.coordinator = new ViewportRequestCoordinator<>(dataSource, this);
@@ -128,6 +132,27 @@ public final class ViewportChoiceListModel<T extends Object>
             throw new IllegalStateException("Viewport choice model is closed");
         }
         activeGeneration = coordinator.retry();
+    }
+
+    /// Invalidates cached values and re-reads the data-source boundary without inventing a logical size.
+    ///
+    /// The next viewport measurement issues a fresh request. This operation supports sources whose exact count
+    /// changes after installation, deletion, filtering, or an explicit refresh.
+    public void invalidateData() {
+        requireEventDispatchThread();
+        if (closed) {
+            throw new IllegalStateException("Viewport choice model is closed");
+        }
+
+        coordinator.invalidate();
+        activeGeneration++;
+        currentPlan = null;
+        loadedValues.clear();
+        failedRanges.clear();
+        retainedRanges.clear();
+        exactItemCount = dataSource.exactItemCount();
+        updateExposedSize(exactItemCount.orElse(0));
+        fireAllContentsChanged();
     }
 
     /// Returns the observed mean source latency used by future load plans.

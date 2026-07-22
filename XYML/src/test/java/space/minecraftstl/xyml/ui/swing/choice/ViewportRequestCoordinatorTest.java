@@ -116,6 +116,27 @@ public final class ViewportRequestCoordinatorTest {
         assertEquals(List.of(new IndexRange(10, 13)), listener.loadedRanges);
     }
 
+    /// Verifies that explicit invalidation cancels current work and forces equal future demand into a new generation.
+    @Test
+    public void invalidatesEqualDemandAndDiscardsLateCompletion() {
+        ControlledDataSource dataSource = new ControlledDataSource();
+        RecordingListener listener = new RecordingListener();
+        ViewportRequestCoordinator<String> coordinator = new ViewportRequestCoordinator<>(dataSource, listener);
+        ViewportLoadPlan plan = plan(new IndexRange(4, 7));
+        long firstGeneration = coordinator.request(plan);
+
+        coordinator.invalidate();
+        long secondGeneration = coordinator.request(plan);
+
+        assertTrue(dataSource.requests.get(0).cancellation().isCancelled());
+        assertTrue(secondGeneration > firstGeneration);
+        dataSource.requests.get(0).future().complete(page(4, "old-4", "old-5", "old-6"));
+        assertEquals(List.of(), listener.loadedGenerations);
+
+        dataSource.requests.get(1).future().complete(page(4, "new-4", "new-5", "new-6"));
+        assertEquals(List.of(secondGeneration), listener.loadedGenerations);
+    }
+
     /// Creates a minimal load plan with the requested desired range.
     ///
     /// @param range the visible and desired range

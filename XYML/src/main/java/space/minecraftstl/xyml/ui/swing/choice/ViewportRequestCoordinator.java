@@ -88,6 +88,19 @@ public final class ViewportRequestCoordinator<T extends Object> implements AutoC
         return !closed && candidateGeneration == generation;
     }
 
+    /// Cancels the active generation and forgets its demand while keeping this coordinator reusable.
+    ///
+    /// A later [#request(ViewportLoadPlan)] call starts a fresh generation even if its ranges match the
+    /// invalidated plan. Late completions from invalidated work are discarded.
+    public synchronized void invalidate() {
+        if (closed) {
+            throw new IllegalStateException("Viewport request coordinator is closed");
+        }
+        generation++;
+        cancelActiveRequests();
+        currentPlan = null;
+    }
+
     /// Cancels current requests and prevents all future requests.
     @Override
     public synchronized void close() {
