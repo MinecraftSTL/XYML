@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
+import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.ThemeMode;
 
 import java.util.Objects;
@@ -62,14 +63,7 @@ public final class PersistedAppearanceSettingsModel
             AppearanceSettingsStore store,
             SwingThemeManager themeManager,
             SwingAnimator animator) {
-        this(store, snapshot -> {
-            themeManager.update(
-                    snapshot.themeMode(),
-                    new SwingDesignTokens(snapshot.cornerRadius()));
-            animator.setMotionPolicy(snapshot.animationsEnabled()
-                    ? MotionPolicy.FULL
-                    : MotionPolicy.OFF);
-        });
+        this(store, createSwingRuntimeApplier(themeManager, animator));
     }
 
     /// Creates a model with an explicit runtime applier for deterministic tests.
@@ -167,6 +161,26 @@ public final class PersistedAppearanceSettingsModel
                 raw.cornerRadiusStep(),
                 !raw.animationsDisabled(),
                 raw.writable());
+    }
+
+    /// Creates a runtime applier that never synchronously waits across the JavaFX and Swing UI threads.
+    ///
+    /// @param themeManager active Swing theme manager
+    /// @param animator shared Swing animator
+    /// @return callback dispatching all runtime mutations to the Swing EDT
+    private static Consumer<AppearanceSettingsSnapshot> createSwingRuntimeApplier(
+            SwingThemeManager themeManager,
+            SwingAnimator animator) {
+        Objects.requireNonNull(themeManager, "themeManager");
+        Objects.requireNonNull(animator, "animator");
+        return snapshot -> SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+            themeManager.update(
+                    snapshot.themeMode(),
+                    new SwingDesignTokens(snapshot.cornerRadius()));
+            animator.setMotionPolicy(snapshot.animationsEnabled()
+                    ? MotionPolicy.FULL
+                    : MotionPolicy.OFF);
+        });
     }
 
     /// Rejects writes after closure or while the backing store is read-only.

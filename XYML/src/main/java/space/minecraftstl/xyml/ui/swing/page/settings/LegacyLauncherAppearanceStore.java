@@ -17,7 +17,6 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
-import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -28,9 +27,10 @@ import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
 
 import java.util.Objects;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.FutureTask;
 import java.util.function.BooleanSupplier;
+
+import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.executeAndWait;
+import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.requireEventThread;
 
 /// Transitional adapter isolating legacy JavaFX launcher properties behind [AppearanceSettingsStore].
 ///
@@ -63,7 +63,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
     public LegacyLauncherAppearanceStore(
             LauncherSettings settings,
             BooleanSupplier writableSupplier) {
-        requireJavaFxThread();
+        requireEventThread();
         this.settings = Objects.requireNonNull(settings, "settings");
         this.writableSupplier = Objects.requireNonNull(writableSupplier, "writableSupplier");
         currentSnapshot = readSnapshot();
@@ -76,7 +76,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
     ///
     /// @return legacy store bound to [SettingsManager#settings()]
     public static LegacyLauncherAppearanceStore createForCurrentSettings() {
-        requireJavaFxThread();
+        requireEventThread();
         return new LegacyLauncherAppearanceStore(
                 SettingsManager.settings(),
                 () -> !SettingsManager.hasReadOnlyCoreSettings());
@@ -102,7 +102,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
     @Override
     public void setThemeModeValue(String themeModeValue) {
         String validatedValue = Objects.requireNonNull(themeModeValue, "themeModeValue");
-        runOnJavaFxThreadAndWait(() -> {
+        executeAndWait(() -> {
             requireOpen();
             settings.themeBrightnessModeProperty().set(validatedValue);
         });
@@ -111,7 +111,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
     /// Persists one validated corner radius on the JavaFX thread.
     @Override
     public void setCornerRadius(int cornerRadius) {
-        runOnJavaFxThreadAndWait(() -> {
+        executeAndWait(() -> {
             requireOpen();
             settings.cornerRadiusProperty().set(cornerRadius);
         });
@@ -120,7 +120,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
     /// Persists the legacy animation-disable flag on the JavaFX thread.
     @Override
     public void setAnimationsDisabled(boolean disabled) {
-        runOnJavaFxThreadAndWait(() -> {
+        executeAndWait(() -> {
             requireOpen();
             settings.animationDisabledProperty().set(disabled);
         });
@@ -129,7 +129,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
     /// Removes every JavaFX property listener synchronously and exactly once.
     @Override
     public void close() {
-        runOnJavaFxThreadAndWait(() -> {
+        executeAndWait(() -> {
             if (!closed) {
                 closed = true;
                 settings.themeBrightnessModeProperty().removeListener(propertyListener);
@@ -141,7 +141,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
 
     /// Rebuilds and publishes the raw snapshot after one legacy property changes.
     private void refreshSnapshot() {
-        requireJavaFxThread();
+        requireEventThread();
         if (closed) {
             return;
         }
@@ -155,7 +155,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
     ///
     /// @return raw immutable store snapshot
     private StoredAppearanceSettings readSnapshot() {
-        requireJavaFxThread();
+        requireEventThread();
         @Nullable String configuredMode = settings.themeBrightnessModeProperty().get();
         int radius = alignRadius(settings.cornerRadiusProperty().get());
         return new StoredAppearanceSettings(
@@ -179,42 +179,6 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
         int offset = constrained - LauncherSettings.MINIMUM_CORNER_RADIUS;
         return LauncherSettings.MINIMUM_CORNER_RADIUS
                 + offset / LauncherSettings.CORNER_RADIUS_STEP * LauncherSettings.CORNER_RADIUS_STEP;
-    }
-
-    /// Runs one property operation synchronously on the JavaFX application thread.
-    ///
-    /// @param operation property operation
-    private static void runOnJavaFxThreadAndWait(Runnable operation) {
-        Objects.requireNonNull(operation, "operation");
-        if (Platform.isFxApplicationThread()) {
-            operation.run();
-            return;
-        }
-
-        FutureTask<Void> task = new FutureTask<>(operation, null);
-        Platform.runLater(task);
-        try {
-            task.get();
-        } catch (InterruptedException failure) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while waiting for JavaFX settings update", failure);
-        } catch (ExecutionException failure) {
-            @Nullable Throwable cause = failure.getCause();
-            if (cause instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            }
-            if (cause instanceof Error error) {
-                throw error;
-            }
-            throw new IllegalStateException("JavaFX settings update failed", cause);
-        }
-    }
-
-    /// Requires construction and direct property callbacks to run on the JavaFX thread.
-    private static void requireJavaFxThread() {
-        if (!Platform.isFxApplicationThread()) {
-            throw new IllegalStateException("Legacy appearance store must access properties on the JavaFX thread");
-        }
     }
 
     /// Rejects property writes after listener cleanup.

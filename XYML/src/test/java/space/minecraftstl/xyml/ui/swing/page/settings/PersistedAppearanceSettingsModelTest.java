@@ -18,14 +18,26 @@
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.MotionPolicy;
+import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
+import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.ThemeMode;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -119,6 +131,30 @@ public final class PersistedAppearanceSettingsModelTest {
                         () -> model.setThemeMode(ThemeMode.SYSTEM)));
     }
 
+    /// A store publishing on another UI thread cannot deadlock that thread against the blocked Swing EDT.
+    @Test
+    public void appliesCrossThreadStoreChangesWithoutEdtDeadlock() {
+        CrossThreadStore store = new CrossThreadStore(raw("light", 6, false, true));
+        SwingThemeManager themeManager = new SwingThemeManager(
+                ThemeMode.LIGHT,
+                new SwingDesignTokens(6),
+                () -> false);
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 16);
+        AtomicReference<@Nullable PersistedAppearanceSettingsModel> model = new AtomicReference<>();
+
+        EdtDispatcher.executeAndWait(() -> {
+            model.set(new PersistedAppearanceSettingsModel(store, themeManager, animator));
+            Objects.requireNonNull(model.get()).setCornerRadius(8);
+        });
+        EdtDispatcher.executeAndWait(() -> { });
+
+        assertAll(
+                () -> assertEquals(8, Objects.requireNonNull(model.get()).snapshot().cornerRadius()),
+                () -> assertEquals(8, themeManager.designTokens().cornerRadius()),
+                () -> assertEquals(MotionPolicy.FULL, animator.motionPolicy()));
+        Objects.requireNonNull(model.get()).close();
+    }
+
     /// Creates raw test settings with the production radius bounds and step.
     ///
     /// @param mode persisted mode value
@@ -136,7 +172,7 @@ public final class PersistedAppearanceSettingsModelTest {
 
     /// Synchronous toolkit-neutral persistence fake.
     @NotNullByDefault
-    private static final class FakeStore implements AppearanceSettingsStore {
+    private static class FakeStore implements AppearanceSettingsStore {
         /// Raw transition publisher.
         private final ValueChangeSupport<StoredAppearanceSettings> changes = new ValueChangeSupport<>(this);
 
@@ -215,6 +251,36 @@ public final class PersistedAppearanceSettingsModelTest {
         /// @return whether any subscriber remains
         private boolean hasSubscribers() {
             return changes.hasSubscribers();
+        }
+    }
+
+    /// Simulates a legacy store that synchronously waits while another toolkit thread publishes its change.
+    @NotNullByDefault
+    private static final class CrossThreadStore extends FakeStore {
+        /// Creates a cross-thread fake with initial values.
+        ///
+        /// @param initial initial raw values
+        private CrossThreadStore(StoredAppearanceSettings initial) {
+            super(initial);
+        }
+
+        /// Publishes the radius from a simulated foreign UI thread while the calling EDT waits for completion.
+        @Override
+        public void setCornerRadius(int cornerRadius) {
+            FutureTask<Void> change = new FutureTask<>(() -> {
+                super.setCornerRadius(cornerRadius);
+                return null;
+            });
+            Thread publisher = new Thread(change, "appearance-cross-toolkit-publisher");
+            publisher.start();
+            try {
+                change.get(2L, TimeUnit.SECONDS);
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while simulating cross-toolkit persistence", failure);
+            } catch (ExecutionException | TimeoutException failure) {
+                throw new IllegalStateException("Cross-toolkit appearance update did not complete", failure);
+            }
         }
     }
 }
