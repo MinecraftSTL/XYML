@@ -50,4 +50,19 @@ public final class ThemeModeTest {
                 () -> assertEquals(ThemeVariant.LIGHT, ThemeMode.SYSTEM.resolve(() -> false)),
                 () -> assertEquals(ThemeVariant.DARK, ThemeMode.SYSTEM.resolve(() -> true)));
     }
+
+    /// Persisted legacy and canonical identifiers round-trip without changing automatic behavior.
+    @Test
+    public void mapsPersistedSettingValues() {
+        assertAll(
+                () -> assertEquals(ThemeMode.SYSTEM, ThemeMode.fromSettingValue(null)),
+                () -> assertEquals(ThemeMode.SYSTEM, ThemeMode.fromSettingValue("auto")),
+                () -> assertEquals(ThemeMode.SYSTEM, ThemeMode.fromSettingValue("SYSTEM")),
+                () -> assertEquals(ThemeMode.SYSTEM, ThemeMode.fromSettingValue("unknown")),
+                () -> assertEquals(ThemeMode.LIGHT, ThemeMode.fromSettingValue(" light ")),
+                () -> assertEquals(ThemeMode.DARK, ThemeMode.fromSettingValue("DARK")),
+                () -> assertEquals("auto", ThemeMode.SYSTEM.settingValue()),
+                () -> assertEquals("light", ThemeMode.LIGHT.settingValue()),
+                () -> assertEquals("dark", ThemeMode.DARK.settingValue()));
+    }
 }

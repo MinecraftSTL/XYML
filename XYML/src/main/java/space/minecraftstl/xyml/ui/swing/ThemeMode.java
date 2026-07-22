@@ -18,7 +18,9 @@
 package space.minecraftstl.xyml.ui.swing;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
+import java.util.Locale;
 import java.util.Objects;
 
 /// Describes how the launcher selects its light or dark Swing palette.
@@ -44,6 +46,35 @@ public enum ThemeMode {
             case LIGHT -> ThemeVariant.LIGHT;
             case DARK -> ThemeVariant.DARK;
             case SYSTEM -> systemThemeDetector.isDarkTheme() ? ThemeVariant.DARK : ThemeVariant.LIGHT;
+        };
+    }
+
+    /// Parses the launcher's persisted brightness identifier.
+    ///
+    /// Legacy, blank, and unknown values preserve automatic system behavior.
+    ///
+    /// @param value persisted brightness identifier, or null
+    /// @return matching Swing theme mode
+    public static ThemeMode fromSettingValue(@Nullable String value) {
+        if (value == null) {
+            return SYSTEM;
+        }
+        return switch (value.trim().toLowerCase(Locale.ROOT)) {
+            case "light" -> LIGHT;
+            case "dark" -> DARK;
+            case "system", "auto" -> SYSTEM;
+            default -> SYSTEM;
+        };
+    }
+
+    /// Returns the canonical launcher setting identifier.
+    ///
+    /// @return `light`, `dark`, or the compatible automatic value `auto`
+    public String settingValue() {
+        return switch (this) {
+            case LIGHT -> "light";
+            case DARK -> "dark";
+            case SYSTEM -> "auto";
         };
     }
 }
