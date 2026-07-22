@@ -1,0 +1,72 @@
+/*
+ * Hello Minecraft! Launcher
+ * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package space.minecraftstl.xyml.ui.swing.application;
+
+import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsStrings;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstancesStrings;
+import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
+import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentations;
+
+import java.time.Duration;
+import java.util.Objects;
+
+/// Groups startup-selected text and timing without inventing composition-level defaults.
+///
+/// @param windowTitle operating-system window title
+/// @param shellPages localized top-level navigation presentations
+/// @param home localized home-page controls
+/// @param homeStatus localized home readiness states
+/// @param instances localized installed-instance controls
+/// @param instancesStatus localized repository states and fallbacks
+/// @param accounts localized account-page controls
+/// @param appearance localized appearance-settings controls
+/// @param pageTransitionDuration non-negative page transition duration selected by startup policy
+@NotNullByDefault
+public record SwingApplicationPresentation(
+        String windowTitle,
+        ShellPagePresentations shellPages,
+        HomeStrings home,
+        HomeStatusStrings homeStatus,
+        InstancesStrings instances,
+        RepositoryInstancesStatusStrings instancesStatus,
+        AccountsStrings accounts,
+        AppearanceSettingsStrings appearance,
+        Duration pageTransitionDuration) {
+    /// Validates all localized text groups and the explicit timing policy.
+    public SwingApplicationPresentation {
+        Objects.requireNonNull(windowTitle, "windowTitle");
+        Objects.requireNonNull(shellPages, "shellPages");
+        Objects.requireNonNull(home, "home");
+        Objects.requireNonNull(homeStatus, "homeStatus");
+        Objects.requireNonNull(instances, "instances");
+        Objects.requireNonNull(instancesStatus, "instancesStatus");
+        Objects.requireNonNull(accounts, "accounts");
+        Objects.requireNonNull(appearance, "appearance");
+        Objects.requireNonNull(pageTransitionDuration, "pageTransitionDuration");
+        if (windowTitle.isBlank()) {
+            throw new IllegalArgumentException("windowTitle must not be blank");
+        }
+        if (pageTransitionDuration.isNegative()) {
+            throw new IllegalArgumentException("pageTransitionDuration must not be negative");
+        }
+    }
+}
