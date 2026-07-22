@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.task;
+package space.minecraftstl.xyml.task.presentation;
 
 import org.jetbrains.annotations.NotNullByDefault;
 

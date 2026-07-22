@@ -23,6 +23,9 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.task.presentation.TaskPresentationModel;
+import space.minecraftstl.xyml.task.presentation.TaskSnapshot;
+import space.minecraftstl.xyml.task.presentation.TaskStatus;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import java.awt.Component;

@@ -15,14 +15,14 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.task;
+package space.minecraftstl.xyml.task.presentation;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
 import java.util.OptionalDouble;
 
-/// Immutable task information consumed by a desktop presentation.
+/// Immutable task information consumed by a presentation surface.
 ///
 /// An empty progress value means the task cannot currently quantify its completion. Detail text is an empty
 /// string when no diagnostic or explanatory text is available.

@@ -15,13 +15,13 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.task;
+package space.minecraftstl.xyml.task.presentation;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 
-/// Supplies read-only task presentation state independently of JavaFX and Swing component types.
+/// Supplies read-only task presentation state independently of desktop UI toolkit types.
 ///
 /// Implementations may publish from worker threads. Subscribers receive changes synchronously on the publishing
 /// thread and must dispatch toolkit work themselves. A cancellation request must be idempotent because several

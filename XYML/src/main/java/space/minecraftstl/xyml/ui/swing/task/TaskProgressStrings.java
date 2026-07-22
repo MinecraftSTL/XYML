@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.task;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.task.presentation.TaskStatus;
 
 import java.util.Objects;
 
