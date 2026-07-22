@@ -96,6 +96,18 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Theme appearance override key for background opacity.
     public static final String THEME_APPEARANCE_BACKGROUND_OPACITY = "backgroundOpacity";
 
+    /// Smallest supported Swing component corner radius in logical pixels.
+    public static final int MINIMUM_CORNER_RADIUS = 0;
+
+    /// Largest supported radius for controls whose minimum stable height is forty logical pixels.
+    public static final int MAXIMUM_CORNER_RADIUS = 20;
+
+    /// Persisted corner-radius adjustment increment in logical pixels.
+    public static final int CORNER_RADIUS_STEP = 1;
+
+    /// Legacy-compatible default derived from the launcher's predominant six-pixel surface radius.
+    public static final int DEFAULT_CORNER_RADIUS = 6;
+
     /// Gson instance used for launcher settings and related settings objects that depend on JavaFX properties.
     public static final Gson SETTINGS_GSON = new GsonBuilder()
             .registerTypeAdapter(Path.class, PathTypeAdapter.INSTANCE)
@@ -477,6 +489,15 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     }
 
     // General UI
+
+    /// Global Swing component corner radius in logical pixels.
+    @SerializedName("cornerRadius")
+    private final IntegerProperty cornerRadius = new SimpleIntegerProperty(DEFAULT_CORNER_RADIUS);
+
+    /// Returns the adjustable Swing component corner-radius property.
+    public IntegerProperty cornerRadiusProperty() {
+        return cornerRadius;
+    }
 
     /// Whether UI animations are disabled.
     @SerializedName("animationDisabled")

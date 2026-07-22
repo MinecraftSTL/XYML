@@ -141,6 +141,11 @@
     "windowTransparent": {
       "type": "boolean"
     },
+    "cornerRadius": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20
+    },
     "animationDisabled": {
       "type": "boolean"
     },
