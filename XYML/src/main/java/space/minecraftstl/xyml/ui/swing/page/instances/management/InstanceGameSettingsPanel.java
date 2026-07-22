@@ -94,6 +94,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// Backing store that owns durable values and inheritance markers.
     private final InstanceGameSettingsStore store;
 
+    /// Invalidates already-loaded instance pages after a successful working-directory change.
+    private final Runnable workingDirectoryChanged;
+
     /// Non-blocking adapter over the process-wide local Java runtime registry.
     private final JavaRuntimeManagementService javaRuntimeService;
 
@@ -344,11 +347,26 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             XYMLGameRepository repository,
             String instanceId,
             Executor executor) {
+        this(repository, instanceId, executor, () -> { });
+    }
+
+    /// Creates a production panel and reports successful working-directory changes to its instance workspace.
+    ///
+    /// @param repository repository containing the managed instance
+    /// @param instanceId stable non-blank instance identifier
+    /// @param executor background executor used for time-consuming game-version detection
+    /// @param workingDirectoryChanged callback invalidating pages backed by the previous working directory
+    InstanceGameSettingsPanel(
+            XYMLGameRepository repository,
+            String instanceId,
+            Executor executor,
+            Runnable workingDirectoryChanged) {
         this(
                 new RepositoryInstanceGameSettingsStore(repository, instanceId),
                 new JavaManagerRuntimeManagementService(),
                 loadGameVersion(repository, instanceId, executor),
-                GameSettingsEditorPresentation.INSTANCE);
+                GameSettingsEditorPresentation.INSTANCE,
+                workingDirectoryChanged);
     }
 
     /// Creates an editor over an explicit store for either instance or embedded global-preset presentation.
@@ -416,11 +434,30 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             JavaRuntimeManagementService javaRuntimeService,
             CompletionStage<GameVersionNumber> gameVersionStage,
             GameSettingsEditorPresentation presentation) {
+        this(store, javaRuntimeService, gameVersionStage, presentation, () -> { });
+    }
+
+    /// Creates a settings panel with explicit services and a successful working-directory change callback.
+    ///
+    /// @param store backing store for effective values and persistence
+    /// @param javaRuntimeService non-blocking local Java discovery service
+    /// @param gameVersionStage asynchronous instance game-version result
+    /// @param presentation instance or embedded global-preset presentation
+    /// @param workingDirectoryChanged callback invalidating pages backed by the previous working directory
+    InstanceGameSettingsPanel(
+            InstanceGameSettingsStore store,
+            JavaRuntimeManagementService javaRuntimeService,
+            CompletionStage<GameVersionNumber> gameVersionStage,
+            GameSettingsEditorPresentation presentation,
+            Runnable workingDirectoryChanged) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.store = Objects.requireNonNull(store, "store");
         this.javaRuntimeService = Objects.requireNonNull(javaRuntimeService, "javaRuntimeService");
         this.presentation = Objects.requireNonNull(presentation, "presentation");
+        this.workingDirectoryChanged = Objects.requireNonNull(
+                workingDirectoryChanged,
+                "workingDirectoryChanged");
         configureComponents();
         javaRuntimeSubscription = javaRuntimeService.subscribe(change -> javaRuntimeSnapshotChanged());
         applySnapshot(store.snapshot());
@@ -752,9 +789,14 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             return;
         }
         try {
+            InstanceGameSettingsSnapshot previous = displayedSnapshot();
             store.save(editedSnapshot());
-            applySnapshot(store.snapshot());
+            InstanceGameSettingsSnapshot saved = store.snapshot();
+            applySnapshot(saved);
             statusLabel.setText(i18n("message.success"));
+            if (workingDirectoryChanged(previous, saved)) {
+                workingDirectoryChanged.run();
+            }
         } catch (IllegalArgumentException | IllegalStateException exception) {
             statusLabel.setText(i18n(
                     "swing.instance_settings.save_failed",
@@ -762,6 +804,20 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                             exception.getMessage(),
                             i18n("swing.instance_settings.invalid"))));
         }
+    }
+
+    /// Returns whether saved settings resolve instance content from a different working-directory configuration.
+    ///
+    /// @param previous settings rendered before persistence
+    /// @param saved durable settings returned after persistence
+    /// @return whether directory-dependent instance pages must be rebuilt
+    private static boolean workingDirectoryChanged(
+            InstanceGameSettingsSnapshot previous,
+            InstanceGameSettingsSnapshot saved) {
+        InstanceGameSettingsSnapshot.LaunchOptionsSettings before = previous.launchOptions();
+        InstanceGameSettingsSnapshot.LaunchOptionsSettings after = saved.launchOptions();
+        return before.runningDirectoryOverridden() != after.runningDirectoryOverridden()
+                || !before.runningDirectory().equals(after.runningDirectory());
     }
 
     /// Restores the visible controls from the latest durable values.

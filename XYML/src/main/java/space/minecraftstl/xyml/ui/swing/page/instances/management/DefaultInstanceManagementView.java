@@ -176,6 +176,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         setOpaque(false);
 
         AtomicReference<@Nullable InstanceOverviewPanel> overviewReference = new AtomicReference<>();
+        AtomicReference<@Nullable InstanceManagementPageDeck> pageDeckReference = new AtomicReference<>();
         @Nullable InstanceWorkspaceSummaryPanel createdSummary = null;
         @Nullable InstanceOverviewPanel createdOverview = null;
         @Nullable InstanceManagementPageDeck createdPageDeck = null;
@@ -219,7 +220,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                             requiredAnimationDuration,
                             requiredWorldQuickPlayActions,
                             maintenanceLaunchActions),
-                    createdOverview));
+                    createdOverview,
+                    () -> workingDirectoryChanged(pageDeckReference, overviewReference)));
+            pageDeckReference.set(createdPageDeck);
             InstanceManagementNavigationPanel createdNavigation = new InstanceManagementNavigationPanel(
                     createdPageDeck.availablePages(),
                     InstanceManagementPageId.OVERVIEW,
@@ -333,6 +336,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     /// @param resourcePackDependencies resource-pack strings and interactions
     /// @param operationDependencies lifecycle, progress, animation, world, and maintenance actions
     /// @param overview eagerly created default overview page
+    /// @param workingDirectoryChanged invalidates pages backed by a previous working directory
     /// @return destination factories without eagerly constructing optional pages
     private static EnumMap<InstanceManagementPageId, InstanceManagementPageDeck.PageFactory> createPageFactories(
             GameRepository repository,
@@ -342,7 +346,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             ModPageDependencies modDependencies,
             ResourcePackPageDependencies resourcePackDependencies,
             OperationPageDependencies operationDependencies,
-            InstanceOverviewPanel overview) {
+            InstanceOverviewPanel overview,
+            Runnable workingDirectoryChanged) {
         EnumMap<InstanceManagementPageId, InstanceManagementPageDeck.PageFactory> factories =
                 new EnumMap<>(InstanceManagementPageId.class);
         factories.put(
@@ -417,7 +422,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                 InstanceGameSettingsPanel panel = new InstanceGameSettingsPanel(
                         xymlRepository,
                         instanceId,
-                        executor);
+                        executor,
+                        workingDirectoryChanged);
                 return InstanceManagementPage.passive(panel, panel::close);
             });
             factories.put(InstanceManagementPageId.AUTOMATIC_INSTALL, () -> {
@@ -463,6 +469,22 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             }
         }
         return factories;
+    }
+
+    /// Refreshes the overview and discards cached pages that resolved the previous working directory.
+    ///
+    /// @param pageDeckReference initialized page deck reference
+    /// @param overviewReference initialized overview reference
+    private static void workingDirectoryChanged(
+            AtomicReference<@Nullable InstanceManagementPageDeck> pageDeckReference,
+            AtomicReference<@Nullable InstanceOverviewPanel> overviewReference) {
+        EdtDispatcher.requireEventDispatchThread();
+        requireOverview(overviewReference).refresh();
+        InstanceManagementPageDeck currentDeck = requirePageDeck(pageDeckReference);
+        currentDeck.invalidatePages(currentDeck.availablePages().stream()
+                .filter(page -> page != InstanceManagementPageId.OVERVIEW)
+                .filter(page -> page != InstanceManagementPageId.GAME_SETTINGS)
+                .toList());
     }
 
     /// Immutable schematic-page construction dependencies.
@@ -565,6 +587,19 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         @Nullable InstanceOverviewPanel current = Objects.requireNonNull(reference, "reference").get();
         if (current == null) {
             throw new IllegalStateException("Instance overview is not initialized");
+        }
+        return current;
+    }
+
+    /// Returns the page deck after construction has installed it for settings-change invalidation.
+    ///
+    /// @param reference construction-safe page deck reference
+    /// @return initialized page deck
+    private static InstanceManagementPageDeck requirePageDeck(
+            AtomicReference<@Nullable InstanceManagementPageDeck> reference) {
+        @Nullable InstanceManagementPageDeck current = Objects.requireNonNull(reference, "reference").get();
+        if (current == null) {
+            throw new IllegalStateException("Instance management page deck is not initialized");
         }
         return current;
     }

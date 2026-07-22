@@ -77,10 +77,11 @@ final class InstanceGameSettingsPanelTest {
     @Test
     void savesExplicitLocalOverrides() {
         RecordingStore store = new RecordingStore(snapshot());
+        AtomicInteger workingDirectoryChanges = new AtomicInteger();
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
-                InstanceGameSettingsPanel panel = createPanel(store);
+                InstanceGameSettingsPanel panel = createPanel(store, workingDirectoryChanges::incrementAndGet);
                 panelReference.set(panel);
 
                 clickOverride(panel, "instanceGameSettingsAutomaticMemory");
@@ -113,6 +114,7 @@ final class InstanceGameSettingsPanelTest {
             assertEquals("-XX:+UseG1GC", saved.jvm().options());
             assertTrue(saved.launchOptions().runningDirectoryOverridden());
             assertEquals("instance-run", saved.launchOptions().runningDirectory());
+            assertEquals(1, workingDirectoryChanges.get());
         } finally {
             closePanel(panelReference);
         }
@@ -723,9 +725,23 @@ final class InstanceGameSettingsPanelTest {
     /// @param store deterministic game-settings store
     /// @return panel backed by an empty uninitialized runtime snapshot
     private static InstanceGameSettingsPanel createPanel(InstanceGameSettingsStore store) {
+        return createPanel(store, () -> { });
+    }
+
+    /// Creates a panel with an explicit working-directory change callback.
+    ///
+    /// @param store deterministic game-settings store
+    /// @param workingDirectoryChanged callback invoked after a durable working-directory change
+    /// @return panel backed by an empty uninitialized runtime snapshot
+    private static InstanceGameSettingsPanel createPanel(
+            InstanceGameSettingsStore store,
+            Runnable workingDirectoryChanged) {
         return new InstanceGameSettingsPanel(
                 Objects.requireNonNull(store, "store"),
-                new RecordingJavaRuntimeService(new JavaRuntimeManagementSnapshot(false, 0L, List.of())));
+                new RecordingJavaRuntimeService(new JavaRuntimeManagementSnapshot(false, 0L, List.of())),
+                CompletableFuture.completedFuture(GameVersionNumber.unknown()),
+                GameSettingsEditorPresentation.INSTANCE,
+                Objects.requireNonNull(workingDirectoryChanged, "workingDirectoryChanged"));
     }
 
     /// Returns every editor name represented by the complete settings snapshot.
