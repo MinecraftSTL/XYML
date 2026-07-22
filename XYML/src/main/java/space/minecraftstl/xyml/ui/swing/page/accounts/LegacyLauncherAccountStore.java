@@ -51,6 +51,9 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// account objects, server objects, authentication tokens, passwords, or private serialized account data.
 @NotNullByDefault
 public final class LegacyLauncherAccountStore implements AccountStore, AutoCloseable {
+    /// Serializes listener registration with the transition to the closed lifecycle state.
+    private final Object lifecycleLock = new Object();
+
     /// Plain account-state transition publisher.
     private final ValueChangeSupport<AccountStoreState> changes = new ValueChangeSupport<>(this);
 
@@ -95,10 +98,12 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
     @Override
     public Subscription subscribe(ValueChangeListener<AccountStoreState> listener) {
         Objects.requireNonNull(listener, "listener");
-        if (closed.get()) {
-            throw new IllegalStateException("Legacy launcher account store is closed");
+        synchronized (lifecycleLock) {
+            if (closed.get()) {
+                throw new IllegalStateException("Legacy launcher account store is closed");
+            }
+            return changes.subscribe(listener);
         }
-        return changes.subscribe(listener);
     }
 
     /// Selects an account by stable identifier without synchronously waiting across UI toolkit threads.
@@ -119,9 +124,12 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
     /// Requests idempotent listener removal without blocking a Swing EDT caller on JavaFX.
     @Override
     public void close() {
-        if (closed.compareAndSet(false, true)) {
-            execute(this::removeLegacyListeners);
+        synchronized (lifecycleLock) {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
         }
+        execute(this::removeLegacyListeners);
     }
 
     /// Handles any structural or extractor-driven account-list transition.
