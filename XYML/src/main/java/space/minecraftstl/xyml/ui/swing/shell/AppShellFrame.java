@@ -109,6 +109,13 @@ public final class AppShellFrame extends JFrame {
         EdtDispatcher.execute(() -> setVisible(true));
     }
 
+    /// Releases cached page resources before disposing the native window.
+    @Override
+    public void dispose() {
+        shellPanel.close();
+        super.dispose();
+    }
+
     /// Initializes FlatLaf before the {@link JFrame} superclass creates any Swing components.
     ///
     /// @param title the native window title

@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.shell;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.EnumMap;
 import java.util.EnumSet;
@@ -28,13 +29,16 @@ import java.util.Objects;
 ///
 /// @param <T> the toolkit-specific page representation
 @NotNullByDefault
-public final class ShellPageCache<T> {
+public final class ShellPageCache<T> implements AutoCloseable {
     /// Defensive copy of the complete caller-provided factory set.
     private final EnumMap<ShellPageId, ShellPageFactory<? extends T>> factories =
             new EnumMap<>(ShellPageId.class);
 
     /// Pages already created during this application session.
     private final EnumMap<ShellPageId, T> pages = new EnumMap<>(ShellPageId.class);
+
+    /// Whether this cache has released all created page resources.
+    private boolean closed;
 
     /// Creates an empty lazy cache after validating all five page factories.
     ///
@@ -58,6 +62,9 @@ public final class ShellPageCache<T> {
     /// @return the cached or newly created page
     public T getOrCreate(ShellPageId page) {
         Objects.requireNonNull(page);
+        if (closed) {
+            throw new IllegalStateException("Shell page cache is closed");
+        }
         return pages.computeIfAbsent(page, selectedPage -> Objects.requireNonNull(
                 factories.get(selectedPage).createPage(),
                 () -> "Page factory returned null for " + selectedPage));
@@ -76,5 +83,33 @@ public final class ShellPageCache<T> {
     /// @return the cached page count
     public int cachedPageCount() {
         return pages.size();
+    }
+
+    /// Closes every created auto-closeable page exactly once and releases the cache.
+    ///
+    /// Non-closeable page values are simply discarded. All pages are visited even when one close operation
+    /// fails; the first failure is rethrown after cleanup has been attempted.
+    @Override
+    public void close() {
+        if (closed) {
+            return;
+        }
+        closed = true;
+        @Nullable Exception firstFailure = null;
+        for (T page : pages.values()) {
+            if (page instanceof AutoCloseable closeable) {
+                try {
+                    closeable.close();
+                } catch (Exception failure) {
+                    if (firstFailure == null) {
+                        firstFailure = failure;
+                    }
+                }
+            }
+        }
+        pages.clear();
+        if (firstFailure != null) {
+            throw new IllegalStateException("Failed to close one or more shell pages", firstFailure);
+        }
     }
 }

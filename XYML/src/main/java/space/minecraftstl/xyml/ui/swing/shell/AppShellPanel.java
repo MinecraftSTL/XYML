@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
 import javax.swing.ButtonGroup;
 import javax.swing.JComponent;
@@ -37,7 +38,7 @@ import java.util.Objects;
 
 /// Renders the stable XYML brand, navigation, and lazily created top-level page area.
 @NotNullByDefault
-public final class AppShellPanel extends JPanel {
+public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Minimum shell width that preserves page and navigation readability.
     public static final int MINIMUM_WIDTH = 900;
 
@@ -74,6 +75,9 @@ public final class AppShellPanel extends JPanel {
 
     /// Localized navigation and page-title presentations.
     private final ShellPagePresentations pagePresentations;
+
+    /// Whether this shell has released all cached page resources.
+    private boolean closed;
 
     /// Creates the application shell on the EDT.
     ///
@@ -115,6 +119,9 @@ public final class AppShellPanel extends JPanel {
     /// @param page the destination to show
     public void navigateTo(ShellPageId page) {
         EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            throw new IllegalStateException("Application shell is closed");
+        }
         Objects.requireNonNull(page);
         if (!navigationState.select(page)) {
             return;
@@ -144,6 +151,17 @@ public final class AppShellPanel extends JPanel {
     /// @return the cached page count
     public int cachedPageCount() {
         return pageCache.cachedPageCount();
+    }
+
+    /// Closes all created destination pages from any caller thread.
+    @Override
+    public void close() {
+        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+            if (!closed) {
+                closed = true;
+                pageCache.close();
+            }
+        });
     }
 
     /// Returns the destination page currently hosted by the deck for focused tests and integrations.

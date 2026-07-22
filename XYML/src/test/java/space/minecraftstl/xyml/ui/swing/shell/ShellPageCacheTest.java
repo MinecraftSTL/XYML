@@ -66,6 +66,27 @@ public final class ShellPageCacheTest {
         assertThrows(IllegalArgumentException.class, () -> new ShellPageCache<>(incomplete));
     }
 
+    /// Closing releases only created auto-closeable pages once and rejects later creation.
+    @Test
+    public void closesCreatedPagesExactlyOnce() {
+        EnumMap<ShellPageId, ShellPageFactory<? extends CloseableValue>> factories =
+                new EnumMap<>(ShellPageId.class);
+        AtomicInteger closes = new AtomicInteger();
+        for (ShellPageId page : ShellPageId.values()) {
+            factories.put(page, () -> new CloseableValue(closes));
+        }
+        ShellPageCache<CloseableValue> cache = new ShellPageCache<>(factories);
+        cache.getOrCreate(ShellPageId.HOME);
+        cache.getOrCreate(ShellPageId.INSTANCES);
+
+        cache.close();
+        cache.close();
+
+        assertEquals(2, closes.get());
+        assertEquals(0, cache.cachedPageCount());
+        assertThrows(IllegalStateException.class, () -> cache.getOrCreate(ShellPageId.SETTINGS));
+    }
+
     /// Creates a complete generic factory set for focused cache tests.
     ///
     /// @return one simple factory for every destination
@@ -76,5 +97,25 @@ public final class ShellPageCacheTest {
             factories.put(page, Object::new);
         }
         return factories;
+    }
+
+    /// Closeable generic cache value with an externally visible close count.
+    @NotNullByDefault
+    private static final class CloseableValue implements AutoCloseable {
+        /// Counter incremented by the first cache close.
+        private final AtomicInteger closes;
+
+        /// Creates a closeable test value.
+        ///
+        /// @param closes shared close counter
+        private CloseableValue(AtomicInteger closes) {
+            this.closes = closes;
+        }
+
+        /// Records one close invocation.
+        @Override
+        public void close() {
+            closes.incrementAndGet();
+        }
     }
 }

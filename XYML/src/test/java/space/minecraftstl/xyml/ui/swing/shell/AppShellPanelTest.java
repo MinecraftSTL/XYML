@@ -56,6 +56,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies lazy navigation, stable bounds, accessibility, and fixed-size headless rendering.
@@ -140,6 +141,35 @@ public final class AppShellPanelTest {
         Path report = Path.of("build", "reports", "swing-shell", "app-shell.png").toAbsolutePath();
         Files.createDirectories(report.getParent());
         assertTrue(ImageIO.write(image, "png", report.toFile()));
+    }
+
+    /// Closing the shell releases only cached page resources once and rejects later navigation.
+    @Test
+    public void closesCachedPagesExactlyOnce() {
+        AtomicInteger closes = new AtomicInteger();
+        EnumMap<ShellPageId, ShellPageFactory<? extends JComponent>> factories =
+                new EnumMap<>(ShellPageId.class);
+        for (ShellPageId page : ShellPageId.values()) {
+            factories.put(page, () -> new CloseablePanel(closes));
+        }
+        AtomicReference<@Nullable AppShellPanel> result = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> result.set(new AppShellPanel(
+                factories,
+                ShellPageId.HOME,
+                ShellPagePresentations.englishFallback(),
+                new SwingAnimator(MotionPolicy.OFF, 16),
+                Duration.ZERO)));
+        AppShellPanel panel = java.util.Objects.requireNonNull(result.get());
+
+        EdtDispatcher.executeAndWait(() -> {
+            panel.navigateTo(ShellPageId.INSTANCES);
+            panel.close();
+            panel.close();
+            assertEquals(0, panel.cachedPageCount());
+            assertThrows(IllegalStateException.class, () -> panel.navigateTo(ShellPageId.SETTINGS));
+        });
+
+        assertEquals(2, closes.get());
     }
 
     /// Creates and initializes a light FlatLaf shell with motion disabled for deterministic testing.
@@ -274,5 +304,25 @@ public final class AppShellPanelTest {
             }
         }
         return colors;
+    }
+
+    /// Closeable page panel used to verify shell-owned resource cleanup.
+    @NotNullByDefault
+    private static final class CloseablePanel extends JPanel implements AutoCloseable {
+        /// Shared close invocation counter.
+        private final AtomicInteger closes;
+
+        /// Creates one closeable page panel.
+        ///
+        /// @param closes shared close counter
+        private CloseablePanel(AtomicInteger closes) {
+            this.closes = closes;
+        }
+
+        /// Records one shell-owned close invocation.
+        @Override
+        public void close() {
+            closes.incrementAndGet();
+        }
     }
 }
