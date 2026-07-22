@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.task;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.util.Lang;
 
 import java.util.Collection;
@@ -27,20 +29,27 @@ import java.util.concurrent.*;
 import static space.minecraftstl.xyml.util.Lang.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- *
- * @author huangyuhui
- */
+/// Executes a task graph asynchronously while publishing lifecycle events and cooperative cancellation state.
+@NotNullByDefault
 public final class AsyncTaskExecutor extends TaskExecutor {
+    /// The terminal execution future, or null before [#start()] finishes constructing the asynchronous chain.
+    private @Nullable CompletableFuture<Boolean> future;
 
-    private CompletableFuture<Boolean> future;
+    /// Whether [#start()] has begun and cancellation requests are therefore valid.
+    private volatile boolean started;
 
+    /// Creates an asynchronous executor rooted at the supplied task.
     public AsyncTaskExecutor(Task<?> task) {
         super(task);
     }
 
+    /// Starts one execution chain and returns this executor.
+    ///
+    /// The started flag is published before any listener notification so synchronous listener cancellation is valid.
+    /// Repeated calls retain the historical behavior of starting another chain and replacing [#future].
     @Override
     public TaskExecutor start() {
+        started = true;
         taskListeners.forEach(TaskListener::onStart);
         future = executeTasks(null, Collections.singleton(firstTask))
                 .thenApplyAsync(exception -> {
@@ -71,6 +80,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         return this;
     }
 
+    /// Starts the chain, waits for its terminal future, and returns whether it succeeded.
     @Override
     public boolean test() {
         start();
@@ -86,16 +96,19 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         return false;
     }
 
+    /// Records a cooperative cancellation request after execution has started.
     @Override
     public synchronized void cancel() {
-        if (future == null) {
+        if (!started) {
             throw new IllegalStateException("Cannot cancel a not started TaskExecutor");
         }
 
         cancelled = true;
     }
 
-    private CompletableFuture<?> executeTasksExceptionally(Task<?> parentTask, Collection<? extends Task<?>> tasks) {
+    /// Executes a possibly absent collection of sibling tasks and completes exceptionally when any sibling fails.
+    private CompletableFuture<@Nullable Void> executeTasksExceptionally(
+            @Nullable Task<?> parentTask, @Nullable Collection<? extends Task<?>> tasks) {
         if (tasks == null || tasks.isEmpty())
             return CompletableFuture.completedFuture(null);
 
@@ -113,7 +126,9 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                 });
     }
 
-    private CompletableFuture<Exception> executeTasks(Task<?> parentTask, Collection<? extends Task<?>> tasks) {
+    /// Executes sibling tasks and converts their terminal failure to a nullable future value.
+    private CompletableFuture<@Nullable Exception> executeTasks(
+            @Nullable Task<?> parentTask, Collection<? extends Task<?>> tasks) {
         return executeTasksExceptionally(parentTask, tasks)
                 .thenApplyAsync(unused -> (Exception) null)
                 .exceptionally(throwable -> {
@@ -127,7 +142,9 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                 });
     }
 
-    private <T> CompletableFuture<T> executeCompletableFutureTask(Task<?> parentTask, CompletableFutureTask<T> task) {
+    /// Executes a task whose body supplies its own possibly nullable completable-future result.
+    private <T> CompletableFuture<@Nullable T> executeCompletableFutureTask(
+            @Nullable Task<?> parentTask, CompletableFutureTask<T> task) {
         return CompletableFuture.completedFuture(null)
                 .thenComposeAsync(unused -> {
                     checkCancellation();
@@ -143,13 +160,15 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     taskListeners.forEach(it -> it.onReady(task));
 
                     return task.getFuture(new TaskCompletableFuture() {
+                        /// Executes one nested task with the current task as its parent.
                         @Override
-                        public <T2> CompletableFuture<T2> one(Task<T2> subtask) {
+                        public <T2> CompletableFuture<@Nullable T2> one(Task<T2> subtask) {
                             return executeTask(task, subtask);
                         }
 
+                        /// Executes all supplied nested tasks with the current task as their parent.
                         @Override
-                        public CompletableFuture<?> all(Collection<Task<?>> tasks) {
+                        public CompletableFuture<@Nullable Void> all(Collection<Task<?>> tasks) {
                             return executeTasksExceptionally(task, tasks);
                         }
                     });
@@ -196,7 +215,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                 });
     }
 
-    private <T> CompletableFuture<T> executeNormalTask(Task<?> parentTask, Task<T> task) {
+    /// Executes a regular task through pre-work, prerequisites, body, follow-ups, and post-work.
+    private <T> CompletableFuture<@Nullable T> executeNormalTask(@Nullable Task<?> parentTask, Task<T> task) {
         return CompletableFuture.completedFuture(null)
                 .thenComposeAsync(unused -> {
                     checkCancellation();
@@ -307,7 +327,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                 });
     }
 
-    private <T> CompletableFuture<T> executeTask(Task<?> parentTask, Task<T> task) {
+    /// Dispatches one task to the regular or completable-future execution path.
+    private <T> CompletableFuture<@Nullable T> executeTask(@Nullable Task<?> parentTask, Task<T> task) {
         if (task instanceof CompletableFutureTask<T> completableFutureTask) {
             return executeCompletableFutureTask(parentTask, completableFutureTask);
         } else {
@@ -315,12 +336,14 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         }
     }
 
+    /// Throws a cancellation exception when cooperative cancellation has been requested.
     private void checkCancellation() {
         if (isCancelled()) {
             throw new CancellationException("Cancelled by user");
         }
     }
 
+    /// Converts interruption to cancellation while returning every other exception unchanged.
     private static Exception convertInterruptedException(Exception e) {
         if (e instanceof InterruptedException) {
             return new CancellationException(e.getMessage());
@@ -329,9 +352,11 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         }
     }
 
-    private static Thread.UncaughtExceptionHandler uncaughtExceptionHandler = null;
+    /// Optional handler for unexpected runtime failures attributed to launcher defects.
+    private static @Nullable Thread.UncaughtExceptionHandler uncaughtExceptionHandler;
 
-    public static void setUncaughtExceptionHandler(Thread.UncaughtExceptionHandler uncaughtExceptionHandler) {
+    /// Replaces or clears the handler for unexpected runtime failures.
+    public static void setUncaughtExceptionHandler(@Nullable Thread.UncaughtExceptionHandler uncaughtExceptionHandler) {
         AsyncTaskExecutor.uncaughtExceptionHandler = uncaughtExceptionHandler;
     }
 }
