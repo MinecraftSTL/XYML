@@ -21,20 +21,29 @@ import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
 
-/// Immutable selected account and instance presentation from a launcher state store.
+/// Immutable selected account and instance identity plus presentation from a launcher state store.
 ///
+/// @param accountId stable selected account ID, or empty for none
+/// @param gameDirectoryId stable selected game-directory ID, or empty for none
+/// @param instanceId stable selected instance ID within the game directory, or empty for none
 /// @param accountName selected account profile name, or empty for none
 /// @param accountDetail selected account provider detail
-/// @param instanceName selected instance ID, or empty for none
+/// @param instanceName selected instance display name, or empty when unavailable
 /// @param instanceDetail selected game-directory detail
 @NotNullByDefault
 public record HomeSelectionState(
+        String accountId,
+        String gameDirectoryId,
+        String instanceId,
         String accountName,
         String accountDetail,
         String instanceName,
         String instanceDetail) {
     /// Validates one selection state.
     public HomeSelectionState {
+        Objects.requireNonNull(accountId, "accountId");
+        Objects.requireNonNull(gameDirectoryId, "gameDirectoryId");
+        Objects.requireNonNull(instanceId, "instanceId");
         Objects.requireNonNull(accountName, "accountName");
         Objects.requireNonNull(accountDetail, "accountDetail");
         Objects.requireNonNull(instanceName, "instanceName");

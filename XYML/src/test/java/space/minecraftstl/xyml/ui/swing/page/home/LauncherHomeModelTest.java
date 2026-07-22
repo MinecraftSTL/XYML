@@ -43,16 +43,20 @@ public final class LauncherHomeModelTest {
     /// Missing selections map deterministically, with the account requirement taking precedence.
     @Test
     public void mapsMissingSelectionsAndReadyTransition() {
-        FakeSelectionStore store = new FakeSelectionStore(new HomeSelectionState("", "", "", ""));
+        FakeSelectionStore store = new FakeSelectionStore(
+                new HomeSelectionState("", "directory-a", "", "", "", "", ""));
         AtomicReference<HomeSnapshot> published = new AtomicReference<>();
         LauncherHomeModel model = createModel(store, new AtomicInteger(), new AtomicInteger(),
                 new AtomicInteger(), new AtomicInteger());
         Subscription subscription = model.subscribe(change -> published.set(change.currentValue()));
 
         HomeSnapshot missingAccount = model.snapshot();
-        store.publish(new HomeSelectionState("Alex", "microsoft", "", ""));
+        store.publish(new HomeSelectionState(
+                "account-a", "directory-a", "", "Alex", "microsoft", "", ""));
         HomeSnapshot missingInstance = model.snapshot();
-        store.publish(new HomeSelectionState("Alex", "microsoft", "1.21.1", "Default directory"));
+        store.publish(new HomeSelectionState(
+                "account-a", "directory-a", "instance-a",
+                "Alex", "microsoft", "1.21.1", "Default directory"));
         HomeSnapshot ready = model.snapshot();
 
         assertAll(
@@ -70,10 +74,38 @@ public final class LauncherHomeModelTest {
         model.close();
     }
 
+    /// Stable IDs enable launch even when optional display names are unavailable.
+    @Test
+    public void basesReadinessOnStableIdentityInsteadOfDisplayText() {
+        FakeSelectionStore store = new FakeSelectionStore(
+                new HomeSelectionState("", "", "", "Alex", "microsoft", "1.21.1", "Games"));
+        AtomicInteger launches = new AtomicInteger();
+        LauncherHomeModel model = createModel(
+                store, new AtomicInteger(), new AtomicInteger(), new AtomicInteger(), launches);
+
+        HomeSnapshot presentationOnly = model.snapshot();
+        model.launch();
+        store.publish(new HomeSelectionState(
+                "account-a", "directory-a", "instance-a", "", "microsoft", "", "Games"));
+        HomeSnapshot identityReady = model.snapshot();
+        model.launch();
+
+        assertAll(
+                () -> assertEquals("Choose an account", presentationOnly.statusText()),
+                () -> assertFalse(presentationOnly.launchEnabled()),
+                () -> assertEquals("Ready", identityReady.statusText()),
+                () -> assertTrue(identityReady.launchEnabled()),
+                () -> assertEquals("", identityReady.accountName()),
+                () -> assertEquals("", identityReady.instanceName()),
+                () -> assertEquals(1, launches.get()));
+        model.close();
+    }
+
     /// Navigation commands always delegate, while launch delegates only after both selections exist.
     @Test
     public void delegatesCommandsAndGatesLaunch() {
-        FakeSelectionStore store = new FakeSelectionStore(new HomeSelectionState("", "", "", ""));
+        FakeSelectionStore store = new FakeSelectionStore(
+                new HomeSelectionState("", "directory-a", "", "", "", "", ""));
         AtomicInteger accountSelections = new AtomicInteger();
         AtomicInteger instanceSelections = new AtomicInteger();
         AtomicInteger instanceAdditions = new AtomicInteger();
@@ -85,7 +117,8 @@ public final class LauncherHomeModelTest {
         model.selectInstance();
         model.addInstance();
         model.launch();
-        store.publish(new HomeSelectionState("Steve", "offline", "1.20.1", "Games"));
+        store.publish(new HomeSelectionState(
+                "account-a", "directory-a", "instance-a", "Steve", "offline", "1.20.1", "Games"));
         model.launch();
 
         assertAll(
@@ -100,7 +133,9 @@ public final class LauncherHomeModelTest {
     @Test
     public void closesSubscriptionAndRejectsFurtherUse() {
         FakeSelectionStore store = new FakeSelectionStore(
-                new HomeSelectionState("Alex", "microsoft", "1.21.1", "Games"));
+                new HomeSelectionState(
+                        "account-a", "directory-a", "instance-a",
+                        "Alex", "microsoft", "1.21.1", "Games"));
         AtomicInteger launches = new AtomicInteger();
         LauncherHomeModel model = createModel(
                 store, new AtomicInteger(), new AtomicInteger(), new AtomicInteger(), launches);
@@ -108,7 +143,8 @@ public final class LauncherHomeModelTest {
 
         model.close();
         model.close();
-        store.publish(new HomeSelectionState("Steve", "offline", "1.20.1", "Other"));
+        store.publish(new HomeSelectionState(
+                "account-b", "directory-b", "instance-b", "Steve", "offline", "1.20.1", "Other"));
 
         assertAll(
                 () -> assertFalse(store.hasSubscribers()),
@@ -124,9 +160,12 @@ public final class LauncherHomeModelTest {
     /// A transition occurring between the initial snapshot and registration is recovered by post-subscribe reconciliation.
     @Test
     public void reconcilesTransitionDuringSubscription() {
-        FakeSelectionStore store = new FakeSelectionStore(new HomeSelectionState("", "", "", ""));
+        FakeSelectionStore store = new FakeSelectionStore(
+                new HomeSelectionState("", "directory-a", "", "", "", "", ""));
         HomeSelectionState readySelection =
-                new HomeSelectionState("Alex", "microsoft", "1.21.1", "Games");
+                new HomeSelectionState(
+                        "account-a", "directory-a", "instance-a",
+                        "Alex", "microsoft", "1.21.1", "Games");
         store.transitionBeforeNextSubscription(readySelection);
 
         LauncherHomeModel model = createModel(store, new AtomicInteger(), new AtomicInteger(),

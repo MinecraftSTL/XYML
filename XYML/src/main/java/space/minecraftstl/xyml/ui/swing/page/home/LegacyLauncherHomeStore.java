@@ -117,15 +117,20 @@ public final class LegacyLauncherHomeStore implements HomeSelectionStore, AutoCl
     private static HomeSelectionState readSnapshot() {
         requireEventThread();
         @Nullable Account account = Accounts.getSelectedAccount();
+        String accountId = account == null ? "" : account.getAccountID().toString();
         String accountName = account == null ? "" : account.getProfileName();
         String accountDetail = account == null ? "" : accountType(account);
 
         XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
+        String gameDirectoryId = repository.getGameDirectory().getId().toString();
         @Nullable String instanceId = repository.getSelectedInstance();
         String instanceDetail = instanceId == null
                 ? ""
                 : GameDirectoryManager.getGameDirectoryDisplayName(repository.getGameDirectory());
         return new HomeSelectionState(
+                accountId,
+                gameDirectoryId,
+                Objects.requireNonNullElse(instanceId, ""),
                 accountName,
                 accountDetail,
                 Objects.requireNonNullElse(instanceId, ""),

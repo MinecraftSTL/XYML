@@ -194,8 +194,8 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
     /// @param selection selected account and instance presentation
     /// @return mapped home state
     private HomeSnapshot map(HomeSelectionState selection) {
-        boolean hasAccount = !selection.accountName().isBlank();
-        boolean hasInstance = !selection.instanceName().isBlank();
+        boolean hasAccount = !selection.accountId().isBlank();
+        boolean hasInstance = !selection.gameDirectoryId().isBlank() && !selection.instanceId().isBlank();
         String status = !hasAccount
                 ? statusStrings.missingAccountStatus()
                 : !hasInstance ? statusStrings.missingInstanceStatus() : statusStrings.readyStatus();
