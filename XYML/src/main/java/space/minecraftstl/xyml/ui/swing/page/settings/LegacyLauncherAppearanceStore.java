@@ -27,9 +27,10 @@ import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
-import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.executeAndWait;
+import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.execute;
 import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.requireEventThread;
 
 /// Transitional adapter isolating legacy JavaFX launcher properties behind [AppearanceSettingsStore].
@@ -38,6 +39,9 @@ import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.req
 /// class is the only appearance-settings layer that must be replaced when launcher settings become toolkit-neutral.
 @NotNullByDefault
 public final class LegacyLauncherAppearanceStore implements AppearanceSettingsStore, AutoCloseable {
+    /// Serializes listener registration with the transition to the closed lifecycle state.
+    private final Object lifecycleLock = new Object();
+
     /// Legacy launcher setting object.
     private final LauncherSettings settings;
 
@@ -53,8 +57,8 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
     /// Latest raw store snapshot available to non-JavaFX threads.
     private volatile StoredAppearanceSettings currentSnapshot;
 
-    /// Whether JavaFX listeners have been removed.
-    private volatile boolean closed;
+    /// Whether closure has been requested from any thread.
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     /// Creates an adapter on the JavaFX application thread.
     ///
@@ -92,57 +96,63 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
     @Override
     public Subscription subscribe(ValueChangeListener<StoredAppearanceSettings> listener) {
         Objects.requireNonNull(listener, "listener");
-        if (closed) {
-            throw new IllegalStateException("Legacy appearance store is closed");
+        synchronized (lifecycleLock) {
+            if (closed.get()) {
+                throw new IllegalStateException("Legacy appearance store is closed");
+            }
+            return changes.subscribe(listener);
         }
-        return changes.subscribe(listener);
     }
 
-    /// Persists one canonical brightness identifier on the JavaFX thread.
+    /// Queues one canonical brightness identifier for persistence on the JavaFX thread.
     @Override
     public void setThemeModeValue(String themeModeValue) {
         String validatedValue = Objects.requireNonNull(themeModeValue, "themeModeValue");
-        executeAndWait(() -> {
-            requireOpen();
-            settings.themeBrightnessModeProperty().set(validatedValue);
-        });
-    }
-
-    /// Persists one validated corner radius on the JavaFX thread.
-    @Override
-    public void setCornerRadius(int cornerRadius) {
-        executeAndWait(() -> {
-            requireOpen();
-            settings.cornerRadiusProperty().set(cornerRadius);
-        });
-    }
-
-    /// Persists the legacy animation-disable flag on the JavaFX thread.
-    @Override
-    public void setAnimationsDisabled(boolean disabled) {
-        executeAndWait(() -> {
-            requireOpen();
-            settings.animationDisabledProperty().set(disabled);
-        });
-    }
-
-    /// Removes every JavaFX property listener synchronously and exactly once.
-    @Override
-    public void close() {
-        executeAndWait(() -> {
-            if (!closed) {
-                closed = true;
-                settings.themeBrightnessModeProperty().removeListener(propertyListener);
-                settings.cornerRadiusProperty().removeListener(propertyListener);
-                settings.animationDisabledProperty().removeListener(propertyListener);
+        requireOpen();
+        execute(() -> {
+            if (!closed.get()) {
+                settings.themeBrightnessModeProperty().set(validatedValue);
             }
         });
+    }
+
+    /// Queues one validated corner radius for persistence on the JavaFX thread.
+    @Override
+    public void setCornerRadius(int cornerRadius) {
+        requireOpen();
+        execute(() -> {
+            if (!closed.get()) {
+                settings.cornerRadiusProperty().set(cornerRadius);
+            }
+        });
+    }
+
+    /// Queues the legacy animation-disable flag for persistence on the JavaFX thread.
+    @Override
+    public void setAnimationsDisabled(boolean disabled) {
+        requireOpen();
+        execute(() -> {
+            if (!closed.get()) {
+                settings.animationDisabledProperty().set(disabled);
+            }
+        });
+    }
+
+    /// Requests idempotent JavaFX listener removal without blocking a Swing EDT caller.
+    @Override
+    public void close() {
+        synchronized (lifecycleLock) {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+        }
+        execute(this::removeLegacyListeners);
     }
 
     /// Rebuilds and publishes the raw snapshot after one legacy property changes.
     private void refreshSnapshot() {
         requireEventThread();
-        if (closed) {
+        if (closed.get()) {
             return;
         }
         StoredAppearanceSettings previous = currentSnapshot;
@@ -183,8 +193,16 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
 
     /// Rejects property writes after listener cleanup.
     private void requireOpen() {
-        if (closed) {
+        if (closed.get()) {
             throw new IllegalStateException("Legacy appearance store is closed");
         }
+    }
+
+    /// Removes every owned settings listener on the JavaFX application thread.
+    private void removeLegacyListeners() {
+        requireEventThread();
+        settings.themeBrightnessModeProperty().removeListener(propertyListener);
+        settings.cornerRadiusProperty().removeListener(propertyListener);
+        settings.animationDisabledProperty().removeListener(propertyListener);
     }
 }

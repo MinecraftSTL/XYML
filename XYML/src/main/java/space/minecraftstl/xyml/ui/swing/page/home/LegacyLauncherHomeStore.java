@@ -29,14 +29,17 @@ import space.minecraftstl.xyml.setting.Accounts;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.execute;
-import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.executeAndWait;
 import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.requireEventThread;
 
 /// Transitional store projecting legacy JavaFX account and repository selections into plain strings.
 @NotNullByDefault
 public final class LegacyLauncherHomeStore implements HomeSelectionStore, AutoCloseable {
+    /// Serializes listener registration with the transition to the closed lifecycle state.
+    private final Object lifecycleLock = new Object();
+
     /// Home selection transition publisher.
     private final ValueChangeSupport<HomeSelectionState> changes = new ValueChangeSupport<>(this);
 
@@ -47,8 +50,8 @@ public final class LegacyLauncherHomeStore implements HomeSelectionStore, AutoCl
     /// Latest cross-thread-safe plain selection state.
     private volatile HomeSelectionState currentSnapshot;
 
-    /// Whether legacy listeners have been removed.
-    private volatile boolean closed;
+    /// Whether closure has been requested from any thread.
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     /// Creates a store after Accounts and GameDirectoryManager initialization on the JavaFX thread.
     public LegacyLauncherHomeStore() {
@@ -69,35 +72,43 @@ public final class LegacyLauncherHomeStore implements HomeSelectionStore, AutoCl
     @Override
     public Subscription subscribe(ValueChangeListener<HomeSelectionState> listener) {
         Objects.requireNonNull(listener, "listener");
-        if (closed) {
-            throw new IllegalStateException("Legacy launcher home store is closed");
+        synchronized (lifecycleLock) {
+            if (closed.get()) {
+                throw new IllegalStateException("Legacy launcher home store is closed");
+            }
+            return changes.subscribe(listener);
         }
-        return changes.subscribe(listener);
     }
 
-    /// Removes all legacy JavaFX listeners synchronously and exactly once.
+    /// Requests idempotent JavaFX listener removal without blocking a Swing EDT caller.
     @Override
     public void close() {
-        executeAndWait(() -> {
-            if (!closed) {
-                closed = true;
-                Accounts.selectedAccountProperty().removeListener(selectionListener);
-                GameDirectoryManager.selectedRepositoryProperty().removeListener(selectionListener);
-                GameDirectoryManager.selectedInstanceProperty().removeListener(selectionListener);
+        synchronized (lifecycleLock) {
+            if (!closed.compareAndSet(false, true)) {
+                return;
             }
-        });
+        }
+        execute(this::removeLegacyListeners);
     }
 
     /// Rebuilds and publishes plain strings after a legacy selection changes.
     private void refreshSnapshot() {
         requireEventThread();
-        if (closed) {
+        if (closed.get()) {
             return;
         }
         HomeSelectionState previous = currentSnapshot;
         HomeSelectionState replacement = readSnapshot();
         currentSnapshot = replacement;
         changes.fireChange(previous, replacement);
+    }
+
+    /// Removes every JavaFX selection listener on the JavaFX application thread.
+    private void removeLegacyListeners() {
+        requireEventThread();
+        Accounts.selectedAccountProperty().removeListener(selectionListener);
+        GameDirectoryManager.selectedRepositoryProperty().removeListener(selectionListener);
+        GameDirectoryManager.selectedInstanceProperty().removeListener(selectionListener);
     }
 
     /// Reads current legacy selections without performing expensive version resolution.

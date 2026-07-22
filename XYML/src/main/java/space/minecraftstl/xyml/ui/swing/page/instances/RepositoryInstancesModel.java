@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -853,10 +854,10 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             return repository.subscribeSelectedInstance(listener);
         }
 
-        /// Persists one selected repository instance ID.
+        /// Queues one selected repository instance ID on the JavaFX application thread.
         @Override
         public void setSelectedInstanceId(String instanceId) {
-            repository.setSelectedInstance(instanceId);
+            LegacyJavaFxDispatcher.execute(() -> repository.setSelectedInstance(instanceId));
         }
 
         /// Performs one blocking repository refresh.

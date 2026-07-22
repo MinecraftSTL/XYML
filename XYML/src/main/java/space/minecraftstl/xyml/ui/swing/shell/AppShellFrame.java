@@ -112,8 +112,46 @@ public final class AppShellFrame extends JFrame {
     /// Releases cached page resources before disposing the native window.
     @Override
     public void dispose() {
-        shellPanel.close();
-        super.dispose();
+        disposeInOrder(shellPanel::close, super::dispose);
+    }
+
+    /// Runs shell cleanup before native disposal without allowing either failure to skip the other action.
+    ///
+    /// The first failure is rethrown after both actions have run. When both actions fail, the native-disposal
+    /// failure is attached to the shell-cleanup failure as a suppressed exception.
+    ///
+    /// @param shellCleanup cached page and shell resource cleanup
+    /// @param nativeDisposal native window disposal
+    static void disposeInOrder(Runnable shellCleanup, Runnable nativeDisposal) {
+        Objects.requireNonNull(shellCleanup, "shellCleanup");
+        Objects.requireNonNull(nativeDisposal, "nativeDisposal");
+
+        @Nullable Throwable firstFailure = null;
+        try {
+            shellCleanup.run();
+        } catch (Throwable cleanupFailure) {
+            firstFailure = cleanupFailure;
+        }
+
+        try {
+            nativeDisposal.run();
+        } catch (Throwable disposalFailure) {
+            if (firstFailure == null) {
+                firstFailure = disposalFailure;
+            } else if (firstFailure != disposalFailure) {
+                firstFailure.addSuppressed(disposalFailure);
+            }
+        }
+
+        if (firstFailure instanceof RuntimeException runtimeException) {
+            throw runtimeException;
+        }
+        if (firstFailure instanceof Error error) {
+            throw error;
+        }
+        if (firstFailure != null) {
+            throw new IllegalStateException("Failed to dispose Swing application window", firstFailure);
+        }
     }
 
     /// Initializes FlatLaf before the {@link JFrame} superclass creates any Swing components.

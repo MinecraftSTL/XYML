@@ -31,17 +31,77 @@ import javax.swing.JComponent;
 import javax.swing.JPanel;
 import java.awt.GraphicsEnvironment;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
-/// Verifies native-frame constraints when the test environment provides a display server.
+/// Verifies deterministic shell disposal and native-frame constraints.
 @NotNullByDefault
 public final class AppShellFrameTest {
+    /// Shell cleanup precedes native disposal when neither action fails.
+    @Test
+    public void disposesInOrder() {
+        List<String> actions = new ArrayList<>();
+
+        AppShellFrame.disposeInOrder(
+                () -> actions.add("shell"),
+                () -> actions.add("native"));
+
+        assertEquals(List.of("shell", "native"), actions);
+    }
+
+    /// Native disposal still runs when shell cleanup fails, and the original failure is preserved.
+    @Test
+    public void disposesNativeWindowAfterShellCleanupFailure() {
+        List<String> actions = new ArrayList<>();
+        IllegalStateException cleanupFailure = new IllegalStateException("shell cleanup failed");
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class, () ->
+                AppShellFrame.disposeInOrder(
+                        () -> {
+                            actions.add("shell");
+                            throw cleanupFailure;
+                        },
+                        () -> actions.add("native")));
+
+        assertAll(
+                () -> assertSame(cleanupFailure, thrown),
+                () -> assertEquals(List.of("shell", "native"), actions));
+    }
+
+    /// A native-disposal failure is suppressed by the earlier shell-cleanup failure.
+    @Test
+    public void suppressesNativeFailureAfterShellCleanupFailure() {
+        List<String> actions = new ArrayList<>();
+        IllegalStateException cleanupFailure = new IllegalStateException("shell cleanup failed");
+        IllegalArgumentException nativeFailure = new IllegalArgumentException("native disposal failed");
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class, () ->
+                AppShellFrame.disposeInOrder(
+                        () -> {
+                            actions.add("shell");
+                            throw cleanupFailure;
+                        },
+                        () -> {
+                            actions.add("native");
+                            throw nativeFailure;
+                        }));
+
+        assertAll(
+                () -> assertSame(cleanupFailure, thrown),
+                () -> assertEquals(List.of("shell", "native"), actions),
+                () -> assertEquals(1, thrown.getSuppressed().length),
+                () -> assertSame(nativeFailure, thrown.getSuppressed()[0]));
+    }
+
     /// The frame remains operating-system decorated, resizable, and packed to the shell's preferred bounds.
     @Test
     public void createsSystemDecoratedFrame() {
