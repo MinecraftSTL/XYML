@@ -25,7 +25,8 @@ import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
 /// Supplies installed-instance state, viewport data, and commands without exposing JavaFX or Swing types.
 ///
 /// Implementations must expose an exact item count and keep count and indexed order stable within one
-/// [InstancesSnapshot#contentRevision()] value. Range loading must not block the Swing event dispatch thread.
+/// [InstancesSnapshot#contentRevision()] value. [InstancesSnapshot#itemCount()] must equal [#exactItemCount()]
+/// when that snapshot is current. Range loading must not block the Swing event dispatch thread.
 @NotNullByDefault
 public interface InstancesModel extends ViewportChoiceDataSource<InstanceListItem> {
     /// Returns the latest immutable instance-page state.

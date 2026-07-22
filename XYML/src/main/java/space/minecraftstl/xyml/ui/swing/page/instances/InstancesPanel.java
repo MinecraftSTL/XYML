@@ -234,18 +234,9 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
     private void applySnapshot(InstancesSnapshot snapshot) {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(snapshot, "snapshot");
-        OptionalInt itemCount = model.exactItemCount();
-        if (itemCount.isEmpty()) {
-            throw new IllegalStateException("Installed-instance model must expose an exact item count");
-        }
-        if (snapshot.selectedIndex().isPresent()
-                && snapshot.selectedIndex().getAsInt() >= itemCount.getAsInt()) {
-            throw new IllegalStateException("Selected instance index exceeds the current exact item count");
-        }
-
         @Nullable InstancesSnapshot previous = displayedSnapshot;
-        boolean contentChanged = previous != null
-                && previous.contentRevision() != snapshot.contentRevision();
+        boolean contentChanged = previous == null
+                || previous.contentRevision() != snapshot.contentRevision();
         displayedSnapshot = snapshot;
 
         if (contentChanged) {
@@ -255,7 +246,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
 
         ((CardLayout) listCards.getLayout()).show(
                 listCards,
-                itemCount.getAsInt() == 0 ? EMPTY_CARD : LIST_CARD);
+                snapshot.itemCount() == 0 ? EMPTY_CARD : LIST_CARD);
         restoreSelection(snapshot.selectedIndex());
 
         choiceList.setEnabled(snapshot.listEnabled());
@@ -275,6 +266,9 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
     /// @param selectedIndex selected source index, or empty for no selection
     private void restoreSelection(OptionalInt selectedIndex) {
         int targetIndex = selectedIndex.orElse(-1);
+        if (targetIndex >= choiceList.getChoiceModel().getSize()) {
+            targetIndex = -1;
+        }
         if (choiceList.getList().getSelectedIndex() == targetIndex) {
             return;
         }

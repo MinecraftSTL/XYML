@@ -28,6 +28,7 @@ import java.util.OptionalInt;
 /// status, and selection-only changes must not increment that revision.
 ///
 /// @param selectedIndex selected source index, or empty when no instance is selected
+/// @param itemCount exact item count belonging to this content revision
 /// @param contentRevision revision incremented after item count, order, or row content changes
 /// @param statusText current repository status text
 /// @param refreshing whether a repository refresh is running
@@ -38,6 +39,7 @@ import java.util.OptionalInt;
 @NotNullByDefault
 public record InstancesSnapshot(
         OptionalInt selectedIndex,
+        int itemCount,
         long contentRevision,
         String statusText,
         boolean refreshing,
@@ -49,11 +51,17 @@ public record InstancesSnapshot(
     public InstancesSnapshot {
         Objects.requireNonNull(selectedIndex, "selectedIndex");
         Objects.requireNonNull(statusText, "statusText");
+        if (itemCount < 0) {
+            throw new IllegalArgumentException("Item count cannot be negative");
+        }
         if (contentRevision < 0L) {
             throw new IllegalArgumentException("Content revision cannot be negative");
         }
         if (selectedIndex.isPresent() && selectedIndex.getAsInt() < 0) {
             throw new IllegalArgumentException("Selected index cannot be negative");
+        }
+        if (selectedIndex.isPresent() && selectedIndex.getAsInt() >= itemCount) {
+            throw new IllegalArgumentException("Selected index must be inside the exact item count");
         }
         if (refreshing && refreshEnabled) {
             throw new IllegalArgumentException("Refreshing state cannot accept another refresh command");

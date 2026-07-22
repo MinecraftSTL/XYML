@@ -34,6 +34,9 @@ import space.minecraftstl.xyml.modpack.ModAdviser;
 import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.modpack.ModpackProvider;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.setting.DefaultIsolationType;
@@ -102,6 +105,9 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// The selected instance ID persisted for this repository's game directory.
     private final StringBinding selectedInstance;
 
+    /// Toolkit-neutral selected-instance transitions for Swing and later core migration.
+    private final ValueChangeSupport<String> selectedInstanceChanges = new ValueChangeSupport<>(this);
+
     // instance game settings
     private final Map<String, GameSettings.Instance> instanceGameSettings = new HashMap<>();
     /// Instance IDs whose local game settings file has already been checked.
@@ -136,7 +142,17 @@ public final class XYMLGameRepository extends DefaultGameRepository {
 
     /// Sets the selected instance ID for this repository's game directory.
     public void setSelectedInstance(@Nullable String instance) {
+        @Nullable String previous = getSelectedInstance();
         settings().setSelectedInstance(gameDirectory.getId(), instance);
+        selectedInstanceChanges.fireChange(previous, getSelectedInstance());
+    }
+
+    /// Registers for selected-instance transitions on the thread that changes the setting.
+    ///
+    /// @param listener selected-instance transition listener
+    /// @return independently cancellable listener registration
+    public Subscription subscribeSelectedInstance(ValueChangeListener<String> listener) {
+        return selectedInstanceChanges.subscribe(listener);
     }
 
     /// Refreshes the selected instance ID after versions are loaded.
@@ -206,6 +222,24 @@ public final class XYMLGameRepository extends DefaultGameRepository {
                 .filter(v -> !v.isHidden())
                 .sorted(Comparator.comparing((Version v) -> Lang.requireNonNullElse(v.getReleaseTime(), Instant.EPOCH))
                         .thenComparing(v -> VersionNumber.asVersion(v.getId())));
+    }
+
+    /// Detects the Minecraft version from one already captured primary JAR path.
+    ///
+    /// This avoids resolving an instance ID against a newer repository revision during lazy row loading.
+    ///
+    /// @param primaryJar captured primary game JAR
+    /// @return detected Minecraft version, or empty when the JAR cannot identify one
+    public Optional<String> detectGameVersion(Path primaryJar) {
+        return GameVersion.minecraftVersion(primaryJar);
+    }
+
+    /// Serializes scans for this repository because refresh rebuilding mutates non-concurrent caches.
+    ///
+    /// Separate game repositories may still refresh concurrently.
+    @Override
+    public synchronized void refreshVersions() {
+        super.refreshVersions();
     }
 
     @Override

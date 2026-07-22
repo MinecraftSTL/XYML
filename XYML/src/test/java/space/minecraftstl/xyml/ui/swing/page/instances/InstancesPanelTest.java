@@ -64,7 +64,7 @@ public final class InstancesPanelTest {
     /// Loaded rows delegate commands once and request only the rows measured as visible.
     @Test
     public void delegatesCommandsAndUsesMeasuredVisibleRange() {
-        FakeInstancesModel model = FakeInstancesModel.immediate(items(1_000), snapshot(0, 0L));
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(1_000), snapshot(0, 1_000, 0L));
         InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS));
 
         onEventDispatchThread(() -> {
@@ -99,7 +99,7 @@ public final class InstancesPanelTest {
     /// A user-selected placeholder is committed exactly once after its sparse row finishes loading.
     @Test
     public void commitsPlaceholderSelectionAfterLoad() {
-        FakeInstancesModel model = FakeInstancesModel.controlled(items(40), snapshot(-1, 0L));
+        FakeInstancesModel model = FakeInstancesModel.controlled(items(40), snapshot(-1, 40, 0L));
         InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS));
 
         onEventDispatchThread(() -> {
@@ -124,7 +124,7 @@ public final class InstancesPanelTest {
     /// A worker-published content revision re-reads the exact count and restores its matching selection.
     @Test
     public void reloadsChangedContentAndAppliesWorkerState() throws InterruptedException {
-        FakeInstancesModel model = FakeInstancesModel.immediate(items(3), snapshot(1, 0L));
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(3), snapshot(1, 3, 0L));
         InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS));
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(820, 420));
@@ -134,7 +134,7 @@ public final class InstancesPanelTest {
         int requestsBeforeRevision = model.requestedRanges().size();
 
         InstancesSnapshot refreshing = new InstancesSnapshot(
-                OptionalInt.of(4), 1L, "Scanning instances", true,
+                OptionalInt.of(4), 5, 1L, "Scanning instances", true,
                 false, false, false, false);
         Thread publisher = new Thread(
                 () -> model.replaceItemsAndPublish(items(5), refreshing),
@@ -165,7 +165,7 @@ public final class InstancesPanelTest {
                         "long-instance",
                         "A very long modded instance name that must remain inside its viewport row",
                         "Minecraft 1.21.1 with a long loader description")),
-                snapshot(0, 0L));
+                snapshot(0, 1, 0L));
         InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(populated, STRINGS));
 
         BufferedImage image = onEventDispatchThread(() -> {
@@ -185,7 +185,7 @@ public final class InstancesPanelTest {
         });
         assertTrue(distinctColors(image).size() > 4);
 
-        FakeInstancesModel empty = FakeInstancesModel.immediate(List.of(), snapshot(-1, 0L));
+        FakeInstancesModel empty = FakeInstancesModel.immediate(List.of(), snapshot(-1, 0, 0L));
         InstancesPanel emptyPanel = onEventDispatchThread(() -> new InstancesPanel(empty, STRINGS));
         onEventDispatchThread(() -> {
             Component emptyLabel = findComponent(emptyPanel, "instancesEmpty");
@@ -212,13 +212,14 @@ public final class InstancesPanelTest {
     /// Creates a normal command-enabled snapshot.
     ///
     /// @param selectedIndex selected source index, or -1 for no selection
+    /// @param itemCount exact item count
     /// @param revision content revision
     /// @return enabled snapshot
-    private static InstancesSnapshot snapshot(int selectedIndex, long revision) {
+    private static InstancesSnapshot snapshot(int selectedIndex, int itemCount, long revision) {
         OptionalInt selected = selectedIndex < 0
                 ? OptionalInt.empty()
                 : OptionalInt.of(selectedIndex);
-        return new InstancesSnapshot(selected, revision, "Ready", false, true, true, true, true);
+        return new InstancesSnapshot(selected, itemCount, revision, "Ready", false, true, true, true, true);
     }
 
     /// Finds a named button in a Swing hierarchy.
