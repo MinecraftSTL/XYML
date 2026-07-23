@@ -51,6 +51,11 @@ import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementHost;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.SchematicInstanceManagementStrings;
+import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
+import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicMetadataStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
@@ -199,6 +204,7 @@ class SwingApplicationCompositionTest {
     void productionOwnershipPlacesSourceBetweenModelsAndStores() {
         List<String> closeOrder = new ArrayList<>();
         HomeModel home = closeableNoCallModel(HomeModel.class, "home-model", closeOrder);
+        InstanceManagementCoordinator instanceManagement = recordingInstanceManagement(closeOrder);
         InstancesModel instances = closeableNoCallModel(InstancesModel.class, "instances-model", closeOrder);
         GameVersionCatalogSource source = closeableNoCallModel(
                 GameVersionCatalogSource.class,
@@ -224,7 +230,11 @@ class SwingApplicationCompositionTest {
         SwingApplicationComposition.ProductionPageModelFactories factories =
                 new SwingApplicationComposition.ProductionPageModelFactories(
                         () -> home,
-                        () -> instances,
+                        () -> instanceManagement,
+                        createdManagement -> {
+                            assertSame(instanceManagement, createdManagement);
+                            return instances;
+                        },
                         () -> source,
                         createdSource -> {
                             assertSame(source, createdSource);
@@ -242,13 +252,15 @@ class SwingApplicationCompositionTest {
                 () -> legacyCloseCount.incrementAndGet());
         assertSame(gameVersions, models.gameVersions());
         assertSame(gameInstaller, models.gameInstaller());
+        assertSame(instanceManagement, models.instanceManagement());
         models.close();
 
-        assertEquals(expectedCloseOrder(), closeOrder);
+        assertEquals(expectedProductionCloseOrder(), closeOrder);
         assertEquals(0, legacyCloseCount.get());
         assertEquals(1, homeStore.closeCount());
         assertEquals(1, accountStore.closeCount());
         assertEquals(1, appearanceStore.closeCount());
+        assertTrue(instanceManagement.isClosed());
     }
 
     /// Confirms that a post-source construction failure closes models, then source, then all stores.
@@ -256,6 +268,7 @@ class SwingApplicationCompositionTest {
     void productionConstructionFailureClosesCreatedSource() {
         List<String> closeOrder = new ArrayList<>();
         HomeModel home = closeableNoCallModel(HomeModel.class, "home-model", closeOrder);
+        InstanceManagementCoordinator instanceManagement = recordingInstanceManagement(closeOrder);
         InstancesModel instances = closeableNoCallModel(InstancesModel.class, "instances-model", closeOrder);
         GameVersionCatalogSource source = closeableNoCallModel(
                 GameVersionCatalogSource.class,
@@ -273,7 +286,8 @@ class SwingApplicationCompositionTest {
         SwingApplicationComposition.ProductionPageModelFactories factories =
                 new SwingApplicationComposition.ProductionPageModelFactories(
                         () -> home,
-                        () -> instances,
+                        () -> instanceManagement,
+                        ignoredManagement -> instances,
                         () -> source,
                         createdSource -> {
                             assertSame(source, createdSource);
@@ -301,6 +315,7 @@ class SwingApplicationCompositionTest {
         assertSame(creationFailure, thrown);
         assertEquals(List.of(
                 "home-model",
+                "instance-management",
                 "instances-model",
                 "game-versions-source",
                 "home-store",
@@ -309,6 +324,7 @@ class SwingApplicationCompositionTest {
         assertEquals(1, homeStore.closeCount());
         assertEquals(1, accountStore.closeCount());
         assertEquals(1, appearanceStore.closeCount());
+        assertTrue(instanceManagement.isClosed());
     }
 
     /// Confirms that a service closes first and its close failure is suppressed after later construction fails.
@@ -316,6 +332,7 @@ class SwingApplicationCompositionTest {
     void productionConstructionFailureClosesInstallerBeforeModelsAndSource() {
         List<String> closeOrder = new ArrayList<>();
         HomeModel home = closeableNoCallModel(HomeModel.class, "home-model", closeOrder);
+        InstanceManagementCoordinator instanceManagement = recordingInstanceManagement(closeOrder);
         InstancesModel instances = closeableNoCallModel(InstancesModel.class, "instances-model", closeOrder);
         GameVersionCatalogSource source = closeableNoCallModel(
                 GameVersionCatalogSource.class,
@@ -343,7 +360,8 @@ class SwingApplicationCompositionTest {
         SwingApplicationComposition.ProductionPageModelFactories factories =
                 new SwingApplicationComposition.ProductionPageModelFactories(
                         () -> home,
-                        () -> instances,
+                        () -> instanceManagement,
+                        ignoredManagement -> instances,
                         () -> source,
                         createdSource -> {
                             assertSame(source, createdSource);
@@ -370,6 +388,7 @@ class SwingApplicationCompositionTest {
         assertEquals(List.of(
                 "game-install-service",
                 "home-model",
+                "instance-management",
                 "instances-model",
                 "game-versions-model",
                 "accounts-model",
@@ -377,6 +396,7 @@ class SwingApplicationCompositionTest {
                 "home-store",
                 "accounts-store",
                 "appearance-store"), closeOrder);
+        assertTrue(instanceManagement.isClosed());
     }
 
     /// Creates no-call proxies that fail if composition accidentally instantiates a page.
@@ -389,17 +409,42 @@ class SwingApplicationCompositionTest {
             List<? extends AutoCloseable> resources,
             GameVersionCatalogModel gameVersions,
             GameInstallService gameInstaller) {
-        List<AutoCloseable> ownedResources = new ArrayList<>(resources.size() + 1);
+        @Unmodifiable List<? extends AutoCloseable> resourceSnapshot = List.copyOf(resources);
+        InstanceManagementCoordinator instanceManagement = noCallInstanceManagement();
+        List<AutoCloseable> ownedResources = new ArrayList<>(resourceSnapshot.size() + 2);
         ownedResources.add(Objects.requireNonNull(gameInstaller, "gameInstaller"));
-        ownedResources.addAll(List.copyOf(resources));
+        ownedResources.add(instanceManagement);
+        ownedResources.addAll(resourceSnapshot);
         return new SwingApplicationPageModels(
                 noCallModel(HomeModel.class),
                 noCallModel(InstancesModel.class),
+                instanceManagement,
                 gameVersions,
                 gameInstaller,
                 noCallModel(AccountsModel.class),
                 noCallModel(AppearanceSettingsModel.class),
                 ownedResources);
+    }
+
+    /// Creates a coordinator whose dynamic factory must remain lazy in composition-only tests.
+    ///
+    /// @return unopened closeable instance-management coordinator
+    private static InstanceManagementCoordinator noCallInstanceManagement() {
+        return new InstanceManagementCoordinator((instanceId, returnCommand) -> {
+            Objects.requireNonNull(instanceId, "instanceId");
+            Objects.requireNonNull(returnCommand, "returnCommand");
+            throw new AssertionError("Instance management view was created eagerly");
+        });
+    }
+
+    /// Creates an unopened coordinator whose host records its exact cleanup position.
+    ///
+    /// @param closeOrder shared close-order recorder
+    /// @return hosted close-order-recording coordinator
+    private static InstanceManagementCoordinator recordingInstanceManagement(List<String> closeOrder) {
+        InstanceManagementCoordinator coordinator = noCallInstanceManagement();
+        coordinator.attachHost(new RecordingInstanceManagementHost(closeOrder));
+        return coordinator;
     }
 
     /// Creates an interface proxy that reports any unexpected page-model invocation.
@@ -482,6 +527,46 @@ class SwingApplicationCompositionTest {
                 new HomeStatusStrings("Ready", "Select account", "Select instance"),
                 new InstancesStrings("Instances", "Refresh", "Refreshing", "Add", "Manage", "Empty"),
                 new RepositoryInstancesStatusStrings("Loading", "Ready", "Refreshing", "Failed", "Unknown"),
+                new SchematicInstanceManagementStrings(
+                        "Instances", "Return to instances", "Resolving schematics", "Resolution failed", "Retry"),
+                new SchematicBrowserStrings(
+                        "Schematics",
+                        "Up",
+                        "Return to parent directory",
+                        "Refresh",
+                        "Refreshing",
+                        "Refresh current directory",
+                        "Open",
+                        "Open selected directory",
+                        "Not loaded",
+                        "Loading schematics",
+                        "No schematics",
+                        "Unable to load schematics",
+                        "Retry",
+                        "Details",
+                        "Select a schematic",
+                        "Directory",
+                        "Unreadable schematic",
+                        "[Directory] ",
+                        new SchematicMetadataStrings(
+                                "Path",
+                                "Name",
+                                "Author",
+                                "Description",
+                                "Created",
+                                "Modified",
+                                "Regions",
+                                "Volume",
+                                "Blocks",
+                                "Size",
+                                "Format version",
+                                "Minecraft data version",
+                                "Preview",
+                                "Unknown",
+                                "%d x %d x %d",
+                                "%d x %d pixels",
+                                "%d pixels",
+                                "Unavailable")),
                 new GameVersionCatalogStrings(
                         "Game versions",
                         "Search",
@@ -556,6 +641,53 @@ class SwingApplicationCompositionTest {
                 "home-store",
                 "accounts-store",
                 "appearance-store");
+    }
+
+    /// Returns the production close order including dynamic instance management.
+    ///
+    /// @return immutable expected production close order
+    private static @Unmodifiable List<String> expectedProductionCloseOrder() {
+        return List.of(
+                "game-install-service",
+                "home-model",
+                "instance-management",
+                "instances-model",
+                "game-versions-model",
+                "accounts-model",
+                "appearance-model",
+                "game-versions-source",
+                "home-store",
+                "accounts-store",
+                "appearance-store");
+    }
+
+    /// Records coordinator host restoration as its observable close-order marker.
+    @NotNullByDefault
+    private static final class RecordingInstanceManagementHost implements InstanceManagementHost {
+        /// Shared close-order recorder.
+        private final List<String> closeOrder;
+
+        /// Creates a host backed by one close-order recorder.
+        ///
+        /// @param closeOrder shared close-order recorder
+        private RecordingInstanceManagementHost(List<String> closeOrder) {
+            this.closeOrder = Objects.requireNonNull(closeOrder, "closeOrder");
+        }
+
+        /// Rejects unexpected eager management view creation.
+        ///
+        /// @param component unexpected dynamic management component
+        @Override
+        public void showManagementView(JComponent component) {
+            throw new AssertionError("Management view was shown eagerly: "
+                    + Objects.requireNonNull(component, "component"));
+        }
+
+        /// Records coordinator cleanup when it restores its attached host.
+        @Override
+        public void showInstanceList() {
+            closeOrder.add("instance-management");
+        }
     }
 
     /// Supplies an empty catalog while recording the panel's lazy initial-load request.

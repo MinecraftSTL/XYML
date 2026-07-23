@@ -21,29 +21,25 @@ import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchCommand;
 
 import java.util.Objects;
-import java.util.function.Consumer;
 
 /// Supplies launcher workflows that the transitional Swing composition does not own.
 ///
-/// The startup layer decides how installation, account creation, instance management, and launch
-/// workflows are implemented. This boundary prevents the composition from reaching into unknown
-/// legacy dialogs while those workflows are being migrated.
+/// The startup layer decides how account creation, instance creation, and launch workflows are
+/// implemented. Instance management is owned by the Swing composition and is intentionally absent
+/// from this legacy workflow boundary.
 ///
 /// @param addAccountCommand command that opens the supported add-account workflow
 /// @param addInstanceCommand command that opens the supported add-instance workflow
-/// @param manageInstanceCommand command that manages a stable selected instance identifier
 /// @param launchCommand command that starts a session from captured stable selection identifiers
 @NotNullByDefault
 public record SwingApplicationCommands(
         Runnable addAccountCommand,
         Runnable addInstanceCommand,
-        Consumer<String> manageInstanceCommand,
         HomeLaunchCommand launchCommand) {
     /// Validates every startup-owned workflow boundary.
     public SwingApplicationCommands {
         Objects.requireNonNull(addAccountCommand, "addAccountCommand");
         Objects.requireNonNull(addInstanceCommand, "addInstanceCommand");
-        Objects.requireNonNull(manageInstanceCommand, "manageInstanceCommand");
         Objects.requireNonNull(launchCommand, "launchCommand");
     }
 }

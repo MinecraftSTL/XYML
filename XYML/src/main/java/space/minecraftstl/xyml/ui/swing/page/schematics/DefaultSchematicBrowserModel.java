@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
@@ -869,6 +870,9 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
             Path directory,
             LoadCancellation cancellation) throws IOException {
         cancellation.throwIfCancelled();
+        if (directory.equals(rootDirectory) && rootDirectoryMissing(rootDirectory)) {
+            return List.of();
+        }
         validateDirectoryChain(rootDirectory, directory, cancellation::throwIfCancelled);
 
         List<DiscoveredEntry> entries = new ArrayList<>();
@@ -897,6 +901,24 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
         validateDirectoryChain(rootDirectory, directory, cancellation::throwIfCancelled);
         cancellation.throwIfCancelled();
         return List.copyOf(entries);
+    }
+
+    /// Returns whether the root itself is absent without classifying other access failures as empty.
+    ///
+    /// Reading attributes without following links distinguishes a missing root from an unreadable,
+    /// non-directory, or symbolic-link root. Those existing failure cases continue through normal
+    /// validation and publish an error state.
+    ///
+    /// @param rootDirectory configured schematic root
+    /// @return whether the root path does not exist
+    /// @throws IOException when root attributes fail for a reason other than absence
+    private static boolean rootDirectoryMissing(Path rootDirectory) throws IOException {
+        try {
+            Files.readAttributes(rootDirectory, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            return false;
+        } catch (NoSuchFileException ignored) {
+            return true;
+        }
     }
 
     /// Creates the production shallow reader without touching the file system during construction.

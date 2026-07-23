@@ -106,6 +106,105 @@ public final class DefaultSchematicBrowserModelTest {
         }
     }
 
+    /// A missing root is an exact empty schematic collection and is never created as a scan side effect.
+    @Test
+    public void missingRootIsReadyAndEmptyWithoutCreatingDirectory() throws Exception {
+        try (FileSystem fileSystem = Jimfs.newFileSystem(Configuration.unix())) {
+            Path root = fileSystem.getPath("/missing/schematics");
+            QueuedExecutor executor = new QueuedExecutor();
+            DefaultSchematicBrowserModel model = new DefaultSchematicBrowserModel(root, executor);
+            try {
+                CompletionStage<SchematicBrowserSnapshot> scan = model.loadIfNeeded();
+                executor.runNext();
+
+                assertAll(
+                        () -> assertEquals(SchematicBrowserStatus.READY, scan.toCompletableFuture().join().status()),
+                        () -> assertEquals(0, model.exactItemCount().orElseThrow()),
+                        () -> assertFalse(Files.exists(root)),
+                        () -> assertFalse(Files.exists(root.getParent())));
+            } finally {
+                model.close();
+            }
+        }
+    }
+
+    /// A root that exists as a regular file remains a scan error rather than an empty collection.
+    @Test
+    public void nonDirectoryRootRemainsAnError() throws Exception {
+        try (FileSystem fileSystem = Jimfs.newFileSystem(Configuration.unix())) {
+            Path root = Files.writeString(fileSystem.getPath("/schematics"), "not a directory");
+            QueuedExecutor executor = new QueuedExecutor();
+            DefaultSchematicBrowserModel model = new DefaultSchematicBrowserModel(root, executor);
+            try {
+                CompletionStage<SchematicBrowserSnapshot> scan = model.loadIfNeeded();
+                executor.runNext();
+
+                CompletionException failure = assertThrows(
+                        CompletionException.class,
+                        () -> scan.toCompletableFuture().join());
+                assertAll(
+                        () -> assertInstanceOf(IOException.class, failure.getCause()),
+                        () -> assertEquals(SchematicBrowserStatus.ERROR, model.snapshot().status()),
+                        () -> assertEquals(root.toAbsolutePath().normalize(), model.snapshot().currentDirectory()));
+            } finally {
+                model.close();
+            }
+        }
+    }
+
+    /// A symbolic-link root remains rejected and never exposes content outside the configured boundary.
+    @Test
+    public void symbolicLinkRootRemainsAnError() throws Exception {
+        try (FileSystem fileSystem = Jimfs.newFileSystem(Configuration.unix())) {
+            Path target = Files.createDirectories(fileSystem.getPath("/outside"));
+            Path root = Files.createSymbolicLink(fileSystem.getPath("/schematics"), target);
+            QueuedExecutor executor = new QueuedExecutor();
+            DefaultSchematicBrowserModel model = new DefaultSchematicBrowserModel(root, executor);
+            try {
+                CompletionStage<SchematicBrowserSnapshot> scan = model.loadIfNeeded();
+                executor.runNext();
+
+                CompletionException failure = assertThrows(
+                        CompletionException.class,
+                        () -> scan.toCompletableFuture().join());
+                assertAll(
+                        () -> assertInstanceOf(IOException.class, failure.getCause()),
+                        () -> assertEquals(SchematicBrowserStatus.ERROR, model.snapshot().status()));
+            } finally {
+                model.close();
+            }
+        }
+    }
+
+    /// A known child removed before navigation remains an error instead of inheriting root-empty behavior.
+    @Test
+    public void missingChildDirectoryRemainsAnError() throws Exception {
+        try (FileSystem fileSystem = Jimfs.newFileSystem(Configuration.unix())) {
+            Path root = fileSystem.getPath("/schematics");
+            Path child = Files.createDirectories(root.resolve("child"));
+            QueuedExecutor executor = new QueuedExecutor();
+            DefaultSchematicBrowserModel model = new DefaultSchematicBrowserModel(root, executor);
+            try {
+                model.loadIfNeeded();
+                executor.runNext();
+                Files.delete(child);
+
+                CompletionStage<SchematicBrowserSnapshot> navigation = model.openDirectory(child);
+                executor.runNext();
+                CompletionException failure = assertThrows(
+                        CompletionException.class,
+                        () -> navigation.toCompletableFuture().join());
+
+                assertAll(
+                        () -> assertInstanceOf(IOException.class, failure.getCause()),
+                        () -> assertEquals(SchematicBrowserStatus.ERROR, model.snapshot().status()),
+                        () -> assertEquals(root.toAbsolutePath().normalize(), model.snapshot().currentDirectory()));
+            } finally {
+                model.close();
+            }
+        }
+    }
+
     /// Metadata parsing touches exactly the requested file indexes and preserves unreadable rows.
     @Test
     public void parsesOnlyFilesInsideTheRequestedRange() {

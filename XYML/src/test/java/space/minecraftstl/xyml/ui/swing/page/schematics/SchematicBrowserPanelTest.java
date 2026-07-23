@@ -102,7 +102,7 @@ public final class SchematicBrowserPanelTest {
                     "%d pixels; rendering deferred",
                     "Unavailable"));
 
-    /// Construction performs no source load or viewport request until explicitly started and laid out.
+    /// Construction stays I/O-free, start is lazy, and repeated close releases the model only once.
     @Test
     public void constructionIsIoFreeAndStartIsLazyAndIdempotent() {
         Path root = Path.of("schematics").toAbsolutePath().normalize();
@@ -126,6 +126,7 @@ public final class SchematicBrowserPanelTest {
             panel.start();
             panel.start();
             assertEquals(1, model.initialLoads.get());
+            panel.close();
             panel.close();
         });
         assertAll(

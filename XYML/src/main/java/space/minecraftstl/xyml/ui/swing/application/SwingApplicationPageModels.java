@@ -25,13 +25,15 @@ import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/// Owns the five toolkit-neutral page models, vanilla installer, and ordered cleanup resources.
+/// Owns the five toolkit-neutral page models, instance-management coordinator, vanilla installer,
+/// and ordered cleanup resources.
 ///
 /// Resources are closed in list order. Production supplies the installer before models, data
 /// sources, and backing stores so active installation is cancelled before dependencies detach.
@@ -42,6 +44,9 @@ public final class SwingApplicationPageModels implements AutoCloseable {
 
     /// Installed-instance state, viewport source, and commands.
     private final InstancesModel instances;
+
+    /// Owner of the dynamic management view hosted inside the instances page.
+    private final InstanceManagementCoordinator instanceManagement;
 
     /// Lazy game-version catalog state and viewport source.
     private final GameVersionCatalogModel gameVersions;
@@ -65,6 +70,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     ///
     /// @param home launcher-home model
     /// @param instances installed-instance model
+    /// @param instanceManagement dynamic instance-management view coordinator
     /// @param gameVersions lazy game-version catalog model
     /// @param gameInstaller single-flight vanilla installation service
     /// @param accounts account-selection model
@@ -73,6 +79,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     public SwingApplicationPageModels(
             HomeModel home,
             InstancesModel instances,
+            InstanceManagementCoordinator instanceManagement,
             GameVersionCatalogModel gameVersions,
             GameInstallService gameInstaller,
             AccountsModel accounts,
@@ -80,6 +87,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
             List<? extends AutoCloseable> ownedResources) {
         this.home = Objects.requireNonNull(home, "home");
         this.instances = Objects.requireNonNull(instances, "instances");
+        this.instanceManagement = Objects.requireNonNull(instanceManagement, "instanceManagement");
         this.gameVersions = Objects.requireNonNull(gameVersions, "gameVersions");
         this.gameInstaller = Objects.requireNonNull(gameInstaller, "gameInstaller");
         this.accounts = Objects.requireNonNull(accounts, "accounts");
@@ -100,6 +108,13 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// @return installed-instance model
     public InstancesModel instances() {
         return instances;
+    }
+
+    /// Returns the owner of dynamic views hosted inside the instances page.
+    ///
+    /// @return instance-management coordinator
+    public InstanceManagementCoordinator instanceManagement() {
+        return instanceManagement;
     }
 
     /// Returns the lazy game-version catalog model.

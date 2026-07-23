@@ -51,6 +51,8 @@ import space.minecraftstl.xyml.ui.swing.page.home.LegacyLauncherHomeStore;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesModel;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.SchematicInstanceManagementView;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.LegacyLauncherAppearanceStore;
@@ -68,13 +70,18 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-/// Owns the transitional Swing window, page models, installer, legacy stores, and animation lifecycle.
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
+
+/// Owns the transitional Swing window, page models, instance management, installer, legacy stores,
+/// and animation lifecycle.
 ///
 /// The production entry point deliberately remains separate from `Launcher` while the migration is staged.
 /// Startup may call [#createAfterJavaFxInitialization] only after Accounts, game directories, and settings
@@ -84,7 +91,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// Native-window abstraction backed by [AppShellFrame] in production.
     private final SwingApplicationWindow window;
 
-    /// Five page models, installer, and their ordered service, model, source, and store lifecycle.
+    /// Five page models, instance management, installer, and ordered owned-resource lifecycle.
     private final SwingApplicationPageModels pageModels;
 
     /// Shared animator whose active timers are cancelled during cleanup.
@@ -111,7 +118,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
     ///
     /// Legacy stores and the selected repository are captured on the JavaFX application thread. Instance
     /// viewport work uses the process-wide caller-owned [Schedulers#io()] executor, which this composition
-    /// never closes. Legacy account, instance, and launch workflow commands remain startup-owned.
+    /// never closes. Legacy account creation, instance creation, and launch commands remain startup-owned;
+    /// instance management itself is composed and owned here.
     ///
     /// @param presentation localized text and explicit transition policy
     /// @param commands startup-owned legacy workflow boundaries
@@ -283,7 +291,10 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 presentation.taskProgress(),
                 animator,
                 presentation.taskProgressAnimationDuration()));
-        factories.put(ShellPageId.INSTANCES, () -> new InstancesPanel(models.instances(), presentation.instances()));
+        factories.put(ShellPageId.INSTANCES, () -> new InstancesPanel(
+                models.instances(),
+                presentation.instances(),
+                models.instanceManagement()));
         factories.put(
                 ShellPageId.DOWNLOADS,
                 () -> new GameVersionCatalogPanel(
@@ -325,11 +336,19 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         () -> navigateCommand.accept(ShellPageId.INSTANCES),
                         commands.addInstanceCommand(),
                         commands.launchCommand()),
-                () -> new RepositoryInstancesModel(
+                () -> new InstanceManagementCoordinator((instanceId, returnCommand) ->
+                        new SchematicInstanceManagementView(
+                                instanceId,
+                                legacy.repository()::getSchematicsDirectory,
+                                Schedulers.io(),
+                                presentation.schematicManagement(),
+                                presentation.schematics(),
+                                returnCommand)),
+                management -> new RepositoryInstancesModel(
                         legacy.repository(),
                         Schedulers.io(),
                         commands.addInstanceCommand(),
-                        commands.manageInstanceCommand(),
+                        instanceId -> openInstanceManagement(management, instanceId),
                         presentation.instancesStatus()),
                 () -> new DownloadProviderGameVersionCatalogSource(DownloadProviders.getDownloadProvider()),
                 source -> new DefaultGameVersionCatalogModel(source, presentation.gameVersionsStatus()),
@@ -357,6 +376,39 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 legacy);
     }
 
+    /// Opens one Swing-owned instance-management view and observes its asynchronous result.
+    ///
+    /// Coordinator cancellation is an expected close race. Other failures have already restored
+    /// the instances list and are logged here so a command failure is never silently discarded.
+    ///
+    /// @param management application-owned instance-management coordinator
+    /// @param instanceId stable selected repository identifier
+    private static void openInstanceManagement(
+            InstanceManagementCoordinator management,
+            String instanceId) {
+        Objects.requireNonNull(management, "management");
+        Objects.requireNonNull(instanceId, "instanceId");
+        management.open(instanceId).whenComplete(
+                (@Nullable Void ignored, @Nullable Throwable failure) -> {
+                    @Nullable Throwable cause = unwrapCompletionFailure(failure);
+                    if (cause != null && !(cause instanceof CancellationException)) {
+                        LOG.warning("Failed to open Swing instance management for " + instanceId, cause);
+                    }
+                });
+    }
+
+    /// Removes asynchronous completion wrappers without changing the underlying failure identity.
+    ///
+    /// @param failure asynchronous failure, or null after success
+    /// @return underlying failure, or null after success
+    private static @Nullable Throwable unwrapCompletionFailure(@Nullable Throwable failure) {
+        @Nullable Throwable current = failure;
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
     /// Executes the production page-model construction sequence with explicit testable factories.
     ///
     /// Every closeable result is registered before the next factory runs, so a later constructor
@@ -381,11 +433,18 @@ public final class SwingApplicationComposition implements AutoCloseable {
         Objects.requireNonNull(appearanceStore, "appearanceStore");
         Objects.requireNonNull(legacyResources, "legacyResources");
         List<AutoCloseable> services = new ArrayList<>(1);
-        List<AutoCloseable> models = new ArrayList<>(5);
+        List<AutoCloseable> models = new ArrayList<>(6);
         List<AutoCloseable> sources = new ArrayList<>(1);
         try {
             HomeModel home = ownCloseable(factories.home().get(), models, "home model");
-            InstancesModel instances = ownCloseable(factories.instances().get(), models, "instances model");
+            InstanceManagementCoordinator instanceManagement = ownCloseable(
+                    factories.instanceManagement().get(),
+                    models,
+                    "instance-management coordinator");
+            InstancesModel instances = ownCloseable(
+                    factories.instances().apply(instanceManagement),
+                    models,
+                    "instances model");
             GameVersionCatalogSource gameVersionSource = ownCloseable(
                     factories.gameVersionSource().get(),
                     sources,
@@ -414,6 +473,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
             return new SwingApplicationPageModels(
                     home,
                     instances,
+                    instanceManagement,
                     gameVersions,
                     gameInstaller,
                     accounts,
@@ -457,7 +517,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// JavaFX or touching the process-wide download provider.
     ///
     /// @param services active-work services closed before their dependencies
-    /// @param models created page models in dependency-safe close order
+    /// @param models created page models and instance-management coordinator in dependency-safe close order
     /// @param sources lower-level sources owned by those models
     /// @param homeStore legacy home projection
     /// @param accountStore legacy account projection
@@ -494,7 +554,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// cleanup failure onto the original construction failure.
     ///
     /// @param services active-work services created before the failure
-    /// @param models page models created before the failure
+    /// @param models page models and instance-management coordinator created before the failure
     /// @param sources lower-level sources created before the failure
     /// @param legacy legacy stores captured before model construction
     /// @param constructionFailure original constructor failure
@@ -625,7 +685,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// Ordered factories used by the production page-model construction transaction.
     ///
     /// @param home launcher-home model factory
-    /// @param instances installed-instance model factory
+    /// @param instanceManagement dynamic instance-management coordinator factory
+    /// @param instances installed-instance model factory receiving the registered coordinator
     /// @param gameVersionSource game-version catalog source factory
     /// @param gameVersions game-version model factory receiving the registered source
     /// @param gameInstaller single-flight vanilla installation service factory
@@ -634,7 +695,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
     @NotNullByDefault
     record ProductionPageModelFactories(
             Supplier<? extends HomeModel> home,
-            Supplier<? extends InstancesModel> instances,
+            Supplier<? extends InstanceManagementCoordinator> instanceManagement,
+            Function<InstanceManagementCoordinator, ? extends InstancesModel> instances,
             Supplier<? extends GameVersionCatalogSource> gameVersionSource,
             Function<GameVersionCatalogSource, ? extends GameVersionCatalogModel> gameVersions,
             Supplier<? extends GameInstallService> gameInstaller,
@@ -643,6 +705,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         /// Validates every factory before production construction starts.
         ProductionPageModelFactories {
             Objects.requireNonNull(home, "home");
+            Objects.requireNonNull(instanceManagement, "instanceManagement");
             Objects.requireNonNull(instances, "instances");
             Objects.requireNonNull(gameVersionSource, "gameVersionSource");
             Objects.requireNonNull(gameVersions, "gameVersions");

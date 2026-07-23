@@ -29,13 +29,21 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementHost;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementView;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementViewFactory;
 
 import javax.swing.AbstractButton;
+import javax.swing.JComponent;
 import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
+import java.awt.event.ActionEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -45,6 +53,7 @@ import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -52,6 +61,9 @@ import java.util.function.Supplier;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests installed-instance commands, placeholder selection, dynamic reload, and viewport-sized demand.
@@ -65,7 +77,9 @@ public final class InstancesPanelTest {
     @Test
     public void delegatesCommandsAndUsesMeasuredVisibleRange() {
         FakeInstancesModel model = FakeInstancesModel.immediate(items(1_000), snapshot(0, 1_000, 0L));
-        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS, coordinator));
 
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(820, 520));
@@ -93,6 +107,7 @@ public final class InstancesPanelTest {
                     () -> assertEquals(1, model.additions.get()),
                     () -> assertEquals(1, model.managementRequests.get()));
             panel.close();
+            coordinator.close();
         });
     }
 
@@ -100,7 +115,9 @@ public final class InstancesPanelTest {
     @Test
     public void commitsPlaceholderSelectionAfterLoad() {
         FakeInstancesModel model = FakeInstancesModel.controlled(items(40), snapshot(-1, 40, 0L));
-        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS, coordinator));
 
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(820, 360));
@@ -118,6 +135,41 @@ public final class InstancesPanelTest {
             panel.choiceList().refreshLoadPlan();
             assertEquals(List.of("instance-2"), model.selectedIds());
             panel.close();
+            coordinator.close();
+        });
+    }
+
+    /// Management remains disabled until a loaded user choice is confirmed by a model snapshot.
+    @Test
+    public void gatesManagementUntilPlaceholderSelectionIsConfirmed() {
+        FakeInstancesModel model = FakeInstancesModel.controlled(items(12), snapshot(0, 12, 0L));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(
+                () -> new InstancesPanel(model, STRINGS, coordinator));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 360));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(2);
+            assertFalse(findButton(panel, "instancesManage").isEnabled());
+            findButton(panel, "instancesManage").doClick();
+        });
+        assertEquals(0, model.managementRequests.get());
+
+        model.completePendingLoads();
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertEquals(List.of("instance-2"), model.selectedIds()),
+                    () -> assertEquals(OptionalInt.of(2), panel.displayedSnapshot().selectedIndex()),
+                    () -> assertTrue(findButton(panel, "instancesManage").isEnabled()));
+            findButton(panel, "instancesManage").doClick();
+            assertEquals(List.of("instance-2"), model.managedIds());
+            panel.close();
+            coordinator.close();
         });
     }
 
@@ -125,7 +177,9 @@ public final class InstancesPanelTest {
     @Test
     public void reloadsChangedContentAndAppliesWorkerState() throws InterruptedException {
         FakeInstancesModel model = FakeInstancesModel.immediate(items(3), snapshot(1, 3, 0L));
-        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS, coordinator));
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(820, 420));
             layoutRecursively(panel);
@@ -153,6 +207,7 @@ public final class InstancesPanelTest {
                     () -> assertFalse(findButton(panel, "instancesRefresh").isEnabled()),
                     () -> assertFalse(findButton(panel, "instancesManage").isEnabled()));
             panel.close();
+            coordinator.close();
             assertFalse(model.hasSubscribers());
         });
     }
@@ -166,7 +221,9 @@ public final class InstancesPanelTest {
                         "A very long modded instance name that must remain inside its viewport row",
                         "Minecraft 1.21.1 with a long loader description")),
                 snapshot(0, 1, 0L));
-        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(populated, STRINGS));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(populated, STRINGS, coordinator));
 
         BufferedImage image = onEventDispatchThread(() -> {
             Dimension size = new Dimension(720, 420);
@@ -181,17 +238,181 @@ public final class InstancesPanelTest {
                 graphics.dispose();
             }
             panel.close();
+            coordinator.close();
             return rendered;
         });
         assertTrue(distinctColors(image).size() > 4);
 
         FakeInstancesModel empty = FakeInstancesModel.immediate(List.of(), snapshot(-1, 0, 0L));
-        InstancesPanel emptyPanel = onEventDispatchThread(() -> new InstancesPanel(empty, STRINGS));
+        RecordingManagementFactory emptyFactory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator emptyCoordinator = new InstanceManagementCoordinator(emptyFactory);
+        InstancesPanel emptyPanel = onEventDispatchThread(
+                () -> new InstancesPanel(empty, STRINGS, emptyCoordinator));
         onEventDispatchThread(() -> {
             Component emptyLabel = findComponent(emptyPanel, "instancesEmpty");
             assertTrue(emptyLabel.isVisible());
             emptyPanel.close();
+            emptyCoordinator.close();
         });
+    }
+
+    /// The coordinator mount replaces the list card and its return command restores it.
+    @Test
+    public void mountsAndReturnsCoordinatorOwnedManagementView() {
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(1), snapshot(0, 1, 0L));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(
+                () -> new InstancesPanel(model, STRINGS, coordinator));
+
+        onEventDispatchThread(() -> {
+            assertTrue(findComponent(panel, "instancesListWorkspace").isVisible());
+            assertFalse(findComponent(panel, "instancesManagementHost").isVisible());
+            findButton(panel, "instancesManage").doClick();
+        });
+        assertAll(
+                () -> assertEquals(1, model.managementRequests.get()),
+                () -> assertEquals(0, factory.creationCount()));
+
+        coordinator.open("instance-0").toCompletableFuture().join();
+        FakeManagementView view = factory.latestView();
+        onEventDispatchThread(() -> assertAll(
+                () -> assertFalse(findComponent(panel, "instancesListWorkspace").isVisible()),
+                () -> assertTrue(findComponent(panel, "instancesManagementHost").isVisible()),
+                () -> assertSame(
+                        findComponent(panel, "instancesManagementHost"),
+                        view.component().getParent()),
+                () -> assertEquals("instance-0", coordinator.currentInstanceId())));
+
+        view.requestReturn();
+        EdtDispatcher.executeAndWait(() -> { });
+        onEventDispatchThread(() -> assertAll(
+                () -> assertTrue(findComponent(panel, "instancesListWorkspace").isVisible()),
+                () -> assertFalse(findComponent(panel, "instancesManagementHost").isVisible()),
+                () -> assertNull(view.component().getParent()),
+                () -> assertNull(coordinator.currentInstanceId()),
+                () -> assertEquals(1, view.closeCount()),
+                () -> assertTrue(view.closedOnEventDispatchThread())));
+
+        panel.close();
+        coordinator.close();
+    }
+
+    /// A worker close synchronously detaches the host, closes its active view once, and is idempotent.
+    @Test
+    public void closesActiveManagementViewSynchronouslyFromWorker() throws InterruptedException {
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(1), snapshot(0, 1, 0L));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(
+                () -> new InstancesPanel(model, STRINGS, coordinator));
+        coordinator.open("instance-0").toCompletableFuture().join();
+        FakeManagementView view = factory.latestView();
+
+        AtomicReference<@Nullable Throwable> closeFailure = new AtomicReference<>();
+        Thread closer = new Thread(() -> {
+            try {
+                panel.close();
+            } catch (RuntimeException | Error failure) {
+                closeFailure.set(failure);
+            }
+        }, "instances-panel-worker-closer");
+        closer.start();
+        closer.join();
+        panel.close();
+
+        CompletionException noHost = assertThrows(
+                CompletionException.class,
+                () -> coordinator.open("instance-after-close").toCompletableFuture().join());
+        onEventDispatchThread(() -> {
+            invokeRegisteredActions(findButton(panel, "instancesRefresh"));
+            invokeRegisteredActions(findButton(panel, "instancesAdd"));
+            invokeRegisteredActions(findButton(panel, "instancesManage"));
+            assertAll(
+                    () -> assertNull(closeFailure.get()),
+                    () -> assertNull(coordinator.currentInstanceId()),
+                    () -> assertNull(view.component().getParent()),
+                    () -> assertEquals(1, view.closeCount()),
+                    () -> assertTrue(view.closedOnEventDispatchThread()),
+                    () -> assertFalse(model.hasSubscribers()),
+                    () -> assertEquals(0, panel.choiceList().getChoiceModel().getSize()),
+                    () -> assertFalse(findButton(panel, "instancesRefresh").isEnabled()),
+                    () -> assertFalse(findButton(panel, "instancesAdd").isEnabled()),
+                    () -> assertFalse(findButton(panel, "instancesManage").isEnabled()),
+                    () -> assertEquals(0, model.refreshes.get()),
+                    () -> assertEquals(0, model.additions.get()),
+                    () -> assertEquals(0, model.managementRequests.get()),
+                    () -> assertTrue(noHost.getCause() instanceof IllegalStateException));
+        });
+        coordinator.close();
+    }
+
+    /// Close preserves the first detach failure while attempting every later cleanup exactly once.
+    @Test
+    public void preservesSuppressedFailuresWhileCompletingCleanup() {
+        RuntimeException viewFailure = new RuntimeException("view close failed");
+        RuntimeException modelFailure = new RuntimeException("model unsubscribe failed");
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(1), snapshot(0, 1, 0L));
+        RecordingManagementFactory factory = new RecordingManagementFactory(viewFailure);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(
+                () -> new InstancesPanel(model, STRINGS, coordinator));
+        coordinator.open("instance-0").toCompletableFuture().join();
+        FakeManagementView view = factory.latestView();
+        model.failUnsubscribeWith(modelFailure);
+
+        RuntimeException actualFailure = assertThrows(RuntimeException.class, panel::close);
+        panel.close();
+
+        onEventDispatchThread(() -> assertAll(
+                () -> assertSame(viewFailure, actualFailure),
+                () -> assertEquals(1, actualFailure.getSuppressed().length),
+                () -> assertSame(modelFailure, actualFailure.getSuppressed()[0]),
+                () -> assertEquals(1, view.closeCount()),
+                () -> assertTrue(view.closedOnEventDispatchThread()),
+                () -> assertNull(view.component().getParent()),
+                () -> assertFalse(model.hasSubscribers()),
+                () -> assertEquals(0, panel.choiceList().getChoiceModel().getSize())));
+        coordinator.close();
+    }
+
+    /// A null model subscription fails construction before host attachment without leaking state.
+    @Test
+    public void cleansUpWhenModelReturnsNullSubscription() {
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(1), snapshot(0, 1, 0L));
+        model.returnNullSubscription();
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+
+        NullPointerException failure = assertThrows(
+                NullPointerException.class,
+                () -> onEventDispatchThread(() -> new InstancesPanel(model, STRINGS, coordinator)));
+
+        assertAll(
+                () -> assertEquals("model returned null subscription", failure.getMessage()),
+                () -> assertFalse(model.hasSubscribers()),
+                () -> assertEquals(0, factory.creationCount()));
+        coordinator.close();
+    }
+
+    /// A rejected host attachment releases the model subscription acquired earlier in construction.
+    @Test
+    public void cleansUpWhenCoordinatorRejectsHostAttachment() {
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(1), snapshot(0, 1, 0L));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        Subscription occupiedLease = coordinator.attachHost(new TestManagementHost());
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> onEventDispatchThread(() -> new InstancesPanel(model, STRINGS, coordinator)));
+
+        assertAll(
+                () -> assertFalse(model.hasSubscribers()),
+                () -> assertTrue(occupiedLease.isSubscribed()),
+                () -> assertEquals(0, factory.creationCount()));
+        occupiedLease.unsubscribe();
+        coordinator.close();
     }
 
     /// Creates deterministic installed-instance rows.
@@ -233,6 +454,16 @@ public final class InstancesPanelTest {
             return button;
         }
         throw new IllegalArgumentException("Named component is not a button: " + name);
+    }
+
+    /// Invokes every registered action directly to verify handler gates independent of button state.
+    ///
+    /// @param button command button whose handlers should run
+    private static void invokeRegisteredActions(AbstractButton button) {
+        ActionEvent event = new ActionEvent(button, ActionEvent.ACTION_PERFORMED, "test");
+        for (java.awt.event.ActionListener listener : button.getActionListeners()) {
+            listener.actionPerformed(event);
+        }
     }
 
     /// Finds a named component in a Swing hierarchy.
@@ -299,6 +530,158 @@ public final class InstancesPanelTest {
         return colors;
     }
 
+    /// Records coordinator-created management views for panel lifecycle assertions.
+    @NotNullByDefault
+    private static final class RecordingManagementFactory implements InstanceManagementViewFactory {
+        /// Failure raised whenever a created view closes, or null for successful close.
+        private final @Nullable RuntimeException closeFailure;
+
+        /// Most recently created view, or null before the first factory call.
+        private final AtomicReference<@Nullable FakeManagementView> latestView = new AtomicReference<>();
+
+        /// Number of factory invocations.
+        private final AtomicInteger creations = new AtomicInteger();
+
+        /// Creates a recording factory.
+        ///
+        /// @param closeFailure failure raised by created views, or null for successful close
+        private RecordingManagementFactory(@Nullable RuntimeException closeFailure) {
+            this.closeFailure = closeFailure;
+        }
+
+        /// Creates and records one management view on the EDT.
+        ///
+        /// @param instanceId stable repository instance identifier
+        /// @param returnCommand command returning to the instances list
+        /// @return newly recorded management view
+        @Override
+        public InstanceManagementView create(String instanceId, Runnable returnCommand) {
+            EdtDispatcher.requireEventDispatchThread();
+            FakeManagementView view = new FakeManagementView(
+                    instanceId,
+                    returnCommand,
+                    closeFailure);
+            latestView.set(view);
+            creations.incrementAndGet();
+            return view;
+        }
+
+        /// Returns the latest created view.
+        ///
+        /// @return latest management view
+        private FakeManagementView latestView() {
+            return Objects.requireNonNull(latestView.get(), "management view was not created");
+        }
+
+        /// Returns the factory invocation count.
+        ///
+        /// @return number of created views
+        private int creationCount() {
+            return creations.get();
+        }
+    }
+
+    /// Coordinator-owned test view recording return and close behavior.
+    @NotNullByDefault
+    private static final class FakeManagementView implements InstanceManagementView {
+        /// Stable instance identifier represented by this view.
+        private final String instanceId;
+
+        /// Component mounted into the panel's management host.
+        private final JPanel component = new JPanel();
+
+        /// Coordinator callback returning to the list card.
+        private final Runnable returnCommand;
+
+        /// Configured close failure, or null for successful close.
+        private final @Nullable RuntimeException closeFailure;
+
+        /// Number of close invocations.
+        private final AtomicInteger closes = new AtomicInteger();
+
+        /// Whether the latest close invocation ran on the EDT.
+        private volatile boolean closeOnEventDispatchThread;
+
+        /// Creates a recording management view.
+        ///
+        /// @param instanceId stable instance identifier
+        /// @param returnCommand coordinator return command
+        /// @param closeFailure close failure, or null for successful close
+        private FakeManagementView(
+                String instanceId,
+                Runnable returnCommand,
+                @Nullable RuntimeException closeFailure) {
+            this.instanceId = instanceId;
+            this.returnCommand = returnCommand;
+            this.closeFailure = closeFailure;
+            component.setName("instanceManagementTestView");
+        }
+
+        /// Returns the represented stable identifier.
+        ///
+        /// @return stable instance identifier
+        @Override
+        public String instanceId() {
+            return instanceId;
+        }
+
+        /// Returns the component mounted into the panel.
+        ///
+        /// @return management root component
+        @Override
+        public JComponent component() {
+            return component;
+        }
+
+        /// Invokes the coordinator-provided return command from the current thread.
+        private void requestReturn() {
+            returnCommand.run();
+        }
+
+        /// Records one EDT close before raising any configured failure.
+        @Override
+        public void close() {
+            closeOnEventDispatchThread = SwingUtilities.isEventDispatchThread();
+            closes.incrementAndGet();
+            if (closeFailure != null) {
+                throw closeFailure;
+            }
+        }
+
+        /// Returns the close invocation count.
+        ///
+        /// @return number of close calls
+        private int closeCount() {
+            return closes.get();
+        }
+
+        /// Returns whether close ran on the EDT.
+        ///
+        /// @return whether close observed the EDT
+        private boolean closedOnEventDispatchThread() {
+            return closeOnEventDispatchThread;
+        }
+    }
+
+    /// Minimal occupied coordinator host used to force a second-attachment failure.
+    @NotNullByDefault
+    private static final class TestManagementHost implements InstanceManagementHost {
+        /// Accepts a component because this host exists only to occupy the exclusive lease.
+        ///
+        /// @param component ignored coordinator-owned component
+        @Override
+        public void showManagementView(JComponent component) {
+            Objects.requireNonNull(component, "component");
+            EdtDispatcher.requireEventDispatchThread();
+        }
+
+        /// Accepts list restoration while the occupied lease is released.
+        @Override
+        public void showInstanceList() {
+            EdtDispatcher.requireEventDispatchThread();
+        }
+    }
+
     /// A captured viewport load whose completion can be controlled by a test.
     ///
     /// @param range requested source range
@@ -335,6 +718,9 @@ public final class InstancesPanelTest {
         /// Selected stable instance identifiers.
         private final List<String> selectedIds = new ArrayList<>();
 
+        /// Stable instance identifiers observed by management commands.
+        private final List<String> managedIds = new ArrayList<>();
+
         /// Refresh command count.
         private final AtomicInteger refreshes = new AtomicInteger();
 
@@ -343,6 +729,12 @@ public final class InstancesPanelTest {
 
         /// Manage command count.
         private final AtomicInteger managementRequests = new AtomicInteger();
+
+        /// Failure raised after the backing model listener is removed, or null for normal cleanup.
+        private volatile @Nullable RuntimeException unsubscribeFailure;
+
+        /// Whether subscribe intentionally violates its non-null contract for construction testing.
+        private boolean returnNullSubscription;
 
         /// Creates a fake model.
         ///
@@ -389,7 +781,18 @@ public final class InstancesPanelTest {
         /// Registers a fake page-state listener.
         @Override
         public Subscription subscribe(ValueChangeListener<InstancesSnapshot> listener) {
-            return changes.subscribe(listener);
+            if (returnNullSubscription) {
+                @Nullable Subscription missingSubscription = null;
+                return missingSubscription;
+            }
+            Subscription delegate = changes.subscribe(listener);
+            return Subscription.create(() -> {
+                delegate.unsubscribe();
+                @Nullable RuntimeException failure = unsubscribeFailure;
+                if (failure != null) {
+                    throw failure;
+                }
+            });
         }
 
         /// Returns the exact immutable source count.
@@ -416,8 +819,35 @@ public final class InstancesPanelTest {
 
         /// Records one selected stable instance identifier.
         @Override
-        public synchronized void selectInstance(String instanceId) {
-            selectedIds.add(instanceId);
+        public void selectInstance(String instanceId) {
+            InstancesSnapshot previous;
+            InstancesSnapshot replacement;
+            synchronized (this) {
+                selectedIds.add(instanceId);
+                int selectedIndex = -1;
+                for (int index = 0; index < items.size(); index++) {
+                    if (items.get(index).id().equals(instanceId)) {
+                        selectedIndex = index;
+                        break;
+                    }
+                }
+                if (selectedIndex < 0) {
+                    throw new IllegalArgumentException("Unknown fake instance: " + instanceId);
+                }
+                previous = current.get();
+                replacement = new InstancesSnapshot(
+                        OptionalInt.of(selectedIndex),
+                        previous.itemCount(),
+                        previous.contentRevision(),
+                        previous.statusText(),
+                        previous.refreshing(),
+                        previous.listEnabled(),
+                        previous.refreshEnabled(),
+                        previous.addEnabled(),
+                        true);
+                current.set(replacement);
+            }
+            changes.fireChange(previous, replacement);
         }
 
         /// Records one refresh command.
@@ -436,6 +866,13 @@ public final class InstancesPanelTest {
         @Override
         public void manageSelectedInstance() {
             managementRequests.incrementAndGet();
+            InstancesSnapshot snapshot = current.get();
+            if (snapshot.selectedIndex().isPresent()) {
+                int selectedIndex = snapshot.selectedIndex().getAsInt();
+                synchronized (this) {
+                    managedIds.add(items.get(selectedIndex).id());
+                }
+            }
         }
 
         /// Returns a snapshot of captured request ranges.
@@ -450,6 +887,13 @@ public final class InstancesPanelTest {
         /// @return immutable selected identifiers in command order
         private synchronized @Unmodifiable List<String> selectedIds() {
             return List.copyOf(selectedIds);
+        }
+
+        /// Returns stable identifiers observed by management commands.
+        ///
+        /// @return immutable managed identifiers in command order
+        private synchronized @Unmodifiable List<String> managedIds() {
+            return List.copyOf(managedIds);
         }
 
         /// Completes all currently pending viewport loads from their captured source snapshots.
@@ -481,6 +925,18 @@ public final class InstancesPanelTest {
         /// @return whether this fake has at least one subscriber
         private boolean hasSubscribers() {
             return changes.hasSubscribers();
+        }
+
+        /// Configures this fake to violate the subscription result contract.
+        private void returnNullSubscription() {
+            returnNullSubscription = true;
+        }
+
+        /// Configures a failure raised after listener removal during unsubscription.
+        ///
+        /// @param failure exact cleanup failure to raise
+        private void failUnsubscribeWith(RuntimeException failure) {
+            unsubscribeFailure = Objects.requireNonNull(failure, "failure");
         }
 
         /// Creates one source-aligned exact page.
