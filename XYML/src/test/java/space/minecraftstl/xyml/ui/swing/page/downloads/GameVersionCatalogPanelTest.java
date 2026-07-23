@@ -21,14 +21,24 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.install.DefaultGameInstallService;
+import space.minecraftstl.xyml.game.install.GameInstallRequest;
+import space.minecraftstl.xyml.game.install.GameInstallRequestRejectedException;
+import space.minecraftstl.xyml.game.install.GameInstallService;
+import space.minecraftstl.xyml.game.install.GameInstallSession;
+import space.minecraftstl.xyml.game.install.GameInstallStatus;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.presentation.TaskSnapshot;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.AbstractButton;
 import javax.swing.JComboBox;
@@ -37,6 +47,7 @@ import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,6 +58,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -54,6 +66,8 @@ import java.util.function.Supplier;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests lazy display loading, measured viewport demand, controls, state cards, and cleanup.
@@ -72,13 +86,37 @@ public final class GameVersionCatalogPanelTest {
             "Refresh",
             "Refreshing");
 
+    /// Explicit localized vanilla-installation text used by the page fixture.
+    private static final GameInstallStrings INSTALL_STRINGS = new GameInstallStrings(
+            "Instance name",
+            "Install",
+            "Back to versions",
+            "Install game",
+            "Preparing installation",
+            "Invalid name",
+            "Instance already exists",
+            "Another installation is running",
+            "Installation failed");
+
+    /// Explicit localized task-progress text used by the page fixture.
+    private static final TaskProgressStrings TASK_STRINGS = new TaskProgressStrings(
+            "Waiting",
+            "Running",
+            "Completed",
+            "Failed",
+            "Cancelled",
+            "Task progress",
+            "Cancel",
+            "Show details",
+            "Hide details");
+
     /// Construction performs no source load and the first display delegates lazy loading.
     @Test
     public void startsLoadingOnlyAfterDisplayNotification() {
         FakeCatalogModel model = FakeCatalogModel.immediate(List.of(), snapshot(
                 -1, 0, 0L, GameVersionCatalogStatus.IDLE, "Waiting", false, true));
         GameVersionCatalogPanel panel = onEventDispatchThread(
-                () -> new GameVersionCatalogPanel(model, STRINGS));
+                () -> createPanel(model));
 
         assertEquals(0, model.lazyLoads.get());
         onEventDispatchThread(() -> {
@@ -98,7 +136,7 @@ public final class GameVersionCatalogPanelTest {
                 items(1_000),
                 snapshot(-1, 1_000, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
         GameVersionCatalogPanel panel = onEventDispatchThread(
-                () -> new GameVersionCatalogPanel(model, STRINGS));
+                () -> createPanel(model));
 
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(820, 520));
@@ -136,7 +174,7 @@ public final class GameVersionCatalogPanelTest {
                 items(40),
                 snapshot(-1, 40, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
         GameVersionCatalogPanel panel = onEventDispatchThread(
-                () -> new GameVersionCatalogPanel(model, STRINGS));
+                () -> createPanel(model));
 
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(820, 360));
@@ -164,7 +202,7 @@ public final class GameVersionCatalogPanelTest {
                 items(3),
                 snapshot(1, 3, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
         GameVersionCatalogPanel panel = onEventDispatchThread(
-                () -> new GameVersionCatalogPanel(model, STRINGS));
+                () -> createPanel(model));
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(820, 420));
             layoutRecursively(panel);
@@ -252,6 +290,243 @@ public final class GameVersionCatalogPanelTest {
                     () -> assertEquals(List.of(), model.queries()),
                     () -> assertEquals(List.of(), model.filters()));
         });
+    }
+
+    /// Installs the exact loaded choice, derives only from its version ID, and preserves a user name.
+    @Test
+    public void installsExactLoadedChoiceAndPreservesUserAuthoredName() throws Exception {
+        FakeCatalogModel model = FakeCatalogModel.immediate(
+                items(1_000),
+                snapshot(-1, 1_000, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
+        RecordingGameInstallService service = RecordingGameInstallService.completed();
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model, service));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 520));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            JList<ChoiceListEntry<GameVersionCatalogItem>> list = panel.choiceList().getList();
+            list.setSelectedIndex(1);
+
+            JTextField instanceName = findTextField(panel, "gameVersionsInstanceName");
+            assertEquals("version-1", instanceName.getText());
+            instanceName.setText("my-instance");
+            list.setSelectedIndex(2);
+            assertEquals("my-instance", instanceName.getText());
+
+            findButton(panel, "gameVersionsInstall").doClick();
+            assertAll(
+                    () -> assertEquals(
+                            List.of(new GameInstallRequest("my-instance", "version-2")),
+                            service.requests()),
+                    () -> assertTrue(findComponent(panel, "gameVersionsTaskWorkspace").isVisible()),
+                    () -> assertFalse(findComponent(panel, "gameVersionsCatalogWorkspace").isVisible()));
+        });
+
+        awaitTerminal(service.latestSession());
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            assertTrue(findButton(panel, "gameVersionsBackToCatalog").isEnabled());
+            findButton(panel, "gameVersionsBackToCatalog").doClick();
+            assertAll(
+                    () -> assertTrue(findComponent(panel, "gameVersionsCatalogWorkspace").isVisible()),
+                    () -> assertFalse(findComponent(panel, "gameVersionsTaskWorkspace").isVisible()),
+                    () -> assertTrue(findButton(panel, "gameVersionsInstall").isEnabled()));
+
+            IndexRange requested = model.requestedRanges().get(0);
+            int viewportHeight = panel.choiceList().getViewport().getExtentSize().height;
+            int rowHeight = panel.choiceList().getList().getFixedCellHeight();
+            int visibleRows = (viewportHeight + rowHeight - 1) / rowHeight;
+            assertAll(
+                    () -> assertEquals(visibleRows, requested.length()),
+                    () -> assertTrue(requested.length() < model.exactItemCount().orElseThrow()));
+            panel.close();
+        });
+
+        assertEquals(0, service.closeCount());
+        service.close();
+        assertEquals(1, service.closeCount());
+    }
+
+    /// Maps repository validation by typed reason while retaining the failed task until dismissal.
+    @Test
+    public void localizesTypedInstallationRejection() throws Exception {
+        FakeCatalogModel model = FakeCatalogModel.immediate(
+                items(4),
+                snapshot(-1, 4, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
+        RecordingGameInstallService service = RecordingGameInstallService.failingWith(
+                GameInstallRequestRejectedException.Reason.INSTANCE_ALREADY_EXISTS);
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model, service));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 420));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(0);
+            findButton(panel, "gameVersionsInstall").doClick();
+        });
+
+        awaitTerminal(service.latestSession());
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertEquals(
+                            INSTALL_STRINGS.instanceAlreadyExistsStatus(),
+                            findComponent(
+                                    panel,
+                                    "gameVersionsInstallTaskStatus",
+                                    javax.swing.JLabel.class).getText()),
+                    () -> assertTrue(findButton(panel, "gameVersionsBackToCatalog").isEnabled()));
+            panel.close();
+        });
+        service.close();
+    }
+
+    /// Closing the page detaches late task transitions without taking service ownership.
+    @Test
+    public void closeIgnoresLateInstallationStatusWithoutClosingService() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        FakeCatalogModel model = FakeCatalogModel.immediate(
+                items(4),
+                snapshot(-1, 4, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
+        RecordingGameInstallService service = RecordingGameInstallService.blocking(entered, release);
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model, service));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 420));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(0);
+            findButton(panel, "gameVersionsInstall").doClick();
+        });
+        assertTrue(entered.await(5L, TimeUnit.SECONDS));
+
+        panel.close();
+        assertEquals(0, service.closeCount());
+        release.countDown();
+        awaitTerminal(service.latestSession());
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> assertAll(
+                () -> assertFalse(findButton(panel, "gameVersionsBackToCatalog").isEnabled()),
+                () -> assertFalse(findTextField(panel, "gameVersionsInstanceName").isEnabled())));
+        service.close();
+        assertEquals(1, service.closeCount());
+    }
+
+    /// A task-surface binding failure cancels the started session and restores visible catalog feedback.
+    @Test
+    public void presentationBindingFailureRollsBackStartedInstallation() throws Exception {
+        IllegalStateException bindingFailure = new IllegalStateException("status subscription failed");
+        FakeCatalogModel model = FakeCatalogModel.immediate(
+                items(4),
+                snapshot(-1, 4, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
+        RecordingGameInstallService service = RecordingGameInstallService.statusSubscribeFailure(bindingFailure);
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model, service));
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class, () -> onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 420));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(0);
+            findButton(panel, "gameVersionsInstall").doClick();
+        }));
+
+        assertSame(bindingFailure, thrown);
+        StatusPropertyFailureSession failedPresentation = service.latestDecoratedSession();
+        assertEquals(1, failedPresentation.cancelCalls());
+        awaitTerminal(failedPresentation);
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertTrue(findComponent(panel, "gameVersionsCatalogWorkspace").isVisible()),
+                    () -> assertFalse(findComponent(panel, "gameVersionsTaskWorkspace").isVisible()),
+                    () -> assertEquals(
+                            INSTALL_STRINGS.installationFailedStatus(),
+                            findComponent(
+                                    panel,
+                                    "gameVersionsInstallStatus",
+                                    javax.swing.JLabel.class).getText()));
+            panel.close();
+        });
+        service.close();
+    }
+
+    /// A status-unsubscribe failure is propagated only after the catalog card has been restored.
+    @Test
+    public void returnCleanupFailureStillRestoresCatalogCard() throws Exception {
+        IllegalStateException unsubscribeFailure = new IllegalStateException("status unsubscribe failed");
+        FakeCatalogModel model = FakeCatalogModel.immediate(
+                items(4),
+                snapshot(-1, 4, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
+        RecordingGameInstallService service = RecordingGameInstallService.statusUnsubscribeFailure(
+                unsubscribeFailure);
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model, service));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 420));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(0);
+            findButton(panel, "gameVersionsInstall").doClick();
+        });
+        awaitTerminal(service.latestSession());
+        EdtDispatcher.executeAndWait(() -> { });
+
+        IllegalStateException thrown = assertThrows(
+                IllegalStateException.class,
+                () -> onEventDispatchThread(
+                        () -> findButton(panel, "gameVersionsBackToCatalog").doClick()));
+        assertSame(unsubscribeFailure, thrown);
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertTrue(findComponent(panel, "gameVersionsCatalogWorkspace").isVisible()),
+                    () -> assertFalse(findComponent(panel, "gameVersionsTaskWorkspace").isVisible()),
+                    () -> assertTrue(findButton(panel, "gameVersionsInstall").isEnabled()));
+            panel.close();
+        });
+        service.close();
+    }
+
+    /// Waits for either normal or exceptional installation completion.
+    ///
+    /// @param session session whose terminal state is required
+    private static void awaitTerminal(GameInstallSession session) throws Exception {
+        session.completion()
+                .handle((ignored, failure) -> null)
+                .toCompletableFuture()
+                .get(5L, TimeUnit.SECONDS);
+    }
+
+    /// Creates a catalog-only fixture whose installer rejects unexpected use or ownership transfer.
+    ///
+    /// @param model catalog model under test
+    /// @return panel with explicit zero-duration task presentation
+    private static GameVersionCatalogPanel createPanel(GameVersionCatalogModel model) {
+        return createPanel(model, new RejectingGameInstallService());
+    }
+
+    /// Creates a page fixture with one explicit installation service.
+    ///
+    /// @param model catalog model under test
+    /// @param installService installation service under test
+    /// @return page fixture
+    private static GameVersionCatalogPanel createPanel(
+            GameVersionCatalogModel model,
+            GameInstallService installService) {
+        return new GameVersionCatalogPanel(
+                model,
+                installService,
+                STRINGS,
+                INSTALL_STRINGS,
+                TASK_STRINGS,
+                null,
+                Duration.ZERO);
     }
 
     /// Creates deterministic catalog rows.
@@ -656,6 +931,451 @@ public final class GameVersionCatalogPanelTest {
                     List.copyOf(values),
                     OptionalInt.of(itemSnapshot.size()),
                     actualRange.endExclusive() == itemSnapshot.size());
+        }
+    }
+
+    /// Records exact requests while delegating real session behavior to the production service.
+    @NotNullByDefault
+    private static final class RecordingGameInstallService implements GameInstallService {
+        /// Real single-flight service under the page integration.
+        private final DefaultGameInstallService delegate;
+
+        /// Optional test decorator applied to each real returned session.
+        private final java.util.function.Function<GameInstallSession, GameInstallSession> sessionDecorator;
+
+        /// Exact installation requests in invocation order.
+        private final List<GameInstallRequest> requests = new ArrayList<>();
+
+        /// Latest returned session, or null before the installation command.
+        private final AtomicReference<@Nullable GameInstallSession> latestSession = new AtomicReference<>();
+
+        /// Whether this test-owned service has been closed.
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        /// Number of first close transitions.
+        private final AtomicInteger closeCount = new AtomicInteger();
+
+        /// Creates a recording wrapper around one explicit production service.
+        ///
+        /// @param delegate real service
+        /// @param sessionDecorator optional behavior decorator for returned sessions
+        private RecordingGameInstallService(
+                DefaultGameInstallService delegate,
+                java.util.function.Function<GameInstallSession, GameInstallSession> sessionDecorator) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+            this.sessionDecorator = Objects.requireNonNull(sessionDecorator, "sessionDecorator");
+        }
+
+        /// Creates a service whose task completes normally.
+        ///
+        /// @return successful recording service
+        private static RecordingGameInstallService completed() {
+            return wrapping(request -> new CompletedInstallTask());
+        }
+
+        /// Creates a service whose task rejects the exact request for one typed reason.
+        ///
+        /// @param reason typed repository validation reason
+        /// @return failing recording service
+        private static RecordingGameInstallService failingWith(
+                GameInstallRequestRejectedException.Reason reason) {
+            Objects.requireNonNull(reason, "reason");
+            return wrapping(request -> new FailingInstallTask(
+                    new GameInstallRequestRejectedException(request, reason)));
+        }
+
+        /// Creates a service whose task remains active until released.
+        ///
+        /// @param entered task-start signal
+        /// @param release task-completion gate
+        /// @return blocking recording service
+        private static RecordingGameInstallService blocking(
+                CountDownLatch entered,
+                CountDownLatch release) {
+            Objects.requireNonNull(entered, "entered");
+            Objects.requireNonNull(release, "release");
+            return wrapping(request -> new BlockingInstallTask(entered, release));
+        }
+
+        /// Creates a service whose status-property subscription fails during presentation binding.
+        ///
+        /// @param failure exact subscription failure
+        /// @return recording service with a failing status property
+        private static RecordingGameInstallService statusSubscribeFailure(RuntimeException failure) {
+            Objects.requireNonNull(failure, "failure");
+            return wrapping(
+                    request -> new CompletedInstallTask(),
+                    session -> new StatusPropertyFailureSession(session, failure, true));
+        }
+
+        /// Creates a service whose installed status subscription fails when the task is dismissed.
+        ///
+        /// @param failure exact unsubscription failure
+        /// @return recording service with a failing status cleanup
+        private static RecordingGameInstallService statusUnsubscribeFailure(RuntimeException failure) {
+            Objects.requireNonNull(failure, "failure");
+            return wrapping(
+                    request -> new CompletedInstallTask(),
+                    session -> new StatusPropertyFailureSession(session, failure, false));
+        }
+
+        /// Wraps one request-to-task function in the production single-flight service.
+        ///
+        /// @param taskFactory request-specific task function
+        /// @return recording service
+        private static RecordingGameInstallService wrapping(
+                java.util.function.Function<GameInstallRequest, Task<?>> taskFactory) {
+            return wrapping(taskFactory, java.util.function.Function.identity());
+        }
+
+        /// Wraps one task function and one returned-session decorator in the production service.
+        ///
+        /// @param taskFactory request-specific task function
+        /// @param sessionDecorator decorator applied to each returned session
+        /// @return recording service
+        private static RecordingGameInstallService wrapping(
+                java.util.function.Function<GameInstallRequest, Task<?>> taskFactory,
+                java.util.function.Function<GameInstallSession, GameInstallSession> sessionDecorator) {
+            Objects.requireNonNull(taskFactory, "taskFactory");
+            Objects.requireNonNull(sessionDecorator, "sessionDecorator");
+            return new RecordingGameInstallService(
+                    new DefaultGameInstallService(
+                            taskFactory::apply,
+                            Runnable::run,
+                            INSTALL_STRINGS.taskTitle(),
+                            INSTALL_STRINGS.preparingPhase()),
+                    sessionDecorator);
+        }
+
+        /// Records and delegates one exact request.
+        ///
+        /// @param request exact page request
+        /// @return returned production session
+        @Override
+        public synchronized GameInstallSession install(GameInstallRequest request) {
+            requests.add(Objects.requireNonNull(request, "request"));
+            GameInstallSession session = Objects.requireNonNull(
+                    sessionDecorator.apply(delegate.install(request)),
+                    "sessionDecorator returned null");
+            latestSession.set(session);
+            return session;
+        }
+
+        /// Returns the real active installation state.
+        ///
+        /// @return current active session
+        @Override
+        public Optional<GameInstallSession> activeInstallation() {
+            return delegate.activeInstallation();
+        }
+
+        /// Closes the test-owned production service once.
+        @Override
+        public void close() {
+            if (closed.compareAndSet(false, true)) {
+                closeCount.incrementAndGet();
+                delegate.close();
+            }
+        }
+
+        /// Returns immutable recorded requests.
+        ///
+        /// @return request snapshot
+        private synchronized @Unmodifiable List<GameInstallRequest> requests() {
+            return List.copyOf(requests);
+        }
+
+        /// Returns the latest page-returned session.
+        ///
+        /// @return latest session
+        private GameInstallSession latestSession() {
+            return Objects.requireNonNull(latestSession.get(), "installation session was not created");
+        }
+
+        /// Returns the latest session as the configured status-property failure decorator.
+        ///
+        /// @return latest decorated session
+        private StatusPropertyFailureSession latestDecoratedSession() {
+            return (StatusPropertyFailureSession) latestSession();
+        }
+
+        /// Returns the number of first service close transitions.
+        ///
+        /// @return close count
+        private int closeCount() {
+            return closeCount.get();
+        }
+    }
+
+    /// Delegates a real session while injecting one deterministic status-property failure.
+    @NotNullByDefault
+    private static final class StatusPropertyFailureSession implements GameInstallSession {
+        /// Real installation session supplying every authoritative state.
+        private final GameInstallSession delegate;
+
+        /// Wrapped status property used by the page binding.
+        private final ReadOnlyProperty<GameInstallStatus> statusProperty;
+
+        /// Number of direct session cancellation requests.
+        private final AtomicInteger cancelCalls = new AtomicInteger();
+
+        /// Creates one failure-decorated session.
+        ///
+        /// @param delegate real session
+        /// @param failure exact injected failure
+        /// @param failOnSubscribe whether to fail acquisition rather than removal
+        private StatusPropertyFailureSession(
+                GameInstallSession delegate,
+                RuntimeException failure,
+                boolean failOnSubscribe) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+            statusProperty = new StatusPropertyFailure(
+                    delegate.statusProperty(),
+                    failure,
+                    failOnSubscribe);
+        }
+
+        /// Returns the exact real request.
+        ///
+        /// @return real request
+        @Override
+        public GameInstallRequest request() {
+            return delegate.request();
+        }
+
+        /// Returns the authoritative real lifecycle.
+        ///
+        /// @return real lifecycle
+        @Override
+        public GameInstallStatus status() {
+            return delegate.status();
+        }
+
+        /// Returns the failure-decorated status property.
+        ///
+        /// @return decorated status property
+        @Override
+        public ReadOnlyProperty<GameInstallStatus> statusProperty() {
+            return statusProperty;
+        }
+
+        /// Returns the real minimal completion stage.
+        ///
+        /// @return real completion
+        @Override
+        public CompletionStage<Void> completion() {
+            return delegate.completion();
+        }
+
+        /// Returns the exact real terminal failure.
+        ///
+        /// @return real failure state
+        @Override
+        public Optional<Throwable> failure() {
+            return delegate.failure();
+        }
+
+        /// Records and forwards direct cancellation.
+        ///
+        /// @return real cancellation acceptance
+        @Override
+        public boolean cancel() {
+            cancelCalls.incrementAndGet();
+            return delegate.cancel();
+        }
+
+        /// Returns the real task presentation snapshot.
+        ///
+        /// @return real task snapshot
+        @Override
+        public TaskSnapshot snapshot() {
+            return delegate.snapshot();
+        }
+
+        /// Registers a real task-presentation listener.
+        ///
+        /// @param listener presentation listener
+        /// @return real registration
+        @Override
+        public Subscription subscribe(ValueChangeListener<TaskSnapshot> listener) {
+            return delegate.subscribe(listener);
+        }
+
+        /// Forwards presentation cancellation through the counted direct path.
+        @Override
+        public void requestCancellation() {
+            cancel();
+        }
+
+        /// Returns the number of direct cancellation calls.
+        ///
+        /// @return cancellation count
+        private int cancelCalls() {
+            return cancelCalls.get();
+        }
+    }
+
+    /// Wraps one status property and fails either subscription acquisition or removal.
+    @NotNullByDefault
+    private static final class StatusPropertyFailure implements ReadOnlyProperty<GameInstallStatus> {
+        /// Real status property.
+        private final ReadOnlyProperty<GameInstallStatus> delegate;
+
+        /// Exact injected unchecked failure.
+        private final RuntimeException failure;
+
+        /// Whether listener acquisition rather than removal fails.
+        private final boolean failOnSubscribe;
+
+        /// Creates one deterministic failure wrapper.
+        ///
+        /// @param delegate real status property
+        /// @param failure exact injected failure
+        /// @param failOnSubscribe whether acquisition fails
+        private StatusPropertyFailure(
+                ReadOnlyProperty<GameInstallStatus> delegate,
+                RuntimeException failure,
+                boolean failOnSubscribe) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+            this.failure = Objects.requireNonNull(failure, "failure");
+            this.failOnSubscribe = failOnSubscribe;
+        }
+
+        /// Returns the current real status.
+        ///
+        /// @return real property value
+        @Override
+        public GameInstallStatus getValue() {
+            return delegate.getValue();
+        }
+
+        /// Registers a real listener or throws the configured acquisition failure.
+        ///
+        /// @param listener status listener
+        /// @return removal-failing registration when acquisition succeeds
+        @Override
+        public Subscription subscribe(ValueChangeListener<GameInstallStatus> listener) {
+            if (failOnSubscribe) {
+                throw failure;
+            }
+            Subscription subscription = delegate.subscribe(listener);
+            return Subscription.create(() -> {
+                try {
+                    subscription.unsubscribe();
+                } catch (RuntimeException | Error cleanupFailure) {
+                    if (cleanupFailure != failure) {
+                        failure.addSuppressed(cleanupFailure);
+                    }
+                }
+                throw failure;
+            });
+        }
+
+        /// Returns the real property bean.
+        ///
+        /// @return real property bean, or null
+        @Override
+        public @Nullable Object getBean() {
+            return delegate.getBean();
+        }
+
+        /// Returns the real property name.
+        ///
+        /// @return real property name
+        @Override
+        public String getName() {
+            return delegate.getName();
+        }
+    }
+
+    /// Completes one installation task normally.
+    @NotNullByDefault
+    private static final class CompletedInstallTask extends Task<@Nullable Void> {
+        /// Creates a successful task.
+        private CompletedInstallTask() {
+        }
+
+        /// Completes without producing a value.
+        @Override
+        public void execute() {
+        }
+    }
+
+    /// Throws one exact request failure from task execution.
+    @NotNullByDefault
+    private static final class FailingInstallTask extends Task<@Nullable Void> {
+        /// Exact failure emitted by execution.
+        private final RuntimeException failure;
+
+        /// Creates a failing task.
+        ///
+        /// @param failure exact failure
+        private FailingInstallTask(RuntimeException failure) {
+            this.failure = Objects.requireNonNull(failure, "failure");
+        }
+
+        /// Throws the configured failure unchanged.
+        @Override
+        public void execute() {
+            throw failure;
+        }
+    }
+
+    /// Waits for an explicit completion gate while allowing cooperative cancellation.
+    @NotNullByDefault
+    private static final class BlockingInstallTask extends Task<@Nullable Void> {
+        /// Signals that task execution began.
+        private final CountDownLatch entered;
+
+        /// Controls completion of the simulated installation.
+        private final CountDownLatch release;
+
+        /// Creates a controlled task.
+        ///
+        /// @param entered task-start signal
+        /// @param release task-completion gate
+        private BlockingInstallTask(CountDownLatch entered, CountDownLatch release) {
+            this.entered = Objects.requireNonNull(entered, "entered");
+            this.release = Objects.requireNonNull(release, "release");
+        }
+
+        /// Waits in bounded intervals until completion or cancellation.
+        @Override
+        public void execute() throws Exception {
+            entered.countDown();
+            while (!release.await(10L, TimeUnit.MILLISECONDS)) {
+                if (isCancelled()) {
+                    throw new java.util.concurrent.CancellationException("installation cancelled");
+                }
+            }
+        }
+    }
+
+    /// Installer fixture that fails if catalog-only tests accidentally start or own installation.
+    @NotNullByDefault
+    private static final class RejectingGameInstallService implements GameInstallService {
+        /// Rejects an unexpected installation command.
+        ///
+        /// @param request unexpected request
+        /// @return never returns
+        @Override
+        public GameInstallSession install(GameInstallRequest request) {
+            throw new AssertionError("Unexpected install request: "
+                    + Objects.requireNonNull(request, "request"));
+        }
+
+        /// Returns the stable empty active-session state.
+        ///
+        /// @return empty active installation
+        @Override
+        public Optional<GameInstallSession> activeInstallation() {
+            return Optional.empty();
+        }
+
+        /// Rejects accidental service ownership by the panel.
+        @Override
+        public void close() {
+            throw new AssertionError("Catalog panel must not close its installation service");
         }
     }
 }

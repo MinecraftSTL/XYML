@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.application;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsStrings;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameInstallStrings;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStatusStrings;
@@ -42,6 +43,7 @@ import java.util.Objects;
 /// @param instancesStatus localized repository states and fallbacks
 /// @param gameVersions localized game-version catalog controls
 /// @param gameVersionsStatus localized game-version catalog lifecycle states
+/// @param gameInstall localized vanilla-installation controls, task text, and validation feedback
 /// @param accounts localized account-page controls
 /// @param appearance localized appearance-settings controls
 /// @param pageTransitionDuration non-negative page transition duration selected by startup policy
@@ -57,6 +59,7 @@ public record SwingApplicationPresentation(
         RepositoryInstancesStatusStrings instancesStatus,
         GameVersionCatalogStrings gameVersions,
         GameVersionCatalogStatusStrings gameVersionsStatus,
+        GameInstallStrings gameInstall,
         AccountsStrings accounts,
         AppearanceSettingsStrings appearance,
         Duration pageTransitionDuration,
@@ -72,6 +75,7 @@ public record SwingApplicationPresentation(
         Objects.requireNonNull(instancesStatus, "instancesStatus");
         Objects.requireNonNull(gameVersions, "gameVersions");
         Objects.requireNonNull(gameVersionsStatus, "gameVersionsStatus");
+        Objects.requireNonNull(gameInstall, "gameInstall");
         Objects.requireNonNull(accounts, "accounts");
         Objects.requireNonNull(appearance, "appearance");
         Objects.requireNonNull(pageTransitionDuration, "pageTransitionDuration");

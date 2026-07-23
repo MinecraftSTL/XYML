@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.application;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.install.GameInstallService;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
@@ -30,10 +31,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/// Owns the five toolkit-neutral page models and their ordered cleanup resources.
+/// Owns the five toolkit-neutral page models, vanilla installer, and ordered cleanup resources.
 ///
-/// Resources are closed in list order. Production supplies models before their data sources and
-/// backing stores so subscriptions are removed before lower-level adapters are detached.
+/// Resources are closed in list order. Production supplies the installer before models, data
+/// sources, and backing stores so active installation is cancelled before dependencies detach.
 @NotNullByDefault
 public final class SwingApplicationPageModels implements AutoCloseable {
     /// Launcher-home state and commands.
@@ -44,6 +45,9 @@ public final class SwingApplicationPageModels implements AutoCloseable {
 
     /// Lazy game-version catalog state and viewport source.
     private final GameVersionCatalogModel gameVersions;
+
+    /// Single-flight vanilla installation service used by the game-version page.
+    private final GameInstallService gameInstaller;
 
     /// Account state, viewport source, and commands.
     private final AccountsModel accounts;
@@ -62,6 +66,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// @param home launcher-home model
     /// @param instances installed-instance model
     /// @param gameVersions lazy game-version catalog model
+    /// @param gameInstaller single-flight vanilla installation service
     /// @param accounts account-selection model
     /// @param appearance appearance-settings model
     /// @param ownedResources resources closed in the supplied order
@@ -69,12 +74,14 @@ public final class SwingApplicationPageModels implements AutoCloseable {
             HomeModel home,
             InstancesModel instances,
             GameVersionCatalogModel gameVersions,
+            GameInstallService gameInstaller,
             AccountsModel accounts,
             AppearanceSettingsModel appearance,
             List<? extends AutoCloseable> ownedResources) {
         this.home = Objects.requireNonNull(home, "home");
         this.instances = Objects.requireNonNull(instances, "instances");
         this.gameVersions = Objects.requireNonNull(gameVersions, "gameVersions");
+        this.gameInstaller = Objects.requireNonNull(gameInstaller, "gameInstaller");
         this.accounts = Objects.requireNonNull(accounts, "accounts");
         this.appearance = Objects.requireNonNull(appearance, "appearance");
         Objects.requireNonNull(ownedResources, "ownedResources");
@@ -100,6 +107,13 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// @return game-version catalog model
     public GameVersionCatalogModel gameVersions() {
         return gameVersions;
+    }
+
+    /// Returns the single-flight vanilla installation service.
+    ///
+    /// @return application-owned game installer
+    public GameInstallService gameInstaller() {
+        return gameInstaller;
     }
 
     /// Returns the account-selection model.

@@ -21,6 +21,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.game.install.DefaultGameInstallService;
+import space.minecraftstl.xyml.game.install.GameInstallService;
+import space.minecraftstl.xyml.game.install.RepositoryVanillaInstallTaskFactory;
 import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -71,7 +74,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-/// Owns the transitional Swing application window, page models, legacy stores, and animation lifecycle.
+/// Owns the transitional Swing window, page models, installer, legacy stores, and animation lifecycle.
 ///
 /// The production entry point deliberately remains separate from `Launcher` while the migration is staged.
 /// Startup may call [#createAfterJavaFxInitialization] only after Accounts, game directories, and settings
@@ -81,7 +84,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// Native-window abstraction backed by [AppShellFrame] in production.
     private final SwingApplicationWindow window;
 
-    /// Five page models and their ordered model, source, and store lifecycle.
+    /// Five page models, installer, and their ordered service, model, source, and store lifecycle.
     private final SwingApplicationPageModels pageModels;
 
     /// Shared animator whose active timers are cancelled during cleanup.
@@ -245,7 +248,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         return closed.get();
     }
 
-    /// Disposes the frame, cancels animations, and closes models and stores exactly once.
+    /// Disposes the frame, cancels animations, and closes services, models, and stores exactly once.
     ///
     /// Cleanup attempts every owned resource even when an earlier resource fails. The process-wide
     /// [Schedulers#io()] executor is caller-owned and is intentionally absent from this lifecycle.
@@ -283,7 +286,14 @@ public final class SwingApplicationComposition implements AutoCloseable {
         factories.put(ShellPageId.INSTANCES, () -> new InstancesPanel(models.instances(), presentation.instances()));
         factories.put(
                 ShellPageId.DOWNLOADS,
-                () -> new GameVersionCatalogPanel(models.gameVersions(), presentation.gameVersions()));
+                () -> new GameVersionCatalogPanel(
+                        models.gameVersions(),
+                        models.gameInstaller(),
+                        presentation.gameVersions(),
+                        presentation.gameInstall(),
+                        presentation.taskProgress(),
+                        animator,
+                        presentation.taskProgressAnimationDuration()));
         factories.put(ShellPageId.ACCOUNTS, () -> new AccountsPanel(models.accounts(), presentation.accounts()));
         factories.put(
                 ShellPageId.SETTINGS,
@@ -291,7 +301,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         return Map.copyOf(factories);
     }
 
-    /// Creates production models and records model-before-store cleanup order.
+    /// Creates production collaborators and records service-before-model-before-store cleanup order.
     ///
     /// @param legacy captured JavaFX store bindings and selected repository
     /// @param commands startup-owned workflow boundaries
@@ -323,6 +333,15 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         presentation.instancesStatus()),
                 () -> new DownloadProviderGameVersionCatalogSource(DownloadProviders.getDownloadProvider()),
                 source -> new DefaultGameVersionCatalogModel(source, presentation.gameVersionsStatus()),
+                () -> new DefaultGameInstallService(
+                        new RepositoryVanillaInstallTaskFactory(
+                                legacy.repository(),
+                                DownloadProviders.getDownloadProvider(),
+                                Schedulers.io(),
+                                LegacyJavaFxDispatcher::execute),
+                        Schedulers.io(),
+                        presentation.gameInstall().taskTitle(),
+                        presentation.gameInstall().preparingPhase()),
                 () -> new LauncherAccountsModel(
                         legacy.accountStore(),
                         commands.addAccountCommand()),
@@ -361,6 +380,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         Objects.requireNonNull(accountStore, "accountStore");
         Objects.requireNonNull(appearanceStore, "appearanceStore");
         Objects.requireNonNull(legacyResources, "legacyResources");
+        List<AutoCloseable> services = new ArrayList<>(1);
         List<AutoCloseable> models = new ArrayList<>(5);
         List<AutoCloseable> sources = new ArrayList<>(1);
         try {
@@ -374,6 +394,10 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     factories.gameVersions().apply(gameVersionSource),
                     models,
                     "game-version model");
+            GameInstallService gameInstaller = ownCloseable(
+                    factories.gameInstaller().get(),
+                    services,
+                    "game-install service");
             AccountsModel accounts = ownCloseable(factories.accounts().get(), models, "accounts model");
             AppearanceSettingsModel appearance = ownCloseable(
                     factories.appearance().get(),
@@ -381,6 +405,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     "appearance model");
 
             @Unmodifiable List<AutoCloseable> resources = productionOwnedResources(
+                    services,
                     models,
                     sources,
                     homeStore,
@@ -390,11 +415,17 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     home,
                     instances,
                     gameVersions,
+                    gameInstaller,
                     accounts,
                     appearance,
                     resources);
         } catch (RuntimeException | Error failure) {
-            closeProductionModelConstructionAfterFailure(models, sources, legacyResources, failure);
+            closeProductionModelConstructionAfterFailure(
+                    services,
+                    models,
+                    sources,
+                    legacyResources,
+                    failure);
             throw failure;
         }
     }
@@ -420,11 +451,12 @@ public final class SwingApplicationComposition implements AutoCloseable {
         return validatedValue;
     }
 
-    /// Builds the immutable production model-before-source-before-store ownership order.
+    /// Builds the immutable production service-before-model-before-source-before-store ownership order.
     ///
     /// This package-visible policy keeps successful ownership directly testable without initializing
     /// JavaFX or touching the process-wide download provider.
     ///
+    /// @param services active-work services closed before their dependencies
     /// @param models created page models in dependency-safe close order
     /// @param sources lower-level sources owned by those models
     /// @param homeStore legacy home projection
@@ -432,18 +464,22 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @param appearanceStore legacy appearance persistence adapter
     /// @return immutable complete ownership order
     static @Unmodifiable List<AutoCloseable> productionOwnedResources(
+            List<? extends AutoCloseable> services,
             List<? extends AutoCloseable> models,
             List<? extends AutoCloseable> sources,
             AutoCloseable homeStore,
             AutoCloseable accountStore,
             AutoCloseable appearanceStore) {
+        Objects.requireNonNull(services, "services");
         Objects.requireNonNull(models, "models");
         Objects.requireNonNull(sources, "sources");
         Objects.requireNonNull(homeStore, "homeStore");
         Objects.requireNonNull(accountStore, "accountStore");
         Objects.requireNonNull(appearanceStore, "appearanceStore");
 
-        List<AutoCloseable> resources = new ArrayList<>(models.size() + sources.size() + 3);
+        List<AutoCloseable> resources = new ArrayList<>(
+                services.size() + models.size() + sources.size() + 3);
+        resources.addAll(List.copyOf(services));
         resources.addAll(List.copyOf(models));
         resources.addAll(List.copyOf(sources));
         resources.add(homeStore);
@@ -457,19 +493,23 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// Cleanup follows the same dependency direction as successful ownership and suppresses every
     /// cleanup failure onto the original construction failure.
     ///
+    /// @param services active-work services created before the failure
     /// @param models page models created before the failure
     /// @param sources lower-level sources created before the failure
     /// @param legacy legacy stores captured before model construction
     /// @param constructionFailure original constructor failure
     static void closeProductionModelConstructionAfterFailure(
+            List<? extends AutoCloseable> services,
             List<? extends AutoCloseable> models,
             List<? extends AutoCloseable> sources,
             AutoCloseable legacy,
             Throwable constructionFailure) {
+        Objects.requireNonNull(services, "services");
         Objects.requireNonNull(models, "models");
         Objects.requireNonNull(sources, "sources");
         Objects.requireNonNull(legacy, "legacy");
         Objects.requireNonNull(constructionFailure, "constructionFailure");
+        closeAllAfterFailure(List.copyOf(services), constructionFailure);
         closeAllAfterFailure(List.copyOf(models), constructionFailure);
         closeAllAfterFailure(List.copyOf(sources), constructionFailure);
         closeAfterFailure(legacy, constructionFailure);
@@ -588,6 +628,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @param instances installed-instance model factory
     /// @param gameVersionSource game-version catalog source factory
     /// @param gameVersions game-version model factory receiving the registered source
+    /// @param gameInstaller single-flight vanilla installation service factory
     /// @param accounts account-selection model factory
     /// @param appearance appearance-settings model factory
     @NotNullByDefault
@@ -596,6 +637,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
             Supplier<? extends InstancesModel> instances,
             Supplier<? extends GameVersionCatalogSource> gameVersionSource,
             Function<GameVersionCatalogSource, ? extends GameVersionCatalogModel> gameVersions,
+            Supplier<? extends GameInstallService> gameInstaller,
             Supplier<? extends AccountsModel> accounts,
             Supplier<? extends AppearanceSettingsModel> appearance) {
         /// Validates every factory before production construction starts.
@@ -604,6 +646,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
             Objects.requireNonNull(instances, "instances");
             Objects.requireNonNull(gameVersionSource, "gameVersionSource");
             Objects.requireNonNull(gameVersions, "gameVersions");
+            Objects.requireNonNull(gameInstaller, "gameInstaller");
             Objects.requireNonNull(accounts, "accounts");
             Objects.requireNonNull(appearance, "appearance");
         }

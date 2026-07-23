@@ -21,6 +21,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.install.GameInstallRequest;
+import space.minecraftstl.xyml.game.install.GameInstallService;
+import space.minecraftstl.xyml.game.install.GameInstallSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -32,6 +35,7 @@ import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.ThemeMode;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsStrings;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameInstallStrings;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogItem;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogPanel;
@@ -65,6 +69,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -87,6 +92,7 @@ class SwingApplicationCompositionTest {
     void keepsPagesLazyAndRoutesNavigationThroughWindowReference() {
         AtomicReference<@Nullable Consumer<ShellPageId>> navigation = new AtomicReference<>();
         List<String> closeOrder = new ArrayList<>();
+        RecordingGameInstallService gameInstaller = new RecordingGameInstallService(closeOrder);
         List<CountingCloseable> resources = createResources(closeOrder);
         RecordingGameVersionCatalogModel gameVersions = new RecordingGameVersionCatalogModel();
         RecordingWindowFactory windowFactory = new RecordingWindowFactory();
@@ -94,7 +100,7 @@ class SwingApplicationCompositionTest {
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
                 navigateCommand -> {
                     navigation.set(navigateCommand);
-                    return createModels(resources, gameVersions);
+                    return createModels(resources, gameVersions, gameInstaller);
                 },
                 presentation(),
                 themeManager(),
@@ -123,6 +129,7 @@ class SwingApplicationCompositionTest {
             catalogPanel.close();
             catalogPanel.removeNotify();
         });
+        assertEquals(0, gameInstaller.closeCount());
 
         composition.close();
         composition.close();
@@ -132,6 +139,7 @@ class SwingApplicationCompositionTest {
         for (CountingCloseable resource : resources) {
             assertEquals(1, resource.closeCount());
         }
+        assertEquals(1, gameInstaller.closeCount());
         assertThrows(IllegalStateException.class, composition::open);
     }
 
@@ -139,11 +147,12 @@ class SwingApplicationCompositionTest {
     @Test
     void nativeWindowClosureClosesOwnedResourcesOnce() {
         List<String> closeOrder = new ArrayList<>();
+        RecordingGameInstallService gameInstaller = new RecordingGameInstallService(closeOrder);
         List<CountingCloseable> resources = createResources(closeOrder);
         RecordingWindowFactory windowFactory = new RecordingWindowFactory();
         RecordingGameVersionCatalogModel gameVersions = new RecordingGameVersionCatalogModel();
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
-                navigateCommand -> createModels(resources, gameVersions),
+                navigateCommand -> createModels(resources, gameVersions, gameInstaller),
                 presentation(),
                 themeManager(),
                 new SwingAnimator(MotionPolicy.OFF, 16),
@@ -156,12 +165,14 @@ class SwingApplicationCompositionTest {
         assertEquals(1, windowFactory.window().closeCount());
         assertEquals(expectedCloseOrder(), closeOrder);
         assertFalse(resources.stream().anyMatch(resource -> resource.closeCount() != 1));
+        assertEquals(1, gameInstaller.closeCount());
     }
 
     /// Confirms that a failed window factory closes the complete collaborator-owned resource bundle.
     @Test
     void windowCreationFailureClosesCollaboratorResources() {
         List<String> closeOrder = new ArrayList<>();
+        RecordingGameInstallService gameInstaller = new RecordingGameInstallService(closeOrder);
         List<CountingCloseable> resources = createResources(closeOrder);
         RecordingGameVersionCatalogModel gameVersions = new RecordingGameVersionCatalogModel();
         IllegalStateException creationFailure = new IllegalStateException("window creation failed");
@@ -169,7 +180,7 @@ class SwingApplicationCompositionTest {
         IllegalStateException thrown = assertThrows(
                 IllegalStateException.class,
                 () -> SwingApplicationComposition.createForCollaborators(
-                        navigateCommand -> createModels(resources, gameVersions),
+                        navigateCommand -> createModels(resources, gameVersions, gameInstaller),
                         presentation(),
                         themeManager(),
                         new SwingAnimator(MotionPolicy.OFF, 16),
@@ -180,6 +191,7 @@ class SwingApplicationCompositionTest {
         assertSame(creationFailure, thrown);
         assertEquals(expectedCloseOrder(), closeOrder);
         assertFalse(resources.stream().anyMatch(resource -> resource.closeCount() != 1));
+        assertEquals(1, gameInstaller.closeCount());
     }
 
     /// Confirms that production success ownership places every model before its source and stores.
@@ -195,6 +207,10 @@ class SwingApplicationCompositionTest {
         GameVersionCatalogModel gameVersions = closeableNoCallModel(
                 GameVersionCatalogModel.class,
                 "game-versions-model",
+                closeOrder);
+        GameInstallService gameInstaller = closeableNoCallModel(
+                GameInstallService.class,
+                "game-install-service",
                 closeOrder);
         AccountsModel accounts = closeableNoCallModel(AccountsModel.class, "accounts-model", closeOrder);
         AppearanceSettingsModel appearance = closeableNoCallModel(
@@ -214,6 +230,7 @@ class SwingApplicationCompositionTest {
                             assertSame(source, createdSource);
                             return gameVersions;
                         },
+                        () -> gameInstaller,
                         () -> accounts,
                         () -> appearance);
 
@@ -224,6 +241,7 @@ class SwingApplicationCompositionTest {
                 appearanceStore,
                 () -> legacyCloseCount.incrementAndGet());
         assertSame(gameVersions, models.gameVersions());
+        assertSame(gameInstaller, models.gameInstaller());
         models.close();
 
         assertEquals(expectedCloseOrder(), closeOrder);
@@ -262,6 +280,9 @@ class SwingApplicationCompositionTest {
                             throw creationFailure;
                         },
                         () -> {
+                            throw new AssertionError("Installer must not be created after game-model failure");
+                        },
+                        () -> {
                             throw new AssertionError("Accounts model must not be created after failure");
                         },
                         () -> {
@@ -290,21 +311,95 @@ class SwingApplicationCompositionTest {
         assertEquals(1, appearanceStore.closeCount());
     }
 
+    /// Confirms that a service closes first and its close failure is suppressed after later construction fails.
+    @Test
+    void productionConstructionFailureClosesInstallerBeforeModelsAndSource() {
+        List<String> closeOrder = new ArrayList<>();
+        HomeModel home = closeableNoCallModel(HomeModel.class, "home-model", closeOrder);
+        InstancesModel instances = closeableNoCallModel(InstancesModel.class, "instances-model", closeOrder);
+        GameVersionCatalogSource source = closeableNoCallModel(
+                GameVersionCatalogSource.class,
+                "game-versions-source",
+                closeOrder);
+        GameVersionCatalogModel gameVersions = closeableNoCallModel(
+                GameVersionCatalogModel.class,
+                "game-versions-model",
+                closeOrder);
+        IllegalStateException serviceCloseFailure = new IllegalStateException("installer close failed");
+        GameInstallService gameInstaller = failingCloseGameInstallService(
+                "game-install-service",
+                closeOrder,
+                serviceCloseFailure);
+        AccountsModel accounts = closeableNoCallModel(AccountsModel.class, "accounts-model", closeOrder);
+        CountingCloseable homeStore = new CountingCloseable("home-store", closeOrder);
+        CountingCloseable accountStore = new CountingCloseable("accounts-store", closeOrder);
+        CountingCloseable appearanceStore = new CountingCloseable("appearance-store", closeOrder);
+        AutoCloseable legacyStores = () -> {
+            homeStore.close();
+            accountStore.close();
+            appearanceStore.close();
+        };
+        IllegalStateException creationFailure = new IllegalStateException("appearance model construction failed");
+        SwingApplicationComposition.ProductionPageModelFactories factories =
+                new SwingApplicationComposition.ProductionPageModelFactories(
+                        () -> home,
+                        () -> instances,
+                        () -> source,
+                        createdSource -> {
+                            assertSame(source, createdSource);
+                            return gameVersions;
+                        },
+                        () -> gameInstaller,
+                        () -> accounts,
+                        () -> {
+                            throw creationFailure;
+                        });
+
+        IllegalStateException thrown = assertThrows(
+                IllegalStateException.class,
+                () -> SwingApplicationComposition.createProductionModels(
+                        factories,
+                        homeStore,
+                        accountStore,
+                        appearanceStore,
+                        legacyStores));
+
+        assertSame(creationFailure, thrown);
+        assertEquals(1, thrown.getSuppressed().length);
+        assertSame(serviceCloseFailure, thrown.getSuppressed()[0]);
+        assertEquals(List.of(
+                "game-install-service",
+                "home-model",
+                "instances-model",
+                "game-versions-model",
+                "accounts-model",
+                "game-versions-source",
+                "home-store",
+                "accounts-store",
+                "appearance-store"), closeOrder);
+    }
+
     /// Creates no-call proxies that fail if composition accidentally instantiates a page.
     ///
     /// @param resources ordered lifecycle probes
     /// @param gameVersions game-version model required by the real lazy download-page factory
+    /// @param gameInstaller application-owned installation service supplied to that page factory
     /// @return model bundle containing proxy contracts and explicit resources
     private static SwingApplicationPageModels createModels(
             List<? extends AutoCloseable> resources,
-            GameVersionCatalogModel gameVersions) {
+            GameVersionCatalogModel gameVersions,
+            GameInstallService gameInstaller) {
+        List<AutoCloseable> ownedResources = new ArrayList<>(resources.size() + 1);
+        ownedResources.add(Objects.requireNonNull(gameInstaller, "gameInstaller"));
+        ownedResources.addAll(List.copyOf(resources));
         return new SwingApplicationPageModels(
                 noCallModel(HomeModel.class),
                 noCallModel(InstancesModel.class),
                 gameVersions,
+                gameInstaller,
                 noCallModel(AccountsModel.class),
                 noCallModel(AppearanceSettingsModel.class),
-                resources);
+                ownedResources);
     }
 
     /// Creates an interface proxy that reports any unexpected page-model invocation.
@@ -349,6 +444,32 @@ class SwingApplicationCompositionTest {
         return contract.cast(proxy);
     }
 
+    /// Creates an installation-service proxy that records cleanup before throwing one exact failure.
+    ///
+    /// @param resourceName stable close-order name
+    /// @param closeOrder shared close-order recorder
+    /// @param closeFailure exact close failure
+    /// @return close-failing service proxy
+    private static GameInstallService failingCloseGameInstallService(
+            String resourceName,
+            List<String> closeOrder,
+            RuntimeException closeFailure) {
+        Objects.requireNonNull(closeFailure, "closeFailure");
+        CountingCloseable closeable = new CountingCloseable(resourceName, closeOrder);
+        Object proxy = Proxy.newProxyInstance(
+                GameInstallService.class.getClassLoader(),
+                new Class<?>[]{GameInstallService.class},
+                (ignoredProxy, method, ignoredArguments) -> {
+                    if (method.getName().equals("close") && method.getParameterCount() == 0) {
+                        closeable.close();
+                        throw closeFailure;
+                    }
+                    throw new AssertionError("Production construction used installer eagerly: "
+                            + method.getName());
+                });
+        return GameInstallService.class.cast(proxy);
+    }
+
     /// Creates the explicit test-only localized presentation.
     ///
     /// @return complete presentation fixture
@@ -373,6 +494,16 @@ class SwingApplicationCompositionTest {
                         "Refresh",
                         "Refreshing"),
                 new GameVersionCatalogStatusStrings("Waiting", "Loading", "Ready", "Empty", "Failed"),
+                new GameInstallStrings(
+                        "Instance name",
+                        "Install",
+                        "Back to versions",
+                        "Install game",
+                        "Preparing installation",
+                        "Invalid name",
+                        "Instance already exists",
+                        "Another installation is running",
+                        "Installation failed"),
                 new AccountsStrings("Accounts", "Add", "Empty"),
                 new AppearanceSettingsStrings(
                         "Appearance", "Theme", "System", "Light", "Dark", "Radius", "Animations"),
@@ -415,6 +546,7 @@ class SwingApplicationCompositionTest {
     /// @return immutable expected close order
     private static @Unmodifiable List<String> expectedCloseOrder() {
         return List.of(
+                "game-install-service",
                 "home-model",
                 "instances-model",
                 "game-versions-model",
@@ -676,6 +808,51 @@ class SwingApplicationCompositionTest {
         /// @return close count
         private int closeCount() {
             return closeCount.get();
+        }
+    }
+
+    /// Records application ownership while rejecting unexpected installation workflow calls.
+    @NotNullByDefault
+    private static final class RecordingGameInstallService implements GameInstallService {
+        /// Close-order probe backing this typed service.
+        private final CountingCloseable closeable;
+
+        /// Creates one typed application-owned service probe.
+        ///
+        /// @param closeOrder shared close-order recorder
+        private RecordingGameInstallService(List<String> closeOrder) {
+            closeable = new CountingCloseable("game-install-service", closeOrder);
+        }
+
+        /// Rejects an installation command in composition-only tests.
+        ///
+        /// @param request unexpected installation request
+        /// @return never returns
+        @Override
+        public GameInstallSession install(GameInstallRequest request) {
+            throw new AssertionError("Unexpected installation request: "
+                    + Objects.requireNonNull(request, "request"));
+        }
+
+        /// Returns the stable empty active-session state.
+        ///
+        /// @return empty active installation
+        @Override
+        public Optional<GameInstallSession> activeInstallation() {
+            return Optional.empty();
+        }
+
+        /// Records application-owned service cleanup.
+        @Override
+        public void close() {
+            closeable.close();
+        }
+
+        /// Returns the number of service close invocations.
+        ///
+        /// @return close count
+        private int closeCount() {
+            return closeable.closeCount();
         }
     }
 
