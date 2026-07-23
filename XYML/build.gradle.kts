@@ -245,7 +245,12 @@ tasks.shadowJar {
 
 val requiredOfflineUiEntries = listOf(
     "com/formdev/flatlaf/FlatLaf.class",
+    "com/formdev/flatlaf/FlatLaf.properties",
+    "com/formdev/flatlaf/FlatLightLaf.properties",
+    "com/formdev/flatlaf/FlatDarkLaf.properties",
     "com/formdev/flatlaf/extras/FlatSVGIcon.class",
+    "com/github/weisj/jsvg/SVGDocument.class",
+    "net/miginfocom/layout/LC.class",
     "net/miginfocom/swing/MigLayout.class",
 )
 
