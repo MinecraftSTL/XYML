@@ -173,6 +173,11 @@ An artifact verification task must prove that the final launcher:
    module-opening flags.
 10. Add offline artifact verification and the cross-platform smoke-test matrix.
 
+After the Swing downloads page gained vanilla installation, both Home and
+Instances route their new-instance action internally to `DOWNLOADS`. Startup no
+longer supplies a legacy add-instance workflow command; only account creation
+and launch remain transitional command boundaries.
+
 ## Commit and verification policy
 
 Each commit must compile independently and have a single migration purpose.

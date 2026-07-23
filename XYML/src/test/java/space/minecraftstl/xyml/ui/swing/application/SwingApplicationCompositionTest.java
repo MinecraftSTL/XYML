@@ -199,9 +199,9 @@ class SwingApplicationCompositionTest {
         assertEquals(1, gameInstaller.closeCount());
     }
 
-    /// Confirms that production success ownership places every model before its source and stores.
+    /// Confirms production ownership and shared internal add-instance navigation for both page models.
     @Test
-    void productionOwnershipPlacesSourceBetweenModelsAndStores() {
+    void productionOwnershipSharesInternalAddInstanceNavigation() {
         List<String> closeOrder = new ArrayList<>();
         HomeModel home = closeableNoCallModel(HomeModel.class, "home-model", closeOrder);
         InstanceManagementCoordinator instanceManagement = recordingInstanceManagement(closeOrder);
@@ -227,12 +227,19 @@ class SwingApplicationCompositionTest {
         CountingCloseable accountStore = new CountingCloseable("accounts-store", closeOrder);
         CountingCloseable appearanceStore = new CountingCloseable("appearance-store", closeOrder);
         AtomicInteger legacyCloseCount = new AtomicInteger();
+        AtomicReference<@Nullable Runnable> homeAddInstanceCommand = new AtomicReference<>();
+        AtomicReference<@Nullable Runnable> instancesAddInstanceCommand = new AtomicReference<>();
+        List<ShellPageId> navigations = new ArrayList<>();
         SwingApplicationComposition.ProductionPageModelFactories factories =
                 new SwingApplicationComposition.ProductionPageModelFactories(
-                        () -> home,
+                        addInstanceCommand -> {
+                            homeAddInstanceCommand.set(addInstanceCommand);
+                            return home;
+                        },
                         () -> instanceManagement,
-                        createdManagement -> {
+                        (createdManagement, addInstanceCommand) -> {
                             assertSame(instanceManagement, createdManagement);
+                            instancesAddInstanceCommand.set(addInstanceCommand);
                             return instances;
                         },
                         () -> source,
@@ -249,10 +256,17 @@ class SwingApplicationCompositionTest {
                 homeStore,
                 accountStore,
                 appearanceStore,
-                () -> legacyCloseCount.incrementAndGet());
+                () -> legacyCloseCount.incrementAndGet(),
+                navigations::add);
         assertSame(gameVersions, models.gameVersions());
         assertSame(gameInstaller, models.gameInstaller());
         assertSame(instanceManagement, models.instanceManagement());
+        Runnable homeCommand = Objects.requireNonNull(homeAddInstanceCommand.get());
+        Runnable instancesCommand = Objects.requireNonNull(instancesAddInstanceCommand.get());
+        assertSame(homeCommand, instancesCommand);
+        homeCommand.run();
+        instancesCommand.run();
+        assertEquals(List.of(ShellPageId.DOWNLOADS, ShellPageId.DOWNLOADS), navigations);
         models.close();
 
         assertEquals(expectedProductionCloseOrder(), closeOrder);
@@ -285,9 +299,9 @@ class SwingApplicationCompositionTest {
         IllegalStateException creationFailure = new IllegalStateException("game model construction failed");
         SwingApplicationComposition.ProductionPageModelFactories factories =
                 new SwingApplicationComposition.ProductionPageModelFactories(
-                        () -> home,
+                        ignoredAddInstanceCommand -> home,
                         () -> instanceManagement,
-                        ignoredManagement -> instances,
+                        (ignoredManagement, ignoredAddInstanceCommand) -> instances,
                         () -> source,
                         createdSource -> {
                             assertSame(source, createdSource);
@@ -310,7 +324,9 @@ class SwingApplicationCompositionTest {
                         homeStore,
                         accountStore,
                         appearanceStore,
-                        legacyStores));
+                        legacyStores,
+                        ignoredPage -> {
+                        }));
 
         assertSame(creationFailure, thrown);
         assertEquals(List.of(
@@ -359,9 +375,9 @@ class SwingApplicationCompositionTest {
         IllegalStateException creationFailure = new IllegalStateException("appearance model construction failed");
         SwingApplicationComposition.ProductionPageModelFactories factories =
                 new SwingApplicationComposition.ProductionPageModelFactories(
-                        () -> home,
+                        ignoredAddInstanceCommand -> home,
                         () -> instanceManagement,
-                        ignoredManagement -> instances,
+                        (ignoredManagement, ignoredAddInstanceCommand) -> instances,
                         () -> source,
                         createdSource -> {
                             assertSame(source, createdSource);
@@ -380,7 +396,9 @@ class SwingApplicationCompositionTest {
                         homeStore,
                         accountStore,
                         appearanceStore,
-                        legacyStores));
+                        legacyStores,
+                        ignoredPage -> {
+                        }));
 
         assertSame(creationFailure, thrown);
         assertEquals(1, thrown.getSuppressed().length);
