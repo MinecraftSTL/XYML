@@ -20,9 +20,12 @@ package space.minecraftstl.xyml.ui.swing.page.home;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.AbstractButton;
@@ -33,6 +36,7 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.util.HashSet;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -221,6 +225,10 @@ public final class HomePanelTest {
         /// Home snapshot transition publisher.
         private final ValueChangeSupport<HomeSnapshot> changes = new ValueChangeSupport<>(this);
 
+        /// Optional fake launch session retained for the home-view contract.
+        private final SimpleObjectProperty<Optional<LaunchSession>> launchSession =
+                new SimpleObjectProperty<>(this, "launchSession", Optional.empty());
+
         /// Account-selection command count.
         private final AtomicInteger accountSelections = new AtomicInteger();
 
@@ -250,6 +258,12 @@ public final class HomePanelTest {
         @Override
         public Subscription subscribe(ValueChangeListener<HomeSnapshot> listener) {
             return changes.subscribe(listener);
+        }
+
+        /// Returns the optional fake launch-session property.
+        @Override
+        public ReadOnlyProperty<Optional<LaunchSession>> launchSessionProperty() {
+            return launchSession;
         }
 
         /// Records account-selection invocation.

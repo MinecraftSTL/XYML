@@ -18,8 +18,12 @@
 package space.minecraftstl.xyml.ui.swing.page.home;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
+
+import java.util.Optional;
 
 /// Supplies launcher-home state and commands without exposing JavaFX or Swing types.
 @NotNullByDefault
@@ -29,11 +33,22 @@ public interface HomeModel {
     /// @return current home snapshot
     HomeSnapshot snapshot();
 
-    /// Registers for future home-state transitions on the publishing thread.
+    /// Registers for future home-state invalidations on the publishing thread.
+    ///
+    /// Concurrent changes may coalesce before delivery. Consumers must read [#snapshot()] rather than treating an
+    /// event payload as newer than a snapshot already observed on another thread. One listener's runtime failure is
+    /// isolated from later registrations, while an [Error] is propagated unchanged.
     ///
     /// @param listener snapshot transition listener
     /// @return independently cancellable listener registration
     Subscription subscribe(ValueChangeListener<HomeSnapshot> listener);
+
+    /// Returns the latest launch session for task presentation, or an empty value before the first launch.
+    ///
+    /// A terminal session remains available until the next launch so failure details do not disappear immediately.
+    ///
+    /// @return read-only optional launch-session property
+    ReadOnlyProperty<Optional<LaunchSession>> launchSessionProperty();
 
     /// Opens the account-selection workflow.
     void selectAccount();

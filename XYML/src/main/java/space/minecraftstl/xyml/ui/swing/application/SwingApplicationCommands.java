@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.application;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchCommand;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 
 import javax.swing.JComponent;
@@ -34,14 +35,14 @@ import java.util.function.Consumer;
 /// @param addAccountCommand command that opens the supported add-account workflow
 /// @param addInstanceCommand command that opens the supported add-instance workflow
 /// @param manageInstanceCommand command that manages a stable selected instance identifier
-/// @param launchCommand command that launches the currently selected account and instance
+/// @param launchCommand command that starts a session from captured stable selection identifiers
 @NotNullByDefault
 public record SwingApplicationCommands(
         ShellPageFactory<? extends JComponent> downloadsPageFactory,
         Runnable addAccountCommand,
         Runnable addInstanceCommand,
         Consumer<String> manageInstanceCommand,
-        Runnable launchCommand) {
+        HomeLaunchCommand launchCommand) {
     /// Validates every startup-owned workflow boundary.
     public SwingApplicationCommands {
         Objects.requireNonNull(downloadsPageFactory, "downloadsPageFactory");
