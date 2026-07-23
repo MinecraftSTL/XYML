@@ -43,6 +43,7 @@ import space.minecraftstl.xyml.addon.repository.ModrinthRemoteAddonRepository;
 import space.minecraftstl.xyml.addon.resourcepack.ResourcePackFile;
 import space.minecraftstl.xyml.addon.resourcepack.ResourcePackManager;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.image.EncodedImage;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -58,9 +59,11 @@ import space.minecraftstl.xyml.util.Pair;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.TaskCancellationAction;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantLock;
@@ -438,25 +441,64 @@ public final class ResourcePackListPage extends ListPageBase<ResourcePackListPag
         }
     }
 
+    /// Legacy JavaFX row data with icon decoding completed by the caller's refresh worker.
+    @NotNullByDefault
     public static class ResourcePackInfoObject {
+        /// Local resource-pack domain object.
         private final ResourcePackFile file;
+
+        /// Mutable legacy JavaFX enabled-state property.
         private final BooleanProperty enabled;
 
+        /// Decoded or bundled fallback icon cached before cell rendering.
+        private final Image icon;
+
+        /// Creates one row and performs bounded icon I/O on the current refresh worker.
+        ///
+        /// @param pair resource pack and enabled state
         public ResourcePackInfoObject(Pair<ResourcePackFile, Boolean> pair) {
             this.file = pair.key();
             this.enabled = new SimpleBooleanProperty(this, "enabled", pair.value());
+            this.icon = loadIcon(file);
         }
 
+        /// Returns the local resource-pack object.
+        ///
+        /// @return local resource pack
         public ResourcePackFile getFile() {
             return file;
         }
 
+        /// Returns the legacy enabled-state property.
+        ///
+        /// @return enabled-state property
         public BooleanProperty enabledProperty() {
             return enabled;
         }
 
+        /// Returns the cached decoded or fallback icon without cell-thread I/O.
+        ///
+        /// @return usable square icon
         Image getIcon() {
-            Image image = file.getIcon();
+            return icon;
+        }
+
+        /// Loads bounded encoded bytes and converts them for the legacy JavaFX page.
+        ///
+        /// @param file local resource pack
+        /// @return decoded square image or bundled fallback
+        private static Image loadIcon(ResourcePackFile file) {
+            @Nullable Image image = null;
+            try {
+                @Nullable EncodedImage iconData = file.loadIconData();
+                if (iconData != null) {
+                    try (InputStream input = iconData.openStream()) {
+                        image = new Image(input, 64, 64, true, true);
+                    }
+                }
+            } catch (IOException | RuntimeException failure) {
+                LOG.warning("Failed to load resource pack icon", failure);
+            }
             if (image == null || image.isError() || image.getWidth() <= 0 || image.getHeight() <= 0 ||
                     (Math.abs(image.getWidth() - image.getHeight()) >= 1)) {
                 image = FXUtils.newBuiltinImage("/assets/img/unknown_pack.png");
