@@ -31,6 +31,7 @@ import java.util.Objects;
 /// @param addInstanceAction new-instance command label
 /// @param launchAction normal launch command label
 /// @param launchingAction in-progress launch command label
+/// @param backToSelectionsAction command label for returning from task progress to launch selections
 @NotNullByDefault
 public record HomeStrings(
         String pageTitle,
@@ -40,7 +41,8 @@ public record HomeStrings(
         String missingInstanceLabel,
         String addInstanceAction,
         String launchAction,
-        String launchingAction) {
+        String launchingAction,
+        String backToSelectionsAction) {
     /// Validates localized home-page text.
     public HomeStrings {
         Objects.requireNonNull(pageTitle, "pageTitle");
@@ -51,5 +53,6 @@ public record HomeStrings(
         Objects.requireNonNull(addInstanceAction, "addInstanceAction");
         Objects.requireNonNull(launchAction, "launchAction");
         Objects.requireNonNull(launchingAction, "launchingAction");
+        Objects.requireNonNull(backToSelectionsAction, "backToSelectionsAction");
     }
 }

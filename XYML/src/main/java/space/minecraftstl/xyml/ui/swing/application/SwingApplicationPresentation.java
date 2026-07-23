@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstancesStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentations;
+import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -40,6 +41,8 @@ import java.util.Objects;
 /// @param accounts localized account-page controls
 /// @param appearance localized appearance-settings controls
 /// @param pageTransitionDuration non-negative page transition duration selected by startup policy
+/// @param taskProgress localized task-progress controls and lifecycle states
+/// @param taskProgressAnimationDuration non-negative progress animation duration selected by startup policy
 @NotNullByDefault
 public record SwingApplicationPresentation(
         String windowTitle,
@@ -50,7 +53,9 @@ public record SwingApplicationPresentation(
         RepositoryInstancesStatusStrings instancesStatus,
         AccountsStrings accounts,
         AppearanceSettingsStrings appearance,
-        Duration pageTransitionDuration) {
+        Duration pageTransitionDuration,
+        TaskProgressStrings taskProgress,
+        Duration taskProgressAnimationDuration) {
     /// Validates all localized text groups and the explicit timing policy.
     public SwingApplicationPresentation {
         Objects.requireNonNull(windowTitle, "windowTitle");
@@ -62,11 +67,16 @@ public record SwingApplicationPresentation(
         Objects.requireNonNull(accounts, "accounts");
         Objects.requireNonNull(appearance, "appearance");
         Objects.requireNonNull(pageTransitionDuration, "pageTransitionDuration");
+        Objects.requireNonNull(taskProgress, "taskProgress");
+        Objects.requireNonNull(taskProgressAnimationDuration, "taskProgressAnimationDuration");
         if (windowTitle.isBlank()) {
             throw new IllegalArgumentException("windowTitle must not be blank");
         }
         if (pageTransitionDuration.isNegative()) {
             throw new IllegalArgumentException("pageTransitionDuration must not be negative");
+        }
+        if (taskProgressAnimationDuration.isNegative()) {
+            throw new IllegalArgumentException("taskProgressAnimationDuration must not be negative");
         }
     }
 }

@@ -216,6 +216,44 @@ public final class LauncherHomeModelTest {
         }
     }
 
+    /// Terminal state is still published when status-listener cleanup throws its contracted runtime failure.
+    @Test
+    public void publishesTerminalSnapshotWhenStatusUnsubscribeFails() {
+        FakeSelectionStore store = new FakeSelectionStore(new HomeSelectionState(
+                "account-a", "directory-a", "instance-a", "Alex", "microsoft", "1.21.1", "Games"));
+        DefaultGameLaunchService launchService = pendingLaunchService();
+        IllegalStateException unsubscribeFailure = new IllegalStateException("status unsubscribe failed");
+        LauncherHomeModel model = new LauncherHomeModel(
+                store,
+                STATUS_STRINGS,
+                () -> { },
+                () -> { },
+                () -> { },
+                request -> new ThrowingUnsubscribeLaunchSession(
+                        launchService.launch(request),
+                        unsubscribeFailure));
+        AtomicReference<HomeSnapshot> latestPublished = new AtomicReference<>(model.snapshot());
+        Subscription homeSubscription = model.subscribe(
+                change -> latestPublished.set(change.currentValue()));
+        try {
+            model.launch();
+            LaunchSession session = model.launchSessionProperty().getValue().orElseThrow();
+
+            assertTrue(session.cancel());
+
+            assertAll(
+                    () -> assertEquals(LaunchStatus.CANCELLED, session.status()),
+                    () -> assertFalse(model.snapshot().launching()),
+                    () -> assertTrue(model.snapshot().launchEnabled()),
+                    () -> assertTrue(model.snapshot().selectionCommandsEnabled()),
+                    () -> assertEquals(model.snapshot(), latestPublished.get()));
+        } finally {
+            homeSubscription.unsubscribe();
+            model.close();
+            launchService.close();
+        }
+    }
+
     /// A session that fails before status subscription is reconciled immediately instead of leaving launch disabled.
     @Test
     public void reconcilesSessionAlreadyTerminalWhenCommandReturns() {
@@ -744,6 +782,138 @@ public final class LauncherHomeModelTest {
         @Override
         public int hashCode() {
             return EqualLaunchSession.class.hashCode();
+        }
+    }
+
+    /// Launch-session decorator whose status subscription throws after releasing its delegate registration.
+    @NotNullByDefault
+    private static final class ThrowingUnsubscribeLaunchSession implements LaunchSession {
+        /// Real session supplying launch and task behavior.
+        private final LaunchSession delegate;
+
+        /// Status property that injects the configured unsubscribe failure.
+        private final ReadOnlyProperty<LaunchStatus> statusProperty;
+
+        /// Creates a session with one failing status-listener cleanup boundary.
+        ///
+        /// @param delegate real launch session
+        /// @param unsubscribeFailure failure thrown after delegated status cleanup
+        private ThrowingUnsubscribeLaunchSession(
+                LaunchSession delegate,
+                RuntimeException unsubscribeFailure) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+            statusProperty = new ThrowingUnsubscribeStatusProperty(
+                    delegate.statusProperty(),
+                    unsubscribeFailure);
+        }
+
+        /// Returns the delegated launch request.
+        @Override
+        public LaunchRequest request() {
+            return delegate.request();
+        }
+
+        /// Returns the delegated launch status.
+        @Override
+        public LaunchStatus status() {
+            return delegate.status();
+        }
+
+        /// Returns the failure-injecting status property.
+        @Override
+        public ReadOnlyProperty<LaunchStatus> statusProperty() {
+            return statusProperty;
+        }
+
+        /// Returns the delegated task snapshot.
+        @Override
+        public TaskSnapshot snapshot() {
+            return delegate.snapshot();
+        }
+
+        /// Registers a delegated task listener.
+        @Override
+        public Subscription subscribe(ValueChangeListener<TaskSnapshot> listener) {
+            return delegate.subscribe(listener);
+        }
+
+        /// Delegates task cancellation.
+        @Override
+        public void requestCancellation() {
+            delegate.requestCancellation();
+        }
+
+        /// Returns the delegated process completion.
+        @Override
+        public CompletionStage<ManagedProcess> completion() {
+            return delegate.completion();
+        }
+
+        /// Returns the delegated created process.
+        @Override
+        public Optional<ManagedProcess> createdProcess() {
+            return delegate.createdProcess();
+        }
+
+        /// Returns the delegated terminal failure.
+        @Override
+        public Optional<Throwable> failure() {
+            return delegate.failure();
+        }
+
+        /// Delegates cooperative cancellation.
+        @Override
+        public boolean cancel() {
+            return delegate.cancel();
+        }
+    }
+
+    /// Read-only status-property decorator that fails after removing each registration.
+    @NotNullByDefault
+    private static final class ThrowingUnsubscribeStatusProperty implements ReadOnlyProperty<LaunchStatus> {
+        /// Real status property.
+        private final ReadOnlyProperty<LaunchStatus> delegate;
+
+        /// Failure thrown after a delegated unsubscribe.
+        private final RuntimeException unsubscribeFailure;
+
+        /// Creates a status-property cleanup failure boundary.
+        ///
+        /// @param delegate real status property
+        /// @param unsubscribeFailure failure thrown after cleanup
+        private ThrowingUnsubscribeStatusProperty(
+                ReadOnlyProperty<LaunchStatus> delegate,
+                RuntimeException unsubscribeFailure) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+            this.unsubscribeFailure = Objects.requireNonNull(unsubscribeFailure, "unsubscribeFailure");
+        }
+
+        /// Returns the current delegated status.
+        @Override
+        public @Nullable LaunchStatus getValue() {
+            return delegate.getValue();
+        }
+
+        /// Registers a listener whose cleanup releases the delegate before failing.
+        @Override
+        public Subscription subscribe(ValueChangeListener<LaunchStatus> listener) {
+            Subscription registration = delegate.subscribe(listener);
+            return Subscription.create(() -> {
+                registration.unsubscribe();
+                throw unsubscribeFailure;
+            });
+        }
+
+        /// Returns the delegated property owner.
+        @Override
+        public @Nullable Object getBean() {
+            return delegate.getBean();
+        }
+
+        /// Returns the delegated property name.
+        @Override
+        public String getName() {
+            return delegate.getName();
         }
     }
 }

@@ -196,7 +196,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         }
 
         @Unmodifiable Map<ShellPageId, ShellPageFactory<? extends JComponent>> pageFactories =
-                createPageFactories(models, presentation, downloadsPageFactory);
+                createPageFactories(models, presentation, downloadsPageFactory, animator);
         final SwingApplicationWindow createdWindow;
         try {
             createdWindow = Objects.requireNonNull(
@@ -259,14 +259,21 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @param models toolkit-neutral page models
     /// @param presentation localized page text
     /// @param downloadsPageFactory caller-owned lazy download page factory
+    /// @param animator shared application animator
     /// @return complete immutable page factory table
     private static @Unmodifiable Map<ShellPageId, ShellPageFactory<? extends JComponent>> createPageFactories(
             SwingApplicationPageModels models,
             SwingApplicationPresentation presentation,
-            ShellPageFactory<? extends JComponent> downloadsPageFactory) {
+            ShellPageFactory<? extends JComponent> downloadsPageFactory,
+            SwingAnimator animator) {
         EnumMap<ShellPageId, ShellPageFactory<? extends JComponent>> factories =
                 new EnumMap<>(ShellPageId.class);
-        factories.put(ShellPageId.HOME, () -> new HomePanel(models.home(), presentation.home()));
+        factories.put(ShellPageId.HOME, () -> new HomePanel(
+                models.home(),
+                presentation.home(),
+                presentation.taskProgress(),
+                animator,
+                presentation.taskProgressAnimationDuration()));
         factories.put(ShellPageId.INSTANCES, () -> new InstancesPanel(models.instances(), presentation.instances()));
         factories.put(ShellPageId.DOWNLOADS, downloadsPageFactory);
         factories.put(ShellPageId.ACCOUNTS, () -> new AccountsPanel(models.accounts(), presentation.accounts()));

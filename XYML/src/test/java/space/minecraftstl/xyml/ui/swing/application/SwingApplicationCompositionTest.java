@@ -40,6 +40,7 @@ import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentations;
+import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
@@ -168,13 +169,18 @@ class SwingApplicationCompositionTest {
         return new SwingApplicationPresentation(
                 "XYML test",
                 ShellPagePresentations.englishFallback(),
-                new HomeStrings("Home", "Account", "None", "Instance", "None", "Add", "Launch", "Launching"),
+                new HomeStrings(
+                        "Home", "Account", "None", "Instance", "None", "Add", "Launch", "Launching", "Back"),
                 new HomeStatusStrings("Ready", "Select account", "Select instance"),
                 new InstancesStrings("Instances", "Refresh", "Refreshing", "Add", "Manage", "Empty"),
                 new RepositoryInstancesStatusStrings("Loading", "Ready", "Refreshing", "Failed", "Unknown"),
                 new AccountsStrings("Accounts", "Add", "Empty"),
                 new AppearanceSettingsStrings(
                         "Appearance", "Theme", "System", "Light", "Dark", "Radius", "Animations"),
+                Duration.ZERO,
+                new TaskProgressStrings(
+                        "Waiting", "Running", "Completed", "Failed", "Cancelled",
+                        "Task progress", "Cancel", "Show details", "Hide details"),
                 Duration.ZERO);
     }
 

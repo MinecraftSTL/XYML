@@ -36,6 +36,8 @@ import java.awt.image.BufferedImage;
 import java.util.HashSet;
 import java.util.OptionalDouble;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -45,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests task progress rendering and worker-to-EDT state delivery without creating a native window.
@@ -106,6 +109,129 @@ public final class TaskProgressPanelTest {
                     () -> assertTrue(model.wasCancellationAccepted()),
                     () -> assertFalse(panel.isCancellationActionVisible()),
                     () -> assertFalse(panel.isCancellationActionEnabled()));
+            panel.close();
+        });
+    }
+
+    /// Verifies that a rejected runtime cancellation refreshes state and permits a later retry.
+    @Test
+    public void restoresCancellationAfterRuntimeFailure() {
+        TaskSnapshot initialSnapshot = new TaskSnapshot(
+                "Download files",
+                "Connecting",
+                OptionalDouble.empty(),
+                TaskStatus.RUNNING,
+                true,
+                "");
+        TaskSnapshot refreshedSnapshot = new TaskSnapshot(
+                "Download files",
+                "Waiting for mirror",
+                OptionalDouble.of(0.1),
+                TaskStatus.RUNNING,
+                false,
+                "Mirror rollback is pending");
+        TaskSnapshot retrySnapshot = new TaskSnapshot(
+                "Download files",
+                "Retry cancellation",
+                OptionalDouble.of(0.1),
+                TaskStatus.RUNNING,
+                true,
+                "Retry is available");
+        IllegalStateException expectedFailure = new IllegalStateException("cancellation rejected");
+        FakeTaskPresentationModel model = new FakeTaskPresentationModel(initialSnapshot);
+        model.rejectNextCancellation(expectedFailure, refreshedSnapshot);
+        TaskProgressPanel panel = onEventDispatchThread(() -> new TaskProgressPanel(model));
+
+        IllegalStateException actualFailure = onEventDispatchThread(
+                () -> assertThrows(IllegalStateException.class, panel::requestCancellation));
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertSame(expectedFailure, actualFailure),
+                    () -> assertSame(refreshedSnapshot, panel.getDisplayedSnapshot()),
+                    () -> assertFalse(panel.isCancellationActionVisible()),
+                    () -> assertFalse(panel.isCancellationActionEnabled()),
+                    () -> assertEquals(1, model.cancellationInvocationCount()));
+        });
+
+        model.publish(retrySnapshot);
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertSame(retrySnapshot, panel.getDisplayedSnapshot()),
+                    () -> assertTrue(panel.isCancellationActionVisible()),
+                    () -> assertTrue(panel.isCancellationActionEnabled()));
+            panel.requestCancellation();
+
+            assertAll(
+                    () -> assertEquals(2, model.cancellationInvocationCount()),
+                    () -> assertTrue(model.wasCancellationAccepted()),
+                    () -> assertFalse(panel.isCancellationActionVisible()),
+                    () -> assertFalse(panel.isCancellationActionEnabled()));
+            panel.close();
+        });
+    }
+
+    /// A snapshot recovery error outranks the cancellation runtime failure without disabling a later retry.
+    @Test
+    public void preservesBothFailuresWhenCancellationRecoveryAlsoFails() {
+        TaskSnapshot snapshot = new TaskSnapshot(
+                "Launch game",
+                "Preparing process",
+                OptionalDouble.empty(),
+                TaskStatus.RUNNING,
+                true,
+                "");
+        IllegalStateException cancellationFailure = new IllegalStateException("cancellation rejected");
+        AssertionError recoveryFailure = new AssertionError("snapshot unavailable");
+        FakeTaskPresentationModel model = new FakeTaskPresentationModel(snapshot);
+        TaskProgressPanel panel = onEventDispatchThread(() -> new TaskProgressPanel(model));
+        model.rejectNextCancellation(cancellationFailure, snapshot);
+        model.rejectNextSnapshotRead(recoveryFailure);
+
+        AssertionError actualFailure = onEventDispatchThread(
+                () -> assertThrows(AssertionError.class, panel::requestCancellation));
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertSame(recoveryFailure, actualFailure),
+                    () -> assertEquals(1, actualFailure.getSuppressed().length),
+                    () -> assertSame(cancellationFailure, actualFailure.getSuppressed()[0]),
+                    () -> assertTrue(panel.isCancellationActionVisible()),
+                    () -> assertTrue(panel.isCancellationActionEnabled()));
+
+            panel.requestCancellation();
+            assertEquals(2, model.cancellationInvocationCount());
+            panel.close();
+        });
+    }
+
+    /// Verifies that an error from cancellation also restores an active cancelable surface.
+    @Test
+    public void restoresCancellationAfterError() {
+        TaskSnapshot snapshot = new TaskSnapshot(
+                "Launch game",
+                "Preparing process",
+                OptionalDouble.empty(),
+                TaskStatus.RUNNING,
+                true,
+                "");
+        AssertionError expectedFailure = new AssertionError("cancellation observer failed");
+        FakeTaskPresentationModel model = new FakeTaskPresentationModel(snapshot);
+        model.rejectNextCancellation(expectedFailure, snapshot);
+        TaskProgressPanel panel = onEventDispatchThread(() -> new TaskProgressPanel(model));
+
+        AssertionError actualFailure = onEventDispatchThread(
+                () -> assertThrows(AssertionError.class, panel::requestCancellation));
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertSame(expectedFailure, actualFailure),
+                    () -> assertSame(snapshot, panel.getDisplayedSnapshot()),
+                    () -> assertTrue(panel.isCancellationActionVisible()),
+                    () -> assertTrue(panel.isCancellationActionEnabled()),
+                    () -> assertEquals(1, model.cancellationInvocationCount()));
             panel.close();
         });
     }
@@ -200,6 +326,43 @@ public final class TaskProgressPanelTest {
         assertTrue(paintedColors.size() > 1, "the off-screen task surface should contain visible structure");
     }
 
+    /// Closing waits for an in-flight task snapshot read and rejects every later task publication.
+    @Test
+    public void closeFormsBarrierAgainstInFlightTaskPublication() throws InterruptedException {
+        TaskSnapshot initialSnapshot = new TaskSnapshot(
+                "Launch game", "Waiting", OptionalDouble.empty(), TaskStatus.WAITING, true, "");
+        TaskSnapshot runningSnapshot = new TaskSnapshot(
+                "Launch game", "Preparing", OptionalDouble.of(0.3), TaskStatus.RUNNING, true, "");
+        TaskSnapshot lateSnapshot = new TaskSnapshot(
+                "Launch game", "Late update", OptionalDouble.of(0.8), TaskStatus.RUNNING, true, "");
+        FakeTaskPresentationModel model = new FakeTaskPresentationModel(initialSnapshot);
+        TaskProgressPanel panel = onEventDispatchThread(() -> new TaskProgressPanel(model));
+        CountDownLatch snapshotEntered = new CountDownLatch(1);
+        CountDownLatch releaseSnapshot = new CountDownLatch(1);
+        CountDownLatch closeReturned = new CountDownLatch(1);
+        model.blockNextSnapshotRead(snapshotEntered, releaseSnapshot);
+        model.publish(runningSnapshot);
+
+        Thread closer = new Thread(() -> {
+            panel.close();
+            closeReturned.countDown();
+        }, "task-panel-close-barrier-test");
+        try {
+            assertTrue(snapshotEntered.await(5, TimeUnit.SECONDS));
+            closer.start();
+            assertFalse(closeReturned.await(100, TimeUnit.MILLISECONDS));
+        } finally {
+            releaseSnapshot.countDown();
+        }
+
+        assertTrue(closeReturned.await(5, TimeUnit.SECONDS));
+        closer.join();
+        model.publish(lateSnapshot);
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> assertSame(runningSnapshot, panel.getDisplayedSnapshot()));
+    }
+
     /// Executes a value-producing operation synchronously on the Swing event dispatch thread.
     ///
     /// @param operation the operation to execute
@@ -259,6 +422,21 @@ public final class TaskProgressPanelTest {
         /// Whether the fake task accepted its first cancellation request.
         private final AtomicBoolean cancellationAccepted = new AtomicBoolean();
 
+        /// Failure thrown by the next cancellation request, or null when cancellation should succeed.
+        private final AtomicReference<@Nullable Throwable> nextCancellationFailure = new AtomicReference<>();
+
+        /// Snapshot installed immediately before the configured cancellation failure is thrown.
+        private final AtomicReference<@Nullable TaskSnapshot> cancellationFailureSnapshot = new AtomicReference<>();
+
+        /// Failure thrown by the next snapshot read, or null when reads should succeed.
+        private final AtomicReference<@Nullable Throwable> nextSnapshotFailure = new AtomicReference<>();
+
+        /// Signal emitted when the next explicitly blocked snapshot read starts.
+        private final AtomicReference<@Nullable CountDownLatch> nextSnapshotEntered = new AtomicReference<>();
+
+        /// Signal releasing the next explicitly blocked snapshot read.
+        private final AtomicReference<@Nullable CountDownLatch> nextSnapshotRelease = new AtomicReference<>();
+
         /// Creates a fake model with an initial snapshot.
         ///
         /// @param initialSnapshot the initial immutable state
@@ -271,6 +449,26 @@ public final class TaskProgressPanelTest {
         /// @return the latest snapshot
         @Override
         public TaskSnapshot snapshot() {
+            @Nullable Throwable failure = nextSnapshotFailure.getAndSet(null);
+            if (failure instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (failure instanceof Error error) {
+                throw error;
+            }
+            @Nullable CountDownLatch entered = nextSnapshotEntered.getAndSet(null);
+            if (entered != null) {
+                CountDownLatch release = java.util.Objects.requireNonNull(
+                        nextSnapshotRelease.getAndSet(null),
+                        "blocked snapshot release latch");
+                entered.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError("Interrupted while blocking a fake task snapshot", exception);
+                }
+            }
             return currentSnapshot.get();
         }
 
@@ -287,7 +485,52 @@ public final class TaskProgressPanelTest {
         @Override
         public void requestCancellation() {
             cancellationInvocations.incrementAndGet();
+            @Nullable Throwable failure = nextCancellationFailure.getAndSet(null);
+            if (failure != null) {
+                TaskSnapshot failureSnapshot = java.util.Objects.requireNonNull(
+                        cancellationFailureSnapshot.getAndSet(null),
+                        "a cancellation failure must have a replacement snapshot");
+                currentSnapshot.set(failureSnapshot);
+                if (failure instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
+                }
+                if (failure instanceof Error error) {
+                    throw error;
+                }
+                throw new AssertionError("unsupported cancellation failure", failure);
+            }
             cancellationAccepted.compareAndSet(false, true);
+        }
+
+        /// Configures the next cancellation request to install a new state and fail.
+        ///
+        /// @param failure runtime exception or error returned by the fake cancellation path
+        /// @param latestSnapshot state visible from [#snapshot()] before the failure is thrown
+        private void rejectNextCancellation(Throwable failure, TaskSnapshot latestSnapshot) {
+            if (!(failure instanceof RuntimeException) && !(failure instanceof Error)) {
+                throw new IllegalArgumentException("failure must be a RuntimeException or Error");
+            }
+            cancellationFailureSnapshot.set(latestSnapshot);
+            nextCancellationFailure.set(failure);
+        }
+
+        /// Configures one snapshot read to fail with the supplied unchecked failure.
+        ///
+        /// @param failure runtime exception or error thrown by the next read
+        private void rejectNextSnapshotRead(Throwable failure) {
+            if (!(failure instanceof RuntimeException) && !(failure instanceof Error)) {
+                throw new IllegalArgumentException("failure must be a RuntimeException or Error");
+            }
+            nextSnapshotFailure.set(failure);
+        }
+
+        /// Configures the next snapshot read to expose and wait on deterministic test latches.
+        ///
+        /// @param entered signal emitted when the read starts
+        /// @param release signal allowing the read to finish
+        private void blockNextSnapshotRead(CountDownLatch entered, CountDownLatch release) {
+            nextSnapshotRelease.set(release);
+            nextSnapshotEntered.set(entered);
         }
 
         /// Publishes a replacement snapshot on the calling thread.

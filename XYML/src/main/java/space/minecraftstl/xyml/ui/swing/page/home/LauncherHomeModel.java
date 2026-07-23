@@ -349,8 +349,15 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
                 launchStatusSubscription = null;
             }
         }
-        unsubscribe(terminalSubscription);
-        publishTransition(transition);
+        final @Nullable Subscription subscriptionToRelease = terminalSubscription;
+        @Nullable Throwable reconciliationFailure = null;
+        reconciliationFailure = attempt(
+                reconciliationFailure,
+                () -> unsubscribe(subscriptionToRelease));
+        reconciliationFailure = attempt(
+                reconciliationFailure,
+                () -> publishTransition(transition));
+        rethrowFailure(reconciliationFailure);
     }
 
     /// Clears the in-flight command marker and restores state when no session was installed.

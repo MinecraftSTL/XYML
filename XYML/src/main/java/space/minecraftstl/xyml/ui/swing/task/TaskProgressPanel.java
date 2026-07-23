@@ -45,6 +45,7 @@ import java.awt.FlowLayout;
 import java.awt.Font;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /// Presents one toolkit-neutral task as a stable Swing progress surface.
 ///
@@ -73,6 +74,12 @@ public final class TaskProgressPanel extends JPanel implements AutoCloseable {
 
     /// Model supplying the current snapshot and future transitions.
     private final TaskPresentationModel model;
+
+    /// Serializes a close request with model publications that mutate this component tree.
+    private final Object publicationLock = new Object();
+
+    /// Synchronously prevents new component mutations before queued EDT cleanup runs.
+    private final AtomicBoolean closeRequested = new AtomicBoolean();
 
     /// Localized labels used by controls and status text.
     private final TaskProgressStrings strings;
@@ -159,7 +166,26 @@ public final class TaskProgressPanel extends JPanel implements AutoCloseable {
         EdtDispatcher.requireEventDispatchThread();
         configureComponents();
         modelSubscription = model.subscribe(this::modelSnapshotChanged);
-        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> applySnapshot(model.snapshot()));
+        try {
+            SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> applySnapshot(model.snapshot()));
+        } catch (RuntimeException | Error initializationFailure) {
+            synchronized (publicationLock) {
+                closeRequested.set(true);
+                closed = true;
+            }
+            Throwable combinedFailure = initializationFailure;
+            try {
+                modelSubscription.unsubscribe();
+            } catch (RuntimeException | Error unsubscribeFailure) {
+                combinedFailure = combineUncheckedFailures(combinedFailure, unsubscribeFailure);
+            }
+            try {
+                cancelProgressAnimation();
+            } catch (RuntimeException | Error animationFailure) {
+                combinedFailure = combineUncheckedFailures(combinedFailure, animationFailure);
+            }
+            throw propagate(combinedFailure);
+        }
     }
 
     /// Returns the snapshot currently represented by this panel.
@@ -239,15 +265,28 @@ public final class TaskProgressPanel extends JPanel implements AutoCloseable {
     ///
     /// @param expanded whether available details should be visible
     public void setDetailsExpanded(boolean expanded) {
-        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> setDetailsExpandedOnEventDispatchThread(expanded));
+        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+            synchronized (publicationLock) {
+                if (!closeRequested.get()) {
+                    setDetailsExpandedOnEventDispatchThread(expanded);
+                }
+            }
+        });
     }
 
-    /// Sends the model's cancellation command at most once from this panel.
+    /// Sends at most one unresolved cancellation request from this panel.
     ///
     /// Calls from worker threads are queued through [SwingUiDispatcher]. The command has no effect when the
-    /// current snapshot is terminal or does not permit cancellation.
+    /// current snapshot is terminal or does not permit cancellation. If a request throws and a later authoritative
+    /// snapshot permits cancellation again, the user may retry.
     public void requestCancellation() {
-        SwingUiDispatcher.INSTANCE.dispatchOrRun(this::requestCancellationOnEventDispatchThread);
+        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+            synchronized (publicationLock) {
+                if (!closeRequested.get()) {
+                    requestCancellationOnEventDispatchThread();
+                }
+            }
+        });
     }
 
     /// Releases the model subscription and any running progress animation.
@@ -256,6 +295,11 @@ public final class TaskProgressPanel extends JPanel implements AutoCloseable {
     /// effect.
     @Override
     public void close() {
+        synchronized (publicationLock) {
+            if (!closeRequested.compareAndSet(false, true)) {
+                return;
+            }
+        }
         SwingUiDispatcher.INSTANCE.dispatchOrRun(this::closeOnEventDispatchThread);
     }
 
@@ -339,8 +383,10 @@ public final class TaskProgressPanel extends JPanel implements AutoCloseable {
     private void modelSnapshotChanged(ValueChange<TaskSnapshot> change) {
         Objects.requireNonNull(change, "change");
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
-            if (!closed) {
-                applySnapshot(model.snapshot());
+            synchronized (publicationLock) {
+                if (!closeRequested.get()) {
+                    applySnapshot(model.snapshot());
+                }
             }
         });
     }
@@ -416,7 +462,13 @@ public final class TaskProgressPanel extends JPanel implements AutoCloseable {
                 progressAnimationDuration,
                 MotionPurpose.ESSENTIAL,
                 Easing.DECELERATE,
-                progress -> progressBar.setValue(interpolateProgress(initialValue, targetValue, progress)),
+                progress -> {
+                    synchronized (publicationLock) {
+                        if (!closeRequested.get()) {
+                            progressBar.setValue(interpolateProgress(initialValue, targetValue, progress));
+                        }
+                    }
+                },
                 () -> { });
     }
 
@@ -454,6 +506,10 @@ public final class TaskProgressPanel extends JPanel implements AutoCloseable {
     private void setDetailsExpandedOnEventDispatchThread(boolean expanded) {
         EdtDispatcher.requireEventDispatchThread();
 
+        if (closeRequested.get()) {
+            return;
+        }
+
         boolean hasDetails = !detailsArea.getText().isBlank();
         detailsExpanded = expanded && hasDetails;
         updateDetailsPresentation();
@@ -477,7 +533,8 @@ public final class TaskProgressPanel extends JPanel implements AutoCloseable {
         EdtDispatcher.requireEventDispatchThread();
 
         @Nullable TaskSnapshot snapshot = displayedSnapshot;
-        if (closed
+        if (closeRequested.get()
+                || closed
                 || cancellationRequested
                 || snapshot == null
                 || snapshot.status().isTerminal()
@@ -488,7 +545,63 @@ public final class TaskProgressPanel extends JPanel implements AutoCloseable {
         cancellationRequested = true;
         cancelButton.setEnabled(false);
         cancelButton.setVisible(false);
-        model.requestCancellation();
+        try {
+            model.requestCancellation();
+        } catch (RuntimeException | Error cancellationFailure) {
+            cancellationRequested = false;
+            @Nullable TaskSnapshot recoverySnapshot = null;
+            try {
+                recoverySnapshot = model.snapshot();
+                if (!closed) {
+                    applySnapshot(recoverySnapshot);
+                }
+            } catch (RuntimeException | Error recoveryFailure) {
+                TaskSnapshot fallbackSnapshot = recoverySnapshot == null ? snapshot : recoverySnapshot;
+                if (!closed) {
+                    restoreCancellationAction(fallbackSnapshot);
+                }
+                throw propagate(combineUncheckedFailures(cancellationFailure, recoveryFailure));
+            }
+            throw cancellationFailure;
+        }
+    }
+
+    /// Restores only the cancellation command after best-effort snapshot recovery itself fails.
+    ///
+    /// @param snapshot last reliable task state
+    private void restoreCancellationAction(TaskSnapshot snapshot) {
+        EdtDispatcher.requireEventDispatchThread();
+        boolean canCancel = snapshot.cancelable() && !snapshot.status().isTerminal();
+        cancelButton.setVisible(canCancel);
+        cancelButton.setEnabled(canCancel);
+    }
+
+    /// Combines two unchecked failures while preventing a runtime exception from hiding an [Error].
+    ///
+    /// @param primary original cancellation failure
+    /// @param secondary recovery failure
+    /// @return failure that retains the other as suppressed context
+    private static Throwable combineUncheckedFailures(Throwable primary, Throwable secondary) {
+        if (primary == secondary) {
+            return primary;
+        }
+        if (!(primary instanceof Error) && secondary instanceof Error) {
+            secondary.addSuppressed(primary);
+            return secondary;
+        }
+        primary.addSuppressed(secondary);
+        return primary;
+    }
+
+    /// Returns or throws an unchecked failure without erasing an [Error].
+    ///
+    /// @param failure unchecked failure to propagate
+    /// @return runtime exception when the failure is not an error
+    private static RuntimeException propagate(Throwable failure) {
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        return (RuntimeException) failure;
     }
 
     /// Releases resources on the Swing event dispatch thread.
@@ -497,8 +610,22 @@ public final class TaskProgressPanel extends JPanel implements AutoCloseable {
 
         if (!closed) {
             closed = true;
-            modelSubscription.unsubscribe();
-            cancelProgressAnimation();
+            @Nullable Throwable closingFailure = null;
+            try {
+                modelSubscription.unsubscribe();
+            } catch (RuntimeException | Error unsubscribeFailure) {
+                closingFailure = unsubscribeFailure;
+            }
+            try {
+                cancelProgressAnimation();
+            } catch (RuntimeException | Error animationFailure) {
+                closingFailure = closingFailure == null
+                        ? animationFailure
+                        : combineUncheckedFailures(closingFailure, animationFailure);
+            }
+            if (closingFailure != null) {
+                throw propagate(closingFailure);
+            }
         }
     }
 }
