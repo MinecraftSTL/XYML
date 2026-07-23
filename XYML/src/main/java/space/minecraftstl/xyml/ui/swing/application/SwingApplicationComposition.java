@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -32,13 +33,22 @@ import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.ThemeMode;
 import space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsPanel;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.LauncherAccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.LegacyLauncherAccountStore;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DefaultGameVersionCatalogModel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadProviderGameVersionCatalogSource;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogPanel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogSource;
 import space.minecraftstl.xyml.ui.swing.page.home.HomePanel;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.LauncherHomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.LegacyLauncherHomeStore;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesModel;
+import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.LegacyLauncherAppearanceStore;
 import space.minecraftstl.xyml.ui.swing.page.settings.PersistedAppearanceSettingsModel;
@@ -58,6 +68,8 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /// Owns the transitional Swing application window, page models, legacy stores, and animation lifecycle.
 ///
@@ -69,7 +81,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// Native-window abstraction backed by [AppShellFrame] in production.
     private final SwingApplicationWindow window;
 
-    /// Four page models and their ordered model/store lifecycle.
+    /// Five page models and their ordered model, source, and store lifecycle.
     private final SwingApplicationPageModels pageModels;
 
     /// Shared animator whose active timers are cancelled during cleanup.
@@ -96,10 +108,10 @@ public final class SwingApplicationComposition implements AutoCloseable {
     ///
     /// Legacy stores and the selected repository are captured on the JavaFX application thread. Instance
     /// viewport work uses the process-wide caller-owned [Schedulers#io()] executor, which this composition
-    /// never closes. All workflow commands and the download component factory remain startup-owned.
+    /// never closes. Legacy account, instance, and launch workflow commands remain startup-owned.
     ///
     /// @param presentation localized text and explicit transition policy
-    /// @param commands startup-owned download and legacy workflow boundaries
+    /// @param commands startup-owned legacy workflow boundaries
     /// @param systemThemeDetector fast operating-system appearance detector
     /// @param animationFrameDelayMillis positive Swing animation timer delay
     /// @return closed-resource-safe Swing application composition
@@ -138,7 +150,6 @@ public final class SwingApplicationComposition implements AutoCloseable {
                             themeManager,
                             animator),
                     presentation,
-                    commands.downloadsPageFactory(),
                     themeManager,
                     animator,
                     SwingApplicationComposition::createFrameWindow);
@@ -156,7 +167,6 @@ public final class SwingApplicationComposition implements AutoCloseable {
     ///
     /// @param modelFactory model factory receiving the shell-backed navigation command
     /// @param presentation localized text and explicit transition policy
-    /// @param downloadsPageFactory lazy caller-supplied download component factory
     /// @param themeManager active Swing theme manager
     /// @param animator shared animator owned by the returned composition
     /// @param windowFactory explicit native-window factory
@@ -164,13 +174,11 @@ public final class SwingApplicationComposition implements AutoCloseable {
     public static SwingApplicationComposition createForCollaborators(
             SwingApplicationPageModelFactory modelFactory,
             SwingApplicationPresentation presentation,
-            ShellPageFactory<? extends JComponent> downloadsPageFactory,
             SwingThemeManager themeManager,
             SwingAnimator animator,
             SwingApplicationWindowFactory windowFactory) {
         Objects.requireNonNull(modelFactory, "modelFactory");
         Objects.requireNonNull(presentation, "presentation");
-        Objects.requireNonNull(downloadsPageFactory, "downloadsPageFactory");
         Objects.requireNonNull(themeManager, "themeManager");
         Objects.requireNonNull(animator, "animator");
         Objects.requireNonNull(windowFactory, "windowFactory");
@@ -196,7 +204,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         }
 
         @Unmodifiable Map<ShellPageId, ShellPageFactory<? extends JComponent>> pageFactories =
-                createPageFactories(models, presentation, downloadsPageFactory, animator);
+                createPageFactories(models, presentation, animator);
         final SwingApplicationWindow createdWindow;
         try {
             createdWindow = Objects.requireNonNull(
@@ -258,13 +266,11 @@ public final class SwingApplicationComposition implements AutoCloseable {
     ///
     /// @param models toolkit-neutral page models
     /// @param presentation localized page text
-    /// @param downloadsPageFactory caller-owned lazy download page factory
     /// @param animator shared application animator
     /// @return complete immutable page factory table
     private static @Unmodifiable Map<ShellPageId, ShellPageFactory<? extends JComponent>> createPageFactories(
             SwingApplicationPageModels models,
             SwingApplicationPresentation presentation,
-            ShellPageFactory<? extends JComponent> downloadsPageFactory,
             SwingAnimator animator) {
         EnumMap<ShellPageId, ShellPageFactory<? extends JComponent>> factories =
                 new EnumMap<>(ShellPageId.class);
@@ -275,7 +281,9 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 animator,
                 presentation.taskProgressAnimationDuration()));
         factories.put(ShellPageId.INSTANCES, () -> new InstancesPanel(models.instances(), presentation.instances()));
-        factories.put(ShellPageId.DOWNLOADS, downloadsPageFactory);
+        factories.put(
+                ShellPageId.DOWNLOADS,
+                () -> new GameVersionCatalogPanel(models.gameVersions(), presentation.gameVersions()));
         factories.put(ShellPageId.ACCOUNTS, () -> new AccountsPanel(models.accounts(), presentation.accounts()));
         factories.put(
                 ShellPageId.SETTINGS,
@@ -299,47 +307,172 @@ public final class SwingApplicationComposition implements AutoCloseable {
             Consumer<ShellPageId> navigateCommand,
             SwingThemeManager themeManager,
             SwingAnimator animator) {
-        List<AutoCloseable> models = new ArrayList<>(4);
+        ProductionPageModelFactories factories = new ProductionPageModelFactories(
+                () -> new LauncherHomeModel(
+                        legacy.homeStore(),
+                        presentation.homeStatus(),
+                        () -> navigateCommand.accept(ShellPageId.ACCOUNTS),
+                        () -> navigateCommand.accept(ShellPageId.INSTANCES),
+                        commands.addInstanceCommand(),
+                        commands.launchCommand()),
+                () -> new RepositoryInstancesModel(
+                        legacy.repository(),
+                        Schedulers.io(),
+                        commands.addInstanceCommand(),
+                        commands.manageInstanceCommand(),
+                        presentation.instancesStatus()),
+                () -> new DownloadProviderGameVersionCatalogSource(DownloadProviders.getDownloadProvider()),
+                source -> new DefaultGameVersionCatalogModel(source, presentation.gameVersionsStatus()),
+                () -> new LauncherAccountsModel(
+                        legacy.accountStore(),
+                        commands.addAccountCommand()),
+                () -> new PersistedAppearanceSettingsModel(
+                        legacy.appearanceStore(),
+                        themeManager,
+                        animator));
+        return createProductionModels(
+                factories,
+                legacy.homeStore(),
+                legacy.accountStore(),
+                legacy.appearanceStore(),
+                legacy);
+    }
+
+    /// Executes the production page-model construction sequence with explicit testable factories.
+    ///
+    /// Every closeable result is registered before the next factory runs, so a later constructor
+    /// failure cannot leak an earlier model or source. The returned bundle owns stores individually;
+    /// the aggregate legacy resource is used only to clean up partial construction.
+    ///
+    /// @param factories ordered page-model and source factories
+    /// @param homeStore legacy home projection
+    /// @param accountStore legacy account projection
+    /// @param appearanceStore legacy appearance persistence adapter
+    /// @param legacyResources aggregate partial-construction cleanup resource
+    /// @return fully owned production page models
+    static SwingApplicationPageModels createProductionModels(
+            ProductionPageModelFactories factories,
+            AutoCloseable homeStore,
+            AutoCloseable accountStore,
+            AutoCloseable appearanceStore,
+            AutoCloseable legacyResources) {
+        Objects.requireNonNull(factories, "factories");
+        Objects.requireNonNull(homeStore, "homeStore");
+        Objects.requireNonNull(accountStore, "accountStore");
+        Objects.requireNonNull(appearanceStore, "appearanceStore");
+        Objects.requireNonNull(legacyResources, "legacyResources");
+        List<AutoCloseable> models = new ArrayList<>(5);
+        List<AutoCloseable> sources = new ArrayList<>(1);
         try {
-            LauncherHomeModel home = new LauncherHomeModel(
-                    legacy.homeStore(),
-                    presentation.homeStatus(),
-                    () -> navigateCommand.accept(ShellPageId.ACCOUNTS),
-                    () -> navigateCommand.accept(ShellPageId.INSTANCES),
-                    commands.addInstanceCommand(),
-                    commands.launchCommand());
-            models.add(home);
+            HomeModel home = ownCloseable(factories.home().get(), models, "home model");
+            InstancesModel instances = ownCloseable(factories.instances().get(), models, "instances model");
+            GameVersionCatalogSource gameVersionSource = ownCloseable(
+                    factories.gameVersionSource().get(),
+                    sources,
+                    "game-version source");
+            GameVersionCatalogModel gameVersions = ownCloseable(
+                    factories.gameVersions().apply(gameVersionSource),
+                    models,
+                    "game-version model");
+            AccountsModel accounts = ownCloseable(factories.accounts().get(), models, "accounts model");
+            AppearanceSettingsModel appearance = ownCloseable(
+                    factories.appearance().get(),
+                    models,
+                    "appearance model");
 
-            RepositoryInstancesModel instances = new RepositoryInstancesModel(
-                    legacy.repository(),
-                    Schedulers.io(),
-                    commands.addInstanceCommand(),
-                    commands.manageInstanceCommand(),
-                    presentation.instancesStatus());
-            models.add(instances);
-
-            LauncherAccountsModel accounts = new LauncherAccountsModel(
-                    legacy.accountStore(),
-                    commands.addAccountCommand());
-            models.add(accounts);
-
-            PersistedAppearanceSettingsModel appearance = new PersistedAppearanceSettingsModel(
-                    legacy.appearanceStore(),
-                    themeManager,
-                    animator);
-            models.add(appearance);
-
-            List<AutoCloseable> resources = new ArrayList<>(7);
-            resources.addAll(models);
-            resources.add(legacy.homeStore());
-            resources.add(legacy.accountStore());
-            resources.add(legacy.appearanceStore());
-            return new SwingApplicationPageModels(home, instances, accounts, appearance, resources);
+            @Unmodifiable List<AutoCloseable> resources = productionOwnedResources(
+                    models,
+                    sources,
+                    homeStore,
+                    accountStore,
+                    appearanceStore);
+            return new SwingApplicationPageModels(
+                    home,
+                    instances,
+                    gameVersions,
+                    accounts,
+                    appearance,
+                    resources);
         } catch (RuntimeException | Error failure) {
-            closeAllAfterFailure(models, failure);
-            closeAfterFailure(legacy, failure);
+            closeProductionModelConstructionAfterFailure(models, sources, legacyResources, failure);
             throw failure;
         }
+    }
+
+    /// Registers a non-null closeable factory result before construction advances.
+    ///
+    /// @param value factory result implementing its page or source contract
+    /// @param resources matching ownership layer receiving the closeable resource
+    /// @param description failure description for a non-closeable implementation
+    /// @param <T> page-model or source contract
+    /// @return the same validated result
+    private static <T> T ownCloseable(
+            T value,
+            List<AutoCloseable> resources,
+            String description) {
+        T validatedValue = Objects.requireNonNull(value, description);
+        Objects.requireNonNull(resources, "resources");
+        Objects.requireNonNull(description, "description");
+        if (!(validatedValue instanceof AutoCloseable closeable)) {
+            throw new IllegalStateException(description + " must implement AutoCloseable");
+        }
+        resources.add(closeable);
+        return validatedValue;
+    }
+
+    /// Builds the immutable production model-before-source-before-store ownership order.
+    ///
+    /// This package-visible policy keeps successful ownership directly testable without initializing
+    /// JavaFX or touching the process-wide download provider.
+    ///
+    /// @param models created page models in dependency-safe close order
+    /// @param sources lower-level sources owned by those models
+    /// @param homeStore legacy home projection
+    /// @param accountStore legacy account projection
+    /// @param appearanceStore legacy appearance persistence adapter
+    /// @return immutable complete ownership order
+    static @Unmodifiable List<AutoCloseable> productionOwnedResources(
+            List<? extends AutoCloseable> models,
+            List<? extends AutoCloseable> sources,
+            AutoCloseable homeStore,
+            AutoCloseable accountStore,
+            AutoCloseable appearanceStore) {
+        Objects.requireNonNull(models, "models");
+        Objects.requireNonNull(sources, "sources");
+        Objects.requireNonNull(homeStore, "homeStore");
+        Objects.requireNonNull(accountStore, "accountStore");
+        Objects.requireNonNull(appearanceStore, "appearanceStore");
+
+        List<AutoCloseable> resources = new ArrayList<>(models.size() + sources.size() + 3);
+        resources.addAll(List.copyOf(models));
+        resources.addAll(List.copyOf(sources));
+        resources.add(homeStore);
+        resources.add(accountStore);
+        resources.add(appearanceStore);
+        return List.copyOf(resources);
+    }
+
+    /// Closes every partially constructed production layer after a later constructor fails.
+    ///
+    /// Cleanup follows the same dependency direction as successful ownership and suppresses every
+    /// cleanup failure onto the original construction failure.
+    ///
+    /// @param models page models created before the failure
+    /// @param sources lower-level sources created before the failure
+    /// @param legacy legacy stores captured before model construction
+    /// @param constructionFailure original constructor failure
+    static void closeProductionModelConstructionAfterFailure(
+            List<? extends AutoCloseable> models,
+            List<? extends AutoCloseable> sources,
+            AutoCloseable legacy,
+            Throwable constructionFailure) {
+        Objects.requireNonNull(models, "models");
+        Objects.requireNonNull(sources, "sources");
+        Objects.requireNonNull(legacy, "legacy");
+        Objects.requireNonNull(constructionFailure, "constructionFailure");
+        closeAllAfterFailure(List.copyOf(models), constructionFailure);
+        closeAllAfterFailure(List.copyOf(sources), constructionFailure);
+        closeAfterFailure(legacy, constructionFailure);
     }
 
     /// Creates the production [AppShellFrame] adapter.
@@ -447,6 +580,33 @@ public final class SwingApplicationComposition implements AutoCloseable {
             throw error;
         }
         throw new IllegalStateException("Failed to close Swing application composition", failure);
+    }
+
+    /// Ordered factories used by the production page-model construction transaction.
+    ///
+    /// @param home launcher-home model factory
+    /// @param instances installed-instance model factory
+    /// @param gameVersionSource game-version catalog source factory
+    /// @param gameVersions game-version model factory receiving the registered source
+    /// @param accounts account-selection model factory
+    /// @param appearance appearance-settings model factory
+    @NotNullByDefault
+    record ProductionPageModelFactories(
+            Supplier<? extends HomeModel> home,
+            Supplier<? extends InstancesModel> instances,
+            Supplier<? extends GameVersionCatalogSource> gameVersionSource,
+            Function<GameVersionCatalogSource, ? extends GameVersionCatalogModel> gameVersions,
+            Supplier<? extends AccountsModel> accounts,
+            Supplier<? extends AppearanceSettingsModel> appearance) {
+        /// Validates every factory before production construction starts.
+        ProductionPageModelFactories {
+            Objects.requireNonNull(home, "home");
+            Objects.requireNonNull(instances, "instances");
+            Objects.requireNonNull(gameVersionSource, "gameVersionSource");
+            Objects.requireNonNull(gameVersions, "gameVersions");
+            Objects.requireNonNull(accounts, "accounts");
+            Objects.requireNonNull(appearance, "appearance");
+        }
     }
 
     /// Captures legacy JavaFX stores and one real selected repository with idempotent cleanup.

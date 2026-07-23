@@ -21,6 +21,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
@@ -29,6 +32,15 @@ import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.ThemeMode;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsStrings;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogItem;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogPanel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogSnapshot;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogSource;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogStatus;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionFilter;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
@@ -37,13 +49,15 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstancesStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
+import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
+import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
+import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentations;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JComponent;
-import javax.swing.JPanel;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -51,6 +65,9 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalInt;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -58,6 +75,7 @@ import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -67,38 +85,44 @@ class SwingApplicationCompositionTest {
     /// Confirms that pages stay factory-backed and navigation resolves through the created window.
     @Test
     void keepsPagesLazyAndRoutesNavigationThroughWindowReference() {
-        AtomicInteger downloadsCreated = new AtomicInteger();
         AtomicReference<@Nullable Consumer<ShellPageId>> navigation = new AtomicReference<>();
         List<String> closeOrder = new ArrayList<>();
         List<CountingCloseable> resources = createResources(closeOrder);
+        RecordingGameVersionCatalogModel gameVersions = new RecordingGameVersionCatalogModel();
         RecordingWindowFactory windowFactory = new RecordingWindowFactory();
 
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
                 navigateCommand -> {
                     navigation.set(navigateCommand);
-                    return createModels(resources);
+                    return createModels(resources, gameVersions);
                 },
                 presentation(),
-                () -> {
-                    downloadsCreated.incrementAndGet();
-                    return new JPanel();
-                },
                 themeManager(),
                 new SwingAnimator(MotionPolicy.OFF, 16),
                 windowFactory);
 
         RecordingWindow window = windowFactory.window();
         assertEquals(EnumSet.allOf(ShellPageId.class), window.pageFactories().keySet());
-        assertEquals(0, downloadsCreated.get());
+        assertEquals(0, gameVersions.lazyLoadCount());
 
         composition.open();
         assertEquals(1, window.openCount());
         Objects.requireNonNull(navigation.get()).accept(ShellPageId.ACCOUNTS);
         assertEquals(List.of(ShellPageId.ACCOUNTS), window.navigations());
 
-        JComponent downloads = window.createPage(ShellPageId.DOWNLOADS);
-        assertTrue(downloads instanceof JPanel);
-        assertEquals(1, downloadsCreated.get());
+        EdtDispatcher.executeAndWait(() -> {
+            JComponent downloads = window.createPage(ShellPageId.DOWNLOADS);
+            assertTrue(downloads instanceof GameVersionCatalogPanel);
+            assertEquals(0, gameVersions.lazyLoadCount());
+
+            GameVersionCatalogPanel catalogPanel = (GameVersionCatalogPanel) downloads;
+            catalogPanel.addNotify();
+            catalogPanel.removeNotify();
+            catalogPanel.addNotify();
+            assertEquals(1, gameVersions.lazyLoadCount());
+            catalogPanel.close();
+            catalogPanel.removeNotify();
+        });
 
         composition.close();
         composition.close();
@@ -117,10 +141,10 @@ class SwingApplicationCompositionTest {
         List<String> closeOrder = new ArrayList<>();
         List<CountingCloseable> resources = createResources(closeOrder);
         RecordingWindowFactory windowFactory = new RecordingWindowFactory();
+        RecordingGameVersionCatalogModel gameVersions = new RecordingGameVersionCatalogModel();
         SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
-                navigateCommand -> createModels(resources),
+                navigateCommand -> createModels(resources, gameVersions),
                 presentation(),
-                JPanel::new,
                 themeManager(),
                 new SwingAnimator(MotionPolicy.OFF, 16),
                 windowFactory);
@@ -134,14 +158,150 @@ class SwingApplicationCompositionTest {
         assertFalse(resources.stream().anyMatch(resource -> resource.closeCount() != 1));
     }
 
+    /// Confirms that a failed window factory closes the complete collaborator-owned resource bundle.
+    @Test
+    void windowCreationFailureClosesCollaboratorResources() {
+        List<String> closeOrder = new ArrayList<>();
+        List<CountingCloseable> resources = createResources(closeOrder);
+        RecordingGameVersionCatalogModel gameVersions = new RecordingGameVersionCatalogModel();
+        IllegalStateException creationFailure = new IllegalStateException("window creation failed");
+
+        IllegalStateException thrown = assertThrows(
+                IllegalStateException.class,
+                () -> SwingApplicationComposition.createForCollaborators(
+                        navigateCommand -> createModels(resources, gameVersions),
+                        presentation(),
+                        themeManager(),
+                        new SwingAnimator(MotionPolicy.OFF, 16),
+                        (ignoredTheme, ignoredPages, ignoredPresentation, ignoredAnimator) -> {
+                            throw creationFailure;
+                        }));
+
+        assertSame(creationFailure, thrown);
+        assertEquals(expectedCloseOrder(), closeOrder);
+        assertFalse(resources.stream().anyMatch(resource -> resource.closeCount() != 1));
+    }
+
+    /// Confirms that production success ownership places every model before its source and stores.
+    @Test
+    void productionOwnershipPlacesSourceBetweenModelsAndStores() {
+        List<String> closeOrder = new ArrayList<>();
+        HomeModel home = closeableNoCallModel(HomeModel.class, "home-model", closeOrder);
+        InstancesModel instances = closeableNoCallModel(InstancesModel.class, "instances-model", closeOrder);
+        GameVersionCatalogSource source = closeableNoCallModel(
+                GameVersionCatalogSource.class,
+                "game-versions-source",
+                closeOrder);
+        GameVersionCatalogModel gameVersions = closeableNoCallModel(
+                GameVersionCatalogModel.class,
+                "game-versions-model",
+                closeOrder);
+        AccountsModel accounts = closeableNoCallModel(AccountsModel.class, "accounts-model", closeOrder);
+        AppearanceSettingsModel appearance = closeableNoCallModel(
+                AppearanceSettingsModel.class,
+                "appearance-model",
+                closeOrder);
+        CountingCloseable homeStore = new CountingCloseable("home-store", closeOrder);
+        CountingCloseable accountStore = new CountingCloseable("accounts-store", closeOrder);
+        CountingCloseable appearanceStore = new CountingCloseable("appearance-store", closeOrder);
+        AtomicInteger legacyCloseCount = new AtomicInteger();
+        SwingApplicationComposition.ProductionPageModelFactories factories =
+                new SwingApplicationComposition.ProductionPageModelFactories(
+                        () -> home,
+                        () -> instances,
+                        () -> source,
+                        createdSource -> {
+                            assertSame(source, createdSource);
+                            return gameVersions;
+                        },
+                        () -> accounts,
+                        () -> appearance);
+
+        SwingApplicationPageModels models = SwingApplicationComposition.createProductionModels(
+                factories,
+                homeStore,
+                accountStore,
+                appearanceStore,
+                () -> legacyCloseCount.incrementAndGet());
+        assertSame(gameVersions, models.gameVersions());
+        models.close();
+
+        assertEquals(expectedCloseOrder(), closeOrder);
+        assertEquals(0, legacyCloseCount.get());
+        assertEquals(1, homeStore.closeCount());
+        assertEquals(1, accountStore.closeCount());
+        assertEquals(1, appearanceStore.closeCount());
+    }
+
+    /// Confirms that a post-source construction failure closes models, then source, then all stores.
+    @Test
+    void productionConstructionFailureClosesCreatedSource() {
+        List<String> closeOrder = new ArrayList<>();
+        HomeModel home = closeableNoCallModel(HomeModel.class, "home-model", closeOrder);
+        InstancesModel instances = closeableNoCallModel(InstancesModel.class, "instances-model", closeOrder);
+        GameVersionCatalogSource source = closeableNoCallModel(
+                GameVersionCatalogSource.class,
+                "game-versions-source",
+                closeOrder);
+        CountingCloseable homeStore = new CountingCloseable("home-store", closeOrder);
+        CountingCloseable accountStore = new CountingCloseable("accounts-store", closeOrder);
+        CountingCloseable appearanceStore = new CountingCloseable("appearance-store", closeOrder);
+        AutoCloseable legacyStores = () -> {
+            homeStore.close();
+            accountStore.close();
+            appearanceStore.close();
+        };
+        IllegalStateException creationFailure = new IllegalStateException("game model construction failed");
+        SwingApplicationComposition.ProductionPageModelFactories factories =
+                new SwingApplicationComposition.ProductionPageModelFactories(
+                        () -> home,
+                        () -> instances,
+                        () -> source,
+                        createdSource -> {
+                            assertSame(source, createdSource);
+                            throw creationFailure;
+                        },
+                        () -> {
+                            throw new AssertionError("Accounts model must not be created after failure");
+                        },
+                        () -> {
+                            throw new AssertionError("Appearance model must not be created after failure");
+                        });
+
+        IllegalStateException thrown = assertThrows(
+                IllegalStateException.class,
+                () -> SwingApplicationComposition.createProductionModels(
+                        factories,
+                        homeStore,
+                        accountStore,
+                        appearanceStore,
+                        legacyStores));
+
+        assertSame(creationFailure, thrown);
+        assertEquals(List.of(
+                "home-model",
+                "instances-model",
+                "game-versions-source",
+                "home-store",
+                "accounts-store",
+                "appearance-store"), closeOrder);
+        assertEquals(1, homeStore.closeCount());
+        assertEquals(1, accountStore.closeCount());
+        assertEquals(1, appearanceStore.closeCount());
+    }
+
     /// Creates no-call proxies that fail if composition accidentally instantiates a page.
     ///
     /// @param resources ordered lifecycle probes
+    /// @param gameVersions game-version model required by the real lazy download-page factory
     /// @return model bundle containing proxy contracts and explicit resources
-    private static SwingApplicationPageModels createModels(List<? extends AutoCloseable> resources) {
+    private static SwingApplicationPageModels createModels(
+            List<? extends AutoCloseable> resources,
+            GameVersionCatalogModel gameVersions) {
         return new SwingApplicationPageModels(
                 noCallModel(HomeModel.class),
                 noCallModel(InstancesModel.class),
+                gameVersions,
                 noCallModel(AccountsModel.class),
                 noCallModel(AppearanceSettingsModel.class),
                 resources);
@@ -162,6 +322,33 @@ class SwingApplicationCompositionTest {
         return modelType.cast(proxy);
     }
 
+    /// Creates a model or source proxy that only accepts its owned close invocation.
+    ///
+    /// @param contract model or source interface
+    /// @param resourceName stable close-order name
+    /// @param closeOrder shared close-order recorder
+    /// @param <T> model or source contract type
+    /// @return closeable proxy implementing the requested contract
+    private static <T> T closeableNoCallModel(
+            Class<T> contract,
+            String resourceName,
+            List<String> closeOrder) {
+        Objects.requireNonNull(contract, "contract");
+        CountingCloseable closeable = new CountingCloseable(resourceName, closeOrder);
+        Object proxy = Proxy.newProxyInstance(
+                contract.getClassLoader(),
+                new Class<?>[]{contract, AutoCloseable.class},
+                (ignoredProxy, method, ignoredArguments) -> {
+                    if (method.getName().equals("close") && method.getParameterCount() == 0) {
+                        closeable.close();
+                        return null;
+                    }
+                    throw new AssertionError("Production construction used resource eagerly: "
+                            + method.getName());
+                });
+        return contract.cast(proxy);
+    }
+
     /// Creates the explicit test-only localized presentation.
     ///
     /// @return complete presentation fixture
@@ -174,6 +361,18 @@ class SwingApplicationCompositionTest {
                 new HomeStatusStrings("Ready", "Select account", "Select instance"),
                 new InstancesStrings("Instances", "Refresh", "Refreshing", "Add", "Manage", "Empty"),
                 new RepositoryInstancesStatusStrings("Loading", "Ready", "Refreshing", "Failed", "Unknown"),
+                new GameVersionCatalogStrings(
+                        "Game versions",
+                        "Search",
+                        "Type",
+                        "All",
+                        "Release",
+                        "Snapshot",
+                        "April Fools",
+                        "Old",
+                        "Refresh",
+                        "Refreshing"),
+                new GameVersionCatalogStatusStrings("Waiting", "Loading", "Ready", "Empty", "Failed"),
                 new AccountsStrings("Accounts", "Add", "Empty"),
                 new AppearanceSettingsStrings(
                         "Appearance", "Theme", "System", "Light", "Dark", "Radius", "Animations"),
@@ -194,16 +393,18 @@ class SwingApplicationCompositionTest {
                 SystemThemeDetector.lightFallback());
     }
 
-    /// Creates lifecycle probes in production model-before-store close order.
+    /// Creates lifecycle probes in production model-before-source-before-store close order.
     ///
     /// @param closeOrder shared close-order recorder
-    /// @return seven distinct model and store probes
+    /// @return nine distinct model, source, and store probes
     private static List<CountingCloseable> createResources(List<String> closeOrder) {
         return List.of(
                 new CountingCloseable("home-model", closeOrder),
                 new CountingCloseable("instances-model", closeOrder),
+                new CountingCloseable("game-versions-model", closeOrder),
                 new CountingCloseable("accounts-model", closeOrder),
                 new CountingCloseable("appearance-model", closeOrder),
+                new CountingCloseable("game-versions-source", closeOrder),
                 new CountingCloseable("home-store", closeOrder),
                 new CountingCloseable("accounts-store", closeOrder),
                 new CountingCloseable("appearance-store", closeOrder));
@@ -216,11 +417,123 @@ class SwingApplicationCompositionTest {
         return List.of(
                 "home-model",
                 "instances-model",
+                "game-versions-model",
                 "accounts-model",
                 "appearance-model",
+                "game-versions-source",
                 "home-store",
                 "accounts-store",
                 "appearance-store");
+    }
+
+    /// Supplies an empty catalog while recording the panel's lazy initial-load request.
+    @NotNullByDefault
+    private static final class RecordingGameVersionCatalogModel implements GameVersionCatalogModel {
+        /// Stable empty idle snapshot used by the composition test page.
+        private final GameVersionCatalogSnapshot snapshot = new GameVersionCatalogSnapshot(
+                OptionalInt.empty(),
+                0,
+                0L,
+                GameVersionCatalogStatus.IDLE,
+                "Waiting",
+                "",
+                GameVersionFilter.ALL,
+                false,
+                true);
+
+        /// Number of lazy initial-load commands delegated by created panels.
+        private final AtomicInteger lazyLoadCount = new AtomicInteger();
+
+        /// Creates an empty recording catalog.
+        private RecordingGameVersionCatalogModel() {
+        }
+
+        /// Returns the stable empty catalog snapshot.
+        ///
+        /// @return empty idle snapshot
+        @Override
+        public GameVersionCatalogSnapshot snapshot() {
+            return snapshot;
+        }
+
+        /// Returns an independently removable no-op listener registration.
+        ///
+        /// @param listener listener accepted by the page
+        /// @return no-op listener registration
+        @Override
+        public Subscription subscribe(ValueChangeListener<GameVersionCatalogSnapshot> listener) {
+            Objects.requireNonNull(listener, "listener");
+            return Subscription.create(() -> {
+            });
+        }
+
+        /// Returns the exact empty item count.
+        ///
+        /// @return exact zero count
+        @Override
+        public OptionalInt exactItemCount() {
+            return OptionalInt.of(0);
+        }
+
+        /// Returns an empty page clamped to the exact zero count.
+        ///
+        /// @param desiredRange measured viewport request
+        /// @param cancellation cooperative request cancellation
+        /// @return completed empty page
+        @Override
+        public CompletionStage<ChoicePage<GameVersionCatalogItem>> load(
+                IndexRange desiredRange,
+                LoadCancellation cancellation) {
+            Objects.requireNonNull(desiredRange, "desiredRange");
+            Objects.requireNonNull(cancellation, "cancellation").throwIfCancelled();
+            IndexRange emptyRange = desiredRange.clampToItemCount(0);
+            return CompletableFuture.completedFuture(
+                    new ChoicePage<>(emptyRange, List.of(), OptionalInt.of(0), true));
+        }
+
+        /// Records one lazy initial-load command.
+        @Override
+        public void loadIfNeeded() {
+            lazyLoadCount.incrementAndGet();
+        }
+
+        /// Rejects an unexpected refresh command in this composition-only fake.
+        @Override
+        public void refresh() {
+            throw new AssertionError("Catalog refresh was invoked unexpectedly");
+        }
+
+        /// Accepts a query command without changing the stable empty fixture.
+        ///
+        /// @param query query delegated by the panel
+        @Override
+        public void setQuery(String query) {
+            Objects.requireNonNull(query, "query");
+        }
+
+        /// Accepts a filter command without changing the stable empty fixture.
+        ///
+        /// @param filter filter delegated by the panel
+        @Override
+        public void setFilter(GameVersionFilter filter) {
+            Objects.requireNonNull(filter, "filter");
+        }
+
+        /// Rejects selection because the fixture contains no version IDs.
+        ///
+        /// @param versionId unexpected selected version ID
+        @Override
+        public void selectVersion(String versionId) {
+            throw new AssertionError("Empty catalog cannot select version "
+                    + Objects.requireNonNull(versionId, "versionId"));
+        }
+
+        /// Returns the recorded lazy initial-load count.
+        ///
+        /// @return lazy initial-load count
+        private int lazyLoadCount() {
+            return lazyLoadCount.get();
+        }
     }
 
     /// Records the factories supplied by the composition without creating a native frame.

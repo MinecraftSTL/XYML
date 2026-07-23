@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
@@ -29,10 +30,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/// Owns the four toolkit-neutral page models and their ordered cleanup resources.
+/// Owns the five toolkit-neutral page models and their ordered cleanup resources.
 ///
-/// Resources are closed in list order. Production supplies models before their backing stores so
-/// subscriptions are removed before legacy adapters detach from JavaFX properties.
+/// Resources are closed in list order. Production supplies models before their data sources and
+/// backing stores so subscriptions are removed before lower-level adapters are detached.
 @NotNullByDefault
 public final class SwingApplicationPageModels implements AutoCloseable {
     /// Launcher-home state and commands.
@@ -40,6 +41,9 @@ public final class SwingApplicationPageModels implements AutoCloseable {
 
     /// Installed-instance state, viewport source, and commands.
     private final InstancesModel instances;
+
+    /// Lazy game-version catalog state and viewport source.
+    private final GameVersionCatalogModel gameVersions;
 
     /// Account state, viewport source, and commands.
     private final AccountsModel accounts;
@@ -57,17 +61,20 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     ///
     /// @param home launcher-home model
     /// @param instances installed-instance model
+    /// @param gameVersions lazy game-version catalog model
     /// @param accounts account-selection model
     /// @param appearance appearance-settings model
     /// @param ownedResources resources closed in the supplied order
     public SwingApplicationPageModels(
             HomeModel home,
             InstancesModel instances,
+            GameVersionCatalogModel gameVersions,
             AccountsModel accounts,
             AppearanceSettingsModel appearance,
             List<? extends AutoCloseable> ownedResources) {
         this.home = Objects.requireNonNull(home, "home");
         this.instances = Objects.requireNonNull(instances, "instances");
+        this.gameVersions = Objects.requireNonNull(gameVersions, "gameVersions");
         this.accounts = Objects.requireNonNull(accounts, "accounts");
         this.appearance = Objects.requireNonNull(appearance, "appearance");
         Objects.requireNonNull(ownedResources, "ownedResources");
@@ -86,6 +93,13 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// @return installed-instance model
     public InstancesModel instances() {
         return instances;
+    }
+
+    /// Returns the lazy game-version catalog model.
+    ///
+    /// @return game-version catalog model
+    public GameVersionCatalogModel gameVersions() {
+        return gameVersions;
     }
 
     /// Returns the account-selection model.
