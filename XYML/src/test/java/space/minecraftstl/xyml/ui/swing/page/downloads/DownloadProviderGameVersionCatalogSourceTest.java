@@ -640,6 +640,27 @@ final class DownloadProviderGameVersionCatalogSourceTest {
         }
     }
 
+    /// A cooperative cancellation observed before terminal arbitration outranks a recorded task failure.
+    @Test
+    void cancellationSignalOutranksTerminalFailure() {
+        RecordingVersionList versionList = new RecordingVersionList(List.of());
+        ControlledExecutorFactory executors = new ControlledExecutorFactory();
+        LoadCancellation cancellation = new LoadCancellation();
+        AssertionError terminalFailure = new AssertionError("cancelled task failed");
+
+        try (DownloadProviderGameVersionCatalogSource source =
+                     new DownloadProviderGameVersionCatalogSource(
+                             new RecordingDownloadProvider(versionList),
+                             executors)) {
+            CompletionStage<@Unmodifiable List<GameVersionCatalogItem>> stage =
+                    source.load(cancellation);
+            cancellation.cancel();
+            executors.executor(0).finish(false, terminalFailure);
+
+            assertCancelled(stage);
+        }
+    }
+
     /// A provider returning a non-game entry fails explicitly instead of publishing a partially typed catalog.
     @Test
     void rejectsUnexpectedRemoteVersionType() {

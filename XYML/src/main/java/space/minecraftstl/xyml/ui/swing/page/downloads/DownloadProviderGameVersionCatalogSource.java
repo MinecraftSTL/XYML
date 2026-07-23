@@ -514,13 +514,8 @@ public final class DownloadProviderGameVersionCatalogSource
             return;
         }
         if (!success) {
-            if (operation.cancelRequested
-                    || operation.cancellation.isCancelled()) {
-                finishOperation(operation, LoadResult.cancelledResult());
-            } else {
-                finishOperation(operation, LoadResult.failed(
-                        new IllegalStateException("Game-version refresh stopped without a failure cause")));
-            }
+            finishOperation(operation, LoadResult.failed(
+                    new IllegalStateException("Game-version refresh stopped without a failure cause")));
             return;
         }
 
