@@ -23,6 +23,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserModel;
+import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserPanel;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 
@@ -75,6 +76,9 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
     /// Localized browser text transferred to the resolved browser.
     private final SchematicBrowserStrings browserStrings;
 
+    /// Explicit dialog and desktop boundary transferred unchanged to the resolved browser.
+    private final SchematicBrowserInteractions browserInteractions;
+
     /// Coordinator-owned command returning to the instance list.
     private final Runnable returnCommand;
 
@@ -121,6 +125,7 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
     /// @param executor caller-owned asynchronous executor that never runs blocking work inline on EDT
     /// @param strings localized outer-shell text
     /// @param browserStrings localized browser text
+    /// @param browserInteractions explicit browser dialog and desktop boundary
     /// @param returnCommand coordinator command returning to the instance list
     public SchematicInstanceManagementView(
             String instanceId,
@@ -128,6 +133,7 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
             Executor executor,
             SchematicInstanceManagementStrings strings,
             SchematicBrowserStrings browserStrings,
+            SchematicBrowserInteractions browserInteractions,
             Runnable returnCommand) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
@@ -139,6 +145,7 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
         this.executor = Objects.requireNonNull(executor, "executor");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.browserStrings = Objects.requireNonNull(browserStrings, "browserStrings");
+        this.browserInteractions = Objects.requireNonNull(browserInteractions, "browserInteractions");
         this.returnCommand = Objects.requireNonNull(returnCommand, "returnCommand");
 
         setName("schematicInstanceManagement");
@@ -355,7 +362,7 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
         DefaultSchematicBrowserModel model = new DefaultSchematicBrowserModel(directory, executor);
         @Nullable SchematicBrowserPanel created = null;
         try {
-            created = new SchematicBrowserPanel(model, browserStrings);
+            created = new SchematicBrowserPanel(model, browserStrings, browserInteractions);
             created.setName("schematicInstanceBrowser");
             contentCards.add(created, BROWSER_CARD);
             browserPanel = created;

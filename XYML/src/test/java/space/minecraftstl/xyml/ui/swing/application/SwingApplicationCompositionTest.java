@@ -54,6 +54,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesStatus
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementHost;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.SchematicInstanceManagementStrings;
+import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicMetadataStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
@@ -584,7 +585,24 @@ class SwingApplicationCompositionTest {
                                 "%d x %d x %d",
                                 "%d x %d pixels",
                                 "%d pixels",
-                                "Unavailable")),
+                                "Unavailable"),
+                        new SchematicBrowserActionStrings(
+                                "Import",
+                                "Import schematics",
+                                "Choose schematics",
+                                "Litematic file",
+                                "New directory",
+                                "Create a directory",
+                                "Directory name",
+                                "Delete",
+                                "Delete selected item",
+                                "Delete %s?",
+                                "Reveal",
+                                "Reveal in file manager",
+                                "Updating schematics",
+                                "Update failed",
+                                "Operation failed",
+                                "Reveal failed")),
                 new GameVersionCatalogStrings(
                         "Game versions",
                         "Search",

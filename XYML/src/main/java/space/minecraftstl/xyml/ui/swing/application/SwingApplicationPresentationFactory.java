@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.SchematicInstanceManagementStrings;
+import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicMetadataStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
@@ -200,7 +201,31 @@ public final class SwingApplicationPresentationFactory {
                 i18n("swing.schematics.directory"),
                 i18n("swing.schematics.unreadable"),
                 i18n("swing.schematics.directory_prefix"),
-                createSchematicMetadataStrings());
+                createSchematicMetadataStrings(),
+                createSchematicBrowserActionStrings());
+    }
+
+    /// Creates localized schematic file-operation controls, prompts, and states.
+    ///
+    /// @return schematic file-operation text
+    private static SchematicBrowserActionStrings createSchematicBrowserActionStrings() {
+        return new SchematicBrowserActionStrings(
+                i18n("schematics.add"),
+                i18n("swing.schematics.import_tooltip"),
+                i18n("schematics.add.title"),
+                i18n("extension.schematic"),
+                i18n("schematics.create_directory"),
+                i18n("swing.schematics.create_directory_tooltip"),
+                i18n("schematics.create_directory.prompt"),
+                i18n("button.delete"),
+                i18n("swing.schematics.delete_tooltip"),
+                i18n("swing.schematics.delete_confirm"),
+                i18n("button.reveal_dir"),
+                i18n("reveal.in_file_manager"),
+                i18n("swing.schematics.status.writing"),
+                i18n("swing.schematics.status.write_failed"),
+                i18n("message.failed"),
+                i18n("swing.schematics.reveal_failed"));
     }
 
     /// Creates localized schematic metadata labels and exact formatter patterns.

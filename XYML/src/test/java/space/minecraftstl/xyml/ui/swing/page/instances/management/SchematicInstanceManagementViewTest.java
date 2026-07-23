@@ -19,8 +19,12 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
+import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserItem;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserPanel;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicMetadataStrings;
@@ -34,7 +38,10 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -103,7 +110,24 @@ public final class SchematicInstanceManagementViewTest {
                     "%d x %d x %d",
                     "%d x %d pixels; rendering deferred",
                     "%d pixels; rendering deferred",
-                    "Unavailable"));
+                    "Unavailable"),
+            new SchematicBrowserActionStrings(
+                    "Import",
+                    "Import schematics",
+                    "Choose schematics",
+                    "Litematic file",
+                    "New directory",
+                    "Create a directory",
+                    "Directory name",
+                    "Delete",
+                    "Delete selected item",
+                    "Delete %s?",
+                    "Reveal",
+                    "Reveal in file manager",
+                    "Updating schematics",
+                    "Update failed",
+                    "Operation failed",
+                    "Reveal failed"));
 
     /// Loading is installed first, resolution runs through the executor, and return stays outer-level.
     @Test
@@ -112,6 +136,7 @@ public final class SchematicInstanceManagementViewTest {
         AtomicBoolean resolutionOnEdt = new AtomicBoolean(true);
         AtomicBoolean returnOnEdt = new AtomicBoolean();
         AtomicInteger returnCalls = new AtomicInteger();
+        TestSchematicBrowserInteractions interactions = new TestSchematicBrowserInteractions();
         Path resolvedRoot = Path.of("resolved", "schematics").toAbsolutePath().normalize();
 
         SchematicInstanceManagementView view = onEventDispatchThread(() ->
@@ -125,6 +150,7 @@ public final class SchematicInstanceManagementViewTest {
                         executor,
                         MANAGEMENT_STRINGS,
                         BROWSER_STRINGS,
+                        interactions,
                         () -> {
                             returnOnEdt.set(SwingUtilities.isEventDispatchThread());
                             returnCalls.incrementAndGet();
@@ -144,15 +170,23 @@ public final class SchematicInstanceManagementViewTest {
         executor.runNext();
         flushEventDispatchThread();
 
+        onEventDispatchThread(() -> assertInstanceOf(
+                SchematicBrowserPanel.class,
+                findComponent(view, "schematicInstanceBrowser")).start());
+        executor.runNext();
+        flushEventDispatchThread();
+
         onEventDispatchThread(() -> {
             Component browser = findComponent(view, "schematicInstanceBrowser");
             assertAll(
                     () -> assertInstanceOf(SchematicBrowserPanel.class, browser),
                     () -> assertTrue(browser.isVisible()),
                     () -> assertFalse(resolutionOnEdt.get()));
+            findButton(view, "schematicsImport").doClick();
             findButton(view, "schematicInstanceReturn").doClick();
         });
         assertAll(
+                () -> assertEquals(1, interactions.importChooserCalls()),
                 () -> assertEquals(1, returnCalls.get()),
                 () -> assertTrue(returnOnEdt.get()));
 
@@ -177,6 +211,7 @@ public final class SchematicInstanceManagementViewTest {
                         executor,
                         MANAGEMENT_STRINGS,
                         BROWSER_STRINGS,
+                        new TestSchematicBrowserInteractions(),
                         () -> { }));
 
         executor.runNext();
@@ -221,6 +256,7 @@ public final class SchematicInstanceManagementViewTest {
                         executor,
                         MANAGEMENT_STRINGS,
                         BROWSER_STRINGS,
+                        new TestSchematicBrowserInteractions(),
                         () -> { }));
         executor.runNext();
         flushEventDispatchThread();
@@ -266,6 +302,7 @@ public final class SchematicInstanceManagementViewTest {
                         executor,
                         MANAGEMENT_STRINGS,
                         BROWSER_STRINGS,
+                        new TestSchematicBrowserInteractions(),
                         () -> { }));
 
         try {
@@ -397,6 +434,77 @@ public final class SchematicInstanceManagementViewTest {
     /// @param operation operation to run
     private static void onEventDispatchThread(Runnable operation) {
         EdtDispatcher.executeAndWait(operation);
+    }
+
+    /// Deterministic dialog and desktop boundary used to verify exact dependency transfer.
+    @NotNullByDefault
+    private static final class TestSchematicBrowserInteractions implements SchematicBrowserInteractions {
+        /// Number of times the panel invoked the import chooser.
+        private final AtomicInteger importChooserCalls = new AtomicInteger();
+
+        /// Records the chooser request and models cancellation.
+        ///
+        /// @param owner dialog owner
+        /// @param currentDirectory browser directory
+        /// @return empty immutable selection
+        @Override
+        public @Unmodifiable List<Path> chooseImportFiles(Component owner, Path currentDirectory) {
+            Objects.requireNonNull(owner, "owner");
+            Objects.requireNonNull(currentDirectory, "currentDirectory");
+            importChooserCalls.incrementAndGet();
+            return List.of();
+        }
+
+        /// Models cancellation of the create-directory prompt.
+        ///
+        /// @param owner dialog owner
+        /// @return null to represent cancellation
+        @Override
+        public @Nullable String promptDirectoryName(Component owner) {
+            Objects.requireNonNull(owner, "owner");
+            return null;
+        }
+
+        /// Declines every delete confirmation.
+        ///
+        /// @param owner dialog owner
+        /// @param target proposed target
+        /// @return always false
+        @Override
+        public boolean confirmDelete(Component owner, SchematicBrowserItem target) {
+            Objects.requireNonNull(owner, "owner");
+            Objects.requireNonNull(target, "target");
+            return false;
+        }
+
+        /// Completes reveal immediately without desktop work.
+        ///
+        /// @param target selected target
+        /// @return already-completed stage
+        @Override
+        public CompletionStage<@Nullable Void> reveal(SchematicBrowserItem target) {
+            Objects.requireNonNull(target, "target");
+            return CompletableFuture.completedFuture(null);
+        }
+
+        /// Accepts failure feedback without presenting a dialog.
+        ///
+        /// @param owner dialog owner
+        /// @param title failure title
+        /// @param detail failure detail
+        @Override
+        public void showFailure(Component owner, String title, String detail) {
+            Objects.requireNonNull(owner, "owner");
+            Objects.requireNonNull(title, "title");
+            Objects.requireNonNull(detail, "detail");
+        }
+
+        /// Returns the exact import chooser invocation count.
+        ///
+        /// @return chooser invocation count
+        private int importChooserCalls() {
+            return importChooserCalls.get();
+        }
     }
 
     /// Deterministic caller-owned executor that runs submitted work only when requested.

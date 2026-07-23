@@ -78,6 +78,12 @@ public final class SwingApplicationPresentationFactoryTest {
                 () -> assertEquals("New Game", presentation.gameVersions().pageTitle()),
                 () -> assertEquals("Accounts", presentation.accounts().pageTitle()),
                 () -> assertEquals("Appearance", presentation.appearance().pageTitle()),
+                () -> assertEquals(
+                        "Choose schematic file you want to import",
+                        presentation.schematics().actions().importDialogTitle()),
+                () -> assertEquals(
+                        "Operation Failed",
+                        presentation.schematics().actions().operationFailedTitle()),
                 () -> assertEquals("Task progress", presentation.taskProgress().progressAccessibleName()),
                 () -> assertPresentationTextResolved(texts));
     }
@@ -131,7 +137,13 @@ public final class SwingApplicationPresentationFactoryTest {
                         String.format(
                                 Locale.ROOT,
                                 presentation.schematics().metadata().previewPixelCountFormat(),
-                                144)));
+                                144)),
+                () -> assertEquals(
+                        "Delete \"castle.litematic\"? This action cannot be undone.",
+                        String.format(
+                                Locale.ROOT,
+                                presentation.schematics().actions().deleteConfirmationFormat(),
+                                "castle.litematic")));
     }
 
     /// Languages without dedicated Swing entries fall back to base text instead of exposing keys.
@@ -242,7 +254,8 @@ public final class SwingApplicationPresentationFactoryTest {
     /// @return whether the text resembles a raw key
     private static boolean resemblesRawResourceKey(String text) {
         return text.equals("search") || text.matches(
-                "(?:account|button|download|install|message|schematics|settings|swing|version)(?:\\..*)?");
+                "(?:account|button|download|extension|install|message|reveal|schematics|settings|swing|version)"
+                        + "(?:\\..*)?");
     }
 
     /// Verifies that every collected value is visible text rather than a missing resource key.

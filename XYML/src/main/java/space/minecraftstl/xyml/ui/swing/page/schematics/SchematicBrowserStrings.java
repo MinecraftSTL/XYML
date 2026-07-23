@@ -42,6 +42,7 @@ import java.util.Objects;
 /// @param unreadableText unreadable-file details heading
 /// @param directoryRowPrefix prefix distinguishing directory rows
 /// @param metadata metadata labels and formats
+/// @param actions file-operation labels, prompts, and failure text
 @NotNullByDefault
 public record SchematicBrowserStrings(
         String pageTitle,
@@ -62,7 +63,8 @@ public record SchematicBrowserStrings(
         String directorySelectionText,
         String unreadableText,
         String directoryRowPrefix,
-        SchematicMetadataStrings metadata) {
+        SchematicMetadataStrings metadata,
+        SchematicBrowserActionStrings actions) {
     /// Validates all localized browser text.
     public SchematicBrowserStrings {
         Objects.requireNonNull(pageTitle, "pageTitle");
@@ -84,5 +86,6 @@ public record SchematicBrowserStrings(
         Objects.requireNonNull(unreadableText, "unreadableText");
         Objects.requireNonNull(directoryRowPrefix, "directoryRowPrefix");
         Objects.requireNonNull(metadata, "metadata");
+        Objects.requireNonNull(actions, "actions");
     }
 }

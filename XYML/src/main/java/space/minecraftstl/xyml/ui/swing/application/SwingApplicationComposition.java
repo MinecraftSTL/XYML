@@ -53,6 +53,8 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.SchematicInstanceManagementView;
+import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserInteractions;
+import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.LegacyLauncherAppearanceStore;
@@ -329,6 +331,9 @@ public final class SwingApplicationComposition implements AutoCloseable {
             Consumer<ShellPageId> navigateCommand,
             SwingThemeManager themeManager,
             SwingAnimator animator) {
+        SchematicBrowserInteractions schematicInteractions = new DefaultSchematicBrowserInteractions(
+                presentation.schematics().actions(),
+                Schedulers.io());
         ProductionPageModelFactories factories = new ProductionPageModelFactories(
                 addInstanceCommand -> new LauncherHomeModel(
                         legacy.homeStore(),
@@ -344,6 +349,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                 Schedulers.io(),
                                 presentation.schematicManagement(),
                                 presentation.schematics(),
+                                schematicInteractions,
                                 returnCommand)),
                 (management, addInstanceCommand) -> new RepositoryInstancesModel(
                         legacy.repository(),

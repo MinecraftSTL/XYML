@@ -33,8 +33,12 @@ import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
 import javax.swing.AbstractButton;
+import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
+import javax.swing.event.ListDataEvent;
+import javax.swing.event.ListDataListener;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -46,8 +50,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -57,11 +64,32 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Headless Swing tests for schematic browser loading, geometry, navigation, details, and closure.
 @NotNullByDefault
 public final class SchematicBrowserPanelTest {
+    /// Localized file-operation text used by focused panel tests.
+    private static final SchematicBrowserActionStrings ACTION_STRINGS = new SchematicBrowserActionStrings(
+            "Import",
+            "Import Litematic files",
+            "Import schematics",
+            "Litematic files",
+            "New folder",
+            "Create a schematic folder",
+            "Folder name",
+            "Delete",
+            "Delete selected item",
+            "Delete %s?",
+            "Reveal",
+            "Reveal selected item",
+            "Updating schematics",
+            "Unable to update schematics",
+            "Schematic operation failed",
+            "Unable to reveal schematic");
+
     /// Localized browser text used by focused panel tests.
     private static final SchematicBrowserStrings STRINGS = new SchematicBrowserStrings(
             "Schematics",
@@ -100,7 +128,8 @@ public final class SchematicBrowserPanelTest {
                     "%d x %d x %d",
                     "%d x %d pixels; rendering deferred",
                     "%d pixels; rendering deferred",
-                    "Unavailable"));
+                    "Unavailable"),
+            ACTION_STRINGS);
 
     /// Construction stays I/O-free, start is lazy, and repeated close releases the model only once.
     @Test
@@ -108,7 +137,8 @@ public final class SchematicBrowserPanelTest {
         Path root = Path.of("schematics").toAbsolutePath().normalize();
         FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(
                 List.of(), snapshot(root, root, OptionalInt.empty(), 0L, SchematicBrowserStatus.IDLE, null, false));
-        SchematicBrowserPanel panel = onEventDispatchThread(() -> new SchematicBrowserPanel(model, STRINGS));
+        SchematicBrowserPanel panel = onEventDispatchThread(() ->
+                new SchematicBrowserPanel(model, STRINGS, new FakeSchematicBrowserInteractions()));
 
         assertAll(
                 () -> assertEquals(0, model.initialLoads.get()),
@@ -122,7 +152,37 @@ public final class SchematicBrowserPanelTest {
                     () -> assertTrue(assertInstanceOf(
                             FlatSVGIcon.class, findButton(panel, "schematicsRefresh").getIcon()).hasFound()),
                     () -> assertTrue(assertInstanceOf(
-                            FlatSVGIcon.class, findButton(panel, "schematicsOpenDirectory").getIcon()).hasFound()));
+                            FlatSVGIcon.class, findButton(panel, "schematicsImport").getIcon()).hasFound()),
+                    () -> assertTrue(assertInstanceOf(
+                            FlatSVGIcon.class,
+                            findButton(panel, "schematicsCreateDirectory").getIcon()).hasFound()),
+                    () -> assertTrue(assertInstanceOf(
+                            FlatSVGIcon.class,
+                            findButton(panel, "schematicsOpenDirectory").getIcon()).hasFound()),
+                    () -> assertTrue(assertInstanceOf(
+                            FlatSVGIcon.class, findButton(panel, "schematicsReveal").getIcon()).hasFound()),
+                    () -> assertTrue(assertInstanceOf(
+                            FlatSVGIcon.class, findButton(panel, "schematicsDelete").getIcon()).hasFound()),
+                    () -> assertAccessibleAction(
+                            findButton(panel, "schematicsImport"),
+                            ACTION_STRINGS.importAction(),
+                            ACTION_STRINGS.importTooltip()),
+                    () -> assertAccessibleAction(
+                            findButton(panel, "schematicsCreateDirectory"),
+                            ACTION_STRINGS.createDirectoryAction(),
+                            ACTION_STRINGS.createDirectoryTooltip()),
+                    () -> assertAccessibleAction(
+                            findButton(panel, "schematicsOpenDirectory"),
+                            STRINGS.openDirectoryAction(),
+                            STRINGS.openDirectoryTooltip()),
+                    () -> assertAccessibleAction(
+                            findButton(panel, "schematicsReveal"),
+                            ACTION_STRINGS.revealAction(),
+                            ACTION_STRINGS.revealTooltip()),
+                    () -> assertAccessibleAction(
+                            findButton(panel, "schematicsDelete"),
+                            ACTION_STRINGS.deleteAction(),
+                            ACTION_STRINGS.deleteTooltip()));
             panel.start();
             panel.start();
             assertEquals(1, model.initialLoads.get());
@@ -143,7 +203,8 @@ public final class SchematicBrowserPanelTest {
         FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(
                 rows,
                 snapshot(root, root, OptionalInt.of(rows.size()), 1L, SchematicBrowserStatus.READY, null, false));
-        SchematicBrowserPanel panel = onEventDispatchThread(() -> new SchematicBrowserPanel(model, STRINGS));
+        SchematicBrowserPanel panel = onEventDispatchThread(() ->
+                new SchematicBrowserPanel(model, STRINGS, new FakeSchematicBrowserInteractions()));
 
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(940, 520));
@@ -164,6 +225,95 @@ public final class SchematicBrowserPanelTest {
         });
     }
 
+    /// Long localized commands collapse to icons and remain inside narrow action strips.
+    @Test
+    public void narrowActionStripsUseStableIconPresentation() {
+        Path root = Path.of("schematics").toAbsolutePath().normalize();
+        SchematicDirectoryItem row = new SchematicDirectoryItem(root.resolve("child"), "child");
+        FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(
+                List.of(row),
+                snapshot(root, root, OptionalInt.of(1), 1L, SchematicBrowserStatus.READY, null, false));
+        SchematicBrowserStrings longStrings = longActionStrings();
+        SchematicBrowserPanel panel = onEventDispatchThread(() -> new SchematicBrowserPanel(
+                model, longStrings, new FakeSchematicBrowserInteractions()));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(480, 420));
+            panel.start();
+            layoutRecursively(panel);
+
+            @Unmodifiable List<AbstractButton> actions = List.of(
+                    findButton(panel, "schematicsReturn"),
+                    findButton(panel, "schematicsRefresh"),
+                    findButton(panel, "schematicsImport"),
+                    findButton(panel, "schematicsCreateDirectory"),
+                    findButton(panel, "schematicsOpenDirectory"),
+                    findButton(panel, "schematicsReveal"),
+                    findButton(panel, "schematicsDelete"));
+            for (AbstractButton action : actions) {
+                assertAll(
+                        () -> assertNull(action.getText()),
+                        () -> assertTrue(Objects.requireNonNull(
+                                action.getAccessibleContext().getAccessibleName()).length() > 20),
+                        () -> assertActionWithinParent(action));
+            }
+            model.publish(
+                    List.of(row),
+                    snapshot(
+                            root,
+                            root,
+                            OptionalInt.of(1),
+                            1L,
+                            SchematicBrowserStatus.LOADING,
+                            null,
+                            false));
+            layoutRecursively(panel);
+            AbstractButton refresh = findButton(panel, "schematicsRefresh");
+            assertAll(
+                    () -> assertNull(refresh.getText()),
+                    () -> assertEquals(
+                            longStrings.refreshingAction(),
+                            refresh.getAccessibleContext().getAccessibleName()),
+                    () -> assertActionWithinParent(refresh));
+            panel.close();
+        });
+    }
+
+    /// The full-label threshold includes both outer FlowLayout gaps without wrapping a hidden row.
+    @Test
+    public void actionStripUsesExactFullLabelWidthThreshold() {
+        Path root = Path.of("schematics").toAbsolutePath().normalize();
+        FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(
+                List.of(),
+                snapshot(root, root, OptionalInt.of(0), 1L, SchematicBrowserStatus.READY, null, false));
+        SchematicBrowserPanel panel = onEventDispatchThread(() ->
+                new SchematicBrowserPanel(model, STRINGS, new FakeSchematicBrowserInteractions()));
+
+        onEventDispatchThread(() -> {
+            AbstractButton returnAction = findButton(panel, "schematicsReturn");
+            AbstractButton refreshAction = findButton(panel, "schematicsRefresh");
+            Container actionStrip = returnAction.getParent();
+            int fullWidth = actionStrip.getPreferredSize().width;
+
+            actionStrip.setSize(fullWidth - 1, 40);
+            actionStrip.doLayout();
+            assertAll(
+                    () -> assertNull(returnAction.getText()),
+                    () -> assertNull(refreshAction.getText()),
+                    () -> assertActionWithinParent(returnAction),
+                    () -> assertActionWithinParent(refreshAction));
+
+            actionStrip.setSize(fullWidth, 40);
+            actionStrip.doLayout();
+            assertAll(
+                    () -> assertEquals(STRINGS.returnAction(), returnAction.getText()),
+                    () -> assertEquals(STRINGS.refreshAction(), refreshAction.getText()),
+                    () -> assertActionWithinParent(returnAction),
+                    () -> assertActionWithinParent(refreshAction));
+            panel.close();
+        });
+    }
+
     /// Toolbar and double-click navigation work, worker errors expose retry, and new content clears selection.
     @Test
     public void navigatesRefreshesRetriesAndReloadsChangedDirectory() throws Exception {
@@ -174,7 +324,8 @@ public final class SchematicBrowserPanelTest {
         FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(
                 rootRows,
                 snapshot(root, root, OptionalInt.of(1), 1L, SchematicBrowserStatus.READY, null, false));
-        SchematicBrowserPanel panel = onEventDispatchThread(() -> new SchematicBrowserPanel(model, STRINGS));
+        SchematicBrowserPanel panel = onEventDispatchThread(() ->
+                new SchematicBrowserPanel(model, STRINGS, new FakeSchematicBrowserInteractions()));
 
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(900, 480));
@@ -252,7 +403,8 @@ public final class SchematicBrowserPanelTest {
         FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(
                 rows,
                 snapshot(root, root, OptionalInt.of(2), 1L, SchematicBrowserStatus.READY, null, false));
-        SchematicBrowserPanel panel = onEventDispatchThread(() -> new SchematicBrowserPanel(model, STRINGS));
+        SchematicBrowserPanel panel = onEventDispatchThread(() ->
+                new SchematicBrowserPanel(model, STRINGS, new FakeSchematicBrowserInteractions()));
 
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(900, 520));
@@ -283,7 +435,8 @@ public final class SchematicBrowserPanelTest {
         SchematicBrowserSnapshot initial = snapshot(
                 root, root, OptionalInt.of(rows.size()), 1L, SchematicBrowserStatus.READY, null, false);
         FakeSchematicBrowserModel model = FakeSchematicBrowserModel.controlled(rows, initial);
-        SchematicBrowserPanel panel = onEventDispatchThread(() -> new SchematicBrowserPanel(model, STRINGS));
+        SchematicBrowserPanel panel = onEventDispatchThread(() ->
+                new SchematicBrowserPanel(model, STRINGS, new FakeSchematicBrowserInteractions()));
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(800, 420));
             layoutRecursively(panel);
@@ -291,6 +444,8 @@ public final class SchematicBrowserPanelTest {
             panel.choiceList().refreshLoadPlan();
             assertFalse(model.pendingLoads().isEmpty());
         });
+        @Unmodifiable List<ListDataListener> retainedListListeners = onEventDispatchThread(() ->
+                List.of(panel.choiceList().getChoiceModel().getListDataListeners()));
 
         Thread closer = new Thread(panel::close, "schematics-panel-close-worker");
         closer.start();
@@ -303,13 +458,368 @@ public final class SchematicBrowserPanelTest {
         model.initialLoad.complete(late);
         EdtDispatcher.executeAndWait(() -> { });
 
+        onEventDispatchThread(() -> {
+            JTextArea details = assertInstanceOf(
+                    JTextArea.class, findComponent(panel, "schematicsDetailsText"));
+            details.setText("closed details sentinel");
+            ListDataEvent lateListEvent = new ListDataEvent(
+                    panel.choiceList().getChoiceModel(), ListDataEvent.CONTENTS_CHANGED, 0, 0);
+            retainedListListeners.forEach(listener -> listener.contentsChanged(lateListEvent));
+
+            assertAll(
+                    () -> assertEquals(initial, panel.displayedSnapshot()),
+                    () -> assertEquals(0, panel.choiceList().getChoiceModel().getSize()),
+                    () -> assertEquals("closed details sentinel", details.getText()),
+                    () -> assertFalse(retainedListListeners.isEmpty()),
+                    () -> assertFalse(findButton(panel, "schematicsRefresh").isEnabled()),
+                    () -> assertEquals(1, model.closeCalls.get()),
+                    () -> assertTrue(model.closedOnEdt.get()),
+                    () -> assertFalse(model.hasSubscribers()));
+        });
+    }
+
+    /// Cancelled chooser, prompt, and confirmation dialogs never reach the model.
+    @Test
+    public void cancelledDialogsDoNotStartWrites() {
+        Path root = Path.of("schematics").toAbsolutePath().normalize();
+        SchematicDirectoryItem row = new SchematicDirectoryItem(root.resolve("child"), "child");
+        FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(
+                List.of(row),
+                snapshot(root, root, OptionalInt.of(1), 1L, SchematicBrowserStatus.READY, null, false));
+        FakeSchematicBrowserInteractions interactions = new FakeSchematicBrowserInteractions();
+        SchematicBrowserPanel panel = onEventDispatchThread(() ->
+                new SchematicBrowserPanel(model, STRINGS, interactions));
+
+        onEventDispatchThread(() -> {
+            prepareLoadedList(panel);
+            panel.choiceList().getList().setSelectedIndex(0);
+            findButton(panel, "schematicsImport").doClick();
+            findButton(panel, "schematicsCreateDirectory").doClick();
+            findButton(panel, "schematicsDelete").doClick();
+
+            assertAll(
+                    () -> assertEquals(1, interactions.importChooserCalls),
+                    () -> assertEquals(1, interactions.directoryPromptCalls),
+                    () -> assertEquals(List.of(row), interactions.confirmedTargets),
+                    () -> assertEquals(List.of(), model.importedFiles()),
+                    () -> assertEquals(List.of(), model.createdDirectoryNames()),
+                    () -> assertEquals(List.of(), model.deletedPaths()));
+            panel.close();
+        });
+    }
+
+    /// Confirmed actions pass the exact captured chooser values, name, row, and path.
+    @Test
+    public void confirmedActionsUseExactCapturedModelArguments() {
+        Path root = Path.of("schematics").toAbsolutePath().normalize();
+        SchematicDirectoryItem row = new SchematicDirectoryItem(root.resolve("child"), "child");
+        FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(
+                List.of(row),
+                snapshot(root, root, OptionalInt.of(1), 1L, SchematicBrowserStatus.READY, null, false));
+        FakeSchematicBrowserInteractions interactions = new FakeSchematicBrowserInteractions();
+        @Unmodifiable List<Path> sources = List.of(
+                Path.of("source-one.litematic"),
+                Path.of("source-two.litematic"));
+        interactions.importSelection = sources;
+        interactions.directoryName = "new folder";
+        interactions.deletionConfirmed = true;
+        SchematicBrowserPanel panel = onEventDispatchThread(() ->
+                new SchematicBrowserPanel(model, STRINGS, interactions));
+
+        onEventDispatchThread(() -> {
+            prepareLoadedList(panel);
+            panel.choiceList().getList().setSelectedIndex(0);
+            findButton(panel, "schematicsImport").doClick();
+            findButton(panel, "schematicsCreateDirectory").doClick();
+            findButton(panel, "schematicsDelete").doClick();
+
+            assertAll(
+                    () -> assertEquals(root, interactions.importDirectory),
+                    () -> assertEquals(List.of(sources), model.importedFiles()),
+                    () -> assertEquals(List.of("new folder"), model.createdDirectoryNames()),
+                    () -> assertEquals(List.of(row.path()), model.deletedPaths()),
+                    () -> assertSame(row, interactions.confirmedTargets.get(0)));
+            panel.close();
+        });
+    }
+
+    /// Modal results are discarded after closure, directory changes, busy writes, or selection changes.
+    @Test
+    public void modalResultsAreRevalidatedBeforeModelMutation() {
+        Path root = Path.of("schematics").toAbsolutePath().normalize();
+        @Unmodifiable List<SchematicBrowserItem> rows = List.of(
+                new SchematicDirectoryItem(root.resolve("first"), "first"),
+                new SchematicDirectoryItem(root.resolve("second"), "second"));
+        SchematicBrowserSnapshot ready = snapshot(
+                root, root, OptionalInt.of(2), 1L, SchematicBrowserStatus.READY, null, false);
+        FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(rows, ready);
+        FakeSchematicBrowserInteractions interactions = new FakeSchematicBrowserInteractions();
+        interactions.importSelection = List.of(Path.of("source.litematic"));
+        interactions.directoryName = "new-folder";
+        interactions.deletionConfirmed = true;
+        SchematicBrowserPanel panel = onEventDispatchThread(() ->
+                new SchematicBrowserPanel(model, STRINGS, interactions));
+
+        onEventDispatchThread(() -> {
+            prepareLoadedList(panel);
+            interactions.importDialogHook = () -> model.publish(
+                    rows,
+                    snapshot(
+                            root,
+                            root,
+                            OptionalInt.of(2),
+                            1L,
+                            SchematicBrowserStatus.READY,
+                            null,
+                            false,
+                            SchematicBrowserWriteStatus.BUSY,
+                            null));
+            findButton(panel, "schematicsImport").doClick();
+            assertEquals(List.of(), model.importedFiles());
+
+            model.publish(rows, ready);
+            Path changedDirectory = root.resolve("changed");
+            interactions.directoryDialogHook = () -> model.publish(
+                    rows,
+                    snapshot(
+                            root,
+                            changedDirectory,
+                            OptionalInt.of(2),
+                            2L,
+                            SchematicBrowserStatus.READY,
+                            null,
+                            true));
+            findButton(panel, "schematicsCreateDirectory").doClick();
+            assertEquals(List.of(), model.createdDirectoryNames());
+
+            SchematicBrowserSnapshot restored = snapshot(
+                    root, root, OptionalInt.of(2), 3L, SchematicBrowserStatus.READY, null, false);
+            model.publish(rows, restored);
+            prepareLoadedList(panel);
+            panel.choiceList().getList().setSelectedIndex(0);
+            interactions.deleteDialogHook = () -> panel.choiceList().getList().setSelectedIndex(1);
+            findButton(panel, "schematicsDelete").doClick();
+            assertEquals(List.of(), model.deletedPaths());
+
+            interactions.importDialogHook = panel::close;
+            findButton(panel, "schematicsImport").doClick();
+            assertAll(
+                    () -> assertEquals(List.of(), model.importedFiles()),
+                    () -> assertEquals(1, model.closeCalls.get()));
+        });
+    }
+
+    /// Busy and failed writes retain content and selection while applying exact command gating.
+    @Test
+    public void writeLifecycleRetainsSelectionAndUsesGenericVisibleFailureStatus() {
+        Path root = Path.of("schematics").toAbsolutePath().normalize();
+        Path current = root.resolve("nested");
+        SchematicDirectoryItem row = new SchematicDirectoryItem(current.resolve("child"), "child");
+        @Unmodifiable List<SchematicBrowserItem> rows = List.of(row);
+        FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(
+                rows,
+                snapshot(root, current, OptionalInt.of(1), 1L, SchematicBrowserStatus.READY, null, true));
+        SchematicBrowserPanel panel = onEventDispatchThread(() -> new SchematicBrowserPanel(
+                model,
+                STRINGS,
+                new FakeSchematicBrowserInteractions()));
+
+        onEventDispatchThread(() -> {
+            prepareLoadedList(panel);
+            JList<ChoiceListEntry<SchematicBrowserItem>> list = panel.choiceList().getList();
+            list.setSelectedIndex(0);
+            model.publish(
+                    rows,
+                    snapshot(
+                            root,
+                            current,
+                            OptionalInt.of(1),
+                            1L,
+                            SchematicBrowserStatus.READY,
+                            null,
+                            true,
+                            SchematicBrowserWriteStatus.BUSY,
+                            null));
+
+            JLabel status = assertInstanceOf(JLabel.class, findComponent(panel, "schematicsStatus"));
+            assertAll(
+                    () -> assertEquals(0, list.getSelectedIndex()),
+                    () -> assertFalse(list.isEnabled()),
+                    () -> assertFalse(findButton(panel, "schematicsReturn").isEnabled()),
+                    () -> assertFalse(findButton(panel, "schematicsRefresh").isEnabled()),
+                    () -> assertFalse(findButton(panel, "schematicsImport").isEnabled()),
+                    () -> assertFalse(findButton(panel, "schematicsCreateDirectory").isEnabled()),
+                    () -> assertFalse(findButton(panel, "schematicsOpenDirectory").isEnabled()),
+                    () -> assertFalse(findButton(panel, "schematicsReveal").isEnabled()),
+                    () -> assertFalse(findButton(panel, "schematicsDelete").isEnabled()),
+                    () -> assertEquals(ACTION_STRINGS.writingStatus(), status.getText()));
+
+            String diagnostic = "private disk diagnostic";
+            model.publish(
+                    rows,
+                    snapshot(
+                            root,
+                            current,
+                            OptionalInt.of(1),
+                            1L,
+                            SchematicBrowserStatus.READY,
+                            null,
+                            true,
+                            SchematicBrowserWriteStatus.ERROR,
+                            diagnostic));
+            assertAll(
+                    () -> assertEquals(0, list.getSelectedIndex()),
+                    () -> assertTrue(list.isEnabled()),
+                    () -> assertTrue(findButton(panel, "schematicsReturn").isEnabled()),
+                    () -> assertTrue(findButton(panel, "schematicsRefresh").isEnabled()),
+                    () -> assertTrue(findButton(panel, "schematicsImport").isEnabled()),
+                    () -> assertTrue(findButton(panel, "schematicsCreateDirectory").isEnabled()),
+                    () -> assertTrue(findButton(panel, "schematicsOpenDirectory").isEnabled()),
+                    () -> assertTrue(findButton(panel, "schematicsReveal").isEnabled()),
+                    () -> assertTrue(findButton(panel, "schematicsDelete").isEnabled()),
+                    () -> assertEquals(ACTION_STRINGS.writeFailedStatus(), status.getText()),
+                    () -> assertFalse(status.getText().contains(diagnostic)),
+                    () -> assertTrue(Objects.requireNonNull(status.getToolTipText()).contains(diagnostic)),
+                    () -> assertTrue(Objects.requireNonNull(
+                            status.getAccessibleContext().getAccessibleDescription()).contains(diagnostic)));
+
+            model.publish(
+                    rows,
+                    snapshot(root, current, OptionalInt.of(1), 2L, SchematicBrowserStatus.READY, null, true));
+            assertEquals(-1, list.getSelectedIndex());
+            panel.close();
+        });
+    }
+
+    /// Published write errors suppress duplicate dialogs while unpublished failures remain visible.
+    @Test
+    public void writeFailureObservationDeduplicatesPublishedErrorsAndUnwrapsFailures() {
+        Path root = Path.of("schematics").toAbsolutePath().normalize();
+        SchematicBrowserSnapshot ready = snapshot(
+                root, root, OptionalInt.of(0), 1L, SchematicBrowserStatus.READY, null, false);
+        FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(List.of(), ready);
+        FakeSchematicBrowserInteractions interactions = new FakeSchematicBrowserInteractions();
+        interactions.importSelection = List.of(Path.of("source.litematic"));
+        interactions.directoryName = "invalid/name";
+        SchematicBrowserPanel panel = onEventDispatchThread(() ->
+                new SchematicBrowserPanel(model, STRINGS, interactions));
+
+        onEventDispatchThread(() -> {
+            CompletableFuture<SchematicBrowserSnapshot> publishedFailure = new CompletableFuture<>();
+            model.setNextWriteCompletion(publishedFailure);
+            findButton(panel, "schematicsImport").doClick();
+            String detail = "disk full";
+            model.publish(
+                    List.of(),
+                    snapshot(
+                            root,
+                            root,
+                            OptionalInt.of(0),
+                            1L,
+                            SchematicBrowserStatus.READY,
+                            null,
+                            false,
+                            SchematicBrowserWriteStatus.ERROR,
+                            detail));
+            publishedFailure.completeExceptionally(new IllegalStateException(detail));
+            assertEquals(List.of(), interactions.failures);
+
+            model.publish(List.of(), ready);
+            model.setNextWriteCompletion(CompletableFuture.failedFuture(
+                    new CompletionException(new ExecutionException(
+                            new IllegalArgumentException("invalid component")))));
+            findButton(panel, "schematicsCreateDirectory").doClick();
+            assertEquals(
+                    List.of(new FailurePresentation(
+                            ACTION_STRINGS.operationFailedTitle(),
+                            "invalid component",
+                            true)),
+                    interactions.failures);
+
+            model.setNextWriteCompletion(CompletableFuture.failedFuture(
+                    new CancellationException("closed")));
+            findButton(panel, "schematicsImport").doClick();
+            assertEquals(1, interactions.failures.size());
+            panel.close();
+        });
+    }
+
+    /// Reveal gates only itself, reports resolved failures on the EDT, and drops late close callbacks.
+    @Test
+    public void revealCompletionIsIsolatedAndCloseDropsLateFeedback() {
+        Path root = Path.of("schematics").toAbsolutePath().normalize();
+        SchematicFileItem row = new SchematicFileItem(
+                root.resolve("broken.litematic"),
+                "broken.litematic",
+                null,
+                "unreadable");
+        FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(
+                List.of(row),
+                snapshot(root, root, OptionalInt.of(1), 1L, SchematicBrowserStatus.READY, null, false));
+        FakeSchematicBrowserInteractions interactions = new FakeSchematicBrowserInteractions();
+        CompletableFuture<@Nullable Void> failedReveal = new CompletableFuture<>();
+        interactions.revealCompletion = failedReveal;
+        SchematicBrowserPanel panel = onEventDispatchThread(() ->
+                new SchematicBrowserPanel(model, STRINGS, interactions));
+
+        onEventDispatchThread(() -> {
+            prepareLoadedList(panel);
+            panel.choiceList().getList().setSelectedIndex(0);
+            findButton(panel, "schematicsReveal").doClick();
+            assertAll(
+                    () -> assertSame(row, interactions.revealedTargets.get(0)),
+                    () -> assertFalse(findButton(panel, "schematicsReveal").isEnabled()),
+                    () -> assertTrue(findButton(panel, "schematicsDelete").isEnabled()),
+                    () -> assertTrue(findButton(panel, "schematicsImport").isEnabled()),
+                    () -> assertTrue(findButton(panel, "schematicsCreateDirectory").isEnabled()),
+                    () -> assertTrue(findButton(panel, "schematicsRefresh").isEnabled()),
+                    () -> assertTrue(panel.choiceList().getList().isEnabled()));
+        });
+
+        failedReveal.completeExceptionally(new CompletionException(
+                new ExecutionException(new IllegalStateException("desktop unavailable"))));
+        EdtDispatcher.executeAndWait(() -> { });
         onEventDispatchThread(() -> assertAll(
-                () -> assertEquals(initial, panel.displayedSnapshot()),
-                () -> assertEquals(0, panel.choiceList().getChoiceModel().getSize()),
-                () -> assertFalse(findButton(panel, "schematicsRefresh").isEnabled()),
-                () -> assertEquals(1, model.closeCalls.get()),
-                () -> assertTrue(model.closedOnEdt.get()),
-                () -> assertFalse(model.hasSubscribers())));
+                () -> assertEquals(
+                        List.of(new FailurePresentation(
+                                ACTION_STRINGS.revealFailedTitle(),
+                                "desktop unavailable",
+                                true)),
+                        interactions.failures),
+                () -> assertTrue(findButton(panel, "schematicsReveal").isEnabled())));
+
+        CompletableFuture<@Nullable Void> cancelledReveal = new CompletableFuture<>();
+        onEventDispatchThread(() -> {
+            interactions.revealCompletion = cancelledReveal;
+            findButton(panel, "schematicsReveal").doClick();
+        });
+        cancelledReveal.completeExceptionally(new CancellationException("cancelled"));
+        EdtDispatcher.executeAndWait(() -> { });
+        onEventDispatchThread(() -> assertAll(
+                () -> assertEquals(1, interactions.failures.size()),
+                () -> assertTrue(findButton(panel, "schematicsReveal").isEnabled())));
+
+        CompletableFuture<@Nullable Void> lateReveal = new CompletableFuture<>();
+        onEventDispatchThread(() -> {
+            interactions.revealCompletion = lateReveal;
+            findButton(panel, "schematicsReveal").doClick();
+            panel.close();
+        });
+        lateReveal.completeExceptionally(new IllegalStateException("late failure"));
+        EdtDispatcher.executeAndWait(() -> { });
+        onEventDispatchThread(() -> assertAll(
+                () -> assertEquals(1, interactions.failures.size()),
+                () -> assertFalse(findButton(panel, "schematicsReveal").isEnabled()),
+                () -> assertEquals(1, model.closeCalls.get())));
+    }
+
+    /// Lays out the panel and resolves the first viewport range against an immediate fake model.
+    ///
+    /// @param panel panel under test
+    private static void prepareLoadedList(SchematicBrowserPanel panel) {
+        panel.setSize(new Dimension(900, 520));
+        layoutRecursively(panel);
+        panel.choiceList().refreshLoadPlan();
     }
 
     /// Creates deterministic directory rows.
@@ -346,6 +856,40 @@ public final class SchematicBrowserPanelTest {
         return new SchematicBrowserSnapshot(root, current, count, revision, status, failure, canReturn);
     }
 
+    /// Creates one browser snapshot with an explicit independent write lifecycle.
+    ///
+    /// @param root immutable root
+    /// @param current current directory
+    /// @param count exact count or empty before discovery
+    /// @param revision content revision
+    /// @param status scan lifecycle status
+    /// @param failure scan failure text or null
+    /// @param canReturn whether parent navigation is enabled
+    /// @param writeStatus write lifecycle status
+    /// @param writeFailure write failure text or null
+    /// @return immutable snapshot
+    private static SchematicBrowserSnapshot snapshot(
+            Path root,
+            Path current,
+            OptionalInt count,
+            long revision,
+            SchematicBrowserStatus status,
+            @Nullable String failure,
+            boolean canReturn,
+            SchematicBrowserWriteStatus writeStatus,
+            @Nullable String writeFailure) {
+        return new SchematicBrowserSnapshot(
+                root,
+                current,
+                count,
+                revision,
+                status,
+                failure,
+                canReturn,
+                writeStatus,
+                writeFailure);
+    }
+
     /// Locates the existing core Litematic test fixture from either common Gradle working directory.
     ///
     /// @return existing fixture path
@@ -364,6 +908,68 @@ public final class SchematicBrowserPanelTest {
         throw new IllegalStateException("Missing Litematic test fixture from " + workingDirectory);
     }
 
+    /// Creates deliberately long command labels for responsive action-strip coverage.
+    ///
+    /// @return browser presentation with long visible action labels
+    private static SchematicBrowserStrings longActionStrings() {
+        String longReturn = "Return to the parent schematic directory immediately";
+        String longRefresh = "Refresh every schematic in the current directory";
+        String longOpen = "Open the selected schematic directory now";
+        SchematicBrowserActionStrings longActions = new SchematicBrowserActionStrings(
+                "Import multiple Litematic schematic files from this computer",
+                ACTION_STRINGS.importTooltip(),
+                ACTION_STRINGS.importDialogTitle(),
+                ACTION_STRINGS.litematicFileDescription(),
+                "Create a new child directory for schematic files",
+                ACTION_STRINGS.createDirectoryTooltip(),
+                ACTION_STRINGS.createDirectoryPrompt(),
+                "Delete the selected schematic item permanently",
+                ACTION_STRINGS.deleteTooltip(),
+                ACTION_STRINGS.deleteConfirmationFormat(),
+                "Reveal the selected schematic in the platform file manager",
+                ACTION_STRINGS.revealTooltip(),
+                ACTION_STRINGS.writingStatus(),
+                ACTION_STRINGS.writeFailedStatus(),
+                ACTION_STRINGS.operationFailedTitle(),
+                ACTION_STRINGS.revealFailedTitle());
+        return new SchematicBrowserStrings(
+                STRINGS.pageTitle(),
+                longReturn,
+                STRINGS.returnTooltip(),
+                longRefresh,
+                longRefresh,
+                STRINGS.refreshTooltip(),
+                longOpen,
+                STRINGS.openDirectoryTooltip(),
+                STRINGS.idleText(),
+                STRINGS.loadingText(),
+                STRINGS.emptyText(),
+                STRINGS.errorTitle(),
+                STRINGS.retryAction(),
+                STRINGS.detailsTitle(),
+                STRINGS.noSelectionText(),
+                STRINGS.directorySelectionText(),
+                STRINGS.unreadableText(),
+                STRINGS.directoryRowPrefix(),
+                STRINGS.metadata(),
+                longActions);
+    }
+
+    /// Verifies one laid-out action stays fully inside its responsive strip.
+    ///
+    /// @param action action being checked
+    private static void assertActionWithinParent(AbstractButton action) {
+        Container parent = action.getParent();
+        Rectangle bounds = action.getBounds();
+        assertAll(
+                () -> assertTrue(bounds.width > 0),
+                () -> assertTrue(bounds.height > 0),
+                () -> assertTrue(bounds.x >= 0),
+                () -> assertTrue(bounds.y >= 0),
+                () -> assertTrue(bounds.x + bounds.width <= parent.getWidth()),
+                () -> assertTrue(bounds.y + bounds.height <= parent.getHeight()));
+    }
+
     /// Finds a named button in a Swing hierarchy.
     ///
     /// @param root hierarchy root
@@ -375,6 +981,24 @@ public final class SchematicBrowserPanelTest {
             return button;
         }
         throw new IllegalArgumentException("Named component is not a button: " + name);
+    }
+
+    /// Verifies visible, hover, and assistive presentation for one command.
+    ///
+    /// @param button command under test
+    /// @param text expected visible and accessible name
+    /// @param description expected tooltip and accessible description
+    private static void assertAccessibleAction(
+            AbstractButton button,
+            String text,
+            String description) {
+        assertAll(
+                () -> assertEquals(text, button.getText()),
+                () -> assertEquals(description, button.getToolTipText()),
+                () -> assertEquals(text, button.getAccessibleContext().getAccessibleName()),
+                () -> assertEquals(
+                        description,
+                        button.getAccessibleContext().getAccessibleDescription()));
     }
 
     /// Finds one named component recursively.
@@ -427,6 +1051,109 @@ public final class SchematicBrowserPanelTest {
         }
     }
 
+    /// One failure presentation captured from the panel interaction boundary.
+    ///
+    /// @param title localized dialog title
+    /// @param detail resolved failure detail
+    /// @param shownOnEdt whether presentation occurred on the event-dispatch thread
+    @NotNullByDefault
+    private record FailurePresentation(String title, String detail, boolean shownOnEdt) {
+    }
+
+    /// Deterministic modal and desktop interaction fake for action-focused panel tests.
+    @NotNullByDefault
+    private static final class FakeSchematicBrowserInteractions implements SchematicBrowserInteractions {
+        /// Import selection returned by the next and subsequent chooser calls.
+        private @Unmodifiable List<Path> importSelection = List.of();
+
+        /// Directory name returned by the next and subsequent prompt calls, or null to cancel.
+        private @Nullable String directoryName;
+
+        /// Whether the next and subsequent deletion confirmations are accepted.
+        private boolean deletionConfirmed;
+
+        /// Reveal completion returned by the next and subsequent reveal calls.
+        private CompletionStage<@Nullable Void> revealCompletion =
+                CompletableFuture.completedFuture(null);
+
+        /// Hook run while the import chooser is notionally open.
+        private Runnable importDialogHook = () -> { };
+
+        /// Hook run while the directory prompt is notionally open.
+        private Runnable directoryDialogHook = () -> { };
+
+        /// Hook run while the deletion confirmation is notionally open.
+        private Runnable deleteDialogHook = () -> { };
+
+        /// Last directory supplied to the import chooser, or null before use.
+        private @Nullable Path importDirectory;
+
+        /// Number of import chooser invocations.
+        private int importChooserCalls;
+
+        /// Number of directory prompt invocations.
+        private int directoryPromptCalls;
+
+        /// Targets supplied to deletion confirmation.
+        private final List<SchematicBrowserItem> confirmedTargets = new ArrayList<>();
+
+        /// Targets supplied to platform reveal.
+        private final List<SchematicBrowserItem> revealedTargets = new ArrayList<>();
+
+        /// Failure presentations captured from the panel.
+        private final List<FailurePresentation> failures = new ArrayList<>();
+
+        /// Returns the configured import selection after running the modal hook.
+        @Override
+        public @Unmodifiable List<Path> chooseImportFiles(
+                Component owner,
+                Path currentDirectory) {
+            assertTrue(SwingUtilities.isEventDispatchThread());
+            Objects.requireNonNull(owner, "owner");
+            importChooserCalls++;
+            importDirectory = currentDirectory;
+            importDialogHook.run();
+            return importSelection;
+        }
+
+        /// Returns the configured directory name after running the modal hook.
+        @Override
+        public @Nullable String promptDirectoryName(Component owner) {
+            assertTrue(SwingUtilities.isEventDispatchThread());
+            Objects.requireNonNull(owner, "owner");
+            directoryPromptCalls++;
+            directoryDialogHook.run();
+            return directoryName;
+        }
+
+        /// Returns the configured confirmation after running the modal hook.
+        @Override
+        public boolean confirmDelete(Component owner, SchematicBrowserItem target) {
+            assertTrue(SwingUtilities.isEventDispatchThread());
+            Objects.requireNonNull(owner, "owner");
+            confirmedTargets.add(target);
+            deleteDialogHook.run();
+            return deletionConfirmed;
+        }
+
+        /// Captures the exact reveal target and returns the configured completion.
+        @Override
+        public CompletionStage<@Nullable Void> reveal(SchematicBrowserItem target) {
+            revealedTargets.add(target);
+            return revealCompletion;
+        }
+
+        /// Captures one failure presentation and its dispatch thread.
+        @Override
+        public void showFailure(Component owner, String title, String detail) {
+            Objects.requireNonNull(owner, "owner");
+            failures.add(new FailurePresentation(
+                    title,
+                    detail,
+                    SwingUtilities.isEventDispatchThread()));
+        }
+    }
+
     /// One captured viewport request awaiting optional test completion.
     ///
     /// @param range requested range
@@ -474,6 +1201,18 @@ public final class SchematicBrowserPanelTest {
 
         /// Number of parent navigation commands.
         private final AtomicInteger parentReturns = new AtomicInteger();
+
+        /// Immutable source lists supplied to import commands.
+        private final List<List<Path>> imports = new ArrayList<>();
+
+        /// Exact names supplied to create-directory commands.
+        private final List<String> createdDirectories = new ArrayList<>();
+
+        /// Exact paths supplied to deletion commands.
+        private final List<Path> deletedTargets = new ArrayList<>();
+
+        /// One-shot write completion override, or null for immediate current-state success.
+        private @Nullable CompletionStage<SchematicBrowserSnapshot> nextWriteCompletion;
 
         /// Number of close calls.
         private final AtomicInteger closeCalls = new AtomicInteger();
@@ -578,30 +1317,36 @@ public final class SchematicBrowserPanelTest {
             return CompletableFuture.completedFuture(current.get());
         }
 
-        /// Rejects imports because existing panel tests do not expose write interactions.
+        /// Captures an immutable import source list and returns the configured completion.
         @Override
-        public CompletionStage<SchematicBrowserSnapshot> importFiles(List<Path> sourceFiles) {
-            return unsupportedWrite();
+        public synchronized CompletionStage<SchematicBrowserSnapshot> importFiles(List<Path> sourceFiles) {
+            imports.add(List.copyOf(sourceFiles));
+            return takeWriteCompletion();
         }
 
-        /// Rejects directory creation because existing panel tests do not expose write interactions.
+        /// Captures an exact directory name and returns the configured completion.
         @Override
-        public CompletionStage<SchematicBrowserSnapshot> createDirectory(String directoryName) {
-            return unsupportedWrite();
+        public synchronized CompletionStage<SchematicBrowserSnapshot> createDirectory(String directoryName) {
+            createdDirectories.add(directoryName);
+            return takeWriteCompletion();
         }
 
-        /// Rejects deletion because existing panel tests do not expose write interactions.
+        /// Captures an exact deletion path and returns the configured completion.
         @Override
-        public CompletionStage<SchematicBrowserSnapshot> delete(Path target) {
-            return unsupportedWrite();
+        public synchronized CompletionStage<SchematicBrowserSnapshot> delete(Path target) {
+            deletedTargets.add(target);
+            return takeWriteCompletion();
         }
 
-        /// Returns one explicit unsupported write stage without changing fake state.
+        /// Consumes the one-shot write completion or returns immediate current-state success.
         ///
-        /// @return asynchronously observable unsupported-operation failure
-        private static CompletionStage<SchematicBrowserSnapshot> unsupportedWrite() {
-            return CompletableFuture.failedFuture(
-                    new UnsupportedOperationException("Panel fake does not implement writes"));
+        /// @return configured write stage
+        private CompletionStage<SchematicBrowserSnapshot> takeWriteCompletion() {
+            @Nullable CompletionStage<SchematicBrowserSnapshot> configured = nextWriteCompletion;
+            nextWriteCompletion = null;
+            return configured == null
+                    ? CompletableFuture.completedFuture(current.get())
+                    : configured;
         }
 
         /// Records owned model disposal and its thread.
@@ -635,6 +1380,35 @@ public final class SchematicBrowserPanelTest {
         /// @return immutable opened paths
         private synchronized @Unmodifiable List<Path> openedDirectories() {
             return List.copyOf(opened);
+        }
+
+        /// Returns captured immutable import source lists.
+        ///
+        /// @return immutable command history
+        private synchronized @Unmodifiable List<List<Path>> importedFiles() {
+            return imports.stream().map(List::copyOf).toList();
+        }
+
+        /// Returns captured directory names.
+        ///
+        /// @return immutable command history
+        private synchronized @Unmodifiable List<String> createdDirectoryNames() {
+            return List.copyOf(createdDirectories);
+        }
+
+        /// Returns captured deletion targets.
+        ///
+        /// @return immutable command history
+        private synchronized @Unmodifiable List<Path> deletedPaths() {
+            return List.copyOf(deletedTargets);
+        }
+
+        /// Configures one write command completion.
+        ///
+        /// @param completion one-shot completion
+        private synchronized void setNextWriteCompletion(
+                CompletionStage<SchematicBrowserSnapshot> completion) {
+            nextWriteCompletion = completion;
         }
 
         /// Returns pending viewport requests.
