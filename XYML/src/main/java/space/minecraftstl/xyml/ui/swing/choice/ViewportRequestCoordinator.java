@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.OptionalLong;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 
@@ -128,6 +129,7 @@ public final class ViewportRequestCoordinator<T extends Object> implements AutoC
         cancelActiveRequests();
         currentPlan = plan;
         long requestGeneration = ++generation;
+        OptionalLong requestSourceRevision = dataSource.sourceRevision();
         @Unmodifiable List<IndexRange> ranges = requestedRanges(plan);
         listener.loading(requestGeneration, ranges);
 
@@ -138,9 +140,23 @@ public final class ViewportRequestCoordinator<T extends Object> implements AutoC
             try {
                 CompletionStage<ChoicePage<T>> stage = dataSource.load(range, cancellation);
                 stage.whenComplete((@Nullable ChoicePage<T> page, @Nullable Throwable failure) ->
-                        complete(requestGeneration, range, cancellation, startedAtNanos, page, failure));
+                        complete(
+                                requestGeneration,
+                                requestSourceRevision,
+                                range,
+                                cancellation,
+                                startedAtNanos,
+                                page,
+                                failure));
             } catch (Throwable failure) {
-                complete(requestGeneration, range, cancellation, startedAtNanos, null, failure);
+                complete(
+                        requestGeneration,
+                        requestSourceRevision,
+                        range,
+                        cancellation,
+                        startedAtNanos,
+                        null,
+                        failure);
             }
         }
         return requestGeneration;
@@ -149,6 +165,7 @@ public final class ViewportRequestCoordinator<T extends Object> implements AutoC
     /// Accepts one asynchronous request completion if its generation remains current.
     ///
     /// @param requestGeneration the generation that issued the request
+    /// @param requestSourceRevision source revision captured before issuing the generation
     /// @param requestedRange the range originally passed to the source
     /// @param cancellation the request cancellation signal
     /// @param startedAtNanos the monotonic request start time
@@ -156,12 +173,15 @@ public final class ViewportRequestCoordinator<T extends Object> implements AutoC
     /// @param failure the completion failure, or `null` for success
     private synchronized void complete(
             long requestGeneration,
+            OptionalLong requestSourceRevision,
             IndexRange requestedRange,
             LoadCancellation cancellation,
             long startedAtNanos,
             @Nullable ChoicePage<T> page,
             @Nullable Throwable failure) {
-        if (!isCurrent(requestGeneration) || cancellation.isCancelled()) {
+        if (!isCurrent(requestGeneration)
+                || cancellation.isCancelled()
+                || !requestSourceRevision.equals(dataSource.sourceRevision())) {
             return;
         }
 

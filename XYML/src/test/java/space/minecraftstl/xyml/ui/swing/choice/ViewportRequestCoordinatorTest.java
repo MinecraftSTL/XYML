@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -137,6 +138,23 @@ public final class ViewportRequestCoordinatorTest {
         assertEquals(List.of(secondGeneration), listener.loadedGenerations);
     }
 
+    /// Verifies a mutable source revision rejects late completion before coordinator invalidation.
+    @Test
+    public void discardsCompletionAfterSourceRevisionChanges() {
+        ControlledDataSource dataSource = new ControlledDataSource();
+        dataSource.setSourceRevision(7L);
+        RecordingListener listener = new RecordingListener();
+        ViewportRequestCoordinator<String> coordinator = new ViewportRequestCoordinator<>(
+                dataSource,
+                listener);
+        coordinator.request(plan(new IndexRange(0, 3)));
+
+        dataSource.setSourceRevision(8L);
+        dataSource.requests.get(0).future().complete(page(0, "old-0", "old-1", "old-2"));
+
+        assertEquals(List.of(), listener.loadedGenerations);
+    }
+
     /// Creates a minimal load plan with the requested desired range.
     ///
     /// @param range the visible and desired range
@@ -179,6 +197,9 @@ public final class ViewportRequestCoordinatorTest {
         /// The exact source count exposed before loading, when known.
         private final OptionalInt itemCount;
 
+        /// Optional mutable content revision used by late-completion tests.
+        private OptionalLong sourceRevision = OptionalLong.empty();
+
         /// Creates a bounded one-hundred-row test source.
         private ControlledDataSource() {
             this(OptionalInt.of(100));
@@ -197,6 +218,24 @@ public final class ViewportRequestCoordinatorTest {
         @Override
         public OptionalInt exactItemCount() {
             return itemCount;
+        }
+
+        /// Returns the current optional test revision.
+        ///
+        /// @return current revision, or empty when revision validation is disabled
+        @Override
+        public OptionalLong sourceRevision() {
+            return sourceRevision;
+        }
+
+        /// Enables or advances the test source revision.
+        ///
+        /// @param revision non-negative test revision
+        private void setSourceRevision(long revision) {
+            if (revision < 0L) {
+                throw new IllegalArgumentException("revision must not be negative");
+            }
+            sourceRevision = OptionalLong.of(revision);
         }
 
         /// Captures a controllable source request.

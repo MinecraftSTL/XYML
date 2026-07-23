@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.choice;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.concurrent.CompletionStage;
 
 /// Supplies indexed choices to a viewport-driven list without prescribing source pagination.
@@ -31,6 +32,17 @@ public interface ViewportChoiceDataSource<T extends Object> {
     ///
     /// @return the exact item count, or empty for a source whose end has not been discovered
     OptionalInt exactItemCount();
+
+    /// Returns the current source-content revision when late completions require validation.
+    ///
+    /// A coordinator captures this value when issuing a generation and discards every success or
+    /// failure completed after the source revision changes. Sources without mutable generations may
+    /// keep the default empty value.
+    ///
+    /// @return stable current content revision, or empty when revision validation is unnecessary
+    default OptionalLong sourceRevision() {
+        return OptionalLong.empty();
+    }
 
     /// Loads values needed to cover the desired range.
     ///
