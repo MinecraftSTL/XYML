@@ -578,6 +578,32 @@ public final class SchematicBrowserPanelTest {
             return CompletableFuture.completedFuture(current.get());
         }
 
+        /// Rejects imports because existing panel tests do not expose write interactions.
+        @Override
+        public CompletionStage<SchematicBrowserSnapshot> importFiles(List<Path> sourceFiles) {
+            return unsupportedWrite();
+        }
+
+        /// Rejects directory creation because existing panel tests do not expose write interactions.
+        @Override
+        public CompletionStage<SchematicBrowserSnapshot> createDirectory(String directoryName) {
+            return unsupportedWrite();
+        }
+
+        /// Rejects deletion because existing panel tests do not expose write interactions.
+        @Override
+        public CompletionStage<SchematicBrowserSnapshot> delete(Path target) {
+            return unsupportedWrite();
+        }
+
+        /// Returns one explicit unsupported write stage without changing fake state.
+        ///
+        /// @return asynchronously observable unsupported-operation failure
+        private static CompletionStage<SchematicBrowserSnapshot> unsupportedWrite() {
+            return CompletableFuture.failedFuture(
+                    new UnsupportedOperationException("Panel fake does not implement writes"));
+        }
+
         /// Records owned model disposal and its thread.
         @Override
         public void close() {

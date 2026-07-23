@@ -23,6 +23,7 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.CompletionStage;
 
 /// Supplies a shallow, viewport-driven schematic directory without exposing a desktop toolkit.
@@ -60,7 +61,34 @@ public interface SchematicBrowserModel extends ViewportChoiceDataSource<Schemati
     /// @return completion of the parent scan or the unchanged root state
     CompletionStage<SchematicBrowserSnapshot> returnToParent();
 
-    /// Cancels scans and viewport loads and prevents every late result from publishing.
+    /// Imports regular no-follow Litematic files into the current stable directory without overwriting.
+    ///
+    /// The returned stage completes only after the resulting shallow listing is committed. The
+    /// implementation accepts no concurrent write operation.
+    ///
+    /// @param sourceFiles source files defensively captured when the command starts
+    /// @return completion of the write and its resulting stable browser state
+    CompletionStage<SchematicBrowserSnapshot> importFiles(List<Path> sourceFiles);
+
+    /// Creates one direct child directory in the current stable directory.
+    ///
+    /// @param directoryName one non-blank legal path component
+    /// @return completion of the write and its resulting stable browser state
+    CompletionStage<SchematicBrowserSnapshot> createDirectory(String directoryName);
+
+    /// Recursively deletes one exact direct child from the current stable listing without following links.
+    ///
+    /// Once deletion begins, an I/O failure may leave an isolated partially deleted tree that cannot
+    /// be rolled back. The returned failure and write snapshot make that outcome explicit.
+    ///
+    /// @param target exact path captured from the current stable listing
+    /// @return completion of the write and its resulting stable browser state
+    CompletionStage<SchematicBrowserSnapshot> delete(Path target);
+
+    /// Cancels public completions, requests cooperative operation cancellation, and prevents late publication.
+    ///
+    /// A deletion that already moved its target to a private isolation path finishes that committed
+    /// cleanup after closure so an internal partially deleted tree is not abandoned unnecessarily.
     @Override
     void close();
 }

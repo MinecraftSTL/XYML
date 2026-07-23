@@ -31,10 +31,12 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -49,12 +51,14 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 
-/// Default read-only schematic browser with shallow scanning and viewport-only metadata parsing.
+/// Default schematic browser with shallow scanning, viewport-only parsing, and serialized writes.
 ///
 /// Construction normalizes paths but performs no file-system access. Every directory scan and
 /// Litematic parse runs on the caller-owned executor. Successful scans publish an exact immutable
 /// index, while range loads parse only file rows inside their clamped requested range. Generation
-/// ownership and cooperative cancellation prevent superseded scans or range loads from committing.
+/// ownership and cooperative cancellation prevent superseded scans, range loads, or writes from
+/// committing. Refresh and navigation are rejected while a write is active, so a scan can never
+/// race a mutation that later changes the same directory.
 @NotNullByDefault
 public final class DefaultSchematicBrowserModel implements SchematicBrowserModel {
     /// Production no-op used at the externally observable completion boundary.
@@ -89,6 +93,9 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
     /// Litematic metadata reader, injectable for deterministic tests.
     private final MetadataReader metadataReader;
 
+    /// Blocking mutation boundary, injectable for deterministic tests.
+    private final MutationIo mutationIo;
+
     /// Package-private test hook invoked outside model locks immediately before a terminal future CAS.
     private final Runnable beforeTerminalCompletion;
 
@@ -105,11 +112,17 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
     /// Latest atomically published directory descriptors and snapshot.
     private volatile BrowserState state;
 
-    /// Monotonically increasing ownership token for scans and range requests.
+    /// Monotonically increasing ownership token for scans, ranges, snapshot completions, and writes.
     private long generation;
 
     /// Latest directory scan allowed to commit, or null while no scan is active.
     private @Nullable ScanOperation activeScan;
+
+    /// Sole write operation allowed to mutate the current stable directory, or null while idle.
+    private @Nullable WriteOperation activeWrite;
+
+    /// Internally committed terminal write whose completed future may release the slot reentrantly.
+    private @Nullable WriteOperation terminalWrite;
 
     /// Whether all future commands and loads must be rejected.
     private volatile boolean closed;
@@ -124,6 +137,7 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
                 executor,
                 productionDirectoryReader(rootDirectory),
                 productionMetadataReader(rootDirectory),
+                productionMutationIo(rootDirectory),
                 NO_COMPLETION_HOOK);
     }
 
@@ -138,7 +152,13 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
             Executor executor,
             DirectoryReader directoryReader,
             MetadataReader metadataReader) {
-        this(rootDirectory, executor, directoryReader, metadataReader, NO_COMPLETION_HOOK);
+        this(
+                rootDirectory,
+                executor,
+                directoryReader,
+                metadataReader,
+                productionMutationIo(rootDirectory),
+                NO_COMPLETION_HOOK);
     }
 
     /// Creates an idle browser with an explicit terminal-completion test boundary.
@@ -154,11 +174,36 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
             DirectoryReader directoryReader,
             MetadataReader metadataReader,
             Runnable beforeTerminalCompletion) {
+        this(
+                rootDirectory,
+                executor,
+                directoryReader,
+                metadataReader,
+                productionMutationIo(rootDirectory),
+                beforeTerminalCompletion);
+    }
+
+    /// Creates an idle browser with explicit read, write, and completion test boundaries.
+    ///
+    /// @param rootDirectory immutable browser root
+    /// @param executor caller-owned I/O executor
+    /// @param directoryReader shallow directory reader
+    /// @param metadataReader Litematic metadata reader
+    /// @param mutationIo blocking file-system mutation boundary
+    /// @param beforeTerminalCompletion test hook run outside locks before terminal future completion
+    DefaultSchematicBrowserModel(
+            Path rootDirectory,
+            Executor executor,
+            DirectoryReader directoryReader,
+            MetadataReader metadataReader,
+            MutationIo mutationIo,
+            Runnable beforeTerminalCompletion) {
         this.rootDirectory = Objects.requireNonNull(rootDirectory, "rootDirectory")
                 .toAbsolutePath().normalize();
         this.executor = Objects.requireNonNull(executor, "executor");
         this.directoryReader = Objects.requireNonNull(directoryReader, "directoryReader");
         this.metadataReader = Objects.requireNonNull(metadataReader, "metadataReader");
+        this.mutationIo = Objects.requireNonNull(mutationIo, "mutationIo");
         this.beforeTerminalCompletion = Objects.requireNonNull(
                 beforeTerminalCompletion, "beforeTerminalCompletion");
         state = new BrowserState(List.of(), new SchematicBrowserSnapshot(
@@ -204,6 +249,9 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
         RangeOperation operation;
         synchronized (stateLock) {
             requireOpen();
+            if (currentWriteLocked() != null) {
+                return CompletableFuture.failedFuture(writeInProgressFailure());
+            }
             BrowserState current = state;
             if (current.snapshot().itemCount().isEmpty()) {
                 return CompletableFuture.failedFuture(
@@ -231,7 +279,11 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
         long existingGeneration = 0L;
         synchronized (stateLock) {
             requireOpen();
-            if (state.snapshot().status() == SchematicBrowserStatus.IDLE) {
+            @Nullable WriteOperation write = currentWriteLocked();
+            if (write != null) {
+                preparation = null;
+                activeResult = write.result();
+            } else if (state.snapshot().status() == SchematicBrowserStatus.IDLE) {
                 preparation = prepareScanLocked(state.snapshot().currentDirectory());
             } else if (activeScan != null) {
                 preparation = null;
@@ -257,6 +309,9 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
         ScanPreparation preparation;
         synchronized (stateLock) {
             requireOpen();
+            if (currentWriteLocked() != null) {
+                return CompletableFuture.failedFuture(writeInProgressFailure());
+            }
             preparation = prepareScanLocked(state.snapshot().currentDirectory());
         }
         return activateScan(preparation);
@@ -271,9 +326,11 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
         @Nullable IllegalArgumentException failure = null;
         synchronized (stateLock) {
             requireOpen();
-            boolean knownDirectory = state.entries().stream()
-                    .anyMatch(entry -> entry.directory() && entry.path().equals(normalized));
-            if (knownDirectory) {
+            if (currentWriteLocked() != null) {
+                return CompletableFuture.failedFuture(writeInProgressFailure());
+            }
+            @Nullable DiscoveredEntry knownEntry = findEntry(state.entries(), normalized);
+            if (knownEntry != null && knownEntry.directory()) {
                 preparation = prepareScanLocked(normalized);
             } else {
                 failure = new IllegalArgumentException("Unknown schematic child directory: " + normalized);
@@ -294,6 +351,9 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
         long rootGeneration = 0L;
         synchronized (stateLock) {
             requireOpen();
+            if (currentWriteLocked() != null) {
+                return CompletableFuture.failedFuture(writeInProgressFailure());
+            }
             Path current = state.snapshot().currentDirectory();
             if (current.equals(rootDirectory)) {
                 if (activeScan != null && activeScan.targetDirectory().equals(rootDirectory)) {
@@ -323,10 +383,95 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
         return activateScan(preparation);
     }
 
+    /// Starts one atomic-preflight import against the current stable directory.
+    @Override
+    public CompletionStage<SchematicBrowserSnapshot> importFiles(List<Path> sourceFiles) {
+        Objects.requireNonNull(sourceFiles, "sourceFiles");
+        final @Unmodifiable List<Path> capturedFiles;
+        try {
+            capturedFiles = sourceFiles.stream()
+                    .map(path -> Objects.requireNonNull(path, "sourceFiles contains null"))
+                    .map(path -> path.toAbsolutePath().normalize())
+                    .toList();
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+        if (capturedFiles.isEmpty()) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("sourceFiles must not be empty"));
+        }
+
+        @Nullable WritePreparation preparation;
+        @Nullable RuntimeException failure;
+        synchronized (stateLock) {
+            requireOpen();
+            failure = writePreconditionFailureLocked();
+            preparation = failure == null
+                    ? prepareWriteLocked((currentDirectory, cancellation) ->
+                            mutationIo.importFiles(currentDirectory, capturedFiles, cancellation))
+                    : null;
+        }
+        return preparation == null
+                ? CompletableFuture.failedFuture(Objects.requireNonNull(failure))
+                : activateWrite(preparation);
+    }
+
+    /// Starts creation of one validated direct child in the current stable directory.
+    @Override
+    public CompletionStage<SchematicBrowserSnapshot> createDirectory(String directoryName) {
+        Objects.requireNonNull(directoryName, "directoryName");
+        @Nullable IllegalArgumentException nameFailure = validateDirectoryName(directoryName);
+        if (nameFailure != null) {
+            return CompletableFuture.failedFuture(nameFailure);
+        }
+
+        @Nullable WritePreparation preparation;
+        @Nullable RuntimeException failure;
+        synchronized (stateLock) {
+            requireOpen();
+            failure = writePreconditionFailureLocked();
+            preparation = failure == null
+                    ? prepareWriteLocked((currentDirectory, cancellation) ->
+                            mutationIo.createDirectory(
+                                    currentDirectory, directoryName, cancellation))
+                    : null;
+        }
+        return preparation == null
+                ? CompletableFuture.failedFuture(Objects.requireNonNull(failure))
+                : activateWrite(preparation);
+    }
+
+    /// Starts recursive no-follow deletion of one exact current listing entry.
+    @Override
+    public CompletionStage<SchematicBrowserSnapshot> delete(Path target) {
+        Objects.requireNonNull(target, "target");
+        Path normalized = target.toAbsolutePath().normalize();
+        @Nullable WritePreparation preparation = null;
+        @Nullable RuntimeException failure;
+        synchronized (stateLock) {
+            requireOpen();
+            failure = writePreconditionFailureLocked();
+            if (failure == null) {
+                @Nullable DiscoveredEntry entry = findEntry(state.entries(), normalized);
+                if (entry == null) {
+                    failure = new IllegalArgumentException(
+                            "Unknown schematic entry in the current listing: " + normalized);
+                } else {
+                    preparation = prepareWriteLocked((currentDirectory, cancellation) ->
+                            mutationIo.delete(currentDirectory, entry, cancellation));
+                }
+            }
+        }
+        return preparation == null
+                ? CompletableFuture.failedFuture(Objects.requireNonNull(failure))
+                : activateWrite(preparation);
+    }
+
     /// Cancels every active operation and prevents late state or listener effects.
     @Override
     public void close() {
         @Nullable ScanOperation scanToCancel;
+        @Nullable WriteOperation writeToCancel;
         @Unmodifiable List<RangeOperation> rangesToCancel;
         @Unmodifiable List<SnapshotCompletion> snapshotsToCancel;
         synchronized (stateLock) {
@@ -335,12 +480,16 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
                 generation++;
                 scanToCancel = activeScan;
                 activeScan = null;
+                writeToCancel = activeWrite;
+                activeWrite = null;
+                terminalWrite = null;
                 rangesToCancel = List.copyOf(activeRangeLoads);
                 activeRangeLoads.clear();
                 snapshotsToCancel = List.copyOf(activeSnapshotCompletions);
                 activeSnapshotCompletions.clear();
             } else {
                 scanToCancel = null;
+                writeToCancel = null;
                 rangesToCancel = List.of();
                 snapshotsToCancel = List.of();
             }
@@ -348,12 +497,349 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
         if (scanToCancel != null) {
             cancelScan(scanToCancel, "Schematic browser was closed");
         }
+        if (writeToCancel != null) {
+            cancelWrite(writeToCancel, "Schematic browser was closed");
+        }
         rangesToCancel.forEach(operation -> cancelRange(operation, "Schematic browser was closed"));
         snapshotsToCancel.forEach(
                 operation -> cancelSnapshotCompletion(operation, "Schematic browser was closed"));
         synchronized (publicationLock) {
             listeners.clear();
         }
+    }
+
+    /// Returns a stable write precondition failure while holding [#stateLock].
+    ///
+    /// @return failure preventing a write, or null when a write may be prepared
+    private @Nullable RuntimeException writePreconditionFailureLocked() {
+        if (currentWriteLocked() != null) {
+            return writeInProgressFailure();
+        }
+        SchematicBrowserSnapshot snapshot = state.snapshot();
+        if (activeScan != null
+                || snapshot.status() != SchematicBrowserStatus.READY
+                || snapshot.itemCount().isEmpty()) {
+            return new IllegalStateException(
+                    "A stable schematic directory listing is required before writing");
+        }
+        return null;
+    }
+
+    /// Builds and commits one busy write generation while holding [#stateLock].
+    ///
+    /// @param action blocking mutation action
+    /// @return immutable activation data
+    private WritePreparation prepareWriteLocked(WriteAction action) {
+        @Unmodifiable List<RangeOperation> previousRanges = List.copyOf(activeRangeLoads);
+        activeRangeLoads.clear();
+        @Unmodifiable List<SnapshotCompletion> previousSnapshots =
+                List.copyOf(activeSnapshotCompletions);
+        activeSnapshotCompletions.clear();
+        BrowserState previousState = state;
+        SchematicBrowserSnapshot previous = previousState.snapshot();
+        WriteOperation operation = new WriteOperation(
+                ++generation,
+                previous.currentDirectory(),
+                new LoadCancellation(),
+                action,
+                new CompletableFuture<>());
+        terminalWrite = null;
+        activeWrite = operation;
+        SchematicBrowserSnapshot busy = new SchematicBrowserSnapshot(
+                rootDirectory,
+                previous.currentDirectory(),
+                previous.itemCount(),
+                previous.contentRevision(),
+                previous.status(),
+                previous.failureMessage(),
+                previous.canReturnToParent(),
+                SchematicBrowserWriteStatus.BUSY,
+                null);
+        state = new BrowserState(previousState.entries(), busy);
+        return new WritePreparation(
+                operation,
+                previousRanges,
+                previousSnapshots,
+                new SnapshotTransition(previous, busy));
+    }
+
+    /// Cancels stale range work, publishes busy state, and submits one current write.
+    ///
+    /// @param preparation committed write activation
+    /// @return write and reconciliation completion
+    private CompletionStage<SchematicBrowserSnapshot> activateWrite(
+            WritePreparation preparation) {
+        preparation.previousRanges().forEach(
+                operation -> cancelRange(operation, "Schematic content is being modified"));
+        preparation.previousSnapshots().forEach(
+                operation -> cancelSnapshotCompletion(
+                        operation, "Schematic content is being modified"));
+        publish(preparation.transition());
+
+        boolean submit;
+        synchronized (stateLock) {
+            submit = isWriteCurrentLocked(preparation.operation());
+        }
+        if (submit) {
+            submitWrite(preparation.operation());
+        }
+        return preparation.operation().result();
+    }
+
+    /// Submits one blocking write and converts executor rejection into visible write failure.
+    ///
+    /// @param operation write to submit
+    private void submitWrite(WriteOperation operation) {
+        try {
+            executor.execute(() -> runWrite(operation));
+        } catch (RuntimeException failure) {
+            completeWriteFailure(operation, failure);
+        } catch (Error failure) {
+            completeWriteFailure(operation, failure);
+            throw failure;
+        }
+    }
+
+    /// Performs one mutation followed by a shallow reconciliation scan on the same worker.
+    ///
+    /// @param operation owned write generation
+    private void runWrite(WriteOperation operation) {
+        try {
+            ensureWriteCurrent(operation);
+            operation.action().run(operation.currentDirectory(), operation.cancellation());
+            ensureWriteCurrent(operation);
+            @Unmodifiable List<DiscoveredEntry> entries = directoryReader.read(
+                    operation.currentDirectory(), operation.cancellation());
+            ensureWriteCurrent(operation);
+            completeWriteSuccess(operation, entries);
+        } catch (CancellationException failure) {
+            cancelWrite(operation, failure.getMessage() == null
+                    ? "Schematic write was cancelled"
+                    : failure.getMessage());
+        } catch (IOException | RuntimeException failure) {
+            completeWriteFailure(operation, failure);
+        } catch (Error failure) {
+            completeWriteFailure(operation, failure);
+            throw failure;
+        }
+    }
+
+    /// Atomically replaces the listing after a current write and reconciliation scan succeed.
+    ///
+    /// The future reaches a terminal state and releases its write slot before listeners observe the
+    /// idle snapshot, allowing listener reentrancy to start a later write deterministically.
+    ///
+    /// @param operation owned write generation
+    /// @param discoveredEntries reconciled direct children
+    private void completeWriteSuccess(
+            WriteOperation operation,
+            @Unmodifiable List<DiscoveredEntry> discoveredEntries) {
+        @Unmodifiable List<DiscoveredEntry> entries = discoveredEntries.stream()
+                .sorted(ENTRY_ORDER)
+                .toList();
+        @Nullable SnapshotTransition transition = null;
+        boolean superseded;
+        synchronized (stateLock) {
+            superseded = !isWriteCurrentLocked(operation);
+            if (!superseded) {
+                BrowserState previousState = state;
+                SchematicBrowserSnapshot previous = previousState.snapshot();
+                SchematicBrowserSnapshot ready = new SchematicBrowserSnapshot(
+                        rootDirectory,
+                        operation.currentDirectory(),
+                        OptionalInt.of(entries.size()),
+                        previous.contentRevision() + 1L,
+                        SchematicBrowserStatus.READY,
+                        null,
+                        !operation.currentDirectory().equals(rootDirectory),
+                        SchematicBrowserWriteStatus.IDLE,
+                        null);
+                state = new BrowserState(entries, ready);
+                transition = new SnapshotTransition(previous, ready);
+            }
+        }
+        if (superseded) {
+            cancelWrite(operation, "Schematic write result was superseded");
+            return;
+        }
+        SnapshotTransition committed = Objects.requireNonNull(transition);
+        beforeTerminalCompletion.run();
+        if (!markTerminalWrite(operation)) {
+            cancelWrite(operation, "Schematic write result was superseded");
+            return;
+        }
+        operation.result().complete(committed.current());
+        clearCompletedWrite(operation);
+        publish(committed);
+    }
+
+    /// Publishes a current write failure without discarding the last stable listing.
+    ///
+    /// @param operation failing write
+    /// @param failure original mutation, reconciliation, or executor failure
+    private void completeWriteFailure(WriteOperation operation, Throwable failure) {
+        @Nullable SnapshotTransition transition = null;
+        boolean superseded;
+        synchronized (stateLock) {
+            superseded = !isWriteCurrentLocked(operation);
+            if (!superseded) {
+                BrowserState previousState = state;
+                SchematicBrowserSnapshot previous = previousState.snapshot();
+                SchematicBrowserSnapshot failed = new SchematicBrowserSnapshot(
+                        rootDirectory,
+                        previous.currentDirectory(),
+                        previous.itemCount(),
+                        previous.contentRevision(),
+                        previous.status(),
+                        previous.failureMessage(),
+                        previous.canReturnToParent(),
+                        SchematicBrowserWriteStatus.ERROR,
+                        failureText(failure));
+                state = new BrowserState(previousState.entries(), failed);
+                transition = new SnapshotTransition(previous, failed);
+            }
+        }
+        if (superseded) {
+            cancelWrite(operation, "Schematic write failure was superseded");
+            return;
+        }
+        SnapshotTransition committed = Objects.requireNonNull(transition);
+        beforeTerminalCompletion.run();
+        if (!markTerminalWrite(operation)) {
+            cancelWrite(operation, "Schematic write failure was superseded");
+            return;
+        }
+        operation.result().completeExceptionally(failure);
+        clearCompletedWrite(operation);
+        publish(committed);
+    }
+
+    /// Throws when closure or another generation invalidates a write.
+    ///
+    /// @param operation write to validate
+    private void ensureWriteCurrent(WriteOperation operation) {
+        operation.cancellation().throwIfCancelled();
+        synchronized (stateLock) {
+            if (!isWriteCurrentLocked(operation)) {
+                throw new CancellationException("Schematic write was superseded");
+            }
+        }
+    }
+
+    /// Returns whether one write still owns the current generation and sole write slot.
+    ///
+    /// @param operation write to inspect
+    /// @return whether the write may continue or commit
+    private boolean isWriteCurrentLocked(WriteOperation operation) {
+        return !closed
+                && activeWrite == operation
+                && generation == operation.generation()
+                && !operation.cancellation().isCancelled();
+    }
+
+    /// Returns the active non-terminal write while permitting synchronous terminal callbacks to reenter.
+    ///
+    /// This method must run under [#stateLock]. A caller-completed public future cannot release the
+    /// slot because only model-owned terminal completion installs [#terminalWrite].
+    ///
+    /// @return active write, or null after an internally committed terminal future completes
+    private @Nullable WriteOperation currentWriteLocked() {
+        @Nullable WriteOperation write = activeWrite;
+        if (write != null && terminalWrite == write && write.result().isDone()) {
+            activeWrite = null;
+            terminalWrite = null;
+            return null;
+        }
+        return write;
+    }
+
+    /// Marks one current write as internally terminal immediately before completing its future.
+    ///
+    /// @param operation terminal write candidate
+    /// @return whether the write still owns the open model generation
+    private boolean markTerminalWrite(WriteOperation operation) {
+        synchronized (stateLock) {
+            if (!isWriteCurrentLocked(operation)) {
+                return false;
+            }
+            terminalWrite = operation;
+            return true;
+        }
+    }
+
+    /// Requests write cancellation and completes its returned stage promptly.
+    ///
+    /// @param operation write to cancel
+    /// @param message cancellation explanation
+    private void cancelWrite(WriteOperation operation, String message) {
+        operation.cancellation().cancel();
+        operation.result().completeExceptionally(new CancellationException(message));
+        clearCompletedWrite(operation);
+    }
+
+    /// Releases a write slot only after its future has reached an atomic terminal state.
+    ///
+    /// @param operation completed write
+    private void clearCompletedWrite(WriteOperation operation) {
+        synchronized (stateLock) {
+            if (activeWrite == operation) {
+                activeWrite = null;
+            }
+            if (terminalWrite == operation) {
+                terminalWrite = null;
+            }
+        }
+    }
+
+    /// Finds an exact normalized descriptor inside an immutable stable listing.
+    ///
+    /// @param entries stable direct-child descriptors
+    /// @param path normalized candidate path
+    /// @return matching descriptor, or null when unknown
+    private static @Nullable DiscoveredEntry findEntry(
+            @Unmodifiable List<DiscoveredEntry> entries,
+            Path path) {
+        for (DiscoveredEntry entry : entries) {
+            if (entry.path().equals(path)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    /// Validates one portable direct-child directory name without touching the file system.
+    ///
+    /// @param directoryName candidate name
+    /// @return validation failure, or null when the name is one legal path component
+    private @Nullable IllegalArgumentException validateDirectoryName(String directoryName) {
+        if (directoryName.isBlank()
+                || !directoryName.equals(directoryName.strip())
+                || ".".equals(directoryName)
+                || "..".equals(directoryName)
+                || directoryName.indexOf('/') >= 0
+                || directoryName.indexOf('\\') >= 0) {
+            return new IllegalArgumentException(
+                    "directoryName must be one non-blank path component");
+        }
+        try {
+            Path component = rootDirectory.getFileSystem().getPath(directoryName);
+            if (component.isAbsolute()
+                    || component.getNameCount() != 1
+                    || !directoryName.equals(component.toString())) {
+                return new IllegalArgumentException(
+                        "directoryName must be one legal path component");
+            }
+        } catch (InvalidPathException failure) {
+            return new IllegalArgumentException("directoryName is not a legal path component", failure);
+        }
+        return null;
+    }
+
+    /// Creates a consistent failure for commands that cannot overlap the sole active write.
+    ///
+    /// @return new write-in-progress failure
+    private static IllegalStateException writeInProgressFailure() {
+        return new IllegalStateException("A schematic write operation is already in progress");
     }
 
     /// Builds and commits a new loading generation while holding [#stateLock].
@@ -381,7 +867,9 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
                 previous.contentRevision(),
                 SchematicBrowserStatus.LOADING,
                 null,
-                previous.canReturnToParent());
+                previous.canReturnToParent(),
+                previous.writeStatus(),
+                previous.writeFailureMessage());
         state = new BrowserState(previousState.entries(), loading);
         return new ScanPreparation(
                 operation,
@@ -477,7 +965,9 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
                         previous.contentRevision() + 1L,
                         SchematicBrowserStatus.READY,
                         null,
-                        !currentDirectory.equals(rootDirectory));
+                        !currentDirectory.equals(rootDirectory),
+                        previous.writeStatus(),
+                        previous.writeFailureMessage());
                 state = new BrowserState(entries, ready);
                 transition = new SnapshotTransition(previous, ready);
                 rangesToCancel = List.copyOf(activeRangeLoads);
@@ -514,7 +1004,9 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
                         previous.contentRevision(),
                         SchematicBrowserStatus.ERROR,
                         failureText(failure),
-                        previous.canReturnToParent());
+                        previous.canReturnToParent(),
+                        previous.writeStatus(),
+                        previous.writeFailureMessage());
                 state = new BrowserState(previousState.entries(), failed);
                 transition = new SnapshotTransition(previous, failed);
             }
@@ -881,17 +1373,28 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
             for (Path child : stream) {
                 cancellation.throwIfCancelled();
                 try {
+                    String fileName = child.getFileName().toString();
+                    if (FileSystemSchematicMutationIo.isPrivateArtifactName(fileName)) {
+                        continue;
+                    }
                     BasicFileAttributes attributes = Files.readAttributes(
                             child, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
                     if (attributes.isSymbolicLink()) {
                         continue;
                     }
-                    String fileName = child.getFileName().toString();
                     if (attributes.isDirectory()) {
-                        entries.add(new DiscoveredEntry(child.toAbsolutePath().normalize(), fileName, true));
+                        entries.add(new DiscoveredEntry(
+                                child.toAbsolutePath().normalize(),
+                                fileName,
+                                true,
+                                FileIdentity.capture(attributes)));
                     } else if (attributes.isRegularFile()
                             && fileName.toLowerCase(Locale.ROOT).endsWith(".litematic")) {
-                        entries.add(new DiscoveredEntry(child.toAbsolutePath().normalize(), fileName, false));
+                        entries.add(new DiscoveredEntry(
+                                child.toAbsolutePath().normalize(),
+                                fileName,
+                                false,
+                                FileIdentity.capture(attributes)));
                     }
                 } catch (IOException | SecurityException ignored) {
                     // One inaccessible child must not destabilize the indexes of readable siblings.
@@ -912,7 +1415,7 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
     /// @param rootDirectory configured schematic root
     /// @return whether the root path does not exist
     /// @throws IOException when root attributes fail for a reason other than absence
-    private static boolean rootDirectoryMissing(Path rootDirectory) throws IOException {
+    static boolean rootDirectoryMissing(Path rootDirectory) throws IOException {
         try {
             Files.readAttributes(rootDirectory, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
             return false;
@@ -953,6 +1456,16 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
         };
     }
 
+    /// Creates the production mutation boundary without touching the file system during construction.
+    ///
+    /// @param rootDirectory configured lexical root
+    /// @return serialized no-follow file operations rooted at the normalized path
+    private static MutationIo productionMutationIo(Path rootDirectory) {
+        Path normalizedRoot = Objects.requireNonNull(rootDirectory, "rootDirectory")
+                .toAbsolutePath().normalize();
+        return new FileSystemSchematicMutationIo(normalizedRoot);
+    }
+
     /// Rejects a target outside the root or containing a symbolic-link directory component.
     ///
     /// The check is repeated for the target after opening and after reading its directory stream.
@@ -963,7 +1476,7 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
     /// @param directory normalized target directory
     /// @param cancellationCheck cooperative cancellation check invoked between components
     /// @throws IOException when the target escapes the root or any component is not a real directory
-    private static void validateDirectoryChain(
+    static void validateDirectoryChain(
             Path rootDirectory,
             Path directory,
             Runnable cancellationCheck) throws IOException {
@@ -986,7 +1499,7 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
     ///
     /// @param directory component to validate
     /// @throws IOException when the component is not a real directory
-    private static void validateDirectory(Path directory) throws IOException {
+    static void validateDirectory(Path directory) throws IOException {
         BasicFileAttributes attributes = Files.readAttributes(
                 directory, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         if (!attributes.isDirectory() || attributes.isSymbolicLink()) {
@@ -998,12 +1511,61 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
     ///
     /// @param file Litematic path to validate
     /// @throws IOException when the final component is not a real regular file
-    private static void validateRegularFile(Path file) throws IOException {
+    static void validateRegularFile(Path file) throws IOException {
         BasicFileAttributes attributes = Files.readAttributes(
                 file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         if (!attributes.isRegularFile() || attributes.isSymbolicLink()) {
             throw new IOException("Schematic path is not a real Litematic file: " + file);
         }
+    }
+
+    /// Performs blocking, no-follow mutations for one validated current directory.
+    @NotNullByDefault
+    interface MutationIo {
+        /// Imports immutable normalized sources without overwriting existing children.
+        ///
+        /// @param currentDirectory stable destination directory
+        /// @param sourceFiles immutable source paths
+        /// @param cancellation cooperative model cancellation
+        /// @throws IOException when preflight, copying, moving, or rollback fails
+        void importFiles(
+                Path currentDirectory,
+                @Unmodifiable List<Path> sourceFiles,
+                LoadCancellation cancellation) throws IOException;
+
+        /// Creates one absent direct child directory.
+        ///
+        /// @param currentDirectory stable destination directory
+        /// @param directoryName validated direct-child name
+        /// @param cancellation cooperative model cancellation
+        /// @throws IOException when creation or post-write validation fails
+        void createDirectory(
+                Path currentDirectory,
+                String directoryName,
+                LoadCancellation cancellation) throws IOException;
+
+        /// Deletes one exact stable direct-child descriptor without following links.
+        ///
+        /// @param currentDirectory stable parent directory
+        /// @param entry exact descriptor captured from the stable listing
+        /// @param cancellation cooperative model cancellation
+        /// @throws IOException when validation, traversal, or deletion fails
+        void delete(
+                Path currentDirectory,
+                DiscoveredEntry entry,
+                LoadCancellation cancellation) throws IOException;
+    }
+
+    /// Runs one captured mutation against its stable directory.
+    @FunctionalInterface
+    @NotNullByDefault
+    private interface WriteAction {
+        /// Executes blocking mutation work.
+        ///
+        /// @param currentDirectory captured stable directory
+        /// @param cancellation cooperative model cancellation
+        /// @throws IOException when mutation work fails
+        void run(Path currentDirectory, LoadCancellation cancellation) throws IOException;
     }
 
     /// Reads one shallow directory listing for a model-owned scan operation.
@@ -1038,8 +1600,86 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
     /// @param path exact normalized child path
     /// @param fileName stable source file name
     /// @param directory whether the child is a directory
+    /// @param identity scan-time no-follow identity, or null only for injected reader tests
     @NotNullByDefault
-    record DiscoveredEntry(Path path, String fileName, boolean directory) {
+    record DiscoveredEntry(
+            Path path,
+            String fileName,
+            boolean directory,
+            @Nullable FileIdentity identity) {
+        /// Creates a descriptor without provider identity for injected reader tests.
+        ///
+        /// Such a descriptor remains loadable and navigable but production deletion rejects it
+        /// because exact object identity cannot be revalidated.
+        ///
+        /// @param path exact normalized child path
+        /// @param fileName stable source file name
+        /// @param directory whether the child is a directory
+        DiscoveredEntry(Path path, String fileName, boolean directory) {
+            this(path, fileName, directory, null);
+        }
+    }
+
+    /// Cross-platform no-follow identity for one scanned or transaction-owned file-system object.
+    ///
+    /// Providers with file keys use that exact identity. Providers such as the Windows JDK that
+    /// expose no key fall back to type, creation time, last-modified time, and size. The fallback is
+    /// a best-effort fingerprint rather than an atomic OS handle comparison.
+    ///
+    /// @param fileKey provider identity, or null when unavailable
+    /// @param creationTime captured creation time
+    /// @param lastModifiedTime captured last-modified time
+    /// @param size captured byte size
+    /// @param directory whether the captured object is a directory
+    @NotNullByDefault
+    record FileIdentity(
+            @Nullable Object fileKey,
+            FileTime creationTime,
+            FileTime lastModifiedTime,
+            long size,
+            boolean directory) {
+        /// Captures one no-follow attribute snapshot.
+        ///
+        /// @param attributes no-follow basic attributes
+        /// @return immutable cross-platform identity
+        static FileIdentity capture(BasicFileAttributes attributes) {
+            return new FileIdentity(
+                    attributes.fileKey(),
+                    attributes.creationTime(),
+                    attributes.lastModifiedTime(),
+                    attributes.size(),
+                    attributes.isDirectory());
+        }
+
+        /// Tests object continuity while permitting expected content metadata changes.
+        ///
+        /// @param attributes current no-follow attributes
+        /// @return whether the current object is the captured object on a best-effort basis
+        boolean sameObject(BasicFileAttributes attributes) {
+            if (attributes.isSymbolicLink()
+                    || (directory && !attributes.isDirectory())
+                    || (!directory && !attributes.isRegularFile())) {
+                return false;
+            }
+            @Nullable Object currentFileKey = attributes.fileKey();
+            if (fileKey != null) {
+                return fileKey.equals(currentFileKey);
+            }
+            return creationTime.equals(attributes.creationTime());
+        }
+
+        /// Tests an unchanged snapshot, strengthening keyless identity with mutable metadata.
+        ///
+        /// @param attributes current no-follow attributes
+        /// @return whether the current snapshot still matches this identity
+        boolean matchesSnapshot(BasicFileAttributes attributes) {
+            if (!sameObject(attributes)) {
+                return false;
+            }
+            return fileKey != null
+                    || (lastModifiedTime.equals(attributes.lastModifiedTime())
+                    && size == attributes.size());
+        }
     }
 
     /// Immutable atomically published indexed content and presentation snapshot.
@@ -1067,6 +1707,22 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
             long generation,
             Path targetDirectory,
             LoadCancellation cancellation,
+            CompletableFuture<SchematicBrowserSnapshot> result) {
+    }
+
+    /// One cancellable serialized write followed by a shallow reconciliation scan.
+    ///
+    /// @param generation ownership token
+    /// @param currentDirectory stable write destination
+    /// @param cancellation cooperative lifecycle cancellation
+    /// @param action captured blocking mutation
+    /// @param result externally observed write and reconciliation completion
+    @NotNullByDefault
+    private record WriteOperation(
+            long generation,
+            Path currentDirectory,
+            LoadCancellation cancellation,
+            WriteAction action,
             CompletableFuture<SchematicBrowserSnapshot> result) {
     }
 
@@ -1120,6 +1776,25 @@ public final class DefaultSchematicBrowserModel implements SchematicBrowserModel
             SnapshotTransition transition) {
         /// Defensively freezes superseded operations.
         private ScanPreparation {
+            previousRanges = List.copyOf(previousRanges);
+            previousSnapshots = List.copyOf(previousSnapshots);
+        }
+    }
+
+    /// Work cancelled and state published when activating a prepared write.
+    ///
+    /// @param operation new sole write
+    /// @param previousRanges superseded viewport requests
+    /// @param previousSnapshots superseded no-op snapshot completions
+    /// @param transition committed busy transition
+    @NotNullByDefault
+    private record WritePreparation(
+            WriteOperation operation,
+            @Unmodifiable List<RangeOperation> previousRanges,
+            @Unmodifiable List<SnapshotCompletion> previousSnapshots,
+            SnapshotTransition transition) {
+        /// Defensively freezes superseded operations.
+        private WritePreparation {
             previousRanges = List.copyOf(previousRanges);
             previousSnapshots = List.copyOf(previousSnapshots);
         }
