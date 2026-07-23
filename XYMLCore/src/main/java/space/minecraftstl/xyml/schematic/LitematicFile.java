@@ -32,6 +32,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Objects;
@@ -148,7 +149,7 @@ public final class LitematicFile {
     public static LitematicFile load(Path file) throws IOException {
         Objects.requireNonNull(file, "file");
         CompoundTag root;
-        try (InputStream input = new GZIPInputStream(Files.newInputStream(file))) {
+        try (InputStream input = new GZIPInputStream(Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS))) {
             root = NBTCodec.of().readTag(input, TagType.COMPOUND);
         }
 
