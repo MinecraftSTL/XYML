@@ -373,7 +373,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         newGameSettings.getOverrideProperties().add(GameSettings.PROPERTY_RUNNING_DIRECTORY);
         newGameSettings.runningDirectoryProperty().setValue("");
         initInstanceGameSettings(dstId, newGameSettings);
-        saveGameSettings(dstId);
+        saveGameSettingsSync(dstId);
 
         Path dstGameDir = getRunDirectory(dstId);
 
