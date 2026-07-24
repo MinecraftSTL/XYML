@@ -20,9 +20,6 @@ package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.addon.LocalAddonFile;
-import space.minecraftstl.xyml.addon.resourcepack.ResourcePackFile;
-import space.minecraftstl.xyml.addon.resourcepack.ResourcePackManager;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
@@ -31,19 +28,14 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.util.Lang;
-import space.minecraftstl.xyml.util.Pair;
 
 import java.io.IOException;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
@@ -63,6 +55,8 @@ import java.util.concurrent.Executor;
 /// and closure cancel every still-active range from a superseded generation. A terminal outcome
 /// decided immediately before invalidation is rejected by the viewport request coordinator through
 /// [#sourceRevision()], while no model cache or arbitrary page size widens the requested range.
+/// Writes cancel stale range work, run serially with source reads, and atomically replace the
+/// shallow index after the source mutation finishes.
 @NotNullByDefault
 public final class DefaultResourcePackCatalogModel implements ResourcePackCatalogModel {
     /// Deterministic file-name order used by every completed candidate index.
@@ -75,10 +69,10 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
     /// Lock preventing executor submission from crossing the close return boundary.
     private final Object sourceInvocationLock = new Object();
 
-    /// Blocking two-stage access invoked only by [#backgroundExecutor].
-    private final CatalogAccess catalogAccess;
+    /// Blocking catalog access invoked only by [#backgroundExecutor].
+    private final ResourcePackCatalogAccess catalogAccess;
 
-    /// Caller-owned executor for shallow indexing and exact-range parsing.
+    /// Caller-owned executor for indexing, exact-range parsing, and serialized writes.
     private final Executor backgroundExecutor;
 
     /// Localized lifecycle text.
@@ -115,6 +109,10 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
     private final Map<RangeOperation, RangeTerminalOutcome> pendingTerminalPublications =
             new IdentityHashMap<>();
 
+    /// Decided write outcomes whose externally visible futures still need lock-free publication.
+    private final Map<MutationOperation, MutationTerminalOutcome> pendingMutationPublications =
+            new IdentityHashMap<>();
+
     /// Atomically published path index and exactly matching snapshot.
     private volatile ModelState state;
 
@@ -126,6 +124,9 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
 
     /// Current shallow index operation, or null outside active indexing.
     private @Nullable IndexOperation activeIndex;
+
+    /// Current serialized catalog write, or null outside a write operation.
+    private @Nullable MutationOperation activeMutation;
 
     /// Monotonic snapshot commit sequence used for publication coalescing.
     private long snapshotSequence;
@@ -148,7 +149,7 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             Executor backgroundExecutor,
             ResourcePackCatalogStatusStrings statusStrings) {
         this(
-                new ManagerCatalogAccess(repository, instanceId),
+                new FileSystemResourcePackCatalogAccess(repository, instanceId),
                 backgroundExecutor,
                 statusStrings,
                 () -> { },
@@ -157,12 +158,12 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
 
     /// Creates an idle catalog around an injected blocking access boundary.
     ///
-    /// @param catalogAccess blocking two-stage source
+    /// @param catalogAccess blocking catalog source
     /// @param backgroundExecutor caller-owned executor that dispatches every source invocation
     ///                           asynchronously rather than inline on the calling thread
     /// @param statusStrings localized lifecycle text
     DefaultResourcePackCatalogModel(
-            CatalogAccess catalogAccess,
+            ResourcePackCatalogAccess catalogAccess,
             Executor backgroundExecutor,
             ResourcePackCatalogStatusStrings statusStrings) {
         this(catalogAccess, backgroundExecutor, statusStrings, () -> { }, () -> { });
@@ -170,12 +171,12 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
 
     /// Creates an idle catalog with a deterministic range-terminal test hook.
     ///
-    /// @param catalogAccess blocking two-stage source
+    /// @param catalogAccess blocking catalog source
     /// @param backgroundExecutor caller-owned executor for source invocation
     /// @param statusStrings localized lifecycle text
     /// @param beforeRangeTerminalCompletion test hook before terminal arbitration
     DefaultResourcePackCatalogModel(
-            CatalogAccess catalogAccess,
+            ResourcePackCatalogAccess catalogAccess,
             Executor backgroundExecutor,
             ResourcePackCatalogStatusStrings statusStrings,
             Runnable beforeRangeTerminalCompletion) {
@@ -189,13 +190,13 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
 
     /// Creates an idle catalog with deterministic hooks around range-terminal decision.
     ///
-    /// @param catalogAccess blocking two-stage source
+    /// @param catalogAccess blocking catalog source
     /// @param backgroundExecutor caller-owned executor for source invocation
     /// @param statusStrings localized lifecycle text
     /// @param beforeRangeTerminalCompletion test hook before terminal arbitration
     /// @param afterRangeTerminalDecision test hook before lock-free Future publication
     DefaultResourcePackCatalogModel(
-            CatalogAccess catalogAccess,
+            ResourcePackCatalogAccess catalogAccess,
             Executor backgroundExecutor,
             ResourcePackCatalogStatusStrings statusStrings,
             Runnable beforeRangeTerminalCompletion,
@@ -216,6 +217,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                 0L,
                 ResourcePackCatalogStatus.IDLE,
                 statusStrings.idleStatus(),
+                ResourcePackCatalogWriteStatus.IDLE,
+                "",
                 false,
                 true));
     }
@@ -284,7 +287,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             requireOpen();
             ModelState current = state;
             if (!current.content().indexReady()
-                    || current.snapshot().status() != ResourcePackCatalogStatus.READY) {
+                    || current.snapshot().status() != ResourcePackCatalogStatus.READY
+                    || current.snapshot().writeStatus() == ResourcePackCatalogWriteStatus.BUSY) {
                 return CompletableFuture.failedFuture(
                         new IllegalStateException("A ready resource-pack index is required before range loading"));
             }
@@ -344,6 +348,7 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             requireOpen();
             ModelState current = state;
             if (!current.content().indexReady()
+                    || current.snapshot().writeStatus() == ResourcePackCatalogWriteStatus.BUSY
                     || indexOf(current.content().paths(), normalizedPath) < 0) {
                 throw new IllegalArgumentException("Unknown resource pack: " + normalizedPath);
             }
@@ -359,6 +364,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                     previous.contentRevision(),
                     previous.status(),
                     previous.statusText(),
+                    previous.writeStatus(),
+                    previous.writeStatusText(),
                     previous.listEnabled(),
                     previous.refreshEnabled());
             transition = replaceStateLocked(current.content(), replacement);
@@ -372,6 +379,9 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         @Nullable SnapshotTransition transition;
         synchronized (stateLock) {
             requireOpen();
+            if (state.snapshot().writeStatus() == ResourcePackCatalogWriteStatus.BUSY) {
+                throw new IllegalStateException("Selection cannot change during a resource-pack write");
+            }
             if (selectedPath == null) {
                 return;
             }
@@ -385,6 +395,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                     previous.contentRevision(),
                     previous.status(),
                     previous.statusText(),
+                    previous.writeStatus(),
+                    previous.writeStatusText(),
                     previous.listEnabled(),
                     previous.refreshEnabled());
             transition = replaceStateLocked(current.content(), replacement);
@@ -392,10 +404,63 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         publish(transition);
     }
 
-    /// Cancels every active operation, terminates subscriptions, and disables control flags.
+    /// Imports multiple source packs through one serialized write and one follow-up index scan.
+    ///
+    /// @param sources source archives or directories
+    /// @return asynchronous terminal completion
+    @Override
+    public CompletionStage<ResourcePackCatalogSnapshot> importResourcePacks(List<Path> sources) {
+        Objects.requireNonNull(sources, "sources");
+        if (sources.isEmpty()) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("At least one resource-pack source is required"));
+        }
+        @Unmodifiable List<Path> normalizedSources = sources.stream()
+                .map(path -> Objects.requireNonNull(path, "sources contains null path"))
+                .map(path -> path.toAbsolutePath().normalize())
+                .toList();
+        try {
+            return startMutation(new ResourcePackImportMutation(normalizedSources));
+        } catch (IllegalArgumentException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+    }
+
+    /// Persistently enables one stable path from the current exact catalog.
+    ///
+    /// @param path current indexed resource-pack path
+    /// @return asynchronous terminal completion
+    @Override
+    public CompletionStage<ResourcePackCatalogSnapshot> enableResourcePack(Path path) {
+        return startMutation(new ResourcePackEnabledMutation(normalizeMutationPath(path), true));
+    }
+
+    /// Persistently disables one stable path from the current exact catalog.
+    ///
+    /// @param path current indexed resource-pack path
+    /// @return asynchronous terminal completion
+    @Override
+    public CompletionStage<ResourcePackCatalogSnapshot> disableResourcePack(Path path) {
+        return startMutation(new ResourcePackEnabledMutation(normalizeMutationPath(path), false));
+    }
+
+    /// Persistently disables and then deletes one stable current path.
+    ///
+    /// @param path current indexed resource-pack path
+    /// @return asynchronous terminal completion
+    @Override
+    public CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path) {
+        return startMutation(new ResourcePackDeleteMutation(normalizeMutationPath(path)));
+    }
+
+    /// Cancels index, range, and pre-commit write work, then terminates every subscription.
+    ///
+    /// A committed write retains its Future and finishes against serialized source access, but its
+    /// result cannot replace the closed model state or reach terminated listeners.
     @Override
     public void close() {
-        @Unmodifiable List<RangeOperation> terminalPublications;
+        @Unmodifiable List<RangeOperation> rangePublications;
+        @Unmodifiable List<MutationOperation> mutationPublications;
         synchronized (stateLock) {
             if (!closed) {
                 closed = true;
@@ -408,6 +473,14 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                 rangesToCancel.forEach(operation -> decideRangeCancellationLocked(
                         operation,
                         "Resource-pack catalog was closed"));
+                if (activeMutation != null && !activeMutation.committed()) {
+                    activeMutation.cancellation().cancel();
+                    decideMutationTerminalLocked(
+                            activeMutation,
+                            MutationTerminalOutcome.failure(new CancellationException(
+                                    "Resource-pack catalog was closed")));
+                    activeMutation = null;
+                }
                 selectedPath = null;
                 ModelState current = state;
                 ResourcePackCatalogSnapshot previous = current.snapshot();
@@ -418,14 +491,18 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                         Math.addExact(previous.contentRevision(), 1L),
                         previous.status(),
                         previous.statusText(),
+                        ResourcePackCatalogWriteStatus.IDLE,
+                        "",
                         false,
                         false);
                 state = new ModelState(current.content(), terminal);
                 snapshotSequence++;
             }
-            terminalPublications = List.copyOf(pendingTerminalPublications.keySet());
+            rangePublications = List.copyOf(pendingTerminalPublications.keySet());
+            mutationPublications = List.copyOf(pendingMutationPublications.keySet());
         }
-        terminalPublications.forEach(this::publishRangeTerminal);
+        rangePublications.forEach(this::publishRangeTerminal);
+        mutationPublications.forEach(this::publishMutationTerminal);
 
         // Repeated close callers independently cross both idempotent barriers.
         synchronized (sourceInvocationLock) {
@@ -435,6 +512,357 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         listeners.clear();
     }
 
+    /// Starts one serialized local mutation from a stable exact supported index.
+    ///
+    /// @param request immutable mutation request
+    /// @return externally observed write completion
+    private CompletionStage<ResourcePackCatalogSnapshot> startMutation(
+            ResourcePackCatalogMutationRequest request) {
+        MutationPreparation preparation;
+        synchronized (stateLock) {
+            requireOpen();
+            ModelState current = state;
+            if (activeMutation != null) {
+                throw new IllegalStateException("A resource-pack write is already active");
+            }
+            if (activeIndex != null
+                    || !current.content().indexReady()
+                    || current.snapshot().status() != ResourcePackCatalogStatus.READY) {
+                throw new IllegalStateException(
+                        "A stable ready resource-pack index is required before writing");
+            }
+            @Nullable Path targetPath = mutationTargetPath(request);
+            if (targetPath != null && indexOf(current.content().paths(), targetPath) < 0) {
+                throw new IllegalArgumentException("Unknown resource pack: " + targetPath);
+            }
+
+            @Unmodifiable List<RangeOperation> rangesToCancel = List.copyOf(activeRanges);
+            rangesToCancel.forEach(operation -> decideRangeCancellationLocked(
+                    operation,
+                    "Resource-pack viewport load was superseded by a write"));
+            long nextGeneration = ++generation;
+            MutationOperation operation = new MutationOperation(
+                    nextGeneration,
+                    request,
+                    new LoadCancellation(),
+                    new CompletableFuture<>());
+            activeMutation = operation;
+            CatalogContent busyContent = new CatalogContent(
+                    nextGeneration,
+                    true,
+                    current.content().paths());
+            ResourcePackCatalogSnapshot previous = current.snapshot();
+            ResourcePackCatalogSnapshot busy = copySnapshot(
+                    previous,
+                    selectedIndex(busyContent.paths()),
+                    previous.itemCount(),
+                    previous.contentRevision(),
+                    previous.status(),
+                    previous.statusText(),
+                    ResourcePackCatalogWriteStatus.BUSY,
+                    statusStrings.writeBusyStatus(),
+                    false,
+                    false);
+            @Nullable SnapshotTransition transition = replaceStateLocked(busyContent, busy);
+            preparation = new MutationPreparation(
+                    operation,
+                    List.copyOf(pendingTerminalPublications.keySet()),
+                    Objects.requireNonNull(transition, "Busy write transition must change snapshot"));
+        }
+        publish(preparation.transition());
+        preparation.rangePublications().forEach(this::publishRangeTerminal);
+        submitMutation(preparation.operation());
+        return preparation.operation().result();
+    }
+
+    /// Submits one mutation without allowing submission to cross the close boundary.
+    ///
+    /// @param operation current mutation operation
+    private void submitMutation(MutationOperation operation) {
+        @Nullable Throwable schedulingFailure = null;
+        boolean current;
+        synchronized (sourceInvocationLock) {
+            synchronized (stateLock) {
+                current = isMutationCurrentLocked(operation);
+            }
+            if (current) {
+                try {
+                    backgroundExecutor.execute(() -> runMutation(operation));
+                } catch (RuntimeException | Error failure) {
+                    schedulingFailure = failure;
+                }
+            }
+        }
+        if (!current) {
+            cancelMutation(operation, "Resource-pack write was cancelled before submission");
+            return;
+        }
+        if (schedulingFailure != null) {
+            completeMutationSubmissionFailure(operation, schedulingFailure);
+            if (schedulingFailure instanceof Error error) {
+                throw error;
+            }
+        }
+    }
+
+    /// Runs one local mutation and mandatory shallow rescan on the background executor.
+    ///
+    /// @param operation current mutation operation
+    private void runMutation(MutationOperation operation) {
+        try {
+            ensureMutationCurrent(operation);
+            ResourcePackCatalogMutationAccessResult result = Objects.requireNonNull(
+                    catalogAccess.mutateAndLoadIndex(
+                            operation.request(),
+                            operation.cancellation(),
+                            () -> markMutationCommitted(operation)),
+                    "resource-pack access returned null mutation result");
+            ResourcePackCatalogIndex sourceIndex = result.refreshedIndex();
+            ResourcePackCatalogIndex immutableIndex = new ResourcePackCatalogIndex(
+                    sourceIndex.supported(),
+                    immutableIndexPaths(sourceIndex.paths()));
+            completeMutationResult(operation, immutableIndex, result.mutationFailure());
+        } catch (CancellationException failure) {
+            if (operation.committed()) {
+                completeMutationRefreshFailure(operation, failure);
+            } else {
+                cancelMutation(operation, failure.getMessage() == null
+                        ? "Resource-pack write was cancelled"
+                        : failure.getMessage());
+            }
+        } catch (IOException | RuntimeException failure) {
+            completeMutationRefreshFailure(operation, failure);
+        } catch (Error failure) {
+            completeMutationRefreshFailure(operation, failure);
+            throw failure;
+        }
+    }
+
+    /// Marks the transition into a phase whose external side effects cannot be cancelled honestly.
+    ///
+    /// @param operation mutation reaching its commit point
+    private void markMutationCommitted(MutationOperation operation) {
+        synchronized (stateLock) {
+            if (!isMutationCurrentLocked(operation)) {
+                throw new CancellationException("Resource-pack write was superseded before commit");
+            }
+            operation.markCommitted();
+        }
+    }
+
+    /// Publishes one successfully rescanned mutation, retaining any write failure separately.
+    ///
+    /// @param operation owning mutation
+    /// @param loadedIndex mandatory post-write shallow index
+    /// @param mutationFailure mutation failure, or null after success
+    private void completeMutationResult(
+            MutationOperation operation,
+            ResourcePackCatalogIndex loadedIndex,
+            @Nullable Throwable mutationFailure) {
+        @Nullable SnapshotTransition transition = null;
+        ResourcePackCatalogSnapshot terminalSnapshot;
+        synchronized (stateLock) {
+            if (activeMutation != operation) {
+                return;
+            }
+            activeMutation = null;
+            if (!closed) {
+                ModelState current = state;
+                @Unmodifiable List<Path> paths = loadedIndex.supported()
+                        ? loadedIndex.paths()
+                        : List.of();
+                if (selectedPath != null && indexOf(paths, selectedPath) < 0) {
+                    selectedPath = null;
+                }
+                CatalogContent refreshedContent = new CatalogContent(
+                        operation.generation(),
+                        true,
+                        paths);
+                ResourcePackCatalogStatus catalogStatus = loadedIndex.supported()
+                        ? ResourcePackCatalogStatus.READY
+                        : ResourcePackCatalogStatus.UNSUPPORTED;
+                String catalogStatusText = loadedIndex.supported()
+                        ? readyStatus(paths.size())
+                        : statusStrings.unsupportedStatus();
+                ResourcePackCatalogWriteStatus writeStatus = mutationFailure == null
+                        ? ResourcePackCatalogWriteStatus.IDLE
+                        : ResourcePackCatalogWriteStatus.ERROR;
+                String writeStatusText = mutationFailure == null
+                        ? ""
+                        : writeFailedStatus(mutationFailure);
+                ResourcePackCatalogSnapshot replacement = copySnapshot(
+                        current.snapshot(),
+                        selectedIndex(paths),
+                        OptionalInt.of(paths.size()),
+                        Math.addExact(current.snapshot().contentRevision(), 1L),
+                        catalogStatus,
+                        catalogStatusText,
+                        writeStatus,
+                        writeStatusText,
+                        loadedIndex.supported() && !paths.isEmpty(),
+                        true);
+                transition = replaceStateLocked(refreshedContent, replacement);
+            }
+            terminalSnapshot = state.snapshot();
+            decideMutationTerminalLocked(
+                    operation,
+                    mutationFailure == null
+                            ? MutationTerminalOutcome.success(terminalSnapshot)
+                            : MutationTerminalOutcome.failure(mutationFailure));
+        }
+        publish(transition);
+        publishMutationTerminal(operation);
+    }
+
+    /// Invalidates the exact index when a mutation's mandatory follow-up scan cannot complete.
+    ///
+    /// @param operation owning mutation
+    /// @param failure mutation adapter or follow-up scan failure
+    private void completeMutationRefreshFailure(
+            MutationOperation operation,
+            Throwable failure) {
+        @Nullable SnapshotTransition transition = null;
+        synchronized (stateLock) {
+            if (activeMutation != operation) {
+                return;
+            }
+            activeMutation = null;
+            if (!closed) {
+                ModelState current = state;
+                CatalogContent unknownContent = new CatalogContent(
+                        operation.generation(),
+                        false,
+                        List.of());
+                ResourcePackCatalogSnapshot replacement = copySnapshot(
+                        current.snapshot(),
+                        OptionalInt.empty(),
+                        OptionalInt.empty(),
+                        Math.addExact(current.snapshot().contentRevision(), 1L),
+                        ResourcePackCatalogStatus.FAILED,
+                        failedStatus(failure),
+                        ResourcePackCatalogWriteStatus.ERROR,
+                        writeFailedStatus(failure),
+                        false,
+                        true);
+                transition = replaceStateLocked(unknownContent, replacement);
+            }
+            decideMutationTerminalLocked(operation, MutationTerminalOutcome.failure(failure));
+        }
+        publish(transition);
+        publishMutationTerminal(operation);
+    }
+
+    /// Restores the unchanged exact index when the executor rejects a write before source access.
+    ///
+    /// @param operation rejected mutation
+    /// @param failure executor rejection
+    private void completeMutationSubmissionFailure(
+            MutationOperation operation,
+            Throwable failure) {
+        @Nullable SnapshotTransition transition = null;
+        synchronized (stateLock) {
+            if (activeMutation != operation) {
+                return;
+            }
+            activeMutation = null;
+            if (!closed) {
+                ModelState current = state;
+                ResourcePackCatalogSnapshot previous = current.snapshot();
+                ResourcePackCatalogSnapshot replacement = copySnapshot(
+                        previous,
+                        selectedIndex(current.content().paths()),
+                        previous.itemCount(),
+                        previous.contentRevision(),
+                        previous.status(),
+                        previous.statusText(),
+                        ResourcePackCatalogWriteStatus.ERROR,
+                        writeFailedStatus(failure),
+                        !current.content().paths().isEmpty(),
+                        true);
+                transition = replaceStateLocked(current.content(), replacement);
+            }
+            decideMutationTerminalLocked(operation, MutationTerminalOutcome.failure(failure));
+        }
+        publish(transition);
+        publishMutationTerminal(operation);
+    }
+
+    /// Cancels one pre-commit mutation without publishing its Future under a model lock.
+    ///
+    /// @param operation mutation to cancel
+    /// @param message cancellation explanation
+    private void cancelMutation(MutationOperation operation, String message) {
+        synchronized (stateLock) {
+            if (operation.committed()) {
+                return;
+            }
+            operation.cancellation().cancel();
+            if (activeMutation == operation) {
+                activeMutation = null;
+            }
+            decideMutationTerminalLocked(
+                    operation,
+                    MutationTerminalOutcome.failure(new CancellationException(message)));
+        }
+        publishMutationTerminal(operation);
+    }
+
+    /// Records one mutation terminal outcome exactly once.
+    ///
+    /// @param operation mutation receiving the outcome
+    /// @param outcome success, failure, or cancellation
+    private void decideMutationTerminalLocked(
+            MutationOperation operation,
+            MutationTerminalOutcome outcome) {
+        if (!operation.result().isDone()) {
+            pendingMutationPublications.putIfAbsent(operation, outcome);
+        }
+    }
+
+    /// Publishes one decided mutation outcome without holding a model or access lock.
+    ///
+    /// @param operation operation whose Future may need publication
+    private void publishMutationTerminal(MutationOperation operation) {
+        @Nullable MutationTerminalOutcome outcome;
+        synchronized (stateLock) {
+            outcome = pendingMutationPublications.get(operation);
+        }
+        if (outcome == null) {
+            return;
+        }
+        outcome.publish(operation.result());
+        synchronized (stateLock) {
+            if (operation.result().isDone()
+                    && pendingMutationPublications.get(operation) == outcome) {
+                pendingMutationPublications.remove(operation);
+            }
+        }
+    }
+
+    /// Throws when a pre-commit mutation has lost ownership or has been cancelled.
+    ///
+    /// @param operation mutation to validate
+    private void ensureMutationCurrent(MutationOperation operation) {
+        operation.cancellation().throwIfCancelled();
+        synchronized (stateLock) {
+            if (!isMutationCurrentLocked(operation)) {
+                throw new CancellationException("Resource-pack write was superseded");
+            }
+        }
+    }
+
+    /// Returns whether a mutation may continue, including committed work crossing close.
+    ///
+    /// @param operation mutation to inspect
+    /// @return whether it still owns terminal completion
+    private boolean isMutationCurrentLocked(MutationOperation operation) {
+        if (activeMutation != operation || operation.cancellation().isCancelled()) {
+            return false;
+        }
+        return operation.committed()
+                || (!closed && generation == operation.generation());
+    }
+
     /// Commits one loading generation and captures operations it supersedes.
     ///
     /// @param onlyIfIdle whether a prior attempt makes this request a no-op
@@ -442,6 +870,9 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         IndexPreparation preparation;
         synchronized (stateLock) {
             requireOpen();
+            if (activeMutation != null) {
+                throw new IllegalStateException("A resource-pack write is active");
+            }
             ModelState current = state;
             if (onlyIfIdle && current.snapshot().status() != ResourcePackCatalogStatus.IDLE) {
                 return;
@@ -470,6 +901,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                     contentRevision,
                     ResourcePackCatalogStatus.LOADING,
                     statusStrings.loadingStatus(),
+                    current.snapshot().writeStatus(),
+                    current.snapshot().writeStatusText(),
                     false,
                     false);
             @Nullable SnapshotTransition transition = replaceStateLocked(loadingContent, loading);
@@ -514,11 +947,11 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
     private void runIndex(IndexOperation operation) {
         try {
             ensureIndexCurrent(operation);
-            CatalogIndex sourceIndex = Objects.requireNonNull(
+            ResourcePackCatalogIndex sourceIndex = Objects.requireNonNull(
                     catalogAccess.loadIndex(operation.cancellation()),
                     "resource-pack access returned null index");
             ensureIndexCurrent(operation);
-            CatalogIndex immutableIndex = new CatalogIndex(
+            ResourcePackCatalogIndex immutableIndex = new ResourcePackCatalogIndex(
                     sourceIndex.supported(),
                     immutableIndexPaths(sourceIndex.paths()));
             ensureIndexCurrent(operation);
@@ -537,7 +970,9 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
     ///
     /// @param operation owning index operation
     /// @param loadedIndex immutable source index
-    private void completeIndexSuccess(IndexOperation operation, CatalogIndex loadedIndex) {
+    private void completeIndexSuccess(
+            IndexOperation operation,
+            ResourcePackCatalogIndex loadedIndex) {
         @Nullable SnapshotTransition transition = null;
         synchronized (stateLock) {
             if (isIndexCurrentLocked(operation)) {
@@ -566,6 +1001,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                         Math.addExact(current.snapshot().contentRevision(), 1L),
                         status,
                         statusText,
+                        current.snapshot().writeStatus(),
+                        current.snapshot().writeStatusText(),
                         loadedIndex.supported() && !paths.isEmpty(),
                         true);
                 transition = replaceStateLocked(readyContent, ready);
@@ -591,6 +1028,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                         current.snapshot().contentRevision(),
                         ResourcePackCatalogStatus.FAILED,
                         failedStatus(failure),
+                        current.snapshot().writeStatus(),
+                        current.snapshot().writeStatusText(),
                         false,
                         true);
                 transition = replaceStateLocked(current.content(), failed);
@@ -984,6 +1423,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
     /// @param contentRevision replacement content revision
     /// @param status replacement lifecycle
     /// @param statusText replacement localized status
+    /// @param writeStatus replacement serialized-write lifecycle
+    /// @param writeStatusText replacement write lifecycle text
     /// @param listEnabled replacement list enabled flag
     /// @param refreshEnabled replacement refresh enabled flag
     /// @return replacement snapshot
@@ -994,6 +1435,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             long contentRevision,
             ResourcePackCatalogStatus status,
             String statusText,
+            ResourcePackCatalogWriteStatus writeStatus,
+            String writeStatusText,
             boolean listEnabled,
             boolean refreshEnabled) {
         Objects.requireNonNull(ignoredPrevious, "ignoredPrevious");
@@ -1003,6 +1446,8 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                 contentRevision,
                 status,
                 statusText,
+                writeStatus,
+                writeStatusText,
                 listEnabled,
                 refreshEnabled);
     }
@@ -1028,6 +1473,41 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         return statusStrings.failedStatus() + ": " + detail;
     }
 
+    /// Builds localized write-failure text with the shared unknown-detail fallback.
+    ///
+    /// @param failure mutation or mandatory rescan failure
+    /// @return localized write status and detail
+    private String writeFailedStatus(Throwable failure) {
+        @Nullable Throwable resolved = unwrapFailure(failure);
+        @Nullable String message = resolved == null ? null : resolved.getMessage();
+        String detail = message == null || message.isBlank()
+                ? statusStrings.unknownFailure()
+                : message;
+        return statusStrings.writeFailedStatus() + ": " + detail;
+    }
+
+    /// Normalizes one public mutation path before current-index validation.
+    ///
+    /// @param path caller-supplied stable pack path
+    /// @return normalized absolute path
+    private static Path normalizeMutationPath(Path path) {
+        return Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
+    }
+
+    /// Extracts the current-index target of a single-path mutation.
+    ///
+    /// @param mutation immutable mutation request
+    /// @return normalized target path, or null for a multi-source import
+    private static @Nullable Path mutationTargetPath(ResourcePackCatalogMutationRequest mutation) {
+        if (mutation instanceof ResourcePackEnabledMutation enabledMutation) {
+            return enabledMutation.path();
+        }
+        if (mutation instanceof ResourcePackDeleteMutation deleteMutation) {
+            return deleteMutation.path();
+        }
+        return null;
+    }
+
     /// Removes asynchronous wrapper failures.
     ///
     /// @param failure source failure, possibly wrapped
@@ -1049,47 +1529,13 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
                 .toString();
     }
 
-    /// Maps the legacy compatibility enum into the public toolkit-neutral enum.
-    ///
-    /// @param compatibility legacy manager compatibility
-    /// @return toolkit-neutral compatibility
-    private static ResourcePackCompatibility mapCompatibility(
-            ResourcePackFile.Compatibility compatibility) {
-        return switch (compatibility) {
-            case COMPATIBLE -> ResourcePackCompatibility.COMPATIBLE;
-            case TOO_NEW -> ResourcePackCompatibility.TOO_NEW;
-            case TOO_OLD -> ResourcePackCompatibility.TOO_OLD;
-            case INVALID -> ResourcePackCompatibility.INVALID;
-            case MISSING_PACK_META -> ResourcePackCompatibility.MISSING_PACK_META;
-            case MISSING_GAME_META -> ResourcePackCompatibility.MISSING_GAME_META;
-        };
-    }
-
-    /// Creates a stable invalid row when one indexed candidate disappears or cannot be parsed.
-    ///
-    /// @param path indexed candidate path
-    /// @return geometry-preserving invalid row
-    private static ResourcePackCatalogItem invalidItem(Path path) {
-        String exactFileName = fileName(path);
-        String displayName = exactFileName.toLowerCase(Locale.ROOT).endsWith(".zip")
-                ? exactFileName.substring(0, exactFileName.length() - 4)
-                : exactFileName;
-        return new ResourcePackCatalogItem(
-                path,
-                displayName,
-                exactFileName,
-                "",
-                ResourcePackCompatibility.INVALID,
-                false);
-    }
-
     /// Reports an isolated listener failure without stopping later listeners.
     ///
     /// @param listenerFailure listener failure to report
-    private static void reportListenerFailure(RuntimeException listenerFailure) {
+    private static void reportListenerFailure(Throwable listenerFailure) {
         try {
             Lang.handleUncaughtException(listenerFailure);
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException | Error ignored) {
             // Listener diagnostics cannot corrupt already committed catalog state.
         }
     }
@@ -1098,44 +1544,6 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
     private void requireOpen() {
         if (closed) {
             throw new IllegalStateException("Resource-pack catalog model is closed");
-        }
-    }
-
-    /// Blocking two-stage source required by the asynchronous model.
-    @NotNullByDefault
-    interface CatalogAccess {
-        /// Loads only supported state and sorted candidate paths.
-        ///
-        /// @param cancellation cooperative index cancellation
-        /// @return shallow supported or unsupported index
-        /// @throws IOException when local index access fails
-        CatalogIndex loadIndex(LoadCancellation cancellation) throws IOException;
-
-        /// Resolves exactly the supplied paths in the supplied order.
-        ///
-        /// @param paths exact normalized viewport paths
-        /// @param cancellation cooperative viewport cancellation
-        /// @return one row per path in identical order
-        /// @throws IOException when shared local state cannot be read
-        @Unmodifiable List<ResourcePackCatalogItem> loadItems(
-                @Unmodifiable List<Path> paths,
-                LoadCancellation cancellation) throws IOException;
-    }
-
-    /// Shallow source result containing no parsed pack metadata.
-    ///
-    /// @param supported whether the Minecraft instance supports resource packs
-    /// @param paths candidate direct children, empty when unsupported
-    @NotNullByDefault
-    record CatalogIndex(
-            boolean supported,
-            @Unmodifiable List<Path> paths) {
-        /// Stores a defensive path-list copy and validates unsupported results.
-        CatalogIndex {
-            paths = List.copyOf(paths);
-            if (!supported && !paths.isEmpty()) {
-                throw new IllegalArgumentException("Unsupported index must not contain paths");
-            }
         }
     }
 
@@ -1188,6 +1596,82 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
     private record IndexOperation(
             long generation,
             LoadCancellation cancellation) {
+    }
+
+    /// One serialized catalog write with an explicit irreversible commit boundary.
+    @NotNullByDefault
+    private static final class MutationOperation {
+        /// Generation owning this write before closure.
+        private final long generation;
+
+        /// Immutable requested source mutation.
+        private final ResourcePackCatalogMutationRequest request;
+
+        /// Model-owned cancellation observed only before the commit point.
+        private final LoadCancellation cancellation;
+
+        /// Externally observed terminal catalog snapshot.
+        private final CompletableFuture<ResourcePackCatalogSnapshot> result;
+
+        /// Whether source access crossed its first potentially irreversible side effect.
+        private boolean committed;
+
+        /// Creates one pre-commit write operation.
+        ///
+        /// @param generation ownership generation
+        /// @param request immutable source mutation
+        /// @param cancellation model-owned pre-commit cancellation
+        /// @param result externally observed completion
+        private MutationOperation(
+                long generation,
+                ResourcePackCatalogMutationRequest request,
+                LoadCancellation cancellation,
+                CompletableFuture<ResourcePackCatalogSnapshot> result) {
+            this.generation = generation;
+            this.request = Objects.requireNonNull(request, "request");
+            this.cancellation = Objects.requireNonNull(cancellation, "cancellation");
+            this.result = Objects.requireNonNull(result, "result");
+        }
+
+        /// Returns this write's ownership generation.
+        ///
+        /// @return ownership generation
+        private long generation() {
+            return generation;
+        }
+
+        /// Returns the immutable requested mutation.
+        ///
+        /// @return source mutation
+        private ResourcePackCatalogMutationRequest request() {
+            return request;
+        }
+
+        /// Returns the model-owned pre-commit cancellation signal.
+        ///
+        /// @return cancellation signal
+        private LoadCancellation cancellation() {
+            return cancellation;
+        }
+
+        /// Returns the externally observed terminal Future.
+        ///
+        /// @return terminal catalog completion
+        private CompletableFuture<ResourcePackCatalogSnapshot> result() {
+            return result;
+        }
+
+        /// Records entry into the non-cancellable source commit phase.
+        private void markCommitted() {
+            committed = true;
+        }
+
+        /// Returns whether close must allow actual source completion to win.
+        ///
+        /// @return whether the commit boundary was crossed
+        private boolean committed() {
+            return committed;
+        }
     }
 
     /// One exact-range parse operation over a captured immutable path sublist.
@@ -1264,6 +1748,57 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         }
     }
 
+    /// Immutable terminal value for one serialized write Future.
+    ///
+    /// Exactly one of `snapshot` and `failure` is present.
+    ///
+    /// @param snapshot terminal model snapshot after success, or null after failure
+    /// @param failure mutation failure or cancellation, or null after success
+    @NotNullByDefault
+    private record MutationTerminalOutcome(
+            @Nullable ResourcePackCatalogSnapshot snapshot,
+            @Nullable Throwable failure) {
+        /// Validates that the outcome has exactly one terminal value.
+        private MutationTerminalOutcome {
+            if ((snapshot == null) == (failure == null)) {
+                throw new IllegalArgumentException(
+                        "Mutation outcome requires exactly one terminal value");
+            }
+        }
+
+        /// Creates one successful write outcome.
+        ///
+        /// @param snapshot terminal catalog snapshot
+        /// @return successful outcome
+        private static MutationTerminalOutcome success(
+                ResourcePackCatalogSnapshot snapshot) {
+            return new MutationTerminalOutcome(
+                    Objects.requireNonNull(snapshot, "snapshot"),
+                    null);
+        }
+
+        /// Creates one exceptional write outcome.
+        ///
+        /// @param failure failure or cancellation
+        /// @return exceptional outcome
+        private static MutationTerminalOutcome failure(Throwable failure) {
+            return new MutationTerminalOutcome(
+                    null,
+                    Objects.requireNonNull(failure, "failure"));
+        }
+
+        /// Completes one write Future without holding model or access locks.
+        ///
+        /// @param result Future receiving this outcome
+        private void publish(CompletableFuture<ResourcePackCatalogSnapshot> result) {
+            if (snapshot != null) {
+                result.complete(snapshot);
+            } else {
+                result.completeExceptionally(Objects.requireNonNull(failure, "failure"));
+            }
+        }
+    }
+
     /// Work cancelled and transition published when a new index activates.
     ///
     /// @param operation new index operation
@@ -1280,6 +1815,22 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         }
     }
 
+    /// Write activation data published after releasing the model lock.
+    ///
+    /// @param operation activated serialized write
+    /// @param rangePublications cancelled range outcomes awaiting lock-free publication
+    /// @param transition committed busy-state transition
+    @NotNullByDefault
+    private record MutationPreparation(
+            MutationOperation operation,
+            @Unmodifiable List<RangeOperation> rangePublications,
+            SnapshotTransition transition) {
+        /// Freezes cancelled range publications.
+        private MutationPreparation {
+            rangePublications = List.copyOf(rangePublications);
+        }
+    }
+
     /// One sequenced immutable snapshot transition.
     ///
     /// @param previous state before replacement
@@ -1290,117 +1841,6 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             ResourcePackCatalogSnapshot previous,
             ResourcePackCatalogSnapshot current,
             long sequence) {
-    }
-
-    /// Real local manager access with shallow indexing and exact-range parsing.
-    @NotNullByDefault
-    static final class ManagerCatalogAccess implements CatalogAccess {
-        /// Manager bound to one stable repository instance.
-        private final ResourcePackManager manager;
-
-        /// Direct resource-pack directory used by the shallow index.
-        private final Path directory;
-
-        /// Creates a manager adapter without starting any I/O.
-        ///
-        /// @param repository repository containing the managed instance
-        /// @param instanceId stable non-blank repository instance identifier
-        ManagerCatalogAccess(GameRepository repository, String instanceId) {
-            Objects.requireNonNull(repository, "repository");
-            Objects.requireNonNull(instanceId, "instanceId");
-            if (instanceId.isBlank()) {
-                throw new IllegalArgumentException("instanceId must not be blank");
-            }
-            manager = new ResourcePackManager(repository, instanceId);
-            directory = manager.getDirectory().toAbsolutePath().normalize();
-        }
-
-        /// Enumerates only supported direct-child shapes and sorts by exact file name.
-        ///
-        /// @param cancellation cooperative index cancellation
-        /// @return shallow exact path index
-        /// @throws IOException when directory enumeration fails
-        @Override
-        public CatalogIndex loadIndex(LoadCancellation cancellation) throws IOException {
-            cancellation.throwIfCancelled();
-            if (!ResourcePackManager.isMcVersionSupported(manager.getMinecraftVersion())) {
-                return new CatalogIndex(false, List.of());
-            }
-            if (!Files.isDirectory(directory)) {
-                return new CatalogIndex(true, List.of());
-            }
-            List<Path> paths = new ArrayList<>();
-            try (DirectoryStream<Path> children = Files.newDirectoryStream(directory)) {
-                for (Path child : children) {
-                    cancellation.throwIfCancelled();
-                    Path normalized = child.toAbsolutePath().normalize();
-                    if (ResourcePackFile.isFileResourcePack(normalized)) {
-                        paths.add(normalized);
-                    }
-                }
-            }
-            cancellation.throwIfCancelled();
-            paths.sort(PATH_ORDER);
-            return new CatalogIndex(true, paths);
-        }
-
-        /// Parses only requested paths and isolates ordinary per-pack I/O failures.
-        ///
-        /// @param paths exact normalized viewport paths
-        /// @param cancellation cooperative viewport cancellation
-        /// @return exact rows in identical order
-        /// @throws IOException when shared enabled-state access fails
-        @Override
-        public @Unmodifiable List<ResourcePackCatalogItem> loadItems(
-                @Unmodifiable List<Path> paths,
-                LoadCancellation cancellation) throws IOException {
-            List<@Nullable ResourcePackFile> resolvedFiles = new ArrayList<>(paths.size());
-            List<ResourcePackFile> validFiles = new ArrayList<>(paths.size());
-            for (Path path : paths) {
-                cancellation.throwIfCancelled();
-                try {
-                    @Nullable ResourcePackFile file = ResourcePackFile.fromFile(manager, path);
-                    resolvedFiles.add(file);
-                    if (file != null) {
-                        validFiles.add(file);
-                    }
-                } catch (IOException failure) {
-                    cancellation.throwIfCancelled();
-                    resolvedFiles.add(null);
-                }
-            }
-
-            Map<ResourcePackFile, Boolean> enabledStates = new IdentityHashMap<>();
-            @Unmodifiable List<Pair<ResourcePackFile, Boolean>> states = manager
-                    .arePacksEnabled(validFiles.stream())
-                    .toList();
-            for (Pair<ResourcePackFile, Boolean> state : states) {
-                enabledStates.put(
-                        Objects.requireNonNull(state.key(), "resource-pack file"),
-                        Objects.requireNonNull(state.value(), "resource-pack enabled state"));
-            }
-
-            List<ResourcePackCatalogItem> items = new ArrayList<>(paths.size());
-            for (int index = 0; index < paths.size(); index++) {
-                cancellation.throwIfCancelled();
-                Path path = paths.get(index);
-                @Nullable ResourcePackFile file = resolvedFiles.get(index);
-                if (file == null) {
-                    items.add(invalidItem(path));
-                    continue;
-                }
-                @Nullable LocalAddonFile.Description description = file.getDescription();
-                items.add(new ResourcePackCatalogItem(
-                        path,
-                        file.getFileName(),
-                        file.getFileNameWithExtension(),
-                        description == null ? "" : description.toString(),
-                        mapCompatibility(file.getCompatibility()),
-                        Boolean.TRUE.equals(enabledStates.get(file))));
-            }
-            cancellation.throwIfCancelled();
-            return List.copyOf(items);
-        }
     }
 
     /// Immutable listener delivery retained while a callback owner drains the latest transition.
@@ -1486,7 +1926,7 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
             try {
                 try {
                     listener.onChange(delivery.change());
-                } catch (RuntimeException listenerFailure) {
+                } catch (RuntimeException | Error listenerFailure) {
                     reportListenerFailure(listenerFailure);
                 }
             } finally {

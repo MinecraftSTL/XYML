@@ -32,6 +32,8 @@ import java.util.OptionalInt;
 /// @param contentRevision revision incremented whenever indexed content is invalidated or replaced
 /// @param status latest lazy disk-scan lifecycle
 /// @param statusText localized status and optional failure detail
+/// @param writeStatus latest serialized local-write lifecycle
+/// @param writeStatusText localized write progress or failure detail, empty while idle
 /// @param listEnabled whether visible rows may be selected
 /// @param refreshEnabled whether a fresh disk scan may be requested
 @NotNullByDefault
@@ -41,6 +43,8 @@ public record ResourcePackCatalogSnapshot(
         long contentRevision,
         ResourcePackCatalogStatus status,
         String statusText,
+        ResourcePackCatalogWriteStatus writeStatus,
+        String writeStatusText,
         boolean listEnabled,
         boolean refreshEnabled) {
     /// Validates one atomically published catalog snapshot.
@@ -49,6 +53,8 @@ public record ResourcePackCatalogSnapshot(
         Objects.requireNonNull(itemCount, "itemCount");
         Objects.requireNonNull(status, "status");
         Objects.requireNonNull(statusText, "statusText");
+        Objects.requireNonNull(writeStatus, "writeStatus");
+        Objects.requireNonNull(writeStatusText, "writeStatusText");
         if (contentRevision < 0L) {
             throw new IllegalArgumentException("contentRevision must not be negative");
         }
@@ -64,6 +70,16 @@ public record ResourcePackCatalogSnapshot(
         }
         if (status == ResourcePackCatalogStatus.LOADING && refreshEnabled) {
             throw new IllegalArgumentException("Loading state cannot accept another refresh");
+        }
+        if (writeStatus == ResourcePackCatalogWriteStatus.BUSY
+                && (listEnabled || refreshEnabled)) {
+            throw new IllegalArgumentException("Busy write state must disable list and refresh");
+        }
+        if (writeStatus == ResourcePackCatalogWriteStatus.IDLE && !writeStatusText.isEmpty()) {
+            throw new IllegalArgumentException("Idle write state must not expose status text");
+        }
+        if (writeStatus != ResourcePackCatalogWriteStatus.IDLE && writeStatusText.isBlank()) {
+            throw new IllegalArgumentException("Active or failed write state requires status text");
         }
         if ((status == ResourcePackCatalogStatus.READY
                 || status == ResourcePackCatalogStatus.UNSUPPORTED)

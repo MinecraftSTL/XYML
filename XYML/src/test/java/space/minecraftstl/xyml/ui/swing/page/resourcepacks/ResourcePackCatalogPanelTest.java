@@ -453,6 +453,8 @@ public final class ResourcePackCatalogPanelTest {
                 contentRevision,
                 status,
                 statusText,
+                ResourcePackCatalogWriteStatus.IDLE,
+                "",
                 listEnabled,
                 refreshEnabled);
     }
@@ -781,6 +783,46 @@ public final class ResourcePackCatalogPanelTest {
             publish(rows, copyWithSelection(previous, OptionalInt.empty()));
         }
 
+        /// Returns the unchanged fake snapshot for an unused import command.
+        ///
+        /// @param sources ignored source paths
+        /// @return already completed current snapshot
+        @Override
+        public CompletionStage<ResourcePackCatalogSnapshot> importResourcePacks(List<Path> sources) {
+            Objects.requireNonNull(sources, "sources");
+            return CompletableFuture.completedFuture(current.get());
+        }
+
+        /// Returns the unchanged fake snapshot for an unused enable command.
+        ///
+        /// @param path ignored current pack path
+        /// @return already completed current snapshot
+        @Override
+        public CompletionStage<ResourcePackCatalogSnapshot> enableResourcePack(Path path) {
+            Objects.requireNonNull(path, "path");
+            return CompletableFuture.completedFuture(current.get());
+        }
+
+        /// Returns the unchanged fake snapshot for an unused disable command.
+        ///
+        /// @param path ignored current pack path
+        /// @return already completed current snapshot
+        @Override
+        public CompletionStage<ResourcePackCatalogSnapshot> disableResourcePack(Path path) {
+            Objects.requireNonNull(path, "path");
+            return CompletableFuture.completedFuture(current.get());
+        }
+
+        /// Returns the unchanged fake snapshot for an unused delete command.
+        ///
+        /// @param path ignored current pack path
+        /// @return already completed current snapshot
+        @Override
+        public CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path) {
+            Objects.requireNonNull(path, "path");
+            return CompletableFuture.completedFuture(current.get());
+        }
+
         /// Closes this test-owned model once.
         @Override
         public void close() {
@@ -875,6 +917,8 @@ public final class ResourcePackCatalogPanelTest {
                     source.contentRevision(),
                     source.status(),
                     source.statusText(),
+                    source.writeStatus(),
+                    source.writeStatusText(),
                     source.listEnabled(),
                     source.refreshEnabled());
         }

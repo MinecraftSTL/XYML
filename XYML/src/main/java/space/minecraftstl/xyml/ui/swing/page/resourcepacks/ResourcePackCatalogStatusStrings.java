@@ -30,6 +30,8 @@ import java.util.Objects;
 /// @param unsupportedStatus status when the Minecraft version cannot use resource packs
 /// @param failedStatus prefix after the latest disk scan fails
 /// @param unknownFailure fallback detail when a failure has no readable message
+/// @param writeBusyStatus status while one local mutation and follow-up scan are active
+/// @param writeFailedStatus prefix after the latest local mutation fails
 @NotNullByDefault
 public record ResourcePackCatalogStatusStrings(
         String idleStatus,
@@ -38,7 +40,9 @@ public record ResourcePackCatalogStatusStrings(
         String emptyStatus,
         String unsupportedStatus,
         String failedStatus,
-        String unknownFailure) {
+        String unknownFailure,
+        String writeBusyStatus,
+        String writeFailedStatus) {
     /// Validates every localized lifecycle value.
     public ResourcePackCatalogStatusStrings {
         Objects.requireNonNull(idleStatus, "idleStatus");
@@ -48,5 +52,7 @@ public record ResourcePackCatalogStatusStrings(
         Objects.requireNonNull(unsupportedStatus, "unsupportedStatus");
         Objects.requireNonNull(failedStatus, "failedStatus");
         Objects.requireNonNull(unknownFailure, "unknownFailure");
+        Objects.requireNonNull(writeBusyStatus, "writeBusyStatus");
+        Objects.requireNonNull(writeFailedStatus, "writeFailedStatus");
     }
 }

@@ -23,6 +23,8 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
 
 import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.CompletionStage;
 
 /// Supplies lazy installed-resource-pack state without exposing JavaFX or Swing types.
 ///
@@ -60,7 +62,40 @@ public interface ResourcePackCatalogModel
     /// Clears the stable selection without changing indexed content.
     void clearSelection();
 
-    /// Cancels index and viewport work, terminates subscriptions, and disables future commands.
+    /// Imports multiple resource-pack archives or directories as one serialized catalog write.
+    ///
+    /// The source list is captured defensively. An empty list, duplicate target name, unsupported
+    /// source shape, or existing target completes exceptionally without overwriting catalog files.
+    /// Preflight and private staging avoid expected partial copies. If an external process creates
+    /// a later target during publication, already published packs and the external target are kept;
+    /// the Future fails after the actual partial state has been rescanned and published.
+    ///
+    /// @param sources source archives or directories
+    /// @return asynchronous terminal snapshot after the mandatory shallow follow-up scan
+    CompletionStage<ResourcePackCatalogSnapshot> importResourcePacks(List<Path> sources);
+
+    /// Persistently enables one pack identified by its stable current-index path.
+    ///
+    /// @param path direct-child path belonging to the current complete catalog
+    /// @return asynchronous completion after options persistence and shallow reindexing
+    CompletionStage<ResourcePackCatalogSnapshot> enableResourcePack(Path path);
+
+    /// Persistently disables one pack identified by its stable current-index path.
+    ///
+    /// @param path direct-child path belonging to the current complete catalog
+    /// @return asynchronous completion after options persistence and shallow reindexing
+    CompletionStage<ResourcePackCatalogSnapshot> disableResourcePack(Path path);
+
+    /// Persistently disables and then deletes one current pack by stable path.
+    ///
+    /// @param path direct-child path belonging to the current complete catalog
+    /// @return asynchronous completion after deletion and shallow reindexing
+    CompletionStage<ResourcePackCatalogSnapshot> deleteResourcePack(Path path);
+
+    /// Closes commands and subscriptions, cancels index, viewport, and pre-commit write work.
+    ///
+    /// A write that already crossed its irreversible commit point continues only long enough to
+    /// report its actual Future outcome; it cannot publish a late catalog state after closure.
     @Override
     void close();
 }

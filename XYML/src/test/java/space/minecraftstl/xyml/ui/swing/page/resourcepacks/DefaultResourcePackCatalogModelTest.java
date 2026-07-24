@@ -77,7 +77,9 @@ public final class DefaultResourcePackCatalogModelTest {
                     "empty",
                     "unsupported",
                     "failed",
-                    "unknown");
+                    "unknown",
+                    "writing",
+                    "write failed");
 
     /// Maximum time allotted to one concurrency checkpoint.
     private static final long CONCURRENCY_TIMEOUT_SECONDS = 5L;
@@ -248,7 +250,7 @@ public final class DefaultResourcePackCatalogModelTest {
                     if (calls.getAndIncrement() == 0) {
                         throw new IOException("index failed");
                     }
-                    return new DefaultResourcePackCatalogModel.CatalogIndex(false, List.of());
+                    return new ResourcePackCatalogIndex(false, List.of());
                 },
                 DefaultResourcePackCatalogModelTest::itemsForPaths);
         DefaultResourcePackCatalogModel model = model(access, Runnable::run);
@@ -745,6 +747,308 @@ public final class DefaultResourcePackCatalogModelTest {
         model.close();
     }
 
+    /// Verifies one successful write owns BUSY exclusively and replaces the index exactly once.
+    @Test
+    public void successfulMutationPublishesBusyThenOneExactRefreshedRevision() {
+        Path first = testPath("first.zip");
+        Path second = testPath("second.zip");
+        Path source = testPath("source.zip");
+        RecordingAccess access = new RecordingAccess(
+                cancellation -> supportedIndex(List.of(first)),
+                DefaultResourcePackCatalogModelTest::itemsForPaths,
+                (mutation, cancellation, commitPoint) -> {
+                    assertInstanceOf(ResourcePackImportMutation.class, mutation);
+                    cancellation.throwIfCancelled();
+                    commitPoint.run();
+                    return new ResourcePackCatalogMutationAccessResult(
+                            supportedIndex(List.of(first, second)),
+                            null);
+                });
+        ManualExecutor executor = new ManualExecutor();
+        DefaultResourcePackCatalogModel model = model(access, executor);
+        model.loadIfNeeded();
+        executor.runNext();
+        model.selectResourcePack(first);
+
+        CompletionStage<ResourcePackCatalogSnapshot> duplicateImport =
+                model.importResourcePacks(List.of(source, source));
+        assertInstanceOf(IllegalArgumentException.class, stageFailure(duplicateImport));
+
+        CompletionStage<ResourcePackCatalogSnapshot> completion =
+                model.importResourcePacks(List.of(source));
+        ResourcePackCatalogSnapshot busy = model.snapshot();
+        CompletionStage<ChoicePage<ResourcePackCatalogItem>> blockedRange = model.load(
+                new IndexRange(0, 1),
+                new LoadCancellation());
+
+        assertAll(
+                () -> assertEquals(ResourcePackCatalogWriteStatus.BUSY, busy.writeStatus()),
+                () -> assertEquals("writing", busy.writeStatusText()),
+                () -> assertEquals(1L, busy.contentRevision()),
+                () -> assertEquals(OptionalInt.of(1), busy.itemCount()),
+                () -> assertFalse(busy.listEnabled()),
+                () -> assertFalse(busy.refreshEnabled()),
+                () -> assertFalse(completion.toCompletableFuture().isDone()),
+                () -> assertInstanceOf(IllegalStateException.class, stageFailure(blockedRange)),
+                () -> assertThrows(IllegalStateException.class, model::refresh),
+                () -> assertThrows(
+                        IllegalStateException.class,
+                        () -> model.enableResourcePack(first)));
+
+        executor.runNext();
+        ResourcePackCatalogSnapshot terminal = completion.toCompletableFuture().join();
+        assertAll(
+                () -> assertEquals(terminal, model.snapshot()),
+                () -> assertEquals(ResourcePackCatalogWriteStatus.IDLE, terminal.writeStatus()),
+                () -> assertEquals("", terminal.writeStatusText()),
+                () -> assertEquals(ResourcePackCatalogStatus.READY, terminal.status()),
+                () -> assertEquals(OptionalInt.of(2), terminal.itemCount()),
+                () -> assertEquals(OptionalInt.of(0), terminal.selectedIndex()),
+                () -> assertEquals(2L, terminal.contentRevision()),
+                () -> assertEquals(1, access.mutationCalls()));
+        model.close();
+    }
+
+    /// Verifies a failed write still publishes the real post-failure index and clears deletion selection.
+    @Test
+    public void mutationFailurePublishesRescannedRealityAndErrorState() {
+        Path retained = testPath("retained.zip");
+        Path deleted = testPath("deleted.zip");
+        IOException writeFailure = new IOException("delete failed after persistence");
+        RecordingAccess access = new RecordingAccess(
+                cancellation -> supportedIndex(List.of(retained, deleted)),
+                DefaultResourcePackCatalogModelTest::itemsForPaths,
+                (mutation, cancellation, commitPoint) -> {
+                    assertInstanceOf(ResourcePackDeleteMutation.class, mutation);
+                    commitPoint.run();
+                    return new ResourcePackCatalogMutationAccessResult(
+                            supportedIndex(List.of(retained)),
+                            writeFailure);
+                });
+        ManualExecutor executor = new ManualExecutor();
+        DefaultResourcePackCatalogModel model = model(access, executor);
+        model.loadIfNeeded();
+        executor.runNext();
+        model.selectResourcePack(deleted);
+
+        CompletionStage<ResourcePackCatalogSnapshot> completion =
+                model.deleteResourcePack(deleted);
+        executor.runNext();
+        Throwable observed = stageFailure(completion);
+        ResourcePackCatalogSnapshot terminal = model.snapshot();
+
+        assertAll(
+                () -> assertEquals(writeFailure, observed),
+                () -> assertEquals(ResourcePackCatalogStatus.READY, terminal.status()),
+                () -> assertEquals(ResourcePackCatalogWriteStatus.ERROR, terminal.writeStatus()),
+                () -> assertTrue(terminal.writeStatusText().contains("delete failed")),
+                () -> assertEquals(OptionalInt.of(1), terminal.itemCount()),
+                () -> assertEquals(OptionalInt.empty(), terminal.selectedIndex()),
+                () -> assertEquals(2L, terminal.contentRevision()),
+                () -> assertTrue(terminal.listEnabled()),
+                () -> assertTrue(terminal.refreshEnabled()));
+        model.close();
+    }
+
+    /// Verifies executor rejection reports a write error without pretending indexed content changed.
+    @Test
+    public void mutationExecutorRejectionPreservesExactIndexAndRevision() {
+        Path pack = testPath("rejected.zip");
+        RecordingAccess access = new RecordingAccess(
+                cancellation -> supportedIndex(List.of(pack)),
+                DefaultResourcePackCatalogModelTest::itemsForPaths,
+                (mutation, cancellation, commitPoint) -> {
+                    throw new AssertionError("Rejected mutation must not reach source access");
+                });
+        SwitchableExecutor executor = new SwitchableExecutor();
+        DefaultResourcePackCatalogModel model = model(access, executor);
+        model.loadIfNeeded();
+        RejectedExecutionException rejection = new RejectedExecutionException("write rejected");
+        executor.reject(rejection);
+
+        CompletionStage<ResourcePackCatalogSnapshot> completion = model.enableResourcePack(pack);
+        ResourcePackCatalogSnapshot terminal = model.snapshot();
+
+        assertAll(
+                () -> assertEquals(rejection, stageFailure(completion)),
+                () -> assertEquals(ResourcePackCatalogStatus.READY, terminal.status()),
+                () -> assertEquals(ResourcePackCatalogWriteStatus.ERROR, terminal.writeStatus()),
+                () -> assertEquals(OptionalInt.of(1), terminal.itemCount()),
+                () -> assertEquals(1L, terminal.contentRevision()),
+                () -> assertTrue(terminal.listEnabled()),
+                () -> assertTrue(terminal.refreshEnabled()),
+                () -> assertEquals(0, access.mutationCalls()));
+        model.close();
+    }
+
+    /// Verifies close cancels queued pre-commit work and rejects its late executor task.
+    @Test
+    public void closeCancelsPreCommitMutationAndRejectsLateSourceWork() {
+        Path pack = testPath("pre-commit.zip");
+        RecordingAccess access = new RecordingAccess(
+                cancellation -> supportedIndex(List.of(pack)),
+                DefaultResourcePackCatalogModelTest::itemsForPaths,
+                (mutation, cancellation, commitPoint) -> {
+                    throw new AssertionError("Closed pre-commit mutation reached source access");
+                });
+        ManualExecutor executor = new ManualExecutor();
+        DefaultResourcePackCatalogModel model = model(access, executor);
+        model.loadIfNeeded();
+        executor.runNext();
+
+        CompletionStage<ResourcePackCatalogSnapshot> completion = model.disableResourcePack(pack);
+        model.close();
+        Throwable observed = stageFailure(completion);
+        executor.runNext();
+
+        assertAll(
+                () -> assertInstanceOf(CancellationException.class, observed),
+                () -> assertEquals(0, access.mutationCalls()),
+                () -> assertEquals(2L, model.snapshot().contentRevision()),
+                () -> assertFalse(model.snapshot().listEnabled()),
+                () -> assertFalse(model.snapshot().refreshEnabled()));
+    }
+
+    /// Verifies close cannot misreport cancellation after source access crosses its commit point.
+    @Test
+    public void closeAllowsCommittedMutationFutureToReportActualCompletion() {
+        Path first = testPath("committed-first.zip");
+        Path second = testPath("committed-second.zip");
+        CountDownLatch committed = new CountDownLatch(1);
+        CountDownLatch releaseMutation = new CountDownLatch(1);
+        RecordingAccess access = new RecordingAccess(
+                cancellation -> supportedIndex(List.of(first)),
+                DefaultResourcePackCatalogModelTest::itemsForPaths,
+                (mutation, cancellation, commitPoint) -> {
+                    commitPoint.run();
+                    committed.countDown();
+                    awaitLatch(releaseMutation, "committed mutation was not released");
+                    return new ResourcePackCatalogMutationAccessResult(
+                            supportedIndex(List.of(first, second)),
+                            null);
+                });
+        ManualExecutor executor = new ManualExecutor();
+        DefaultResourcePackCatalogModel model = model(access, executor);
+        model.loadIfNeeded();
+        executor.runNext();
+        CompletionStage<ResourcePackCatalogSnapshot> completion = model.enableResourcePack(first);
+        Thread worker = daemonThread("resource-pack-committed-mutation", executor.takeNext());
+
+        worker.start();
+        awaitLatch(committed, "mutation did not cross its commit point");
+        model.close();
+        assertFalse(completion.toCompletableFuture().isDone(),
+                "close misreported committed mutation as cancelled");
+        releaseMutation.countDown();
+        joinThread(worker, "committed mutation did not finish");
+        ResourcePackCatalogSnapshot completedSnapshot = completion.toCompletableFuture().join();
+
+        assertAll(
+                () -> assertEquals(model.snapshot(), completedSnapshot),
+                () -> assertEquals(1, access.mutationCalls()),
+                () -> assertEquals(2L, model.snapshot().contentRevision()),
+                () -> assertFalse(model.snapshot().refreshEnabled()));
+    }
+
+    /// Verifies listener and Future callbacks may reenter model commands without lock inversion.
+    @Test
+    public void mutationListenerAndFutureCompletionAllowReentrantCommands() {
+        Path pack = testPath("reentrant-write.zip");
+        RecordingAccess access = new RecordingAccess(
+                cancellation -> supportedIndex(List.of(pack)),
+                DefaultResourcePackCatalogModelTest::itemsForPaths,
+                (mutation, cancellation, commitPoint) -> {
+                    commitPoint.run();
+                    return new ResourcePackCatalogMutationAccessResult(
+                            supportedIndex(List.of(pack)),
+                            null);
+                });
+        ManualExecutor executor = new ManualExecutor();
+        DefaultResourcePackCatalogModel model = model(access, executor);
+        model.loadIfNeeded();
+        executor.runNext();
+        model.selectResourcePack(pack);
+        AtomicInteger terminalListenerCalls = new AtomicInteger();
+        model.subscribe(change -> {
+            if (change.previousValue().writeStatus() == ResourcePackCatalogWriteStatus.BUSY
+                    && change.currentValue().writeStatus() == ResourcePackCatalogWriteStatus.IDLE) {
+                terminalListenerCalls.incrementAndGet();
+                model.clearSelection();
+            }
+        });
+
+        CompletionStage<ResourcePackCatalogSnapshot> completion = model.disableResourcePack(pack);
+        CompletionStage<ResourcePackCatalogSnapshot> reentrant = completion.thenApply(snapshot -> {
+            model.refresh();
+            return snapshot;
+        });
+        executor.runNext();
+
+        assertAll(
+                () -> assertEquals(1, terminalListenerCalls.get()),
+                () -> assertEquals(OptionalInt.empty(), model.snapshot().selectedIndex()),
+                () -> assertEquals(ResourcePackCatalogStatus.LOADING, model.snapshot().status()),
+                () -> assertEquals(1, executor.taskCount()),
+                () -> assertEquals(2L,
+                        reentrant.toCompletableFuture().join().contentRevision()));
+        executor.runNext();
+        model.close();
+    }
+
+    /// Verifies listener Errors and diagnostic-handler Errors cannot interrupt write progression.
+    @Test
+    public void listenerErrorsCannotBlockMutationSubmissionOrFutureCompletion() {
+        Path pack = testPath("listener-error.zip");
+        RecordingAccess access = new RecordingAccess(
+                cancellation -> supportedIndex(List.of(pack)),
+                DefaultResourcePackCatalogModelTest::itemsForPaths,
+                (mutation, cancellation, commitPoint) -> {
+                    commitPoint.run();
+                    return new ResourcePackCatalogMutationAccessResult(
+                            supportedIndex(List.of(pack)),
+                            null);
+                });
+        ManualExecutor executor = new ManualExecutor();
+        DefaultResourcePackCatalogModel model = model(access, executor);
+        model.loadIfNeeded();
+        executor.runNext();
+        AtomicInteger diagnostics = new AtomicInteger();
+        AtomicInteger healthyListenerCalls = new AtomicInteger();
+        model.subscribe(change -> {
+            throw new AssertionError("listener failure " + change.currentValue().writeStatus());
+        });
+        model.subscribe(change -> healthyListenerCalls.incrementAndGet());
+        Thread currentThread = Thread.currentThread();
+        @Nullable Thread.UncaughtExceptionHandler previousHandler =
+                currentThread.getUncaughtExceptionHandler();
+
+        try {
+            currentThread.setUncaughtExceptionHandler((thread, failure) -> {
+                diagnostics.incrementAndGet();
+                throw new AssertionError("diagnostic handler failure", failure);
+            });
+            CompletionStage<ResourcePackCatalogSnapshot> completion =
+                    model.enableResourcePack(pack);
+            assertAll(
+                    () -> assertEquals(ResourcePackCatalogWriteStatus.BUSY,
+                            model.snapshot().writeStatus()),
+                    () -> assertEquals(1, executor.taskCount()),
+                    () -> assertFalse(completion.toCompletableFuture().isDone()));
+
+            executor.runNext();
+            ResourcePackCatalogSnapshot terminal = completion.toCompletableFuture().join();
+            assertAll(
+                    () -> assertEquals(ResourcePackCatalogWriteStatus.IDLE,
+                            terminal.writeStatus()),
+                    () -> assertEquals(2, diagnostics.get()),
+                    () -> assertEquals(2, healthyListenerCalls.get()),
+                    () -> assertEquals(1, access.mutationCalls()));
+        } finally {
+            currentThread.setUncaughtExceptionHandler(previousHandler);
+            model.close();
+        }
+    }
+
     /// Verifies production access maps compatibility, enabled state, and isolated corrupt candidates.
     @Test
     public void productionAccessMapsRealLocalResourcePackState() throws IOException {
@@ -767,11 +1071,11 @@ public final class DefaultResourcePackCatalogModelTest {
                 "resourcePacks:[\"file/b-compatible-enabled\"]\n"
                         + "incompatibleResourcePacks:[]\n");
         GameRepository repository = localRepository(temporaryDirectory);
-        DefaultResourcePackCatalogModel.ManagerCatalogAccess access =
-                new DefaultResourcePackCatalogModel.ManagerCatalogAccess(repository, "test-instance");
+        FileSystemResourcePackCatalogAccess access =
+                new FileSystemResourcePackCatalogAccess(repository, "test-instance");
         LoadCancellation cancellation = new LoadCancellation();
 
-        DefaultResourcePackCatalogModel.CatalogIndex index = access.loadIndex(cancellation);
+        ResourcePackCatalogIndex index = access.loadIndex(cancellation);
         @Unmodifiable List<ResourcePackCatalogItem> items = access.loadItems(index.paths(), cancellation);
 
         assertAll(
@@ -810,7 +1114,7 @@ public final class DefaultResourcePackCatalogModelTest {
     /// @param executor controlled executor
     /// @return idle catalog model
     private static DefaultResourcePackCatalogModel model(
-            DefaultResourcePackCatalogModel.CatalogAccess access,
+            ResourcePackCatalogAccess access,
             Executor executor) {
         return new DefaultResourcePackCatalogModel(access, executor, STATUS_STRINGS);
     }
@@ -819,9 +1123,9 @@ public final class DefaultResourcePackCatalogModelTest {
     ///
     /// @param paths candidate paths
     /// @return supported source index
-    private static DefaultResourcePackCatalogModel.CatalogIndex supportedIndex(
+    private static ResourcePackCatalogIndex supportedIndex(
             @Unmodifiable List<Path> paths) {
-        return new DefaultResourcePackCatalogModel.CatalogIndex(true, paths);
+        return new ResourcePackCatalogIndex(true, paths);
     }
 
     /// Creates one ordinary parsed row per exact supplied path.
@@ -1033,7 +1337,7 @@ public final class DefaultResourcePackCatalogModelTest {
         /// @param cancellation cooperative cancellation
         /// @return source index
         /// @throws IOException test I/O failure
-        DefaultResourcePackCatalogModel.CatalogIndex load(
+        ResourcePackCatalogIndex load(
                 LoadCancellation cancellation) throws IOException;
     }
 
@@ -1050,6 +1354,23 @@ public final class DefaultResourcePackCatalogModelTest {
         @Unmodifiable List<ResourcePackCatalogItem> load(
                 @Unmodifiable List<Path> paths,
                 LoadCancellation cancellation) throws IOException;
+    }
+
+    /// Blocking write-and-rescan test function.
+    @FunctionalInterface
+    @NotNullByDefault
+    private interface MutationLoader {
+        /// Applies one test mutation and returns its mandatory refreshed index.
+        ///
+        /// @param mutation requested mutation
+        /// @param cancellation cooperative pre-commit cancellation
+        /// @param commitPoint irreversible commit callback
+        /// @return refreshed index and optional mutation failure
+        /// @throws IOException test I/O failure
+        ResourcePackCatalogMutationAccessResult load(
+                ResourcePackCatalogMutationRequest mutation,
+                LoadCancellation cancellation,
+                Runnable commitPoint) throws IOException;
     }
 
     /// Viewport listener counting accepted late successes and failures.
@@ -1120,18 +1441,24 @@ public final class DefaultResourcePackCatalogModelTest {
 
     /// Two-stage access that records every invocation and exact item request.
     @NotNullByDefault
-    private static final class RecordingAccess implements DefaultResourcePackCatalogModel.CatalogAccess {
+    private static final class RecordingAccess implements ResourcePackCatalogAccess {
         /// Injected shallow-index behavior.
         private final IndexLoader indexLoader;
 
         /// Injected exact-items behavior.
         private final ItemLoader itemLoader;
 
+        /// Injected mutation and mandatory-rescan behavior.
+        private final MutationLoader mutationLoader;
+
         /// Number of shallow index calls.
         private final AtomicInteger indexCalls = new AtomicInteger();
 
         /// Number of exact item calls.
         private final AtomicInteger itemCalls = new AtomicInteger();
+
+        /// Number of serialized mutation calls.
+        private final AtomicInteger mutationCalls = new AtomicInteger();
 
         /// Immutable path requests in invocation order.
         private final List<@Unmodifiable List<Path>> requestedPaths = new ArrayList<>();
@@ -1141,13 +1468,32 @@ public final class DefaultResourcePackCatalogModelTest {
         /// @param indexLoader shallow-index behavior
         /// @param itemLoader exact-items behavior
         private RecordingAccess(IndexLoader indexLoader, ItemLoader itemLoader) {
+            this(
+                    indexLoader,
+                    itemLoader,
+                    (mutation, cancellation, commitPoint) -> {
+                        throw new UnsupportedOperationException(
+                                "Mutation behavior was not configured");
+                    });
+        }
+
+        /// Creates one recording access with explicit mutation behavior.
+        ///
+        /// @param indexLoader shallow-index behavior
+        /// @param itemLoader exact-items behavior
+        /// @param mutationLoader mutation and mandatory-rescan behavior
+        private RecordingAccess(
+                IndexLoader indexLoader,
+                ItemLoader itemLoader,
+                MutationLoader mutationLoader) {
             this.indexLoader = indexLoader;
             this.itemLoader = itemLoader;
+            this.mutationLoader = mutationLoader;
         }
 
         /// Records and delegates one shallow index call.
         @Override
-        public DefaultResourcePackCatalogModel.CatalogIndex loadIndex(
+        public ResourcePackCatalogIndex loadIndex(
                 LoadCancellation cancellation) throws IOException {
             indexCalls.incrementAndGet();
             return indexLoader.load(cancellation);
@@ -1163,6 +1509,22 @@ public final class DefaultResourcePackCatalogModelTest {
             return itemLoader.load(paths, cancellation);
         }
 
+        /// Records and delegates one serialized mutation.
+        ///
+        /// @param mutation requested write
+        /// @param cancellation cooperative cancellation
+        /// @param commitPoint irreversible commit callback
+        /// @return refreshed index and optional mutation failure
+        /// @throws IOException configured test I/O failure
+        @Override
+        public ResourcePackCatalogMutationAccessResult mutateAndLoadIndex(
+                ResourcePackCatalogMutationRequest mutation,
+                LoadCancellation cancellation,
+                Runnable commitPoint) throws IOException {
+            mutationCalls.incrementAndGet();
+            return mutationLoader.load(mutation, cancellation, commitPoint);
+        }
+
         /// Returns shallow index call count.
         ///
         /// @return index call count
@@ -1175,6 +1537,13 @@ public final class DefaultResourcePackCatalogModelTest {
         /// @return item call count
         private int itemCalls() {
             return itemCalls.get();
+        }
+
+        /// Returns serialized mutation call count.
+        ///
+        /// @return mutation call count
+        private int mutationCalls() {
+            return mutationCalls.get();
         }
 
         /// Returns immutable copies of exact path requests.
