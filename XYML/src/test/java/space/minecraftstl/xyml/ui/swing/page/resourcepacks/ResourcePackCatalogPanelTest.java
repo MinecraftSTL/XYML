@@ -66,6 +66,38 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Headless Swing tests for lazy resource-pack states, viewport demand, details, and closure.
 @NotNullByDefault
 public final class ResourcePackCatalogPanelTest {
+    /// Stable managed directory used by headless panel tests.
+    private static final Path RESOURCE_PACK_DIRECTORY = Path.of("resourcepacks")
+            .toAbsolutePath()
+            .normalize();
+
+    /// Localized action text used by headless panel tests.
+    private static final ResourcePackCatalogActionStrings ACTION_STRINGS =
+            new ResourcePackCatalogActionStrings(
+                    "Import",
+                    "Import resource packs",
+                    "Import resource packs",
+                    "Resource pack ZIP files",
+                    "Enable",
+                    "Enable selected resource pack",
+                    "Disable",
+                    "Disable selected resource pack",
+                    "Enable incompatible resource pack",
+                    "Enable %s?",
+                    "Delete",
+                    "Permanently delete selected resource pack",
+                    "Delete %s?",
+                    "Reveal",
+                    "Reveal selected resource pack",
+                    "Open directory",
+                    "Open the resource-pack directory",
+                    "Resource-pack operation failed",
+                    "Unable to reveal resource pack",
+                    "Unable to open resource-pack directory");
+
+    /// Silent application boundary used by read-only panel tests.
+    private static final ResourcePackCatalogInteractions INTERACTIONS = new SilentInteractions();
+
     /// Localized catalog text used by focused panel tests.
     private static final ResourcePackCatalogStrings STRINGS = new ResourcePackCatalogStrings(
             "Resource packs",
@@ -103,7 +135,7 @@ public final class ResourcePackCatalogPanelTest {
                 snapshot(OptionalInt.empty(), OptionalInt.empty(), 0L,
                         ResourcePackCatalogStatus.IDLE, "Waiting", false, true));
         ResourcePackCatalogPanel panel = onEventDispatchThread(
-                () -> new ResourcePackCatalogPanel(model, STRINGS));
+                () -> newPanel(model));
 
         assertAll(
                 () -> assertEquals(0, model.lazyLoads.get()),
@@ -151,7 +183,7 @@ public final class ResourcePackCatalogPanelTest {
         subscribeModel.failSubscriptionWith(subscribeFailure);
 
         RuntimeException observedSubscribeFailure = assertThrows(RuntimeException.class,
-                () -> onEventDispatchThread(() -> new ResourcePackCatalogPanel(subscribeModel, STRINGS)));
+                () -> onEventDispatchThread(() -> newPanel(subscribeModel)));
         assertAll(
                 () -> assertSame(subscribeFailure, observedSubscribeFailure),
                 () -> assertEquals(1, subscribeModel.closeCalls.get()),
@@ -165,7 +197,7 @@ public final class ResourcePackCatalogPanelTest {
         snapshotModel.failSnapshotWith(snapshotFailure);
 
         RuntimeException observedSnapshotFailure = assertThrows(RuntimeException.class,
-                () -> onEventDispatchThread(() -> new ResourcePackCatalogPanel(snapshotModel, STRINGS)));
+                () -> onEventDispatchThread(() -> newPanel(snapshotModel)));
         assertAll(
                 () -> assertSame(snapshotFailure, observedSnapshotFailure),
                 () -> assertEquals(1, snapshotModel.closeCalls.get()),
@@ -176,7 +208,7 @@ public final class ResourcePackCatalogPanelTest {
                 snapshot(OptionalInt.empty(), OptionalInt.empty(), 0L,
                         ResourcePackCatalogStatus.IDLE, "Waiting", false, true));
         assertThrows(IllegalStateException.class,
-                () -> new ResourcePackCatalogPanel(threadModel, STRINGS));
+                () -> newPanel(threadModel));
         assertEquals(1, threadModel.closeCalls.get());
 
         FakeResourcePackCatalogModel nullStringsModel = FakeResourcePackCatalogModel.immediate(
@@ -184,7 +216,12 @@ public final class ResourcePackCatalogPanelTest {
                 snapshot(OptionalInt.empty(), OptionalInt.empty(), 0L,
                         ResourcePackCatalogStatus.IDLE, "Waiting", false, true));
         assertThrows(NullPointerException.class,
-                () -> onEventDispatchThread(() -> new ResourcePackCatalogPanel(nullStringsModel, null)));
+                () -> onEventDispatchThread(() -> new ResourcePackCatalogPanel(
+                        nullStringsModel,
+                        null,
+                        ACTION_STRINGS,
+                        INTERACTIONS,
+                        RESOURCE_PACK_DIRECTORY)));
         assertEquals(1, nullStringsModel.closeCalls.get());
     }
 
@@ -196,7 +233,7 @@ public final class ResourcePackCatalogPanelTest {
                 snapshot(OptionalInt.empty(), OptionalInt.empty(), 0L,
                         ResourcePackCatalogStatus.IDLE, "Waiting", false, true));
         ResourcePackCatalogPanel panel = onEventDispatchThread(
-                () -> new ResourcePackCatalogPanel(model, STRINGS));
+                () -> newPanel(model));
 
         onEventDispatchThread(() -> {
             assertTrue(findComponent(panel, "resourcePacksIdle").isVisible());
@@ -258,7 +295,7 @@ public final class ResourcePackCatalogPanelTest {
                 snapshot(OptionalInt.empty(), OptionalInt.of(rows.size()), 1L,
                         ResourcePackCatalogStatus.READY, "Ready", true, true));
         ResourcePackCatalogPanel panel = onEventDispatchThread(
-                () -> new ResourcePackCatalogPanel(model, STRINGS));
+                () -> newPanel(model));
 
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(960, 540));
@@ -319,7 +356,7 @@ public final class ResourcePackCatalogPanelTest {
                 snapshot(OptionalInt.empty(), OptionalInt.of(rows.size()), 1L,
                         ResourcePackCatalogStatus.READY, "Ready", true, true));
         ResourcePackCatalogPanel panel = onEventDispatchThread(
-                () -> new ResourcePackCatalogPanel(model, STRINGS));
+                () -> newPanel(model));
 
         onEventDispatchThread(() -> {
             panel.setSize(new Dimension(900, 420));
@@ -349,7 +386,7 @@ public final class ResourcePackCatalogPanelTest {
                 snapshot(OptionalInt.empty(), OptionalInt.of(rows.size()), 1L,
                         ResourcePackCatalogStatus.READY, "Ready", true, true));
         ResourcePackCatalogPanel panel = onEventDispatchThread(
-                () -> new ResourcePackCatalogPanel(model, STRINGS));
+                () -> newPanel(model));
 
         onEventDispatchThread(() -> {
             JSplitPane split = findComponent(panel, "resourcePacksCatalogSplit", JSplitPane.class);
@@ -386,7 +423,7 @@ public final class ResourcePackCatalogPanelTest {
                 snapshot(OptionalInt.empty(), OptionalInt.empty(), 0L,
                         ResourcePackCatalogStatus.IDLE, "Waiting", false, true));
         ResourcePackCatalogPanel panel = onEventDispatchThread(
-                () -> new ResourcePackCatalogPanel(model, STRINGS));
+                () -> newPanel(model));
         @Unmodifiable List<ResourcePackCatalogItem> rows = items(2);
         ResourcePackCatalogSnapshot ready = snapshot(OptionalInt.empty(), OptionalInt.of(2), 2L,
                 ResourcePackCatalogStatus.READY, "Newest", true, true);
@@ -468,6 +505,19 @@ public final class ResourcePackCatalogPanelTest {
         return list.getSelectionMode() == javax.swing.ListSelectionModel.SINGLE_SELECTION
                 ? ListSelectionModelValue.SINGLE
                 : ListSelectionModelValue.OTHER;
+    }
+
+    /// Creates one panel with the shared silent interaction boundary.
+    ///
+    /// @param model owned fake model
+    /// @return configured panel
+    private static ResourcePackCatalogPanel newPanel(ResourcePackCatalogModel model) {
+        return new ResourcePackCatalogPanel(
+                model,
+                STRINGS,
+                ACTION_STRINGS,
+                INTERACTIONS,
+                RESOURCE_PACK_DIRECTORY);
     }
 
     /// Runs one value-producing action on the EDT.
@@ -600,6 +650,60 @@ public final class ResourcePackCatalogPanelTest {
 
         /// Any unexpected selection mode.
         OTHER
+    }
+
+    /// Interaction boundary that never opens a dialog or performs a desktop operation.
+    @NotNullByDefault
+    private static final class SilentInteractions implements ResourcePackCatalogInteractions {
+        /// Returns no selected import files.
+        @Override
+        public @Unmodifiable List<Path> chooseImportFiles(
+                Component owner,
+                Path currentDirectory) {
+            Objects.requireNonNull(owner, "owner");
+            Objects.requireNonNull(currentDirectory, "currentDirectory");
+            return List.of();
+        }
+
+        /// Rejects the unused incompatible-pack confirmation.
+        @Override
+        public boolean confirmEnableIncompatible(
+                Component owner,
+                ResourcePackCatalogItem target) {
+            Objects.requireNonNull(owner, "owner");
+            Objects.requireNonNull(target, "target");
+            return false;
+        }
+
+        /// Rejects the unused permanent-delete confirmation.
+        @Override
+        public boolean confirmDelete(Component owner, ResourcePackCatalogItem target) {
+            Objects.requireNonNull(owner, "owner");
+            Objects.requireNonNull(target, "target");
+            return false;
+        }
+
+        /// Completes the unused reveal command immediately.
+        @Override
+        public CompletionStage<@Nullable Void> reveal(ResourcePackCatalogItem target) {
+            Objects.requireNonNull(target, "target");
+            return CompletableFuture.completedFuture(null);
+        }
+
+        /// Completes the unused open-directory command immediately.
+        @Override
+        public CompletionStage<@Nullable Void> openResourcePackDirectory(Path resourcePackDirectory) {
+            Objects.requireNonNull(resourcePackDirectory, "resourcePackDirectory");
+            return CompletableFuture.completedFuture(null);
+        }
+
+        /// Ignores unused failure feedback.
+        @Override
+        public void showFailure(Component owner, String title, String detail) {
+            Objects.requireNonNull(owner, "owner");
+            Objects.requireNonNull(title, "title");
+            Objects.requireNonNull(detail, "detail");
+        }
     }
 
     /// Captures one exact viewport request for controlled completion.

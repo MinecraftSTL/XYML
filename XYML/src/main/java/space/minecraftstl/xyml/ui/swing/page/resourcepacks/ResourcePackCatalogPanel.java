@@ -21,6 +21,7 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -28,7 +29,9 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 
 import javax.swing.BorderFactory;
+import javax.swing.AbstractAction;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -37,6 +40,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.ListSelectionModel;
+import javax.swing.KeyStroke;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import javax.swing.event.ListSelectionEvent;
@@ -46,9 +50,17 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.event.HierarchyEvent;
 import java.awt.event.HierarchyListener;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
+import java.util.function.Supplier;
 
 /// Presents an installed-resource-pack catalog without performing source I/O in Swing code.
 ///
@@ -94,6 +106,15 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Localized visible and accessible text.
     private final ResourcePackCatalogStrings strings;
 
+    /// Localized command, confirmation, and failure text.
+    private final ResourcePackCatalogActionStrings actionStrings;
+
+    /// Application-owned dialog, desktop, and directory interaction boundary.
+    private final ResourcePackCatalogInteractions interactions;
+
+    /// Stable normalized directory managed by this catalog.
+    private final Path resourcePackDirectory;
+
     /// Viewport-measured single-choice list.
     private final ViewportChoiceList<ResourcePackCatalogItem> choiceList;
 
@@ -105,6 +126,21 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
 
     /// Retry command available only after a failed local scan.
     private final JButton retryButton;
+
+    /// Multi-file resource-pack import command.
+    private final JButton importButton;
+
+    /// Command that creates and opens the managed resource-pack directory.
+    private final JButton openDirectoryButton;
+
+    /// Binary enabled-state command for the loaded selected pack.
+    private final JCheckBox enabledToggle;
+
+    /// Command that reveals the loaded selected pack in the platform file manager.
+    private final JButton revealButton;
+
+    /// Permanent deletion command for the loaded selected pack.
+    private final JButton deleteButton;
 
     /// Current model status and retained failure detail.
     private final JTextArea statusText;
@@ -186,13 +222,34 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Whether EDT-owned component and model resources have been released.
     private boolean resourcesClosed;
 
+    /// Whether programmatic checkbox reconciliation suppresses user commands.
+    private boolean applyingEnabledToggle;
+
+    /// Whether a model write command remains locally outstanding.
+    private boolean writePending;
+
+    /// Model-notification revision captured immediately before the current write invocation.
+    private long writeStartUpdateRevision;
+
+    /// Whether one platform reveal command remains outstanding.
+    private boolean revealPending;
+
+    /// Whether one create-and-open-directory command remains outstanding.
+    private boolean openDirectoryPending;
+
     /// Creates a read-only resource-pack catalog panel on the Swing event dispatch thread.
     ///
     /// @param model owned toolkit-neutral lazy catalog model
     /// @param strings localized catalog controls, states, and detail labels
+    /// @param actionStrings localized command, confirmation, and failure text
+    /// @param interactions application-owned dialog, desktop, and directory interaction boundary
+    /// @param resourcePackDirectory stable managed resource-pack directory
     public ResourcePackCatalogPanel(
             ResourcePackCatalogModel model,
-            ResourcePackCatalogStrings strings) {
+            ResourcePackCatalogStrings strings,
+            ResourcePackCatalogActionStrings actionStrings,
+            ResourcePackCatalogInteractions interactions,
+            Path resourcePackDirectory) {
         super();
         @Nullable ViewportChoiceList<ResourcePackCatalogItem> acquiredChoiceList = null;
         @Nullable Subscription acquiredSubscription = null;
@@ -200,6 +257,11 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             EdtDispatcher.requireEventDispatchThread();
             this.model = Objects.requireNonNull(model, "model");
             this.strings = Objects.requireNonNull(strings, "strings");
+            this.actionStrings = Objects.requireNonNull(actionStrings, "actionStrings");
+            this.interactions = Objects.requireNonNull(interactions, "interactions");
+            this.resourcePackDirectory = Objects.requireNonNull(
+                    resourcePackDirectory,
+                    "resourcePackDirectory").toAbsolutePath().normalize();
             setLayout(new MigLayout(
                     "insets 0, fill, wrap 1",
                     "[grow,fill]",
@@ -207,6 +269,11 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             contentCards = new JPanel(new CardLayout());
             refreshButton = new JButton();
             retryButton = new JButton();
+            importButton = new JButton();
+            openDirectoryButton = new JButton();
+            enabledToggle = new JCheckBox();
+            revealButton = new JButton();
+            deleteButton = new JButton();
             statusText = stateText("resourcePacksStatus");
             idleText = stateText("resourcePacksIdle");
             loadingText = stateText("resourcePacksLoading");
@@ -325,13 +392,34 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
 
     /// Builds the title command, all state cards, list workspace, and status band.
     private void configureComponents() {
-        JPanel headingBand = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][]", "[40!]"));
+        JPanel headingBand = new JPanel(new MigLayout(
+                "insets 0, fillx",
+                "[grow,fill][][][]",
+                "[40!]"));
         headingBand.setOpaque(false);
 
         JLabel heading = new JLabel(strings.pageTitle());
         heading.setName("resourcePacksPageTitle");
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 28.0F));
         headingBand.add(heading, "growx");
+
+        configureIconButton(
+                importButton,
+                "resourcePacksImport",
+                "assets/swing/icons/file-import.svg",
+                actionStrings.importAction(),
+                actionStrings.importTooltip(),
+                this::chooseAndImportResourcePacks);
+        headingBand.add(importButton, "w 40!, h 40!");
+
+        configureIconButton(
+                openDirectoryButton,
+                "resourcePacksOpenDirectory",
+                "assets/swing/icons/folder-open.svg",
+                actionStrings.openDirectoryAction(),
+                actionStrings.openDirectoryTooltip(),
+                this::openResourcePackDirectory);
+        headingBand.add(openDirectoryButton, "w 40!, h 40!");
 
         refreshButton.setName("resourcePacksRefresh");
         refreshButton.setText(null);
@@ -390,6 +478,20 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         list.getAccessibleContext().setAccessibleName(strings.pageTitle());
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.addListSelectionListener(selectionListener);
+        list.getInputMap(JComponent.WHEN_FOCUSED).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0),
+                "clearResourcePackSelection");
+        list.getActionMap().put("clearResourcePackSelection", new AbstractAction() {
+            /// Clears the stable selected row when the list can accept user commands.
+            ///
+            /// @param event ignored keyboard action event
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                if (list.isEnabled()) {
+                    list.clearSelection();
+                }
+            }
+        });
         choiceList.getChoiceModel().addListDataListener(listDataListener);
     }
 
@@ -400,7 +502,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         JPanel details = new JPanel(new MigLayout(
                 "insets 16, fill, wrap 2",
                 "[][grow,fill]",
-                "[]12[]8[]8[]8[]12[]8[grow,fill]"));
+                "[]12[]8[]8[]8[]12[]8[grow,fill]12[]"));
         details.setName("resourcePacksDetails");
         details.setOpaque(false);
 
@@ -445,6 +547,39 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         descriptionScroll.setName("resourcePacksDescriptionScroll");
         descriptionScroll.getViewport().setOpaque(false);
         details.add(descriptionScroll, "span 2, grow");
+
+        JPanel actions = new JPanel(new MigLayout(
+                "insets 0, fillx",
+                "[grow,fill][][]",
+                "[40!]"));
+        actions.setName("resourcePacksSelectionActions");
+        actions.setOpaque(false);
+
+        enabledToggle.setName("resourcePacksEnabledToggle");
+        enabledToggle.setText(strings.enabledLabel());
+        enabledToggle.setToolTipText(actionStrings.enableTooltip());
+        enabledToggle.getAccessibleContext().setAccessibleDescription(actionStrings.enableTooltip());
+        enabledToggle.addActionListener(event -> toggleSelectedResourcePackEnabled());
+        actions.add(enabledToggle, "growx, h 40!");
+
+        configureIconButton(
+                revealButton,
+                "resourcePacksReveal",
+                "assets/swing/icons/folder-open.svg",
+                actionStrings.revealAction(),
+                actionStrings.revealTooltip(),
+                this::revealSelectedResourcePack);
+        actions.add(revealButton, "w 40!, h 40!");
+
+        configureIconButton(
+                deleteButton,
+                "resourcePacksDelete",
+                "assets/swing/icons/delete.svg",
+                actionStrings.deleteAction(),
+                actionStrings.deleteTooltip(),
+                this::confirmAndDeleteSelectedResourcePack);
+        actions.add(deleteButton, "w 40!, h 40!");
+        details.add(actions, "span 2, growx");
 
         JScrollPane detailsScroll = createTransparentScrollPane(details, "resourcePacksDetailsScroll");
         detailsScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
@@ -549,11 +684,14 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         refreshButton.setEnabled(snapshot.refreshEnabled());
         retryButton.setEnabled(snapshot.status() == ResourcePackCatalogStatus.FAILED
                 && snapshot.refreshEnabled());
-        statusText.setText(snapshot.statusText());
+        String visibleStatus = snapshot.writeStatus() == ResourcePackCatalogWriteStatus.IDLE
+                ? snapshot.statusText()
+                : snapshot.writeStatusText();
+        statusText.setText(visibleStatus);
         statusText.setCaretPosition(0);
-        statusText.setToolTipText(snapshot.statusText());
-        statusText.getAccessibleContext().setAccessibleName(snapshot.statusText());
-        statusText.getAccessibleContext().setAccessibleDescription(snapshot.statusText());
+        statusText.setToolTipText(visibleStatus);
+        statusText.getAccessibleContext().setAccessibleName(visibleStatus);
+        statusText.getAccessibleContext().setAccessibleDescription(visibleStatus);
         updateSelectionDetails();
     }
 
@@ -625,11 +763,14 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     private void updateSelectionDetails() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable ResourcePackCatalogSnapshot snapshot = displayedSnapshot;
-        @Nullable ResourcePackCatalogItem selected = snapshot != null && snapshot.listEnabled()
+        @Nullable ResourcePackCatalogItem selected = snapshot != null
+                && snapshot.status() == ResourcePackCatalogStatus.READY
+                && snapshot.selectedIndex().isPresent()
                 ? choiceList.getSelectedValue()
                 : null;
         if (selected == null) {
             showNoSelection();
+            updateActionAvailability(null);
             return;
         }
 
@@ -642,6 +783,13 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         descriptionArea.setCaretPosition(0);
         compatibilityValue.setText(strings.compatibilityText(selected.compatibility()));
         enabledValue.setText(strings.enabledText(selected.enabled()));
+        applyingEnabledToggle = true;
+        try {
+            enabledToggle.setSelected(selected.enabled());
+        } finally {
+            applyingEnabledToggle = false;
+        }
+        updateActionAvailability(selected);
     }
 
     /// Restores stable read-only detail placeholders for no loaded selection.
@@ -654,6 +802,13 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         descriptionArea.setCaretPosition(0);
         compatibilityValue.setText("");
         enabledValue.setText("");
+        applyingEnabledToggle = true;
+        try {
+            enabledToggle.setSelected(false);
+        } finally {
+            applyingEnabledToggle = false;
+        }
+        updateActionAvailability(null);
     }
 
     /// Requests a fresh index only while the displayed and authoritative states permit it.
@@ -671,6 +826,374 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 && displayed.status() == current.status()) {
             model.refresh();
         }
+    }
+
+    /// Chooses multiple local archives and imports them only if the captured catalog remains current.
+    private void chooseAndImportResourcePacks() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable ResourcePackCatalogSnapshot beforeDialog = currentWritableSnapshot();
+        if (beforeDialog == null) {
+            return;
+        }
+        long expectedRevision = beforeDialog.contentRevision();
+        final @Unmodifiable List<Path> selectedSources;
+        try {
+            selectedSources = List.copyOf(
+                    interactions.chooseImportFiles(this, resourcePackDirectory));
+        } catch (RuntimeException failure) {
+            showOperationFailure(failure);
+            return;
+        }
+        if (selectedSources.isEmpty() || !isWritableSnapshotCurrent(expectedRevision)) {
+            return;
+        }
+        startWrite(() -> model.importResourcePacks(selectedSources));
+    }
+
+    /// Toggles the selected pack through the model after compatibility confirmation when required.
+    private void toggleSelectedResourcePackEnabled() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (applyingEnabledToggle) {
+            return;
+        }
+        @Nullable ResourcePackCatalogSnapshot beforeDialog = currentWritableSnapshot();
+        @Nullable ResourcePackCatalogItem selected = selectedActionTarget(beforeDialog);
+        if (beforeDialog == null || selected == null) {
+            updateSelectionDetails();
+            return;
+        }
+
+        long expectedRevision = beforeDialog.contentRevision();
+        Path expectedPath = selected.path();
+        boolean enabling = !selected.enabled();
+        applyingEnabledToggle = true;
+        try {
+            enabledToggle.setSelected(selected.enabled());
+        } finally {
+            applyingEnabledToggle = false;
+        }
+
+        if (enabling && selected.compatibility() != ResourcePackCompatibility.COMPATIBLE) {
+            final boolean confirmed;
+            try {
+                confirmed = interactions.confirmEnableIncompatible(this, selected);
+            } catch (RuntimeException failure) {
+                showOperationFailure(failure);
+                return;
+            }
+            if (!confirmed) {
+                return;
+            }
+        }
+        if (!isSelectedActionCurrent(expectedRevision, expectedPath)) {
+            return;
+        }
+        startWrite(() -> enabling
+                ? model.enableResourcePack(expectedPath)
+                : model.disableResourcePack(expectedPath));
+    }
+
+    /// Permanently deletes the selected pack only after confirmation and stale-state rejection.
+    private void confirmAndDeleteSelectedResourcePack() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable ResourcePackCatalogSnapshot beforeDialog = currentWritableSnapshot();
+        @Nullable ResourcePackCatalogItem selected = selectedActionTarget(beforeDialog);
+        if (beforeDialog == null || selected == null) {
+            return;
+        }
+        long expectedRevision = beforeDialog.contentRevision();
+        Path expectedPath = selected.path();
+        final boolean confirmed;
+        try {
+            confirmed = interactions.confirmDelete(this, selected);
+        } catch (RuntimeException failure) {
+            showOperationFailure(failure);
+            return;
+        }
+        if (confirmed && isSelectedActionCurrent(expectedRevision, expectedPath)) {
+            startWrite(() -> model.deleteResourcePack(expectedPath));
+        }
+    }
+
+    /// Starts one platform reveal without blocking the EDT or permitting duplicate reveals.
+    private void revealSelectedResourcePack() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable ResourcePackCatalogSnapshot snapshot = currentWritableSnapshot();
+        @Nullable ResourcePackCatalogItem selected = selectedActionTarget(snapshot);
+        if (revealPending || snapshot == null || selected == null) {
+            return;
+        }
+        revealPending = true;
+        updateActionAvailability(selected);
+        try {
+            CompletionStage<@Nullable Void> completion = Objects.requireNonNull(
+                    interactions.reveal(selected),
+                    "interactions.reveal returned null");
+            completion.whenComplete((@Nullable Void ignored, @Nullable Throwable failure) ->
+                    EdtDispatcher.execute(() -> revealCompleted(failure)));
+        } catch (RuntimeException failure) {
+            revealCompleted(failure);
+        } catch (Error failure) {
+            revealPending = false;
+            updateSelectionDetails();
+            throw failure;
+        }
+    }
+
+    /// Creates and opens the managed directory without blocking the EDT or accepting double clicks.
+    private void openResourcePackDirectory() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!canOpenResourcePackDirectory()) {
+            return;
+        }
+        openDirectoryPending = true;
+        updateActionAvailability(choiceList.getSelectedValue());
+        try {
+            CompletionStage<@Nullable Void> completion = Objects.requireNonNull(
+                    interactions.openResourcePackDirectory(resourcePackDirectory),
+                    "interactions.openResourcePackDirectory returned null");
+            completion.whenComplete((@Nullable Void ignored, @Nullable Throwable failure) ->
+                    EdtDispatcher.execute(() -> openDirectoryCompleted(failure)));
+        } catch (RuntimeException failure) {
+            openDirectoryCompleted(failure);
+        } catch (Error failure) {
+            openDirectoryPending = false;
+            updateActionAvailability(choiceList.getSelectedValue());
+            throw failure;
+        }
+    }
+
+    /// Starts and observes one serialized model write, including synchronous validation failures.
+    ///
+    /// @param operation deferred model write
+    private void startWrite(Supplier<CompletionStage<ResourcePackCatalogSnapshot>> operation) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (writePending || currentWritableSnapshot() == null) {
+            return;
+        }
+        writePending = true;
+        synchronized (stateLock) {
+            writeStartUpdateRevision = updateRevision;
+        }
+        updateActionAvailability(choiceList.getSelectedValue());
+        try {
+            CompletionStage<ResourcePackCatalogSnapshot> completion = Objects.requireNonNull(
+                    operation.get(),
+                    "resource-pack write returned null");
+            completion.whenComplete((
+                    @Nullable ResourcePackCatalogSnapshot ignored,
+                    @Nullable Throwable failure) -> EdtDispatcher.execute(() -> writeCompleted(failure)));
+        } catch (RuntimeException failure) {
+            writeCompleted(failure);
+        } catch (Error failure) {
+            writePending = false;
+            updateSelectionDetails();
+            throw failure;
+        }
+    }
+
+    /// Clears the local write gate and reports only failures not already published by the model.
+    ///
+    /// @param failure asynchronous wrapper or original failure, or null after success
+    private void writeCompleted(@Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!isOpen()) {
+            return;
+        }
+        writePending = false;
+        updateSelectionDetails();
+        if (failure == null) {
+            return;
+        }
+        Throwable resolved = unwrapCompletionFailure(failure);
+        if (!(resolved instanceof CancellationException)
+                && !currentWriteFailureWasPublished()) {
+            interactions.showFailure(
+                    this,
+                    actionStrings.operationFailedTitle(),
+                    failureText(resolved));
+        }
+    }
+
+    /// Detects a model-published terminal error belonging to the current panel-started write.
+    ///
+    /// A retained error from an earlier write must not suppress a new synchronous validation or
+    /// custom-stage failure that produced no model notification.
+    ///
+    /// @return whether this write published a terminal error snapshot
+    private boolean currentWriteFailureWasPublished() {
+        long currentUpdateRevision;
+        synchronized (stateLock) {
+            currentUpdateRevision = updateRevision;
+        }
+        return currentUpdateRevision > writeStartUpdateRevision
+                && model.snapshot().writeStatus() == ResourcePackCatalogWriteStatus.ERROR;
+    }
+
+    /// Clears the reveal gate and reports a non-cancellation failure while the panel remains open.
+    ///
+    /// @param failure asynchronous wrapper or original failure, or null after success
+    private void revealCompleted(@Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!isOpen()) {
+            return;
+        }
+        revealPending = false;
+        updateSelectionDetails();
+        if (failure != null) {
+            Throwable resolved = unwrapCompletionFailure(failure);
+            if (!(resolved instanceof CancellationException)) {
+                interactions.showFailure(
+                        this,
+                        actionStrings.revealFailedTitle(),
+                        failureText(resolved));
+            }
+        }
+    }
+
+    /// Clears the directory gate and reports a non-cancellation failure while still open.
+    ///
+    /// @param failure asynchronous wrapper or original failure, or null after success
+    private void openDirectoryCompleted(@Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!isOpen()) {
+            return;
+        }
+        openDirectoryPending = false;
+        updateActionAvailability(choiceList.getSelectedValue());
+        if (failure != null) {
+            Throwable resolved = unwrapCompletionFailure(failure);
+            if (!(resolved instanceof CancellationException)) {
+                interactions.showFailure(
+                        this,
+                        actionStrings.openDirectoryFailedTitle(),
+                        failureText(resolved));
+            }
+        }
+    }
+
+    /// Reports one synchronous dialog or command failure unless it represents cancellation.
+    ///
+    /// @param failure original interaction failure
+    private void showOperationFailure(Throwable failure) {
+        if (!isOpen()) {
+            return;
+        }
+        Throwable resolved = unwrapCompletionFailure(failure);
+        if (!(resolved instanceof CancellationException)) {
+            interactions.showFailure(
+                    this,
+                    actionStrings.operationFailedTitle(),
+                    failureText(resolved));
+        }
+    }
+
+    /// Updates every action from the displayed state, authoritative state, and local pending gates.
+    ///
+    /// @param selected loaded selected row, or null while no row is ready
+    private void updateActionAvailability(@Nullable ResourcePackCatalogItem selected) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable ResourcePackCatalogSnapshot writable = currentWritableSnapshot();
+        boolean selectedCurrent = writable != null
+                && selected != null
+                && isSelectedActionCurrent(writable.contentRevision(), selected.path());
+        importButton.setEnabled(writable != null);
+        enabledToggle.setEnabled(selectedCurrent);
+        revealButton.setEnabled(selectedCurrent && !revealPending);
+        deleteButton.setEnabled(selectedCurrent);
+        openDirectoryButton.setEnabled(canOpenResourcePackDirectory());
+
+        boolean enabling = selected == null || !selected.enabled();
+        String toggleName = enabling
+                ? actionStrings.enableAction()
+                : actionStrings.disableAction();
+        String toggleTooltip = enabling
+                ? actionStrings.enableTooltip()
+                : actionStrings.disableTooltip();
+        enabledToggle.getAccessibleContext().setAccessibleName(toggleName);
+        enabledToggle.getAccessibleContext().setAccessibleDescription(toggleTooltip);
+        enabledToggle.setToolTipText(toggleTooltip);
+    }
+
+    /// Returns the displayed snapshot only when it still denotes the exact writable catalog.
+    ///
+    /// @return current writable snapshot, or null
+    private @Nullable ResourcePackCatalogSnapshot currentWritableSnapshot() {
+        if (!isOpen() || writePending) {
+            return null;
+        }
+        @Nullable ResourcePackCatalogSnapshot displayed = displayedSnapshot;
+        if (displayed == null
+                || displayed.status() != ResourcePackCatalogStatus.READY
+                || displayed.itemCount().isEmpty()
+                || displayed.writeStatus() == ResourcePackCatalogWriteStatus.BUSY) {
+            return null;
+        }
+        ResourcePackCatalogSnapshot current = model.snapshot();
+        return current.status() == ResourcePackCatalogStatus.READY
+                && current.itemCount().isPresent()
+                && current.writeStatus() != ResourcePackCatalogWriteStatus.BUSY
+                && current.contentRevision() == displayed.contentRevision()
+                && current.itemCount().equals(displayed.itemCount())
+                ? displayed
+                : null;
+    }
+
+    /// Checks whether one modal result still targets the exact writable catalog revision.
+    ///
+    /// @param expectedRevision captured content revision
+    /// @return whether the captured catalog remains writable and current
+    private boolean isWritableSnapshotCurrent(long expectedRevision) {
+        @Nullable ResourcePackCatalogSnapshot current = currentWritableSnapshot();
+        return current != null && current.contentRevision() == expectedRevision;
+    }
+
+    /// Returns the loaded selection only when both displayed and model selection agree.
+    ///
+    /// @param snapshot current writable snapshot, or null
+    /// @return exact loaded target, or null
+    private @Nullable ResourcePackCatalogItem selectedActionTarget(
+            @Nullable ResourcePackCatalogSnapshot snapshot) {
+        if (snapshot == null || snapshot.selectedIndex().isEmpty()) {
+            return null;
+        }
+        int selectedIndex = choiceList.getList().getSelectedIndex();
+        if (selectedIndex != snapshot.selectedIndex().getAsInt()) {
+            return null;
+        }
+        @Nullable ResourcePackCatalogItem selected = choiceList.getSelectedValue();
+        ResourcePackCatalogSnapshot current = model.snapshot();
+        return selected != null
+                && current.contentRevision() == snapshot.contentRevision()
+                && current.selectedIndex().orElse(-1) == selectedIndex
+                ? selected
+                : null;
+    }
+
+    /// Checks whether one captured selected path still owns the exact current selection.
+    ///
+    /// @param expectedRevision captured content revision
+    /// @param expectedPath captured selected path
+    /// @return whether the exact selected action remains legal
+    private boolean isSelectedActionCurrent(long expectedRevision, Path expectedPath) {
+        @Nullable ResourcePackCatalogSnapshot snapshot = currentWritableSnapshot();
+        @Nullable ResourcePackCatalogItem selected = selectedActionTarget(snapshot);
+        return snapshot != null
+                && snapshot.contentRevision() == expectedRevision
+                && selected != null
+                && selected.path().equals(expectedPath);
+    }
+
+    /// Returns whether opening the managed directory is legal for the latest displayed state.
+    ///
+    /// @return whether the directory command may start
+    private boolean canOpenResourcePackDirectory() {
+        @Nullable ResourcePackCatalogSnapshot snapshot = displayedSnapshot;
+        return isOpen()
+                && !openDirectoryPending
+                && !writePending
+                && snapshot != null
+                && snapshot.writeStatus() != ResourcePackCatalogWriteStatus.BUSY;
     }
 
     /// Releases every owned resource on the EDT while attempting all cleanup steps.
@@ -692,6 +1215,11 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             failure = attemptCleanup(failure, () -> removeHierarchyListener(showingListener));
             failure = attemptCleanup(failure, () -> refreshButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> retryButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> importButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> openDirectoryButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> enabledToggle.setEnabled(false));
+            failure = attemptCleanup(failure, () -> revealButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> deleteButton.setEnabled(false));
             failure = attemptCleanup(failure, choiceList::close);
             failure = attemptCleanup(failure, model::close);
             throwUncheckedFailure(failure);
@@ -727,6 +1255,54 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// @return visible failure text
     private String failureText(String statusText) {
         return statusText.isBlank() ? strings.failureTitle() : statusText;
+    }
+
+    /// Removes asynchronous completion wrappers while preserving the original failure identity.
+    ///
+    /// @param failure asynchronous wrapper or original failure
+    /// @return deepest wrapped failure
+    private static Throwable unwrapCompletionFailure(Throwable failure) {
+        Throwable current = Objects.requireNonNull(failure, "failure");
+        while ((current instanceof CompletionException || current instanceof ExecutionException)
+                && current.getCause() != null) {
+            current = Objects.requireNonNull(current.getCause());
+        }
+        return current;
+    }
+
+    /// Produces non-blank user-facing failure detail without inventing operation context.
+    ///
+    /// @param failure resolved failure
+    /// @return message or failure type when no message exists
+    private static String failureText(Throwable failure) {
+        @Nullable String message = Objects.requireNonNull(failure, "failure").getMessage();
+        return message == null || message.isBlank()
+                ? failure.getClass().getSimpleName()
+                : message;
+    }
+
+    /// Configures one fixed-size icon command with visible tooltip and accessible text.
+    ///
+    /// @param button command button
+    /// @param name stable component name
+    /// @param iconPath bundled SVG icon path
+    /// @param accessibleName localized command name
+    /// @param tooltip localized command description
+    /// @param action command callback
+    private static void configureIconButton(
+            JButton button,
+            String name,
+            String iconPath,
+            String accessibleName,
+            String tooltip,
+            Runnable action) {
+        button.setName(name);
+        button.setText(null);
+        button.setIcon(new FlatSVGIcon(iconPath, 18, 18));
+        button.setToolTipText(tooltip);
+        button.getAccessibleContext().setAccessibleName(accessibleName);
+        button.getAccessibleContext().setAccessibleDescription(tooltip);
+        button.addActionListener(event -> action.run());
     }
 
     /// Configures one selectable read-only multiline value.
