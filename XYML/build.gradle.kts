@@ -237,6 +237,7 @@ val requiredOfflineLibraryEntries = listOf(
     "com/google/gson/GsonBuilder.class",
     "com/google/gson/reflect/TypeToken.class",
     "com/google/gson/stream/JsonReader.class",
+    "kala/encdet/EncodingDetector.class",
     "net/miginfocom/layout/LC.class",
     "net/miginfocom/swing/MigLayout.class",
     "net/jpountz/lz4/LZ4BlockInputStream.class",

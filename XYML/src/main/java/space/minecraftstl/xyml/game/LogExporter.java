@@ -17,9 +17,9 @@
  */
 package space.minecraftstl.xyml.game;
 
+import kala.encdet.EncodingDetector;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.util.StringUtils;
-import space.minecraftstl.xyml.util.io.IOUtils;
 import space.minecraftstl.xyml.util.io.Zipper;
 import space.minecraftstl.xyml.util.logging.Logger;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
@@ -102,7 +102,7 @@ public final class LogExporter {
             for (Path file : stream) {
                 if (Files.isRegularFile(file)) {
                     if (logMatcher == null || logMatcher.matches(file)) {
-                        try (BufferedReader reader = IOUtils.newBufferedReaderMaybeNativeEncoding(file)) {
+                        try (BufferedReader reader = EncodingDetector.MODERN_WEB.newBufferedReader(file)) {
                             zipper.putLines(reader.lines().map(Logger::filterForbiddenToken), file.getFileName().toString());
                         } catch (IOException e) {
                             LOG.warning("Failed to read log file: " + file, e);
