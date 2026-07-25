@@ -38,6 +38,12 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// @param checkingText active scan status
 /// @param emptyText no-update status
 /// @param failedText scan failure status
+/// @param selectionColumnText per-row update-selection column label
+/// @param selectAllText select-all checkbox label
+/// @param updateButtonText selected-update command text
+/// @param updatingText active update status
+/// @param updateSucceededText completed update status
+/// @param failedDownloadText partial update failure status
 /// @param sourceTooltip source-page icon tooltip
 /// @param localFileTooltip local-file icon tooltip
 /// @param failureDialogTitle native action failure dialog title
@@ -53,6 +59,12 @@ public record AddonUpdatesStrings(
         String checkingText,
         String emptyText,
         String failedText,
+        String selectionColumnText,
+        String selectAllText,
+        String updateButtonText,
+        String updatingText,
+        String updateSucceededText,
+        String failedDownloadText,
         String sourceTooltip,
         String localFileTooltip,
         String failureDialogTitle) {
@@ -68,6 +80,12 @@ public record AddonUpdatesStrings(
         checkingText = requireText(checkingText, "checkingText");
         emptyText = requireText(emptyText, "emptyText");
         failedText = requireText(failedText, "failedText");
+        selectionColumnText = requireText(selectionColumnText, "selectionColumnText");
+        selectAllText = requireText(selectAllText, "selectAllText");
+        updateButtonText = requireText(updateButtonText, "updateButtonText");
+        updatingText = requireText(updatingText, "updatingText");
+        updateSucceededText = requireText(updateSucceededText, "updateSucceededText");
+        failedDownloadText = requireText(failedDownloadText, "failedDownloadText");
         sourceTooltip = requireText(sourceTooltip, "sourceTooltip");
         localFileTooltip = requireText(localFileTooltip, "localFileTooltip");
         failureDialogTitle = requireText(failureDialogTitle, "failureDialogTitle");
@@ -88,6 +106,12 @@ public record AddonUpdatesStrings(
                 i18n("update.checking"),
                 i18n("addon.check_update.empty"),
                 i18n("addon.check_update.failed_check"),
+                i18n("selector.choose"),
+                i18n("button.select_all"),
+                i18n("addon.check_update.confirm"),
+                i18n("addon.check_update.confirm"),
+                i18n("install.success"),
+                i18n("addon.check_update.failed_download"),
                 i18n("button.view"),
                 i18n("button.view"),
                 i18n("message.error"));
@@ -108,6 +132,12 @@ public record AddonUpdatesStrings(
                 "Checking for updates",
                 "All files are up-to-date",
                 "Failed to check for updates.",
+                "Choose",
+                "Select all",
+                "Update",
+                "Updating selected files",
+                "Updates installed",
+                "Some files could not be updated",
                 "View source page",
                 "Show local file",
                 "Error");

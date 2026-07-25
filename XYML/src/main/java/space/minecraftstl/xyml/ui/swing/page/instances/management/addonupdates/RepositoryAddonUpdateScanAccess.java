@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BiFunction;
 
 /// Real blocking repository adapter for installed Mod and resource-pack update checks.
 ///
@@ -148,19 +149,61 @@ final class RepositoryAddonUpdateScanAccess implements AddonUpdateScanAccess {
             }
         }
         if (newest != null) {
-            RemoteAddon.Source source = newest.targetVersion().self().getType();
-            updates.add(new AddonUpdateItem(
-                    addon.getFileName(),
-                    addon.getFile(),
-                    newest.currentVersion().version(),
-                    newest.targetVersion().version(),
-                    source,
-                    resolveSourcePage(addon, newest, source)));
+            recordWinner(
+                    addon,
+                    newest,
+                    sourceFailures,
+                    updates,
+                    failures,
+                    (update, source) -> resolveSourcePage(addon, update, source));
         } else if (!sourceFailures.isEmpty()) {
             failures.add(new AddonUpdateCheckFailure(
                     addon.getFileName(),
                     addon.getFile(),
                     String.join("; ", sourceFailures)));
+        }
+    }
+
+    /// Records one selected winner without allowing malformed remote metadata to abort the full scan.
+    ///
+    /// This package-visible seam accepts the already selected winner so tests can verify final modeling
+    /// without constructing a real game repository or scanning an instance directory.
+    ///
+    /// @param addon local add-on represented by the winner
+    /// @param winner newest compatible update selected across all sources
+    /// @param sourceFailures recoverable failures already collected while querying individual sources
+    /// @param updates mutable output list for a successfully modeled update
+    /// @param failures mutable output list for a malformed winner failure
+    /// @param sourcePageResolver resolver for the optional source page
+    static void recordWinner(
+            LocalAddonFile addon,
+            LocalAddonFile.AddonUpdate winner,
+            List<String> sourceFailures,
+            List<AddonUpdateItem> updates,
+            List<AddonUpdateCheckFailure> failures,
+            BiFunction<LocalAddonFile.AddonUpdate, RemoteAddon.Source, @Nullable URI> sourcePageResolver) {
+        Objects.requireNonNull(addon, "addon");
+        Objects.requireNonNull(winner, "winner");
+        Objects.requireNonNull(sourceFailures, "sourceFailures");
+        Objects.requireNonNull(updates, "updates");
+        Objects.requireNonNull(failures, "failures");
+        Objects.requireNonNull(sourcePageResolver, "sourcePageResolver");
+        try {
+            RemoteAddon.Source source = winner.targetVersion().self().getType();
+            @Nullable URI sourcePage;
+            try {
+                sourcePage = sourcePageResolver.apply(winner, source);
+            } catch (RuntimeException failure) {
+                sourcePage = null;
+            }
+            updates.add(AddonUpdateItem.from(winner, sourcePage));
+        } catch (RuntimeException failure) {
+            List<String> details = new ArrayList<>(sourceFailures);
+            details.add("Selected update: " + describeFailure(failure));
+            failures.add(new AddonUpdateCheckFailure(
+                    addon.getFileName(),
+                    addon.getFile(),
+                    String.join("; ", details)));
         }
     }
 

@@ -101,7 +101,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     /// Lazy offline modpack archive exporter for repositories exposing XYML export APIs, or null otherwise.
     private final @Nullable ModpackExportPanel modpackExport;
 
-    /// Explicit network-check page for installed Mod and resource-pack updates.
+    /// Explicit scan-and-apply page for installed Mod and resource-pack updates.
     private final AddonUpdatesPanel addonUpdates;
 
     /// Schematic browser host owned by the schematic tab.
@@ -286,7 +286,13 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             createdWorlds = new WorldCatalogPanel(repository, this.instanceId, executor);
             createdDataPacks = new DataPackManagementPanel(repository, this.instanceId, executor);
             createdBackups = new WorldBackupsPanel(repository, this.instanceId, executor);
-            createdAddonUpdates = new AddonUpdatesPanel(repository, this.instanceId, executor);
+            createdAddonUpdates = new AddonUpdatesPanel(
+                    repository,
+                    this.instanceId,
+                    executor,
+                    taskProgressStrings,
+                    animator,
+                    progressAnimationDuration);
             createdSchematics = new SchematicInstanceManagementView(
                     this.instanceId,
                     schematicDirectoryResolver,
