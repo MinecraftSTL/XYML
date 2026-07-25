@@ -16,6 +16,7 @@ import java.security.KeyFactory
 import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.PKCS8EncodedKeySpec
+import java.util.jar.Manifest
 import java.util.zip.ZipFile
 
 plugins {
@@ -66,11 +67,8 @@ val embedResources = configurations.register("embedResources")
 dependencies {
     implementation(project(":XYMLCore"))
     implementation(project(":XYMLBoot"))
-    implementation("libs:JFoenix")
     implementation(libs.jwebp)
-    implementation(libs.fxsvgimage)
     implementation(libs.java.info)
-    implementation(libs.monet.fx)
     implementation(libs.flatlaf)
     implementation(libs.flatlaf.extras)
     implementation(libs.miglayout.swing)
@@ -129,40 +127,26 @@ tasks.withType<JavaCompile> {
     targetCompatibility = "17"
 }
 
-tasks.checkstyleMain {
-    // Third-party code is not checked
-    exclude("**/space/minecraftstl/xyml/ui/image/apng/**")
-}
-
-val addOpens = listOf(
+val compileExports = listOf(
     "java.base/java.lang",
     "java.base/java.lang.reflect",
     "java.base/jdk.internal.loader",
-    "javafx.base/com.sun.javafx.binding",
-    "javafx.base/com.sun.javafx.event",
-    "javafx.base/com.sun.javafx.runtime",
-    "javafx.base/javafx.beans.property",
-    "javafx.graphics/javafx.css",
-    "javafx.graphics/javafx.stage",
-    "javafx.graphics/javafx.scene",
-    "javafx.graphics/com.sun.glass.ui",
-    "javafx.graphics/com.sun.javafx.stage",
-    "javafx.graphics/com.sun.javafx.util",
-    "javafx.graphics/com.sun.prism",
-    "javafx.controls/com.sun.javafx.scene.control",
-    "javafx.controls/com.sun.javafx.scene.control.behavior",
-    "javafx.graphics/com.sun.javafx.tk.quantum",
-    "javafx.controls/javafx.scene.control.skin",
+    "jdk.attach/sun.tools.attach",
+)
+
+val runtimeOpens = listOf(
+    "java.base/java.lang",
+    "java.base/java.lang.reflect",
+    "java.base/jdk.internal.loader",
     "jdk.attach/sun.tools.attach",
 )
 
 tasks.compileJava {
-    options.compilerArgs.addAll(addOpens.map { "--add-exports=$it=ALL-UNNAMED" })
+    options.compilerArgs.addAll(compileExports.map { "--add-exports=$it=ALL-UNNAMED" })
 }
 
 val hmclProperties = buildList {
     add("hmcl.version" to project.version.toString())
-    add("hmcl.add-opens" to addOpens.joinToString(" "))
     System.getenv("GITHUB_SHA")?.let {
         add("hmcl.version.hash" to it)
     }
@@ -215,7 +199,6 @@ tasks.shadowJar {
     minimize {
         exclude(dependency("com.google.code.gson:.*:.*"))
         exclude(dependency("net.java.dev.jna:jna:.*"))
-        exclude(dependency("libs:JFoenix:.*"))
         exclude(dependency("com.formdev:flatlaf.*:.*"))
         exclude(dependency("com.miglayout:.*:.*"))
         exclude(project(":XYMLBoot"))
@@ -226,7 +209,7 @@ tasks.shadowJar {
         "Implementation-Version" to project.version.toString(),
         "Main-Class" to "space.minecraftstl.xyml.Main",
         "Multi-Release" to "true",
-        "Add-Opens" to addOpens.joinToString(" "),
+        "Add-Opens" to runtimeOpens.joinToString(" "),
         "Enable-Native-Access" to "ALL-UNNAMED",
         "Enable-Final-Field-Mutation" to "ALL-UNNAMED",
     )
@@ -254,6 +237,32 @@ val requiredOfflineUiEntries = listOf(
     "net/miginfocom/swing/MigLayout.class",
 )
 
+val forbiddenRuntimePatcherEntries = listOf(
+    "assets/openjfx-dependencies.json",
+    "space/minecraftstl/xyml/util/JavaFXPatcher.class",
+    "space/minecraftstl/xyml/util/SelfDependencyPatcher.class",
+)
+
+val forbiddenLegacyUiEntryPrefixes = listOf(
+    "assets/css/",
+    "javafx/",
+    "com/sun/javafx/",
+    "com/jfoenix/",
+    "org/glavo/monetfx/",
+    "org/glavo/png/javafx/",
+    "org/girod/javafx/svgimage/",
+    "org/hildan/fxgson/",
+)
+
+fun findForbiddenLegacyUiEntries(jar: ZipFile): List<String> = jar.entries().asSequence()
+    .map { it.name }
+    .filter { entry ->
+        entry in forbiddenRuntimePatcherEntries
+            || forbiddenLegacyUiEntryPrefixes.any(entry::startsWith)
+    }
+    .sorted()
+    .toList()
+
 val verifyOfflineUiArtifact = tasks.register("verifyOfflineUiArtifact") {
     group = "verification"
     description = "Verifies that pure-Java Swing UI dependencies are embedded in the launcher artifact."
@@ -267,8 +276,396 @@ val verifyOfflineUiArtifact = tasks.register("verifyOfflineUiArtifact") {
             if (missingEntries.isNotEmpty()) {
                 throw GradleException("Missing offline UI entries: ${missingEntries.joinToString()}")
             }
+            val forbiddenEntries = findForbiddenLegacyUiEntries(jar)
+            if (forbiddenEntries.isNotEmpty()) {
+                throw GradleException("Retained legacy UI entries: ${forbiddenEntries.joinToString()}")
+            }
+            val manifestEntry = jar.getEntry("META-INF/MANIFEST.MF")
+                ?: throw GradleException("Launcher artifact has no manifest")
+            val runtimeAddOpens = jar.getInputStream(manifestEntry).use { input ->
+                Manifest(input).mainAttributes.getValue("Add-Opens")
+            }.orEmpty()
+            if ("javafx." in runtimeAddOpens) {
+                throw GradleException("Launcher manifest still opens JavaFX modules: $runtimeAddOpens")
+            }
         }
     }
+}
+
+val packagingJavaHome = providers.gradleProperty("xyml.packaging.javaHome")
+    .orElse(providers.environmentVariable("XYML_PACKAGING_JAVA_HOME"))
+    .orElse(providers.provider { System.getProperty("java.home") })
+    .map { file(it) }
+
+val hostOperatingSystem = System.getProperty("os.name").lowercase()
+val isWindowsHost = hostOperatingSystem.startsWith("windows")
+val isMacHost = hostOperatingSystem.startsWith("mac")
+val packagingExecutableSuffix = if (isWindowsHost) ".exe" else ""
+
+fun packagingTool(javaHome: File, name: String): File =
+    javaHome.resolve("bin").resolve("$name$packagingExecutableSuffix")
+
+fun jdkFeatureVersion(javaHome: File): Int {
+    val releaseFile = javaHome.resolve("release")
+    if (!releaseFile.isFile) {
+        throw GradleException("Packaging Java home has no release metadata: $releaseFile")
+    }
+
+    val release = releaseFile.readText()
+    val version = Regex("""(?m)^JAVA_VERSION=\"([^\"]+)\"""")
+        .find(release)
+        ?.groupValues
+        ?.get(1)
+        ?: throw GradleException("Packaging JDK release file has no JAVA_VERSION: $releaseFile")
+    return Regex("""^\d+""").find(version)?.value?.toInt()
+        ?: throw GradleException("Unsupported packaging JDK version: $version")
+}
+
+fun numericPackageVersion(rawVersion: String): String {
+    val components = Regex("""\d+""").findAll(rawVersion)
+        .map { it.value.toLong().coerceAtMost(65535).toInt() }
+        .take(3)
+        .toMutableList()
+    while (components.size < 3) {
+        components += 0
+    }
+    if (components[0] == 0) {
+        components[0] = 1
+    }
+    return components.joinToString(".")
+}
+
+val packagedRuntimeModules = listOf(
+    "java.base",
+    "java.compiler",
+    "java.desktop",
+    "java.instrument",
+    "java.logging",
+    "java.management",
+    "java.management.rmi",
+    "java.naming",
+    "java.net.http",
+    "java.prefs",
+    "java.rmi",
+    "java.scripting",
+    "java.security.jgss",
+    "java.security.sasl",
+    "java.sql",
+    "java.sql.rowset",
+    "java.transaction.xa",
+    "java.xml",
+    "java.xml.crypto",
+    "jdk.attach",
+    "jdk.charsets",
+    "jdk.crypto.cryptoki",
+    "jdk.crypto.ec",
+    "jdk.httpserver",
+    "jdk.jartool",
+    "jdk.jfr",
+    "jdk.localedata",
+    "jdk.management",
+    "jdk.management.agent",
+    "jdk.naming.dns",
+    "jdk.naming.rmi",
+    "jdk.net",
+    "jdk.security.auth",
+    "jdk.security.jgss",
+    "jdk.unsupported",
+    "jdk.xml.dom",
+    "jdk.zipfs",
+)
+
+require(packagedRuntimeModules.none { it.startsWith("javafx.") }) {
+    "The packaged runtime module list must not contain JavaFX"
+}
+
+val packagedJvmOptions = buildList {
+    add("-Dxyml.packaged=true")
+    add("-Dfile.encoding=UTF-8")
+    addAll(runtimeOpens.map { "--add-opens=$it=ALL-UNNAMED" })
+}
+
+val nativePackageVersion = numericPackageVersion(project.version.toString())
+val jpackageInputDirectory = layout.buildDirectory.dir("jpackage/input")
+val jlinkRuntimeDirectory = layout.buildDirectory.dir("jpackage/runtime")
+val appImageDirectory = layout.buildDirectory.dir("jpackage/app-image")
+val installerDirectory = layout.buildDirectory.dir("jpackage/installer")
+val stagedApplicationJar = jpackageInputDirectory.map { it.file("XYML.jar") }
+val platformIcon = layout.projectDirectory.file(
+    when {
+        isWindowsHost -> "image/xyml.ico"
+        isMacHost -> "image/xyml.icns"
+        else -> "image/xyml.png"
+    }
+)
+
+val validatePackagingJdk17 = tasks.register("validatePackagingJdk17") {
+    group = "distribution"
+    description = "Verifies that native application packaging uses a complete JDK 17 installation."
+
+    inputs.property("packagingJavaHome", packagingJavaHome.map { it.absolutePath })
+
+    doLast {
+        val javaHome = packagingJavaHome.get()
+        if (jdkFeatureVersion(javaHome) != 17) {
+            throw GradleException(
+                "Native packaging requires JDK 17, but ${javaHome.resolve("release")} describes " +
+                    "Java ${jdkFeatureVersion(javaHome)}. Set XYML_PACKAGING_JAVA_HOME or " +
+                    "-Pxyml.packaging.javaHome to a JDK 17 installation."
+            )
+        }
+
+        val requiredFiles = listOf(
+            javaHome.resolve("jmods/java.base.jmod"),
+            packagingTool(javaHome, "java"),
+            packagingTool(javaHome, "jlink"),
+            packagingTool(javaHome, "jpackage"),
+        )
+        val missingFiles = requiredFiles.filterNot(File::isFile)
+        if (missingFiles.isNotEmpty()) {
+            throw GradleException("Incomplete packaging JDK 17; missing: ${missingFiles.joinToString()}")
+        }
+    }
+}
+
+val prepareJpackageInput = tasks.register<Sync>("prepareJpackageInput") {
+    group = "distribution"
+    description = "Stages the dependency-complete launcher JAR for jpackage without network access."
+
+    dependsOn(verifyOfflineUiArtifact)
+    from(tasks.shadowJar.flatMap { it.archiveFile }) {
+        rename { "XYML.jar" }
+    }
+    into(jpackageInputDirectory)
+}
+
+val jlinkRuntimeImage = tasks.register<Exec>("jlinkRuntimeImage") {
+    group = "distribution"
+    description = "Builds the platform-native, JavaFX-free JDK 17 runtime image."
+
+    dependsOn(validatePackagingJdk17)
+    inputs.property("runtimeModules", packagedRuntimeModules)
+    inputs.property("packagingJavaHome", packagingJavaHome.map { it.absolutePath })
+    inputs.file(packagingJavaHome.map { it.resolve("release") })
+    inputs.files(packagingJavaHome.map { javaHome ->
+        packagedRuntimeModules.map { module -> javaHome.resolve("jmods/$module.jmod") }
+    })
+    outputs.dir(jlinkRuntimeDirectory)
+
+    doFirst {
+        val javaHome = packagingJavaHome.get()
+        val outputDirectory = jlinkRuntimeDirectory.get().asFile
+        delete(outputDirectory)
+        commandLine(
+            packagingTool(javaHome, "jlink"),
+            "--module-path", javaHome.resolve("jmods"),
+            "--add-modules", packagedRuntimeModules.joinToString(","),
+            "--output", outputDirectory,
+            "--strip-debug",
+            "--no-header-files",
+            "--no-man-pages",
+            "--compress=2",
+        )
+    }
+}
+
+fun runtimeModulesFromRelease(releaseFile: File): List<String> {
+    val release = releaseFile.readText()
+    return Regex("""(?m)^MODULES=\"([^\"]*)\"""")
+        .find(release)
+        ?.groupValues
+        ?.get(1)
+        ?.split(' ')
+        ?.filter(String::isNotBlank)
+        ?: throw GradleException("Runtime release file has no MODULES entry: $releaseFile")
+}
+
+val verifyJlinkRuntime = tasks.register("verifyJlinkRuntime") {
+    group = "verification"
+    description = "Verifies the linked runtime is Java 17 and contains no JavaFX modules."
+
+    dependsOn(jlinkRuntimeImage)
+    inputs.dir(jlinkRuntimeDirectory)
+
+    doLast {
+        val runtimeHome = jlinkRuntimeDirectory.get().asFile
+        if (jdkFeatureVersion(runtimeHome) != 17) {
+            throw GradleException("Linked runtime is not Java 17: ${runtimeHome.resolve("release")}")
+        }
+
+        val modules = runtimeModulesFromRelease(runtimeHome.resolve("release"))
+        val missingModules = packagedRuntimeModules.filterNot(modules::contains)
+        if (missingModules.isNotEmpty()) {
+            throw GradleException("Linked runtime is missing modules: ${missingModules.joinToString()}")
+        }
+        val javaFxModules = modules.filter { it.startsWith("javafx.") }
+        if (javaFxModules.isNotEmpty()) {
+            throw GradleException("Linked runtime still contains JavaFX modules: ${javaFxModules.joinToString()}")
+        }
+    }
+}
+
+fun jpackageArguments(destination: File, packageType: String): List<Any> = buildList {
+    add("--type")
+    add(packageType)
+    add("--name")
+    add("XYML")
+    add("--app-version")
+    add(nativePackageVersion)
+    add("--vendor")
+    add("MinecraftSTL")
+    add("--description")
+    add("XYML Minecraft Launcher")
+    add("--dest")
+    add(destination)
+    add("--input")
+    add(jpackageInputDirectory.get().asFile)
+    add("--main-jar")
+    add(stagedApplicationJar.get().asFile.name)
+    add("--main-class")
+    add("space.minecraftstl.xyml.Main")
+    add("--runtime-image")
+    add(jlinkRuntimeDirectory.get().asFile)
+    if (platformIcon.asFile.isFile) {
+        add("--icon")
+        add(platformIcon.asFile)
+    }
+    packagedJvmOptions.forEach { option ->
+        add("--java-options")
+        add(option)
+    }
+}
+
+val jpackageAppImage = tasks.register<Exec>("jpackageAppImage") {
+    group = "distribution"
+    description = "Builds a self-contained native app-image for the current host platform."
+
+    dependsOn(prepareJpackageInput, verifyJlinkRuntime)
+    inputs.file(stagedApplicationJar)
+    inputs.dir(jlinkRuntimeDirectory)
+    inputs.file(platformIcon)
+    inputs.property("nativePackageVersion", nativePackageVersion)
+    inputs.property("packagedJvmOptions", packagedJvmOptions)
+    outputs.dir(appImageDirectory)
+
+    doFirst {
+        val destination = appImageDirectory.get().asFile
+        delete(destination)
+        commandLine(
+            listOf(packagingTool(packagingJavaHome.get(), "jpackage")) +
+                jpackageArguments(destination, "app-image")
+        )
+    }
+}
+
+val verifyPackagedRuntime = tasks.register("verifyPackagedRuntime") {
+    group = "verification"
+    description = "Verifies the app-image embeds the fat JAR, JDK 17 runtime, and packaged-mode option."
+
+    dependsOn(jpackageAppImage)
+    inputs.dir(appImageDirectory)
+
+    doLast {
+        val appImageRoot = appImageDirectory.get().asFile
+        val configFile = appImageRoot.walkTopDown()
+            .firstOrNull { it.isFile && it.name == "XYML.cfg" }
+            ?: throw GradleException("Packaged app-image has no XYML.cfg")
+        if ("-Dxyml.packaged=true" !in configFile.readText()) {
+            throw GradleException("Packaged app-image does not enable -Dxyml.packaged=true: $configFile")
+        }
+
+        val packagedJar = appImageRoot.walkTopDown()
+            .firstOrNull { it.isFile && it.name == "XYML.jar" }
+            ?: throw GradleException("Packaged app-image has no embedded XYML.jar")
+        if (!digest("SHA-256", packagedJar.readBytes()).contentEquals(
+                digest("SHA-256", stagedApplicationJar.get().asFile.readBytes())
+            )
+        ) {
+            throw GradleException("Packaged app-image does not contain the staged shadow JAR")
+        }
+        ZipFile(packagedJar).use { jar ->
+            val missingEntries = requiredOfflineUiEntries.filter { jar.getEntry(it) == null }
+            if (missingEntries.isNotEmpty()) {
+                throw GradleException("Packaged app-image is missing offline dependencies: ${missingEntries.joinToString()}")
+            }
+            val forbiddenEntries = findForbiddenLegacyUiEntries(jar)
+            if (forbiddenEntries.isNotEmpty()) {
+                throw GradleException("Packaged app-image retains legacy UI entries: ${forbiddenEntries.joinToString()}")
+            }
+        }
+
+        val runtimeRelease = appImageRoot.walkTopDown()
+            .firstOrNull { it.isFile && it.name == "release" && "runtime" in it.invariantSeparatorsPath }
+            ?: throw GradleException("Packaged app-image has no linked runtime release metadata")
+        if (jdkFeatureVersion(runtimeRelease.parentFile) != 17) {
+            throw GradleException("Packaged app-image runtime is not Java 17: $runtimeRelease")
+        }
+        val javaFxModules = runtimeModulesFromRelease(runtimeRelease).filter { it.startsWith("javafx.") }
+        if (javaFxModules.isNotEmpty()) {
+            throw GradleException("Packaged app-image runtime contains JavaFX: ${javaFxModules.joinToString()}")
+        }
+    }
+}
+
+val defaultInstallerType = when {
+    isWindowsHost -> "exe"
+    isMacHost -> "dmg"
+    else -> "deb"
+}
+val nativeInstallerType = providers.gradleProperty("xyml.package.type").orElse(defaultInstallerType)
+val packagedAppImage = appImageDirectory.map { directory ->
+    directory.dir(if (isMacHost) "XYML.app" else "XYML")
+}
+
+val jpackageInstaller = tasks.register<Exec>("jpackageInstaller") {
+    group = "distribution"
+    description = "Builds the current platform installer (exe, dmg, or deb) using native packaging tools."
+
+    dependsOn(verifyPackagedRuntime)
+    inputs.dir(packagedAppImage)
+    inputs.property("nativeInstallerType", nativeInstallerType)
+    inputs.property("nativePackageVersion", nativePackageVersion)
+    outputs.dir(installerDirectory)
+
+    doFirst {
+        val destination = installerDirectory.get().asFile
+        delete(destination)
+        val packageType = nativeInstallerType.get()
+        val arguments = mutableListOf<Any>(
+            "--type", packageType,
+            "--name", "XYML",
+            "--app-version", nativePackageVersion,
+            "--vendor", "MinecraftSTL",
+            "--description", "XYML Minecraft Launcher",
+            "--dest", destination,
+            "--app-image", packagedAppImage.get().asFile,
+        )
+        when {
+            isWindowsHost -> arguments.addAll(listOf(
+                "--win-dir-chooser",
+                "--win-menu",
+                "--win-menu-group", "XYML",
+                "--win-shortcut",
+            ))
+            isMacHost -> arguments.addAll(listOf(
+                "--mac-package-identifier", "space.minecraftstl.xyml",
+                "--mac-package-name", "XYML",
+            ))
+            else -> arguments.addAll(listOf(
+                "--linux-package-name", "xyml",
+                "--linux-menu-group", "Game",
+                "--linux-app-category", "Game",
+                "--linux-shortcut",
+            ))
+        }
+        commandLine(listOf(packagingTool(packagingJavaHome.get(), "jpackage")) + arguments)
+    }
+}
+
+tasks.register("nativePackage") {
+    group = "distribution"
+    description = "Builds and verifies the app-image and then builds the native installer."
+    dependsOn(verifyPackagedRuntime, jpackageInstaller)
 }
 
 tasks.check {
@@ -408,7 +805,7 @@ fun parseToolOptions(options: String?): MutableList<String> {
 // For IntelliJ IDEA
 tasks.withType<JavaExec> {
     if (name != "run") {
-        jvmArgs(addOpens.map { "--add-opens=$it=ALL-UNNAMED" })
+        jvmArgs(runtimeOpens.map { "--add-opens=$it=ALL-UNNAMED" })
 //        if (javaVersion >= JavaVersion.VERSION_24) {
 //            jvmArgs("--enable-native-access=ALL-UNNAMED")
 //        }

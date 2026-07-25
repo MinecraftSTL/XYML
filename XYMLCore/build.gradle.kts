@@ -14,12 +14,10 @@ tasks.compileJava {
 dependencies {
     api(libs.kala.compress.zip)
     api(libs.kala.compress.tar)
-    api(libs.simple.png.javafx)
     api(libs.gson)
     api(libs.tomlj)
     api(libs.xz)
     api(libs.lz4)
-    api(libs.fx.gson)
     api(libs.constant.pool.scanner)
     api(libs.nanohttpd)
     api(libs.jsoup)

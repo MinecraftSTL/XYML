@@ -18,12 +18,11 @@ subprojects {
         plugin("checkstyle")
     }
 
-    repositories {
-        flatDir {
-            name = "libs"
-            dirs = setOf(rootProject.file("lib"))
-        }
+    configure<JavaPluginExtension> {
+        toolchain.languageVersion.set(JavaLanguageVersion.of(17))
+    }
 
+    repositories {
         System.getenv("MAVEN_CENTRAL_REPO").let { repo ->
             if (repo.isNullOrBlank())
                 mavenCentral()
@@ -75,8 +74,6 @@ subprojects {
         dependsOn(tasks["checkstyleMain"], tasks["checkstyleTest"])
     }
 }
-
-space.minecraftstl.xyml.gradle.javafx.JavaFXUtils.register(rootProject)
 
 defaultTasks("clean", "build")
 
