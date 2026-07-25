@@ -24,9 +24,11 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.addonupdates.AddonUpdatesPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.backups.WorldBackupsPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementPanel;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.export.ModpackExportPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogActionStrings;
@@ -42,6 +44,7 @@ import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogSt
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
+import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -50,6 +53,7 @@ import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import javax.swing.event.ChangeListener;
 import java.awt.Font;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -57,7 +61,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Hosts an instance overview alongside lifecycle, settings, add-on, world, backup, and schematic tools for one managed game instance.
+/// Hosts one instance overview alongside lifecycle, settings, add-on, world, backup, and schematic tools.
 ///
 /// All tabs are constructed on the EDT, while their filesystem work remains lazy and uses the supplied
 /// executor. The view owns all child lifecycles and returns to the instance list through one shared toolbar.
@@ -90,6 +94,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     /// Lazy local world-backup management surface.
     private final WorldBackupsPanel backups;
 
+    /// Lazy offline modpack archive exporter for repositories exposing XYML export APIs, or null otherwise.
+    private final @Nullable ModpackExportPanel modpackExport;
+
     /// Explicit network-check page for installed Mod and resource-pack updates.
     private final AddonUpdatesPanel addonUpdates;
 
@@ -107,6 +114,48 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
 
     /// Prevents repeated child and component cleanup.
     private final AtomicBoolean closed = new AtomicBoolean();
+
+    /// Creates management tabs with task progress defaults retained for source-compatible direct callers.
+    ///
+    /// The production composition uses the overload that receives its localized task labels and shared animator.
+    public DefaultInstanceManagementView(
+            GameRepository repository,
+            SchematicDirectoryResolver schematicDirectoryResolver,
+            String instanceId,
+            Executor executor,
+            SchematicInstanceManagementStrings managementStrings,
+            SchematicBrowserStrings schematicStrings,
+            SchematicBrowserInteractions schematicInteractions,
+            ModCatalogStrings modStrings,
+            ModCatalogStatusStrings modStatusStrings,
+            ModCatalogActionStrings modActionStrings,
+            ModCatalogInteractions modInteractions,
+            ResourcePackCatalogStrings resourcePackStrings,
+            ResourcePackCatalogStatusStrings resourcePackStatusStrings,
+            ResourcePackCatalogActionStrings resourcePackActionStrings,
+            ResourcePackCatalogInteractions resourcePackInteractions,
+            Runnable returnCommand) {
+        this(
+                repository,
+                schematicDirectoryResolver,
+                instanceId,
+                executor,
+                managementStrings,
+                schematicStrings,
+                schematicInteractions,
+                modStrings,
+                modStatusStrings,
+                modActionStrings,
+                modInteractions,
+                resourcePackStrings,
+                resourcePackStatusStrings,
+                resourcePackActionStrings,
+                resourcePackInteractions,
+                returnCommand,
+                TaskProgressStrings.english(),
+                null,
+                Duration.ZERO);
+    }
 
     /// Creates the production instance-management tabs on the Swing event dispatch thread.
     ///
@@ -126,6 +175,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     /// @param resourcePackActionStrings localized resource-pack action text
     /// @param resourcePackInteractions resource-pack dialog and desktop interactions
     /// @param returnCommand coordinator command returning to the instance list
+    /// @param taskProgressStrings localized task-progress labels for the modpack exporter
+    /// @param animator optional shared motion-aware progress animator
+    /// @param progressAnimationDuration non-negative modpack-export progress animation duration
     public DefaultInstanceManagementView(
             GameRepository repository,
             SchematicDirectoryResolver schematicDirectoryResolver,
@@ -142,7 +194,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             ResourcePackCatalogStatusStrings resourcePackStatusStrings,
             ResourcePackCatalogActionStrings resourcePackActionStrings,
             ResourcePackCatalogInteractions resourcePackInteractions,
-            Runnable returnCommand) {
+            Runnable returnCommand,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
@@ -164,6 +219,11 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         Objects.requireNonNull(resourcePackActionStrings, "resourcePackActionStrings");
         Objects.requireNonNull(resourcePackInteractions, "resourcePackInteractions");
         Objects.requireNonNull(returnCommand, "returnCommand");
+        Objects.requireNonNull(taskProgressStrings, "taskProgressStrings");
+        Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration");
+        if (progressAnimationDuration.isNegative()) {
+            throw new IllegalArgumentException("progressAnimationDuration must not be negative");
+        }
 
         @Nullable InstanceOverviewPanel createdOverview = null;
         @Nullable InstanceLifecyclePanel createdLifecycle = null;
@@ -173,6 +233,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         @Nullable WorldCatalogPanel createdWorlds = null;
         @Nullable DataPackManagementPanel createdDataPacks = null;
         @Nullable WorldBackupsPanel createdBackups = null;
+        @Nullable ModpackExportPanel createdModpackExport = null;
         @Nullable AddonUpdatesPanel createdAddonUpdates = null;
         @Nullable SchematicInstanceManagementView createdSchematics = null;
         try {
@@ -184,6 +245,13 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                         executor,
                         returnCommand);
                 createdGameSettings = new InstanceGameSettingsPanel(xymlRepository, this.instanceId);
+                createdModpackExport = new ModpackExportPanel(
+                        xymlRepository,
+                        this.instanceId,
+                        executor,
+                        taskProgressStrings,
+                        animator,
+                        progressAnimationDuration);
             }
             createdMods = new ModCatalogPanel(
                     new DefaultModCatalogModel(
@@ -225,6 +293,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             worlds = createdWorlds;
             dataPacks = createdDataPacks;
             backups = createdBackups;
+            modpackExport = createdModpackExport;
             addonUpdates = createdAddonUpdates;
             schematics = createdSchematics;
             configureComponents(
@@ -243,6 +312,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             }
             if (createdAddonUpdates != null) {
                 cleanupFailure = attemptCleanup(cleanupFailure, createdAddonUpdates::close);
+            }
+            if (createdModpackExport != null) {
+                cleanupFailure = attemptCleanup(cleanupFailure, createdModpackExport::close);
             }
             if (createdBackups != null) {
                 cleanupFailure = attemptCleanup(cleanupFailure, createdBackups::close);
@@ -301,6 +373,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                 @Nullable Throwable failure = null;
                 failure = attemptCleanup(failure, schematics::close);
                 failure = attemptCleanup(failure, addonUpdates::close);
+                @Nullable ModpackExportPanel currentModpackExport = modpackExport;
+                if (currentModpackExport != null) {
+                    failure = attemptCleanup(failure, currentModpackExport::close);
+                }
                 failure = attemptCleanup(failure, backups::close);
                 failure = attemptCleanup(failure, dataPacks::close);
                 failure = attemptCleanup(failure, worlds::close);
@@ -376,6 +452,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         tabs.addTab(worlds.title(), worlds);
         tabs.addTab(dataPacks.title(), dataPacks);
         tabs.addTab(backups.title(), backups);
+        @Nullable ModpackExportPanel currentModpackExport = modpackExport;
+        if (currentModpackExport != null) {
+            tabs.addTab(currentModpackExport.title(), currentModpackExport);
+        }
         tabs.addTab(addonUpdates.title(), addonUpdates);
         tabs.addTab(schematicStrings.pageTitle(), schematics);
         tabs.addChangeListener(lazyTabListener);
@@ -401,6 +481,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         }
         if (tabs.getSelectedComponent() == backups) {
             backups.activate();
+        }
+        @Nullable ModpackExportPanel currentModpackExport = modpackExport;
+        if (tabs.getSelectedComponent() == currentModpackExport && currentModpackExport != null) {
+            currentModpackExport.activate();
         }
     }
 

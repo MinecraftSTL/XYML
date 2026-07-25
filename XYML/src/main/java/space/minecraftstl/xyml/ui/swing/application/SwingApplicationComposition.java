@@ -461,7 +461,10 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                 presentation.resourcePacksStatus(),
                                 presentation.resourcePacksActions(),
                                 resourcePackInteractions,
-                                returnCommand)),
+                                returnCommand,
+                                presentation.taskProgress(),
+                                animator,
+                                presentation.taskProgressAnimationDuration())),
                 (management, addInstanceCommand) -> new RepositoryInstancesModel(
                         legacy.repository(),
                         Schedulers.io(),
