@@ -82,6 +82,13 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     /// Added loader versions keyed by kind before dependency-safe output ordering.
     private final Map<GameLoaderKind, GameLoaderCatalogItem> selectedByKind = new LinkedHashMap<>();
 
+    /// Loader kinds already installed in an existing instance and retained outside this staged selection.
+    ///
+    /// Retained kinds participate in compatibility and API-parent checks, but are intentionally absent
+    /// from [#selectedRemoteVersions()] because this control must submit only newly selected exact
+    /// [RemoteVersion] objects to an installation task.
+    private final Set<GameLoaderKind> retainedLoaderKinds = EnumSet.noneOf(GameLoaderKind.class);
+
     /// Small visual model of the currently selected installer components.
     private final DefaultListModel<GameLoaderCatalogItem> selectedLoaderListModel = new DefaultListModel<>();
 
@@ -192,6 +199,34 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     public void removeSelectionListener(LoaderSelectionListener listener) {
         EdtDispatcher.requireEventDispatchThread();
         selectionListeners.remove(Objects.requireNonNull(listener, "listener"));
+    }
+
+    /// Replaces the loader kinds retained by an already existing game instance.
+    ///
+    /// This lets an instance-management page reuse the same remote catalog without allowing a staged
+    /// loader to conflict with an installed component. Supplying the same kind remains valid for an
+    /// update, while an API may rely on its already-installed parent. Replacing the retained baseline
+    /// clears every staged catalog and selection because those rows were validated against the prior
+    /// instance state.
+    ///
+    /// @param loaderKinds non-null installed loader kinds to retain outside the staged task
+    public void setRetainedLoaderKinds(Collection<GameLoaderKind> loaderKinds) {
+        EdtDispatcher.requireEventDispatchThread();
+        requireOpen();
+        Collection<GameLoaderKind> nonNullLoaderKinds = Objects.requireNonNull(loaderKinds, "loaderKinds");
+        retainedLoaderKinds.clear();
+        for (GameLoaderKind loaderKind : nonNullLoaderKinds) {
+            retainedLoaderKinds.add(Objects.requireNonNull(loaderKind, "loaderKinds contains null"));
+        }
+        refreshRevision.incrementAndGet();
+        catalogLoading = false;
+        clearCatalogRows();
+        clearSelectedLoaders();
+        setStatus(catalogModel.snapshot().gameVersion().isEmpty()
+                ? strings.awaitingGameVersionStatus()
+                : strings.awaitingLoaderStatus());
+        refreshView();
+        publishSelectionChanged();
     }
 
     /// Selects the base Minecraft version and clears all dependent catalog and install selections.
@@ -387,12 +422,12 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
             refreshView();
             return;
         }
-        if (!GameLoaderCompatibilityMatrix.hasRequiredParent(kind, selectedByKind.keySet())) {
+        if (!GameLoaderCompatibilityMatrix.hasRequiredParent(kind, effectiveLoaderKinds())) {
             setStatus(strings.parentRequiredStatus());
             refreshView();
             return;
         }
-        if (!GameLoaderCompatibilityMatrix.conflictsWith(kind, selectedByKind.keySet()).isEmpty()) {
+        if (!GameLoaderCompatibilityMatrix.conflictsWith(kind, effectiveLoaderKinds()).isEmpty()) {
             setStatus(strings.conflictStatus());
             refreshView();
             return;
@@ -505,12 +540,12 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
             refreshView();
             return;
         }
-        if (!GameLoaderCompatibilityMatrix.hasRequiredParent(candidateKind, selectedByKind.keySet())) {
+        if (!GameLoaderCompatibilityMatrix.hasRequiredParent(candidateKind, effectiveLoaderKinds())) {
             setStatus(strings.parentRequiredStatus());
             refreshView();
             return;
         }
-        if (!GameLoaderCompatibilityMatrix.conflictsWith(candidateKind, selectedByKind.keySet()).isEmpty()) {
+        if (!GameLoaderCompatibilityMatrix.conflictsWith(candidateKind, effectiveLoaderKinds()).isEmpty()) {
             setStatus(strings.conflictStatus());
             refreshView();
             return;
@@ -552,7 +587,9 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     private boolean hasDependentSelectedApi(GameLoaderKind kind) {
         for (GameLoaderKind selectedKind : selectedByKind.keySet()) {
             Optional<GameLoaderKind> requiredParent = GameLoaderCompatibilityMatrix.requiredParent(selectedKind);
-            if (requiredParent.isPresent() && requiredParent.get() == kind) {
+            if (requiredParent.isPresent()
+                    && requiredParent.get() == kind
+                    && !retainedLoaderKinds.contains(kind)) {
                 return true;
             }
         }
@@ -611,10 +648,11 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         Optional<GameLoaderKind> requiredParent = GameLoaderCompatibilityMatrix.requiredParent(kind);
         if (requiredParent.isPresent()) {
             @Nullable GameLoaderCatalogItem parentItem = selectedByKind.get(requiredParent.get());
-            if (parentItem == null) {
+            if (parentItem != null) {
+                appendItemWithParent(parentItem, emittedKinds, orderedItems);
+            } else if (!retainedLoaderKinds.contains(requiredParent.get())) {
                 throw new IllegalStateException("Selected API does not retain its required parent");
             }
-            appendItemWithParent(parentItem, emittedKinds, orderedItems);
         }
         emittedKinds.add(kind);
         orderedItems.add(item);
@@ -671,8 +709,8 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     private boolean canAdd(GameLoaderCatalogItem candidate) {
         GameLoaderKind kind = candidate.kind();
         return !selectedByKind.containsKey(kind)
-                && GameLoaderCompatibilityMatrix.hasRequiredParent(kind, selectedByKind.keySet())
-                && GameLoaderCompatibilityMatrix.conflictsWith(kind, selectedByKind.keySet()).isEmpty();
+                && GameLoaderCompatibilityMatrix.hasRequiredParent(kind, effectiveLoaderKinds())
+                && GameLoaderCompatibilityMatrix.conflictsWith(kind, effectiveLoaderKinds()).isEmpty();
     }
 
     /// Returns whether a loader catalog may be entered without violating the current install selection.
@@ -686,8 +724,21 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     private boolean canSelectLoaderCatalog(GameLoaderKind kind) {
         GameLoaderKind nonNullKind = Objects.requireNonNull(kind, "kind");
         return !selectedByKind.containsKey(nonNullKind)
-                && GameLoaderCompatibilityMatrix.hasRequiredParent(nonNullKind, selectedByKind.keySet())
-                && GameLoaderCompatibilityMatrix.conflictsWith(nonNullKind, selectedByKind.keySet()).isEmpty();
+                && GameLoaderCompatibilityMatrix.hasRequiredParent(nonNullKind, effectiveLoaderKinds())
+                && GameLoaderCompatibilityMatrix.conflictsWith(nonNullKind, effectiveLoaderKinds()).isEmpty();
+    }
+
+    /// Returns every installed and staged loader kind used for compatibility checks.
+    ///
+    /// A staged row of the same kind as a retained component is an update, not a duplicate conflict;
+    /// the historical matrix has no self-conflicts, so this union safely authorizes that operation.
+    ///
+    /// @return mutable local compatibility set containing no null kind
+    private Set<GameLoaderKind> effectiveLoaderKinds() {
+        Set<GameLoaderKind> kinds = EnumSet.noneOf(GameLoaderKind.class);
+        kinds.addAll(retainedLoaderKinds);
+        kinds.addAll(selectedByKind.keySet());
+        return kinds;
     }
 
     /// Formats one visible catalog row without replacing its original RemoteVersion object.

@@ -99,7 +99,8 @@ final class LoaderSelectionWizardPanelTest {
         }
     }
 
-    /// Verifies explicit loading, viewport-list selection, parent requirements, conflict blocking, safe order, and clearing.
+    /// Verifies explicit loading, viewport-list selection, parent requirements, conflict blocking,
+    /// safe ordering, and clearing.
     @Test
     void selectsExactVersionsOnlyAfterExplicitRefreshAndEnforcesInstallRules() throws Exception {
         RemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
@@ -183,6 +184,70 @@ final class LoaderSelectionWizardPanelTest {
                 assertEquals("1.21.1", panel.selectionSnapshot().gameVersion().orElseThrow());
             });
             assertEquals(2, source.requestCount.get());
+        } finally {
+            closePanel(panelReference.get());
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Verifies existing instance loaders participate in compatibility checks without becoming task rows.
+    @Test
+    void retainedInstanceLoadersBlockConflictsAndSatisfyApiParents() throws Exception {
+        RemoteVersion fabric = remoteVersion("fabric", "1.20.1", "0.16.0");
+        RemoteVersion fabricApi = remoteVersion("fabric-api", "1.20.1", "0.100.0");
+        RecordingSource source = new RecordingSource();
+        source.put(GameLoaderKind.FABRIC, fabric);
+        source.put(GameLoaderKind.FABRIC_API, fabricApi);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable LoaderSelectionWizardPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new LoaderSelectionWizardPanel(
+                    new DefaultGameLoaderCatalogModel(source),
+                    executor,
+                    LoaderSelectionWizardStrings.english())));
+            LoaderSelectionWizardPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                panel.selectGameVersion("1.20.1");
+                panel.setRetainedLoaderKinds(List.of(GameLoaderKind.FABRIC));
+                JButton fabricButton = findNamed(panel, "loaderKind_FABRIC", JButton.class);
+                JButton fabricApiButton = findNamed(panel, "loaderKind_FABRIC_API", JButton.class);
+                JButton forgeButton = findNamed(panel, "loaderKind_FORGE", JButton.class);
+                assertNotNull(fabricButton);
+                assertNotNull(fabricApiButton);
+                assertNotNull(forgeButton);
+                assertTrue(fabricButton.isEnabled());
+                assertTrue(fabricApiButton.isEnabled());
+                assertFalse(forgeButton.isEnabled());
+            });
+
+            selectAndLoad(panel, executor, GameLoaderKind.FABRIC_API);
+            EdtDispatcher.executeAndWait(() -> {
+                selectFirstLoadedCatalogRow(panel);
+                JButton addButton = findNamed(panel, "loaderAddSelection", JButton.class);
+                assertNotNull(addButton);
+                assertTrue(addButton.isEnabled());
+                addButton.doClick();
+                assertEquals(List.of(fabricApi), panel.selectedRemoteVersions());
+            });
+
+            selectAndLoad(panel, executor, GameLoaderKind.FABRIC);
+            EdtDispatcher.executeAndWait(() -> {
+                selectFirstLoadedCatalogRow(panel);
+                JButton addButton = findNamed(panel, "loaderAddSelection", JButton.class);
+                assertNotNull(addButton);
+                addButton.doClick();
+                assertEquals(List.of(fabric, fabricApi), panel.selectedRemoteVersions());
+                JList<?> selectedList = findNamed(panel, "loaderSelectedList", JList.class);
+                JButton removeButton = findNamed(panel, "loaderRemoveSelection", JButton.class);
+                assertNotNull(selectedList);
+                assertNotNull(removeButton);
+                selectedList.setSelectedIndex(0);
+                assertTrue(removeButton.isEnabled());
+                removeButton.doClick();
+                assertEquals(List.of(fabricApi), panel.selectedRemoteVersions());
+            });
         } finally {
             closePanel(panelReference.get());
             executor.shutdownNow();
