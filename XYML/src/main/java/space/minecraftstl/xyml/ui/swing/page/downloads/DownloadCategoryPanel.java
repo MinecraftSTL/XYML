@@ -34,7 +34,6 @@ import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingConstants;
 import java.awt.Desktop;
-import java.awt.Font;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -47,10 +46,10 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Provides add-on category workflows beside the built-in game-version installer.
 ///
-/// Mods, resource packs, and shader packs now use native explicit-search catalogs that install to
-/// a selected instance. Modpack imports remain local in this panel, while their remote catalog has
-/// its dedicated download-center tab. Worlds retain their established browser and local-directory
-/// route until their archive-import workflow has an equivalent native remote catalog.
+/// Mods, resource packs, and shader packs use native explicit-search catalogs that install to a
+/// selected instance. Modpack imports remain local in this panel, while their remote catalog has
+/// its dedicated download-center tab. Worlds use the same native, safe archive workflow as the
+/// instance-management page and never require an external browser to import a local archive.
 @NotNullByDefault
 public final class DownloadCategoryPanel extends JPanel implements AutoCloseable {
     /// Category tab host retained for keyboard navigation and focused UI verification.
@@ -67,6 +66,9 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
 
     /// Native explicit-search remote shader-pack catalog owned by the Shaders content tab.
     private final RemoteAddonCatalogPanel shaderPackCatalog;
+
+    /// Native local world archive workflow activated only after the Worlds category becomes visible.
+    private final WorldArchiveDownloadPanel worldArchivePanel;
 
     /// Feedback for the latest external browse or directory-reveal request.
     private final JLabel statusLabel;
@@ -108,11 +110,13 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration);
+        worldArchivePanel = new WorldArchiveDownloadPanel();
         for (DownloadCategory category : DownloadCategory.values()) {
             categoryTabs.addTab(
                     i18n(category.titleKey()),
                     createCategoryTab(category));
         }
+        categoryTabs.addChangeListener(event -> activateSelectedCategory());
         add(categoryTabs, "grow");
 
         statusLabel = new JLabel("", SwingConstants.LEADING);
@@ -134,6 +138,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         modsCatalog.close();
         resourcePackCatalog.close();
         shaderPackCatalog.close();
+        worldArchivePanel.close();
         localModpackImporter.close();
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             categoryTabs.setEnabled(false);
@@ -152,7 +157,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
             case MODS -> modsCatalog;
             case RESOURCE_PACKS -> resourcePackCatalog;
             case SHADERS -> shaderPackCatalog;
-            case WORLDS -> createDirectoryTab(category);
+            case WORLDS -> worldArchivePanel;
         };
     }
 
@@ -190,25 +195,6 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         panel.add(createCategoryActions(category), "growx");
         localModpackImporter.setName("downloadsLocalModpackImporter");
         panel.add(localModpackImporter, "grow");
-        return panel;
-    }
-
-    /// Builds the remaining world category with its established browser and local-directory commands.
-    ///
-    /// @param category category whose commands the tab represents
-    /// @return configured add-on category tab
-    private JPanel createDirectoryTab(DownloadCategory category) {
-        JPanel panel = new JPanel(new MigLayout(
-                "insets 20, fillx, wrap 1",
-                "[grow,fill]",
-                "[]16[]"));
-        panel.setOpaque(false);
-        panel.setName("downloadsCategory" + category.name());
-
-        JLabel heading = new JLabel(i18n(category.titleKey()));
-        heading.setFont(heading.getFont().deriveFont(Font.BOLD, 22.0F));
-        panel.add(heading, "growx");
-        panel.add(createCategoryActions(category), "growx");
         return panel;
     }
 
@@ -344,6 +330,17 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         });
     }
 
+    /// Activates the world page only after its category is intentionally selected by the user.
+    ///
+    /// The other category panels either require explicit search commands or have their own lifecycle,
+    /// so selection itself must not trigger their network work.
+    private void activateSelectedCategory() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!closed && categoryTabs.getSelectedComponent() == worldArchivePanel) {
+            worldArchivePanel.activate();
+        }
+    }
+
     /// Executes one desktop operation after platform capability checks complete.
     @FunctionalInterface
     @NotNullByDefault
@@ -370,7 +367,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         /// Instance shader packs and their standard shaderpacks directory.
         SHADERS("download.shader", "folder.shaderpacks", true, "https://modrinth.com/shaders"),
 
-        /// Instance world archives and their Minecraft saves directory.
+        /// Instance world archives managed entirely by the native archive workflow.
         WORLDS("world", "folder.saves", true, "https://modrinth.com/worlds");
 
         /// Localization key used as the tab title.
