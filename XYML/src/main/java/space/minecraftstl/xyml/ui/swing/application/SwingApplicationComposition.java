@@ -63,6 +63,7 @@ import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.LegacyLauncherAppearanceStore;
 import space.minecraftstl.xyml.ui.swing.page.settings.PersistedAppearanceSettingsModel;
+import space.minecraftstl.xyml.ui.swing.page.settings.SettingsCenterPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.StoredAppearanceSettings;
 import space.minecraftstl.xyml.ui.swing.shell.AppShellFrame;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
@@ -404,7 +405,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
         factories.put(ShellPageId.ACCOUNTS, () -> new AccountsPanel(models.accounts(), presentation.accounts()));
         factories.put(
                 ShellPageId.SETTINGS,
-                () -> new AppearanceSettingsPanel(models.appearance(), presentation.appearance()));
+                () -> SettingsCenterPanel.createForCurrentSettings(
+                        new AppearanceSettingsPanel(models.appearance(), presentation.appearance())));
         return Map.copyOf(factories);
     }
 

@@ -43,6 +43,7 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.JTabbedPane;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.event.DocumentEvent;
@@ -55,6 +56,8 @@ import java.awt.Font;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.OptionalInt;
+
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Presents a lazily loaded game-version catalog and one vanilla installation workflow.
 ///
@@ -111,6 +114,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
     /// Owns the current installation task presentation panel.
     private final TaskProgressHostPanel taskProgressHost;
+
+    /// Secondary download-center categories retained beside the vanilla game-version workflow.
+    private final DownloadCategoryPanel downloadCategoryPanel;
+
+    /// Top-level tabs preserving the original game installer while exposing restored content categories.
+    private final JTabbedPane downloadCenterTabs = new JTabbedPane();
 
     /// Version-ID query editor.
     private final JTextField searchField = new JTextField();
@@ -274,18 +283,26 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
         super(new MigLayout(
-                "insets 0, fill, wrap 1",
+                "insets 0, fill",
                 "[grow,fill]",
-                "[]12[grow,fill]"));
+                "[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
         this.model = Objects.requireNonNull(model, "model");
         this.installService = Objects.requireNonNull(installService, "installService");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.installStrings = Objects.requireNonNull(installStrings, "installStrings");
+        TaskProgressStrings resolvedTaskProgressStrings = Objects.requireNonNull(
+                taskProgressStrings, "taskProgressStrings");
+        Duration resolvedProgressAnimationDuration = Objects.requireNonNull(
+                progressAnimationDuration, "progressAnimationDuration");
         taskProgressHost = new TaskProgressHostPanel(
-                Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
+                resolvedTaskProgressStrings,
                 animator,
-                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"));
+                resolvedProgressAnimationDuration);
+        downloadCategoryPanel = new DownloadCategoryPanel(
+                resolvedTaskProgressStrings,
+                animator,
+                resolvedProgressAnimationDuration);
         choiceList = new ViewportChoiceList<>(model, GameVersionCatalogItem::versionId);
 
         configureComponents();
@@ -343,6 +360,13 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
     /// Builds the stable title, catalog workspace, and installation-task workspace.
     private void configureComponents() {
+        JPanel gameVersionsPanel = new JPanel(new MigLayout(
+                "insets 0, fill, wrap 1",
+                "[grow,fill]",
+                "[]12[grow,fill]"));
+        gameVersionsPanel.setOpaque(false);
+        gameVersionsPanel.setName("gameVersionsDownloadCenter");
+
         JPanel headingBand = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][]", "[]"));
         headingBand.setOpaque(false);
 
@@ -358,7 +382,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             }
         });
         headingBand.add(refreshButton, "h 40!");
-        add(headingBand, "growx");
+        gameVersionsPanel.add(headingBand, "growx");
 
         JPanel catalogWorkspace = new JPanel(new MigLayout(
                 "insets 0, fill, wrap 1",
@@ -460,7 +484,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         workflowCards.setName("gameVersionsWorkflowCards");
         workflowCards.add(catalogWorkspace, CATALOG_VIEW);
         workflowCards.add(taskWorkspace, TASK_VIEW);
-        add(workflowCards, "grow");
+        gameVersionsPanel.add(workflowCards, "grow");
+
+        downloadCenterTabs.setName("downloadCenterTabs");
+        downloadCenterTabs.addTab(strings.pageTitle(), gameVersionsPanel);
+        downloadCenterTabs.addTab(i18n("download.content"), downloadCategoryPanel);
+        add(downloadCenterTabs, "grow");
 
         updateInstallAction();
     }
@@ -927,6 +956,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             cleanupFailure = attemptCleanup(cleanupFailure, () -> backToCatalogButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> choiceList.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> choiceList.getList().setEnabled(false));
+            cleanupFailure = attemptCleanup(cleanupFailure, downloadCategoryPanel::close);
             cleanupFailure = attemptCleanup(cleanupFailure, taskProgressHost::close);
             cleanupFailure = attemptCleanup(cleanupFailure, choiceList::close);
             throwUncheckedFailure(cleanupFailure);
