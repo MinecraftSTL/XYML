@@ -30,7 +30,9 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import java.awt.Font;
@@ -39,6 +41,8 @@ import java.util.Objects;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Shows one managed instance's identity and resolved local directories with real file operations.
 ///
@@ -79,6 +83,12 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
 
     /// Opens the resolved effective game directory with the platform desktop handler.
     private final JButton openGameDirectoryButton = new JButton();
+
+    /// Opens the restored list of well-known directories rooted at the effective game directory.
+    private final JButton exploreDirectoriesButton = new JButton();
+
+    /// Retained popup containing direct game, add-on, save, and diagnostic folder commands.
+    private final JPopupMenu directoryMenu = new JPopupMenu();
 
     /// Refreshes the repository and recalculates displayed metadata.
     private final JButton refreshButton = new JButton();
@@ -147,6 +157,14 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         return strings.title();
     }
 
+    /// Returns the restored directory menu for focused integration checks.
+    ///
+    /// @return popup containing well-known game-directory commands
+    JPopupMenu directoryMenu() {
+        EdtDispatcher.requireEventDispatchThread();
+        return directoryMenu;
+    }
+
     /// Releases the panel's Swing controls and ignores late background completions.
     @Override
     public void close() {
@@ -200,7 +218,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         add(gameDirectoryValue, "growx");
         add(openGameDirectoryButton, "w 40!, h 40!");
 
-        JPanel actions = new JPanel(new MigLayout("insets 0, gap 8", "[40!][40!][40!]", "[40!]"));
+        JPanel actions = new JPanel(new MigLayout("insets 0, gap 8", "[40!][40!][40!][40!]", "[40!]"));
         actions.setName("instanceOverviewActions");
         actions.setOpaque(false);
         configureCommand(
@@ -221,10 +239,19 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
                 strings.deleteIconTooltip(),
                 "assets/swing/icons/delete.svg",
                 this::deleteIcon);
+        configureCommand(
+                exploreDirectoriesButton,
+                "instanceOverviewExploreDirectories",
+                i18n("settings.game.exploration"),
+                "assets/swing/icons/folder-open.svg",
+                this::showDirectoryMenu);
         actions.add(refreshButton, "w 40!, h 40!");
         actions.add(chooseIconButton, "w 40!, h 40!");
         actions.add(deleteIconButton, "w 40!, h 40!");
+        actions.add(exploreDirectoriesButton, "w 40!, h 40!");
         add(actions, "span 3, right");
+
+        configureDirectoryMenu();
 
         updateActionState();
     }
@@ -371,6 +398,60 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         if (currentSnapshot != null) {
             openDirectory(currentSnapshot.gameDirectory());
         }
+    }
+
+    /// Populates the restored directory browser with the same user-facing locations exposed by the former launcher.
+    private void configureDirectoryMenu() {
+        directoryMenu.setName("instanceOverviewDirectoryMenu");
+        addDirectoryMenuItem("instanceOverviewBrowseGame", "folder.game", "");
+        addDirectoryMenuItem("instanceOverviewBrowseMods", "folder.mod", "mods");
+        addDirectoryMenuItem("instanceOverviewBrowseResourcePacks", "folder.resourcepacks", "resourcepacks");
+        addDirectoryMenuItem("instanceOverviewBrowseSaves", "folder.saves", "saves");
+        addDirectoryMenuItem("instanceOverviewBrowseSchematics", "folder.schematics", "schematics");
+        addDirectoryMenuItem("instanceOverviewBrowseShaderPacks", "folder.shaderpacks", "shaderpacks");
+        addDirectoryMenuItem("instanceOverviewBrowseScreenshots", "folder.screenshots", "screenshots");
+        addDirectoryMenuItem("instanceOverviewBrowseConfig", "folder.config", "config");
+        addDirectoryMenuItem("instanceOverviewBrowseLogs", "folder.logs", "logs");
+        addDirectoryMenuItem("instanceOverviewBrowseCrashReports", "folder.crash-reports", "crash-reports");
+    }
+
+    /// Adds one trusted child-directory command to the restored browse menu.
+    ///
+    /// @param name stable Swing component name
+    /// @param labelKey existing localization key
+    /// @param relativeDirectory direct child of the effective game directory, or blank for that directory itself
+    private void addDirectoryMenuItem(String name, String labelKey, String relativeDirectory) {
+        String componentName = requireNonBlank(name, "name");
+        String relative = Objects.requireNonNull(relativeDirectory, "relativeDirectory");
+        JMenuItem item = new JMenuItem(i18n(requireNonBlank(labelKey, "labelKey")));
+        item.setName(componentName);
+        item.addActionListener(event -> openKnownDirectory(relative));
+        directoryMenu.add(item);
+    }
+
+    /// Shows the directory popup only after the effective game directory has been resolved.
+    private void showDirectoryMenu() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get() || operationPending.get() || snapshot == null) {
+            return;
+        }
+        directoryMenu.show(exploreDirectoriesButton, 0, exploreDirectoriesButton.getHeight());
+    }
+
+    /// Opens the effective game directory or one known direct child through the existing asynchronous desktop boundary.
+    ///
+    /// @param relativeDirectory direct child directory, or blank for the effective game directory itself
+    private void openKnownDirectory(String relativeDirectory) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable InstanceSnapshot currentSnapshot = snapshot;
+        if (currentSnapshot == null || closed.get()) {
+            return;
+        }
+        String relative = Objects.requireNonNull(relativeDirectory, "relativeDirectory");
+        Path directory = relative.isBlank()
+                ? currentSnapshot.gameDirectory()
+                : currentSnapshot.gameDirectory().resolve(relative).normalize();
+        openDirectory(directory);
     }
 
     /// Starts a non-blocking platform directory open for one resolved path.
@@ -540,6 +621,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         refreshButton.setEnabled(idle);
         openInstanceDirectoryButton.setEnabled(idle && hasSnapshot);
         openGameDirectoryButton.setEnabled(idle && hasSnapshot);
+        exploreDirectoriesButton.setEnabled(idle && hasSnapshot);
         chooseIconButton.setVisible(supportsCustomIcons);
         chooseIconButton.setEnabled(idle && hasSnapshot && supportsCustomIcons);
         deleteIconButton.setVisible(supportsCustomIcons);

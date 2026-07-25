@@ -26,6 +26,8 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JMenuItem;
+import javax.swing.JPopupMenu;
 import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Container;
@@ -81,25 +83,38 @@ final class InstanceOverviewPanelTest {
                         JButton.class);
                 JButton chooseIcon = findNamed(panel, "instanceOverviewChooseIcon", JButton.class);
                 JButton deleteIcon = findNamed(panel, "instanceOverviewDeleteIcon", JButton.class);
+                JButton exploreDirectories = findNamed(panel, "instanceOverviewExploreDirectories", JButton.class);
                 assertNotNull(root);
                 assertNotNull(game);
                 assertNotNull(refresh);
                 assertNotNull(openInstanceDirectory);
                 assertNotNull(chooseIcon);
                 assertNotNull(deleteIcon);
-                assertEquals(repositoryRoot.resolve("versions").resolve("instance").toAbsolutePath().normalize().toString(),
-                        root.getText());
-                assertEquals(repositoryRoot.resolve("game").toAbsolutePath().normalize().toString(), game.getText());
+                assertNotNull(exploreDirectories);
+                Path expectedInstanceDirectory = repositoryRoot.resolve("versions")
+                        .resolve("instance")
+                        .toAbsolutePath()
+                        .normalize();
+                Path expectedGameDirectory = repositoryRoot.resolve("game").toAbsolutePath().normalize();
+                assertEquals(expectedInstanceDirectory.toString(), root.getText());
+                assertEquals(expectedGameDirectory.toString(), game.getText());
                 assertTrue(refresh.isEnabled());
                 assertTrue(openInstanceDirectory.isEnabled());
+                assertTrue(exploreDirectories.isEnabled());
                 assertFalse(chooseIcon.isVisible());
                 assertFalse(deleteIcon.isVisible());
 
                 openInstanceDirectory.doClick();
-                assertEquals(
-                        repositoryRoot.resolve("versions").resolve("instance").toAbsolutePath().normalize(),
-                        interactions.openedDirectory.get());
+                assertEquals(expectedInstanceDirectory, interactions.openedDirectory.get());
                 assertNull(interactions.failureDetail.get());
+
+                JPopupMenu directoryMenu = panel.directoryMenu();
+                JMenuItem mods = findNamed(directoryMenu, "instanceOverviewBrowseMods", JMenuItem.class);
+                JMenuItem logs = findNamed(directoryMenu, "instanceOverviewBrowseLogs", JMenuItem.class);
+                assertNotNull(mods);
+                assertNotNull(logs);
+                mods.doClick();
+                assertEquals(expectedGameDirectory.resolve("mods"), interactions.openedDirectory.get());
 
                 refresh.doClick();
             });
