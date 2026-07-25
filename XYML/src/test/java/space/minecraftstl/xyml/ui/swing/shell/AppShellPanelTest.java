@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -55,6 +56,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -95,10 +97,12 @@ public final class AppShellPanelTest {
         for (ShellPageId page : ShellPageId.values()) {
             ShellNavigationButton button = panel.navigationButton(page);
             ShellPagePresentation presentation = ShellPagePresentations.englishFallback().get(page);
+            FlatSVGIcon icon = assertInstanceOf(FlatSVGIcon.class, button.getIcon());
             assertAll(
                     () -> assertTrue(button.isFocusable()),
                     () -> assertEquals(presentation.mnemonic(), button.getMnemonic()),
-                    () -> assertEquals(presentation.label(), button.getAccessibleContext().getAccessibleName()));
+                    () -> assertEquals(presentation.label(), button.getAccessibleContext().getAccessibleName()),
+                    () -> assertTrue(icon.hasFound(), page + " navigation SVG was not found"));
         }
     }
 

@@ -17,9 +17,13 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.JToggleButton;
+import java.awt.Color;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Insets;
 import java.util.Objects;
@@ -35,7 +39,7 @@ final class ShellNavigationButton extends JToggleButton {
     /// @param page the represented destination
     /// @param presentation the localized button presentation
     ShellNavigationButton(ShellPageId page, ShellPagePresentation presentation) {
-        super(Objects.requireNonNull(presentation).label(), new ShellNavIcon(page));
+        super(Objects.requireNonNull(presentation).label(), createNavigationIcon(page));
         this.page = page;
         setMnemonic(presentation.mnemonic());
         setHorizontalAlignment(LEFT);
@@ -53,5 +57,40 @@ final class ShellNavigationButton extends JToggleButton {
     /// @return the destination selected by this button
     ShellPageId page() {
         return page;
+    }
+
+    /// Creates a theme-aware legacy navigation icon for one destination.
+    ///
+    /// @param page destination represented by the returned icon
+    /// @return configured 20-pixel SVG icon
+    private static FlatSVGIcon createNavigationIcon(ShellPageId page) {
+        FlatSVGIcon icon = new FlatSVGIcon(iconResource(page), 20, 20);
+        icon.setColorFilter(new FlatSVGIcon.ColorFilter(ShellNavigationButton::resolveIconColor));
+        return icon;
+    }
+
+    /// Resolves a navigation icon color from the owning button's active theme state.
+    ///
+    /// @param component owning component, or null during standalone image rendering
+    /// @param originalColor SVG-authored fallback color
+    /// @return component foreground when available, otherwise the SVG fallback
+    private static Color resolveIconColor(@Nullable Component component, Color originalColor) {
+        Color fallback = Objects.requireNonNull(originalColor, "originalColor");
+        @Nullable Color foreground = component == null ? null : component.getForeground();
+        return foreground == null ? fallback : foreground;
+    }
+
+    /// Maps one destination to the corresponding bundled legacy Material SVG asset.
+    ///
+    /// @param page destination represented by the requested icon
+    /// @return classpath-relative SVG resource path
+    private static String iconResource(ShellPageId page) {
+        return switch (Objects.requireNonNull(page, "page")) {
+            case HOME -> "assets/swing/icons/nav-home.svg";
+            case INSTANCES -> "assets/swing/icons/nav-instances.svg";
+            case DOWNLOADS -> "assets/swing/icons/nav-downloads.svg";
+            case ACCOUNTS -> "assets/swing/icons/nav-accounts.svg";
+            case SETTINGS -> "assets/swing/icons/nav-settings.svg";
+        };
     }
 }
