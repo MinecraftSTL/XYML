@@ -35,7 +35,9 @@ import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
+import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.settings.DisabledJavaRuntimeEntry;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementSnapshot;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
@@ -59,7 +61,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -78,7 +79,7 @@ final class InstanceGameSettingsPanelTest {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
-                InstanceGameSettingsPanel panel = new InstanceGameSettingsPanel(store);
+                InstanceGameSettingsPanel panel = createPanel(store);
                 panelReference.set(panel);
 
                 clickOverride(panel, "instanceGameSettingsAutomaticMemory");
@@ -122,7 +123,7 @@ final class InstanceGameSettingsPanelTest {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
-                InstanceGameSettingsPanel panel = new InstanceGameSettingsPanel(new RecordingStore(snapshot()));
+                InstanceGameSettingsPanel panel = createPanel(new RecordingStore(snapshot()));
                 panelReference.set(panel);
                 JTabbedPane tabs = findNamed(panel, "instanceGameSettingsTabs", JTabbedPane.class);
                 assertEquals(6, tabs.getTabCount());
@@ -305,7 +306,7 @@ final class InstanceGameSettingsPanelTest {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
-                InstanceGameSettingsPanel panel = new InstanceGameSettingsPanel(store);
+                InstanceGameSettingsPanel panel = createPanel(store);
                 panelReference.set(panel);
 
                 overrideChoice(panel, "instanceGameSettingsWindowType", GameWindowType.FULLSCREEN);
@@ -391,7 +392,7 @@ final class InstanceGameSettingsPanelTest {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
-                InstanceGameSettingsPanel panel = new InstanceGameSettingsPanel(store);
+                InstanceGameSettingsPanel panel = createPanel(store);
                 panelReference.set(panel);
                 clickOverride(panel, "instanceGameSettingsMaximumMemory");
                 findNamed(panel, "instanceGameSettingsMaximumMemory", JTextField.class).setText("not-a-number");
@@ -412,7 +413,7 @@ final class InstanceGameSettingsPanelTest {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
-                InstanceGameSettingsPanel panel = new InstanceGameSettingsPanel(store);
+                InstanceGameSettingsPanel panel = createPanel(store);
                 panelReference.set(panel);
 
                 clickOverride(panel, "instanceGameSettingsMaximumMemory");
@@ -475,7 +476,7 @@ final class InstanceGameSettingsPanelTest {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
-                InstanceGameSettingsPanel panel = new InstanceGameSettingsPanel(store);
+                InstanceGameSettingsPanel panel = createPanel(store);
                 panelReference.set(panel);
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
@@ -499,7 +500,7 @@ final class InstanceGameSettingsPanelTest {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
-                InstanceGameSettingsPanel panel = new InstanceGameSettingsPanel(store);
+                InstanceGameSettingsPanel panel = createPanel(store);
                 panelReference.set(panel);
                 overrideChoice(panel, "instanceGameSettingsJavaMode", JavaVersionType.VERSION);
                 overrideText(panel, "instanceGameSettingsJavaVersion", " 21 ");
@@ -544,13 +545,40 @@ final class InstanceGameSettingsPanelTest {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
-                InstanceGameSettingsPanel panel = new InstanceGameSettingsPanel(store);
+                InstanceGameSettingsPanel panel = createPanel(store);
                 panelReference.set(panel);
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
 
+            assertEquals(1, store.saveCount.get());
             assertEquals(854.5D, store.snapshot().window().width());
             assertEquals(100_000.25D, store.snapshot().window().height());
+        } finally {
+            closePanel(panelReference);
+        }
+    }
+
+    /// Rejects non-finite and negative local window dimensions before persistence.
+    @Test
+    void rejectsInvalidWindowDimensions() {
+        RecordingStore store = new RecordingStore(snapshot());
+        AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = createPanel(store);
+                panelReference.set(panel);
+                clickOverride(panel, "instanceGameSettingsWindowWidth");
+                JTextField width = findNamed(panel, "instanceGameSettingsWindowWidth", JTextField.class);
+                JButton save = findNamed(panel, "instanceGameSettingsSave", JButton.class);
+                JLabel status = findNamed(panel, "instanceGameSettingsStatus", JLabel.class);
+
+                for (String invalidValue : List.of("NaN", "Infinity", "-1")) {
+                    width.setText(invalidValue);
+                    save.doClick();
+                    assertEquals(0, store.saveCount.get());
+                    assertTrue(status.getText().startsWith("Cannot save:"));
+                }
+            });
         } finally {
             closePanel(panelReference);
         }
@@ -687,6 +715,16 @@ final class InstanceGameSettingsPanelTest {
                         "  echo post  "),
                 base.graphics(),
                 base.nativeLibraries());
+    }
+
+    /// Creates a panel isolated from process-wide Java runtime and user-settings state.
+    ///
+    /// @param store deterministic game-settings store
+    /// @return panel backed by an empty uninitialized runtime snapshot
+    private static InstanceGameSettingsPanel createPanel(InstanceGameSettingsStore store) {
+        return new InstanceGameSettingsPanel(
+                Objects.requireNonNull(store, "store"),
+                new RecordingJavaRuntimeService(new JavaRuntimeManagementSnapshot(false, 0L, List.of())));
     }
 
     /// Returns every editor name represented by the complete settings snapshot.
@@ -978,14 +1016,74 @@ final class InstanceGameSettingsPanelTest {
             refreshCount.incrementAndGet();
         }
 
-        /// Rejects unrelated runtime registration in this read-only panel test.
+        /// Returns an unused failing runtime-registration task.
         ///
         /// @param selectedPath unused selected path
-        /// @return failed completion because this operation is outside the test scope
+        /// @return stopped task that fails if unexpectedly started
         @Override
-        public CompletionStage<JavaRuntime> addLocalRuntime(Path selectedPath) {
+        public Task<JavaRuntime> addLocalRuntime(Path selectedPath) {
             Objects.requireNonNull(selectedPath, "selectedPath");
-            return CompletableFuture.failedFuture(new UnsupportedOperationException("Not used by this test"));
+            return unusedTask();
+        }
+
+        /// Returns an unused failing runtime-disable task.
+        ///
+        /// @param runtime unused unmanaged runtime
+        /// @return stopped task that fails if unexpectedly started
+        @Override
+        public Task<@Nullable Void> disableLocalRuntime(JavaRuntime runtime) {
+            Objects.requireNonNull(runtime, "runtime");
+            return unusedTask();
+        }
+
+        /// Returns an unused failing managed-runtime uninstall task.
+        ///
+        /// @param runtime unused managed runtime
+        /// @return stopped task that fails if unexpectedly started
+        @Override
+        public Task<@Nullable Void> uninstallManagedRuntime(JavaRuntime runtime) {
+            Objects.requireNonNull(runtime, "runtime");
+            return unusedTask();
+        }
+
+        /// Returns an unused failing disabled-runtime inspection task.
+        ///
+        /// @param disabledRuntime unused disabled runtime entry
+        /// @return stopped task that fails if unexpectedly started
+        @Override
+        public Task<DisabledJavaRuntimeEntry> inspectDisabledRuntime(DisabledJavaRuntimeEntry disabledRuntime) {
+            Objects.requireNonNull(disabledRuntime, "disabledRuntime");
+            return unusedTask();
+        }
+
+        /// Returns an unused failing disabled-runtime restore task.
+        ///
+        /// @param disabledRuntime unused disabled runtime entry
+        /// @return stopped task that fails if unexpectedly started
+        @Override
+        public Task<JavaRuntime> restoreDisabledRuntime(DisabledJavaRuntimeEntry disabledRuntime) {
+            Objects.requireNonNull(disabledRuntime, "disabledRuntime");
+            return unusedTask();
+        }
+
+        /// Returns an unused failing disabled-runtime removal task.
+        ///
+        /// @param disabledRuntime unused disabled runtime entry
+        /// @return stopped task that fails if unexpectedly started
+        @Override
+        public Task<@Nullable Void> removeDisabledRuntime(DisabledJavaRuntimeEntry disabledRuntime) {
+            Objects.requireNonNull(disabledRuntime, "disabledRuntime");
+            return unusedTask();
+        }
+
+        /// Creates a stopped task that exposes unexpected use of an out-of-scope operation.
+        ///
+        /// @param <T> task result type
+        /// @return stopped failing task
+        private static <T> Task<T> unusedTask() {
+            return Task.supplyAsync(() -> {
+                throw new UnsupportedOperationException("Not used by this test");
+            });
         }
 
         /// Publishes one completed discovery result to the registered panel listener.

@@ -18,17 +18,15 @@
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.task.Task;
 
 import java.nio.file.Path;
-import java.util.concurrent.CompletionStage;
 
-/// Provides local Java-runtime discovery and registration without coupling a settings page to legacy state APIs.
-///
-/// Implementations must not fetch Java distributions. The refresh operation scans local candidate paths only, and the
-/// add operation validates one local executable or Java home chosen by the user.
+/// Provides Java-runtime discovery and lifecycle operations without coupling settings pages to process-wide state.
 @NotNullByDefault
 public interface JavaRuntimeManagementService {
     /// Returns the latest discovered local Java-runtime snapshot.
@@ -48,6 +46,36 @@ public interface JavaRuntimeManagementService {
     /// Validates and registers a local Java executable or Java home directory.
     ///
     /// @param selectedPath Java executable or Java home selected by the user
-    /// @return completion with the registered local runtime or its validation failure
-    CompletionStage<JavaRuntime> addLocalRuntime(Path selectedPath);
+    /// @return stopped task yielding the registered local runtime or its validation failure
+    Task<JavaRuntime> addLocalRuntime(Path selectedPath);
+
+    /// Creates a stopped task that hides one unmanaged runtime from discovery.
+    ///
+    /// @param runtime unmanaged runtime to disable
+    /// @return stopped disable task
+    Task<@Nullable Void> disableLocalRuntime(JavaRuntime runtime);
+
+    /// Creates a stopped task that unregisters and deletes one launcher-managed runtime.
+    ///
+    /// @param runtime managed runtime to uninstall
+    /// @return stopped uninstall task
+    Task<@Nullable Void> uninstallManagedRuntime(JavaRuntime runtime);
+
+    /// Creates a stopped background task that inspects one selected disabled path.
+    ///
+    /// @param disabledRuntime disabled entry selected by the user
+    /// @return stopped task yielding an available or invalid inspected entry
+    Task<DisabledJavaRuntimeEntry> inspectDisabledRuntime(DisabledJavaRuntimeEntry disabledRuntime);
+
+    /// Creates a stopped task that validates and restores one disabled executable.
+    ///
+    /// @param disabledRuntime disabled executable entry to restore
+    /// @return stopped task yielding the restored runtime
+    Task<JavaRuntime> restoreDisabledRuntime(DisabledJavaRuntimeEntry disabledRuntime);
+
+    /// Creates a stopped task that forcibly forgets one exact disabled path.
+    ///
+    /// @param disabledRuntime disabled executable entry to remove after a missing path or failed restore
+    /// @return stopped removal task
+    Task<@Nullable Void> removeDisabledRuntime(DisabledJavaRuntimeEntry disabledRuntime);
 }
