@@ -41,9 +41,11 @@ import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /// Presents launcher readiness, selected account and instance, and the primary launch command.
@@ -67,6 +69,9 @@ public final class HomePanel extends JPanel implements AutoCloseable {
     /// Localized home-page text.
     private final HomeStrings strings;
 
+    /// Native local file chooser and completion-dialog boundary for script export.
+    private final LaunchScriptExportInteraction launchScriptExportInteraction;
+
     /// Selected-account command row.
     private final SelectionButton accountButton;
 
@@ -75,6 +80,9 @@ public final class HomePanel extends JPanel implements AutoCloseable {
 
     /// New-instance command.
     private final JButton addInstanceButton = new JButton();
+
+    /// Local standalone launch-script export command.
+    private final JButton exportLaunchScriptButton = new JButton();
 
     /// Command returning from a terminal launch task to the selectors.
     private final JButton backToSelectionsButton = new JButton();
@@ -112,6 +120,9 @@ public final class HomePanel extends JPanel implements AutoCloseable {
     /// Whether the task card rather than the selection card is currently visible.
     private boolean taskViewVisible;
 
+    /// Monotonic export command identity that ignores completion after close or a later command.
+    private long launchScriptExportRevision;
+
     /// Prevents repeated listener and child-resource cleanup from any caller thread.
     private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -128,6 +139,30 @@ public final class HomePanel extends JPanel implements AutoCloseable {
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
+        this(
+                model,
+                strings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                new DefaultLaunchScriptExportInteraction());
+    }
+
+    /// Creates a launcher home panel with an explicit native script-export interaction boundary.
+    ///
+    /// @param model toolkit-neutral home model
+    /// @param strings localized home-page text
+    /// @param taskProgressStrings localized launch-task text
+    /// @param animator optional shared progress animator
+    /// @param progressAnimationDuration non-negative launch-progress animation duration
+    /// @param launchScriptExportInteraction local chooser and completion-dialog interaction
+    HomePanel(
+            HomeModel model,
+            HomeStrings strings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            LaunchScriptExportInteraction launchScriptExportInteraction) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
@@ -135,6 +170,9 @@ public final class HomePanel extends JPanel implements AutoCloseable {
         EdtDispatcher.requireEventDispatchThread();
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
+        this.launchScriptExportInteraction = Objects.requireNonNull(
+                launchScriptExportInteraction,
+                "launchScriptExportInteraction");
         taskProgressHost = new TaskProgressHostPanel(
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
                 animator,
@@ -201,6 +239,7 @@ public final class HomePanel extends JPanel implements AutoCloseable {
             if (!closed.compareAndSet(false, true)) {
                 return;
             }
+            launchScriptExportRevision++;
         }
         @Nullable Throwable closingFailure = null;
         closingFailure = attemptCleanup(closingFailure, modelSubscription::unsubscribe);
@@ -237,7 +276,7 @@ public final class HomePanel extends JPanel implements AutoCloseable {
 
         JPanel actionBand = new JPanel(new MigLayout(
                 "insets 0, fill",
-                "[grow,fill]16[180!]16[260!]",
+                "[grow,fill]16[grow,fill]16[260!]",
                 "[64!]"));
         actionBand.setOpaque(false);
         actionBand.setName("homeActionBand");
@@ -246,11 +285,21 @@ public final class HomePanel extends JPanel implements AutoCloseable {
         addInstanceButton.setName("homeAddInstance");
         addInstanceButton.setText(strings.addInstanceAction());
         addInstanceButton.addActionListener(event -> model.addInstance());
+        exportLaunchScriptButton.setName("homeExportLaunchScript");
+        exportLaunchScriptButton.setText(strings.exportLaunchScriptAction());
+        exportLaunchScriptButton.addActionListener(event -> exportLaunchScript());
         backToSelectionsButton.setName("homeBackToSelections");
         backToSelectionsButton.setText(strings.backToSelectionsAction());
         backToSelectionsButton.addActionListener(event -> showSelectionView());
         secondaryActionCards.setOpaque(false);
-        secondaryActionCards.add(addInstanceButton, SELECTION_VIEW);
+        JPanel selectionActions = new JPanel(new MigLayout(
+                "insets 0, fill, gap 8",
+                "[180!][180!]",
+                "[40!]"));
+        selectionActions.setOpaque(false);
+        selectionActions.add(addInstanceButton, "grow");
+        selectionActions.add(exportLaunchScriptButton, "grow");
+        secondaryActionCards.add(selectionActions, SELECTION_VIEW);
         secondaryActionCards.add(backToSelectionsButton, TASK_VIEW);
         launchButton.setName("homeLaunch");
         launchButton.putClientProperty("JButton.buttonType", "roundRect");
@@ -309,11 +358,64 @@ public final class HomePanel extends JPanel implements AutoCloseable {
         accountButton.setEnabled(snapshot.selectionCommandsEnabled());
         instanceButton.setEnabled(snapshot.selectionCommandsEnabled());
         addInstanceButton.setEnabled(snapshot.selectionCommandsEnabled());
+        exportLaunchScriptButton.setEnabled(snapshot.launchEnabled());
         statusLabel.setText(snapshot.statusText());
         statusLabel.setToolTipText(snapshot.statusText());
         launchButton.setText(snapshot.launching() ? strings.launchingAction() : strings.launchAction());
         launchButton.setEnabled(snapshot.launchEnabled());
         updateTaskActions();
+    }
+
+    /// Opens the native save dialog and starts one explicit script export for the current ready selection.
+    private void exportLaunchScript() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable HomeSnapshot snapshot = displayedSnapshot;
+        if (closed.get() || snapshot == null || !snapshot.launchEnabled()) {
+            return;
+        }
+        Optional<Path> destination = launchScriptExportInteraction.chooseDestination(this, snapshot.instanceName());
+        if (destination.isEmpty()) {
+            return;
+        }
+
+        final long exportRevision = ++launchScriptExportRevision;
+        final CompletionStage<Path> completion;
+        try {
+            completion = Objects.requireNonNull(
+                    model.exportLaunchScript(destination.orElseThrow()),
+                    "home model returned null launch-script export stage");
+        } catch (RuntimeException | Error failure) {
+            launchScriptExportCompleted(exportRevision, null, failure);
+            return;
+        }
+        completion.whenComplete((@Nullable Path scriptFile, @Nullable Throwable failure) ->
+                SwingUiDispatcher.INSTANCE.dispatchOrRun(
+                        () -> launchScriptExportCompleted(exportRevision, scriptFile, failure)));
+    }
+
+    /// Presents one script-export terminal outcome only while it belongs to the latest open page command.
+    ///
+    /// @param exportRevision command identity captured before the export began
+    /// @param scriptFile completed local script path, or null when the export did not return one
+    /// @param failure terminal export failure, or null when script generation succeeded
+    private void launchScriptExportCompleted(
+            long exportRevision,
+            @Nullable Path scriptFile,
+            @Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        synchronized (publicationLock) {
+            if (closed.get() || exportRevision != launchScriptExportRevision) {
+                return;
+            }
+            if (failure == null && scriptFile != null) {
+                launchScriptExportInteraction.exportSucceeded(this, scriptFile);
+                return;
+            }
+            Throwable terminalFailure = failure == null
+                    ? new IllegalStateException("Launch-script export completed without a script path")
+                    : failure;
+            launchScriptExportInteraction.exportFailed(this, terminalFailure);
+        }
     }
 
     /// Replaces the task host only when the launch-session identity changes.

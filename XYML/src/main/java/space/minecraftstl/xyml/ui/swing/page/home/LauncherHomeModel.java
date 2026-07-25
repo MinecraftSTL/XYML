@@ -28,8 +28,11 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
 import space.minecraftstl.xyml.util.Lang;
 
+import java.nio.file.Path;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /// Maps launcher selections and one launch session to toolkit-neutral home presentation state.
@@ -62,6 +65,12 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
 
     /// Session-producing launch command invoked with a captured immutable request.
     private final HomeLaunchCommand launchCommand;
+
+    /// Background launch-script export command invoked with a captured immutable request.
+    private final HomeLaunchScriptExportCommand launchScriptExportCommand;
+
+    /// Whether a script export has captured the current selection and has not reached a terminal outcome.
+    private boolean launchScriptExportPending;
 
     /// Home-state listeners isolated per registration from runtime failures.
     private final CopyOnWriteArrayList<IsolatedListenerSlot<HomeSnapshot>> homeListeners =
@@ -102,6 +111,41 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
     /// @param selectInstanceCommand instance navigation command
     /// @param addInstanceCommand add-instance workflow command
     /// @param launchCommand command creating a session from captured stable identifiers
+    /// @param launchScriptExportCommand command writing a script from captured stable identifiers
+    public LauncherHomeModel(
+            HomeSelectionStore selectionStore,
+            HomeStatusStrings statusStrings,
+            Runnable selectAccountCommand,
+            Runnable selectInstanceCommand,
+            Runnable addInstanceCommand,
+            HomeLaunchCommand launchCommand,
+            HomeLaunchScriptExportCommand launchScriptExportCommand) {
+        this.selectionStore = Objects.requireNonNull(selectionStore, "selectionStore");
+        this.statusStrings = Objects.requireNonNull(statusStrings, "statusStrings");
+        this.selectAccountCommand = Objects.requireNonNull(selectAccountCommand, "selectAccountCommand");
+        this.selectInstanceCommand = Objects.requireNonNull(selectInstanceCommand, "selectInstanceCommand");
+        this.addInstanceCommand = Objects.requireNonNull(addInstanceCommand, "addInstanceCommand");
+        this.launchCommand = Objects.requireNonNull(launchCommand, "launchCommand");
+        this.launchScriptExportCommand = Objects.requireNonNull(
+                launchScriptExportCommand,
+                "launchScriptExportCommand");
+        currentSelection = Objects.requireNonNull(selectionStore.snapshot(), "selectionStore snapshot");
+        currentSnapshot = map(currentSelection);
+        selectionSubscription = selectionStore.subscribe(this::selectionChanged);
+        reconcileSelectionStore();
+    }
+
+    /// Creates a launcher home model without a script-export workflow.
+    ///
+    /// Production composition supplies the explicit export command. This compatibility overload keeps focused callers
+    /// source-compatible while reporting a deterministic unavailable result if they invoke the new action.
+    ///
+    /// @param selectionStore account and instance state store
+    /// @param statusStrings localized readiness text
+    /// @param selectAccountCommand account navigation command
+    /// @param selectInstanceCommand instance navigation command
+    /// @param addInstanceCommand add-instance workflow command
+    /// @param launchCommand command creating a session from captured stable identifiers
     public LauncherHomeModel(
             HomeSelectionStore selectionStore,
             HomeStatusStrings statusStrings,
@@ -109,16 +153,14 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
             Runnable selectInstanceCommand,
             Runnable addInstanceCommand,
             HomeLaunchCommand launchCommand) {
-        this.selectionStore = Objects.requireNonNull(selectionStore, "selectionStore");
-        this.statusStrings = Objects.requireNonNull(statusStrings, "statusStrings");
-        this.selectAccountCommand = Objects.requireNonNull(selectAccountCommand, "selectAccountCommand");
-        this.selectInstanceCommand = Objects.requireNonNull(selectInstanceCommand, "selectInstanceCommand");
-        this.addInstanceCommand = Objects.requireNonNull(addInstanceCommand, "addInstanceCommand");
-        this.launchCommand = Objects.requireNonNull(launchCommand, "launchCommand");
-        currentSelection = Objects.requireNonNull(selectionStore.snapshot(), "selectionStore snapshot");
-        currentSnapshot = map(currentSelection);
-        selectionSubscription = selectionStore.subscribe(this::selectionChanged);
-        reconcileSelectionStore();
+        this(
+                selectionStore,
+                statusStrings,
+                selectAccountCommand,
+                selectInstanceCommand,
+                addInstanceCommand,
+                launchCommand,
+                HomeLaunchScriptExportCommand.unavailable());
     }
 
     /// Returns the latest mapped home state.
@@ -174,7 +216,7 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
         @Nullable SnapshotTransition startingTransition;
         synchronized (stateLock) {
             requireOpen();
-            if (!currentSnapshot.launchEnabled() || launchInvocationPending) {
+            if (!currentSnapshot.launchEnabled() || launchInvocationPending || launchScriptExportPending) {
                 return;
             }
             launchInvocationPending = true;
@@ -204,6 +246,52 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
         installLaunchSession(session);
     }
 
+    /// Captures stable selection IDs and delegates standalone script generation without changing launch-session state.
+    ///
+    /// The pending marker owns the same readiness gate as ordinary launch preparation. It prevents both another
+    /// script export and a game launch from racing account authentication or dependency resolution for this selection.
+    ///
+    /// @param scriptFile local destination selected by the native Swing interaction
+    /// @return completion stage yielding the exact written script path
+    @Override
+    public CompletionStage<Path> exportLaunchScript(Path scriptFile) {
+        Path destination = Objects.requireNonNull(scriptFile, "scriptFile");
+        LaunchRequest request;
+        @Nullable SnapshotTransition startingTransition;
+        synchronized (stateLock) {
+            requireOpen();
+            if (!currentSnapshot.launchEnabled() || launchInvocationPending || launchScriptExportPending) {
+                return CompletableFuture.failedFuture(
+                        new IllegalStateException("A launch-ready account and instance are required"));
+            }
+            launchScriptExportPending = true;
+            request = new LaunchRequest(
+                    currentSelection.accountId(),
+                    currentSelection.gameDirectoryId(),
+                    currentSelection.instanceId());
+            startingTransition = replaceSnapshotLocked(map(currentSelection));
+        }
+
+        try {
+            publishTransition(startingTransition);
+        } catch (RuntimeException | Error publicationFailure) {
+            @Nullable SnapshotTransition rollbackTransition = rollbackLaunchScriptExport();
+            throw propagate(combineWithPublication(publicationFailure, rollbackTransition));
+        }
+
+        final CompletionStage<Path> completion;
+        try {
+            completion = Objects.requireNonNull(
+                    launchScriptExportCommand.export(request, destination),
+                    "launch-script export command returned null stage");
+        } catch (RuntimeException | Error commandFailure) {
+            @Nullable SnapshotTransition rollbackTransition = rollbackLaunchScriptExport();
+            return CompletableFuture.failedFuture(combineWithPublication(commandFailure, rollbackTransition));
+        }
+        completion.whenComplete((@Nullable Path ignored, @Nullable Throwable failure) -> completeLaunchScriptExport());
+        return completion;
+    }
+
     /// Releases selection and session-status subscriptions, then cancels preparation owned by the current session.
     @Override
     public void close() {
@@ -215,6 +303,7 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
             }
             closed = true;
             launchInvocationPending = false;
+            launchScriptExportPending = false;
             statusSubscription = launchStatusSubscription;
             launchStatusSubscription = null;
             session = currentLaunchSession;
@@ -240,7 +329,7 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
     private void runSelectionCommand(Runnable command) {
         synchronized (stateLock) {
             requireOpen();
-            if (!currentSnapshot.selectionCommandsEnabled() || launchInvocationPending) {
+            if (!currentSnapshot.selectionCommandsEnabled() || launchInvocationPending || launchScriptExportPending) {
                 return;
             }
         }
@@ -373,6 +462,25 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
         }
     }
 
+    /// Clears the script-export marker after synchronous command failure and restores normal readiness.
+    ///
+    /// @return restored snapshot transition, or null after closure or when no script export was pending
+    private @Nullable SnapshotTransition rollbackLaunchScriptExport() {
+        synchronized (stateLock) {
+            if (!launchScriptExportPending) {
+                return null;
+            }
+            launchScriptExportPending = false;
+            return closed ? null : replaceSnapshotLocked(map(currentSelection));
+        }
+    }
+
+    /// Clears the script-export marker after either successful or failed asynchronous completion.
+    private void completeLaunchScriptExport() {
+        @Nullable SnapshotTransition transition = rollbackLaunchScriptExport();
+        publishTransition(transition);
+    }
+
     /// Publishes a rollback while retaining it as a secondary failure diagnostic.
     ///
     /// @param primaryFailure launch-command failure
@@ -431,11 +539,16 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
     private HomeSnapshot map(HomeSelectionState selection) {
         boolean hasAccount = !selection.accountId().isBlank();
         boolean hasInstance = !selection.gameDirectoryId().isBlank() && !selection.instanceId().isBlank();
-        boolean preparing = launchInvocationPending
+        boolean preparingLaunch = launchInvocationPending
                 || currentLaunchSession != null && currentLaunchSession.status() == LaunchStatus.PREPARING;
+        boolean preparing = preparingLaunch || launchScriptExportPending;
         String status = !hasAccount
                 ? statusStrings.missingAccountStatus()
-                : !hasInstance ? statusStrings.missingInstanceStatus() : statusStrings.readyStatus();
+                : !hasInstance
+                        ? statusStrings.missingInstanceStatus()
+                        : launchScriptExportPending
+                                ? statusStrings.exportingLaunchScriptStatus()
+                                : statusStrings.readyStatus();
         return new HomeSnapshot(
                 selection.accountName(),
                 selection.accountDetail(),
@@ -443,7 +556,7 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
                 selection.instanceDetail(),
                 status,
                 hasAccount && hasInstance && !preparing,
-                preparing,
+                preparingLaunch,
                 !preparing);
     }
 

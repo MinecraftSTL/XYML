@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.ui.swing.application.SwingApplicationCommands;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentation;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountRefreshCommand;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountReauthentication;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchScriptExportCommand;
 
 import java.util.Objects;
 import java.util.concurrent.Executor;
@@ -36,8 +37,8 @@ import java.util.function.Consumer;
 /// Owns the production launch service and exposes its workflows to the Swing composition.
 ///
 /// The caller retains ownership of the preparation executor and account-creation command. Closing this
-/// owner cancels launch preparation and credential recovery, releases pending visibility policies, and
-/// permanently rejects later launch commands through the owned service.
+/// owner cancels launch preparation, local script export, and credential recovery, releases pending visibility
+/// policies, and permanently rejects later launch commands through the owned service.
 @NotNullByDefault
 public final class LegacySwingApplicationCommandOwner implements AutoCloseable {
     /// Launch preparation service exclusively owned by this command owner.
@@ -45,6 +46,9 @@ public final class LegacySwingApplicationCommandOwner implements AutoCloseable {
 
     /// Factory lifecycle that owns pending process-visibility registrations.
     private final AutoCloseable visibilityPolicyOwner;
+
+    /// Service lifecycle that owns an active local launch-script export, if any.
+    private final AutoCloseable launchScriptExportOwner;
 
     /// Credential recovery service cancelled and released with the command runtime.
     private final AutoCloseable accountReauthenticationOwner;
@@ -73,6 +77,7 @@ public final class LegacySwingApplicationCommandOwner implements AutoCloseable {
         Objects.requireNonNull(addAccountCommand, "addAccountCommand");
         Objects.requireNonNull(accountReauthentication, "accountReauthentication");
         @Nullable ProductionLaunchBoundary boundary = null;
+        @Nullable LegacyLaunchScriptExportService launchScriptExportService = null;
         try {
             boundary = createProductionBoundary(
                     presentation,
@@ -83,13 +88,19 @@ public final class LegacySwingApplicationCommandOwner implements AutoCloseable {
                     accountReauthentication);
             gameLaunchService = boundary.gameLaunchService();
             visibilityPolicyOwner = boundary.taskFactory();
+            launchScriptExportService = new LegacyLaunchScriptExportService(
+                    boundary.taskFactory(),
+                    preparationExecutor);
+            launchScriptExportOwner = launchScriptExportService;
             accountReauthenticationOwner = accountReauthentication;
             commands = createCommands(
                     gameLaunchService,
                     addAccountCommand,
                     AccountRefreshCommand.from(accountReauthentication),
-                    boundary.taskFactory()::observeCompletion);
+                    boundary.taskFactory()::observeCompletion,
+                    launchScriptExportService::export);
         } catch (RuntimeException | Error failure) {
+            closeAfterConstructionFailure(launchScriptExportService, failure);
             closeBoundaryAfterConstructionFailure(boundary, failure);
             closeAfterConstructionFailure(accountReauthentication, failure);
             throw failure;
@@ -121,6 +132,7 @@ public final class LegacySwingApplicationCommandOwner implements AutoCloseable {
             AutoCloseable accountReauthenticationOwner) {
         this.gameLaunchService = Objects.requireNonNull(gameLaunchService, "gameLaunchService");
         this.visibilityPolicyOwner = Objects.requireNonNull(visibilityPolicyOwner, "visibilityPolicyOwner");
+        this.launchScriptExportOwner = () -> { };
         this.accountReauthenticationOwner = Objects.requireNonNull(
                 accountReauthenticationOwner,
                 "accountReauthenticationOwner");
@@ -128,7 +140,8 @@ public final class LegacySwingApplicationCommandOwner implements AutoCloseable {
                 this.gameLaunchService,
                 addAccountCommand,
                 AccountRefreshCommand.unavailable(),
-                completionObserver);
+                completionObserver,
+                HomeLaunchScriptExportCommand.unavailable());
     }
 
     /// Returns the stable commands supplied to the Swing composition.
@@ -144,9 +157,18 @@ public final class LegacySwingApplicationCommandOwner implements AutoCloseable {
         if (closed.compareAndSet(false, true)) {
             @Nullable Throwable failure = null;
             try {
+                launchScriptExportOwner.close();
+            } catch (Throwable exportFailure) {
+                failure = exportFailure;
+            }
+            try {
                 gameLaunchService.close();
             } catch (Throwable serviceFailure) {
-                failure = serviceFailure;
+                if (failure == null) {
+                    failure = serviceFailure;
+                } else if (failure != serviceFailure) {
+                    failure.addSuppressed(serviceFailure);
+                }
             }
             try {
                 visibilityPolicyOwner.close();
@@ -216,15 +238,18 @@ public final class LegacySwingApplicationCommandOwner implements AutoCloseable {
     /// @param addAccountCommand externally owned account-creation command
     /// @param refreshAccountCommand caller-owned account refresh command
     /// @param completionObserver observer attached to every exact returned launch session
+    /// @param launchScriptExportCommand local script-export command sharing the legacy launch preparation chain
     /// @return stable Swing command boundary
     private static SwingApplicationCommands createCommands(
             GameLaunchService gameLaunchService,
             Runnable addAccountCommand,
             AccountRefreshCommand refreshAccountCommand,
-            Consumer<LaunchSession> completionObserver) {
+            Consumer<LaunchSession> completionObserver,
+            HomeLaunchScriptExportCommand launchScriptExportCommand) {
         Objects.requireNonNull(gameLaunchService, "gameLaunchService");
         Objects.requireNonNull(refreshAccountCommand, "refreshAccountCommand");
         Objects.requireNonNull(completionObserver, "completionObserver");
+        Objects.requireNonNull(launchScriptExportCommand, "launchScriptExportCommand");
         return new SwingApplicationCommands(
                 Objects.requireNonNull(addAccountCommand, "addAccountCommand"),
                 refreshAccountCommand,
@@ -232,7 +257,8 @@ public final class LegacySwingApplicationCommandOwner implements AutoCloseable {
                     LaunchSession session = gameLaunchService.launch(request);
                     completionObserver.accept(session);
                     return session;
-                });
+                },
+                launchScriptExportCommand);
     }
 
     /// Closes a fully created production boundary after later owner construction fails.

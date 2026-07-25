@@ -37,6 +37,7 @@ import space.minecraftstl.xyml.ui.swing.page.accounts.AccountReauthentication;
 import space.minecraftstl.xyml.util.platform.ManagedProcess;
 
 import javax.swing.SwingUtilities;
+import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -44,6 +45,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -64,6 +66,9 @@ public final class LegacyLauncherLaunchTaskFactory implements LaunchTaskFactory,
 
     /// Swing-confined builder that resolves the exact request and returns an unstarted task.
     private final Function<LaunchRequest, Task<ManagedProcess>> launchTaskBuilder;
+
+    /// Swing-confined builder that resolves an exact request and returns an unstarted script-export task.
+    private final BiFunction<LaunchRequest, Path, Task<Path>> launchScriptTaskBuilder;
 
     /// Runtime visibility actions applied only after a launch session commits process creation.
     private final LaunchVisibilityActions visibilityActions;
@@ -93,6 +98,11 @@ public final class LegacyLauncherLaunchTaskFactory implements LaunchTaskFactory,
                 this::registerVisibility,
                 launchInteraction,
                 accountReauthentication);
+        this.launchScriptTaskBuilder = (request, scriptFile) -> createProductionLaunchScriptTask(
+                request,
+                scriptFile,
+                launchInteraction,
+                accountReauthentication);
     }
 
     /// Creates an adapter around explicit deterministic collaborators for focused tests.
@@ -117,8 +127,28 @@ public final class LegacyLauncherLaunchTaskFactory implements LaunchTaskFactory,
             Consumer<Runnable> legacyDispatcher,
             Function<LaunchRequest, Task<ManagedProcess>> launchTaskBuilder,
             LaunchVisibilityActions visibilityActions) {
+        this(
+                legacyDispatcher,
+                launchTaskBuilder,
+                (request, scriptFile) -> Task.<Path>fromCompletableFuture(CompletableFuture.failedFuture(
+                        new UnsupportedOperationException("Launch-script export is unavailable"))),
+                visibilityActions);
+    }
+
+    /// Creates an adapter around deterministic launch and script task builders for focused tests.
+    ///
+    /// @param legacyDispatcher synchronous legacy-thread dispatcher
+    /// @param launchTaskBuilder legacy-thread game-launch task builder
+    /// @param launchScriptTaskBuilder legacy-thread script-export task builder
+    /// @param visibilityActions runtime actions consumed after successful process creation
+    LegacyLauncherLaunchTaskFactory(
+            Consumer<Runnable> legacyDispatcher,
+            Function<LaunchRequest, Task<ManagedProcess>> launchTaskBuilder,
+            BiFunction<LaunchRequest, Path, Task<Path>> launchScriptTaskBuilder,
+            LaunchVisibilityActions visibilityActions) {
         this.legacyDispatcher = Objects.requireNonNull(legacyDispatcher, "legacyDispatcher");
         this.launchTaskBuilder = Objects.requireNonNull(launchTaskBuilder, "launchTaskBuilder");
+        this.launchScriptTaskBuilder = Objects.requireNonNull(launchScriptTaskBuilder, "launchScriptTaskBuilder");
         this.visibilityActions = Objects.requireNonNull(visibilityActions, "visibilityActions");
     }
 
@@ -140,6 +170,29 @@ public final class LegacyLauncherLaunchTaskFactory implements LaunchTaskFactory,
                 launchTaskBuilder.apply(request),
                 "launchTaskBuilder returned null")));
         return Objects.requireNonNull(result.get(), "legacy dispatcher did not run launch task builder");
+    }
+
+    /// Resolves and builds one exact unstarted script-export task away from the Swing EDT.
+    ///
+    /// Legacy metadata maintenance may execute synchronously before this method returns. The returned task preserves
+    /// ordinary launcher authentication and dependency preparation, but ends by writing a local script instead of
+    /// creating a game process.
+    ///
+    /// @param request immutable stable launch identifiers
+    /// @param scriptFile local script target selected by the user
+    /// @return unstarted task that completes with the exact generated script path
+    Task<Path> createLaunchScriptTask(LaunchRequest request, Path scriptFile) {
+        LaunchRequest capturedRequest = Objects.requireNonNull(request, "request");
+        Path destination = Objects.requireNonNull(scriptFile, "scriptFile").toAbsolutePath().normalize();
+        if (SwingUtilities.isEventDispatchThread()) {
+            throw new IllegalStateException("Legacy script task creation must not block the Swing EDT");
+        }
+
+        AtomicReference<@Nullable Task<Path>> result = new AtomicReference<>();
+        legacyDispatcher.accept(() -> result.set(Objects.requireNonNull(
+                launchScriptTaskBuilder.apply(capturedRequest, destination),
+                "launchScriptTaskBuilder returned null")));
+        return Objects.requireNonNull(result.get(), "legacy dispatcher did not run launch-script task builder");
     }
 
     /// Observes a session's successful process completion and then consumes its registered policy.
@@ -197,6 +250,40 @@ public final class LegacyLauncherLaunchTaskFactory implements LaunchTaskFactory,
                 Schedulers.io());
     }
 
+    /// Resolves stable IDs on the Swing EDT and builds a real local script-export task.
+    ///
+    /// The resulting task keeps normal account login, native preparation, and dependency-completion behavior. It
+    /// changes only the final action from game process creation to local script generation.
+    ///
+    /// @param request exact captured launch request
+    /// @param scriptFile local script target selected by the user
+    /// @param launchInteraction native production launch-decision boundary
+    /// @param accountReauthentication stable-ID credential recovery boundary
+    /// @return unstarted real script-export task
+    private static Task<Path> createProductionLaunchScriptTask(
+            LaunchRequest request,
+            Path scriptFile,
+            LaunchInteraction launchInteraction,
+            AccountReauthentication accountReauthentication) {
+        LegacyStateDispatcher.requireEventThread();
+        LaunchRequest capturedRequest = Objects.requireNonNull(request, "request");
+        Path destination = Objects.requireNonNull(scriptFile, "scriptFile").toAbsolutePath().normalize();
+        Objects.requireNonNull(launchInteraction, "launchInteraction");
+        Objects.requireNonNull(accountReauthentication, "accountReauthentication");
+
+        GameDirectoryID gameDirectoryId = GameDirectoryID.parse(capturedRequest.gameDirectoryId());
+        XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
+        return afterRepositoryReady(
+                repository.isLoaded(),
+                repository::refreshVersionsAsync,
+                () -> createLoadedProductionLaunchScriptTask(
+                        capturedRequest,
+                        destination,
+                        launchInteraction,
+                        accountReauthentication),
+                Schedulers.io());
+    }
+
     /// Builds the exact legacy launch task after the requested repository is known to be loaded.
     ///
     /// Deferred calls synchronously cross back to the Swing EDT because account and settings objects remain
@@ -245,6 +332,48 @@ public final class LegacyLauncherLaunchTaskFactory implements LaunchTaskFactory,
             }));
         });
         return Objects.requireNonNull(result.get(), "legacy dispatcher did not build launch task");
+    }
+
+    /// Resolves the exact account and instance again after repository readiness, then creates the export task.
+    ///
+    /// Re-resolution deliberately uses only the immutable request. It never reads an active Swing selection, so a
+    /// later account or instance change cannot alter the script that the user explicitly requested.
+    ///
+    /// @param request exact captured launch request
+    /// @param scriptFile normalized local script target
+    /// @param launchInteraction native production launch-decision boundary
+    /// @param accountReauthentication stable-ID credential recovery boundary
+    /// @return unstarted launcher task writing the selected script
+    private static Task<Path> createLoadedProductionLaunchScriptTask(
+            LaunchRequest request,
+            Path scriptFile,
+            LaunchInteraction launchInteraction,
+            AccountReauthentication accountReauthentication) {
+        LaunchRequest capturedRequest = Objects.requireNonNull(request, "request");
+        Path destination = Objects.requireNonNull(scriptFile, "scriptFile").toAbsolutePath().normalize();
+        AtomicReference<@Nullable Task<Path>> result = new AtomicReference<>();
+        LegacyStateDispatcher.executeAndWait(() -> {
+            AccountID accountId = AccountID.parse(capturedRequest.accountId());
+            Account account = Accounts.getAccounts().stream()
+                    .filter(candidate -> candidate.getAccountID().equals(accountId))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("Unknown account: " + accountId));
+            GameDirectoryID gameDirectoryId = GameDirectoryID.parse(capturedRequest.gameDirectoryId());
+            XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
+            if (!repository.isLoaded() || !repository.hasVersion(capturedRequest.instanceId())) {
+                throw new IllegalArgumentException(
+                        "Unknown instance " + capturedRequest.instanceId() + " in " + gameDirectoryId);
+            }
+
+            LauncherHelper helper = new LauncherHelper(
+                    repository,
+                    account,
+                    capturedRequest.instanceId(),
+                    launchInteraction,
+                    accountReauthentication);
+            result.set(helper.createLaunchScriptTask(destination));
+        });
+        return Objects.requireNonNull(result.get(), "legacy dispatcher did not build launch-script task");
     }
 
     /// Registers one original policy without running runtime actions inside the root launch task.
@@ -397,11 +526,12 @@ public final class LegacyLauncherLaunchTaskFactory implements LaunchTaskFactory,
     /// @param refreshTaskSupplier supplier for the exact repository refresh task
     /// @param loadedTaskSupplier task builder that validates the exact instance after readiness
     /// @param continuationExecutor executor used only to obtain the post-refresh task
+    /// @param <T> result type preserved by the loaded task
     /// @return unstarted exact task, preceded by a refresh when required
-    static Task<ManagedProcess> afterRepositoryReady(
+    static <T> Task<T> afterRepositoryReady(
             boolean repositoryLoaded,
             Supplier<Task<?>> refreshTaskSupplier,
-            Supplier<Task<ManagedProcess>> loadedTaskSupplier,
+            Supplier<Task<T>> loadedTaskSupplier,
             Executor continuationExecutor) {
         Objects.requireNonNull(refreshTaskSupplier, "refreshTaskSupplier");
         Objects.requireNonNull(loadedTaskSupplier, "loadedTaskSupplier");

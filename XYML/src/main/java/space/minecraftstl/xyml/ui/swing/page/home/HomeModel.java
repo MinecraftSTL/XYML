@@ -23,7 +23,11 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
 
+import java.nio.file.Path;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 /// Supplies launcher-home state and commands without exposing JavaFX or Swing types.
 @NotNullByDefault
@@ -61,4 +65,16 @@ public interface HomeModel {
 
     /// Starts the selected instance with the selected account.
     void launch();
+
+    /// Exports a standalone script for the selected account and instance.
+    ///
+    /// The caller must provide a local destination chosen through a native UI boundary. The returned stage completes
+    /// on an implementation-owned worker after launch preparation and script writing finish.
+    ///
+    /// @param scriptFile local destination script path
+    /// @return completion stage yielding the exact generated script path
+    default CompletionStage<Path> exportLaunchScript(Path scriptFile) {
+        Objects.requireNonNull(scriptFile, "scriptFile");
+        return CompletableFuture.failedFuture(new IllegalStateException("Launch-script export is unavailable"));
+    }
 }

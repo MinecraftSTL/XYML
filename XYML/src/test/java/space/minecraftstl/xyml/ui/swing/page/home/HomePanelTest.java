@@ -43,6 +43,7 @@ import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.Objects;
@@ -96,6 +97,30 @@ public final class HomePanelTest {
                     () -> assertEquals(1, model.instanceSelections.get()),
                     () -> assertEquals(1, model.instanceAdditions.get()),
                     () -> assertEquals(1, model.launches.get()));
+            panel.close();
+        });
+    }
+
+    /// The explicit home action delegates a selected local path and reports its terminal success without a dialog.
+    @Test
+    public void exportsLaunchScriptThroughInjectedLocalInteraction() {
+        FakeHomeModel model = new FakeHomeModel(readySnapshot());
+        Path target = Path.of("build", "home-panel-launch-script.bat").toAbsolutePath().normalize();
+        RecordingLaunchScriptExportInteraction interaction = new RecordingLaunchScriptExportInteraction(target);
+        HomePanel panel = createPanel(model, interaction);
+
+        onEventDispatchThread(() -> findButton(panel, "homeExportLaunchScript").doClick());
+        assertAll(
+                () -> assertEquals(1, interaction.chooserCalls.get()),
+                () -> assertEquals(1, model.launchScriptExports.get()),
+                () -> assertEquals(target, model.launchScriptDestination.get()));
+
+        model.completeLaunchScriptExport(target);
+        EdtDispatcher.executeAndWait(() -> { });
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertEquals(target, interaction.exportedScript.get()),
+                    () -> assertEquals(0, interaction.failureCalls.get()));
             panel.close();
         });
     }
@@ -443,6 +468,21 @@ public final class HomePanelTest {
                 Duration.ZERO));
     }
 
+    /// Creates the home panel with a deterministic local script-export interaction.
+    ///
+    /// @param model fake home model
+    /// @param interaction local chooser and completion-dialog recorder
+    /// @return initialized home panel
+    private static HomePanel createPanel(HomeModel model, LaunchScriptExportInteraction interaction) {
+        return onEventDispatchThread(() -> new HomePanel(
+                model,
+                STRINGS,
+                TASK_STRINGS,
+                null,
+                Duration.ZERO,
+                interaction));
+    }
+
     /// Creates the normal selected-account and selected-instance launch state.
     ///
     /// @return ready home snapshot
@@ -628,6 +668,15 @@ public final class HomePanelTest {
         /// Launch command count.
         private final AtomicInteger launches = new AtomicInteger();
 
+        /// Launch-script export command count.
+        private final AtomicInteger launchScriptExports = new AtomicInteger();
+
+        /// Latest script target delegated through the fake model, or null before export.
+        private final AtomicReference<@Nullable Path> launchScriptDestination = new AtomicReference<>();
+
+        /// Completion retained until the test explicitly finishes one launch-script export.
+        private final CompletableFuture<Path> launchScriptExportCompletion = new CompletableFuture<>();
+
         /// Creates a fake model with initial state.
         ///
         /// @param initialSnapshot initial home state
@@ -702,6 +751,24 @@ public final class HomePanelTest {
             launches.incrementAndGet();
         }
 
+        /// Records one selected script target and returns its test-controlled completion stage.
+        ///
+        /// @param scriptFile selected local script target
+        /// @return terminal stage controlled by the focused test
+        @Override
+        public CompletionStage<Path> exportLaunchScript(Path scriptFile) {
+            launchScriptExports.incrementAndGet();
+            launchScriptDestination.set(Objects.requireNonNull(scriptFile, "scriptFile"));
+            return launchScriptExportCompletion;
+        }
+
+        /// Completes the currently retained script export with the supplied local result.
+        ///
+        /// @param scriptFile generated local script target
+        private void completeLaunchScriptExport(Path scriptFile) {
+            launchScriptExportCompletion.complete(Objects.requireNonNull(scriptFile, "scriptFile"));
+        }
+
         /// Publishes one replacement snapshot on the calling thread.
         ///
         /// @param replacement new home state
@@ -757,6 +824,63 @@ public final class HomePanelTest {
         private void blockNextSnapshotRead(CountDownLatch entered, CountDownLatch release) {
             nextSnapshotRelease.set(release);
             nextSnapshotEntered.set(entered);
+        }
+    }
+
+    /// Records file selection and terminal feedback without opening any native test dialog.
+    @NotNullByDefault
+    private static final class RecordingLaunchScriptExportInteraction implements LaunchScriptExportInteraction {
+        /// Deterministic selected output target.
+        private final Path destination;
+
+        /// Number of chooser invocations.
+        private final AtomicInteger chooserCalls = new AtomicInteger();
+
+        /// Exact successful script target, or null before success.
+        private final AtomicReference<@Nullable Path> exportedScript = new AtomicReference<>();
+
+        /// Number of reported terminal failures.
+        private final AtomicInteger failureCalls = new AtomicInteger();
+
+        /// Creates a deterministic local output interaction.
+        ///
+        /// @param destination local target returned by every chooser invocation
+        private RecordingLaunchScriptExportInteraction(Path destination) {
+            this.destination = Objects.requireNonNull(destination, "destination");
+        }
+
+        /// Returns the configured local target without constructing a native chooser.
+        ///
+        /// @param owner native dialog owner
+        /// @param instanceLabel selected instance label
+        /// @return configured local target
+        @Override
+        public Optional<Path> chooseDestination(Component owner, String instanceLabel) {
+            Objects.requireNonNull(owner, "owner");
+            Objects.requireNonNull(instanceLabel, "instanceLabel");
+            chooserCalls.incrementAndGet();
+            return Optional.of(destination);
+        }
+
+        /// Records a successful local script generation result.
+        ///
+        /// @param owner native dialog owner
+        /// @param scriptFile generated local script
+        @Override
+        public void exportSucceeded(Component owner, Path scriptFile) {
+            Objects.requireNonNull(owner, "owner");
+            exportedScript.set(Objects.requireNonNull(scriptFile, "scriptFile"));
+        }
+
+        /// Records one failed local script generation result.
+        ///
+        /// @param owner native dialog owner
+        /// @param failure terminal export failure
+        @Override
+        public void exportFailed(Component owner, Throwable failure) {
+            Objects.requireNonNull(owner, "owner");
+            Objects.requireNonNull(failure, "failure");
+            failureCalls.incrementAndGet();
         }
     }
 

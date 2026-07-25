@@ -34,8 +34,10 @@ import space.minecraftstl.xyml.util.platform.ManagedProcess;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.nio.file.Path;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -148,6 +150,60 @@ public final class LauncherHomeModelTest {
                 () -> assertEquals(1, instanceAdditions.get()),
                 () -> assertEquals(1, launches.get()));
         model.close();
+    }
+
+    /// Script export captures the same immutable selection as launch and gates later launch preparation until terminal.
+    @Test
+    public void exportsScriptWithoutRacingLaunchPreparation() {
+        FakeSelectionStore store = new FakeSelectionStore(new HomeSelectionState(
+                "account-a", "directory-a", "instance-a", "Alex", "microsoft", "1.21.1", "Games"));
+        HomeStatusStrings strings = new HomeStatusStrings(
+                "Ready", "Choose an account", "Choose an instance", "Exporting launch script");
+        AtomicReference<@Nullable LaunchRequest> exportedRequest = new AtomicReference<>();
+        AtomicReference<@Nullable Path> exportedPath = new AtomicReference<>();
+        AtomicInteger launchCalls = new AtomicInteger();
+        CompletableFuture<Path> exportCompletion = new CompletableFuture<>();
+        LauncherHomeModel model = new LauncherHomeModel(
+                store,
+                strings,
+                () -> { },
+                () -> { },
+                () -> { },
+                request -> {
+                    launchCalls.incrementAndGet();
+                    throw new AssertionError("launch must remain gated while script export is pending");
+                },
+                (request, scriptFile) -> {
+                    exportedRequest.set(request);
+                    exportedPath.set(scriptFile);
+                    return exportCompletion;
+                });
+        Path target = Path.of("build", "launcher-home-test.bat").toAbsolutePath().normalize();
+        try {
+            CompletionStage<Path> stage = model.exportLaunchScript(target);
+            HomeSnapshot exporting = model.snapshot();
+            model.launch();
+
+            assertAll(
+                    () -> assertEquals(
+                            new LaunchRequest("account-a", "directory-a", "instance-a"),
+                            exportedRequest.get()),
+                    () -> assertEquals(target, exportedPath.get()),
+                    () -> assertEquals("Exporting launch script", exporting.statusText()),
+                    () -> assertFalse(exporting.launching()),
+                    () -> assertFalse(exporting.launchEnabled()),
+                    () -> assertFalse(exporting.selectionCommandsEnabled()),
+                    () -> assertEquals(0, launchCalls.get()));
+
+            exportCompletion.complete(target);
+            assertEquals(target, stage.toCompletableFuture().join());
+            assertAll(
+                    () -> assertEquals("Ready", model.snapshot().statusText()),
+                    () -> assertTrue(model.snapshot().launchEnabled()),
+                    () -> assertTrue(model.snapshot().selectionCommandsEnabled()));
+        } finally {
+            model.close();
+        }
     }
 
     /// Launch captures all stable IDs together, gates concurrent commands, and restores readiness after cancellation.

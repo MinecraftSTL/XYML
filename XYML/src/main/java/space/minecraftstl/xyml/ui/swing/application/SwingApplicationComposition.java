@@ -443,7 +443,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         () -> navigateCommand.accept(ShellPageId.ACCOUNTS),
                         () -> navigateCommand.accept(ShellPageId.INSTANCES),
                         addInstanceCommand,
-                        commands.launchCommand()),
+                        commands.launchCommand(),
+                        commands.launchScriptExportCommand()),
                 () -> new InstanceManagementCoordinator((instanceId, returnCommand) ->
                         new DefaultInstanceManagementView(
                                 legacy.repository(),

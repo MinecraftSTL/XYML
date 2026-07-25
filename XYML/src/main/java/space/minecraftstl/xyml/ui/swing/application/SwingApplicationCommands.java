@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.application;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountRefreshCommand;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchCommand;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchScriptExportCommand;
 
 import java.util.Objects;
 
@@ -32,15 +33,34 @@ import java.util.Objects;
 /// @param addAccountCommand command that opens the supported add-account workflow
 /// @param refreshAccountCommand command that refreshes one account without transferring authentication data to UI
 /// @param launchCommand command that starts a session from captured stable selection identifiers
+/// @param launchScriptExportCommand command that writes a local script from captured stable selection identifiers
 @NotNullByDefault
 public record SwingApplicationCommands(
         Runnable addAccountCommand,
         AccountRefreshCommand refreshAccountCommand,
-        HomeLaunchCommand launchCommand) {
+        HomeLaunchCommand launchCommand,
+        HomeLaunchScriptExportCommand launchScriptExportCommand) {
+    /// Creates commands without a script-export workflow for source-compatible lifecycle fixtures.
+    ///
+    /// @param addAccountCommand command that opens the supported add-account workflow
+    /// @param refreshAccountCommand command that refreshes one account without transferring authentication data to UI
+    /// @param launchCommand command that starts a session from captured stable selection identifiers
+    public SwingApplicationCommands(
+            Runnable addAccountCommand,
+            AccountRefreshCommand refreshAccountCommand,
+            HomeLaunchCommand launchCommand) {
+        this(
+                addAccountCommand,
+                refreshAccountCommand,
+                launchCommand,
+                HomeLaunchScriptExportCommand.unavailable());
+    }
+
     /// Validates every startup-owned workflow boundary.
     public SwingApplicationCommands {
         Objects.requireNonNull(addAccountCommand, "addAccountCommand");
         Objects.requireNonNull(refreshAccountCommand, "refreshAccountCommand");
         Objects.requireNonNull(launchCommand, "launchCommand");
+        Objects.requireNonNull(launchScriptExportCommand, "launchScriptExportCommand");
     }
 }

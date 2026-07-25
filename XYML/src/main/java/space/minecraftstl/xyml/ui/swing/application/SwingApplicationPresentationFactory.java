@@ -138,6 +138,7 @@ public final class SwingApplicationPresentationFactory {
                 i18n("version"),
                 i18n("version.empty"),
                 i18n("install"),
+                i18n("version.launch_script"),
                 i18n("version.launch"),
                 i18n("swing.home.launching"),
                 i18n("swing.home.back_to_selections"));
@@ -150,7 +151,8 @@ public final class SwingApplicationPresentationFactory {
         return new HomeStatusStrings(
                 i18n("swing.home.status.ready"),
                 i18n("account.choose"),
-                i18n("version.empty"));
+                i18n("version.empty"),
+                i18n("version.launch_script"));
     }
 
     /// Creates localized installed-instance controls.

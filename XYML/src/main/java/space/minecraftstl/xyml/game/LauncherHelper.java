@@ -177,11 +177,30 @@ public final class LauncherHelper {
         return createGameLaunchTask();
     }
 
+    /// Builds a stopped task that writes a standalone script after the ordinary launch preparation succeeds.
+    ///
+    /// The task deliberately retains account authentication, dependency verification, native preparation, and
+    /// production interaction behavior from a normal launch. Only the final process-creation action changes to
+    /// [XYMLGameLauncher#makeLaunchScript(Path)], so exported scripts receive the same resolved launch options.
+    ///
+    /// @param scriptFile destination script path selected by the user
+    /// @return not-yet-started task that completes with the normalized written script path
+    public Task<Path> createLaunchScriptTask(Path scriptFile) {
+        Path destination = Objects.requireNonNull(scriptFile, "scriptFile").toAbsolutePath().normalize();
+        LOG.info("Creating launch script for game version: " + selectedVersion);
+        return applyLaunchProgressPolicy(
+                createLaunchPreparation(true).thenComposeAsync((@Nullable XYMLGameLauncher launcher) ->
+                        Task.supplyAsync(() -> {
+                            Objects.requireNonNull(launcher, "prepared launcher").makeLaunchScript(destination);
+                            return destination;
+                        })));
+    }
+
     /// Builds the production game-preparation task and decorates its process result for ownership tracking.
     ///
     /// @return stopped launch task that returns the created managed process
     private Task<ManagedProcess> createGameLaunchTask() {
-        Task<ManagedProcess> processTask = createLaunchPreparation()
+        Task<ManagedProcess> processTask = createLaunchPreparation(false)
                 .thenComposeAsync((@Nullable XYMLGameLauncher launcher) ->
                 Task.supplyAsync(Objects.requireNonNull(launcher, "prepared launcher")::launch));
         return applyLaunchProgressPolicy(decorateGameLaunchTask(processTask));
@@ -189,8 +208,9 @@ public final class LauncherHelper {
 
     /// Performs metadata normalization and builds the remaining chain through an unstarted game launcher.
     ///
+    /// @param makeLaunchScript whether the produced launcher will write a standalone script rather than start a game
     /// @return stopped task that creates the configured launcher
-    private Task<XYMLGameLauncher> createLaunchPreparation() {
+    private Task<XYMLGameLauncher> createLaunchPreparation(boolean makeLaunchScript) {
         // https://github.com/HMCL-dev/HMCL/pull/4121
         PROCESSES.removeIf(it -> it.get() == null);
 
@@ -296,7 +316,7 @@ public final class LauncherHelper {
                             repository.getBaseDirectory(),
                             javaAgents,
                             javaArguments,
-                            false);
+                            makeLaunchScript);
                     if (disableOfflineSkin) {
                         launchOptionsBuilder.setDaemon(false);
                     }
