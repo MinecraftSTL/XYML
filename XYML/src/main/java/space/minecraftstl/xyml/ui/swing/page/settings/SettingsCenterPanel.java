@@ -63,8 +63,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Renders an embeddable Swing settings center backed by [SettingsCenterStore].
 ///
-/// This panel owns the supplied [AppearanceSettingsPanel] and closes it with the general and network settings store.
-/// That single lifecycle boundary makes the settings center safe to cache as one shell page.
+/// This panel owns its embedded appearance, preset, directory, and Java management pages, and closes them with the
+/// general and network settings store. That single lifecycle boundary makes the settings center safe to cache as one
+/// shell page.
 @NotNullByDefault
 public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Add-on catalogue IDs exposed by the legacy launcher setting.
@@ -78,6 +79,12 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
 
     /// Local Java runtime page embedded and closed with this settings center.
     private final JavaManagementPanel javaManagementPanel;
+
+    /// Global game-launch settings preset page embedded and closed with this settings center.
+    private final GameSettingsPresetsPanel gameSettingsPresetsPanel;
+
+    /// Managed game-directory page embedded and closed with this settings center.
+    private final GameDirectoryManagementPanel gameDirectoryManagementPanel;
 
     /// Stable top-level navigation among functional settings pages.
     private final JTabbedPane tabs = new JTabbedPane();
@@ -185,6 +192,8 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         languageBox = new JComboBox<>(new DefaultComboBoxModel<>(
                 SupportedLocale.getSupportedLocales().toArray(SupportedLocale[]::new)));
         javaManagementPanel = new JavaManagementPanel(new JavaManagerRuntimeManagementService());
+        gameSettingsPresetsPanel = GameSettingsPresetsPanel.createForCurrentSettings();
+        gameDirectoryManagementPanel = GameDirectoryManagementPanel.createForCurrentDirectories();
 
         configureComponents();
         storeSubscription = store.subscribe(this::storeChanged);
@@ -217,6 +226,8 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 store.close();
                 appearancePanel.close();
                 javaManagementPanel.close();
+                gameSettingsPresetsPanel.close();
+                gameDirectoryManagementPanel.close();
                 setInteractiveControlsEnabled(false);
             }
         });
@@ -226,10 +237,13 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     private void configureComponents() {
         configureGeneralControls();
         configureDownloadAndProxyControls();
+        tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
 
         tabs.addTab(i18n("settings.launcher.general"), createScrollPane(createGeneralPage()));
         tabs.addTab(i18n("settings.launcher.download"), createScrollPane(createDownloadAndProxyPage()));
         tabs.addTab(i18n("settings.launcher.appearance"), createScrollPane(appearancePanel));
+        tabs.addTab(i18n("settings.type.global.preset.manage_all"), gameSettingsPresetsPanel);
+        tabs.addTab(i18n("game_directory.title"), gameDirectoryManagementPanel);
         tabs.addTab(i18n("java.management"), javaManagementPanel);
         tabs.addTab(i18n("help"), createScrollPane(createHelpPage()));
         tabs.addTab(i18n("contact"), createScrollPane(createFeedbackPage()));
