@@ -118,6 +118,9 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Secondary download-center categories retained beside the vanilla game-version workflow.
     private final DownloadCategoryPanel downloadCategoryPanel;
 
+    /// Explicitly searched remote CurseForge and Modrinth modpack catalog retained beside local imports.
+    private final RemoteModpackCatalogPanel remoteModpackCatalogPanel;
+
     /// Top-level tabs preserving the original game installer while exposing restored content categories.
     private final JTabbedPane downloadCenterTabs = new JTabbedPane();
 
@@ -300,6 +303,11 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 animator,
                 resolvedProgressAnimationDuration);
         downloadCategoryPanel = new DownloadCategoryPanel(
+                resolvedTaskProgressStrings,
+                animator,
+                resolvedProgressAnimationDuration);
+        remoteModpackCatalogPanel = new RemoteModpackCatalogPanel(
+                RemoteModpackCatalogStrings.launcherLocalized(),
                 resolvedTaskProgressStrings,
                 animator,
                 resolvedProgressAnimationDuration);
@@ -487,8 +495,10 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         gameVersionsPanel.add(workflowCards, "grow");
 
         downloadCenterTabs.setName("downloadCenterTabs");
+        downloadCenterTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         downloadCenterTabs.addTab(strings.pageTitle(), gameVersionsPanel);
         downloadCenterTabs.addTab(i18n("download.content"), downloadCategoryPanel);
+        downloadCenterTabs.addTab(i18n("modpack.download"), remoteModpackCatalogPanel);
         add(downloadCenterTabs, "grow");
 
         updateInstallAction();
@@ -956,6 +966,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             cleanupFailure = attemptCleanup(cleanupFailure, () -> backToCatalogButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> choiceList.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> choiceList.getList().setEnabled(false));
+            cleanupFailure = attemptCleanup(cleanupFailure, remoteModpackCatalogPanel::close);
             cleanupFailure = attemptCleanup(cleanupFailure, downloadCategoryPanel::close);
             cleanupFailure = attemptCleanup(cleanupFailure, taskProgressHost::close);
             cleanupFailure = attemptCleanup(cleanupFailure, choiceList::close);
