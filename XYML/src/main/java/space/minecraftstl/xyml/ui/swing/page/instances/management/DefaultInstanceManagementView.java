@@ -22,7 +22,12 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameRepository;
+import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.addonupdates.AddonUpdatesPanel;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.backups.WorldBackupsPanel;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementPanel;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogInteractions;
@@ -43,26 +48,47 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
+import javax.swing.event.ChangeListener;
 import java.awt.Font;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-/// Hosts clearly separated Mod, resource-pack, and schematic tools for one managed game instance.
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
+/// Hosts an instance overview alongside settings, add-on, world, backup, and schematic tools for one managed game instance.
 ///
-/// Both tabs are constructed on the EDT, while their filesystem work remains lazy and uses the supplied
+/// All tabs are constructed on the EDT, while their filesystem work remains lazy and uses the supplied
 /// executor. The view owns all child lifecycles and returns to the instance list through one shared toolbar.
 @NotNullByDefault
 public final class DefaultInstanceManagementView extends JPanel implements InstanceManagementView {
     /// Stable repository instance identifier represented by this view.
     private final String instanceId;
 
+    /// Overview and local file operations owned by the first management tab.
+    private final InstanceOverviewPanel overview;
+
+    /// Instance-specific launch settings when the repository exposes XYML settings persistence, or null otherwise.
+    private final @Nullable InstanceGameSettingsPanel gameSettings;
+
     /// Installed-Mod catalog owned by the Mods tab.
     private final ModCatalogPanel mods;
 
     /// Resource-pack catalog owned by the resource-pack tab.
     private final ResourcePackCatalogPanel resourcePacks;
+
+    /// Lazy world catalog owned by the Worlds tab.
+    private final WorldCatalogPanel worlds;
+
+    /// Lazy selected-world data-pack catalog.
+    private final DataPackManagementPanel dataPacks;
+
+    /// Lazy local world-backup management surface.
+    private final WorldBackupsPanel backups;
+
+    /// Explicit network-check page for installed Mod and resource-pack updates.
+    private final AddonUpdatesPanel addonUpdates;
 
     /// Schematic browser host owned by the schematic tab.
     private final SchematicInstanceManagementView schematics;
@@ -72,6 +98,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
 
     /// Stable tab container retaining each tool's independent lazy state.
     private final JTabbedPane tabs = new JTabbedPane();
+
+    /// Activates local-catalog sources only after users select their corresponding tab.
+    private final ChangeListener lazyTabListener = event -> activateSelectedLazyTab();
 
     /// Prevents repeated child and component cleanup.
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -133,10 +162,20 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         Objects.requireNonNull(resourcePackInteractions, "resourcePackInteractions");
         Objects.requireNonNull(returnCommand, "returnCommand");
 
+        @Nullable InstanceOverviewPanel createdOverview = null;
+        @Nullable InstanceGameSettingsPanel createdGameSettings = null;
         @Nullable ModCatalogPanel createdMods = null;
         @Nullable ResourcePackCatalogPanel createdResourcePacks = null;
+        @Nullable WorldCatalogPanel createdWorlds = null;
+        @Nullable DataPackManagementPanel createdDataPacks = null;
+        @Nullable WorldBackupsPanel createdBackups = null;
+        @Nullable AddonUpdatesPanel createdAddonUpdates = null;
         @Nullable SchematicInstanceManagementView createdSchematics = null;
         try {
+            createdOverview = new InstanceOverviewPanel(repository, this.instanceId, executor);
+            if (repository instanceof XYMLGameRepository xymlRepository) {
+                createdGameSettings = new InstanceGameSettingsPanel(xymlRepository, this.instanceId);
+            }
             createdMods = new ModCatalogPanel(
                     new DefaultModCatalogModel(
                             repository,
@@ -156,6 +195,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     resourcePackActionStrings,
                     resourcePackInteractions,
                     repository.getResourcePackDirectory(this.instanceId));
+            createdWorlds = new WorldCatalogPanel(repository, this.instanceId, executor);
+            createdDataPacks = new DataPackManagementPanel(repository, this.instanceId, executor);
+            createdBackups = new WorldBackupsPanel(repository, this.instanceId, executor);
+            createdAddonUpdates = new AddonUpdatesPanel(repository, this.instanceId, executor);
             createdSchematics = new SchematicInstanceManagementView(
                     this.instanceId,
                     schematicDirectoryResolver,
@@ -165,8 +208,14 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     schematicInteractions,
                     () -> { },
                     false);
+            overview = createdOverview;
+            gameSettings = createdGameSettings;
             mods = createdMods;
             resourcePacks = createdResourcePacks;
+            worlds = createdWorlds;
+            dataPacks = createdDataPacks;
+            backups = createdBackups;
+            addonUpdates = createdAddonUpdates;
             schematics = createdSchematics;
             configureComponents(
                     managementStrings,
@@ -179,11 +228,29 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             if (createdSchematics != null) {
                 cleanupFailure = attemptCleanup(cleanupFailure, createdSchematics::close);
             }
+            if (createdWorlds != null) {
+                cleanupFailure = attemptCleanup(cleanupFailure, createdWorlds::close);
+            }
+            if (createdAddonUpdates != null) {
+                cleanupFailure = attemptCleanup(cleanupFailure, createdAddonUpdates::close);
+            }
+            if (createdBackups != null) {
+                cleanupFailure = attemptCleanup(cleanupFailure, createdBackups::close);
+            }
+            if (createdDataPacks != null) {
+                cleanupFailure = attemptCleanup(cleanupFailure, createdDataPacks::close);
+            }
             if (createdResourcePacks != null) {
                 cleanupFailure = attemptCleanup(cleanupFailure, createdResourcePacks::close);
             }
             if (createdMods != null) {
                 cleanupFailure = attemptCleanup(cleanupFailure, createdMods::close);
+            }
+            if (createdGameSettings != null) {
+                cleanupFailure = attemptCleanup(cleanupFailure, createdGameSettings::close);
+            }
+            if (createdOverview != null) {
+                cleanupFailure = attemptCleanup(cleanupFailure, createdOverview::close);
             }
             if (cleanupFailure != null && cleanupFailure != constructionFailure) {
                 constructionFailure.addSuppressed(cleanupFailure);
@@ -220,9 +287,19 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             EdtDispatcher.executeAndWait(() -> {
                 @Nullable Throwable failure = null;
                 failure = attemptCleanup(failure, schematics::close);
+                failure = attemptCleanup(failure, addonUpdates::close);
+                failure = attemptCleanup(failure, backups::close);
+                failure = attemptCleanup(failure, dataPacks::close);
+                failure = attemptCleanup(failure, worlds::close);
                 failure = attemptCleanup(failure, resourcePacks::close);
                 failure = attemptCleanup(failure, mods::close);
+                @Nullable InstanceGameSettingsPanel currentGameSettings = gameSettings;
+                if (currentGameSettings != null) {
+                    failure = attemptCleanup(failure, currentGameSettings::close);
+                }
+                failure = attemptCleanup(failure, overview::close);
                 returnButton.setEnabled(false);
+                tabs.removeChangeListener(lazyTabListener);
                 tabs.removeAll();
                 removeAll();
                 cleanupFailure.set(failure);
@@ -267,11 +344,43 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         add(toolbar, "growx");
 
         tabs.setName("instanceManagementTabs");
+        tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+        tabs.addTab(overview.title(), overview);
+        @Nullable InstanceGameSettingsPanel currentGameSettings = gameSettings;
+        if (currentGameSettings != null) {
+            tabs.addTab(i18n("settings.game"), currentGameSettings);
+        }
         tabs.addTab(modStrings.title(), mods);
         tabs.addTab(resourcePackStrings.pageTitle(), resourcePacks);
+        tabs.addTab(worlds.title(), worlds);
+        tabs.addTab(dataPacks.title(), dataPacks);
+        tabs.addTab(backups.title(), backups);
+        tabs.addTab(addonUpdates.title(), addonUpdates);
         tabs.addTab(schematicStrings.pageTitle(), schematics);
+        tabs.addChangeListener(lazyTabListener);
+        activateSelectedLazyTab();
         tabs.getAccessibleContext().setAccessibleName(managementStrings.returnAction());
         add(tabs, "grow");
+    }
+
+    /// Starts selected local-catalog work only after the corresponding tab becomes visible.
+    ///
+    /// The installed add-on update page intentionally is excluded because its explicit button is the
+    /// only operation allowed to contact a remote catalogue.
+    private void activateSelectedLazyTab() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) {
+            return;
+        }
+        if (tabs.getSelectedComponent() == worlds) {
+            worlds.activate();
+        }
+        if (tabs.getSelectedComponent() == dataPacks) {
+            dataPacks.activate();
+        }
+        if (tabs.getSelectedComponent() == backups) {
+            backups.activate();
+        }
     }
 
     /// Attempts one cleanup action and retains the first failure identity.

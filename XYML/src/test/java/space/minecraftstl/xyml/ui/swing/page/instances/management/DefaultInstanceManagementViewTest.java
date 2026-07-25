@@ -26,8 +26,10 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentation;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentationFactory;
 import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementStrings;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.DefaultResourcePackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserInteractions;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogStrings;
 
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -44,12 +46,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies that production instance management exposes Mod, resource-pack, and schematic tools.
+/// Verifies that production instance management exposes every recovered local-content tool.
 @NotNullByDefault
 final class DefaultInstanceManagementViewTest {
     /// Temporary repository root used by lazy filesystem adapters.
@@ -58,7 +62,7 @@ final class DefaultInstanceManagementViewTest {
 
     /// All named tabs are reachable and the shared return command remains singular.
     @Test
-    void exposesResourcePackAndSchematicTabsWithOneReturnCommand() throws InterruptedException {
+    void exposesEveryRecoveredManagementTabWithOneReturnCommand() throws InterruptedException {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         AtomicBoolean returned = new AtomicBoolean();
         AtomicReference<@Nullable DefaultInstanceManagementView> viewReference = new AtomicReference<>();
@@ -95,10 +99,15 @@ final class DefaultInstanceManagementViewTest {
             EdtDispatcher.executeAndWait(() -> {
                 JTabbedPane tabs = findNamed(view, "instanceManagementTabs", JTabbedPane.class);
                 assertNotNull(tabs);
-                assertEquals(3, tabs.getTabCount());
-                assertEquals(presentation.mods().title(), tabs.getTitleAt(0));
-                assertEquals(presentation.resourcePacks().pageTitle(), tabs.getTitleAt(1));
-                assertEquals(presentation.schematics().pageTitle(), tabs.getTitleAt(2));
+                assertEquals(8, tabs.getTabCount());
+                assertEquals(InstanceOverviewStrings.english().title(), tabs.getTitleAt(0));
+                assertEquals(presentation.mods().title(), tabs.getTitleAt(1));
+                assertEquals(presentation.resourcePacks().pageTitle(), tabs.getTitleAt(2));
+                assertEquals(WorldCatalogStrings.english().title(), tabs.getTitleAt(3));
+                assertEquals(DataPackManagementStrings.english().title(), tabs.getTitleAt(4));
+                assertEquals(i18n("world.backup"), tabs.getTitleAt(5));
+                assertEquals(i18n("addon.check_update"), tabs.getTitleAt(6));
+                assertEquals(presentation.schematics().pageTitle(), tabs.getTitleAt(7));
                 assertFalse(returned.get());
                 JButton returnButton = findNamed(view, "instanceManagementReturn", JButton.class);
                 assertNotNull(returnButton);
@@ -119,7 +128,7 @@ final class DefaultInstanceManagementViewTest {
         }
     }
 
-    /// Creates the minimum repository contract required before either lazy tab becomes displayable.
+    /// Creates the minimum repository contract required before lazy management tabs become displayable.
     ///
     /// @return repository proxy rooted in the temporary directory
     private GameRepository repository() {
@@ -129,6 +138,7 @@ final class DefaultInstanceManagementViewTest {
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "getResourcePackDirectory" -> repositoryRoot.resolve("resourcepacks");
                     case "getModsDirectory" -> repositoryRoot.resolve("mods");
+                    case "getVersionRoot" -> repositoryRoot.resolve("versions").resolve("instance");
                     case "getRunDirectory" -> repositoryRoot;
                     case "getResolvedPreservingPatchesVersion" -> throw new IllegalStateException(
                             "The test repository intentionally has no Mod metadata");
