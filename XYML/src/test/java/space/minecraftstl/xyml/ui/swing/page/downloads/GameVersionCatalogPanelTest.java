@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.game.install.DefaultGameInstallService;
 import space.minecraftstl.xyml.game.install.GameInstallRequest;
 import space.minecraftstl.xyml.game.install.GameInstallRequestRejectedException;
@@ -38,6 +39,13 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.DefaultGameLoaderCatalogModel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderCatalogItem;
+import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderCatalogRequest;
+import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderCatalogSource;
+import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
+import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionWizardPanel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionWizardStrings;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.AbstractButton;
@@ -349,6 +357,110 @@ public final class GameVersionCatalogPanelTest {
         assertEquals(1, service.closeCount());
     }
 
+    /// Carries the exact embedded loader selection into installation and clears it for another base version.
+    @Test
+    public void installsEmbeddedLoaderSelectionAndClearsItWhenBaseVersionChanges() throws Exception {
+        RemoteVersion fabric = new RemoteVersion(
+                "fabric",
+                "1.20.1",
+                "0.16.0",
+                Instant.EPOCH,
+                List.of("https://example.invalid/fabric.jar"));
+        FixtureLoaderCatalogSource loaderSource = new FixtureLoaderCatalogSource(fabric);
+        LoaderSelectionWizardPanel loaderPanel = onEventDispatchThread(() ->
+                new LoaderSelectionWizardPanel(
+                        new DefaultGameLoaderCatalogModel(loaderSource),
+                        Runnable::run,
+                        LoaderSelectionWizardStrings.english()));
+        @Unmodifiable List<GameVersionCatalogItem> gameVersions = List.of(
+                new GameVersionCatalogItem(
+                        "1.20.1",
+                        GameVersionKind.RELEASE,
+                        Optional.of(Instant.EPOCH)),
+                new GameVersionCatalogItem(
+                        "1.21.1",
+                        GameVersionKind.RELEASE,
+                        Optional.of(Instant.EPOCH.plusSeconds(1L))));
+        FakeCatalogModel model = FakeCatalogModel.immediate(
+                gameVersions,
+                snapshot(-1, 2, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
+        RecordingGameInstallService service = RecordingGameInstallService.completed();
+        GameVersionCatalogPanel panel = onEventDispatchThread(() ->
+                createPanel(model, service, loaderPanel));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(900, 720));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(0);
+
+            assertEquals(0, loaderSource.requestCount());
+            findButton(panel, "gameVersionsLoaders").doClick();
+            assertTrue(findComponent(panel, "gameVersionsLoaderWorkspace").isVisible());
+            assertEquals("1.20.1", loaderPanel.selectionSnapshot().gameVersion().orElseThrow());
+            findButton(panel, "loaderKind_FABRIC").doClick();
+            assertEquals(0, loaderSource.requestCount());
+            findButton(panel, "loaderLoadVersions").doClick();
+            assertEquals(1, loaderSource.requestCount());
+
+            layoutRecursively(panel);
+            loaderPanel.versionChoiceList().getViewport().setExtentSize(new Dimension(560, 180));
+            loaderPanel.versionChoiceList().getList().setSize(560, 180);
+            loaderPanel.versionChoiceList().refreshLoadPlan();
+        });
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            loaderPanel.versionChoiceList().getList().setSelectedIndex(0);
+            findButton(panel, "loaderAddSelection").doClick();
+            assertSame(fabric, loaderPanel.selectedRemoteVersions().get(0));
+            assertTrue(findComponent(
+                    panel,
+                    "gameVersionsLoaderSummary",
+                    javax.swing.JLabel.class).getText().contains("Fabric 0.16.0"));
+
+            findButton(panel, "gameVersionsBackFromLoaders").doClick();
+            assertTrue(findComponent(panel, "gameVersionsCatalogWorkspace").isVisible());
+        });
+
+        model.replaceItemsAndPublish(
+                gameVersions,
+                snapshot(0, 2, 1L, GameVersionCatalogStatus.LOADING, "Refreshing", false, false));
+        EdtDispatcher.executeAndWait(() -> { });
+        onEventDispatchThread(() -> assertEquals(List.of(fabric), loaderPanel.selectedRemoteVersions()));
+        model.replaceItemsAndPublish(
+                gameVersions,
+                snapshot(0, 2, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            assertEquals(List.of(fabric), loaderPanel.selectedRemoteVersions());
+            findButton(panel, "gameVersionsInstall").doClick();
+
+            assertEquals(1, service.requests().size());
+            GameInstallRequest request = service.requests().get(0);
+            assertEquals("1.20.1", request.versionId());
+            assertEquals(List.of(fabric), request.selectedRemoteVersions());
+            assertSame(fabric, request.selectedRemoteVersions().get(0));
+        });
+
+        awaitTerminal(service.latestSession());
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            findButton(panel, "gameVersionsBackToCatalog").doClick();
+            panel.choiceList().getList().setSelectedIndex(1);
+            assertTrue(loaderPanel.selectedRemoteVersions().isEmpty());
+            assertEquals("1.21.1", loaderPanel.selectionSnapshot().gameVersion().orElseThrow());
+            assertTrue(findComponent(
+                    panel,
+                    "gameVersionsLoaderSummary",
+                    javax.swing.JLabel.class).getText().contains("No loaders selected"));
+            panel.close();
+        });
+        service.close();
+    }
+
     /// Maps repository validation by typed reason while retaining the failed task until dismissal.
     @Test
     public void localizesTypedInstallationRejection() throws Exception {
@@ -529,6 +641,27 @@ public final class GameVersionCatalogPanelTest {
                 Duration.ZERO);
     }
 
+    /// Creates a page fixture with an injected loader-selection workflow.
+    ///
+    /// @param model catalog model under test
+    /// @param installService installation service under test
+    /// @param loaderSelectionPanel loader workflow under test
+    /// @return page fixture
+    private static GameVersionCatalogPanel createPanel(
+            GameVersionCatalogModel model,
+            GameInstallService installService,
+            LoaderSelectionWizardPanel loaderSelectionPanel) {
+        return new GameVersionCatalogPanel(
+                model,
+                installService,
+                STRINGS,
+                INSTALL_STRINGS,
+                TASK_STRINGS,
+                null,
+                Duration.ZERO,
+                loaderSelectionPanel);
+    }
+
     /// Creates deterministic catalog rows.
     ///
     /// @param count item count
@@ -683,6 +816,45 @@ public final class GameVersionCatalogPanelTest {
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new AssertionError("Interrupted while waiting for test latch", exception);
+        }
+    }
+
+    /// Returns one exact loader version only after an explicit matching catalog request.
+    @NotNullByDefault
+    private static final class FixtureLoaderCatalogSource implements GameLoaderCatalogSource {
+        /// Original Core remote version whose identity must reach the install request.
+        private final RemoteVersion remoteVersion;
+
+        /// Number of explicit catalog refreshes.
+        private final AtomicInteger requests = new AtomicInteger();
+
+        /// Creates a deterministic source for one Fabric catalog row.
+        ///
+        /// @param remoteVersion exact remote version returned by the source
+        private FixtureLoaderCatalogSource(RemoteVersion remoteVersion) {
+            this.remoteVersion = Objects.requireNonNull(remoteVersion, "remoteVersion");
+        }
+
+        /// Records one explicit request and returns the configured matching row.
+        ///
+        /// @param request exact selected catalog request
+        /// @return completed immutable catalog rows
+        @Override
+        public CompletionStage<@Unmodifiable List<GameLoaderCatalogItem>> refreshAsync(
+                GameLoaderCatalogRequest request) {
+            GameLoaderCatalogRequest exactRequest = Objects.requireNonNull(request, "request");
+            requests.incrementAndGet();
+            @Unmodifiable List<GameLoaderCatalogItem> items = exactRequest.kind() == GameLoaderKind.FABRIC
+                    ? List.of(new GameLoaderCatalogItem(GameLoaderKind.FABRIC, remoteVersion))
+                    : List.of();
+            return CompletableFuture.completedFuture(items);
+        }
+
+        /// Returns the number of explicit source requests.
+        ///
+        /// @return source request count
+        private int requestCount() {
+            return requests.get();
         }
     }
 

@@ -20,6 +20,8 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.game.install.GameInstallAlreadyRunningException;
 import space.minecraftstl.xyml.game.install.GameInstallRequest;
 import space.minecraftstl.xyml.game.install.GameInstallRequestRejectedException;
@@ -33,6 +35,9 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionListener;
+import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionSnapshot;
+import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionWizardPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
@@ -54,12 +59,13 @@ import java.awt.CardLayout;
 import java.awt.Component;
 import java.awt.Font;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Presents a lazily loaded game-version catalog and one vanilla installation workflow.
+/// Presents a lazy game-version catalog, optional loader-selection workflow, and game installation task.
 ///
 /// Construction performs no catalog I/O. The first Swing display notification asks the model to
 /// load if still idle. Installation consumes only a visible loaded choice and never changes the
@@ -82,6 +88,9 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Card containing catalog selection and the installation request controls.
     private static final String CATALOG_VIEW = "catalog";
 
+    /// Card containing the optional compatible loader-selection workflow.
+    private static final String LOADER_VIEW = "loaders";
+
     /// Card containing the current installation task and terminal return command.
     private static final String TASK_VIEW = "task";
 
@@ -94,7 +103,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Toolkit-neutral catalog model and viewport source.
     private final GameVersionCatalogModel model;
 
-    /// Application-owned single-flight vanilla installation service.
+    /// Application-owned single-flight game installation service.
     private final GameInstallService installService;
 
     /// Localized control text.
@@ -121,6 +130,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Explicitly searched remote CurseForge and Modrinth modpack catalog retained beside local imports.
     private final RemoteModpackCatalogPanel remoteModpackCatalogPanel;
 
+    /// Optional loader-selection workflow that remains offline until its explicit refresh command.
+    private final LoaderSelectionWizardPanel loaderSelectionPanel;
+
+    /// Listener retaining the loader selection selected by the embedded workflow.
+    private final LoaderSelectionListener loaderSelectionListener = this::loaderSelectionChanged;
+
     /// Top-level tabs preserving the original game installer while exposing restored content categories.
     private final JTabbedPane downloadCenterTabs = new JTabbedPane();
 
@@ -142,14 +157,23 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Command that captures the loaded selected version and exact instance name.
     private final JButton installButton = new JButton();
 
+    /// Command that opens the optional compatible loader-selection card.
+    private final JButton selectLoadersButton = new JButton();
+
     /// Command that dismisses a terminal task and restores the catalog card.
     private final JButton backToCatalogButton = new JButton();
+
+    /// Command that returns from the loader-selection card to the game-version catalog.
+    private final JButton backFromLoadersButton = new JButton();
 
     /// Localized installation validation or terminal-failure feedback.
     private final JLabel installStatusLabel = new JLabel();
 
     /// Localized terminal installation feedback shown beside the return command.
     private final JLabel taskStatusLabel = new JLabel();
+
+    /// Concise current loader selection retained beside the installation command.
+    private final JLabel loaderSummaryLabel = new JLabel();
 
     /// Status text displayed inside the loading card.
     private final JLabel loadingLabel = stateLabel("gameVersionsLoading");
@@ -241,6 +265,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Stable version ID represented by the current visible loaded choice, or null otherwise.
     private @Nullable String selectedVersionId;
 
+    /// Base game version whose optional loader selection is retained across transient list states.
+    private @Nullable String loaderGameVersionId;
+
+    /// Exact selected loader objects retained for the currently selected base game version.
+    private @Unmodifiable List<RemoteVersion> selectedRemoteVersions = List.of();
+
     /// Last version-derived instance name, or null after the user authored a different value.
     private @Nullable String suggestedInstanceName;
 
@@ -262,16 +292,16 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Whether this panel has already delegated its one lazy initial-load request.
     private boolean initialLoadRequested;
 
-    /// Whether the catalog card rather than task progress is currently visible.
-    private boolean catalogViewVisible = true;
+    /// Exact child workflow card currently shown below the game-version heading.
+    private WorkflowView workflowView = WorkflowView.CATALOG;
 
     /// Whether this panel has released its subscription and viewport resources.
     private boolean closed;
 
-    /// Creates a game-version catalog panel on the Swing event dispatch thread.
+    /// Creates a production game-version catalog panel on the Swing event dispatch thread.
     ///
     /// @param model toolkit-neutral lazy catalog model
-    /// @param installService application-owned single-flight vanilla installer
+    /// @param installService application-owned single-flight game installer
     /// @param strings localized catalog text
     /// @param installStrings localized installation text
     /// @param taskProgressStrings localized task-progress controls and lifecycle states
@@ -285,6 +315,36 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
+        this(
+                model,
+                installService,
+                strings,
+                installStrings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                LoaderSelectionWizardPanel.createForLauncher());
+    }
+
+    /// Creates a catalog panel with an explicit zero-I/O loader-selection control for focused integration tests.
+    ///
+    /// @param model toolkit-neutral lazy catalog model
+    /// @param installService application-owned single-flight game installer
+    /// @param strings localized catalog text
+    /// @param installStrings localized installation text
+    /// @param taskProgressStrings localized task-progress controls and lifecycle states
+    /// @param animator optional shared progress animator
+    /// @param progressAnimationDuration non-negative installation-progress animation duration
+    /// @param loaderSelectionPanel embedded loader-selection workflow
+    GameVersionCatalogPanel(
+            GameVersionCatalogModel model,
+            GameInstallService installService,
+            GameVersionCatalogStrings strings,
+            GameInstallStrings installStrings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            LoaderSelectionWizardPanel loaderSelectionPanel) {
         super(new MigLayout(
                 "insets 0, fill",
                 "[grow,fill]",
@@ -311,9 +371,13 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 resolvedTaskProgressStrings,
                 animator,
                 resolvedProgressAnimationDuration);
+        this.loaderSelectionPanel = Objects.requireNonNull(
+                loaderSelectionPanel,
+                "loaderSelectionPanel");
         choiceList = new ViewportChoiceList<>(model, GameVersionCatalogItem::versionId);
 
         configureComponents();
+        this.loaderSelectionPanel.addSelectionListener(loaderSelectionListener);
         modelSubscription = model.subscribe(this::modelChanged);
         applySnapshot(model.snapshot());
     }
@@ -385,7 +449,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
         refreshButton.setName("gameVersionsRefresh");
         refreshButton.addActionListener(event -> {
-            if (isOpen() && catalogViewVisible) {
+            if (isOpen() && workflowView == WorkflowView.CATALOG) {
                 model.refresh();
             }
         });
@@ -444,9 +508,9 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         catalogWorkspace.add(statusLabel, "growx, h 28!");
 
         JPanel installBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 3",
-                "[][grow,fill]16[220!]",
-                "[40!]4[]"));
+                "insets 0, fillx, wrap 4",
+                "[][grow,fill]12[170!]12[180!]",
+                "[40!]4[]4[]"));
         installBand.setOpaque(false);
         installBand.setName("gameVersionsInstallBand");
 
@@ -456,6 +520,10 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         instanceNameField.setName("gameVersionsInstanceName");
         instanceNameField.getDocument().addDocumentListener(instanceNameListener);
         installBand.add(instanceNameField, "growx, h 40!");
+        selectLoadersButton.setName("gameVersionsLoaders");
+        selectLoadersButton.setText(i18n("settings.tabs.installers"));
+        selectLoadersButton.addActionListener(event -> showLoaderSelection());
+        installBand.add(selectLoadersButton, "grow, h 40!");
         installButton.setName("gameVersionsInstall");
         installButton.setText(installStrings.installAction());
         installButton.putClientProperty("JButton.buttonType", "roundRect");
@@ -463,8 +531,32 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         installBand.add(installButton, "grow, h 40!");
 
         installStatusLabel.setName("gameVersionsInstallStatus");
-        installBand.add(installStatusLabel, "skip 1, span 2, growx, h 24!");
+        installBand.add(installStatusLabel, "skip 1, span 3, growx, h 24!");
+        loaderSummaryLabel.setName("gameVersionsLoaderSummary");
+        loaderSummaryLabel.setText(formatLoaderSummary(loaderSelectionPanel.selectionSummary()));
+        installBand.add(loaderSummaryLabel, "skip 1, span 3, growx, h 24!");
         catalogWorkspace.add(installBand, "growx");
+
+        JPanel loaderWorkspace = new JPanel(new MigLayout(
+                "insets 0, fill, wrap 1",
+                "[grow,fill]",
+                "[grow,fill]12[]"));
+        loaderWorkspace.setOpaque(false);
+        loaderWorkspace.setName("gameVersionsLoaderWorkspace");
+        loaderWorkspace.add(loaderSelectionPanel, "grow");
+
+        JPanel loaderActions = new JPanel(new MigLayout(
+                "insets 0, fillx",
+                "[grow,fill][220!]",
+                "[40!]"));
+        loaderActions.setOpaque(false);
+        loaderSummaryLabel.setToolTipText(loaderSelectionPanel.selectionSummary());
+        loaderActions.add(new JLabel(), "growx");
+        backFromLoadersButton.setName("gameVersionsBackFromLoaders");
+        backFromLoadersButton.setText(installStrings.backToCatalogAction());
+        backFromLoadersButton.addActionListener(event -> showCatalogAfterLoaderSelection());
+        loaderActions.add(backFromLoadersButton, "grow, h 40!");
+        loaderWorkspace.add(loaderActions, "growx");
 
         JPanel taskWorkspace = new JPanel(new MigLayout(
                 "insets 0, fill, wrap 1",
@@ -491,6 +583,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         workflowCards.setOpaque(false);
         workflowCards.setName("gameVersionsWorkflowCards");
         workflowCards.add(catalogWorkspace, CATALOG_VIEW);
+        workflowCards.add(loaderWorkspace, LOADER_VIEW);
         workflowCards.add(taskWorkspace, TASK_VIEW);
         gameVersionsPanel.add(workflowCards, "grow");
 
@@ -573,7 +666,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         refreshButton.setText(snapshot.status() == GameVersionCatalogStatus.LOADING
                 ? strings.refreshingAction()
                 : strings.refreshAction());
-        refreshButton.setEnabled(catalogViewVisible && snapshot.refreshEnabled());
+        refreshButton.setEnabled(workflowView == WorkflowView.CATALOG && snapshot.refreshEnabled());
         statusLabel.setText(snapshot.statusText());
         statusLabel.setToolTipText(snapshot.statusText());
         synchronizeLoadedSelection();
@@ -650,18 +743,25 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 : null;
         if (selected == null) {
             selectedVersionId = null;
+            if (shouldDiscardUnavailableLoaderSelection(snapshot)) {
+                clearLoaderSelection();
+            }
             updateInstallAction();
             return;
         }
 
         String versionId = selected.versionId();
-        if (!versionId.equals(selectedVersionId)) {
+        boolean loaderGameVersionChanged = !versionId.equals(loaderGameVersionId);
+        selectedVersionId = versionId;
+        if (loaderGameVersionChanged) {
             installStatusLabel.setText("");
             installStatusLabel.setToolTipText(null);
             String currentName = instanceNameField.getText();
             boolean mayReplace = currentName.isBlank()
                     || Objects.equals(currentName, suggestedInstanceName);
-            selectedVersionId = versionId;
+            loaderGameVersionId = versionId;
+            selectedRemoteVersions = List.of();
+            loaderSelectionPanel.selectGameVersion(versionId);
             if (mayReplace) {
                 applyInstanceNameSuggestion(versionId);
             } else {
@@ -669,6 +769,100 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             }
         }
         updateInstallAction();
+    }
+
+    /// Determines whether a completed unfiltered catalog proves the bound game version disappeared.
+    ///
+    /// Loading, filtering, querying, and sparse viewport placeholders are transient and retain loader
+    /// choices. A ready full unfiltered catalog with no stable selection is the only state proving that
+    /// the previous base version is no longer available.
+    ///
+    /// @param snapshot latest catalog state, or null before initialization
+    /// @return whether the retained loader selection must be discarded
+    private boolean shouldDiscardUnavailableLoaderSelection(
+            @Nullable GameVersionCatalogSnapshot snapshot) {
+        return loaderGameVersionId != null
+                && snapshot != null
+                && snapshot.status() == GameVersionCatalogStatus.READY
+                && snapshot.query().isBlank()
+                && snapshot.filter() == GameVersionFilter.ALL
+                && snapshot.selectedIndex().isEmpty();
+    }
+
+    /// Clears the base-version binding and all exact selected loader objects.
+    private void clearLoaderSelection() {
+        if (loaderGameVersionId == null && selectedRemoteVersions.isEmpty()) {
+            return;
+        }
+        loaderGameVersionId = null;
+        selectedRemoteVersions = List.of();
+        loaderSelectionPanel.clearGameVersion();
+    }
+
+    /// Opens the optional loader-selection card for the exact currently loaded Minecraft version.
+    private void showLoaderSelection() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!selectLoadersButton.isEnabled() || !isOpen() || workflowView != WorkflowView.CATALOG) {
+            return;
+        }
+        @Nullable GameVersionCatalogItem selected = choiceList.getSelectedValue();
+        @Nullable String versionId = selectedVersionId;
+        if (selected == null || versionId == null || !versionId.equals(selected.versionId())) {
+            synchronizeLoadedSelection();
+            return;
+        }
+
+        LoaderSelectionSnapshot loaderSnapshot = loaderSelectionPanel.selectionSnapshot();
+        if (!versionId.equals(loaderSnapshot.gameVersion().orElse(null))) {
+            loaderSelectionPanel.selectGameVersion(versionId);
+        }
+        workflowView = WorkflowView.LOADERS;
+        ((CardLayout) workflowCards.getLayout()).show(workflowCards, LOADER_VIEW);
+        refreshButton.setEnabled(false);
+        updateInstallAction();
+    }
+
+    /// Returns from loader selection while retaining the exact selected loader objects for installation.
+    private void showCatalogAfterLoaderSelection() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!isOpen() || workflowView != WorkflowView.LOADERS) {
+            return;
+        }
+        workflowView = WorkflowView.CATALOG;
+        ((CardLayout) workflowCards.getLayout()).show(workflowCards, CATALOG_VIEW);
+        @Nullable GameVersionCatalogSnapshot snapshot = displayedSnapshot;
+        refreshButton.setEnabled(snapshot != null && snapshot.refreshEnabled());
+        synchronizeLoadedSelection();
+        choiceList.refreshLoadPlan();
+        updateInstallAction();
+    }
+
+    /// Retains a wizard-published selection only when it belongs to the currently selected base game version.
+    ///
+    /// @param snapshot immutable loader-selection state published on the event dispatch thread
+    private void loaderSelectionChanged(LoaderSelectionSnapshot snapshot) {
+        EdtDispatcher.requireEventDispatchThread();
+        LoaderSelectionSnapshot nonNullSnapshot = Objects.requireNonNull(snapshot, "snapshot");
+        @Nullable String versionId = loaderGameVersionId;
+        boolean belongsToSelectedGame = versionId != null
+                && versionId.equals(nonNullSnapshot.gameVersion().orElse(null));
+        selectedRemoteVersions = belongsToSelectedGame
+                ? nonNullSnapshot.selectedRemoteVersions()
+                : List.of();
+        String summary = belongsToSelectedGame
+                ? nonNullSnapshot.summary()
+                : loaderSelectionPanel.selectionSummary();
+        loaderSummaryLabel.setText(formatLoaderSummary(summary));
+        loaderSummaryLabel.setToolTipText(summary);
+        updateInstallAction();
+    }
+
+    /// Formats the concise embedded-wizard summary for the surrounding installation controls.
+    ///
+    /// @param summary non-blank or empty loader-selection summary
+    /// @return localized surrounding-label text
+    private static String formatLoaderSummary(String summary) {
+        return i18n("settings.tabs.installers") + ": " + Objects.requireNonNull(summary, "summary");
     }
 
     /// Applies one version-derived destination without classifying its document events as user edits.
@@ -699,7 +893,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Starts installation from the exact loaded choice and exact destination field value.
     private void startInstallation() {
         EdtDispatcher.requireEventDispatchThread();
-        if (!installButton.isEnabled() || !isOpen() || !catalogViewVisible) {
+        if (!installButton.isEnabled() || !isOpen() || workflowView != WorkflowView.CATALOG) {
             return;
         }
 
@@ -710,7 +904,10 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             return;
         }
 
-        GameInstallRequest request = new GameInstallRequest(instanceNameField.getText(), versionId);
+        GameInstallRequest request = new GameInstallRequest(
+                instanceNameField.getText(),
+                versionId,
+                selectedRemoteVersions);
         final GameInstallSession session;
         try {
             session = Objects.requireNonNull(
@@ -777,7 +974,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         }
         unsubscribe(previousSubscription);
 
-        catalogViewVisible = false;
+        workflowView = WorkflowView.TASK;
         ((CardLayout) workflowCards.getLayout()).show(workflowCards, TASK_VIEW);
         refreshButton.setEnabled(false);
         applyInstallStatus(session);
@@ -904,7 +1101,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
         taskStatusLabel.setText("");
         taskStatusLabel.setToolTipText(null);
-        catalogViewVisible = true;
+        workflowView = WorkflowView.CATALOG;
         ((CardLayout) workflowCards.getLayout()).show(workflowCards, CATALOG_VIEW);
         @Nullable GameVersionCatalogSnapshot snapshot = displayedSnapshot;
         refreshButton.setEnabled(snapshot != null && snapshot.refreshEnabled());
@@ -916,9 +1113,14 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Enables installation only for an open catalog view with an exact loaded choice and nonblank name.
     private void updateInstallAction() {
         EdtDispatcher.requireEventDispatchThread();
+        selectLoadersButton.setEnabled(
+                isOpen()
+                        && workflowView == WorkflowView.CATALOG
+                        && selectedVersionId != null
+                        && displayedInstallSession == null);
         installButton.setEnabled(
                 isOpen()
-                        && catalogViewVisible
+                        && workflowView == WorkflowView.CATALOG
                         && selectedVersionId != null
                         && !instanceNameField.getText().isBlank()
                         && displayedInstallSession == null);
@@ -958,14 +1160,20 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             cleanupFailure = attemptCleanup(
                     cleanupFailure,
                     () -> choiceList.getChoiceModel().removeListDataListener(listDataListener));
+            cleanupFailure = attemptCleanup(
+                    cleanupFailure,
+                    () -> loaderSelectionPanel.removeSelectionListener(loaderSelectionListener));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> refreshButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> searchField.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> filterBox.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> instanceNameField.setEnabled(false));
+            cleanupFailure = attemptCleanup(cleanupFailure, () -> selectLoadersButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> installButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> backToCatalogButton.setEnabled(false));
+            cleanupFailure = attemptCleanup(cleanupFailure, () -> backFromLoadersButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> choiceList.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> choiceList.getList().setEnabled(false));
+            cleanupFailure = attemptCleanup(cleanupFailure, loaderSelectionPanel::close);
             cleanupFailure = attemptCleanup(cleanupFailure, remoteModpackCatalogPanel::close);
             cleanupFailure = attemptCleanup(cleanupFailure, downloadCategoryPanel::close);
             cleanupFailure = attemptCleanup(cleanupFailure, taskProgressHost::close);
@@ -1056,6 +1264,19 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         JLabel label = new JLabel("", SwingConstants.CENTER);
         label.setName(name);
         return label;
+    }
+
+    /// Distinguishes the three retained child workflows sharing the stable page host.
+    @NotNullByDefault
+    private enum WorkflowView {
+        /// Base game-version catalog and installation controls.
+        CATALOG,
+
+        /// Optional loader-selection subflow for the selected base game version.
+        LOADERS,
+
+        /// Active or terminal installation-task presentation.
+        TASK
     }
 
     /// Renders filter enum values through localized page text.
