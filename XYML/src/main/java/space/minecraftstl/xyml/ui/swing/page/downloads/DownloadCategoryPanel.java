@@ -45,12 +45,12 @@ import java.util.Objects;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Provides usable add-on category workflows beside the built-in game-version installer.
+/// Provides add-on category workflows beside the built-in game-version installer.
 ///
-/// Every category exposes a user-triggered Modrinth browse action. Categories associated with a
-/// selected instance additionally create and reveal the exact instance directory, so the page has
-/// an offline local workflow even when a user does not want to use a browser. Local modpack imports
-/// remain inside the modpack category and use the existing task and progress infrastructure.
+/// Mods, resource packs, and shader packs now use native explicit-search catalogs that install to
+/// a selected instance. Modpack imports remain local in this panel, while their remote catalog has
+/// its dedicated download-center tab. Worlds retain their established browser and local-directory
+/// route until their archive-import workflow has an equivalent native remote catalog.
 @NotNullByDefault
 public final class DownloadCategoryPanel extends JPanel implements AutoCloseable {
     /// Category tab host retained for keyboard navigation and focused UI verification.
@@ -58,6 +58,15 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
 
     /// Real local-archive importer owned by the modpack tab.
     private final LocalModpackImportPanel localModpackImporter;
+
+    /// Native explicit-search remote Mod catalog owned by the Mods content tab.
+    private final RemoteAddonCatalogPanel modsCatalog;
+
+    /// Native explicit-search remote resource-pack catalog owned by the Resource Packs content tab.
+    private final RemoteAddonCatalogPanel resourcePackCatalog;
+
+    /// Native explicit-search remote shader-pack catalog owned by the Shaders content tab.
+    private final RemoteAddonCatalogPanel shaderPackCatalog;
 
     /// Feedback for the latest external browse or directory-reveal request.
     private final JLabel statusLabel;
@@ -79,16 +88,30 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
 
         categoryTabs = new JTabbedPane();
         categoryTabs.setName("downloadsCategoryTabs");
+        categoryTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         localModpackImporter = new LocalModpackImportPanel(
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
                 animator,
                 Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"));
+        modsCatalog = createRemoteCatalog(
+                RemoteAddonCatalogKind.MOD,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration);
+        resourcePackCatalog = createRemoteCatalog(
+                RemoteAddonCatalogKind.RESOURCE_PACK,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration);
+        shaderPackCatalog = createRemoteCatalog(
+                RemoteAddonCatalogKind.SHADER_PACK,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration);
         for (DownloadCategory category : DownloadCategory.values()) {
             categoryTabs.addTab(
                     i18n(category.titleKey()),
-                    category == DownloadCategory.MODPACK
-                            ? createModpackTab(category)
-                            : createDirectoryTab(category));
+                    createCategoryTab(category));
         }
         add(categoryTabs, "grow");
 
@@ -108,12 +131,49 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     @Override
     public void close() {
         closed = true;
+        modsCatalog.close();
+        resourcePackCatalog.close();
+        shaderPackCatalog.close();
         localModpackImporter.close();
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             categoryTabs.setEnabled(false);
             statusLabel.setText("");
             statusLabel.setToolTipText(null);
         });
+    }
+
+    /// Creates one category view while keeping remote direct-install catalogs distinct from local workflows.
+    ///
+    /// @param category fixed content category
+    /// @return configured category page
+    private JPanel createCategoryTab(DownloadCategory category) {
+        return switch (category) {
+            case MODPACK -> createModpackTab(category);
+            case MODS -> modsCatalog;
+            case RESOURCE_PACKS -> resourcePackCatalog;
+            case SHADERS -> shaderPackCatalog;
+            case WORLDS -> createDirectoryTab(category);
+        };
+    }
+
+    /// Creates a no-network native catalog for one selected-instance direct-install category.
+    ///
+    /// @param kind direct-install category represented by the catalog
+    /// @param taskProgressStrings localized task lifecycle controls
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative determinate-progress animation duration
+    /// @return configured native remote catalog
+    private static RemoteAddonCatalogPanel createRemoteCatalog(
+            RemoteAddonCatalogKind kind,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration) {
+        return new RemoteAddonCatalogPanel(
+                Objects.requireNonNull(kind, "kind"),
+                RemoteAddonCatalogStrings.launcherLocalized(kind),
+                Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
+                animator,
+                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration"));
     }
 
     /// Builds the modpack tab with its real local import surface and external catalog route.
@@ -133,7 +193,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         return panel;
     }
 
-    /// Builds one add-on category with immediate catalog browsing and local directory reveal commands.
+    /// Builds the remaining world category with its established browser and local-directory commands.
     ///
     /// @param category category whose commands the tab represents
     /// @return configured add-on category tab
