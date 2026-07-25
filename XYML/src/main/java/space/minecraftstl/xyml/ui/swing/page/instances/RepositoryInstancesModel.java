@@ -31,7 +31,7 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
-import space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher;
+import space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -50,8 +50,8 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 ///
 /// Repository scans and per-row game-version detection run on the supplied background executor.
 /// Each content revision captures immutable instance descriptors, exact count, and selection in one
-/// atomically published state. This transitional adapter contains no JavaFX or Swing types even though
-/// the wrapped repository still has legacy JavaFX internals.
+/// atomically published state. The wrapped repository is accessed only through the launcher state
+/// dispatcher, so no UI component type crosses this model boundary.
 @NotNullByDefault
 public final class RepositoryInstancesModel implements InstancesModel, AutoCloseable {
     /// Lock protecting atomic model-state replacement, refresh ownership, and close state.
@@ -854,10 +854,10 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             return repository.subscribeSelectedInstance(listener);
         }
 
-        /// Queues one selected repository instance ID on the JavaFX application thread.
+        /// Queues one selected repository instance ID on the Swing event thread.
         @Override
         public void setSelectedInstanceId(String instanceId) {
-            LegacyJavaFxDispatcher.execute(() -> repository.setSelectedInstance(instanceId));
+            LegacyStateDispatcher.execute(() -> repository.setSelectedInstance(instanceId));
         }
 
         /// Performs one blocking repository refresh.

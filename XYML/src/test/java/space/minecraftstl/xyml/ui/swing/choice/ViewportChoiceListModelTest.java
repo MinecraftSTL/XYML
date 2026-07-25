@@ -30,10 +30,11 @@ import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /// Tests loading, failure, retry, and loaded states in the sparse Swing model.
 @NotNullByDefault
@@ -103,6 +104,59 @@ public final class ViewportChoiceListModelTest {
                     new IndexRange(0, 5), new IndexRange(0, 5), Set.of(),
                     ScrollDirection.STATIONARY, 0.0, 0));
             assertEquals(2, dataSource.requestCount());
+            model.close();
+        });
+    }
+
+    /// Verifies that a short reversal reuses warm rows while a distant jump releases old values.
+    @Test
+    public void retainsWarmRowsAcrossShortDirectionReversalAndEvictsDistantData() throws Exception {
+        ResizableDataSource dataSource = new ResizableDataSource(100);
+
+        SwingUtilities.invokeAndWait(() -> {
+            ViewportChoiceListModel<String> model = new ViewportChoiceListModel<>(dataSource);
+            model.applyPlan(new ViewportLoadPlan(
+                    new IndexRange(20, 25), new IndexRange(15, 30), Set.of(),
+                    ScrollDirection.STATIONARY, 0.0, 0));
+            assertEquals(1, dataSource.requestCount());
+            assertEquals("15", model.loadedValueAt(15));
+
+            model.applyPlan(new ViewportLoadPlan(
+                    new IndexRange(21, 26), new IndexRange(16, 31), Set.of(),
+                    ScrollDirection.DOWN, 5.0, 1));
+            assertEquals(2, dataSource.requestCount());
+            assertEquals("30", model.loadedValueAt(30));
+
+            model.applyPlan(new ViewportLoadPlan(
+                    new IndexRange(20, 25), new IndexRange(15, 30), Set.of(),
+                    ScrollDirection.UP, 5.0, 1));
+            assertEquals(2, dataSource.requestCount());
+
+            model.applyPlan(new ViewportLoadPlan(
+                    new IndexRange(70, 75), new IndexRange(65, 80), Set.of(),
+                    ScrollDirection.DOWN, 20.0, 5));
+            assertEquals(3, dataSource.requestCount());
+            assertNull(model.loadedValueAt(15));
+            assertEquals("70", model.loadedValueAt(70));
+            model.close();
+        });
+    }
+
+    /// Verifies that wide source-aligned pages cannot escape adaptive retention boundaries.
+    @Test
+    public void filtersSourceAlignedPagesToAdaptiveRetentionBoundary() throws Exception {
+        WholeSourcePageDataSource dataSource = new WholeSourcePageDataSource(100);
+
+        SwingUtilities.invokeAndWait(() -> {
+            ViewportChoiceListModel<String> model = new ViewportChoiceListModel<>(dataSource);
+            model.applyPlan(new ViewportLoadPlan(
+                    new IndexRange(20, 25), new IndexRange(15, 30), Set.of(),
+                    ScrollDirection.STATIONARY, 0.0, 0));
+
+            assertNull(model.loadedValueAt(9));
+            assertEquals("10", model.loadedValueAt(10));
+            assertEquals("34", model.loadedValueAt(34));
+            assertNull(model.loadedValueAt(35));
             model.close();
         });
     }
@@ -193,6 +247,48 @@ public final class ViewportChoiceListModelTest {
         /// @return request count
         private int requestCount() {
             return requests.get();
+        }
+    }
+
+    /// Immediate source that always returns one page aligned to the entire source.
+    @NotNullByDefault
+    private static final class WholeSourcePageDataSource implements ViewportChoiceDataSource<String> {
+        /// Exact source size used to construct every aligned page.
+        private final int itemCount;
+
+        /// Creates a source with a stable exact size.
+        ///
+        /// @param itemCount exact source size
+        private WholeSourcePageDataSource(int itemCount) {
+            this.itemCount = itemCount;
+        }
+
+        /// Returns the stable exact source size.
+        ///
+        /// @return exact source size
+        @Override
+        public OptionalInt exactItemCount() {
+            return OptionalInt.of(itemCount);
+        }
+
+        /// Returns the complete source while preserving its native alignment.
+        ///
+        /// @param desiredRange the requested adaptive range
+        /// @param cancellation the cooperative cancellation signal
+        /// @return an immediately completed whole-source page
+        @Override
+        public CompletionStage<ChoicePage<String>> load(
+                IndexRange desiredRange,
+                LoadCancellation cancellation) {
+            List<String> values = new ArrayList<>();
+            for (int index = 0; index < itemCount; index++) {
+                values.add(Integer.toString(index));
+            }
+            return CompletableFuture.completedFuture(new ChoicePage<>(
+                    new IndexRange(0, itemCount),
+                    values,
+                    OptionalInt.of(itemCount),
+                    true));
         }
     }
 }

@@ -17,12 +17,12 @@
  */
 package space.minecraftstl.xyml.setting;
 
-import javafx.beans.InvalidationListener;
 import space.minecraftstl.xyml.task.FetchTask;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
-import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
 import java.net.*;
@@ -32,28 +32,37 @@ import java.util.Objects;
 import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Installs and updates JVM-wide proxy selection and proxy authentication from launcher settings.
+@NotNullByDefault
 public final class ProxyManager {
 
+    /// Selector that always bypasses proxies.
     private static final SimpleProxySelector NO_PROXY = new SimpleProxySelector(Proxy.NO_PROXY);
+
+    /// System selector captured before the launcher installs its delegating selector.
     private static final ProxySelector SYSTEM_DEFAULT;
 
     static {
-        ProxySelector systemProxySelector = ProxySelector.getDefault();
+        @Nullable ProxySelector systemProxySelector = ProxySelector.getDefault();
         SYSTEM_DEFAULT = systemProxySelector != null
                 ? new ProxySelectorWrapper(systemProxySelector)
                 : NO_PROXY;
     }
 
-    private static volatile @NotNull ProxySelector defaultProxySelector = SYSTEM_DEFAULT;
+    /// Current selector read by the installed JVM-wide delegating selector.
+    private static volatile ProxySelector defaultProxySelector = SYSTEM_DEFAULT;
+
+    /// Current proxy authenticator, or `null` when custom proxy credentials are disabled.
     private static volatile @Nullable SimpleAuthenticator defaultAuthenticator = null;
 
+    /// Builds the proxy selector represented by current launcher settings.
     private static ProxySelector getProxySelector() {
-        ProxyType proxyType = settings().proxyTypeProperty().get();
+        ProxyType proxyType = Objects.requireNonNull(settings().proxyTypeProperty().get());
         return switch (proxyType) {
             case SYSTEM -> ProxyManager.SYSTEM_DEFAULT;
             case DIRECT -> NO_PROXY;
             case HTTP, SOCKS -> {
-                String host = settings().proxyHostProperty().get();
+                @Nullable String host = settings().proxyHostProperty().get();
                 int port = settings().proxyPortProperty().get();
 
                 if (StringUtils.isBlank(host)) {
@@ -70,10 +79,14 @@ public final class ProxyManager {
         };
     }
 
-    private static SimpleAuthenticator getAuthenticator() {
-        if (settings().proxyTypeProperty().get().usesCustomAddress() && settings().hasProxyAuthProperty().get()) {
-            String username = settings().proxyUserProperty().get();
-            String password = settings().proxyPasswordProperty().get();
+    /// Builds proxy credentials from current launcher settings when authentication is enabled.
+    ///
+    /// @return authenticator, or `null` when proxy authentication is not configured
+    private static @Nullable SimpleAuthenticator getAuthenticator() {
+        ProxyType proxyType = Objects.requireNonNull(settings().proxyTypeProperty().get());
+        if (proxyType.usesCustomAddress() && settings().hasProxyAuthProperty().get()) {
+            @Nullable String username = settings().proxyUserProperty().get();
+            @Nullable String password = settings().proxyPasswordProperty().get();
 
             if (username != null || password != null)
                 return new SimpleAuthenticator(
@@ -88,42 +101,56 @@ public final class ProxyManager {
 
     /// Installs proxy and authentication handlers backed by launcher settings.
     public static void init() {
-        ProxySelector.setDefault(new ProxySelector() {
-            @Override
-            public List<Proxy> select(URI uri) {
-                return defaultProxySelector.select(uri);
-            }
-
-            @Override
-            public void connectFailed(URI uri, SocketAddress sa, IOException ioe) {
-                defaultProxySelector.connectFailed(uri, sa, ioe);
-            }
-        });
-        Authenticator.setDefault(new Authenticator() {
-            @Override
-            protected PasswordAuthentication getPasswordAuthentication() {
-                var defaultAuthenticator = ProxyManager.defaultAuthenticator;
-                return defaultAuthenticator != null ? defaultAuthenticator.getPasswordAuthentication() : null;
-            }
-        });
+        ProxySelector.setDefault(new DelegatingProxySelector());
+        Authenticator.setDefault(new DelegatingAuthenticator());
 
         defaultProxySelector = getProxySelector();
-        InvalidationListener updateProxySelector = observable -> defaultProxySelector = getProxySelector();
-        settings().proxyTypeProperty().addListener(updateProxySelector);
-        settings().proxyHostProperty().addListener(updateProxySelector);
-        settings().proxyPortProperty().addListener(updateProxySelector);
+        Runnable updateProxySelector = () -> defaultProxySelector = getProxySelector();
+        settings().proxyTypeProperty().subscribe(change -> updateProxySelector.run());
+        settings().proxyHostProperty().subscribe(change -> updateProxySelector.run());
+        settings().proxyPortProperty().subscribe(change -> updateProxySelector.run());
 
         defaultAuthenticator = getAuthenticator();
-        InvalidationListener updateAuthenticator = observable -> defaultAuthenticator = getAuthenticator();
-        settings().proxyTypeProperty().addListener(updateAuthenticator);
-        settings().hasProxyAuthProperty().addListener(updateAuthenticator);
-        settings().proxyUserProperty().addListener(updateAuthenticator);
-        settings().proxyPasswordProperty().addListener(updateAuthenticator);
+        Runnable updateAuthenticator = () -> defaultAuthenticator = getAuthenticator();
+        settings().proxyTypeProperty().subscribe(change -> updateAuthenticator.run());
+        settings().hasProxyAuthProperty().subscribe(change -> updateAuthenticator.run());
+        settings().proxyUserProperty().subscribe(change -> updateAuthenticator.run());
+        settings().proxyPasswordProperty().subscribe(change -> updateAuthenticator.run());
 
         FetchTask.notifyInitialized();
     }
 
+    /// JVM-wide selector that delegates every request to the latest launcher-managed selector.
+    @NotNullByDefault
+    private static final class DelegatingProxySelector extends ProxySelector {
+        /// Selects proxies through the latest launcher-managed selector.
+        @Override
+        public List<Proxy> select(URI uri) {
+            return defaultProxySelector.select(uri);
+        }
+
+        /// Reports connection failure through the latest launcher-managed selector.
+        @Override
+        public void connectFailed(URI uri, SocketAddress sa, IOException ioe) {
+            defaultProxySelector.connectFailed(uri, sa, ioe);
+        }
+    }
+
+    /// JVM-wide authenticator that delegates to the latest launcher-managed proxy credentials.
+    @NotNullByDefault
+    private static final class DelegatingAuthenticator extends Authenticator {
+        /// Returns the latest launcher-managed proxy credentials when configured.
+        @Override
+        protected @Nullable PasswordAuthentication getPasswordAuthentication() {
+            @Nullable SimpleAuthenticator installedAuthenticator = ProxyManager.defaultAuthenticator;
+            return installedAuthenticator != null ? installedAuthenticator.getPasswordAuthentication() : null;
+        }
+    }
+
+    /// Base selector that validates connection-failure callback arguments.
+    @NotNullByDefault
     private static abstract class AbstractProxySelector extends ProxySelector {
+        /// Rejects an invalid connection-failure callback; concrete selectors need no additional handling.
         @Override
         public void connectFailed(URI uri, SocketAddress sa, IOException ioe) {
             if (uri == null || sa == null || ioe == null) {
@@ -132,20 +159,28 @@ public final class ProxyManager {
         }
     }
 
+    /// Selector returning one immutable proxy choice for every non-null URI.
+    @NotNullByDefault
     private static final class SimpleProxySelector extends AbstractProxySelector {
-        private final List<Proxy> proxies;
+        /// Immutable singleton proxy result.
+        private final @Unmodifiable List<Proxy> proxies;
 
-        SimpleProxySelector(Proxy proxy) {
+        /// Creates a selector returning the given proxy.
+        ///
+        /// @param proxy sole proxy result
+        private SimpleProxySelector(Proxy proxy) {
             this.proxies = List.of(proxy);
         }
 
+        /// Returns the immutable singleton proxy result.
         @Override
-        public List<Proxy> select(URI uri) {
+        public @Unmodifiable List<Proxy> select(URI uri) {
             if (uri == null)
                 throw new IllegalArgumentException("URI can't be null.");
             return proxies;
         }
 
+        /// Returns a diagnostic representation containing the configured proxy.
         @Override
         public String toString() {
             return "SimpleProxySelector" + proxies;
@@ -153,13 +188,19 @@ public final class ProxyManager {
     }
 
     /// Wraps another ProxySelector to avoid using proxy for loopback addresses.
+    @NotNullByDefault
     private static final class ProxySelectorWrapper extends AbstractProxySelector {
+        /// Selector used for non-loopback URIs.
         private final ProxySelector source;
 
-        ProxySelectorWrapper(ProxySelector source) {
+        /// Creates a loopback-bypassing wrapper around a selector.
+        ///
+        /// @param source selector used for non-loopback URIs
+        private ProxySelectorWrapper(ProxySelector source) {
             this.source = source;
         }
 
+        /// Selects a direct connection for loopback URIs and delegates all other URIs.
         @Override
         public List<Proxy> select(URI uri) {
             if (uri == null)
@@ -172,21 +213,32 @@ public final class ProxyManager {
         }
     }
 
+    /// Authenticator holding one immutable proxy username/password pair.
+    @NotNullByDefault
     private static final class SimpleAuthenticator extends Authenticator {
+        /// Proxy authentication username.
         private final String username;
-        private final char[] password;
 
-        private SimpleAuthenticator(String username, char[] password) {
+        /// Proxy authentication password, never mutated after construction.
+        private final char @Unmodifiable [] password;
+
+        /// Creates proxy credentials.
+        ///
+        /// @param username proxy username
+        /// @param password proxy password characters owned by this authenticator
+        private SimpleAuthenticator(String username, char @Unmodifiable [] password) {
             this.username = username;
             this.password = password;
         }
 
+        /// Returns credentials only for proxy authentication requests.
         @Override
-        public PasswordAuthentication getPasswordAuthentication() {
+        public @Nullable PasswordAuthentication getPasswordAuthentication() {
             return getRequestorType() == RequestorType.PROXY ? new PasswordAuthentication(username, password) : null;
         }
     }
 
+    /// Prevents instantiation.
     private ProxyManager() {
     }
 }

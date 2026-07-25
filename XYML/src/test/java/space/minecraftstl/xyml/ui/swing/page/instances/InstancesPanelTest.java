@@ -73,7 +73,7 @@ public final class InstancesPanelTest {
     private static final InstancesStrings STRINGS = new InstancesStrings(
             "Instances", "Refresh", "Refreshing", "Add", "Manage", "No installed instances");
 
-    /// Loaded rows delegate commands once and request only the rows measured as visible.
+    /// Loaded rows delegate commands once and warm one measured viewport beyond first display.
     @Test
     public void delegatesCommandsAndUsesMeasuredVisibleRange() {
         FakeInstancesModel model = FakeInstancesModel.immediate(items(1_000), snapshot(0, 1_000, 0L));
@@ -100,7 +100,7 @@ public final class InstancesPanelTest {
             assertAll(
                     () -> assertEquals(javax.swing.ListSelectionModel.SINGLE_SELECTION,
                             list.getSelectionMode()),
-                    () -> assertEquals(expectedVisibleRows, requested.length()),
+                    () -> assertEquals(expectedVisibleRows * 2, requested.length()),
                     () -> assertTrue(requested.length() < model.exactItemCount().orElseThrow()),
                     () -> assertEquals(List.of("instance-1"), model.selectedIds()),
                     () -> assertEquals(1, model.refreshes.get()),

@@ -19,13 +19,13 @@ package space.minecraftstl.xyml.setting;
 
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonObject;
-import javafx.beans.InvalidationListener;
-import javafx.collections.ListChangeListener;
-import javafx.collections.ObservableList;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.auth.AccountID;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorServer;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.collection.ListChange;
+import space.minecraftstl.xyml.observable.collection.ObservableList;
 import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
@@ -34,7 +34,7 @@ import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.UnknownNullability;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
 import java.nio.file.*;
@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
@@ -229,47 +230,47 @@ public final class SettingsManager {
             UserState::new);
 
     /// The loaded per-workspace launcher settings.
-    private static @UnknownNullability LauncherSettings launcherSettings;
+    private static @Nullable LauncherSettings launcherSettings;
 
     /// The loaded user settings instance.
-    private static @UnknownNullability UserSettings userSettingsInstance;
+    private static @Nullable UserSettings userSettingsInstance;
 
     /// The loaded user state instance.
-    private static @UnknownNullability UserState userStateInstance;
+    private static @Nullable UserState userStateInstance;
 
     /// The loaded per-workspace game directory file.
-    private static @UnknownNullability GameDirectories localGameDirectories;
+    private static @Nullable GameDirectories localGameDirectories;
 
     /// The loaded user game directory file.
-    private static @UnknownNullability GameDirectories userGameDirectories;
+    private static @Nullable GameDirectories userGameDirectories;
 
     /// The loaded detached preset store.
-    private static @UnknownNullability GameSettingsPresets gameSettingsPresets;
+    private static @Nullable GameSettingsPresets gameSettingsPresets;
 
     /// The loaded detached launcher state store.
-    private static @UnknownNullability LauncherState launcherState;
+    private static @Nullable LauncherState launcherState;
 
     /// The loaded detached authlib-injector server list store.
-    private static @UnknownNullability AuthlibInjectorServerList authlibInjectorServers;
+    private static @Nullable AuthlibInjectorServerList authlibInjectorServers;
 
     /// The loaded authlib-injector server metadata cache.
-    private static @UnknownNullability AuthlibInjectorServerMetadataCache authlibInjectorServerMetadataCache;
+    private static @Nullable AuthlibInjectorServerMetadataCache authlibInjectorServerMetadataCache;
 
     /// Metadata cache listeners installed on loaded authlib-injector servers.
-    private static final Map<AuthlibInjectorServer, InvalidationListener> authlibInjectorServerMetadataListeners =
+    private static final Map<AuthlibInjectorServer, Subscription> authlibInjectorServerMetadataSubscriptions =
             new IdentityHashMap<>();
 
     /// The loaded detached account metadata store.
-    private static @UnknownNullability AccountMetadataStore gameAccounts;
+    private static @Nullable AccountMetadataStore gameAccounts;
 
     /// The loaded shared account metadata store.
-    private static @UnknownNullability AccountMetadataStore userGameAccounts;
+    private static @Nullable AccountMetadataStore userGameAccounts;
 
     /// The loaded detached account private data store.
-    private static @UnknownNullability AccountPrivateData gameAccountPrivateData;
+    private static @Nullable AccountPrivateData gameAccountPrivateData;
 
     /// The loaded shared account private data store.
-    private static @UnknownNullability AccountPrivateData userGameAccountPrivateData;
+    private static @Nullable AccountPrivateData userGameAccountPrivateData;
 
     /// Whether this run appears to be using a new workspace.
     private static boolean newlyCreated;
@@ -327,6 +328,39 @@ public final class SettingsManager {
             throw new IllegalStateException("Configuration hasn't been loaded");
         }
         return userSettingsInstance;
+    }
+
+    /// Returns an immutable snapshot of executable paths explicitly registered by the user.
+    ///
+    /// This narrow JDK collection boundary keeps runtime discovery independent of the observable collection used by
+    /// the legacy settings implementation.
+    ///
+    /// @return immutable user Java path snapshot
+    public static @Unmodifiable Set<String> getUserJavaPathsSnapshot() {
+        return Set.copyOf(userSettings().getUserJava());
+    }
+
+    /// Returns whether one executable path is disabled in user settings.
+    ///
+    /// @param path executable path text
+    /// @return true when runtime discovery must ignore this path
+    public static boolean isUserJavaPathDisabled(String path) {
+        return userSettings().getDisabledJava().contains(path);
+    }
+
+    /// Enables and registers one executable path when user settings are writable.
+    ///
+    /// The disabled entry is removed before registration. The return value reports only a new user-path insertion,
+    /// matching the legacy Java manager's decision to add the corresponding runtime to its in-memory registry.
+    ///
+    /// @param path executable path text
+    /// @return true when the user-path set changed
+    public static boolean registerUserJavaPath(String path) {
+        if (isUserSettingsReadOnly()) {
+            return false;
+        }
+        userSettings().getDisabledJava().remove(path);
+        return userSettings().getUserJava().add(path);
     }
 
     /// Returns the loaded user state.
@@ -875,6 +909,7 @@ public final class SettingsManager {
     ///
     /// @param metadata the metadata-only account store
     /// @param privateData the account private data store
+    @NotNullByDefault
     private record AccountMetadataSnapshot(AccountMetadataStore metadata, AccountPrivateData privateData) {
     }
 
@@ -882,6 +917,7 @@ public final class SettingsManager {
     ///
     /// @param access account metadata file access status
     /// @param migratedAccountsSaved whether migrated account metadata and private data were saved
+    @NotNullByDefault
     private record AccountMetadataLoadResult(SettingFileAccess access, boolean migratedAccountsSaved) {
     }
 
@@ -890,6 +926,7 @@ public final class SettingsManager {
     /// @param accountIDs account IDs whose private data should be updated
     /// @param retainedAccountIDs account IDs whose private data should be kept
     /// @param privateData private account data keyed by account ID
+    @NotNullByDefault
     private record AccountPrivateDataUpdate(
             List<AccountID> accountIDs,
             List<AccountID> retainedAccountIDs,
@@ -900,6 +937,7 @@ public final class SettingsManager {
     ///
     /// @param privateData the loaded account private data store
     /// @param file the JSON setting file helper backing the private data store
+    @NotNullByDefault
     private record AccountPrivateDataStore(
             AccountPrivateData privateData,
             JsonSettingFile<AccountPrivateData> file) {
@@ -933,7 +971,7 @@ public final class SettingsManager {
 
     /// Returns the default game setting preset, creating one when needed.
     public static GameSettings.Preset getDefaultGameSettingsPresetOrCreate() {
-        GameSettings.Preset setting = getGameSettings(settings().defaultGameSettingsPresetProperty().get());
+        GameSettings.@Nullable Preset setting = getGameSettings(settings().defaultGameSettingsPresetProperty().get());
         if (setting != null) {
             return setting;
         }
@@ -1125,7 +1163,7 @@ public final class SettingsManager {
         }
 
         if (launcherSettings.isSavable()) {
-            launcherSettings.addListener(source -> {
+            launcherSettings.changes().subscribe(change -> {
                 if (launcherSettings.isBackupOnNextSave()) {
                     launcherSettings.setBackupOnNextSave(false);
                     SettingFileUtils.backupInvalidConfig(SETTINGS_LOCATION);
@@ -1138,7 +1176,7 @@ public final class SettingsManager {
     /// Loads the current per-workspace settings or migrates a legacy config when needed.
     private static LoadedLauncherSettings loadLauncherSettings() throws IOException {
         if (Files.exists(SETTINGS_LOCATION)) {
-            JsonObject jsonObject;
+            @Nullable JsonObject jsonObject;
             try {
                 jsonObject = JsonUtils.fromJsonFile(SETTINGS_LOCATION, JsonObject.class);
             } catch (Exception e) {
@@ -1177,7 +1215,7 @@ public final class SettingsManager {
             }
 
             try {
-                LauncherSettings settings = LauncherSettings.fromJson(jsonObject);
+                @Nullable LauncherSettings settings = LauncherSettings.fromJson(jsonObject);
                 if (settings == null) {
                     settings = new LauncherSettings();
                     settings.setSavable(false);
@@ -1199,7 +1237,7 @@ public final class SettingsManager {
                 return new LoadedLauncherSettings(settings, null, SettingFileAccess.READ_WRITE);
             }
         } else {
-            LegacyConfigMigrator.LegacyConfigMigration migration = migrateLegacySettings();
+            LegacyConfigMigrator.@Nullable LegacyConfigMigration migration = migrateLegacySettings();
             if (migration != null) {
                 return new LoadedLauncherSettings(migration.launcherSettings(), migration, SettingFileAccess.READ_WRITE);
             }
@@ -1219,7 +1257,7 @@ public final class SettingsManager {
             return null;
         }
 
-        JsonObject jsonObject;
+        @Nullable JsonObject jsonObject;
         try {
             jsonObject = JsonUtils.fromJsonFile(LEGACY_SETTINGS_LOCATION, JsonObject.class);
         } catch (JsonParseException e) {
@@ -1413,39 +1451,62 @@ public final class SettingsManager {
             bindAuthlibInjectorServerMetadataCache(server, false);
         }
 
-        authlibInjectorServers().getServers().addListener((ListChangeListener<AuthlibInjectorServer>) change -> {
-            while (change.next()) {
-                for (AuthlibInjectorServer server : change.getRemoved()) {
-                    unbindAuthlibInjectorServerMetadataCache(server);
-                }
-                for (AuthlibInjectorServer server : change.getAddedSubList()) {
-                    bindAuthlibInjectorServerMetadataCache(server, true);
-                }
+        authlibInjectorServers().getServers().subscribe(SettingsManager::synchronizeAuthlibInjectorServerMetadataCache);
+    }
+
+    /// Applies one server-list mutation to cache subscriptions without disturbing retained server identities.
+    ///
+    /// @param change completed immutable server-list mutation
+    private static void synchronizeAuthlibInjectorServerMetadataCache(
+            ListChange<AuthlibInjectorServer> change) {
+        for (AuthlibInjectorServer server : change.previousItems()) {
+            if (!containsIdentity(change.currentItems(), server)) {
+                unbindAuthlibInjectorServerMetadataCache(server);
             }
-        });
+        }
+        for (AuthlibInjectorServer server : change.currentItems()) {
+            if (!containsIdentity(change.previousItems(), server)) {
+                bindAuthlibInjectorServerMetadataCache(server, true);
+            }
+        }
+    }
+
+    /// Returns whether an immutable mutation snapshot contains the exact server object.
+    ///
+    /// @param servers immutable server snapshot
+    /// @param target server identity to find
+    /// @return whether the target object occurs in the snapshot
+    private static boolean containsIdentity(
+            List<AuthlibInjectorServer> servers,
+            AuthlibInjectorServer target) {
+        for (AuthlibInjectorServer server : servers) {
+            if (server == target) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// Connects one server to the metadata cache.
     private static void bindAuthlibInjectorServerMetadataCache(
             AuthlibInjectorServer server,
             boolean storeExistingMetadata) {
-        if (authlibInjectorServerMetadataListeners.containsKey(server)) {
+        if (authlibInjectorServerMetadataSubscriptions.containsKey(server)) {
             return;
         }
 
         AuthlibInjectorServerMetadataCache cache = authlibInjectorServerMetadataCache();
         cache.initialize(server, storeExistingMetadata);
 
-        InvalidationListener listener = ignored -> cache.store(server);
-        server.addListener(listener);
-        authlibInjectorServerMetadataListeners.put(server, listener);
+        Subscription subscription = server.changes().subscribe(change -> cache.store(server));
+        authlibInjectorServerMetadataSubscriptions.put(server, subscription);
     }
 
     /// Disconnects one server from the metadata cache and removes its cached metadata.
     private static void unbindAuthlibInjectorServerMetadataCache(AuthlibInjectorServer server) {
-        InvalidationListener listener = authlibInjectorServerMetadataListeners.remove(server);
-        if (listener != null) {
-            server.removeListener(listener);
+        @Nullable Subscription subscription = authlibInjectorServerMetadataSubscriptions.remove(server);
+        if (subscription != null) {
+            subscription.unsubscribe();
         }
 
         authlibInjectorServerMetadataCache().remove(server);
@@ -1513,7 +1574,7 @@ public final class SettingsManager {
 
             AccountPrivateDataStore defaultPrivateData =
                     new AccountPrivateDataStore(userGameAccountPrivateData(), USER_GAME_ACCOUNT_PRIVATE_DATA_FILE);
-            List<AccountPrivateDataStore> privateDataStores = List.of(
+            @Unmodifiable List<AccountPrivateDataStore> privateDataStores = List.of(
                     new AccountPrivateDataStore(userGameAccountPrivateData(), USER_GAME_ACCOUNT_PRIVATE_DATA_FILE),
                     new AccountPrivateDataStore(gameAccountPrivateData(), GAME_ACCOUNT_PRIVATE_DATA_FILE));
             @Nullable AccountPrivateDataUpdate privateDataUpdate = migrated != null && newlyCreated
@@ -1575,7 +1636,7 @@ public final class SettingsManager {
 
         AccountPrivateDataStore defaultPrivateData =
                 new AccountPrivateDataStore(gameAccountPrivateData(), GAME_ACCOUNT_PRIVATE_DATA_FILE);
-        List<AccountPrivateDataStore> privateDataStores = List.of(
+        @Unmodifiable List<AccountPrivateDataStore> privateDataStores = List.of(
                 new AccountPrivateDataStore(gameAccountPrivateData(), GAME_ACCOUNT_PRIVATE_DATA_FILE),
                 new AccountPrivateDataStore(userGameAccountPrivateData(), USER_GAME_ACCOUNT_PRIVATE_DATA_FILE));
         @Nullable AccountPrivateDataUpdate privateDataUpdate = fallbackGameAccounts != null && newlyCreated
@@ -1703,6 +1764,7 @@ public final class SettingsManager {
     ///
     /// @param settings the loaded launcher settings
     /// @param pendingMigration the pending legacy config migration, or `null` when no legacy config was migrated
+    @NotNullByDefault
     private record LoadedLauncherSettings(
             LauncherSettings settings,
             @Nullable LegacyConfigMigrator.LegacyConfigMigration pendingMigration,

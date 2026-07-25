@@ -24,18 +24,27 @@ import java.util.HashSet;
 import java.util.OptionalInt;
 import java.util.Set;
 
-/// Computes list load windows entirely from current measurements and data-source boundaries.
+/// Computes adaptive list load windows from current measurements and data-source boundaries.
 @NotNullByDefault
 public final class ViewportLoadStrategy {
+    /// Maximum additional forward-looking viewports allowed for speed-based prefetch.
+    ///
+    /// Together with the visible viewport and one baseline viewport on each side, this keeps a
+    /// request within six measured viewports. The list model may retain one more viewport on each
+    /// side as reversal hysteresis, bounding its contiguous cache to eight measured viewports.
+    private static final int MAX_DIRECTIONAL_WARM_VIEWPORTS = 3;
+
     /// Creates a stateless viewport load strategy.
     public ViewportLoadStrategy() {
     }
 
     /// Builds a load plan for the supplied viewport observation.
     ///
-    /// The visible range is calculated from viewport and measured row geometry. Directional
-    /// prefetch is exactly the distance predicted from observed scrolling speed and load latency;
-    /// no fixed page count or cache-window default is used.
+    /// The visible range is calculated from viewport and measured row geometry. One measured
+    /// viewport is prefetched on both sides even on first display or while stationary. Scrolling
+    /// speed and observed load latency add a bounded forward-looking range in the current
+    /// direction. Every window therefore scales with actual visible capacity rather than a fixed
+    /// item count.
     ///
     /// @param observation the current measured viewport state
     /// @return the load plan constrained by any known data-source boundary
@@ -54,12 +63,16 @@ public final class ViewportLoadStrategy {
         double rowsPerSecond = calculateRowsPerSecond(scrollDelta, observation);
         int predictedRows = predictRowsDuringLoad(rowsPerSecond, observation.observedLoadLatency());
 
-        int desiredStart = visibleRange.startInclusive();
-        int desiredEnd = visibleRange.endExclusive();
+        int maximumDirectionalRows = saturatingMultiply(
+                visibleRows,
+                MAX_DIRECTIONAL_WARM_VIEWPORTS);
+        int directionalRows = Math.min(predictedRows, maximumDirectionalRows);
+        int desiredStart = saturatingSubtract(visibleRange.startInclusive(), visibleRows);
+        int desiredEnd = saturatingAdd(visibleRange.endExclusive(), visibleRows);
         if (direction == ScrollDirection.UP) {
-            desiredStart = saturatingSubtract(desiredStart, predictedRows);
+            desiredStart = saturatingSubtract(desiredStart, directionalRows);
         } else if (direction == ScrollDirection.DOWN) {
-            desiredEnd = saturatingAdd(desiredEnd, predictedRows);
+            desiredEnd = saturatingAdd(desiredEnd, directionalRows);
         }
 
         IndexRange desiredRange = new IndexRange(desiredStart, desiredEnd);
@@ -141,6 +154,16 @@ public final class ViewportLoadStrategy {
     /// @return the sum, limited to the largest integer
     private static int saturatingAdd(int left, int right) {
         long result = (long) left + right;
+        return result >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) result;
+    }
+
+    /// Multiplies non-negative integers without overflowing.
+    ///
+    /// @param left the first non-negative value
+    /// @param right the second non-negative value
+    /// @return the product, limited to the largest integer
+    private static int saturatingMultiply(int left, int right) {
+        long result = (long) left * right;
         return result >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) result;
     }
 

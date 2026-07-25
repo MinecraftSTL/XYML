@@ -33,9 +33,11 @@ import java.util.OptionalInt;
 
 /// A sparse Swing list model backed by cancellable viewport-range requests.
 ///
-/// The model retains values in the current source-aligned result ranges plus explicitly pinned
-/// indexes. It does not allocate one object per logical row and does not define page or cache-page
-/// defaults. All public state-changing methods must run on the Swing event dispatch thread.
+/// The model retains the current adaptive demand plus one measured viewport of reversal hysteresis
+/// on both sides and any explicitly pinned indexes. Source-aligned pages are filtered to that
+/// bounded window, so a data source cannot impose an arbitrary cache size. It does not allocate one
+/// object per logical row. All public state-changing methods must run on the Swing event dispatch
+/// thread.
 ///
 /// @param <T> the non-null choice value type
 @NotNullByDefault
@@ -57,7 +59,7 @@ public final class ViewportChoiceListModel<T extends Object>
     /// Failed ranges belonging to the active generation.
     private final List<FailedRange> failedRanges = new ArrayList<>();
 
-    /// The source-aligned ranges retained for the current demand.
+    /// Adaptive demand, reversal-hysteresis, and pinned ranges retained for the current plan.
     private final List<IndexRange> retainedRanges = new ArrayList<>();
 
     /// The currently applied viewport plan, or `null` before layout supplies one.
@@ -121,7 +123,15 @@ public final class ViewportChoiceListModel<T extends Object>
             throw new IllegalStateException("Viewport choice model is closed");
         }
         currentPlan = plan;
+        updateRetainedRanges(plan);
+        boolean evicted = evictOutsideRetention();
         updateExposedSize(plan);
+        if (evicted) {
+            fireAllContentsChanged();
+        }
+        if (isPlanFullyLoaded(plan)) {
+            return;
+        }
         activeGeneration = coordinator.request(plan);
     }
 
@@ -131,7 +141,15 @@ public final class ViewportChoiceListModel<T extends Object>
         if (closed) {
             throw new IllegalStateException("Viewport choice model is closed");
         }
-        activeGeneration = coordinator.retry();
+        @Nullable ViewportLoadPlan plan = currentPlan;
+        if (plan == null) {
+            return;
+        }
+        long previousGeneration = activeGeneration;
+        long requestedGeneration = coordinator.request(plan);
+        activeGeneration = requestedGeneration == previousGeneration
+                ? coordinator.retry()
+                : requestedGeneration;
     }
 
     /// Invalidates cached values and re-reads the data-source boundary without inventing a logical size.
@@ -185,10 +203,15 @@ public final class ViewportChoiceListModel<T extends Object>
     public void loading(long generation, @Unmodifiable List<IndexRange> ranges) {
         requireEventDispatchThread();
         activeGeneration = generation;
-        retainedRanges.clear();
-        retainedRanges.addAll(ranges);
+        @Nullable ViewportLoadPlan plan = currentPlan;
+        if (plan == null) {
+            retainedRanges.clear();
+            retainedRanges.addAll(ranges);
+        } else {
+            updateRetainedRanges(plan);
+        }
         failedRanges.clear();
-        loadedValues.keySet().removeIf(index -> !isRetained(index));
+        evictOutsideRetention();
         fireAllContentsChanged();
     }
 
@@ -249,12 +272,18 @@ public final class ViewportChoiceListModel<T extends Object>
             return;
         }
         mergeExactItemCount(page.exactItemCount());
-        retainedRanges.add(page.range());
+        @Nullable ViewportLoadPlan plan = currentPlan;
+        if (plan != null) {
+            updateRetainedRanges(plan);
+        }
+        evictOutsideRetention();
         for (int offset = 0; offset < page.items().size(); offset++) {
-            loadedValues.put(page.range().startInclusive() + offset, page.items().get(offset));
+            int index = page.range().startInclusive() + offset;
+            if (isRetained(index)) {
+                loadedValues.put(index, page.items().get(offset));
+            }
         }
         removeFailuresIntersecting(requestedRange);
-        @Nullable ViewportLoadPlan plan = currentPlan;
         if (plan != null) {
             updateExposedSize(plan);
         }
@@ -271,7 +300,9 @@ public final class ViewportChoiceListModel<T extends Object>
             return;
         }
         removeFailuresIntersecting(requestedRange);
-        failedRanges.add(new FailedRange(requestedRange, failure));
+        if (intersectsRetainedRange(requestedRange)) {
+            failedRanges.add(new FailedRange(requestedRange, failure));
+        }
         fireRangeContentsChanged(requestedRange);
     }
 
@@ -325,7 +356,107 @@ public final class ViewportChoiceListModel<T extends Object>
         }
     }
 
-    /// Returns whether an index belongs to a retained current-demand or source-aligned range.
+    /// Rebuilds bounded retention from an adaptive viewport plan.
+    ///
+    /// One current visible-range length is kept beyond each side of desired demand. That margin
+    /// absorbs a short direction reversal without another source request while still scaling with
+    /// actual on-screen capacity. Pinned indexes outside the contiguous envelope remain as compact
+    /// singleton ranges.
+    ///
+    /// @param plan the latest measured load plan
+    private void updateRetainedRanges(ViewportLoadPlan plan) {
+        retainedRanges.clear();
+        int hysteresisRows = plan.visibleRange().length();
+        IndexRange desiredRange = plan.desiredRange();
+        IndexRange envelope = new IndexRange(
+                saturatingSubtract(desiredRange.startInclusive(), hysteresisRows),
+                saturatingAdd(desiredRange.endExclusive(), hysteresisRows));
+        if (exactItemCount.isPresent()) {
+            envelope = envelope.clampToItemCount(exactItemCount.getAsInt());
+        }
+        if (!envelope.isEmpty()) {
+            retainedRanges.add(envelope);
+        }
+        for (int index : plan.pinnedIndices()) {
+            if (isValidRetainedIndex(index) && !envelope.contains(index)) {
+                retainedRanges.add(IndexRange.ofLength(index, 1));
+            }
+        }
+    }
+
+    /// Returns whether a requested or failed range intersects any retained range.
+    ///
+    /// @param candidate the range to compare with current retention
+    /// @return whether at least one retained index belongs to the candidate
+    private boolean intersectsRetainedRange(IndexRange candidate) {
+        for (IndexRange retainedRange : retainedRanges) {
+            if (rangesIntersect(candidate, retainedRange)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Removes sparse values and failures that have left the bounded retention window.
+    ///
+    /// @return whether any cached state was removed
+    private boolean evictOutsideRetention() {
+        boolean valuesRemoved = loadedValues.keySet().removeIf(index -> !isRetained(index));
+        boolean failuresRemoved = failedRanges.removeIf(
+                failedRange -> !intersectsRetainedRange(failedRange.range()));
+        return valuesRemoved || failuresRemoved;
+    }
+
+    /// Returns whether every current demanded index is already cached.
+    ///
+    /// This suppresses redundant reloads when a short direction reversal remains inside the
+    /// hysteresis window. Pinned values are included even when outside contiguous demand.
+    ///
+    /// @param plan the latest viewport plan
+    /// @return whether the source does not need to be contacted for this plan
+    private boolean isPlanFullyLoaded(ViewportLoadPlan plan) {
+        if (!isRangeFullyLoaded(plan.desiredRange())) {
+            return false;
+        }
+        for (int index : plan.pinnedIndices()) {
+            if (isValidRetainedIndex(index) && !loadedValues.containsKey(index)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// Returns whether every index in a range has a sparse cached value.
+    ///
+    /// Iterating the bounded sparse cache avoids work proportional to a potentially large logical
+    /// source range while preserving an exact completeness check.
+    ///
+    /// @param range the demanded range
+    /// @return whether every index in the range is loaded
+    private boolean isRangeFullyLoaded(IndexRange range) {
+        IndexRange effectiveRange = exactItemCount.isPresent()
+                ? range.clampToItemCount(exactItemCount.getAsInt())
+                : range;
+        int loadedCount = 0;
+        for (int index : loadedValues.keySet()) {
+            if (effectiveRange.contains(index)) {
+                loadedCount++;
+            }
+        }
+        return loadedCount == effectiveRange.length();
+    }
+
+    /// Returns whether an index can be represented by the current source boundary.
+    ///
+    /// @param index the candidate pinned index
+    /// @return whether a singleton retained range can be created for the index
+    private boolean isValidRetainedIndex(int index) {
+        return index >= 0
+                && index < Integer.MAX_VALUE
+                && (exactItemCount.isEmpty() || index < exactItemCount.getAsInt());
+    }
+
+    /// Returns whether an index belongs to an adaptive or pinned retained range.
     ///
     /// @param index the stable source index
     /// @return whether the sparse value should be retained
@@ -336,6 +467,35 @@ public final class ViewportChoiceListModel<T extends Object>
             }
         }
         return false;
+    }
+
+    /// Returns whether two half-open ranges share at least one index.
+    ///
+    /// @param left the first range
+    /// @param right the second range
+    /// @return whether the ranges intersect
+    private static boolean rangesIntersect(IndexRange left, IndexRange right) {
+        return left.startInclusive() < right.endExclusive()
+                && right.startInclusive() < left.endExclusive();
+    }
+
+    /// Adds non-negative integers without overflowing.
+    ///
+    /// @param left the first non-negative value
+    /// @param right the second non-negative value
+    /// @return the sum, limited to the largest integer
+    private static int saturatingAdd(int left, int right) {
+        long result = (long) left + right;
+        return result >= Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) result;
+    }
+
+    /// Subtracts non-negative integers without underflowing below zero.
+    ///
+    /// @param left the non-negative minuend
+    /// @param right the non-negative subtrahend
+    /// @return the difference, limited to zero
+    private static int saturatingSubtract(int left, int right) {
+        return left <= right ? 0 : left - right;
     }
 
     /// Finds the active failure covering an index.

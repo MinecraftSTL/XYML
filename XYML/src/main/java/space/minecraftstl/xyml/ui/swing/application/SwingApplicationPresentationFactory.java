@@ -28,6 +28,12 @@ import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.SchematicInstanceManagementStrings;
+import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicMetadataStrings;
@@ -92,6 +98,12 @@ public final class SwingApplicationPresentationFactory {
                 createInstancesStatusStrings(),
                 createManagementStrings(),
                 createSchematicBrowserStrings(),
+                createModCatalogStrings(),
+                createModCatalogStatusStrings(),
+                createModCatalogActionStrings(),
+                createResourcePackStrings(),
+                createResourcePackStatusStrings(),
+                createResourcePackActionStrings(),
                 createGameVersionStrings(),
                 createGameVersionStatusStrings(),
                 createGameInstallStrings(),
@@ -253,6 +265,141 @@ public final class SwingApplicationPresentationFactory {
                 i18n("swing.schematics.metadata.preview_unavailable"));
     }
 
+    /// Creates localized installed-Mod content text.
+    ///
+    /// @return installed-Mod catalog text
+    private static ModCatalogStrings createModCatalogStrings() {
+        return new ModCatalogStrings(
+                i18n("mods.manage"),
+                i18n("search"),
+                i18n("swing.mods.filter"),
+                i18n("swing.mods.filter.all"),
+                i18n("swing.mods.filter.enabled"),
+                i18n("swing.mods.filter.disabled"),
+                i18n("swing.mods.no_selection"),
+                i18n("swing.mods.id"),
+                i18n("swing.mods.version"),
+                i18n("mods.game.version"),
+                i18n("swing.mods.loader"),
+                i18n("swing.mods.authors"),
+                i18n("file"),
+                i18n("swing.mods.description"),
+                i18n("swing.mods.enabled"));
+    }
+
+    /// Creates localized installed-Mod lifecycle text.
+    ///
+    /// @return installed-Mod status text
+    private static ModCatalogStatusStrings createModCatalogStatusStrings() {
+        return new ModCatalogStatusStrings(
+                i18n("swing.mods.status.loading"),
+                i18n("swing.mods.status.empty"),
+                i18n("swing.mods.status.ready"),
+                i18n("swing.mods.status.failed"),
+                i18n("swing.mods.status.importing"),
+                i18n("swing.mods.status.enabling"),
+                i18n("swing.mods.status.disabling"),
+                i18n("swing.mods.status.deleting"),
+                i18n("swing.mods.status.write_failed"));
+    }
+
+    /// Creates localized installed-Mod action text.
+    ///
+    /// @return installed-Mod command and confirmation text
+    private static ModCatalogActionStrings createModCatalogActionStrings() {
+        return new ModCatalogActionStrings(
+                i18n("button.refresh"),
+                i18n("swing.mods.refresh_tooltip"),
+                i18n("mods.add"),
+                i18n("swing.mods.import_tooltip"),
+                i18n("swing.mods.open_directory"),
+                i18n("swing.mods.open_directory_tooltip"),
+                i18n("button.reveal_dir"),
+                i18n("swing.mods.reveal_tooltip"),
+                i18n("button.delete"),
+                i18n("swing.mods.delete_tooltip"),
+                i18n("mods.add.title"),
+                i18n("extension.mod"),
+                i18n("swing.mods.delete_confirm"),
+                i18n("message.failed"));
+    }
+
+    /// Creates localized installed-resource-pack content text.
+    ///
+    /// @return resource-pack catalog text
+    private static ResourcePackCatalogStrings createResourcePackStrings() {
+        return new ResourcePackCatalogStrings(
+                i18n("resourcepack.manage"),
+                i18n("button.refresh"),
+                i18n("swing.common.refreshing"),
+                i18n("swing.resourcepacks.refresh_tooltip"),
+                i18n("button.retry"),
+                i18n("swing.resourcepacks.retry_tooltip"),
+                i18n("swing.resourcepacks.status.idle"),
+                i18n("swing.resourcepacks.status.loading"),
+                i18n("swing.resourcepacks.status.empty"),
+                i18n("message.failed"),
+                i18n("swing.resourcepacks.status.unsupported"),
+                i18n("swing.resourcepacks.details"),
+                i18n("swing.resourcepacks.no_selection"),
+                i18n("file"),
+                i18n("swing.resourcepacks.path"),
+                i18n("swing.resourcepacks.description"),
+                i18n("swing.resourcepacks.compatibility"),
+                i18n("swing.resourcepacks.enabled"),
+                i18n("button.enable"),
+                i18n("button.disable"),
+                i18n("swing.resourcepacks.compatible"),
+                i18n("resourcepack.warning.too_new"),
+                i18n("resourcepack.warning.too_old"),
+                i18n("resourcepack.warning.invalid"),
+                i18n("resourcepack.warning.missing_pack_meta"),
+                i18n("resourcepack.warning.missing_game_meta"));
+    }
+
+    /// Creates localized installed-resource-pack lifecycle text.
+    ///
+    /// @return resource-pack status text
+    private static ResourcePackCatalogStatusStrings createResourcePackStatusStrings() {
+        return new ResourcePackCatalogStatusStrings(
+                i18n("swing.resourcepacks.status.idle"),
+                i18n("swing.resourcepacks.status.loading"),
+                i18n("swing.resourcepacks.status.ready"),
+                i18n("swing.resourcepacks.status.empty"),
+                i18n("swing.resourcepacks.status.unsupported"),
+                i18n("swing.resourcepacks.status.failed"),
+                i18n("message.unknown"),
+                i18n("swing.resourcepacks.status.writing"),
+                i18n("swing.resourcepacks.status.write_failed"));
+    }
+
+    /// Creates localized installed-resource-pack action text.
+    ///
+    /// @return resource-pack command and confirmation text
+    private static ResourcePackCatalogActionStrings createResourcePackActionStrings() {
+        return new ResourcePackCatalogActionStrings(
+                i18n("resourcepack.add"),
+                i18n("swing.resourcepacks.import_tooltip"),
+                i18n("resourcepack.add.title"),
+                i18n("extension.resourcepack"),
+                i18n("button.enable"),
+                i18n("swing.resourcepacks.enable_tooltip"),
+                i18n("button.disable"),
+                i18n("swing.resourcepacks.disable_tooltip"),
+                i18n("message.warning"),
+                i18n("swing.resourcepacks.enable_incompatible_confirm"),
+                i18n("button.delete"),
+                i18n("swing.resourcepacks.delete_tooltip"),
+                i18n("swing.resourcepacks.delete_confirm"),
+                i18n("button.reveal_dir"),
+                i18n("reveal.in_file_manager"),
+                i18n("folder.resourcepacks"),
+                i18n("swing.resourcepacks.open_directory_tooltip"),
+                i18n("message.failed"),
+                i18n("swing.resourcepacks.reveal_failed"),
+                i18n("swing.resourcepacks.open_directory_failed"));
+    }
+
     /// Creates localized game-version catalog controls.
     ///
     /// @return game-version catalog text
@@ -305,6 +452,11 @@ public final class SwingApplicationPresentationFactory {
         return new AccountsStrings(
                 i18n("account"),
                 i18n("account.create"),
+                i18n("account.login.refresh"),
+                i18n("account.copy_uuid"),
+                i18n("button.delete"),
+                i18n("button.remove.confirm"),
+                i18n("message.error"),
                 i18n("account.empty"));
     }
 

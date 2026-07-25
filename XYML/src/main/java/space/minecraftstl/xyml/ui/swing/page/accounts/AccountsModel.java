@@ -22,6 +22,8 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
 
+import java.util.concurrent.CompletionStage;
+
 /// Supplies exact account-list state, viewport rows, selection, and the add-account command.
 ///
 /// Implementations must keep [AccountsSnapshot#itemCount()] and [#exactItemCount()] equal. Indexed
@@ -46,4 +48,17 @@ public interface AccountsModel extends ViewportChoiceDataSource<AccountListItem>
 
     /// Opens the add-account workflow.
     void addAccount();
+
+    /// Permanently removes one currently loaded account by stable identifier.
+    ///
+    /// @param accountId stable account identifier
+    /// @param allowReadOnlyOverwrite whether confirmed backup-and-overwrite may make newer storage writable
+    /// @throws AccountStorageOverwriteRequiredException when storage is read-only and overwrite is not allowed
+    void removeAccount(String accountId, boolean allowReadOnlyOverwrite);
+
+    /// Starts asynchronous authentication and persistence for one currently loaded account.
+    ///
+    /// @param accountId stable account identifier
+    /// @return completion after refreshed authentication data has been persisted and released
+    CompletionStage<Void> refreshAccount(String accountId);
 }

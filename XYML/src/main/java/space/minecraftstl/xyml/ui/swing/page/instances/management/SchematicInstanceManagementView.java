@@ -135,10 +135,40 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
             SchematicBrowserStrings browserStrings,
             SchematicBrowserInteractions browserInteractions,
             Runnable returnCommand) {
+        this(
+                instanceId,
+                directoryResolver,
+                executor,
+                strings,
+                browserStrings,
+                browserInteractions,
+                returnCommand,
+                true);
+    }
+
+    /// Creates and starts an embeddable schematic management view on the EDT.
+    ///
+    /// @param instanceId stable repository instance identifier
+    /// @param directoryResolver potentially blocking schematic-root resolver
+    /// @param executor caller-owned asynchronous executor that never runs blocking work inline on EDT
+    /// @param strings localized outer-shell text
+    /// @param browserStrings localized browser text
+    /// @param browserInteractions explicit browser dialog and desktop boundary
+    /// @param returnCommand coordinator command returning to the instance list
+    /// @param showReturnToolbar whether this view owns the top-level return toolbar
+    SchematicInstanceManagementView(
+            String instanceId,
+            SchematicDirectoryResolver directoryResolver,
+            Executor executor,
+            SchematicInstanceManagementStrings strings,
+            SchematicBrowserStrings browserStrings,
+            SchematicBrowserInteractions browserInteractions,
+            Runnable returnCommand,
+            boolean showReturnToolbar) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
-                "[]12[grow,fill]"));
+                showReturnToolbar ? "[]12[grow,fill]" : "[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
         this.instanceId = requireNonBlank(instanceId, "instanceId");
         this.directoryResolver = Objects.requireNonNull(directoryResolver, "directoryResolver");
@@ -149,7 +179,7 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
         this.returnCommand = Objects.requireNonNull(returnCommand, "returnCommand");
 
         setName("schematicInstanceManagement");
-        configureComponents();
+        configureComponents(showReturnToolbar);
         startResolution();
     }
 
@@ -203,22 +233,27 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
     }
 
     /// Builds stable toolbar and lifecycle cards before any background work can complete.
-    private void configureComponents() {
+    /// Builds stable lifecycle cards and an optional top-level return toolbar.
+    ///
+    /// @param showReturnToolbar whether this view owns the top-level return toolbar
+    private void configureComponents(boolean showReturnToolbar) {
         EdtDispatcher.requireEventDispatchThread();
-        JPanel toolbar = new JPanel(new MigLayout("insets 0, fillx", "[][grow,fill]", "[40!]"));
-        toolbar.setOpaque(false);
+        if (showReturnToolbar) {
+            JPanel toolbar = new JPanel(new MigLayout("insets 0, fillx", "[][grow,fill]", "[40!]"));
+            toolbar.setOpaque(false);
 
-        returnButton.setName("schematicInstanceReturn");
-        returnButton.setText(strings.returnAction());
-        returnButton.setToolTipText(strings.returnTooltip());
-        returnButton.setIcon(new FlatSVGIcon("assets/swing/icons/arrow-back.svg", 18, 18));
-        returnButton.addActionListener(event -> {
-            if (!closed.get()) {
-                returnCommand.run();
-            }
-        });
-        toolbar.add(returnButton, "h 40!");
-        add(toolbar, "growx");
+            returnButton.setName("schematicInstanceReturn");
+            returnButton.setText(strings.returnAction());
+            returnButton.setToolTipText(strings.returnTooltip());
+            returnButton.setIcon(new FlatSVGIcon("assets/swing/icons/arrow-back.svg", 18, 18));
+            returnButton.addActionListener(event -> {
+                if (!closed.get()) {
+                    returnCommand.run();
+                }
+            });
+            toolbar.add(returnButton, "h 40!");
+            add(toolbar, "growx");
+        }
 
         loadingLabel.setText(strings.loadingText());
         contentCards.add(loadingLabel, LOADING_CARD);

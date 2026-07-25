@@ -109,7 +109,7 @@ abstract class AbstractProperty<T> implements Property<T> {
             change = prepareChangeLocked(value);
         }
         if (change != null) {
-            change.publish(changeSupport);
+            change.publish(this, changeSupport);
         }
     }
 
@@ -239,6 +239,13 @@ abstract class AbstractProperty<T> implements Property<T> {
         return candidate;
     }
 
+    /// Runs after a distinct normalized value has been committed and before subscribers receive its change.
+    ///
+    /// The state lock is not held while this hook runs. Subclasses may use it to invalidate value-dependent cached
+    /// state, but should not assume that later concurrent transitions are blocked until the hook returns.
+    protected void valueChanged(@Nullable T previousValue, @Nullable T currentValue) {
+    }
+
     /// Records an active-source callback before synchronizing so a racing initial read is retried.
     private void updateBoundValueAfterChange(ObservableValue<T> source) {
         synchronized (stateLock) {
@@ -270,7 +277,7 @@ abstract class AbstractProperty<T> implements Property<T> {
                 change = prepareChangeLocked(currentSourceValue);
             }
             if (change != null) {
-                change.publish(changeSupport);
+                change.publish(this, changeSupport);
             }
 
             synchronized (stateLock) {
@@ -316,8 +323,9 @@ abstract class AbstractProperty<T> implements Property<T> {
             this.currentValue = currentValue;
         }
 
-        /// Publishes this transition to the supplied change support.
-        private void publish(ValueChangeSupport<T> changeSupport) {
+        /// Invokes the subclass hook and publishes this transition to the supplied change support.
+        private void publish(AbstractProperty<T> property, ValueChangeSupport<T> changeSupport) {
+            property.valueChanged(previousValue, currentValue);
             changeSupport.fireChange(previousValue, currentValue);
         }
     }

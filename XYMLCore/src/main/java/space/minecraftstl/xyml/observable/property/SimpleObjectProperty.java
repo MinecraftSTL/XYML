@@ -22,7 +22,7 @@ import org.jetbrains.annotations.Nullable;
 
 /// Stores a nullable object value with toolkit-neutral observable and binding behavior.
 @NotNullByDefault
-public final class SimpleObjectProperty<T> extends AbstractProperty<T> implements ObjectProperty<T> {
+public class SimpleObjectProperty<T> extends AbstractProperty<T> implements ObjectProperty<T> {
     /// Creates an unnamed, ownerless property with a null value.
     public SimpleObjectProperty() {
         this(null, "", null);

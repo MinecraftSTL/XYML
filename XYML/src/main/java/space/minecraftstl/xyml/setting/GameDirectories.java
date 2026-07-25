@@ -19,17 +19,17 @@ package space.minecraftstl.xyml.setting;
 
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.Observable;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableList;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.ObservableSetting;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
+import java.util.List;
 
 /// Stores game directories independently from the main config file.
 ///
@@ -47,7 +47,7 @@ public final class GameDirectories extends ObservableSetting implements JsonSche
 
     /// Creates an empty game directory store.
     public GameDirectories() {
-        tracker.markDirty(schema);
+        markDirty(schema);
         register();
     }
 
@@ -103,7 +103,10 @@ public final class GameDirectories extends ObservableSetting implements JsonSche
     /// Game directories stored in this file.
     @SerializedName("directories")
     private final ObservableList<GameDirectory> gameDirectories =
-            FXCollections.observableArrayList(profile -> new Observable[] { profile });
+            ObservableCollections.observableList(profile -> List.of(
+                    profile.nameProperty(),
+                    profile.pathProperty(),
+                    profile.legacyGameSettingsProperty()));
 
     /// Whether this store represents `HMCL_USER_HOME/config/user-game-directories.json`.
     private transient boolean userFile;
@@ -137,6 +140,7 @@ public final class GameDirectories extends ObservableSetting implements JsonSche
     }
 
     /// JSON adapter for [GameDirectories].
+    @NotNullByDefault
     public static final class Adapter extends ObservableSetting.Adapter<GameDirectories> {
         /// Creates an empty game directory store for deserialization.
         @Override

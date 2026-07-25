@@ -39,6 +39,10 @@ import java.awt.CardLayout;
 import java.awt.Font;
 import java.util.Objects;
 import java.util.OptionalInt;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 
 /// Presents a sparse, viewport-driven list for choosing exactly one launcher account.
 ///
@@ -55,6 +59,12 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
     /// Toolkit-neutral account source and command model.
     private final AccountsModel model;
 
+    /// Localized page and account-action text.
+    private final AccountsStrings strings;
+
+    /// Destructive confirmation, clipboard, and failure presentation boundary.
+    private final AccountManagementInteraction interaction;
+
     /// Viewport-measured single-choice list.
     private final ViewportChoiceList<AccountListItem> choiceList;
 
@@ -64,6 +74,15 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
     /// Add-account command.
     private final JButton addButton = new JButton();
 
+    /// Refresh or reauthentication command for the loaded selection.
+    private final JButton refreshButton = new JButton();
+
+    /// Profile UUID clipboard command for the loaded selection.
+    private final JButton copyUuidButton = new JButton();
+
+    /// Permanent removal command for the loaded selection.
+    private final JButton removeButton = new JButton();
+
     /// Owned model listener registration.
     private final Subscription modelSubscription;
 
@@ -72,19 +91,19 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         /// Rechecks a changed loaded row.
         @Override
         public void intervalAdded(ListDataEvent event) {
-            submitPendingUserSelection();
+            loadedRowsChanged();
         }
 
         /// Rechecks a changed loaded row.
         @Override
         public void intervalRemoved(ListDataEvent event) {
-            submitPendingUserSelection();
+            loadedRowsChanged();
         }
 
         /// Rechecks a changed loaded row.
         @Override
         public void contentsChanged(ListDataEvent event) {
-            submitPendingUserSelection();
+            loadedRowsChanged();
         }
     };
 
@@ -100,18 +119,34 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
     /// Whether this panel has released subscriptions and load resources.
     private boolean closed;
 
+    /// Whether one page-initiated authentication operation is active.
+    private boolean refreshInProgress;
+
     /// Creates an account-selection panel on the EDT.
     ///
     /// @param model toolkit-neutral account model and viewport source
     /// @param strings localized page text
     public AccountsPanel(AccountsModel model, AccountsStrings strings) {
+        this(model, strings, new SwingAccountManagementInteraction());
+    }
+
+    /// Creates an account-selection panel with injectable native side effects for headless tests.
+    ///
+    /// @param model toolkit-neutral account model and viewport source
+    /// @param strings localized page text
+    /// @param interaction confirmation, clipboard, and error boundary
+    AccountsPanel(
+            AccountsModel model,
+            AccountsStrings strings,
+            AccountManagementInteraction interaction) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
-                "[]16[grow,fill]"));
+                "[]8[]16[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
         this.model = Objects.requireNonNull(model, "model");
-        Objects.requireNonNull(strings, "strings");
+        this.strings = Objects.requireNonNull(strings, "strings");
+        this.interaction = Objects.requireNonNull(interaction, "interaction");
         choiceList = new ViewportChoiceList<>(model, AccountsPanel::displayText);
 
         configureComponents(strings);
@@ -143,6 +178,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
                 modelSubscription.unsubscribe();
                 choiceList.getChoiceModel().removeListDataListener(listDataListener);
                 choiceList.close();
+                updateActionAvailability();
             }
         });
     }
@@ -168,6 +204,29 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         toolbar.add(addButton, "h 40!");
         add(toolbar, "growx");
 
+        JPanel actions = new JPanel(new MigLayout(
+                "insets 0, fillx",
+                "[grow][][][]",
+                "[]"));
+        actions.setOpaque(false);
+        actions.add(new JLabel(), "growx, pushx");
+
+        refreshButton.setName("accountsRefresh");
+        refreshButton.setText(strings.refreshAction());
+        refreshButton.addActionListener(event -> refreshSelectedAccount());
+        actions.add(refreshButton, "h 36!");
+
+        copyUuidButton.setName("accountsCopyUuid");
+        copyUuidButton.setText(strings.copyUuidAction());
+        copyUuidButton.addActionListener(event -> copySelectedUuid());
+        actions.add(copyUuidButton, "h 36!");
+
+        removeButton.setName("accountsRemove");
+        removeButton.setText(strings.removeAction());
+        removeButton.addActionListener(event -> removeSelectedAccount());
+        actions.add(removeButton, "h 36!");
+        add(actions, "growx");
+
         choiceList.setName("accountsList");
         JList<ChoiceListEntry<AccountListItem>> list = choiceList.getList();
         list.setName("accountsListView");
@@ -176,6 +235,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
             if (!event.getValueIsAdjusting() && !applyingSnapshot) {
                 pendingUserSelectionIndex = list.getSelectedIndex();
                 submitPendingUserSelection();
+                updateActionAvailability();
             }
         });
         choiceList.getChoiceModel().addListDataListener(listDataListener);
@@ -219,6 +279,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
                 listCards,
                 snapshot.itemCount() == 0 ? EMPTY_CARD : LIST_CARD);
         restoreSelection(snapshot.selectedIndex());
+        updateActionAvailability();
     }
 
     /// Restores the model-selected row without delegating it back as a user command.
@@ -244,6 +305,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
             applyingSnapshot = false;
         }
         choiceList.refreshLoadPlan();
+        updateActionAvailability();
     }
 
     /// Commits a pending user selection once its sparse row has loaded.
@@ -258,7 +320,149 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         if (selected != null) {
             pendingUserSelectionIndex = -1;
             model.selectAccount(selected.accountId());
+            updateActionAvailability();
         }
+    }
+
+    /// Reconciles commands and a pending user choice after sparse row content changes.
+    private void loadedRowsChanged() {
+        submitPendingUserSelection();
+        updateActionAvailability();
+    }
+
+    /// Confirms and permanently removes the currently loaded account.
+    private void removeSelectedAccount() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable AccountListItem selected = selectedItem();
+        if (selected == null || refreshInProgress) {
+            return;
+        }
+        String message = strings.removeConfirmation() + "\n\n" + selected.displayName();
+        if (!interaction.confirmRemoval(this, strings.removeAction(), message)) {
+            return;
+        }
+        try {
+            model.removeAccount(selected.accountId(), false);
+        } catch (AccountStorageOverwriteRequiredException failure) {
+            confirmOverwriteAndRemove(selected, failure);
+        } catch (RuntimeException failure) {
+            showActionFailure(failure);
+        }
+        updateActionAvailability();
+    }
+
+    /// Confirms storage recovery and retries one stable account removal with explicit overwrite consent.
+    ///
+    /// @param selected loaded account row captured before the first removal attempt
+    /// @param failure read-only signal from that exact attempt
+    private void confirmOverwriteAndRemove(
+            AccountListItem selected,
+            AccountStorageOverwriteRequiredException failure) {
+        if (!selected.accountId().equals(failure.accountId())) {
+            showActionFailure(failure);
+            return;
+        }
+        if (!interaction.confirmReadOnlyOverwrite(this)) {
+            return;
+        }
+        try {
+            model.removeAccount(selected.accountId(), true);
+        } catch (RuntimeException retryFailure) {
+            showActionFailure(retryFailure);
+        }
+    }
+
+    /// Starts nonblocking reauthentication for the currently loaded account.
+    private void refreshSelectedAccount() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable AccountListItem selected = selectedItem();
+        if (selected == null || refreshInProgress) {
+            return;
+        }
+
+        refreshInProgress = true;
+        updateActionAvailability();
+        final CompletionStage<Void> completion;
+        try {
+            completion = Objects.requireNonNull(
+                    model.refreshAccount(selected.accountId()),
+                    "account model returned no refresh completion");
+        } catch (Throwable failure) {
+            refreshInProgress = false;
+            updateActionAvailability();
+            showActionFailure(failure);
+            return;
+        }
+        completion.whenComplete((ignored, failure) -> SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+            if (closed) {
+                return;
+            }
+            refreshInProgress = false;
+            updateActionAvailability();
+            @Nullable Throwable resolved = unwrapFailure(failure);
+            if (resolved != null
+                    && !(resolved instanceof CancellationException)
+                    && !(resolved instanceof AccountReauthenticationException)) {
+                showActionFailure(resolved);
+            }
+        }));
+    }
+
+    /// Copies the selected profile UUID through the injected AWT clipboard boundary.
+    private void copySelectedUuid() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable AccountListItem selected = selectedItem();
+        if (selected == null || refreshInProgress) {
+            return;
+        }
+        try {
+            interaction.copyText(selected.profileId());
+        } catch (Throwable failure) {
+            showActionFailure(failure);
+        }
+    }
+
+    /// Returns the currently loaded selected row, excluding sparse placeholders.
+    ///
+    /// @return selected account row, or null while no loaded row is selected
+    private @Nullable AccountListItem selectedItem() {
+        return choiceList.getSelectedValue();
+    }
+
+    /// Enables selection actions only for one loaded row outside active refresh.
+    private void updateActionAvailability() {
+        EdtDispatcher.requireEventDispatchThread();
+        boolean hasSelection = !closed && !refreshInProgress && selectedItem() != null;
+        refreshButton.setEnabled(hasSelection);
+        copyUuidButton.setEnabled(hasSelection);
+        removeButton.setEnabled(hasSelection);
+        addButton.setEnabled(!closed && !refreshInProgress);
+        choiceList.getList().setEnabled(!closed && !refreshInProgress);
+    }
+
+    /// Presents one synchronous or asynchronous account-action failure through Swing.
+    ///
+    /// @param failure action failure
+    private void showActionFailure(Throwable failure) {
+        Throwable resolved = Objects.requireNonNull(unwrapFailure(failure), "resolved failure");
+        @Nullable String localized = resolved.getLocalizedMessage();
+        String message = localized == null || localized.isBlank()
+                ? resolved.getClass().getSimpleName()
+                : localized;
+        interaction.showFailure(this, strings.errorTitle(), message);
+    }
+
+    /// Removes common asynchronous wrappers from one optional failure.
+    ///
+    /// @param failure asynchronous failure, or null after success
+    /// @return meaningful cause, or null after success
+    private static @Nullable Throwable unwrapFailure(@Nullable Throwable failure) {
+        @Nullable Throwable current = failure;
+        while ((current instanceof CompletionException || current instanceof ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     /// Returns the compact text rendered by the reusable viewport-list cell.

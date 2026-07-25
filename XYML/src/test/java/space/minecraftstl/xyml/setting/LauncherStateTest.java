@@ -29,6 +29,20 @@ import static org.junit.jupiter.api.Assertions.*;
 /// Tests for detached launcher state migration.
 @NotNullByDefault
 public final class LauncherStateTest {
+    /// Tests that neutral properties and maps publish aggregate state revisions.
+    @Test
+    public void publishesNeutralStateChanges() {
+        LauncherState state = new LauncherState();
+        long initialRevision = Objects.requireNonNull(state.changes().getValue());
+
+        state.setWidth(1280.0);
+        long afterProperty = Objects.requireNonNull(state.changes().getValue());
+        assertTrue(afterProperty > initialRevision);
+
+        state.getShownTips().put("javaVersionTip", 21);
+        assertTrue(Objects.requireNonNull(state.changes().getValue()) > afterProperty);
+    }
+
     /// Tests extracting runtime state fields from a legacy config object.
     @Test
     public void extractsLauncherStateFromLegacyConfigJson() {

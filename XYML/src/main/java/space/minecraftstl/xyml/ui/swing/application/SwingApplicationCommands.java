@@ -18,25 +18,29 @@
 package space.minecraftstl.xyml.ui.swing.application;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountRefreshCommand;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchCommand;
 
 import java.util.Objects;
 
-/// Supplies launcher workflows that the transitional Swing composition does not own.
+/// Supplies launcher workflows that the Swing composition invokes but does not own.
 ///
 /// The startup layer decides how account creation and launch workflows are implemented. Instance
 /// creation and management are owned by the Swing composition and are intentionally absent from
 /// this legacy workflow boundary.
 ///
 /// @param addAccountCommand command that opens the supported add-account workflow
+/// @param refreshAccountCommand command that refreshes one account without transferring authentication data to UI
 /// @param launchCommand command that starts a session from captured stable selection identifiers
 @NotNullByDefault
 public record SwingApplicationCommands(
         Runnable addAccountCommand,
+        AccountRefreshCommand refreshAccountCommand,
         HomeLaunchCommand launchCommand) {
     /// Validates every startup-owned workflow boundary.
     public SwingApplicationCommands {
         Objects.requireNonNull(addAccountCommand, "addAccountCommand");
+        Objects.requireNonNull(refreshAccountCommand, "refreshAccountCommand");
         Objects.requireNonNull(launchCommand, "launchCommand");
     }
 }

@@ -50,7 +50,6 @@ public final class TaskProgressObservableTest {
         AtomicInteger throwingListenerCalls = new AtomicInteger();
 
         assertEquals(-1.0, task.progressObservable().getValue());
-        assertEquals(-1.0, task.progressProperty().get());
 
         Subscription throwingSubscription = task.progressObservable().subscribe(change -> {
             throwingListenerCalls.incrementAndGet();

@@ -23,6 +23,9 @@ import com.google.gson.JsonParseException;
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
 import org.glavo.uuid.UUIDs;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.auth.AuthenticationException;
 import space.minecraftstl.xyml.auth.OAuth;
 import space.minecraftstl.xyml.auth.ServerDisconnectException;
@@ -34,7 +37,7 @@ import space.minecraftstl.xyml.auth.yggdrasil.TextureType;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.*;
 import space.minecraftstl.xyml.util.io.*;
-import space.minecraftstl.xyml.util.javafx.ObservableOptionalCache;
+import space.minecraftstl.xyml.observable.cache.ObservableOptionalCache;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -53,15 +56,25 @@ import static space.minecraftstl.xyml.util.Lang.threadPool;
 import static space.minecraftstl.xyml.util.Pair.pair;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Performs the Microsoft, Xbox Live, XSTS, and Minecraft Services authentication flow.
+@NotNullByDefault
 public class MicrosoftService {
+    /// OAuth scopes required for Xbox Live authentication and token refresh.
     private static final String SCOPE = "XboxLive.signin offline_access";
+
+    /// Shared executor for asynchronous profile-property cache fetches.
     private static final ThreadPoolExecutor POOL = threadPool("MicrosoftProfileProperties", true, 2, 10,
             TimeUnit.SECONDS);
 
+    /// Receives browser or device-code callbacks from the OAuth flow.
     private final OAuth.Callback callback;
 
+    /// Caches complete Mojang profile data by player UUID.
     private final ObservableOptionalCache<UUID, CompleteGameProfile, AuthenticationException> profileRepository;
 
+    /// Creates a Microsoft authentication service.
+    ///
+    /// @param callback OAuth interaction callback
     public MicrosoftService(OAuth.Callback callback) {
         this.callback = requireNonNull(callback);
         this.profileRepository = new ObservableOptionalCache<>(uuid -> {
@@ -70,10 +83,18 @@ public class MicrosoftService {
         }, (uuid, e) -> LOG.warning("Failed to fetch properties of " + uuid, e), POOL);
     }
 
+    /// Returns the asynchronously populated complete-profile cache.
+    ///
+    /// @return profile cache owned by this service
     public ObservableOptionalCache<UUID, CompleteGameProfile, AuthenticationException> getProfileRepository() {
         return profileRepository;
     }
 
+    /// Authenticates a Microsoft account using the requested OAuth grant flow.
+    ///
+    /// @param flow authorization-code or device-code grant flow
+    /// @return authenticated Minecraft session
+    /// @throws AuthenticationException if OAuth or a downstream service rejects the request
     public MicrosoftSession authenticate(OAuth.GrantFlow flow) throws AuthenticationException {
         try {
             OAuth.Result result = OAuth.MICROSOFT.authenticate(flow, new OAuth.Options(SCOPE, callback));
@@ -85,6 +106,11 @@ public class MicrosoftService {
         }
     }
 
+    /// Refreshes an existing Microsoft session using its Microsoft refresh token.
+    ///
+    /// @param oldSession session whose refresh token is used
+    /// @return refreshed Minecraft session
+    /// @throws AuthenticationException if the token cannot be refreshed or downstream authentication fails
     public MicrosoftSession refresh(MicrosoftSession oldSession) throws AuthenticationException {
         try {
             OAuth.Result result = OAuth.MICROSOFT.refresh(oldSession.refreshToken(), new OAuth.Options(SCOPE, callback));
@@ -96,7 +122,15 @@ public class MicrosoftService {
         }
     }
 
-    private String getUhs(XBoxLiveAuthenticationResponse response, String existingUhs) throws AuthenticationException {
+    /// Extracts and optionally verifies the Xbox user hash from an authorization response.
+    ///
+    /// @param response Xbox authorization response
+    /// @param existingUhs user hash from an earlier stage, or `null` when no comparison is required
+    /// @return response user hash; malformed maps may contain a `null` value
+    /// @throws AuthenticationException if Xbox reports an error or the user hash is absent or inconsistent
+    private @Nullable String getUhs(
+            XBoxLiveAuthenticationResponse response,
+            @Nullable String existingUhs) throws AuthenticationException {
         if (response.errorCode != 0) {
             throw new XboxAuthorizationException(response.errorCode, response.redirectUrl);
         }
@@ -106,7 +140,7 @@ public class MicrosoftService {
             throw new NoXuiException();
         }
 
-        String uhs = (String) response.displayClaims.xui.get(0).get("uhs");
+        @Nullable String uhs = (String) response.displayClaims.xui.get(0).get("uhs");
         if (existingUhs != null) {
             if (!Objects.equals(uhs, existingUhs)) {
                 throw new ServerResponseMalformedException("uhs mismatched");
@@ -115,8 +149,17 @@ public class MicrosoftService {
         return uhs;
     }
 
-    private MicrosoftSession authenticateViaLiveAccessToken(String liveAccessToken, String liveRefreshToken) throws IOException, JsonParseException, AuthenticationException {
-        String uhs;
+    /// Exchanges a Microsoft access token through Xbox Live, XSTS, and Minecraft Services.
+    ///
+    /// @param liveAccessToken Microsoft OAuth access token
+    /// @param liveRefreshToken Microsoft OAuth refresh token persisted in the resulting session
+    /// @return authenticated Minecraft session
+    /// @throws IOException if a service cannot be reached
+    /// @throws JsonParseException if a service returns malformed JSON
+    /// @throws AuthenticationException if any authentication stage rejects the credentials
+    private MicrosoftSession authenticateViaLiveAccessToken(String liveAccessToken, String liveRefreshToken)
+            throws IOException, JsonParseException, AuthenticationException {
+        @Nullable String uhs;
         XBoxLiveAuthenticationResponse xboxResponse, minecraftXstsResponse;
         try {
             // Authenticate with XBox Live
@@ -133,12 +176,13 @@ public class MicrosoftService {
 
             uhs = getUhs(xboxResponse, null);
 
+            @Unmodifiable List<@Nullable String> userTokens = Collections.singletonList(xboxResponse.token);
             minecraftXstsResponse = HttpRequest
                     .POST("https://xsts.auth.xboxlive.com/xsts/authorize")
                     .json(mapOf(
                             pair("Properties",
                                     mapOf(pair("SandboxId", "RETAIL"),
-                                            pair("UserTokens", Collections.singletonList(xboxResponse.token)))),
+                                            pair("UserTokens", userTokens))),
                             pair("RelyingParty", "rp://api.minecraftservices.com/"), pair("TokenType", "JWT")))
                     .ignoreHttpErrorCode(401)
                     .retry(5)
@@ -180,6 +224,11 @@ public class MicrosoftService {
                 new MicrosoftSession.User(minecraftResponse.username), new MicrosoftSession.GameProfile(profileResponse.id, profileResponse.name));
     }
 
+    /// Requests the complete Minecraft profile for an authorization header.
+    ///
+    /// @param authorization complete HTTP Authorization header value
+    /// @return profile response, or an empty optional when the service returns JSON `null`
+    /// @throws AuthenticationException if the service cannot be reached or returns malformed JSON
     public Optional<MinecraftProfileResponse> getCompleteProfile(String authorization) throws AuthenticationException {
         try {
             return Optional.ofNullable(
@@ -192,6 +241,13 @@ public class MicrosoftService {
         }
     }
 
+    /// Validates a Minecraft access token after checking its local expiration time.
+    ///
+    /// @param notAfter token expiration timestamp in epoch milliseconds
+    /// @param tokenType authorization token type
+    /// @param accessToken Minecraft Services access token
+    /// @return `true` when the token remains accepted
+    /// @throws AuthenticationException if validation cannot reach the service
     public boolean validate(long notAfter, String tokenType, String accessToken) throws AuthenticationException {
         requireNonNull(tokenType);
         requireNonNull(accessToken);
@@ -210,12 +266,20 @@ public class MicrosoftService {
         }
     }
 
+    /// Converts a Minecraft Services error payload into an authentication exception.
+    ///
+    /// @param response response to inspect
+    /// @throws AuthenticationException when the response contains an error name
     private static void handleErrorResponse(MinecraftErrorResponse response) throws AuthenticationException {
         if (response.error != null) {
             throw new RemoteAuthenticationException(response.error, response.errorMessage, response.developerMessage);
         }
     }
 
+    /// Extracts the first skin texture from a validated Minecraft profile response.
+    ///
+    /// @param profile validated profile response
+    /// @return a present texture map, which may be empty when the profile has no skins
     public static Optional<Map<TextureType, Texture>> getTextures(MinecraftProfileResponse profile) {
         Objects.requireNonNull(profile);
 
@@ -231,6 +295,11 @@ public class MicrosoftService {
         return Optional.of(textures);
     }
 
+    /// Fetches Xbox profile settings for diagnostic or future profile integration.
+    ///
+    /// @param uhs Xbox user hash
+    /// @param xstsToken Xbox Secure Token Service token
+    /// @throws IOException if the profile request fails
     private static void getXBoxProfile(String uhs, String xstsToken) throws IOException {
         HttpRequest.GET("https://profile.xboxlive.com/users/me/profile/settings",
                         pair("settings", "GameDisplayName,AppDisplayName,AppDisplayPicRaw,GameDisplayPicRaw,"
@@ -243,6 +312,13 @@ public class MicrosoftService {
                 .getString();
     }
 
+    /// Fetches the Minecraft profile and distinguishes missing ownership from an uncreated profile.
+    ///
+    /// @param tokenType authorization token type
+    /// @param accessToken Minecraft Services access token
+    /// @return validated Minecraft profile
+    /// @throws IOException if the profile or entitlement request fails
+    /// @throws AuthenticationException if ownership or profile requirements are not met
     private static MinecraftProfileResponse getMinecraftProfile(String tokenType, String accessToken)
             throws IOException, AuthenticationException {
         HttpURLConnection conn = HttpRequest.GET("https://api.minecraftservices.com/minecraft/profile")
@@ -250,7 +326,7 @@ public class MicrosoftService {
                 .createConnection();
         int responseCode = conn.getResponseCode();
         if (responseCode == HTTP_NOT_FOUND) {
-            MinecraftLicense license = HttpRequest.GET("https://api.minecraftservices.com/entitlements/license")
+            @Nullable MinecraftLicense license = HttpRequest.GET("https://api.minecraftservices.com/entitlements/license")
                     .authorization(tokenType, accessToken)
                     .getJson(MinecraftLicense.class);
             boolean hasMinecraftLicense = license != null && license.items() != null && license.items().stream()
@@ -268,12 +344,24 @@ public class MicrosoftService {
         return JsonUtils.fromNonNullJson(result, MinecraftProfileResponse.class);
     }
 
+    /// Fetches signed Mojang session-server properties for one player.
+    ///
+    /// @param uuid player UUID
+    /// @return complete profile, or an empty optional when the session server returns JSON `null`
+    /// @throws AuthenticationException if the request cannot be completed
     public Optional<CompleteGameProfile> getCompleteGameProfile(UUID uuid) throws AuthenticationException {
         Objects.requireNonNull(uuid);
 
         return Optional.ofNullable(GSON.fromJson(request("https://sessionserver.mojang.com/session/minecraft/profile/" + UUIDs.toCompactString(uuid), null), CompleteGameProfile.class));
     }
 
+    /// Uploads a skin through Minecraft Services.
+    ///
+    /// @param accessToken Minecraft Services access token
+    /// @param isSlim whether to select the slim player model
+    /// @param file skin image to upload
+    /// @throws AuthenticationException if the upload fails or returns an error payload
+    /// @throws UnsupportedOperationException if the current runtime cannot perform the upload
     public void uploadSkin(String accessToken, boolean isSlim, Path file) throws AuthenticationException, UnsupportedOperationException {
         try {
             HttpURLConnection con = NetworkUtils.createHttpConnection("https://api.minecraftservices.com/minecraft/profile/skins");
@@ -292,7 +380,7 @@ public class MicrosoftService {
                 if (con.getResponseCode() / 100 != 2)
                     throw new ResponseCodeException(con.getURL().toURI(), con.getResponseCode());
             } else {
-                MinecraftErrorResponse profileResponse = GSON.fromJson(response, MinecraftErrorResponse.class);
+                @Nullable MinecraftErrorResponse profileResponse = GSON.fromJson(response, MinecraftErrorResponse.class);
                 if (StringUtils.isNotBlank(profileResponse.errorMessage) || con.getResponseCode() / 100 != 2)
                     throw new AuthenticationException("Failed to upload skin, response code: " + con.getResponseCode() + ", response: " + response);
             }
@@ -301,7 +389,13 @@ public class MicrosoftService {
         }
     }
 
-    private static String request(String url, Object payload) throws AuthenticationException {
+    /// Performs a GET for a `null` payload or a JSON POST for a non-null payload.
+    ///
+    /// @param url request URL
+    /// @param payload optional request payload
+    /// @return response body
+    /// @throws AuthenticationException if the network request fails
+    private static String request(String url, @Nullable Object payload) throws AuthenticationException {
         try {
             if (payload == null)
                 return NetworkUtils.doGet(url);
@@ -312,123 +406,191 @@ public class MicrosoftService {
         }
     }
 
+    /// Reports an Xbox authorization error together with its numeric service code.
+    @NotNullByDefault
     public static class XboxAuthorizationException extends AuthenticationException {
+        /// Xbox service error code.
         private final long errorCode;
-        private final String redirect;
 
-        public XboxAuthorizationException(long errorCode, String redirect) {
+        /// Optional remediation URL returned by Xbox.
+        private final @Nullable String redirect;
+
+        /// Creates an Xbox authorization exception.
+        ///
+        /// @param errorCode Xbox service error code
+        /// @param redirect optional remediation URL
+        public XboxAuthorizationException(long errorCode, @Nullable String redirect) {
             this.errorCode = errorCode;
             this.redirect = redirect;
         }
 
+        /// Returns the Xbox service error code.
+        ///
+        /// @return numeric Xbox error code
         public long getErrorCode() {
             return errorCode;
         }
 
-        public String getRedirect() {
+        /// Returns the optional Xbox remediation URL.
+        ///
+        /// @return remediation URL, or `null` when Xbox did not supply one
+        public @Nullable String getRedirect() {
             return redirect;
         }
 
+        /// Error code indicating that the Xbox account is banned.
         public static final long BANNED = 2148916227L;
+
+        /// Error code indicating that no Xbox account exists for the Microsoft account.
         public static final long MISSING_XBOX_ACCOUNT = 2148916233L;
+
+        /// Error code indicating that Xbox is unavailable in the account country.
         public static final long COUNTRY_UNAVAILABLE = 2148916235L;
+
+        /// Error code indicating that a child account must join a family.
         public static final long ADD_FAMILY = 2148916238L;
     }
 
+    /// Reports the legacy HTTP 400 response emitted by Xbox authentication.
+    @NotNullByDefault
     public final static class XBox400Exception extends AuthenticationException {
     }
 
+    /// Reports that an owned Minecraft Java Edition account has no created profile.
+    @NotNullByDefault
     public final static class MinecraftJavaEditionProfileNotFoundException extends AuthenticationException {
     }
 
+    /// Reports that the Microsoft account does not own Minecraft Java Edition.
+    @NotNullByDefault
     public final static class MinecraftJavaEditionLicenseNotFoundException extends AuthenticationException {
     }
 
+    /// Reports that an Xbox response has no usable `xui` claim.
+    @NotNullByDefault
     public final static class NoXuiException extends AuthenticationException {
     }
 
+    /// Models the `DisplayClaims` object returned by Xbox authentication.
+    @NotNullByDefault
     private final static class XBoxLiveAuthenticationResponseDisplayClaims {
-        List<Map<Object, Object>> xui;
+        /// Xbox user identity claim maps, or `null` when omitted by the service.
+        @Nullable List<@Nullable Map<@Nullable Object, @Nullable Object>> xui;
     }
 
+    /// Models fields shared by Xbox success and error responses.
+    @NotNullByDefault
     private static class MicrosoftErrorResponse {
+        /// Numeric Xbox error code; zero denotes success.
         @SerializedName("XErr")
         long errorCode;
 
+        /// Optional human-readable service message.
         @SerializedName("Message")
-        String message;
+        @Nullable String message;
 
+        /// Optional URL where the user can resolve the authorization problem.
         @SerializedName("Redirect")
-        String redirectUrl;
+        @Nullable String redirectUrl;
     }
 
-    /**
-     * Success Response: { "IssueInstant":"2020-12-07T19:52:08.4463796Z",
-     * "NotAfter":"2020-12-21T19:52:08.4463796Z", "Token":"token", "DisplayClaims":{
-     * "xui":[ { "uhs":"userhash" } ] } }
-     * <p>
-     * Error response: { "Identity":"0", "XErr":2148916238, "Message":"",
-     * "Redirect":"https://start.ui.xboxlive.com/AddChildToFamily" }
-     * <p>
-     * XErr Candidates: 2148916233 = missing XBox account 2148916238 = child account
-     * not linked to a family
-     */
+    /// Models an Xbox Live or XSTS authentication response.
+    ///
+    /// Success responses carry issue time, expiry time, token, and user identity claims. Error responses inherit the
+    /// Xbox error code, message, and remediation URL from [MicrosoftErrorResponse].
+    @NotNullByDefault
     private final static class XBoxLiveAuthenticationResponse extends MicrosoftErrorResponse {
+        /// Optional ISO-8601 token issue time returned by Xbox.
         @SerializedName("IssueInstant")
-        String issueInstant;
+        @Nullable String issueInstant;
 
+        /// Optional ISO-8601 token expiry time returned by Xbox.
         @SerializedName("NotAfter")
-        String notAfter;
+        @Nullable String notAfter;
 
+        /// Optional Xbox or XSTS token.
         @SerializedName("Token")
-        String token;
+        @Nullable String token;
 
+        /// Optional Xbox user identity claims.
         @SerializedName("DisplayClaims")
-        XBoxLiveAuthenticationResponseDisplayClaims displayClaims;
+        @Nullable XBoxLiveAuthenticationResponseDisplayClaims displayClaims;
     }
 
+    /// Models the Minecraft Services `login_with_xbox` response.
+    @NotNullByDefault
     private final static class MinecraftLoginWithXBoxResponse {
+        /// Optional service-side user identifier.
         @SerializedName("username")
-        String username;
+        @Nullable String username;
 
+        /// Optional roles returned for the account.
         @SerializedName("roles")
-        List<String> roles;
+        @Nullable List<@Nullable String> roles;
 
+        /// Optional Minecraft Services access token.
         @SerializedName("access_token")
-        String accessToken;
+        @Nullable String accessToken;
 
+        /// Optional authorization token type.
         @SerializedName("token_type")
-        String tokenType;
+        @Nullable String tokenType;
 
+        /// Access-token lifetime in seconds.
         @SerializedName("expires_in")
         int expiresIn;
     }
 
+    /// Models one legacy Minecraft Store entitlement entry.
+    @NotNullByDefault
     private final static class MinecraftStoreResponseItem {
+        /// Optional entitlement name.
         @SerializedName("name")
-        String name;
+        @Nullable String name;
+
+        /// Optional entitlement signature.
         @SerializedName("signature")
-        String signature;
+        @Nullable String signature;
     }
 
+    /// Models the legacy Minecraft Store entitlement response.
+    @NotNullByDefault
     private final static class MinecraftStoreResponse extends MinecraftErrorResponse {
+        /// Optional entitlement entries.
         @SerializedName("items")
-        List<MinecraftStoreResponseItem> items;
+        @Nullable List<@Nullable MinecraftStoreResponseItem> items;
 
+        /// Optional response signature.
         @SerializedName("signature")
-        String signature;
+        @Nullable String signature;
 
+        /// Optional signing key ID.
         @SerializedName("keyId")
-        String keyId;
+        @Nullable String keyId;
     }
 
+    /// Models and validates one skin entry from a Minecraft profile response.
+    @NotNullByDefault
     public final static class MinecraftProfileResponseSkin implements Validation {
-        public String id;
-        public String state;
-        public String url;
-        public String variant; // CLASSIC, SLIM
-        public String alias;
+        /// Skin entry ID, populated by validated responses.
+        public @Nullable String id;
 
+        /// Skin state, populated by validated responses.
+        public @Nullable String state;
+
+        /// Skin image URL, populated by validated responses.
+        public @Nullable String url;
+
+        /// Player-model variant (`CLASSIC` or `SLIM`), populated by validated responses.
+        public @Nullable String variant;
+
+        /// Optional skin alias.
+        public @Nullable String alias;
+
+        /// Verifies that all required skin fields are present.
+        ///
+        /// @throws JsonParseException if a required field is absent
+        /// @throws TolerableValidationException if validation reports a recoverable problem
         @Override
         public void validate() throws JsonParseException, TolerableValidationException {
             Validation.requireNonNull(id, "id cannot be null");
@@ -438,36 +600,62 @@ public class MicrosoftService {
         }
     }
 
+    /// Reserved model for cape entries in Minecraft profile responses.
+    @NotNullByDefault
     public static class MinecraftProfileResponseCape {
 
     }
 
+    /// Models the Minecraft entitlement-license response.
+    ///
+    /// @param items optional entitlement items
+    /// @param signature optional response signature
+    /// @param keyId optional signing key ID
     @JsonSerializable
+    @NotNullByDefault
     public record MinecraftLicense(
-            @SerializedName("items") List<MinecraftLicenseItem> items,
-            @SerializedName("signature") String signature,
-            @SerializedName("keyId") String keyId
+            @SerializedName("items") @Nullable List<@Nullable MinecraftLicenseItem> items,
+            @SerializedName("signature") @Nullable String signature,
+            @SerializedName("keyId") @Nullable String keyId
     ) {
     }
 
+    /// Models one entitlement item in a Minecraft license response.
+    ///
+    /// @param name optional entitlement name
+    /// @param signature optional entitlement signature
     @JsonSerializable
+    @NotNullByDefault
     public record MinecraftLicenseItem(
-            @SerializedName("name") String name,
-            @SerializedName("signature") String signature
+            @SerializedName("name") @Nullable String name,
+            @SerializedName("signature") @Nullable String signature
     ) {
     }
 
+    /// Models and validates the Minecraft Services profile response.
+    @NotNullByDefault
     public static class MinecraftProfileResponse extends MinecraftErrorResponse implements Validation {
+        /// Profile UUID, populated by validated responses.
         @SerializedName("id")
         @JsonAdapter(UnhyphenatedUUIDTypeAdapter.class)
-        UUID id;
-        @SerializedName("name")
-        String name;
-        @SerializedName("skins")
-        List<MinecraftProfileResponseSkin> skins;
-        @SerializedName("capes")
-        List<MinecraftProfileResponseCape> capes;
+        @Nullable UUID id;
 
+        /// Profile name, populated by validated responses.
+        @SerializedName("name")
+        @Nullable String name;
+
+        /// Skin entries, populated by validated responses.
+        @SerializedName("skins")
+        @Nullable List<@Nullable MinecraftProfileResponseSkin> skins;
+
+        /// Cape entries, populated by validated responses.
+        @SerializedName("capes")
+        @Nullable List<@Nullable MinecraftProfileResponseCape> capes;
+
+        /// Verifies that all required profile fields are present.
+        ///
+        /// @throws JsonParseException if a required field is absent
+        /// @throws TolerableValidationException if validation reports a recoverable problem
         @Override
         public void validate() throws JsonParseException, TolerableValidationException {
             Validation.requireNonNull(id, "id cannot be null");
@@ -477,14 +665,26 @@ public class MicrosoftService {
         }
     }
 
+    /// Models an error payload returned by Minecraft Services.
+    @NotNullByDefault
     private static class MinecraftErrorResponse {
-        public String path;
-        public String errorType;
-        public String error;
-        public String errorMessage;
-        public String developerMessage;
+        /// Optional request path associated with the error.
+        public @Nullable String path;
+
+        /// Optional service error type.
+        public @Nullable String errorType;
+
+        /// Optional service error name.
+        public @Nullable String error;
+
+        /// Optional user-facing error message.
+        public @Nullable String errorMessage;
+
+        /// Optional developer-oriented error detail.
+        public @Nullable String developerMessage;
     }
 
+    /// Gson instance that validates response types implementing [Validation].
     private static final Gson GSON = new GsonBuilder()
             .registerTypeAdapterFactory(ValidationTypeAdapterFactory.INSTANCE)
             .create();

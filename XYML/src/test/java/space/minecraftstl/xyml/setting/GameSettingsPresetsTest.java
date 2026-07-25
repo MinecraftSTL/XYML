@@ -17,14 +17,20 @@
  */
 package space.minecraftstl.xyml.setting;
 
+import com.google.common.jimfs.Configuration;
+import com.google.common.jimfs.Jimfs;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.i18n.LocalizedText;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.nio.file.FileSystem;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -34,6 +40,32 @@ import static org.junit.jupiter.api.Assertions.*;
 /// Tests for detached game settings presets.
 @NotNullByDefault
 public final class GameSettingsPresetsTest {
+    /// Tests that a nested preset property update propagates through the neutral list extractor to auto-save.
+    @Test
+    public void autoSavesNestedPresetChanges() throws IOException, InterruptedException {
+        try (FileSystem fileSystem = Jimfs.newFileSystem(Configuration.unix())) {
+            Path location = fileSystem.getPath("/game-settings.json");
+            JsonSettingFile<GameSettingsPresets> file = new JsonSettingFile<>(
+                    location,
+                    "game settings presets",
+                    GameSettingsPresets.class,
+                    GameSettingsPresets.CURRENT_SCHEMA,
+                    GameSettingsPresets::new);
+            GameSettingsPresets presets = new GameSettingsPresets();
+            GameSettings.Preset preset = new GameSettings.Preset(
+                    GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174000"));
+            presets.getPresets().add(preset);
+            file.installAutoSave(presets);
+
+            preset.nameProperty().setValue(LocalizedText.plain("Nested update"));
+            FileSaver.waitForAllSaves();
+
+            JsonObject saved = Objects.requireNonNull(JsonUtils.fromJsonFile(location, JsonObject.class));
+            JsonObject savedPreset = saved.getAsJsonArray("presets").get(0).getAsJsonObject();
+            assertEquals("Nested update", savedPreset.get("name").getAsString());
+        }
+    }
+
     /// Tests that the default preset selection belongs to LauncherSettings.
     @Test
     public void storesDefaultGameSettingsPresetInConfig() {

@@ -37,9 +37,19 @@ public record ThemeReference(
     /// @param packId the theme-pack identifier
     /// @param themeId the selected theme identifier inside the pack, or `null` for an unnamed single-theme pack
     public ThemeReference {
-        packId = ThemePackManifest.requirePackageId(packId);
-        if (themeId != null) {
-            themeId = ThemePackManifest.requireThemeId(themeId);
+        packId = requireIdentifier(packId, "packId");
+        themeId = themeId == null ? null : requireIdentifier(themeId, "themeId");
+    }
+
+    /// Validates one persisted theme identifier without loading the retired theme-pack renderer.
+    ///
+    /// @param value identifier value
+    /// @param name component name
+    /// @return validated identifier
+    private static String requireIdentifier(String value, String name) {
+        if (value.isBlank() || !value.matches("[A-Za-z0-9._-]+")) {
+            throw new IllegalArgumentException(name + " is not a valid theme identifier: " + value);
         }
+        return value;
     }
 }

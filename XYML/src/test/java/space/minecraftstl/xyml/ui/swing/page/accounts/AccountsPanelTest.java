@@ -60,9 +60,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public final class AccountsPanelTest {
     /// Localized strings used by the focused page tests.
     private static final AccountsStrings STRINGS = new AccountsStrings(
-            "Accounts", "Add account", "No accounts");
+            "Accounts",
+            "Add account",
+            "Refresh",
+            "Copy UUID",
+            "Delete",
+            "Remove permanently?",
+            "Account error",
+            "No accounts");
 
-    /// Loaded rows delegate commands once and request only the rows measured as visible.
+    /// Loaded rows delegate commands once and warm one measured viewport beyond first display.
     @Test
     public void delegatesCommandsAndUsesMeasuredVisibleRange() {
         FakeAccountsModel model = FakeAccountsModel.immediate(items(1_000), snapshot(0, 1_000, 0L));
@@ -84,10 +91,108 @@ public final class AccountsPanelTest {
 
             assertAll(
                     () -> assertEquals(ListSelectionModel.SINGLE_SELECTION, list.getSelectionMode()),
-                    () -> assertEquals(expectedVisibleRows, requested.length()),
+                    () -> assertEquals(expectedVisibleRows * 2, requested.length()),
                     () -> assertTrue(requested.length() < model.exactItemCount().orElseThrow()),
                     () -> assertEquals(List.of("account-1"), model.selectedIds()),
                     () -> assertEquals(1, model.additions.get()));
+            panel.close();
+        });
+    }
+
+    /// Management actions use stable loaded-row data, injected confirmation, and nonblocking refresh completion.
+    @Test
+    public void delegatesRemovalRefreshAndUuidCopyThroughInjectedBoundaries() {
+        FakeAccountsModel model = FakeAccountsModel.immediate(items(2), snapshot(0, 2, 0L));
+        CompletableFuture<Void> refreshCompletion = new CompletableFuture<>();
+        model.setRefreshCompletion(refreshCompletion);
+        RecordingAccountManagementInteraction interaction = new RecordingAccountManagementInteraction();
+        AccountsPanel panel = onEventDispatchThread(() -> new AccountsPanel(model, STRINGS, interaction));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 420));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+        });
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            findButton(panel, "accountsCopyUuid").doClick();
+            interaction.allowRemoval = false;
+            findButton(panel, "accountsRemove").doClick();
+            interaction.allowRemoval = true;
+            findButton(panel, "accountsRemove").doClick();
+            findButton(panel, "accountsRefresh").doClick();
+
+            assertAll(
+                    () -> assertEquals(List.of("profile-0"), interaction.copiedText),
+                    () -> assertEquals(2, interaction.confirmations.get()),
+                    () -> assertEquals(List.of("account-0"), model.removedIds()),
+                    () -> assertEquals(List.of("account-0"), model.refreshedIds()),
+                    () -> assertFalse(findButton(panel, "accountsRefresh").isEnabled()),
+                    () -> assertFalse(panel.choiceList().getList().isEnabled()));
+        });
+
+        refreshCompletion.complete(null);
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertTrue(findButton(panel, "accountsRefresh").isEnabled()),
+                    () -> assertTrue(panel.choiceList().getList().isEnabled()),
+                    () -> assertEquals(List.of(), interaction.failures));
+            panel.close();
+        });
+    }
+
+    /// Read-only storage requires a separate explicit backup-and-overwrite decision before deletion.
+    @Test
+    public void confirmsReadOnlyOverwriteBeforeRemovalRetry() {
+        FakeAccountsModel model = FakeAccountsModel.immediate(items(1), snapshot(0, 1, 0L));
+        model.setRemovalRequiresOverwrite(true);
+        RecordingAccountManagementInteraction interaction = new RecordingAccountManagementInteraction();
+        AccountsPanel panel = onEventDispatchThread(() -> new AccountsPanel(model, STRINGS, interaction));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 360));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+        });
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            findButton(panel, "accountsRemove").doClick();
+            interaction.allowOverwrite = true;
+            findButton(panel, "accountsRemove").doClick();
+
+            assertAll(
+                    () -> assertEquals(2, interaction.confirmations.get()),
+                    () -> assertEquals(2, interaction.overwriteConfirmations.get()),
+                    () -> assertEquals(List.of("account-0"), model.removedIds()),
+                    () -> assertEquals(List.of(), interaction.failures));
+            panel.close();
+        });
+    }
+
+    /// Generic refresh failures are routed to the injected Swing error boundary on the EDT.
+    @Test
+    public void presentsRefreshFailureThroughInteraction() {
+        FakeAccountsModel model = FakeAccountsModel.immediate(items(1), snapshot(0, 1, 0L));
+        model.setRefreshCompletion(CompletableFuture.failedFuture(
+                new IllegalStateException("refresh failed")));
+        RecordingAccountManagementInteraction interaction = new RecordingAccountManagementInteraction();
+        AccountsPanel panel = onEventDispatchThread(() -> new AccountsPanel(model, STRINGS, interaction));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 360));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+        });
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            findButton(panel, "accountsRefresh").doClick();
+
+            assertEquals(List.of("refresh failed"), interaction.failures);
             panel.close();
         });
     }
@@ -292,6 +397,64 @@ public final class AccountsPanelTest {
         return colors;
     }
 
+    /// Headless confirmation, clipboard, and failure recorder used by account-action tests.
+    @NotNullByDefault
+    private static final class RecordingAccountManagementInteraction implements AccountManagementInteraction {
+        /// Whether the next and subsequent removal confirmations are accepted.
+        private boolean allowRemoval = true;
+
+        /// Number of destructive confirmations shown.
+        private final AtomicInteger confirmations = new AtomicInteger();
+
+        /// Number of backup-and-overwrite confirmations shown.
+        private final AtomicInteger overwriteConfirmations = new AtomicInteger();
+
+        /// Whether backup-and-overwrite confirmation is accepted.
+        private boolean allowOverwrite;
+
+        /// Exact copied strings.
+        private final List<String> copiedText = new ArrayList<>();
+
+        /// Presented failure messages.
+        private final List<String> failures = new ArrayList<>();
+
+        /// Records one confirmation and returns the configured decision.
+        @Override
+        public boolean confirmRemoval(Component owner, String title, String message) {
+            EdtDispatcher.requireEventDispatchThread();
+            Objects.requireNonNull(owner, "owner");
+            Objects.requireNonNull(title, "title");
+            Objects.requireNonNull(message, "message");
+            confirmations.incrementAndGet();
+            return allowRemoval;
+        }
+
+        /// Records one read-only backup-and-overwrite confirmation.
+        @Override
+        public boolean confirmReadOnlyOverwrite(Component owner) {
+            EdtDispatcher.requireEventDispatchThread();
+            Objects.requireNonNull(owner, "owner");
+            overwriteConfirmations.incrementAndGet();
+            return allowOverwrite;
+        }
+
+        /// Records one exact clipboard value.
+        @Override
+        public void copyText(String text) {
+            EdtDispatcher.requireEventDispatchThread();
+            copiedText.add(Objects.requireNonNull(text, "text"));
+        }
+
+        /// Records one terminal failure message.
+        @Override
+        public void showFailure(Component owner, String title, String message) {
+            EdtDispatcher.requireEventDispatchThread();
+            Objects.requireNonNull(owner, "owner");
+            Objects.requireNonNull(title, "title");
+            failures.add(Objects.requireNonNull(message, "message"));
+        }
+    }
+
     /// A captured viewport load whose completion can be controlled by a test.
     ///
     /// @param range requested source range
@@ -327,6 +490,18 @@ public final class AccountsPanelTest {
 
         /// Selected stable account identifiers.
         private final List<String> selectedIds = new ArrayList<>();
+
+        /// Permanently removed stable account identifiers.
+        private final List<String> removedIds = new ArrayList<>();
+
+        /// Refreshed stable account identifiers.
+        private final List<String> refreshedIds = new ArrayList<>();
+
+        /// Controllable refresh completion.
+        private CompletableFuture<Void> refreshCompletion = CompletableFuture.completedFuture(null);
+
+        /// Whether removal requires explicit backup-and-overwrite consent.
+        private boolean removalRequiresOverwrite;
 
         /// Add command count.
         private final AtomicInteger additions = new AtomicInteger();
@@ -411,6 +586,50 @@ public final class AccountsPanelTest {
         @Override
         public void addAccount() {
             additions.incrementAndGet();
+        }
+
+        /// Records one permanent removal command.
+        @Override
+        public synchronized void removeAccount(String accountId, boolean allowReadOnlyOverwrite) {
+            if (removalRequiresOverwrite && !allowReadOnlyOverwrite) {
+                throw new AccountStorageOverwriteRequiredException(accountId, "read-only account storage");
+            }
+            removedIds.add(accountId);
+        }
+
+        /// Records one refresh command and returns its controllable completion.
+        @Override
+        public synchronized CompletionStage<Void> refreshAccount(String accountId) {
+            refreshedIds.add(accountId);
+            return refreshCompletion;
+        }
+
+        /// Replaces the completion returned by later refresh commands.
+        ///
+        /// @param completion controllable refresh completion
+        private synchronized void setRefreshCompletion(CompletableFuture<Void> completion) {
+            refreshCompletion = Objects.requireNonNull(completion, "completion");
+        }
+
+        /// Configures whether deletion requires confirmed storage recovery.
+        ///
+        /// @param required whether a normal removal attempt must signal read-only storage
+        private synchronized void setRemovalRequiresOverwrite(boolean required) {
+            removalRequiresOverwrite = required;
+        }
+
+        /// Returns the immutable removal-command history.
+        ///
+        /// @return removed stable account identifiers
+        private synchronized @Unmodifiable List<String> removedIds() {
+            return List.copyOf(removedIds);
+        }
+
+        /// Returns the immutable refresh-command history.
+        ///
+        /// @return refreshed stable account identifiers
+        private synchronized @Unmodifiable List<String> refreshedIds() {
+            return List.copyOf(refreshedIds);
         }
 
         /// Returns a snapshot of captured request ranges.

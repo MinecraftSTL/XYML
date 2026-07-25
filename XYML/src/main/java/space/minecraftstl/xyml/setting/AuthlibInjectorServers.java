@@ -26,6 +26,8 @@ import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.gson.TolerableValidationException;
 import space.minecraftstl.xyml.util.gson.Validation;
 import space.minecraftstl.xyml.util.io.JarUtils;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -39,23 +41,35 @@ import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 import static space.minecraftstl.xyml.setting.SettingsManager.getAuthlibInjectorServers;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Imports authlib-injector server URLs from the legacy adjacent configuration file on first launch.
 @JsonSerializable
+@NotNullByDefault
 public final class AuthlibInjectorServers implements Validation {
 
+    /// Legacy adjacent configuration filename.
     public static final String CONFIG_FILENAME = "authlib-injectors.json";
 
+    /// Servers discovered from the legacy configuration during this process.
     private static final Set<AuthlibInjectorServer> servers = new CopyOnWriteArraySet<>();
 
+    /// Returns the live thread-safe set of servers discovered during initialization.
+    ///
+    /// @return mutable discovered-server set
     public static Set<AuthlibInjectorServer> getServers() {
         return servers;
     }
 
-    private final List<String> urls;
+    /// Legacy URLs as deserialized before validation; the list or an element may be `null` in malformed JSON.
+    private final @Nullable List<@Nullable String> urls;
 
-    private AuthlibInjectorServers(List<String> urls) {
+    /// Creates a legacy configuration value for Gson deserialization.
+    ///
+    /// @param urls configured server URLs, or `null` for malformed input rejected by [#validate()]
+    private AuthlibInjectorServers(@Nullable List<@Nullable String> urls) {
         this.urls = urls;
     }
 
+    /// Rejects a missing URL list before the configuration is consumed.
     @Override
     public void validate() throws JsonParseException, TolerableValidationException {
         if (this.urls == null) {
@@ -63,17 +77,19 @@ public final class AuthlibInjectorServers implements Validation {
         }
     }
 
+    /// Imports the adjacent legacy configuration into launcher settings for a newly created profile.
     public static void init() {
         Path configLocation;
-        Path jarPath = JarUtils.thisJarPath();
-        if (jarPath != null && Files.isRegularFile(jarPath) && Files.isWritable(jarPath)) {
-            configLocation = jarPath.getParent().resolve(CONFIG_FILENAME);
+        @Nullable Path jarPath = JarUtils.thisJarPath();
+        @Nullable Path jarParent = jarPath != null ? jarPath.getParent() : null;
+        if (jarPath != null && jarParent != null && Files.isRegularFile(jarPath) && Files.isWritable(jarPath)) {
+            configLocation = jarParent.resolve(CONFIG_FILENAME);
         } else {
             configLocation = Paths.get(CONFIG_FILENAME);
         }
 
         if (SettingsManager.isNewlyCreated() && Files.exists(configLocation)) {
-            AuthlibInjectorServers configInstance;
+            @Nullable AuthlibInjectorServers configInstance;
             try {
                 configInstance = JsonUtils.fromJsonFile(configLocation, AuthlibInjectorServers.class);
             } catch (IOException | JsonParseException e) {
@@ -81,11 +97,27 @@ public final class AuthlibInjectorServers implements Validation {
                 return;
             }
 
-            if (!configInstance.urls.isEmpty()) {
+            if (configInstance == null) {
+                LOG.warning("Malformed authlib-injectors.json: root value is null");
+                return;
+            }
+
+            @Nullable List<@Nullable String> configuredUrls = configInstance.urls;
+            if (configuredUrls == null) {
+                LOG.warning("Malformed authlib-injectors.json: urls is null");
+                return;
+            }
+
+            if (!configuredUrls.isEmpty()) {
                 settings().preferredLoginTypeProperty().set(Accounts.getLoginType(Accounts.FACTORY_AUTHLIB_INJECTOR));
-                for (String url : configInstance.urls) {
+                for (@Nullable String configuredUrl : configuredUrls) {
+                    if (configuredUrl == null) {
+                        LOG.warning("Malformed authlib-injectors.json: urls contains null");
+                        continue;
+                    }
+                    String url = configuredUrl;
                     Task.supplyAsync(Schedulers.io(), () -> AuthlibInjectorServer.locateServer(url))
-                            .thenAcceptAsync(Schedulers.javafx(), server -> {
+                            .thenAcceptAsync(Schedulers.ui(), server -> {
                                 getAuthlibInjectorServers().add(server);
                                 servers.add(server);
                             })

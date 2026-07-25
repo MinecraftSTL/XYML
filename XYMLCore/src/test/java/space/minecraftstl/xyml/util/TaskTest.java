@@ -20,9 +20,10 @@ package space.minecraftstl.xyml.util;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIf;
 
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,13 +31,13 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/// Verifies task composition, completion, cancellation, and executor failure behavior.
+@NotNullByDefault
 public class TaskTest {
-    /**
-     * TaskExecutor will not catch error and will be thrown to global handler.
-     */
+    /// TaskExecutor does not catch errors and forwards them to the global uncaught-exception handler.
     @Test
     public void expectErrorUncaught() {
-        AtomicReference<Throwable> throwable = new AtomicReference<>();
+        AtomicReference<@Nullable Throwable> throwable = new AtomicReference<>();
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> throwable.set(e));
         assertFalse(Task.composeAsync(() -> Task.allOf(
                 Task.allOf(Task.runAsync(() -> {
@@ -47,9 +48,7 @@ public class TaskTest {
         assertInstanceOf(Error.class, throwable.get(), "Error has not been thrown to uncaught exception handler");
     }
 
-    /**
-     *
-     */
+    /// Failure completion receives the original exception.
     @Test
     public void testWhenComplete() {
         boolean result = Task.supplyAsync(() -> {
@@ -61,6 +60,7 @@ public class TaskTest {
         assertFalse(result, "Task should fail at this case");
     }
 
+    /// Recovery composition runs despite an earlier task failure.
     @Test
     public void testWithCompose() {
         AtomicBoolean bool = new AtomicBoolean();
@@ -74,8 +74,8 @@ public class TaskTest {
         assertTrue(bool.get(), "withRunAsync should be executed");
     }
 
+    /// Result consumers execute on the requested non-UI executor.
     @Test
-    @EnabledIf("space.minecraftstl.xyml.JavaFXLauncher#isStarted")
     public void testThenAccept() {
         AtomicBoolean flag = new AtomicBoolean();
         Object obj = new Object();
@@ -90,6 +90,7 @@ public class TaskTest {
         assertTrue(flag.get(), "ThenAccept has not been executed");
     }
 
+    /// Cancelling a task chain prevents later tasks while the common-pool body remains non-interruptible.
     @Test
     public void testCancellation() throws InterruptedException {
         AtomicBoolean flag = new AtomicBoolean(false);
@@ -124,6 +125,7 @@ public class TaskTest {
         assertTrue(flag.get(), "Thread.sleep cannot be interrupted");
     }
 
+    /// CompletableFuture cancellation comparison preserves its established non-interruptible behavior.
     @Test
     public void testCompletableFutureCancellation() throws Throwable {
         AtomicBoolean flag = new AtomicBoolean(false);
@@ -174,6 +176,7 @@ public class TaskTest {
         //Assert.assertTrue("Thread.sleep cannot be interrupted", flag.get());
     }
 
+    /// A rejected executor records its rejection as the task failure.
     public void testRejectedExecutionException() {
         Schedulers.defaultScheduler();
         Schedulers.shutdown();

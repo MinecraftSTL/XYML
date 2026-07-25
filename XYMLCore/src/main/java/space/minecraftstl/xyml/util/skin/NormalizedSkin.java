@@ -17,42 +17,72 @@
  */
 package space.minecraftstl.xyml.util.skin;
 
-import javafx.scene.image.Image;
-import javafx.scene.image.PixelReader;
-import javafx.scene.image.PixelWriter;
-import javafx.scene.image.WritableImage;
+import org.jetbrains.annotations.NotNullByDefault;
 
-/**
- * Describes a Minecraft 1.8+ skin (64x64).
- * Old format skins are converted to the new format.
- *
- * @author yushijinhun
- */
+import java.awt.image.BufferedImage;
+
+/// Describes a Minecraft 1.8+ skin and normalizes the legacy 64x32 layout to 64x64.
+///
+/// Source images may use an integer scale factor. Pixel processing stays in the JDK image model so
+/// account and authentication code does not require a graphical toolkit runtime.
+///
+/// @author yushijinhun
+@NotNullByDefault
 public final class NormalizedSkin {
-
-    private static void copyImage(Image src, WritableImage dst, int sx, int sy, int dx, int dy, int w, int h, boolean flipHorizontal) {
-        PixelReader reader = src.getPixelReader();
-        PixelWriter writer = dst.getPixelWriter();
-
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int pixel = reader.getArgb(sx + x, sy + y);
-                writer.setArgb(dx + (flipHorizontal ? w - x - 1 : x), dy + y, pixel);
+    /// Copies one image region, optionally mirroring it horizontally.
+    ///
+    /// @param source source image
+    /// @param destination destination image
+    /// @param sourceX source x coordinate
+    /// @param sourceY source y coordinate
+    /// @param destinationX destination x coordinate
+    /// @param destinationY destination y coordinate
+    /// @param width region width
+    /// @param height region height
+    /// @param flipHorizontal whether to mirror source pixels horizontally
+    private static void copyImage(
+            BufferedImage source,
+            BufferedImage destination,
+            int sourceX,
+            int sourceY,
+            int destinationX,
+            int destinationY,
+            int width,
+            int height,
+            boolean flipHorizontal) {
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int pixel = source.getRGB(sourceX + x, sourceY + y);
+                destination.setRGB(
+                        destinationX + (flipHorizontal ? width - x - 1 : x),
+                        destinationY + y,
+                        pixel);
             }
         }
     }
 
-    private final Image texture;
-    private final WritableImage normalizedTexture;
+    /// Original skin image supplied by the caller.
+    private final BufferedImage texture;
+
+    /// Normalized square skin image containing generated legacy limbs when required.
+    private final BufferedImage normalizedTexture;
+
+    /// Integer pixel scale relative to the canonical 64-pixel-wide format.
     private final int scale;
+
+    /// Whether the original image used the legacy 2:1 skin layout.
     private final boolean oldFormat;
 
-    public NormalizedSkin(Image texture) throws InvalidSkinException {
+    /// Validates and normalizes a skin image.
+    ///
+    /// @param texture source skin image
+    /// @throws InvalidSkinException if the dimensions are not a scaled 64x64 or 64x32 layout
+    public NormalizedSkin(BufferedImage texture) throws InvalidSkinException {
         this.texture = texture;
 
         // check format
-        int w = (int) texture.getWidth();
-        int h = (int) texture.getHeight();
+        int w = texture.getWidth();
+        int h = texture.getHeight();
         if (w % 64 != 0) {
             throw new InvalidSkinException("Invalid size " + w + "x" + h);
         }
@@ -67,13 +97,14 @@ public final class NormalizedSkin {
         // compute scale
         scale = w / 64;
 
-        normalizedTexture = new WritableImage(w, w);
+        normalizedTexture = new BufferedImage(w, w, BufferedImage.TYPE_INT_ARGB);
         copyImage(texture, normalizedTexture, 0, 0, 0, 0, w, h, false);
         if (oldFormat) {
             convertOldSkin();
         }
     }
 
+    /// Generates the left-leg and left-arm regions omitted by the legacy skin layout.
     private void convertOldSkin() {
         copyImageRelative(4, 16, 20, 48, 4, 4, true); // Top Leg
         copyImageRelative(8, 16, 24, 48, 4, 4, true); // Bottom Leg
@@ -89,26 +120,66 @@ public final class NormalizedSkin {
         copyImageRelative(52, 20, 44, 52, 4, 12, true); // Back Arm
     }
 
-    private void copyImageRelative(int sx, int sy, int dx, int dy, int w, int h, boolean flipHorizontal) {
-        copyImage(normalizedTexture, normalizedTexture, sx * scale, sy * scale, dx * scale, dy * scale, w * scale, h * scale, flipHorizontal);
+    /// Copies a region whose coordinates are expressed in canonical 64-pixel skin units.
+    ///
+    /// @param sourceX source x coordinate
+    /// @param sourceY source y coordinate
+    /// @param destinationX destination x coordinate
+    /// @param destinationY destination y coordinate
+    /// @param width region width
+    /// @param height region height
+    /// @param flipHorizontal whether to mirror source pixels horizontally
+    private void copyImageRelative(
+            int sourceX,
+            int sourceY,
+            int destinationX,
+            int destinationY,
+            int width,
+            int height,
+            boolean flipHorizontal) {
+        copyImage(
+                normalizedTexture,
+                normalizedTexture,
+                sourceX * scale,
+                sourceY * scale,
+                destinationX * scale,
+                destinationY * scale,
+                width * scale,
+                height * scale,
+                flipHorizontal);
     }
 
-    public Image getOriginalTexture() {
+    /// Returns the original caller-provided skin image.
+    ///
+    /// @return original skin image
+    public BufferedImage getOriginalTexture() {
         return texture;
     }
 
-    public Image getNormalizedTexture() {
+    /// Returns the normalized square skin image.
+    ///
+    /// @return normalized skin image
+    public BufferedImage getNormalizedTexture() {
         return normalizedTexture;
     }
 
+    /// Returns the integer pixel scale relative to a 64-pixel-wide skin.
+    ///
+    /// @return image scale
     public int getScale() {
         return scale;
     }
 
+    /// Reports whether the source used the legacy 2:1 layout.
+    ///
+    /// @return true for a legacy skin
     public boolean isOldFormat() {
         return oldFormat;
     }
 
+    /// Detects whether the normalized skin uses the slim arm model.
+    ///
+    /// @return true for the slim model
     public boolean isSlim() {
         return (hasTransparencyRelative(50, 16, 2, 4) ||
                 hasTransparencyRelative(54, 20, 2, 12) ||
@@ -120,15 +191,21 @@ public final class NormalizedSkin {
                         isAreaBlackRelative(46, 52, 2, 12));
     }
 
-    private boolean hasTransparencyRelative(int x0, int y0, int w, int h) {
-        PixelReader reader = normalizedTexture.getPixelReader();
+    /// Checks one canonical skin region for any non-opaque pixel.
+    ///
+    /// @param x0 region x coordinate
+    /// @param y0 region y coordinate
+    /// @param width region width
+    /// @param height region height
+    /// @return true when at least one pixel is transparent
+    private boolean hasTransparencyRelative(int x0, int y0, int width, int height) {
         x0 *= scale;
         y0 *= scale;
-        w *= scale;
-        h *= scale;
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int pixel = reader.getArgb(x0 + x, y0 + y);
+        width *= scale;
+        height *= scale;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int pixel = normalizedTexture.getRGB(x0 + x, y0 + y);
                 if (pixel >>> 24 != 0xff) {
                     return true;
                 }
@@ -137,15 +214,21 @@ public final class NormalizedSkin {
         return false;
     }
 
-    private boolean isAreaBlackRelative(int x0, int y0, int w, int h) {
-        PixelReader reader = normalizedTexture.getPixelReader();
+    /// Checks whether every pixel in one canonical skin region is opaque black.
+    ///
+    /// @param x0 region x coordinate
+    /// @param y0 region y coordinate
+    /// @param width region width
+    /// @param height region height
+    /// @return true when every pixel is opaque black
+    private boolean isAreaBlackRelative(int x0, int y0, int width, int height) {
         x0 *= scale;
         y0 *= scale;
-        w *= scale;
-        h *= scale;
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int pixel = reader.getArgb(x0 + x, y0 + y);
+        width *= scale;
+        height *= scale;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int pixel = normalizedTexture.getRGB(x0 + x, y0 + y);
                 if (pixel != 0xff000000) {
                     return false;
                 }

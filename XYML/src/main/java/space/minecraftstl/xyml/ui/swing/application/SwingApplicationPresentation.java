@@ -27,6 +27,12 @@ import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesStatusStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.SchematicInstanceManagementStrings;
+import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentations;
@@ -45,6 +51,12 @@ import java.util.Objects;
 /// @param instancesStatus localized repository states and fallbacks
 /// @param schematicManagement localized outer instance-management controls and states
 /// @param schematics localized schematic-browser controls, states, and metadata labels
+/// @param mods localized installed-Mod content text
+/// @param modsStatus localized installed-Mod lifecycle text
+/// @param modsActions localized installed-Mod action text
+/// @param resourcePacks localized resource-pack content text
+/// @param resourcePacksStatus localized resource-pack lifecycle text
+/// @param resourcePacksActions localized resource-pack action text
 /// @param gameVersions localized game-version catalog controls
 /// @param gameVersionsStatus localized game-version catalog lifecycle states
 /// @param gameInstall localized vanilla-installation controls, task text, and validation feedback
@@ -63,6 +75,12 @@ public record SwingApplicationPresentation(
         RepositoryInstancesStatusStrings instancesStatus,
         SchematicInstanceManagementStrings schematicManagement,
         SchematicBrowserStrings schematics,
+        ModCatalogStrings mods,
+        ModCatalogStatusStrings modsStatus,
+        ModCatalogActionStrings modsActions,
+        ResourcePackCatalogStrings resourcePacks,
+        ResourcePackCatalogStatusStrings resourcePacksStatus,
+        ResourcePackCatalogActionStrings resourcePacksActions,
         GameVersionCatalogStrings gameVersions,
         GameVersionCatalogStatusStrings gameVersionsStatus,
         GameInstallStrings gameInstall,
@@ -81,6 +99,12 @@ public record SwingApplicationPresentation(
         Objects.requireNonNull(instancesStatus, "instancesStatus");
         Objects.requireNonNull(schematicManagement, "schematicManagement");
         Objects.requireNonNull(schematics, "schematics");
+        Objects.requireNonNull(mods, "mods");
+        Objects.requireNonNull(modsStatus, "modsStatus");
+        Objects.requireNonNull(modsActions, "modsActions");
+        Objects.requireNonNull(resourcePacks, "resourcePacks");
+        Objects.requireNonNull(resourcePacksStatus, "resourcePacksStatus");
+        Objects.requireNonNull(resourcePacksActions, "resourcePacksActions");
         Objects.requireNonNull(gameVersions, "gameVersions");
         Objects.requireNonNull(gameVersionsStatus, "gameVersionsStatus");
         Objects.requireNonNull(gameInstall, "gameInstall");

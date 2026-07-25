@@ -34,7 +34,7 @@ import java.util.concurrent.Executor;
 /// Creates a vanilla installation task against one selected repository and download provider.
 ///
 /// Repository refresh and selection are appended on separate caller-selected executors. This keeps
-/// blocking scans off UI dispatchers while remaining independent of Swing and transitional JavaFX APIs.
+/// blocking scans off UI dispatchers while remaining independent of presentation-toolkit APIs.
 @NotNullByDefault
 public final class RepositoryVanillaInstallTaskFactory implements GameInstallTaskFactory {
     /// Repository receiving the new instance.

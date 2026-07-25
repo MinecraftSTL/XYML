@@ -22,10 +22,10 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Set;
 
-/// Describes the visible and latency-adjusted ranges needed by a list viewport.
+/// Describes the visible and adaptively warmed ranges needed by a list viewport.
 ///
 /// @param visibleRange the rows that currently intersect the viewport
-/// @param desiredRange the visible rows plus directional latency compensation
+/// @param desiredRange visible rows plus measured-capacity warm rows and directional compensation
 /// @param pinnedIndices selected or focused indexes outside the desired range
 /// @param scrollDirection the direction derived from the latest measurements
 /// @param rowsPerSecond the measured absolute scrolling speed

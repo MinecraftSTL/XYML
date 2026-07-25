@@ -219,7 +219,11 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
                 }
             }
             cornerRadiusValue.setText(Integer.toString(radius));
-            if (!applyingSnapshot) {
+            @Nullable AppearanceSettingsSnapshot snapshot = displayedSnapshot;
+            if (!applyingSnapshot
+                    && !cornerRadiusSlider.getValueIsAdjusting()
+                    && snapshot != null
+                    && snapshot.cornerRadius() != radius) {
                 model.setCornerRadius(radius);
             }
         });

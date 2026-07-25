@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -67,6 +68,24 @@ public final class SimplePropertyTest {
         assertEquals("ready", changes.get(0).currentValue());
         assertEquals("ready", changes.get(1).previousValue());
         assertNull(changes.get(1).currentValue());
+    }
+
+    /// Verifies the subclass hook runs before listeners and only for committed distinct transitions.
+    @Test
+    public void invokesSubclassHookOnlyForRealChanges() {
+        HookedObjectProperty property = new HookedObjectProperty("initial");
+        SimpleStringProperty source = new SimpleStringProperty("bound");
+        List<String> valuesSeenByListeners = new ArrayList<>();
+        property.subscribe(change -> valuesSeenByListeners.add(property.lastHookValue));
+
+        property.set("initial");
+        property.set("direct");
+        property.bind(source);
+        source.set("bound");
+        source.set("updated");
+
+        assertEquals(List.of("direct", "bound", "updated"), property.hookValues);
+        assertEquals(property.hookValues, valuesSeenByListeners);
     }
 
     /// Verifies immediate one-way synchronization, duplicate binding suppression, rebinding, and unbinding.
@@ -293,6 +312,30 @@ public final class SimplePropertyTest {
                 Thread.currentThread().interrupt();
                 throw new IllegalStateException("Binding test coordination was interrupted", exception);
             }
+        }
+    }
+
+    /// Object property that records each invocation of the protected distinct-change hook.
+    @NotNullByDefault
+    private static final class HookedObjectProperty extends SimpleObjectProperty<String> {
+        /// Values recorded by the hook in publication order.
+        private final List<String> hookValues = new ArrayList<>();
+
+        /// Most recent value recorded by the hook before listener publication.
+        private String lastHookValue;
+
+        /// Creates a hooked property with its initial value, which is not a transition.
+        private HookedObjectProperty(String initialValue) {
+            super(initialValue);
+            lastHookValue = initialValue;
+        }
+
+        /// Records each distinct committed value before subscribers are notified.
+        @Override
+        protected void valueChanged(@Nullable String previousValue, @Nullable String currentValue) {
+            String nonNullValue = Objects.requireNonNull(currentValue, "currentValue");
+            lastHookValue = nonNullValue;
+            hookValues.add(nonNullValue);
         }
     }
 }

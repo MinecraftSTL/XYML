@@ -98,6 +98,9 @@ public final class Metadata {
     /// Source commit embedded in the launcher artifact, or `null` when unavailable.
     public static final @Nullable String GITHUB_SHA = JarUtils.getAttribute("hmcl.version.hash", null);
 
+    /// Whether this process was launched from an OS-native jpackage application image.
+    public static final boolean PACKAGED = Boolean.getBoolean("xyml.packaged");
+
     /// Normalized process working directory captured when the launcher starts.
     public static final Path CURRENT_DIRECTORY = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
 
@@ -134,12 +137,36 @@ public final class Metadata {
         @Nullable String hmclCurrentDir = System.getProperty("hmcl.dir", System.getenv("HMCL_LOCAL_HOME"));
         HMCL_LOCAL_HOME = StringUtils.isNotBlank(hmclCurrentDir)
                 ? Path.of(hmclCurrentDir).toAbsolutePath().normalize()
-                : CURRENT_DIRECTORY.resolve(".hmcl");
+                : PACKAGED ? packagedLocalHome() : CURRENT_DIRECTORY.resolve(".hmcl");
 
         @Nullable String hmclDependencies = System.getProperty("hmcl.dependencies.dir", System.getenv("HMCL_DEPENDENCIES_DIR"));
         DEPENDENCIES_DIRECTORY = StringUtils.isNotBlank(hmclDependencies)
                 ? Path.of(hmclDependencies).toAbsolutePath().normalize()
                 : HMCL_LOCAL_HOME.resolve("dependencies");
+    }
+
+    /// Resolves writable cache and log storage for a native packaged application.
+    ///
+    /// @return normalized user-writable platform cache directory
+    private static Path packagedLocalHome() {
+        Path userHome = Path.of(System.getProperty("user.home", "."));
+        Path path = switch (OperatingSystem.CURRENT_OS) {
+            case WINDOWS -> {
+                @Nullable String localAppData = System.getenv("LOCALAPPDATA");
+                yield StringUtils.isNotBlank(localAppData)
+                        ? Path.of(localAppData, "XYML")
+                        : userHome.resolve("AppData").resolve("Local").resolve("XYML");
+            }
+            case MACOS -> userHome.resolve("Library").resolve("Caches").resolve("XYML");
+            case LINUX, FREEBSD -> {
+                @Nullable String xdgCache = System.getenv("XDG_CACHE_HOME");
+                yield StringUtils.isNotBlank(xdgCache)
+                        ? Path.of(xdgCache, "xyml")
+                        : userHome.resolve(".cache").resolve("xyml");
+            }
+            case UNKNOWN -> HMCL_USER_HOME.resolve("cache");
+        };
+        return path.toAbsolutePath().normalize();
     }
 
     /// Returns whether the artifact belongs to the stable release channel.

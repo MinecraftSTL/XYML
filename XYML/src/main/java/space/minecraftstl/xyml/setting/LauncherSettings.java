@@ -20,27 +20,27 @@ package space.minecraftstl.xyml.setting;
 import com.google.gson.*;
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.property.*;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
-import javafx.collections.ObservableMap;
-import javafx.collections.ObservableSet;
-import javafx.scene.paint.Color;
-import javafx.scene.paint.Paint;
-import org.glavo.monetfx.ColorStyle;
-import org.hildan.fxgson.creators.ObservableListCreator;
-import org.hildan.fxgson.creators.ObservableMapCreator;
-import org.hildan.fxgson.creators.ObservableSetCreator;
-import org.hildan.fxgson.factories.JavaFxPropertyTypeAdapterFactory;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.auth.AccountID;
 import space.minecraftstl.xyml.java.JavaRuntime;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableMap;
+import space.minecraftstl.xyml.observable.collection.ObservableSet;
+import space.minecraftstl.xyml.observable.property.BooleanProperty;
+import space.minecraftstl.xyml.observable.property.DoubleProperty;
+import space.minecraftstl.xyml.observable.property.IntegerProperty;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleBooleanProperty;
+import space.minecraftstl.xyml.observable.property.SimpleDoubleProperty;
+import space.minecraftstl.xyml.observable.property.SimpleIntegerProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleStringProperty;
+import space.minecraftstl.xyml.observable.property.StringProperty;
 import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.theme.ThemeReference;
-import space.minecraftstl.xyml.ui.FXUtils;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.*;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
@@ -108,15 +108,10 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Legacy-compatible default derived from the launcher's predominant six-pixel surface radius.
     public static final int DEFAULT_CORNER_RADIUS = 6;
 
-    /// Gson instance used for launcher settings and related settings objects that depend on JavaFX properties.
+    /// Gson instance used for launcher settings and related toolkit-neutral settings objects.
     public static final Gson SETTINGS_GSON = new GsonBuilder()
             .registerTypeAdapter(Path.class, PathTypeAdapter.INSTANCE)
             .registerTypeAdapter(UUID.class, UUIDTypeAdapter.INSTANCE)
-            .registerTypeAdapter(ObservableList.class, new ObservableListCreator())
-            .registerTypeAdapter(ObservableSet.class, new ObservableSetCreator())
-            .registerTypeAdapter(ObservableMap.class, new ObservableMapCreator())
-            .registerTypeAdapterFactory(new JavaFxPropertyTypeAdapterFactory(true, true))
-            .registerTypeAdapter(Paint.class, new PaintAdapter())
             .setPrettyPrinting()
             .setObjectToNumberStrategy(ToNumberPolicy.LONG_OR_DOUBLE)
             .create();
@@ -132,7 +127,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     /// Creates empty launcher settings using current defaults.
     public LauncherSettings() {
-        tracker.markDirty(schema);
+        markDirty(schema);
         register();
     }
 
@@ -297,7 +292,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     /// Theme appearance setting keys overridden by the launcher.
     @SerializedName("themeAppearanceOverrides")
-    private final ObservableSet<String> themeAppearanceOverrides = FXCollections.observableSet();
+    private final ObservableSet<String> themeAppearanceOverrides = ObservableCollections.observableSet();
 
     /// Returns the theme appearance setting keys overridden by the launcher.
     public ObservableSet<String> getThemeAppearanceOverrides() {
@@ -333,12 +328,12 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         return themeColorType;
     }
 
-    /// The MonetFX color style used to generate the launcher color scheme.
+    /// The historical color-style identifier retained for configuration compatibility.
     @SerializedName("themeColorStyle")
-    private final ObjectProperty<ColorStyle> themeColorStyle = new RawPreservingObjectProperty<>(ColorStyle.FIDELITY);
+    private final ObjectProperty<String> themeColorStyle = new RawPreservingObjectProperty<>("fidelity");
 
     /// Returns the launcher theme color style property.
-    public ObjectProperty<ColorStyle> themeColorStyleProperty() {
+    public ObjectProperty<String> themeColorStyleProperty() {
         return themeColorStyle;
     }
 
@@ -400,10 +395,10 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     /// The custom launcher background paint.
     @SerializedName("customBackgroundPaint")
-    private final ObjectProperty<@Nullable Paint> customBackgroundPaint = new SimpleObjectProperty<>();
+    private final ObjectProperty<@Nullable String> customBackgroundPaint = new SimpleObjectProperty<>();
 
     /// Returns the custom launcher background paint property.
-    public ObjectProperty<@Nullable Paint> customBackgroundPaintProperty() {
+    public ObjectProperty<@Nullable String> customBackgroundPaintProperty() {
         return customBackgroundPaint;
     }
 
@@ -442,10 +437,10 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     /// The fallback paint used when the selected launcher background cannot be loaded.
     @SerializedName("backgroundFallbackPaint")
-    private final ObjectProperty<Paint> backgroundFallbackPaint = new SimpleObjectProperty<>(Color.WHITE);
+    private final ObjectProperty<String> backgroundFallbackPaint = new SimpleObjectProperty<>("#FFFFFF");
 
     /// Returns the launcher background fallback paint property.
-    public ObjectProperty<Paint> backgroundFallbackPaintProperty() {
+    public ObjectProperty<String> backgroundFallbackPaintProperty() {
         return backgroundFallbackPaint;
     }
 
@@ -501,11 +496,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     /// Whether UI animations are disabled.
     @SerializedName("animationDisabled")
-    private final BooleanProperty animationDisabled = new SimpleBooleanProperty(
-            FXUtils.REDUCED_MOTION == Boolean.TRUE
-                    || !JavaRuntime.CURRENT_JIT_ENABLED
-                    || !FXUtils.GPU_ACCELERATION_ENABLED
-    );
+    private final BooleanProperty animationDisabled = new SimpleBooleanProperty(!JavaRuntime.CURRENT_JIT_ENABLED);
 
     /// Returns the UI animation disable property.
     public BooleanProperty animationDisabledProperty() {
@@ -642,7 +633,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     ///
     /// This field is owned by [GameDirectoryManager]. Code outside [GameDirectoryManager] should not modify it directly.
     @SerializedName(PROPERTY_SELECTED_INSTANCE)
-    private final ObservableMap<GameDirectoryID, String> selectedInstance = FXCollections.observableHashMap();
+    private final ObservableMap<GameDirectoryID, String> selectedInstance = ObservableCollections.observableMap();
 
     /// Returns selected instance IDs keyed by game directory ID.
     ///
@@ -694,6 +685,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     }
 
     /// JSON adapter for [LauncherSettings].
+    @NotNullByDefault
     public static final class Adapter extends ObservableSetting.Adapter<LauncherSettings> {
         /// Creates empty launcher settings for deserialization.
         @Override

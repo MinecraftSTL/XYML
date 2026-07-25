@@ -129,7 +129,7 @@ public final class GameVersionCatalogPanelTest {
         });
     }
 
-    /// Controls delegate stable values and the first demand equals measured visible rows.
+    /// Controls delegate stable values and first demand warms one measured viewport ahead.
     @Test
     public void delegatesControlsAndUsesMeasuredVisibleRange() {
         FakeCatalogModel model = FakeCatalogModel.immediate(
@@ -157,7 +157,7 @@ public final class GameVersionCatalogPanelTest {
             assertAll(
                     () -> assertEquals(javax.swing.ListSelectionModel.SINGLE_SELECTION,
                             list.getSelectionMode()),
-                    () -> assertEquals(visibleRows, requested.length()),
+                    () -> assertEquals(visibleRows * 2, requested.length()),
                     () -> assertTrue(requested.length() < model.exactItemCount().orElseThrow()),
                     () -> assertEquals(List.of("version-9"), model.queries()),
                     () -> assertEquals(List.of(GameVersionFilter.SNAPSHOT), model.filters()),
@@ -339,7 +339,7 @@ public final class GameVersionCatalogPanelTest {
             int rowHeight = panel.choiceList().getList().getFixedCellHeight();
             int visibleRows = (viewportHeight + rowHeight - 1) / rowHeight;
             assertAll(
-                    () -> assertEquals(visibleRows, requested.length()),
+                    () -> assertEquals(visibleRows * 2, requested.length()),
                     () -> assertTrue(requested.length() < model.exactItemCount().orElseThrow()));
             panel.close();
         });

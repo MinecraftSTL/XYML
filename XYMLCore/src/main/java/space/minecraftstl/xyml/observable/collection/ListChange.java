@@ -39,6 +39,8 @@ public final class ListChange<E> {
         REMOVE,
         /// One contiguous sequence was replaced without changing its length.
         REPLACE,
+        /// An observable dependency of one existing element changed without replacing the element.
+        UPDATE,
         /// The complete contents changed or a non-contiguous batch edit occurred.
         RESET,
         /// All previous contents were removed.

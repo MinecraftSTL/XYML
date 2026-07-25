@@ -314,7 +314,7 @@ public final class ResourcePackCatalogPanelTest {
                     () -> assertEquals(ListSelectionModelValue.SINGLE, selectionMode(list)),
                     () -> assertEquals(STRINGS.pageTitle(),
                             list.getAccessibleContext().getAccessibleName()),
-                    () -> assertEquals(visibleRows, requested.length()),
+                    () -> assertEquals(visibleRows * 2, requested.length()),
                     () -> assertTrue(requested.length() < rows.size()),
                     () -> assertEquals(List.of(selected.path()), model.selectedPaths()),
                     () -> assertEquals(selected.fileName(),

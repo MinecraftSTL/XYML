@@ -141,7 +141,9 @@ final class ShellPageDeck extends JPanel {
 
         @Nullable JComponent outgoing = outgoingPage;
         if (outgoing == null || transitionProgress >= 1.0) {
-            paintPage(graphics, incoming, 0, 1.0f);
+            // Normal Swing child painting owns double buffering once the deck is settled. Calling child.paint()
+            // from here nests RepaintManager buffers and can leave translated copies of the page on screen.
+            super.paintChildren(graphics);
             return;
         }
 
@@ -223,7 +225,8 @@ final class ShellPageDeck extends JPanel {
             pageGraphics.translate(page.getX() + horizontalOffset, page.getY());
             pageGraphics.clipRect(0, 0, page.getWidth(), page.getHeight());
             pageGraphics.setComposite(AlphaComposite.SrcOver.derive(Math.max(0.0f, Math.min(1.0f, opacity))));
-            page.paint(pageGraphics);
+            // printAll bypasses Swing double buffering while the deck composites two translated page frames.
+            page.printAll(pageGraphics);
         } finally {
             pageGraphics.dispose();
         }

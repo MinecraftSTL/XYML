@@ -54,6 +54,12 @@ import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesStatus
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementHost;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.SchematicInstanceManagementStrings;
+import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogActionStrings;
+import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStatusStrings;
+import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicMetadataStrings;
@@ -68,6 +74,7 @@ import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentations;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JComponent;
+import javax.swing.JPanel;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -90,7 +97,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies composition factories and lifecycle without initializing JavaFX or creating a native frame.
+/// Verifies composition factories and lifecycle without creating a native frame.
 @NotNullByDefault
 class SwingApplicationCompositionTest {
     /// Confirms that pages stay factory-backed and navigation resolves through the created window.
@@ -119,6 +126,8 @@ class SwingApplicationCompositionTest {
 
         composition.open();
         assertEquals(1, window.openCount());
+        composition.hide();
+        assertEquals(1, window.hideCount());
         Objects.requireNonNull(navigation.get()).accept(ShellPageId.ACCOUNTS);
         assertEquals(List.of(ShellPageId.ACCOUNTS), window.navigations());
 
@@ -174,6 +183,98 @@ class SwingApplicationCompositionTest {
         assertEquals(1, gameInstaller.closeCount());
     }
 
+    /// Confirms that explicit and native closure deliver the startup-owned final command once.
+    @Test
+    void applicationCloseCommandRunsOnceAfterOwnedResources() {
+        List<String> closeOrder = new ArrayList<>();
+        RecordingGameInstallService gameInstaller = new RecordingGameInstallService(closeOrder);
+        List<CountingCloseable> resources = createResources(closeOrder);
+        RecordingWindowFactory windowFactory = new RecordingWindowFactory();
+        AtomicInteger applicationCloseCalls = new AtomicInteger();
+        SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
+                navigateCommand -> createModels(
+                        resources,
+                        new RecordingGameVersionCatalogModel(),
+                        gameInstaller),
+                presentation(),
+                themeManager(),
+                new SwingAnimator(MotionPolicy.OFF, 16),
+                windowFactory,
+                () -> {
+                    applicationCloseCalls.incrementAndGet();
+                    closeOrder.add("application-close");
+                });
+
+        windowFactory.window().close();
+        composition.close();
+
+        assertEquals(1, applicationCloseCalls.get());
+        assertEquals(expectedCloseOrderWithApplication(), closeOrder);
+    }
+
+    /// Confirms that an earlier cleanup failure cannot skip the final application close command.
+    @Test
+    void cleanupFailureRetainsFinalApplicationCloseFailureAsSuppressed() {
+        List<String> closeOrder = new ArrayList<>();
+        IllegalStateException cleanupFailure = new IllegalStateException("installer close failed");
+        IllegalArgumentException applicationCloseFailure =
+                new IllegalArgumentException("application close failed");
+        GameInstallService gameInstaller = failingCloseGameInstallService(
+                "game-install-service",
+                closeOrder,
+                cleanupFailure);
+        List<CountingCloseable> resources = createResources(closeOrder);
+        AtomicInteger applicationCloseCalls = new AtomicInteger();
+        SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
+                navigateCommand -> createModels(
+                        resources,
+                        new RecordingGameVersionCatalogModel(),
+                        gameInstaller),
+                presentation(),
+                themeManager(),
+                new SwingAnimator(MotionPolicy.OFF, 16),
+                new RecordingWindowFactory(),
+                () -> {
+                    applicationCloseCalls.incrementAndGet();
+                    closeOrder.add("application-close");
+                    throw applicationCloseFailure;
+                });
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class, composition::close);
+
+        assertSame(cleanupFailure, thrown);
+        assertEquals(1, applicationCloseCalls.get());
+        assertEquals(expectedCloseOrderWithApplication(), closeOrder);
+        assertEquals(List.of(applicationCloseFailure), List.of(thrown.getSuppressed()));
+    }
+
+    /// Confirms that repeated cleanup of the same failure instance never attempts self-suppression.
+    @Test
+    void repeatedCleanupFailureIdentityIsPreservedWithoutSelfSuppression() {
+        List<String> closeOrder = new ArrayList<>();
+        IllegalStateException repeatedFailure = new IllegalStateException("shared close failure");
+        SwingApplicationComposition composition = SwingApplicationComposition.createForCollaborators(
+                navigateCommand -> createModels(
+                        createResources(closeOrder),
+                        new RecordingGameVersionCatalogModel(),
+                        failingCloseGameInstallService(
+                                "game-install-service",
+                                closeOrder,
+                                repeatedFailure)),
+                presentation(),
+                themeManager(),
+                new SwingAnimator(MotionPolicy.OFF, 16),
+                new RecordingWindowFactory(),
+                () -> {
+                    throw repeatedFailure;
+                });
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class, composition::close);
+
+        assertSame(repeatedFailure, thrown);
+        assertEquals(0, thrown.getSuppressed().length);
+    }
+
     /// Confirms that a failed window factory closes the complete collaborator-owned resource bundle.
     @Test
     void windowCreationFailureClosesCollaboratorResources() {
@@ -198,6 +299,33 @@ class SwingApplicationCompositionTest {
         assertEquals(expectedCloseOrder(), closeOrder);
         assertFalse(resources.stream().anyMatch(resource -> resource.closeCount() != 1));
         assertEquals(1, gameInstaller.closeCount());
+    }
+
+    /// Confirms that construction cleanup may reuse the construction failure without masking it.
+    @Test
+    void windowCreationFailureAllowsSameCleanupFailureInstance() {
+        List<String> closeOrder = new ArrayList<>();
+        IllegalStateException repeatedFailure = new IllegalStateException("shared construction failure");
+
+        IllegalStateException thrown = assertThrows(
+                IllegalStateException.class,
+                () -> SwingApplicationComposition.createForCollaborators(
+                        navigateCommand -> createModels(
+                                createResources(closeOrder),
+                                new RecordingGameVersionCatalogModel(),
+                                failingCloseGameInstallService(
+                                        "game-install-service",
+                                        closeOrder,
+                                        repeatedFailure)),
+                        presentation(),
+                        themeManager(),
+                        new SwingAnimator(MotionPolicy.OFF, 16),
+                        (ignoredTheme, ignoredPages, ignoredPresentation, ignoredAnimator) -> {
+                            throw repeatedFailure;
+                        }));
+
+        assertSame(repeatedFailure, thrown);
+        assertEquals(0, thrown.getSuppressed().length);
     }
 
     /// Confirms production ownership and shared internal add-instance navigation for both page models.
@@ -603,6 +731,12 @@ class SwingApplicationCompositionTest {
                                 "Update failed",
                                 "Operation failed",
                                 "Reveal failed")),
+                modCatalogStrings(),
+                modCatalogStatusStrings(),
+                modCatalogActionStrings(),
+                resourcePackStrings(),
+                resourcePackStatusStrings(),
+                resourcePackActionStrings(),
                 new GameVersionCatalogStrings(
                         "Game versions",
                         "Search",
@@ -625,7 +759,15 @@ class SwingApplicationCompositionTest {
                         "Instance already exists",
                         "Another installation is running",
                         "Installation failed"),
-                new AccountsStrings("Accounts", "Add", "Empty"),
+                new AccountsStrings(
+                        "Accounts",
+                        "Add",
+                        "Refresh",
+                        "Copy UUID",
+                        "Delete",
+                        "Remove permanently?",
+                        "Account error",
+                        "Empty"),
                 new AppearanceSettingsStrings(
                         "Appearance", "Theme", "System", "Light", "Dark", "Radius", "Animations"),
                 Duration.ZERO,
@@ -633,6 +775,69 @@ class SwingApplicationCompositionTest {
                         "Waiting", "Running", "Completed", "Failed", "Cancelled",
                         "Task progress", "Cancel", "Show details", "Hide details"),
                 Duration.ZERO);
+    }
+
+    /// Creates installed-Mod catalog text for the composition fixture.
+    ///
+    /// @return complete installed-Mod catalog text
+    private static ModCatalogStrings modCatalogStrings() {
+        return new ModCatalogStrings(
+                "Mods", "Search", "Status", "All", "Enabled", "Disabled",
+                "Select a Mod", "Mod ID", "Version", "Game version", "Loader",
+                "Authors", "File", "Description", "Enabled");
+    }
+
+    /// Creates installed-Mod lifecycle text for the composition fixture.
+    ///
+    /// @return complete installed-Mod lifecycle text
+    private static ModCatalogStatusStrings modCatalogStatusStrings() {
+        return new ModCatalogStatusStrings(
+                "Loading", "Empty", "%d Mods", "Failed: %s", "Importing",
+                "Enabling", "Disabling", "Deleting", "Write failed: %s");
+    }
+
+    /// Creates installed-Mod action text for the composition fixture.
+    ///
+    /// @return complete installed-Mod action text
+    private static ModCatalogActionStrings modCatalogActionStrings() {
+        return new ModCatalogActionStrings(
+                "Refresh", "Refresh Mods", "Import", "Import Mods", "Open directory",
+                "Open Mods directory", "Reveal", "Reveal Mod", "Delete", "Delete Mod",
+                "Choose Mods", "Mod file", "Delete %s?", "Operation failed");
+    }
+
+    /// Creates resource-pack catalog text for the composition fixture.
+    ///
+    /// @return complete resource-pack catalog text
+    private static ResourcePackCatalogStrings resourcePackStrings() {
+        return new ResourcePackCatalogStrings(
+                "Resource packs", "Refresh", "Refreshing", "Refresh resource packs",
+                "Retry", "Retry loading resource packs", "Not loaded", "Loading",
+                "No resource packs", "Load failed", "Unsupported", "Details",
+                "Select a resource pack", "File", "Path", "Description", "Compatibility",
+                "Enabled", "Enabled", "Disabled", "Compatible", "Too new", "Too old",
+                "Invalid", "Missing pack metadata", "Missing game metadata");
+    }
+
+    /// Creates resource-pack lifecycle text for the composition fixture.
+    ///
+    /// @return complete resource-pack lifecycle text
+    private static ResourcePackCatalogStatusStrings resourcePackStatusStrings() {
+        return new ResourcePackCatalogStatusStrings(
+                "Idle", "Loading", "Ready", "Empty", "Unsupported", "Failed", "Unknown",
+                "Writing", "Write failed");
+    }
+
+    /// Creates resource-pack action text for the composition fixture.
+    ///
+    /// @return complete resource-pack action text
+    private static ResourcePackCatalogActionStrings resourcePackActionStrings() {
+        return new ResourcePackCatalogActionStrings(
+                "Import", "Import resource packs", "Choose resource packs", "ZIP archive",
+                "Enable", "Enable resource pack", "Disable", "Disable resource pack", "Warning",
+                "Enable incompatible %s?", "Delete", "Delete resource pack", "Delete %s?",
+                "Reveal", "Reveal resource pack", "Open directory", "Open resource-pack directory",
+                "Operation failed", "Reveal failed", "Open directory failed");
     }
 
     /// Creates a non-initialized theme manager suitable for the fake window.
@@ -649,7 +854,7 @@ class SwingApplicationCompositionTest {
     ///
     /// @param closeOrder shared close-order recorder
     /// @return nine distinct model, source, and store probes
-    private static List<CountingCloseable> createResources(List<String> closeOrder) {
+    private static @Unmodifiable List<CountingCloseable> createResources(List<String> closeOrder) {
         return List.of(
                 new CountingCloseable("home-model", closeOrder),
                 new CountingCloseable("instances-model", closeOrder),
@@ -677,6 +882,15 @@ class SwingApplicationCompositionTest {
                 "home-store",
                 "accounts-store",
                 "appearance-store");
+    }
+
+    /// Returns the normal close order followed by the startup-owned final command.
+    ///
+    /// @return immutable expected close order including application shutdown
+    private static @Unmodifiable List<String> expectedCloseOrderWithApplication() {
+        List<String> expected = new ArrayList<>(expectedCloseOrder());
+        expected.add("application-close");
+        return List.copyOf(expected);
     }
 
     /// Returns the production close order including dynamic instance management.
@@ -879,14 +1093,23 @@ class SwingApplicationCompositionTest {
         /// Destinations requested through the shell navigation reference.
         private final List<ShellPageId> navigations = new ArrayList<>();
 
+        /// Stable headless component returned as the native dialog owner.
+        private final JComponent dialogOwner = new JPanel();
+
         /// Number of successful open calls.
         private final AtomicInteger openCount = new AtomicInteger();
+
+        /// Number of successful hide calls.
+        private final AtomicInteger hideCount = new AtomicInteger();
 
         /// Number of first close transitions.
         private final AtomicInteger closeCount = new AtomicInteger();
 
         /// Idempotent closed state.
         private final AtomicBoolean closed = new AtomicBoolean();
+
+        /// Whether the fake window currently accepts interaction.
+        private boolean interactionEnabled = true;
 
         /// Composition cleanup callback, or null before registration.
         private @Nullable Runnable closedHandler;
@@ -917,6 +1140,34 @@ class SwingApplicationCompositionTest {
                 throw new IllegalStateException("window is closed");
             }
             openCount.incrementAndGet();
+        }
+
+        /// Records one non-destructive hide request.
+        @Override
+        public void hide() {
+            if (closed.get()) {
+                throw new IllegalStateException("window is closed");
+            }
+            hideCount.incrementAndGet();
+        }
+
+        /// Returns the stable headless dialog owner.
+        ///
+        /// @return headless owner component
+        @Override
+        public JComponent dialogOwner() {
+            return dialogOwner;
+        }
+
+        /// Records application interaction state.
+        ///
+        /// @param enabled whether the fake window accepts interaction
+        @Override
+        public void setInteractionEnabled(boolean enabled) {
+            if (closed.get()) {
+                throw new IllegalStateException("window is closed");
+            }
+            interactionEnabled = enabled;
         }
 
         /// Records a shell-backed navigation request.
@@ -969,6 +1220,13 @@ class SwingApplicationCompositionTest {
         /// @return open count
         private int openCount() {
             return openCount.get();
+        }
+
+        /// Returns the number of successful hide requests.
+        ///
+        /// @return hide count
+        private int hideCount() {
+            return hideCount.get();
         }
 
         /// Returns the number of first close transitions.

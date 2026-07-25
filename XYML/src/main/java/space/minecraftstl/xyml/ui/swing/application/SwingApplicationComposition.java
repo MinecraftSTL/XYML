@@ -34,7 +34,7 @@ import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.ThemeMode;
-import space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher;
+import space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsPanel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.LauncherAccountsModel;
@@ -52,7 +52,11 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
-import space.minecraftstl.xyml.ui.swing.page.instances.management.SchematicInstanceManagementView;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.DefaultInstanceManagementView;
+import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.resourcepacks.DefaultResourcePackCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
@@ -65,6 +69,7 @@ import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 
 import javax.swing.JComponent;
+import java.awt.Component;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.ArrayList;
@@ -83,12 +88,12 @@ import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Owns the transitional Swing window, page models, instance management, installer, legacy stores,
+/// Owns the Swing window, page models, instance management, installer, legacy stores,
 /// and animation lifecycle.
 ///
-/// The production entry point deliberately remains separate from `Launcher` while the migration is staged.
-/// Startup may call [#createAfterJavaFxInitialization] only after Accounts, game directories, and settings
-/// have been initialized on the legacy JavaFX runtime. No caller-owned executor is stopped by this class.
+/// [space.minecraftstl.xyml.Launcher] creates this composition only after Accounts, game directories, and
+/// settings have been initialized on the Swing-confined state thread. No caller-owned executor is stopped
+/// by this class.
 @NotNullByDefault
 public final class SwingApplicationComposition implements AutoCloseable {
     /// Native-window abstraction backed by [AppShellFrame] in production.
@@ -100,6 +105,9 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// Shared animator whose active timers are cancelled during cleanup.
     private final SwingAnimator animator;
 
+    /// Startup-owned command invoked after every composition resource has been offered cleanup.
+    private final Runnable applicationCloseCommand;
+
     /// Prevents repeated window, timer, model, and store cleanup.
     private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -108,18 +116,23 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @param window native-window adapter
     /// @param pageModels page models and owned resources
     /// @param animator shared animator
+    /// @param applicationCloseCommand startup-owned final close command
     private SwingApplicationComposition(
             SwingApplicationWindow window,
             SwingApplicationPageModels pageModels,
-            SwingAnimator animator) {
+            SwingAnimator animator,
+            Runnable applicationCloseCommand) {
         this.window = Objects.requireNonNull(window, "window");
         this.pageModels = Objects.requireNonNull(pageModels, "pageModels");
         this.animator = Objects.requireNonNull(animator, "animator");
+        this.applicationCloseCommand = Objects.requireNonNull(
+                applicationCloseCommand,
+                "applicationCloseCommand");
     }
 
-    /// Creates the production bridge after the legacy JavaFX runtime and state managers are initialized.
+    /// Creates the production bridge after legacy state managers are initialized.
     ///
-    /// Legacy stores and the selected repository are captured on the JavaFX application thread. Instance
+    /// Legacy stores and the selected repository are captured on the Swing event dispatch thread. Instance
     /// viewport work uses the process-wide caller-owned [Schedulers#io()] executor, which this composition
     /// never closes. Legacy account creation and launch commands remain startup-owned. New-instance
     /// commands route to the Swing downloads page, while instance management itself is composed and owned here.
@@ -129,20 +142,43 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @param systemThemeDetector fast operating-system appearance detector
     /// @param animationFrameDelayMillis positive Swing animation timer delay
     /// @return closed-resource-safe Swing application composition
-    public static SwingApplicationComposition createAfterJavaFxInitialization(
+    public static SwingApplicationComposition createAfterStateInitialization(
             SwingApplicationPresentation presentation,
             SwingApplicationCommands commands,
             SystemThemeDetector systemThemeDetector,
             int animationFrameDelayMillis) {
+        return createAfterStateInitialization(
+                presentation,
+                commands,
+                systemThemeDetector,
+                animationFrameDelayMillis,
+                () -> { });
+    }
+
+    /// Creates the production bridge with a startup-owned final close command.
+    ///
+    /// @param presentation localized text and explicit transition policy
+    /// @param commands startup-owned legacy workflow boundaries
+    /// @param systemThemeDetector fast operating-system appearance detector
+    /// @param animationFrameDelayMillis positive Swing animation timer delay
+    /// @param applicationCloseCommand command invoked once after composition cleanup is attempted
+    /// @return closed-resource-safe Swing application composition
+    public static SwingApplicationComposition createAfterStateInitialization(
+            SwingApplicationPresentation presentation,
+            SwingApplicationCommands commands,
+            SystemThemeDetector systemThemeDetector,
+            int animationFrameDelayMillis,
+            Runnable applicationCloseCommand) {
         Objects.requireNonNull(presentation, "presentation");
         Objects.requireNonNull(commands, "commands");
         Objects.requireNonNull(systemThemeDetector, "systemThemeDetector");
+        Objects.requireNonNull(applicationCloseCommand, "applicationCloseCommand");
         if (animationFrameDelayMillis <= 0) {
             throw new IllegalArgumentException("animationFrameDelayMillis must be positive");
         }
 
         AtomicReference<@Nullable LegacyBindings> legacyResult = new AtomicReference<>();
-        LegacyJavaFxDispatcher.executeAndWait(() -> legacyResult.set(LegacyBindings.create()));
+        LegacyStateDispatcher.executeAndWait(() -> legacyResult.set(LegacyBindings.create()));
         LegacyBindings legacy = Objects.requireNonNull(legacyResult.get(), "legacy bindings were not created");
 
         StoredAppearanceSettings rawAppearance = legacy.appearanceStore().snapshot();
@@ -161,21 +197,22 @@ public final class SwingApplicationComposition implements AutoCloseable {
                             commands,
                             presentation,
                             navigateCommand,
-                            themeManager,
-                            animator),
+                    themeManager,
+                    animator),
                     presentation,
                     themeManager,
                     animator,
-                    SwingApplicationComposition::createFrameWindow);
+                    SwingApplicationComposition::createFrameWindow,
+                    applicationCloseCommand);
         } catch (RuntimeException | Error failure) {
             closeAfterFailure(legacy, failure);
             throw failure;
         }
     }
 
-    /// Creates a composition from explicit model and window factories without requiring JavaFX.
+    /// Creates a composition from explicit model and window factories without native windows.
     ///
-    /// This is the integration boundary for focused lifecycle tests and future non-JavaFX startup. The
+    /// This is the integration boundary for focused lifecycle tests. The
     /// composition owns the returned model bundle, animator, and window but does not infer ownership of
     /// any executor captured by those collaborators.
     ///
@@ -191,11 +228,37 @@ public final class SwingApplicationComposition implements AutoCloseable {
             SwingThemeManager themeManager,
             SwingAnimator animator,
             SwingApplicationWindowFactory windowFactory) {
+        return createForCollaborators(
+                modelFactory,
+                presentation,
+                themeManager,
+                animator,
+                windowFactory,
+                () -> { });
+    }
+
+    /// Creates a composition with an explicit command delivered after final cleanup.
+    ///
+    /// @param modelFactory model factory receiving the shell-backed navigation command
+    /// @param presentation localized text and explicit transition policy
+    /// @param themeManager active Swing theme manager
+    /// @param animator shared animator owned by the returned composition
+    /// @param windowFactory explicit native-window factory
+    /// @param applicationCloseCommand command invoked once after all owned cleanup is attempted
+    /// @return composed application lifecycle
+    public static SwingApplicationComposition createForCollaborators(
+            SwingApplicationPageModelFactory modelFactory,
+            SwingApplicationPresentation presentation,
+            SwingThemeManager themeManager,
+            SwingAnimator animator,
+            SwingApplicationWindowFactory windowFactory,
+            Runnable applicationCloseCommand) {
         Objects.requireNonNull(modelFactory, "modelFactory");
         Objects.requireNonNull(presentation, "presentation");
         Objects.requireNonNull(themeManager, "themeManager");
         Objects.requireNonNull(animator, "animator");
         Objects.requireNonNull(windowFactory, "windowFactory");
+        Objects.requireNonNull(applicationCloseCommand, "applicationCloseCommand");
 
         AtomicReference<@Nullable SwingApplicationWindow> windowReference = new AtomicReference<>();
         Consumer<ShellPageId> navigateCommand = page -> {
@@ -234,7 +297,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
         SwingApplicationComposition composition = new SwingApplicationComposition(
                 createdWindow,
                 models,
-                animator);
+                animator,
+                applicationCloseCommand);
         try {
             createdWindow.setClosedHandler(composition::close);
             return composition;
@@ -250,6 +314,34 @@ public final class SwingApplicationComposition implements AutoCloseable {
             throw new IllegalStateException("Swing application composition is closed");
         }
         window.open();
+    }
+
+    /// Hides the native Swing window without releasing page state or owned services.
+    public void hide() {
+        if (closed.get()) {
+            throw new IllegalStateException("Swing application composition is closed");
+        }
+        window.hide();
+    }
+
+    /// Returns the stable native owner for application-modal Swing dialogs.
+    ///
+    /// @return native application window component
+    public Component dialogOwner() {
+        if (closed.get()) {
+            throw new IllegalStateException("Swing application composition is closed");
+        }
+        return window.dialogOwner();
+    }
+
+    /// Enables or disables application interaction while retaining native visibility.
+    ///
+    /// @param enabled whether hosted pages accept user input
+    public void setInteractionEnabled(boolean enabled) {
+        if (closed.get()) {
+            throw new IllegalStateException("Swing application composition is closed");
+        }
+        window.setInteractionEnabled(enabled);
     }
 
     /// Returns whether this lifecycle has released its window, timers, models, and stores.
@@ -273,6 +365,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         failure = closeCollecting(window, failure);
         failure = runCollecting(animator::cancelAll, failure);
         failure = closeCollecting(pageModels, failure);
+        failure = runCollecting(applicationCloseCommand, failure);
         rethrowFailure(failure);
     }
 
@@ -317,7 +410,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
 
     /// Creates production collaborators and records service-before-model-before-store cleanup order.
     ///
-    /// @param legacy captured JavaFX store bindings and selected repository
+    /// @param legacy captured state-store bindings and selected repository
     /// @param commands startup-owned workflow boundaries
     /// @param presentation localized model status text
     /// @param navigateCommand shell-backed navigation command
@@ -334,6 +427,13 @@ public final class SwingApplicationComposition implements AutoCloseable {
         SchematicBrowserInteractions schematicInteractions = new DefaultSchematicBrowserInteractions(
                 presentation.schematics().actions(),
                 Schedulers.io());
+        ResourcePackCatalogInteractions resourcePackInteractions =
+                new DefaultResourcePackCatalogInteractions(
+                        presentation.resourcePacksActions(),
+                        Schedulers.io());
+        ModCatalogInteractions modInteractions = new DefaultModCatalogInteractions(
+                presentation.modsActions(),
+                Schedulers.io());
         ProductionPageModelFactories factories = new ProductionPageModelFactories(
                 addInstanceCommand -> new LauncherHomeModel(
                         legacy.homeStore(),
@@ -343,13 +443,22 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         addInstanceCommand,
                         commands.launchCommand()),
                 () -> new InstanceManagementCoordinator((instanceId, returnCommand) ->
-                        new SchematicInstanceManagementView(
-                                instanceId,
+                        new DefaultInstanceManagementView(
+                                legacy.repository(),
                                 legacy.repository()::getSchematicsDirectory,
+                                instanceId,
                                 Schedulers.io(),
                                 presentation.schematicManagement(),
                                 presentation.schematics(),
                                 schematicInteractions,
+                                presentation.mods(),
+                                presentation.modsStatus(),
+                                presentation.modsActions(),
+                                modInteractions,
+                                presentation.resourcePacks(),
+                                presentation.resourcePacksStatus(),
+                                presentation.resourcePacksActions(),
+                                resourcePackInteractions,
                                 returnCommand)),
                 (management, addInstanceCommand) -> new RepositoryInstancesModel(
                         legacy.repository(),
@@ -364,13 +473,14 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                 legacy.repository(),
                                 DownloadProviders.getDownloadProvider(),
                                 Schedulers.io(),
-                                LegacyJavaFxDispatcher::execute),
+                                LegacyStateDispatcher::execute),
                         Schedulers.io(),
                         presentation.gameInstall().taskTitle(),
                         presentation.gameInstall().preparingPhase()),
                 () -> new LauncherAccountsModel(
                         legacy.accountStore(),
-                        commands.addAccountCommand()),
+                        commands.addAccountCommand(),
+                        commands.refreshAccountCommand()),
                 () -> new PersistedAppearanceSettingsModel(
                         legacy.appearanceStore(),
                         themeManager,
@@ -529,7 +639,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// Builds the immutable production service-before-model-before-source-before-store ownership order.
     ///
     /// This package-visible policy keeps successful ownership directly testable without initializing
-    /// JavaFX or touching the process-wide download provider.
+    /// process-wide state or download provider.
     ///
     /// @param services active-work services closed before their dependencies
     /// @param models created page models and instance-management coordinator in dependency-safe close order
@@ -633,7 +743,9 @@ public final class SwingApplicationComposition implements AutoCloseable {
         try {
             resource.close();
         } catch (Throwable closingFailure) {
-            constructionFailure.addSuppressed(closingFailure);
+            if (constructionFailure != closingFailure) {
+                constructionFailure.addSuppressed(closingFailure);
+            }
         }
     }
 
@@ -677,7 +789,9 @@ public final class SwingApplicationComposition implements AutoCloseable {
         if (previous == null) {
             return current;
         }
-        previous.addSuppressed(current);
+        if (previous != current) {
+            previous.addSuppressed(current);
+        }
         return previous;
     }
 
@@ -731,7 +845,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         }
     }
 
-    /// Captures legacy JavaFX stores and one real selected repository with idempotent cleanup.
+    /// Captures legacy stores and one real selected repository with idempotent cleanup.
     @NotNullByDefault
     private static final class LegacyBindings implements AutoCloseable {
         /// Selected game repository captured after game-directory initialization.
@@ -766,11 +880,11 @@ public final class SwingApplicationComposition implements AutoCloseable {
             this.appearanceStore = Objects.requireNonNull(appearanceStore, "appearanceStore");
         }
 
-        /// Creates all adapters directly on the initialized JavaFX application thread.
+        /// Creates all adapters directly on the initialized Swing event dispatch thread.
         ///
         /// @return complete legacy bindings
         private static LegacyBindings create() {
-            LegacyJavaFxDispatcher.requireEventThread();
+            LegacyStateDispatcher.requireEventThread();
             XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
             @Nullable LegacyLauncherHomeStore homeStore = null;
             @Nullable LegacyLauncherAccountStore accountStore = null;
@@ -881,10 +995,43 @@ public final class SwingApplicationComposition implements AutoCloseable {
         /// Opens the real frame.
         @Override
         public void open() {
-            if (closed.get()) {
-                throw new IllegalStateException("Swing application window is closed");
-            }
-            frame.open();
+            EdtDispatcher.executeAndWait(() -> {
+                if (closed.get()) {
+                    throw new IllegalStateException("Swing application window is closed");
+                }
+                frame.open();
+            });
+        }
+
+        /// Hides the real frame on the EDT unless native disposal already started.
+        @Override
+        public void hide() {
+            EdtDispatcher.executeAndWait(() -> {
+                if (!closed.get()) {
+                    frame.hideWindow();
+                }
+            });
+        }
+
+        /// Returns the stable production frame used to own native dialogs.
+        ///
+        /// @return production application frame
+        @Override
+        public Component dialogOwner() {
+            return frame;
+        }
+
+        /// Enables or disables production-frame interaction on the EDT.
+        ///
+        /// @param enabled whether hosted pages accept user input
+        @Override
+        public void setInteractionEnabled(boolean enabled) {
+            EdtDispatcher.executeAndWait(() -> {
+                if (closed.get()) {
+                    throw new IllegalStateException("Swing application window is closed");
+                }
+                frame.setInteractionEnabled(enabled);
+            });
         }
 
         /// Routes page commands through the hosted application shell.

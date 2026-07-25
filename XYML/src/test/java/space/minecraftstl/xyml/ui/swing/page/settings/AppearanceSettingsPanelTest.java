@@ -74,6 +74,27 @@ public final class AppearanceSettingsPanelTest {
         });
     }
 
+    /// Slider dragging previews the aligned value but persists only when adjustment finishes.
+    @Test
+    public void commitsCornerRadiusAfterSliderAdjustmentFinishes() {
+        FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                ThemeMode.SYSTEM, 6, true, true));
+        AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
+
+        onEventDispatchThread(() -> {
+            JSlider slider = findComponent(panel, "appearanceCornerRadius", JSlider.class);
+            slider.setValueIsAdjusting(true);
+            slider.setValue(10);
+            assertAll(
+                    () -> assertEquals(9, panel.displayedCornerRadius()),
+                    () -> assertEquals(6, model.snapshot().cornerRadius()));
+
+            slider.setValueIsAdjusting(false);
+            assertEquals(9, model.snapshot().cornerRadius());
+            panel.close();
+        });
+    }
+
     /// Worker-published settings are coalesced to the latest snapshot and applied on the EDT.
     @Test
     public void appliesWorkerPublishedSnapshot() throws InterruptedException {

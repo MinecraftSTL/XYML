@@ -22,16 +22,19 @@ import com.google.common.jimfs.Jimfs;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
-import javafx.beans.property.ObjectProperty;
-import javafx.collections.ObservableList;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.observable.collection.ListChange;
+import space.minecraftstl.xyml.observable.collection.ObservableList;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
 import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.PortablePath;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.i18n.LocalizedText;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -41,6 +44,7 @@ import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Objects;
 
@@ -50,6 +54,23 @@ import static org.junit.jupiter.api.Assertions.*;
 /// Tests for detached game directory migration.
 @NotNullByDefault
 public final class GameDirectoriesTest {
+    /// Tests that editing one stored directory publishes an element update through the neutral list.
+    @Test
+    public void observesStoredDirectoryPropertyUpdates() {
+        GameDirectories gameDirectories = new GameDirectories();
+        GameDirectory gameDirectory = new GameDirectory(
+                GameDirectoryID.generate(),
+                LocalizedText.plain("Before"),
+                PortablePath.of(".minecraft"));
+        gameDirectories.getGameDirectories().add(gameDirectory);
+        List<ListChange.Kind> changes = new ArrayList<>();
+        gameDirectories.getGameDirectories().subscribe(change -> changes.add(change.kind()));
+
+        gameDirectory.setName(LocalizedText.plain("After"));
+
+        assertEquals(List.of(ListChange.Kind.UPDATE), changes);
+    }
+
     /// Tests extracting legacy configuration data into a detached game directory store.
     @Test
     public void extractsConfigurationsFromLegacyConfigJson() {
@@ -441,7 +462,7 @@ public final class GameDirectoriesTest {
         GameSettings.Preset defaultPreset = new GameSettings.Preset(defaultPresetId);
         defaultPreset.defaultIsolationTypeProperty().setValue(DefaultIsolationType.MODDED);
         GameSettingsPresets presets = new GameSettingsPresets();
-        presets.getPresets().setAll(defaultPreset);
+        presets.getPresets().setAll(List.of(defaultPreset));
 
         GameDirectory gameDirectory = new GameDirectory(
                 GameDirectoryID.generate(),
@@ -481,7 +502,7 @@ public final class GameDirectoriesTest {
         GameSettings.Preset defaultPreset = new GameSettings.Preset(defaultPresetId);
         GameSettings.Preset legacyPreset = new GameSettings.Preset(legacyPresetId);
         GameSettingsPresets presets = new GameSettingsPresets();
-        presets.getPresets().setAll(defaultPreset, legacyPreset);
+        presets.getPresets().setAll(List.of(defaultPreset, legacyPreset));
 
         GameDirectory gameDirectory = new GameDirectory(
                 GameDirectoryID.generate(),
@@ -510,9 +531,9 @@ public final class GameDirectoriesTest {
         GameSettingsPresetID legacyPresetId =
                 GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174001");
         GameSettingsPresets presets = new GameSettingsPresets();
-        presets.getPresets().setAll(
+        presets.getPresets().setAll(List.of(
                 new GameSettings.Preset(defaultPresetId),
-                new GameSettings.Preset(legacyPresetId));
+                new GameSettings.Preset(legacyPresetId)));
 
         GameDirectory gameDirectory = new GameDirectory(
                 GameDirectoryID.generate(),
@@ -550,9 +571,9 @@ public final class GameDirectoriesTest {
         GameSettingsPresetID legacyPresetId =
                 GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174001");
         GameSettingsPresets presets = new GameSettingsPresets();
-        presets.getPresets().setAll(
+        presets.getPresets().setAll(List.of(
                 new GameSettings.Preset(defaultPresetId),
-                new GameSettings.Preset(legacyPresetId));
+                new GameSettings.Preset(legacyPresetId)));
 
         GameDirectory gameDirectory = new GameDirectory(
                 GameDirectoryID.generate(),
@@ -595,9 +616,9 @@ public final class GameDirectoriesTest {
         GameSettings.Preset legacyPreset = new GameSettings.Preset(legacyPresetId);
         legacyPreset.defaultIsolationTypeProperty().setValue(DefaultIsolationType.ALWAYS);
         GameSettingsPresets presets = new GameSettingsPresets();
-        presets.getPresets().setAll(
+        presets.getPresets().setAll(List.of(
                 new GameSettings.Preset(defaultPresetId),
-                legacyPreset);
+                legacyPreset));
 
         GameDirectory gameDirectory = new GameDirectory(
                 GameDirectoryID.generate(),
@@ -635,7 +656,7 @@ public final class GameDirectoriesTest {
         GameSettings.Preset legacyPreset = new GameSettings.Preset(legacyPresetId);
         legacyPreset.defaultIsolationTypeProperty().setValue(DefaultIsolationType.ALWAYS);
         GameSettingsPresets presets = new GameSettingsPresets();
-        presets.getPresets().setAll(defaultPreset, legacyPreset);
+        presets.getPresets().setAll(List.of(defaultPreset, legacyPreset));
 
         GameDirectory gameDirectory = new GameDirectory(
                 GameDirectoryID.generate(),
@@ -658,6 +679,7 @@ public final class GameDirectoriesTest {
     }
 
     /// Temporary static state override for game directory tests.
+    @NotNullByDefault
     private static final class GameDirectoryEnvironment implements AutoCloseable {
         /// The reflected SettingsManager local game directories field.
         private final Field localGameDirectoriesField;
@@ -681,10 +703,10 @@ public final class GameDirectoriesTest {
         private final Field initializedField;
 
         /// The reflected GameDirectoryManager selected game directory property.
-        private final ObjectProperty<GameDirectory> selectedGameDirectory;
+        private final ObjectProperty<@Nullable GameDirectory> selectedGameDirectory;
 
         /// The reflected GameDirectoryManager selected repository property.
-        private final ObjectProperty<XYMLGameRepository> selectedRepository;
+        private final ObjectProperty<@Nullable XYMLGameRepository> selectedRepository;
 
         /// The merged game directory list used by GameDirectoryManager.
         private final ObservableList<GameDirectory> mergedGameDirectories;
@@ -693,16 +715,16 @@ public final class GameDirectoriesTest {
         private final Map<GameDirectory, XYMLGameRepository> repositories;
 
         /// The previous local game directories instance.
-        private final Object previousLocalGameDirectories;
+        private final @Nullable Object previousLocalGameDirectories;
 
         /// The previous user game directories instance.
-        private final Object previousUserGameDirectories;
+        private final @Nullable Object previousUserGameDirectories;
 
         /// The previous launcher settings instance.
-        private final Object previousLauncherSettings;
+        private final @Nullable Object previousLauncherSettings;
 
         /// The previous game settings presets instance.
-        private final Object previousGameSettingsPresets;
+        private final @Nullable Object previousGameSettingsPresets;
 
         /// The previous local game directories access.
         private final SettingFileAccess previousLocalGameDirectoriesAccess;
@@ -714,16 +736,16 @@ public final class GameDirectoriesTest {
         private final boolean previousInitialized;
 
         /// The previous selected game directory.
-        private final GameDirectory previousSelectedGameDirectory;
+        private final @Nullable GameDirectory previousSelectedGameDirectory;
 
         /// The previous selected repository.
-        private final XYMLGameRepository previousSelectedRepository;
+        private final @Nullable XYMLGameRepository previousSelectedRepository;
 
         /// The previous merged game directories.
-        private final List<GameDirectory> previousMergedGameDirectories;
+        private final @Unmodifiable List<GameDirectory> previousMergedGameDirectories;
 
         /// The previous repository map entries.
-        private final Map<GameDirectory, XYMLGameRepository> previousRepositories;
+        private final @Unmodifiable Map<GameDirectory, XYMLGameRepository> previousRepositories;
 
         /// Replaces game-directory-related static state with the given stores and an empty preset store.
         private GameDirectoryEnvironment(GameDirectories localDirectories, GameDirectories userDirectories)
@@ -769,14 +791,14 @@ public final class GameDirectoriesTest {
             previousInitialized = initializedField.getBoolean(null);
 
             @SuppressWarnings("unchecked")
-            ObjectProperty<GameDirectory> selectedGameDirectory =
-                    (ObjectProperty<GameDirectory>) selectedGameDirectoryField.get(null);
+            ObjectProperty<@Nullable GameDirectory> selectedGameDirectory =
+                    (ObjectProperty<@Nullable GameDirectory>) selectedGameDirectoryField.get(null);
             this.selectedGameDirectory = selectedGameDirectory;
             previousSelectedGameDirectory = selectedGameDirectory.get();
 
             @SuppressWarnings("unchecked")
-            ObjectProperty<XYMLGameRepository> selectedRepository =
-                    (ObjectProperty<XYMLGameRepository>) selectedRepositoryField.get(null);
+            ObjectProperty<@Nullable XYMLGameRepository> selectedRepository =
+                    (ObjectProperty<@Nullable XYMLGameRepository>) selectedRepositoryField.get(null);
             this.selectedRepository = selectedRepository;
             previousSelectedRepository = selectedRepository.get();
 

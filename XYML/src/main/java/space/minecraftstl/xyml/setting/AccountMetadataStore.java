@@ -20,10 +20,10 @@ package space.minecraftstl.xyml.setting;
 import com.google.gson.JsonObject;
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableList;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.ObservableSetting;
@@ -46,8 +46,8 @@ final class AccountMetadataStore extends ObservableSetting implements JsonSchema
 
     /// Creates an empty account metadata store.
     AccountMetadataStore() {
-        tracker.markDirty(schema);
-        tracker.markDirty(accounts);
+        markDirty(schema);
+        markDirty(accounts);
         register();
     }
 
@@ -126,7 +126,7 @@ final class AccountMetadataStore extends ObservableSetting implements JsonSchema
 
     /// Serialized account records.
     @SerializedName("accounts")
-    private final ObservableList<JsonObject> accounts = FXCollections.observableArrayList();
+    private final ObservableList<JsonObject> accounts = ObservableCollections.observableList();
 
     /// Returns serialized account records.
     public ObservableList<JsonObject> getAccounts() {
@@ -134,6 +134,7 @@ final class AccountMetadataStore extends ObservableSetting implements JsonSchema
     }
 
     /// JSON adapter for [AccountMetadataStore].
+    @NotNullByDefault
     static final class Adapter extends ObservableSetting.Adapter<AccountMetadataStore> {
         /// Creates an empty account metadata store for deserialization.
         @Override

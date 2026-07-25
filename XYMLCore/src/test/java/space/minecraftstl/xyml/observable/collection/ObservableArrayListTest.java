@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.observable.collection;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.property.SimpleStringProperty;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -136,5 +137,91 @@ public final class ObservableArrayListTest {
         assertThrows(NullPointerException.class, () -> list.add(null));
         assertThrows(NullPointerException.class, () -> list.setAll(Arrays.asList("replacement", null)));
         assertIterableEquals(List.of("kept"), list);
+    }
+
+    /// Verifies extracted dependencies update every stored occurrence and are released with removed occurrences.
+    @Test
+    public void reportsElementUpdatesAndReleasesRemovedOccurrences() {
+        TrackedElement shared = new TrackedElement("initial");
+        TrackedElement replacement = new TrackedElement("replacement");
+        ObservableArrayList<TrackedElement> list = new ObservableArrayList<>(
+                List.of(shared, shared),
+                element -> List.of(element.value));
+        List<ListChange<TrackedElement>> changes = new ArrayList<>();
+        list.subscribe(changes::add);
+
+        shared.value.set("first-update");
+
+        assertEquals(2, changes.size());
+        assertEquals(ListChange.Kind.UPDATE, changes.get(0).kind());
+        assertEquals(0, changes.get(0).fromIndex());
+        assertEquals(1, changes.get(0).toIndex());
+        assertEquals(List.of(shared), changes.get(0).previousItems());
+        assertEquals(List.of(shared), changes.get(0).currentItems());
+        assertEquals(ListChange.Kind.UPDATE, changes.get(1).kind());
+        assertEquals(1, changes.get(1).fromIndex());
+
+        list.remove(0);
+        list.set(0, replacement);
+        changes.clear();
+        shared.value.set("detached-update");
+        replacement.value.set("active-update");
+
+        assertEquals(1, changes.size());
+        assertEquals(ListChange.Kind.UPDATE, changes.get(0).kind());
+        assertEquals(0, changes.get(0).fromIndex());
+        assertSame(replacement, changes.get(0).currentItems().get(0));
+    }
+
+    /// Verifies extractor failures leave existing contents and subscriptions unchanged.
+    @Test
+    public void validatesExtractedDependenciesBeforeMutation() {
+        TrackedElement retained = new TrackedElement("retained");
+        TrackedElement rejected = new TrackedElement("rejected");
+        ObservableArrayList<TrackedElement> list = new ObservableArrayList<>(
+                List.of(retained),
+                element -> element == rejected ? Arrays.asList(element.value, null) : List.of(element.value));
+        List<ListChange<TrackedElement>> changes = new ArrayList<>();
+        list.subscribe(changes::add);
+
+        assertThrows(NullPointerException.class, () -> list.add(rejected));
+        retained.value.set("still-observed");
+
+        assertIterableEquals(List.of(retained), list);
+        assertEquals(1, changes.size());
+        assertEquals(ListChange.Kind.UPDATE, changes.get(0).kind());
+    }
+
+    /// Verifies a read-only view remains live, re-sources changes, and rejects even empty mutations.
+    @Test
+    public void exposesLiveUnmodifiableObservableView() {
+        ObservableList<String> mutable = ObservableCollections.observableListCopy(List.of("alpha"));
+        ObservableList<String> view = ObservableCollections.unmodifiableObservableList(mutable);
+        List<ListChange<String>> changes = new ArrayList<>();
+        view.subscribe(changes::add);
+
+        mutable.add("bravo");
+
+        assertIterableEquals(List.of("alpha", "bravo"), view);
+        assertEquals(1, changes.size());
+        assertSame(view, changes.get(0).source());
+        assertEquals(ListChange.Kind.ADD, changes.get(0).kind());
+        assertThrows(UnsupportedOperationException.class, () -> view.add("forbidden"));
+        assertThrows(UnsupportedOperationException.class, () -> view.addAll(List.of()));
+        assertThrows(UnsupportedOperationException.class, () -> view.remove("missing"));
+        assertThrows(UnsupportedOperationException.class, () -> view.removeRange(0, 0));
+        assertThrows(UnsupportedOperationException.class, () -> view.setAll(List.of("replacement")));
+    }
+
+    /// Test element whose property is selected by an observable-list extractor.
+    @NotNullByDefault
+    private static final class TrackedElement {
+        /// Observable element state used to trigger update events.
+        private final SimpleStringProperty value;
+
+        /// Creates a tracked element with an initial state.
+        private TrackedElement(String initialValue) {
+            value = new SimpleStringProperty(initialValue);
+        }
     }
 }

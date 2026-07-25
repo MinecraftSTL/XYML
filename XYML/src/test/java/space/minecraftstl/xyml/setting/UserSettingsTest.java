@@ -21,7 +21,9 @@ import com.google.common.jimfs.Configuration;
 import com.google.common.jimfs.Jimfs;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
+import space.minecraftstl.xyml.util.gson.JsonUtils;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -36,6 +38,52 @@ import static org.junit.jupiter.api.Assertions.*;
 /// Tests for user settings serialization and legacy migration.
 @NotNullByDefault
 public final class UserSettingsTest {
+    /// Tests that detached settings auto-save from the toolkit-neutral aggregate revision.
+    @Test
+    public void autoSavesNeutralPropertyChanges() throws IOException, InterruptedException {
+        try (FileSystem fileSystem = Jimfs.newFileSystem(Configuration.unix())) {
+            Path location = fileSystem.getPath("/user-settings.json");
+            JsonSettingFile<UserSettings> file = new JsonSettingFile<>(
+                    location,
+                    "user settings",
+                    UserSettings.class,
+                    UserSettings.CURRENT_SCHEMA,
+                    UserSettings::new);
+            UserSettings settings = new UserSettings();
+            file.installAutoSave(settings);
+
+            settings.logRetentionProperty().set(42);
+            FileSaver.waitForAllSaves();
+
+            JsonObject saved = Objects.requireNonNull(JsonUtils.fromJsonFile(location, JsonObject.class));
+            assertEquals(42, saved.get("logRetention").getAsInt());
+        }
+    }
+
+    /// Tests that compatibility method aliases expose the same toolkit-neutral state.
+    @Test
+    public void mirrorsLegacyViewsWithoutChangingPersistentState() {
+        UserSettings settings = new UserSettings();
+
+        assertSame(settings.enableOfflineAccountProperty(), settings.enableOfflineAccountValueProperty());
+        settings.enableOfflineAccountValueProperty().set(true);
+        assertTrue(settings.enableOfflineAccountProperty().get());
+        settings.enableOfflineAccountProperty().set(false);
+        assertFalse(settings.enableOfflineAccountValueProperty().get());
+
+        assertSame(settings.getUserJava(), settings.getUserJavaValues());
+        settings.getUserJavaValues().add("java-neutral");
+        assertTrue(settings.getUserJava().contains("java-neutral"));
+        settings.getUserJava().add("java-legacy");
+        assertTrue(settings.getUserJavaValues().contains("java-legacy"));
+
+        assertSame(settings.getDisabledJava(), settings.getDisabledJavaValues());
+        settings.getDisabledJavaValues().add("disabled-neutral");
+        assertTrue(settings.getDisabledJava().contains("disabled-neutral"));
+        settings.getDisabledJava().add("disabled-legacy");
+        assertTrue(settings.getDisabledJavaValues().contains("disabled-legacy"));
+    }
+
     /// Tests that legacy global config content is split without preserving unowned fields.
     @Test
     public void migratesLegacyGlobalConfigWithoutPreservingUnownedFields() throws IOException {

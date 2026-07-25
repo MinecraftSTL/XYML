@@ -25,13 +25,31 @@ import java.util.Objects;
 ///
 /// @param pageTitle page heading
 /// @param addAction add-account command label
+/// @param refreshAction refresh or reauthentication command label
+/// @param copyUuidAction profile UUID copy command label
+/// @param removeAction permanent removal command label
+/// @param removeConfirmation destructive removal confirmation
+/// @param errorTitle account-action error title
 /// @param emptyText text shown when no account exists
 @NotNullByDefault
-public record AccountsStrings(String pageTitle, String addAction, String emptyText) {
+public record AccountsStrings(
+        String pageTitle,
+        String addAction,
+        String refreshAction,
+        String copyUuidAction,
+        String removeAction,
+        String removeConfirmation,
+        String errorTitle,
+        String emptyText) {
     /// Validates localized account-page text.
     public AccountsStrings {
         Objects.requireNonNull(pageTitle, "pageTitle");
         Objects.requireNonNull(addAction, "addAction");
+        Objects.requireNonNull(refreshAction, "refreshAction");
+        Objects.requireNonNull(copyUuidAction, "copyUuidAction");
+        Objects.requireNonNull(removeAction, "removeAction");
+        Objects.requireNonNull(removeConfirmation, "removeConfirmation");
+        Objects.requireNonNull(errorTitle, "errorTitle");
         Objects.requireNonNull(emptyText, "emptyText");
     }
 }

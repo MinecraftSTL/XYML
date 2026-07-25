@@ -102,7 +102,7 @@ public final class AppShellPanelTest {
         }
     }
 
-    /// The preferred layout paints opaque, visually varied pixels and keeps navigation text inside its button bounds.
+    /// The preferred layout uses normal Swing painting, produces varied pixels, and keeps navigation text bounded.
     @Test
     public void rendersFixedSizeShellWithoutTextOverflow() throws IOException {
         AppShellPanel panel = createPanel(creationCounts());
@@ -113,7 +113,7 @@ public final class AppShellPanelTest {
             layoutTree(panel);
             Graphics2D graphics = image.createGraphics();
             try {
-                panel.printAll(graphics);
+                panel.paint(graphics);
             } finally {
                 graphics.dispose();
             }

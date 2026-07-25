@@ -19,7 +19,8 @@ package space.minecraftstl.xyml.auth.offline;
 
 import com.google.gson.JsonObject;
 import com.google.gson.annotations.SerializedName;
-import javafx.scene.image.Image;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.auth.yggdrasil.TextureModel;
 import space.minecraftstl.xyml.task.FetchTask;
 import space.minecraftstl.xyml.task.GetTask;
@@ -30,7 +31,6 @@ import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.io.UrlResponseInfo;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -42,25 +42,71 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
-public record Skin(Type type, String cslApi, TextureModel textureModel, String localSkinPath, String localCapePath) {
+/// Persisted offline-account skin configuration and toolkit-neutral loading workflow.
+///
+/// @param type configured skin source
+/// @param cslApi custom-skin-loader endpoint, or null when not applicable
+/// @param textureModel configured arm model, or null when the source determines it
+/// @param localSkinPath local skin path, or null when not configured
+/// @param localCapePath local cape path, or null when not configured
+@NotNullByDefault
+public record Skin(
+        Type type,
+        @Nullable String cslApi,
+        @Nullable TextureModel textureModel,
+        @Nullable String localSkinPath,
+        @Nullable String localCapePath) {
 
+    /// Supported persisted skin sources.
+    @NotNullByDefault
     public enum Type {
+        /// UUID-derived launcher default skin.
         DEFAULT,
+
+        /// Bundled Alex skin.
         ALEX,
+
+        /// Bundled Ari skin.
         ARI,
+
+        /// Bundled Efe skin.
         EFE,
+
+        /// Bundled Kai skin.
         KAI,
+
+        /// Bundled Makena skin.
         MAKENA,
+
+        /// Bundled Noor skin.
         NOOR,
+
+        /// Bundled Steve skin.
         STEVE,
+
+        /// Bundled Sunny skin.
         SUNNY,
+
+        /// Bundled Zuri skin.
         ZURI,
+
+        /// Skin and optional cape loaded from local files.
         LOCAL_FILE,
+
+        /// LittleSkin custom-skin-loader service.
         LITTLE_SKIN,
+
+        /// User-provided custom-skin-loader endpoint.
         CUSTOM_SKIN_LOADER_API,
+
+        /// Yggdrasil-compatible skin service reserved by the persisted format.
         YGGDRASIL_API;
 
-        public static Type fromStorage(String type) {
+        /// Parses a persisted lowercase source identifier.
+        ///
+        /// @param type persisted identifier
+        /// @return matching source, or null when the identifier is unknown
+        public static @Nullable Type fromStorage(String type) {
             return switch (type) {
                 case "default" -> DEFAULT;
                 case "alex" -> ALEX;
@@ -81,12 +127,19 @@ public record Skin(Type type, String cslApi, TextureModel textureModel, String l
         }
     }
 
+    /// Returns the effective arm model used when the configured source does not provide one.
+    ///
+    /// @return configured model, or the wide model by default
     @Override
     public TextureModel textureModel() {
         return textureModel == null ? TextureModel.WIDE : textureModel;
     }
 
-    public Task<LoadedSkin> load(String username) {
+    /// Loads the configured skin and cape without initializing a graphical toolkit.
+    ///
+    /// @param username profile name used by remote custom-skin-loader services
+    /// @return asynchronous loaded skin, or null when the source has no custom texture
+    public Task<@Nullable LoadedSkin> load(String username) {
         switch (type) {
             case DEFAULT:
                 return Task.supplyAsync(() -> null);
@@ -99,66 +152,95 @@ public record Skin(Type type, String cslApi, TextureModel textureModel, String l
             case STEVE:
             case SUNNY:
             case ZURI:
-                TextureModel model = this.textureModel != null ? this.textureModel : type == Type.ALEX ? TextureModel.SLIM : TextureModel.WIDE;
-                String resource = (model == TextureModel.SLIM ? "/assets/img/skin/slim/" : "/assets/img/skin/wide/") + type.name().toLowerCase(Locale.ROOT) + ".png";
+                TextureModel model = textureModel != null
+                        ? textureModel
+                        : type == Type.ALEX ? TextureModel.SLIM : TextureModel.WIDE;
+                String resource = (model == TextureModel.SLIM
+                        ? "/assets/img/skin/slim/"
+                        : "/assets/img/skin/wide/") + type.name().toLowerCase(Locale.ROOT) + ".png";
 
                 return Task.supplyAsync(() -> new LoadedSkin(
                         model,
-                        Texture.loadTexture(new Image(resource)),
-                        null
-                ));
+                        loadBuiltinTexture(resource),
+                        null));
             case LOCAL_FILE:
                 return Task.supplyAsync(() -> {
-                    Texture skin = null, cape = null;
+                    @Nullable Texture skin = null;
+                    @Nullable Texture cape = null;
                     Optional<Path> skinPath = FileUtils.tryGetPath(localSkinPath);
                     Optional<Path> capePath = FileUtils.tryGetPath(localCapePath);
-                    if (skinPath.isPresent()) skin = Texture.loadTexture(Files.newInputStream(skinPath.get()));
-                    if (capePath.isPresent()) cape = Texture.loadTexture(Files.newInputStream(capePath.get()));
+                    if (skinPath.isPresent()) {
+                        skin = Texture.loadTexture(Files.newInputStream(skinPath.get()));
+                    }
+                    if (capePath.isPresent()) {
+                        cape = Texture.loadTexture(Files.newInputStream(capePath.get()));
+                    }
                     return new LoadedSkin(textureModel(), skin, cape);
                 });
             case LITTLE_SKIN:
             case CUSTOM_SKIN_LOADER_API:
                 String realCslApi = type == Type.LITTLE_SKIN
                         ? "https://littleskin.cn/csl"
-                        : NetworkUtils.addHttpsIfMissing(StringUtils.removeSuffix(Lang.requireNonNullElse(cslApi, ""), "/"));
+                        : NetworkUtils.addHttpsIfMissing(
+                                StringUtils.removeSuffix(Lang.requireNonNullElse(cslApi, ""), "/"));
                 return Task.composeAsync(() -> new GetTask(String.format("%s/%s.json", realCslApi, username)))
                         .thenComposeAsync(json -> {
-                            SkinJson result = JsonUtils.GSON.fromJson(json, SkinJson.class);
+                            @Nullable SkinJson result = JsonUtils.GSON.fromJson(json, SkinJson.class);
 
-                            if (!result.hasSkin()) {
+                            if (result == null || !result.hasSkin()) {
                                 return Task.supplyAsync(() -> null);
                             }
 
+                            @Nullable String skinHash = result.getHash();
+                            @Nullable String capeHash = result.getCapeHash();
                             return Task.allOf(
                                     Task.supplyAsync(result::getModel),
-                                    result.getHash() == null ? Task.supplyAsync(() -> null) : new FetchBytesTask(String.format("%s/textures/%s", realCslApi, result.getHash())),
-                                    result.getCapeHash() == null ? Task.supplyAsync(() -> null) : new FetchBytesTask(String.format("%s/textures/%s", realCslApi, result.getCapeHash()))
-                            );
+                                    skinHash == null
+                                            ? Task.supplyAsync(() -> null)
+                                            : new FetchBytesTask(String.format(
+                                                    "%s/textures/%s", realCslApi, skinHash)),
+                                    capeHash == null
+                                            ? Task.supplyAsync(() -> null)
+                                            : new FetchBytesTask(String.format(
+                                                    "%s/textures/%s", realCslApi, capeHash)));
                         }).thenApplyAsync(result -> {
                             if (result == null) {
                                 return null;
                             }
 
-                            Texture skin, cape;
-                            if (result.get(1) != null) {
-                                skin = Texture.loadTexture((InputStream) result.get(1));
-                            } else {
-                                skin = null;
-                            }
-
-                            if (result.get(2) != null) {
-                                cape = Texture.loadTexture((InputStream) result.get(2));
-                            } else {
-                                cape = null;
-                            }
-
-                            return new LoadedSkin((TextureModel) result.get(0), skin, cape);
+                            @Nullable Texture skin = result.get(1) == null
+                                    ? null
+                                    : Texture.loadTexture((InputStream) result.get(1));
+                            @Nullable Texture cape = result.get(2) == null
+                                    ? null
+                                    : Texture.loadTexture((InputStream) result.get(2));
+                            return new LoadedSkin((@Nullable TextureModel) result.get(0), skin, cape);
                         });
             default:
-                throw new UnsupportedOperationException();
+                throw new UnsupportedOperationException("Unsupported skin type: " + type);
         }
     }
 
+    /// Loads one bundled skin resource through the JDK image decoder.
+    ///
+    /// @param resource absolute classpath resource
+    /// @return decoded canonical texture
+    /// @throws IOException when the resource is missing or invalid
+    private static Texture loadBuiltinTexture(String resource) throws IOException {
+        @Nullable InputStream input = Skin.class.getResourceAsStream(resource);
+        if (input == null) {
+            throw new IOException("Missing bundled skin resource: " + resource);
+        }
+        @Nullable Texture texture = Texture.loadTexture(input);
+        if (texture == null) {
+            throw new IOException("Missing bundled skin texture: " + resource);
+        }
+        return texture;
+    }
+
+    /// Writes this configuration to account metadata.
+    ///
+    /// @param storage destination metadata object
     public void writeStorage(JsonObject storage) {
         storage.addProperty("type", type.name().toLowerCase(Locale.ROOT));
         storage.addProperty("cslApi", cslApi);
@@ -167,79 +249,147 @@ public record Skin(Type type, String cslApi, TextureModel textureModel, String l
         storage.addProperty("localCapePath", localCapePath);
     }
 
-    public static Skin fromStorage(JsonObject storage) {
-        if (storage == null) return null;
-
-        String typeText = JsonUtils.getString(storage, "type");
-        Type type = typeText != null ? Type.fromStorage(typeText) : Type.DEFAULT;
-        if (type == null) {
-            type = Type.DEFAULT;
+    /// Reconstructs a skin configuration from account metadata.
+    ///
+    /// Unknown source identifiers fall back to [Type#DEFAULT].
+    ///
+    /// @param storage source metadata, or null when no configuration was persisted
+    /// @return parsed configuration, or null for absent metadata
+    public static @Nullable Skin fromStorage(@Nullable JsonObject storage) {
+        if (storage == null) {
+            return null;
         }
-        String cslApi = JsonUtils.getString(storage, "cslApi");
-        String textureModel = JsonUtils.getString(storage, "textureModel", "default");
-        String localSkinPath = JsonUtils.getString(storage, "localSkinPath");
-        String localCapePath = JsonUtils.getString(storage, "localCapePath");
 
-        return new Skin(type, cslApi, "slim".equals(textureModel) ? TextureModel.SLIM : TextureModel.WIDE, localSkinPath, localCapePath);
+        @Nullable String typeText = JsonUtils.getString(storage, "type");
+        @Nullable Type parsedType = typeText != null ? Type.fromStorage(typeText) : Type.DEFAULT;
+        Type type = parsedType == null ? Type.DEFAULT : parsedType;
+        @Nullable String cslApi = JsonUtils.getString(storage, "cslApi");
+        String textureModel = JsonUtils.getString(storage, "textureModel", "default");
+        @Nullable String localSkinPath = JsonUtils.getString(storage, "localSkinPath");
+        @Nullable String localCapePath = JsonUtils.getString(storage, "localCapePath");
+
+        return new Skin(
+                type,
+                cslApi,
+                "slim".equals(textureModel) ? TextureModel.SLIM : TextureModel.WIDE,
+                localSkinPath,
+                localCapePath);
     }
 
-    private static class FetchBytesTask extends FetchTask<InputStream> {
-
-        public FetchBytesTask(String uri) {
+    /// Downloads one remote texture into memory while retaining repository ETag caching.
+    @NotNullByDefault
+    private static final class FetchBytesTask extends FetchTask<InputStream> {
+        /// Creates a fetch task for one absolute texture URI.
+        ///
+        /// @param uri absolute texture URI
+        private FetchBytesTask(String uri) {
             super(List.of(NetworkUtils.toURI(uri)));
         }
 
+        /// Opens a cached response as the task result.
+        ///
+        /// @param cachedFile cached texture path
+        /// @throws IOException when the cached file cannot be opened
         @Override
         protected void useCachedResult(Path cachedFile) throws IOException {
             setResult(Files.newInputStream(cachedFile));
         }
 
+        /// Enables ETag validation for remote texture responses.
+        ///
+        /// @return ETag validation mode
         @Override
         protected EnumCheckETag shouldCheckETag() {
             return EnumCheckETag.CHECK_E_TAG;
         }
 
+        /// Creates an in-memory response sink that can also populate the repository cache.
+        ///
+        /// @param response response metadata, or null before a response is available
+        /// @param checkETag whether successful bytes should be cached
+        /// @param bmclapiHash optional mirror hash, unused for texture responses
+        /// @return response sink
         @Override
-        protected Context getContext(@Nullable UrlResponseInfo response, boolean checkETag, @Nullable String bmclapiHash) throws IOException {
+        protected Context getContext(
+                @Nullable UrlResponseInfo response,
+                boolean checkETag,
+                @Nullable String bmclapiHash) {
             return new Context() {
-                final ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                /// Accumulates the current response body.
+                private final ByteArrayOutputStream output = new ByteArrayOutputStream();
 
+                /// Clears bytes retained from a previous response attempt.
                 @Override
-                public void reset() throws IOException {
-                    baos.reset();
+                public void reset() {
+                    output.reset();
                 }
 
+                /// Appends one response chunk.
+                ///
+                /// @param buffer source bytes
+                /// @param offset source offset
+                /// @param length byte count
                 @Override
-                public void write(byte[] buffer, int offset, int len) {
-                    baos.write(buffer, offset, len);
+                public void write(byte[] buffer, int offset, int length) {
+                    output.write(buffer, offset, length);
                 }
 
+                /// Publishes successful bytes and optionally stores them in the repository cache.
+                ///
+                /// @throws IOException when repository caching fails
                 @Override
                 public void close() throws IOException {
-                    if (!isSuccess()) return;
+                    if (!isSuccess()) {
+                        return;
+                    }
 
-                    setResult(new ByteArrayInputStream(baos.toByteArray()));
-
+                    byte[] bytes = output.toByteArray();
+                    setResult(new ByteArrayInputStream(bytes));
                     if (checkETag) {
-                        repository.cacheBytes(response, baos.toByteArray());
+                        repository.cacheBytes(response, bytes);
                     }
                 }
             };
         }
     }
 
-    public record LoadedSkin(TextureModel model, Texture skin, Texture cape) {
+    /// Result of loading an offline skin configuration.
+    ///
+    /// @param model detected or configured arm model, or null when unknown
+    /// @param skin decoded skin texture, or null when absent
+    /// @param cape decoded cape texture, or null when absent
+    @NotNullByDefault
+    public record LoadedSkin(
+            @Nullable TextureModel model,
+            @Nullable Texture skin,
+            @Nullable Texture cape) {
     }
 
-    private record SkinJson(String username, String skin, String cape, String elytra,
-                            @SerializedName(value = "textures", alternate = {"skins"}) TextureJson textures) {
-
-        public boolean hasSkin() {
+    /// Custom-skin-loader profile response.
+    ///
+    /// @param username profile name, or null when the profile is absent
+    /// @param skin legacy wide-skin hash, or null
+    /// @param cape legacy cape hash, or null
+    /// @param elytra legacy elytra hash, or null
+    /// @param textures structured texture hashes, or null
+    @NotNullByDefault
+    private record SkinJson(
+            @Nullable String username,
+            @Nullable String skin,
+            @Nullable String cape,
+            @Nullable String elytra,
+            @SerializedName(value = "textures", alternate = {"skins"}) @Nullable TextureJson textures) {
+        /// Reports whether the response describes an existing profile.
+        ///
+        /// @return whether a nonblank profile name is present
+        private boolean hasSkin() {
             return StringUtils.isNotBlank(username);
         }
 
-        @Nullable
-        public TextureModel getModel() {
+        /// Detects the arm model from structured texture fields.
+        ///
+        /// @return slim or wide model, or null when no skin hash exists
+        private @Nullable TextureModel getModel() {
             if (textures != null && textures.slim != null) {
                 return TextureModel.SLIM;
             } else if (textures != null && textures.defaultSkin != null) {
@@ -249,37 +399,59 @@ public record Skin(Type type, String cslApi, TextureModel textureModel, String l
             }
         }
 
-        public String getAlexModelHash() {
-            if (textures != null && textures.slim != null) {
-                return textures.slim;
+        /// Returns the structured slim-skin hash.
+        ///
+        /// @return slim hash, or null
+        private @Nullable String getAlexModelHash() {
+            return textures == null ? null : textures.slim;
+        }
+
+        /// Returns the structured or legacy wide-skin hash.
+        ///
+        /// @return wide hash, or null
+        private @Nullable String getSteveModelHash() {
+            if (textures != null && textures.defaultSkin != null) {
+                return textures.defaultSkin;
+            }
+            return skin;
+        }
+
+        /// Chooses the skin hash corresponding to the detected model.
+        ///
+        /// @return selected skin hash, or null when no model can be detected
+        private @Nullable String getHash() {
+            @Nullable TextureModel model = getModel();
+            if (model == TextureModel.SLIM) {
+                return getAlexModelHash();
+            } else if (model == TextureModel.WIDE) {
+                return getSteveModelHash();
             } else {
                 return null;
             }
         }
 
-        public String getSteveModelHash() {
-            if (textures != null && textures.defaultSkin != null) {
-                return textures.defaultSkin;
-            } else return skin;
-        }
-
-        public String getHash() {
-            TextureModel model = getModel();
-            if (model == TextureModel.SLIM)
-                return getAlexModelHash();
-            else if (model == TextureModel.WIDE)
-                return getSteveModelHash();
-            else
-                return null;
-        }
-
-        public String getCapeHash() {
+        /// Returns the structured or legacy cape hash.
+        ///
+        /// @return cape hash, or null
+        private @Nullable String getCapeHash() {
             if (textures != null && textures.cape != null) {
                 return textures.cape;
-            } else return cape;
+            }
+            return cape;
         }
 
-        public record TextureJson(@SerializedName("default") String defaultSkin, String slim, String cape, String elytra) {
+        /// Structured custom-skin-loader texture fields.
+        ///
+        /// @param defaultSkin wide-skin hash, or null
+        /// @param slim slim-skin hash, or null
+        /// @param cape cape hash, or null
+        /// @param elytra elytra hash, or null
+        @NotNullByDefault
+        private record TextureJson(
+                @SerializedName("default") @Nullable String defaultSkin,
+                @Nullable String slim,
+                @Nullable String cape,
+                @Nullable String elytra) {
         }
     }
 }

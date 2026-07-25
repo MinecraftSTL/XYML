@@ -125,13 +125,17 @@ public final class AppShellFrameTest {
                 new SwingAnimator(MotionPolicy.OFF, 16),
                 Duration.ZERO);
         try {
+            frame.open();
             assertAll(
                     () -> assertFalse(frame.isUndecorated()),
                     () -> assertTrue(frame.isResizable()),
                     () -> assertEquals(AppShellPanel.MINIMUM_WIDTH, frame.getMinimumSize().width),
                     () -> assertEquals(AppShellPanel.MINIMUM_HEIGHT, frame.getMinimumSize().height),
                     () -> assertTrue(frame.getWidth() >= AppShellPanel.PREFERRED_WIDTH),
-                    () -> assertTrue(frame.getHeight() >= AppShellPanel.PREFERRED_HEIGHT));
+                    () -> assertTrue(frame.getHeight() >= AppShellPanel.PREFERRED_HEIGHT),
+                    () -> assertTrue(frame.isVisible()));
+            frame.hideWindow();
+            assertFalse(frame.isVisible());
         } finally {
             EdtDispatcher.executeAndWait(frame::dispose);
         }

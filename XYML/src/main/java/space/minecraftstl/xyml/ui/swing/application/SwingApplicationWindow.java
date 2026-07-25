@@ -20,6 +20,8 @@ package space.minecraftstl.xyml.ui.swing.application;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 
+import java.awt.Component;
+
 /// Abstracts the native Swing window so composition lifecycle and factories can be tested headlessly.
 @NotNullByDefault
 public interface SwingApplicationWindow extends AutoCloseable {
@@ -30,6 +32,19 @@ public interface SwingApplicationWindow extends AutoCloseable {
 
     /// Shows the native window.
     void open();
+
+    /// Hides the native window without disposing its page state.
+    void hide();
+
+    /// Returns the stable native component that owns application-modal dialogs.
+    ///
+    /// @return native application window component
+    Component dialogOwner();
+
+    /// Enables or disables user interaction without changing window visibility.
+    ///
+    /// @param enabled whether application pages accept user interaction
+    void setInteractionEnabled(boolean enabled);
 
     /// Navigates the hosted shell to one stable destination.
     ///

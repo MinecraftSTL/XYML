@@ -51,6 +51,9 @@ public final class LauncherAccountsModel implements AccountsModel, AutoCloseable
     /// Command that opens the real add-account workflow.
     private final Runnable addAccountCommand;
 
+    /// Caller-owned nonblocking authentication refresh command.
+    private final AccountRefreshCommand refreshAccountCommand;
+
     /// Thread-safe account-snapshot publisher.
     private final ValueChangeSupport<AccountsSnapshot> changes = new ValueChangeSupport<>(this);
 
@@ -67,12 +70,25 @@ public final class LauncherAccountsModel implements AccountsModel, AutoCloseable
     ///
     /// @param accountStore immutable account descriptor source and selection sink
     /// @param addAccountCommand add-account workflow command
-    public LauncherAccountsModel(AccountStore accountStore, Runnable addAccountCommand) {
+    /// @param refreshAccountCommand caller-owned account refresh command
+    public LauncherAccountsModel(
+            AccountStore accountStore,
+            Runnable addAccountCommand,
+            AccountRefreshCommand refreshAccountCommand) {
         this.accountStore = Objects.requireNonNull(accountStore, "accountStore");
         this.addAccountCommand = Objects.requireNonNull(addAccountCommand, "addAccountCommand");
+        this.refreshAccountCommand = Objects.requireNonNull(refreshAccountCommand, "refreshAccountCommand");
         state = initialState(accountStore.snapshot());
         storeSubscription = accountStore.subscribe(this::storeChanged);
         reconcileAccountStore();
+    }
+
+    /// Creates a model with an unavailable refresh command for focused legacy callers and tests.
+    ///
+    /// @param accountStore immutable account descriptor source and selection sink
+    /// @param addAccountCommand add-account workflow command
+    LauncherAccountsModel(AccountStore accountStore, Runnable addAccountCommand) {
+        this(accountStore, addAccountCommand, AccountRefreshCommand.unavailable());
     }
 
     /// Returns the latest minimal account-list state.
@@ -147,6 +163,22 @@ public final class LauncherAccountsModel implements AccountsModel, AutoCloseable
             requireOpen();
         }
         addAccountCommand.run();
+    }
+
+    /// Validates one stable identifier before delegating permanent removal to the account store.
+    @Override
+    public void removeAccount(String accountId, boolean allowReadOnlyOverwrite) {
+        validateCurrentAccount(accountId);
+        accountStore.removeAccount(accountId, allowReadOnlyOverwrite);
+    }
+
+    /// Validates one stable identifier before starting caller-owned asynchronous reauthentication.
+    @Override
+    public CompletionStage<Void> refreshAccount(String accountId) {
+        validateCurrentAccount(accountId);
+        return Objects.requireNonNull(
+                refreshAccountCommand.refresh(accountId),
+                "refreshAccountCommand returned null");
     }
 
     /// Releases the account-store subscription exactly once.
@@ -291,6 +323,19 @@ public final class LauncherAccountsModel implements AccountsModel, AutoCloseable
     private void requireOpen() {
         if (closed) {
             throw new IllegalStateException("Launcher accounts model is closed");
+        }
+    }
+
+    /// Requires an open model containing one exact stable account identifier.
+    ///
+    /// @param accountId stable identifier to validate
+    private void validateCurrentAccount(String accountId) {
+        Objects.requireNonNull(accountId, "accountId");
+        synchronized (stateLock) {
+            requireOpen();
+            if (indexOf(state.source().items(), accountId) < 0) {
+                throw new IllegalArgumentException("Unknown account: " + accountId);
+            }
         }
     }
 

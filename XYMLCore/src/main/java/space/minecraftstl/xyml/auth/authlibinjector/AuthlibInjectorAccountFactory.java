@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.auth.authlibinjector;
 
 import com.google.gson.JsonObject;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.auth.AccountID;
 import space.minecraftstl.xyml.auth.AccountFactory;
@@ -27,30 +29,49 @@ import space.minecraftstl.xyml.auth.yggdrasil.CompleteGameProfile;
 import space.minecraftstl.xyml.auth.yggdrasil.GameProfile;
 import space.minecraftstl.xyml.auth.yggdrasil.YggdrasilSession;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
-import space.minecraftstl.xyml.util.javafx.ObservableOptionalCache;
+import space.minecraftstl.xyml.observable.cache.ObservableOptionalCache;
 
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 
+/// Creates and restores accounts backed by an authlib-injector-compatible Yggdrasil server.
+@NotNullByDefault
 public class AuthlibInjectorAccountFactory extends AccountFactory<AuthlibInjectorAccount> {
+    /// Supplies the authlib-injector artifact used when launching an account.
     private final AuthlibInjectorArtifactProvider downloader;
+
+    /// Resolves a persisted API root to its configured server definition.
     private final Function<String, AuthlibInjectorServer> serverLookup;
 
-    /**
-     * @param serverLookup a function that looks up {@link AuthlibInjectorServer} by url
-     */
+    /// Creates an authlib-injector account factory.
+    ///
+    /// @param downloader artifact provider used by created accounts
+    /// @param serverLookup function that looks up an [AuthlibInjectorServer] by URL
     public AuthlibInjectorAccountFactory(AuthlibInjectorArtifactProvider downloader, Function<String, AuthlibInjectorServer> serverLookup) {
         this.downloader = downloader;
         this.serverLookup = serverLookup;
     }
 
+    /// Returns the credentials required for authlib-injector authentication.
+    ///
+    /// @return username-and-password login type
     @Override
     public AccountLoginType getLoginType() {
         return AccountLoginType.USERNAME_PASSWORD;
     }
 
+    /// Creates an account for the server supplied as additional data.
+    ///
+    /// @param selector selects a profile when the credentials expose multiple profiles
+    /// @param username account login name
+    /// @param password account password
+    /// @param progressCallback progress receiver retained for the common factory contract
+    /// @param additionalData configured [AuthlibInjectorServer]
+    /// @return newly created account
+    /// @throws AuthenticationException if account creation cannot authenticate
+    /// @throws ClassCastException if `additionalData` is not an [AuthlibInjectorServer]
     @Override
     public AuthlibInjectorAccount create(CharacterSelector selector, String username, String password, ProgressCallback progressCallback, Object additionalData) throws AuthenticationException {
         Objects.requireNonNull(selector);
@@ -62,12 +83,18 @@ public class AuthlibInjectorAccountFactory extends AccountFactory<AuthlibInjecto
         return new AuthlibInjectorAccount(server, downloader, username, password, selector);
     }
 
+    /// Restores an account from its public and private JSON objects.
+    ///
+    /// @param metadata persisted public account metadata
+    /// @param privateData persisted credential data
+    /// @return restored account
+    /// @throws IllegalArgumentException if the persisted server API root is missing
     @Override
     public AuthlibInjectorAccount fromStorage(JsonObject metadata, JsonObject privateData) {
         Objects.requireNonNull(metadata);
         Objects.requireNonNull(privateData);
 
-        String apiRoot = JsonUtils.getString(metadata, "serverBaseURL");
+        @Nullable String apiRoot = JsonUtils.getString(metadata, "serverBaseURL");
         if (apiRoot == null) {
             throw new IllegalArgumentException("storage does not have API root.");
         }
@@ -75,6 +102,14 @@ public class AuthlibInjectorAccountFactory extends AccountFactory<AuthlibInjecto
         return fromStorage(metadata, privateData, downloader, server);
     }
 
+    /// Restores an account using an already resolved server and artifact provider.
+    ///
+    /// @param metadata persisted public account metadata
+    /// @param privateData persisted credential data
+    /// @param downloader artifact provider used by the restored account
+    /// @param server resolved authentication server
+    /// @return restored account
+    /// @throws IllegalArgumentException if the persisted login name is missing
     static AuthlibInjectorAccount fromStorage(
             JsonObject metadata,
             JsonObject privateData,
@@ -83,13 +118,13 @@ public class AuthlibInjectorAccountFactory extends AccountFactory<AuthlibInjecto
         AccountID accountID = Account.readAccountID(metadata);
         YggdrasilSession session = YggdrasilSession.fromStorage(metadata, privateData);
 
-        String loginName = JsonUtils.getString(metadata, "loginName");
+        @Nullable String loginName = JsonUtils.getString(metadata, "loginName");
         if (loginName == null) {
             throw new IllegalArgumentException("storage does not have loginName");
         }
 
         if (privateData.get("profileProperties") instanceof JsonObject profilePropertiesObject) {
-            Map<String, String> properties = JsonUtils.GSON.fromJson(
+            @Nullable Map<String, @Nullable String> properties = JsonUtils.GSON.fromJson(
                     profilePropertiesObject,
                     JsonUtils.mapTypeOf(String.class, String.class));
             GameProfile selected = session.getSelectedProfile();

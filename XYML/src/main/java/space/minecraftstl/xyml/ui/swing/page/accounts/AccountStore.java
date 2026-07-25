@@ -39,4 +39,14 @@ public interface AccountStore {
     ///
     /// @param accountId stable account identifier
     void selectAccount(String accountId);
+
+    /// Permanently removes one account by stable identifier.
+    ///
+    /// Implementations must leave selection empty or pointing to a remaining account before publishing the
+    /// resulting structural transition.
+    ///
+    /// @param accountId stable account identifier
+    /// @param allowReadOnlyOverwrite whether confirmed backup-and-overwrite may make newer storage writable
+    /// @throws AccountStorageOverwriteRequiredException when storage is read-only and overwrite is not allowed
+    void removeAccount(String accountId, boolean allowReadOnlyOverwrite);
 }

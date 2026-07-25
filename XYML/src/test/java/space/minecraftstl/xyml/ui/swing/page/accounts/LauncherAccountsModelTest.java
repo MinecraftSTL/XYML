@@ -30,8 +30,10 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -39,6 +41,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -167,6 +170,84 @@ public final class LauncherAccountsModelTest {
         model.close();
     }
 
+    /// Removing the selected stable ID publishes new content and selects the first remaining row.
+    @Test
+    public void delegatesRemovalAndKeepsSelectionConsistent() {
+        FakeAccountStore store = new FakeAccountStore(state(
+                List.of(
+                        account("alpha", "Alex", "Microsoft", "profile-alpha"),
+                        account("beta", "Steve", "Offline", "profile-beta"),
+                        account("gamma", "Sunny", "External", "profile-gamma")),
+                "beta"));
+        LauncherAccountsModel model = new LauncherAccountsModel(store, () -> { });
+
+        model.removeAccount("beta", false);
+        ChoicePage<AccountListItem> page = model.load(
+                new IndexRange(0, 2), new LoadCancellation()).toCompletableFuture().join();
+
+        assertAll(
+                () -> assertEquals(List.of("beta"), store.removedIds()),
+                () -> assertEquals(List.of(false), store.removalOverwritePermissions()),
+                () -> assertEquals(new AccountsSnapshot(OptionalInt.of(0), 2, 1L), model.snapshot()),
+                () -> assertEquals(List.of("alpha", "gamma"), page.items().stream()
+                        .map(AccountListItem::accountId)
+                        .toList()));
+        model.close();
+    }
+
+    /// Refresh validates one current stable ID and preserves the injected asynchronous completion.
+    @Test
+    public void delegatesAsynchronousRefreshCommand() {
+        FakeAccountStore store = new FakeAccountStore(state(
+                List.of(account("alpha", "Alex", "Microsoft", "profile-alpha")),
+                "alpha"));
+        AtomicReference<@Nullable String> refreshedId = new AtomicReference<>();
+        CompletableFuture<Void> pending = new CompletableFuture<>();
+        LauncherAccountsModel model = new LauncherAccountsModel(
+                store,
+                () -> { },
+                accountId -> {
+                    refreshedId.set(accountId);
+                    return pending;
+                });
+
+        CompletionStage<Void> completion = model.refreshAccount("alpha");
+
+        assertAll(
+                () -> assertEquals("alpha", refreshedId.get()),
+                () -> assertSame(pending, completion),
+                () -> assertFalse(completion.toCompletableFuture().isDone()));
+        pending.complete(null);
+        completion.toCompletableFuture().join();
+        model.close();
+    }
+
+    /// Removal and refresh reject identifiers removed by a newer revision before delegation.
+    @Test
+    public void rejectsStaleManagementIdentifiers() {
+        AccountDescriptor alpha = account("alpha", "Alex", "Microsoft", "profile-alpha");
+        AccountDescriptor beta = account("beta", "Steve", "Offline", "profile-beta");
+        FakeAccountStore store = new FakeAccountStore(state(List.of(alpha, beta), "alpha"));
+        AtomicInteger refreshes = new AtomicInteger();
+        LauncherAccountsModel model = new LauncherAccountsModel(
+                store,
+                () -> { },
+                accountId -> {
+                    refreshes.incrementAndGet();
+                    return CompletableFuture.completedFuture(null);
+                });
+        store.publish(state(List.of(alpha), "alpha"));
+
+        assertAll(
+                () -> assertThrows(IllegalArgumentException.class,
+                        () -> model.removeAccount("beta", false)),
+                () -> assertThrows(IllegalArgumentException.class,
+                        () -> model.refreshAccount("beta")),
+                () -> assertEquals(List.of(), store.removedIds()),
+                () -> assertEquals(0, refreshes.get()));
+        model.close();
+    }
+
     /// Cancellation returns an already-failed stage without reading a partial source range.
     @Test
     public void observesViewportCancellation() {
@@ -232,6 +313,10 @@ public final class LauncherAccountsModelTest {
                 () -> assertThrows(IllegalStateException.class,
                         () -> model.selectAccount("alpha")),
                 () -> assertThrows(IllegalStateException.class, model::addAccount),
+                () -> assertThrows(IllegalStateException.class,
+                        () -> model.removeAccount("alpha", false)),
+                () -> assertThrows(IllegalStateException.class,
+                        () -> model.refreshAccount("alpha")),
                 () -> assertEquals(0, additions.get()));
     }
 
@@ -289,6 +374,12 @@ public final class LauncherAccountsModelTest {
         /// Stable IDs delegated through selection commands.
         private final List<String> selectedIds = new ArrayList<>();
 
+        /// Stable IDs delegated through permanent removal commands.
+        private final List<String> removedIds = new ArrayList<>();
+
+        /// Backup-and-overwrite permissions delegated with removals.
+        private final List<Boolean> removalOverwritePermissions = new ArrayList<>();
+
         /// Replacement installed before the next subscription, or null when absent.
         private final AtomicReference<@Nullable AccountStoreState> transitionBeforeSubscription =
                 new AtomicReference<>();
@@ -324,6 +415,21 @@ public final class LauncherAccountsModelTest {
             publish(new AccountStoreState(before.accounts(), accountId));
         }
 
+        /// Removes one stable account and selects the first remaining descriptor.
+        @Override
+        public synchronized void removeAccount(String accountId, boolean allowReadOnlyOverwrite) {
+            removedIds.add(accountId);
+            removalOverwritePermissions.add(allowReadOnlyOverwrite);
+            AccountStoreState before = current.get();
+            @Unmodifiable List<AccountDescriptor> remaining = before.accounts().stream()
+                    .filter(account -> !account.id().equals(accountId))
+                    .toList();
+            @Nullable String selected = Objects.equals(before.selectedAccountId(), accountId)
+                    ? remaining.stream().findFirst().map(AccountDescriptor::id).orElse(null)
+                    : before.selectedAccountId();
+            publish(new AccountStoreState(remaining, selected));
+        }
+
         /// Publishes one replacement store state synchronously.
         ///
         /// @param replacement replacement state
@@ -344,6 +450,20 @@ public final class LauncherAccountsModelTest {
         /// @return stable selected IDs in call order
         private synchronized @Unmodifiable List<String> selectedIds() {
             return List.copyOf(selectedIds);
+        }
+
+        /// Returns the immutable delegated removal history.
+        ///
+        /// @return stable removed IDs in call order
+        private synchronized @Unmodifiable List<String> removedIds() {
+            return List.copyOf(removedIds);
+        }
+
+        /// Returns delegated backup-and-overwrite permissions.
+        ///
+        /// @return immutable permissions in call order
+        private synchronized @Unmodifiable List<Boolean> removalOverwritePermissions() {
+            return List.copyOf(removalOverwritePermissions);
         }
 
         /// Returns whether the model still owns a store registration.

@@ -195,7 +195,7 @@ public final class SchematicBrowserPanelTest {
                 () -> assertFalse(model.hasSubscribers()));
     }
 
-    /// The first request contains exactly the rows implied by actual laid-out viewport geometry.
+    /// The first request contains visible rows plus one measured viewport of forward warming.
     @Test
     public void viewportGeometryDeterminesTheRequestedRange() {
         Path root = Path.of("schematics").toAbsolutePath().normalize();
@@ -217,7 +217,7 @@ public final class SchematicBrowserPanelTest {
             int rowHeight = list.getFixedCellHeight();
             int expectedVisibleRows = (viewportHeight + rowHeight - 1) / rowHeight;
             assertAll(
-                    () -> assertEquals(expectedVisibleRows, requested.length()),
+                    () -> assertEquals(expectedVisibleRows * 2, requested.length()),
                     () -> assertTrue(requested.length() < rows.size()),
                     () -> assertEquals(javax.swing.ListSelectionModel.SINGLE_SELECTION,
                             list.getSelectionMode()));

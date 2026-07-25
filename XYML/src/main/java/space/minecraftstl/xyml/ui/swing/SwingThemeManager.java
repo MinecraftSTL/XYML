@@ -84,12 +84,16 @@ public final class SwingThemeManager {
     /// Platform integrations should invoke this method after receiving a native appearance-change event. This method may be called from
     /// any thread and returns only after any required EDT update has completed.
     public void refreshSystemTheme() {
+        ThemeMode currentMode = mode;
+        if (currentMode != ThemeMode.SYSTEM) {
+            return;
+        }
+        ThemeVariant resolvedVariant = currentMode.resolve(systemThemeDetector);
         EdtDispatcher.executeAndWait(() -> {
             if (mode != ThemeMode.SYSTEM) {
                 return;
             }
 
-            ThemeVariant resolvedVariant = mode.resolve(systemThemeDetector);
             if (!initialized || resolvedVariant != effectiveVariant) {
                 applyResolvedTheme(resolvedVariant, true);
             }

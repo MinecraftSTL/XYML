@@ -22,10 +22,10 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableSet;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableSet;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
@@ -79,6 +79,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Instance-specific game setting.
     @JsonAdapter(Instance.Adapter.class)
     @JsonSerializable
+    @NotNullByDefault
     public static final class Instance extends GameSettings implements JsonSchemaSetting {
         /// The JSON schema supported by instance-specific game settings.
         public static final JsonSchema CURRENT_SCHEMA =
@@ -86,7 +87,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
 
         /// Creates an empty instance setting.
         public Instance() {
-            tracker.markDirty(schema);
+            markDirty(schema);
             register();
         }
 
@@ -102,7 +103,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
         /// Returns the schema used by this instance game settings file.
         @Override
         public JsonSchema getSchema() {
-            return schema.get();
+            return Objects.requireNonNull(schema.get(), "schema");
         }
 
         /// Sets the schema used by this instance game settings file.
@@ -161,7 +162,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
 
         /// Setting property names overridden by this instance.
         @SerializedName("overrideProperties")
-        private final ObservableSet<String> overrideProperties = FXCollections.observableSet();
+        private final ObservableSet<String> overrideProperties = ObservableCollections.observableSet();
 
         /// Returns the overridden setting property names.
         public ObservableSet<String> getOverrideProperties() {
@@ -169,7 +170,9 @@ public sealed abstract class GameSettings extends ObservableSetting {
         }
 
         /// JSON adapter for instance settings.
+        @NotNullByDefault
         public static final class Adapter extends ObservableSetting.Adapter<Instance> {
+            /// Creates an empty instance setting for deserialization.
             @Override
             protected Instance createInstance() {
                 return new Instance();
@@ -180,6 +183,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Reusable game setting preset.
     @JsonAdapter(Preset.Adapter.class)
     @JsonSerializable
+    @NotNullByDefault
     public static final class Preset extends GameSettings {
         /// Creates a preset with the given identity.
         public Preset(GameSettingsPresetID id) {
@@ -230,12 +234,15 @@ public sealed abstract class GameSettings extends ObservableSetting {
         }
 
         /// JSON adapter for presets.
+        @NotNullByDefault
         public static final class Adapter extends ObservableSetting.Adapter<@Nullable Preset> {
+            /// Creates an empty preset for deserialization.
             @Override
             protected Preset createInstance() {
                 return new Preset();
             }
 
+            /// Deserializes a preset and rejects the reserved nil preset ID.
             @Override
             public @Nullable Preset deserialize(
                     JsonElement json,
@@ -823,6 +830,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
         return useNativeOpenAL;
     }
 
+    /// Returns the requested renderer when compatible with the graphics API, otherwise the default renderer.
     private static Renderer selectRenderer(GraphicsAPI api, @Nullable Renderer renderer) {
         if (renderer instanceof Renderer.Driver driver && driver.api() != api) {
             return Renderer.DEFAULT;
@@ -879,15 +887,20 @@ public sealed abstract class GameSettings extends ObservableSetting {
 
     /// Returns the property's direct value, or its default value when the direct value is `null`.
     private static <T extends @UnknownNullability Object> T getDirectValue(SettingProperty<T> property) {
-        T value = property.getValue();
+        @Nullable T value = property.getValue();
         return value != null ? value : property.defaultValue();
     }
 
     /// Launch-time effective game setting.
+    @NotNullByDefault
     public static final class Effective {
+        /// Parent preset supplying inherited values.
         private final Preset preset;
+
+        /// Instance-specific overrides, or `null` when resolving only a preset.
         private final @Nullable Instance instance;
 
+        /// Creates an effective setting view over the given preset and optional instance overrides.
         private Effective(Preset preset, @Nullable Instance instance) {
             this.preset = Objects.requireNonNull(preset);
             this.instance = instance;
@@ -981,7 +994,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
 
         /// Returns the effective maximum heap memory in MiB.
         public int getMaxMemory() {
-            Integer value = getInheritable(GameSettings::maxMemoryProperty);
+            @Nullable Integer value = getInheritable(GameSettings::maxMemoryProperty);
             return value != null && value > 0 ? value : SUGGESTED_MEMORY;
         }
 

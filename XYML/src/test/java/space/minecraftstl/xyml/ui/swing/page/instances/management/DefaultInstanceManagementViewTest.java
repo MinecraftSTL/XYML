@@ -1,0 +1,167 @@
+/*
+ * Hello Minecraft! Launcher
+ * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package space.minecraftstl.xyml.ui.swing.page.instances.management;
+
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.game.GameRepository;
+import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentation;
+import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentationFactory;
+import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.resourcepacks.DefaultResourcePackCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserInteractions;
+
+import javax.swing.JButton;
+import javax.swing.JComponent;
+import javax.swing.JTabbedPane;
+import java.awt.Component;
+import java.awt.Container;
+import java.lang.reflect.Proxy;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/// Verifies that production instance management exposes Mod, resource-pack, and schematic tools.
+@NotNullByDefault
+final class DefaultInstanceManagementViewTest {
+    /// Temporary repository root used by lazy filesystem adapters.
+    @TempDir
+    private Path repositoryRoot;
+
+    /// All named tabs are reachable and the shared return command remains singular.
+    @Test
+    void exposesResourcePackAndSchematicTabsWithOneReturnCommand() throws InterruptedException {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicBoolean returned = new AtomicBoolean();
+        AtomicReference<@Nullable DefaultInstanceManagementView> viewReference = new AtomicReference<>();
+        try {
+            SwingApplicationPresentation presentation = SwingApplicationPresentationFactory.create(
+                    "XYML test",
+                    Duration.ZERO,
+                    Duration.ZERO);
+            EdtDispatcher.executeAndWait(() -> viewReference.set(new DefaultInstanceManagementView(
+                    repository(),
+                    ignored -> repositoryRoot.resolve("schematics"),
+                    "instance",
+                    executor,
+                    presentation.schematicManagement(),
+                    presentation.schematics(),
+                    new DefaultSchematicBrowserInteractions(
+                            presentation.schematics().actions(),
+                            executor),
+                    presentation.mods(),
+                    presentation.modsStatus(),
+                    presentation.modsActions(),
+                    new DefaultModCatalogInteractions(
+                            presentation.modsActions(),
+                            executor),
+                    presentation.resourcePacks(),
+                    presentation.resourcePacksStatus(),
+                    presentation.resourcePacksActions(),
+                    new DefaultResourcePackCatalogInteractions(
+                            presentation.resourcePacksActions(),
+                            executor),
+                    () -> returned.set(true))));
+            DefaultInstanceManagementView view = Objects.requireNonNull(viewReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                JTabbedPane tabs = findNamed(view, "instanceManagementTabs", JTabbedPane.class);
+                assertNotNull(tabs);
+                assertEquals(3, tabs.getTabCount());
+                assertEquals(presentation.mods().title(), tabs.getTitleAt(0));
+                assertEquals(presentation.resourcePacks().pageTitle(), tabs.getTitleAt(1));
+                assertEquals(presentation.schematics().pageTitle(), tabs.getTitleAt(2));
+                assertFalse(returned.get());
+                JButton returnButton = findNamed(view, "instanceManagementReturn", JButton.class);
+                assertNotNull(returnButton);
+                returnButton.doClick();
+                assertTrue(returned.get());
+            });
+
+            view.close();
+            view.close();
+            assertEquals("instance", view.instanceId());
+        } finally {
+            @Nullable DefaultInstanceManagementView view = viewReference.get();
+            if (view != null) {
+                view.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Creates the minimum repository contract required before either lazy tab becomes displayable.
+    ///
+    /// @return repository proxy rooted in the temporary directory
+    private GameRepository repository() {
+        return GameRepository.class.cast(Proxy.newProxyInstance(
+                GameRepository.class.getClassLoader(),
+                new Class<?>[]{GameRepository.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getResourcePackDirectory" -> repositoryRoot.resolve("resourcepacks");
+                    case "getModsDirectory" -> repositoryRoot.resolve("mods");
+                    case "getRunDirectory" -> repositoryRoot;
+                    case "getResolvedPreservingPatchesVersion" -> throw new IllegalStateException(
+                            "The test repository intentionally has no Mod metadata");
+                    case "toString" -> "TestGameRepository";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == Objects.requireNonNull(arguments)[0];
+                    default -> throw new AssertionError(
+                            "Instance-management construction used repository eagerly: " + method.getName());
+                }));
+    }
+
+    /// Finds one named descendant of the requested Swing type.
+    ///
+    /// @param root component tree root
+    /// @param name stable component name
+    /// @param type required component type
+    /// @param <T> component type
+    /// @return matching component, or null when absent
+    private static <T extends JComponent> @Nullable T findNamed(
+            Container root,
+            String name,
+            Class<T> type) {
+        for (Component component : root.getComponents()) {
+            if (type.isInstance(component) && name.equals(component.getName())) {
+                return type.cast(component);
+            }
+            if (component instanceof Container child) {
+                @Nullable T nested = findNamed(child, name, type);
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        }
+        return null;
+    }
+}

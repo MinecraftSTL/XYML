@@ -163,7 +163,7 @@ public final class PersistedAppearanceSettingsModel
                 raw.writable());
     }
 
-    /// Creates a runtime applier that never synchronously waits across the JavaFX and Swing UI threads.
+    /// Creates a runtime applier that never synchronously waits across launcher state and Swing UI threads.
     ///
     /// @param themeManager active Swing theme manager
     /// @param animator shared Swing animator

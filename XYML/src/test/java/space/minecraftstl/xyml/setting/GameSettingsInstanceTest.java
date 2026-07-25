@@ -22,6 +22,9 @@ import com.google.common.jimfs.Jimfs;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import space.minecraftstl.xyml.game.Renderer;
+import space.minecraftstl.xyml.observable.collection.ObservableSet;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.util.gson.JsonSchema;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -31,6 +34,7 @@ import java.io.IOException;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -40,6 +44,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests for instance-specific game settings.
 @NotNullByDefault
 public final class GameSettingsInstanceTest {
+    /// Tests that persistent fields expose toolkit-neutral types and publish aggregate revisions.
+    @Test
+    public void publishesToolkitNeutralPropertyAndOverrideChanges() {
+        GameSettings.Instance instance = new GameSettings.Instance();
+        ObjectProperty<JsonSchema> schema = instance.schemaProperty();
+        ObservableSet<String> overrides = instance.getOverrideProperties();
+        long initialRevision = Objects.requireNonNull(instance.changes().getValue());
+
+        instance.jvmOptionsProperty().setValue("-XX:+UseG1GC");
+        long afterProperty = Objects.requireNonNull(instance.changes().getValue());
+        overrides.add(GameSettings.PROPERTY_JVM_OPTIONS);
+
+        assertEquals(GameSettings.Instance.CURRENT_SCHEMA, schema.get());
+        assertTrue(afterProperty > initialRevision);
+        assertTrue(Objects.requireNonNull(instance.changes().getValue()) > afterProperty);
+    }
+
     /// Tests that directory settings are serialized with full `Directory` property names.
     @Test
     public void storesDirectoryPropertyNames() {

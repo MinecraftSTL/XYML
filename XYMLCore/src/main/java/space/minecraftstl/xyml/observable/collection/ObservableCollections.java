@@ -42,6 +42,23 @@ public final class ObservableCollections {
         return new ObservableArrayList<>(elements);
     }
 
+    /// Creates an empty observable list that reports updates from extracted element dependencies.
+    public static <E> ObservableList<E> observableList(ObservableElementExtractor<? super E> extractor) {
+        return new ObservableArrayList<>(extractor);
+    }
+
+    /// Copies elements into an observable list that reports updates from extracted element dependencies.
+    public static <E> ObservableList<E> observableListCopy(
+            Collection<? extends E> elements,
+            ObservableElementExtractor<? super E> extractor) {
+        return new ObservableArrayList<>(elements, extractor);
+    }
+
+    /// Returns a live read-only observable view of the supplied list.
+    public static <E> ObservableList<E> unmodifiableObservableList(ObservableList<E> list) {
+        return new UnmodifiableObservableList<>(list);
+    }
+
     /// Creates an empty insertion-ordered observable set.
     public static <E> ObservableSet<E> observableSet() {
         return new ObservableLinkedHashSet<>();

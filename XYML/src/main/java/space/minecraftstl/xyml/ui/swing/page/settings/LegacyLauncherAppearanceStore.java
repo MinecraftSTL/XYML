@@ -17,7 +17,6 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
-import javafx.beans.value.ChangeListener;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -30,13 +29,13 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
-import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.execute;
-import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.requireEventThread;
+import static space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher.execute;
+import static space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher.requireEventThread;
 
-/// Transitional adapter isolating legacy JavaFX launcher properties behind [AppearanceSettingsStore].
+/// Adapter isolating persisted launcher settings behind [AppearanceSettingsStore].
 ///
-/// All JavaFX property access and listener registration occurs on the JavaFX application thread. This
-/// class is the only appearance-settings layer that must be replaced when launcher settings become toolkit-neutral.
+/// Property access and listener registration occur on the Swing state event thread; the adapter exposes only
+/// immutable snapshots to the rest of the Swing UI.
 @NotNullByDefault
 public final class LegacyLauncherAppearanceStore implements AppearanceSettingsStore, AutoCloseable {
     /// Serializes listener registration with the transition to the closed lifecycle state.
@@ -51,16 +50,16 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
     /// Raw store transition publisher.
     private final ValueChangeSupport<StoredAppearanceSettings> changes = new ValueChangeSupport<>(this);
 
-    /// One listener shared by the three legacy JavaFX properties.
-    private final ChangeListener<Object> propertyListener = (observable, previous, current) -> refreshSnapshot();
+    /// Subscriptions shared by the three persisted appearance properties.
+    private final java.util.List<Subscription> propertySubscriptions = new java.util.ArrayList<>();
 
-    /// Latest raw store snapshot available to non-JavaFX threads.
+    /// Latest raw store snapshot available outside the launcher state event thread.
     private volatile StoredAppearanceSettings currentSnapshot;
 
     /// Whether closure has been requested from any thread.
     private final AtomicBoolean closed = new AtomicBoolean();
 
-    /// Creates an adapter on the JavaFX application thread.
+    /// Creates an adapter on the Swing state event thread.
     ///
     /// @param settings loaded launcher settings
     /// @param writableSupplier dynamic core-settings write check
@@ -71,9 +70,9 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
         this.settings = Objects.requireNonNull(settings, "settings");
         this.writableSupplier = Objects.requireNonNull(writableSupplier, "writableSupplier");
         currentSnapshot = readSnapshot();
-        settings.themeBrightnessModeProperty().addListener(propertyListener);
-        settings.cornerRadiusProperty().addListener(propertyListener);
-        settings.animationDisabledProperty().addListener(propertyListener);
+        propertySubscriptions.add(settings.themeBrightnessModeProperty().subscribe(change -> refreshSnapshot()));
+        propertySubscriptions.add(settings.cornerRadiusProperty().subscribe(change -> refreshSnapshot()));
+        propertySubscriptions.add(settings.animationDisabledProperty().subscribe(change -> refreshSnapshot()));
     }
 
     /// Creates an adapter for the process-wide loaded launcher settings.
@@ -104,7 +103,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
         }
     }
 
-    /// Queues one canonical brightness identifier for persistence on the JavaFX thread.
+    /// Queues one canonical brightness identifier for persistence on the Swing state event thread.
     @Override
     public void setThemeModeValue(String themeModeValue) {
         String validatedValue = Objects.requireNonNull(themeModeValue, "themeModeValue");
@@ -116,7 +115,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
         });
     }
 
-    /// Queues one validated corner radius for persistence on the JavaFX thread.
+    /// Queues one validated corner radius for persistence on the Swing state event thread.
     @Override
     public void setCornerRadius(int cornerRadius) {
         requireOpen();
@@ -127,7 +126,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
         });
     }
 
-    /// Queues the legacy animation-disable flag for persistence on the JavaFX thread.
+    /// Queues the animation-disable flag for persistence on the Swing state event thread.
     @Override
     public void setAnimationsDisabled(boolean disabled) {
         requireOpen();
@@ -138,7 +137,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
         });
     }
 
-    /// Requests idempotent JavaFX listener removal without blocking a Swing EDT caller.
+    /// Requests idempotent listener removal without blocking a Swing EDT caller.
     @Override
     public void close() {
         synchronized (lifecycleLock) {
@@ -161,7 +160,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
         changes.fireChange(previous, replacement);
     }
 
-    /// Reads and normalizes the three legacy settings on the JavaFX thread.
+    /// Reads and normalizes the three persisted settings on the Swing state event thread.
     ///
     /// @return raw immutable store snapshot
     private StoredAppearanceSettings readSnapshot() {
@@ -198,11 +197,12 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
         }
     }
 
-    /// Removes every owned settings listener on the JavaFX application thread.
+    /// Removes every owned settings listener on the Swing state event thread.
     private void removeLegacyListeners() {
         requireEventThread();
-        settings.themeBrightnessModeProperty().removeListener(propertyListener);
-        settings.cornerRadiusProperty().removeListener(propertyListener);
-        settings.animationDisabledProperty().removeListener(propertyListener);
+        for (Subscription subscription : propertySubscriptions) {
+            subscription.unsubscribe();
+        }
+        propertySubscriptions.clear();
     }
 }

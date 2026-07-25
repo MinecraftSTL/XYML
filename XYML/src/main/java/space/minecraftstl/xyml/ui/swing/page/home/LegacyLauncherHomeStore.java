@@ -17,7 +17,6 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.home;
 
-import javafx.beans.value.ChangeListener;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.auth.Account;
@@ -31,10 +30,10 @@ import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.execute;
-import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.requireEventThread;
+import static space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher.execute;
+import static space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher.requireEventThread;
 
-/// Transitional store projecting legacy JavaFX account and repository selections into plain strings.
+/// Store projecting launcher account and repository selections into plain strings for the Swing home page.
 @NotNullByDefault
 public final class LegacyLauncherHomeStore implements HomeSelectionStore, AutoCloseable {
     /// Serializes listener registration with the transition to the closed lifecycle state.
@@ -43,9 +42,14 @@ public final class LegacyLauncherHomeStore implements HomeSelectionStore, AutoCl
     /// Home selection transition publisher.
     private final ValueChangeSupport<HomeSelectionState> changes = new ValueChangeSupport<>(this);
 
-    /// Shared listener for selected account, repository, and instance properties.
-    private final ChangeListener<Object> selectionListener =
-            (observable, previous, current) -> execute(this::refreshSnapshot);
+    /// Subscription to selected-account changes.
+    private final Subscription accountSelectionSubscription;
+
+    /// Subscription to selected-repository changes.
+    private final Subscription repositorySelectionSubscription;
+
+    /// Subscription to selected-instance changes.
+    private final Subscription instanceSelectionSubscription;
 
     /// Latest cross-thread-safe plain selection state.
     private volatile HomeSelectionState currentSnapshot;
@@ -53,13 +57,16 @@ public final class LegacyLauncherHomeStore implements HomeSelectionStore, AutoCl
     /// Whether closure has been requested from any thread.
     private final AtomicBoolean closed = new AtomicBoolean();
 
-    /// Creates a store after Accounts and GameDirectoryManager initialization on the JavaFX thread.
+    /// Creates a store after Accounts and GameDirectoryManager initialization on the Swing event thread.
     public LegacyLauncherHomeStore() {
         requireEventThread();
         currentSnapshot = readSnapshot();
-        Accounts.selectedAccountProperty().addListener(selectionListener);
-        GameDirectoryManager.selectedRepositoryProperty().addListener(selectionListener);
-        GameDirectoryManager.selectedInstanceProperty().addListener(selectionListener);
+        accountSelectionSubscription = Accounts.selectedAccountProperty()
+                .subscribe(change -> execute(this::refreshSnapshot));
+        repositorySelectionSubscription = GameDirectoryManager.selectedRepositoryProperty()
+                .subscribe(change -> execute(this::refreshSnapshot));
+        instanceSelectionSubscription = GameDirectoryManager.selectedInstanceProperty()
+                .subscribe(change -> execute(this::refreshSnapshot));
     }
 
     /// Returns the latest plain home selection state.
@@ -80,7 +87,7 @@ public final class LegacyLauncherHomeStore implements HomeSelectionStore, AutoCl
         }
     }
 
-    /// Requests idempotent JavaFX listener removal without blocking a Swing EDT caller.
+    /// Requests idempotent subscription removal without blocking the caller.
     @Override
     public void close() {
         synchronized (lifecycleLock) {
@@ -88,7 +95,7 @@ public final class LegacyLauncherHomeStore implements HomeSelectionStore, AutoCl
                 return;
             }
         }
-        execute(this::removeLegacyListeners);
+        execute(this::removeSubscriptions);
     }
 
     /// Rebuilds and publishes plain strings after a legacy selection changes.
@@ -103,12 +110,12 @@ public final class LegacyLauncherHomeStore implements HomeSelectionStore, AutoCl
         changes.fireChange(previous, replacement);
     }
 
-    /// Removes every JavaFX selection listener on the JavaFX application thread.
-    private void removeLegacyListeners() {
+    /// Removes every selection subscription on the Swing event thread.
+    private void removeSubscriptions() {
         requireEventThread();
-        Accounts.selectedAccountProperty().removeListener(selectionListener);
-        GameDirectoryManager.selectedRepositoryProperty().removeListener(selectionListener);
-        GameDirectoryManager.selectedInstanceProperty().removeListener(selectionListener);
+        accountSelectionSubscription.unsubscribe();
+        repositorySelectionSubscription.unsubscribe();
+        instanceSelectionSubscription.unsubscribe();
     }
 
     /// Reads current legacy selections without performing expensive version resolution.

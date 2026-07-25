@@ -17,10 +17,6 @@
  */
 package space.minecraftstl.xyml.task;
 
-import javafx.application.Platform;
-import javafx.beans.property.DoubleProperty;
-import javafx.beans.property.ReadOnlyDoubleProperty;
-import javafx.beans.property.SimpleDoubleProperty;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -33,8 +29,6 @@ import space.minecraftstl.xyml.util.function.ExceptionalFunction;
 import space.minecraftstl.xyml.util.function.ExceptionalRunnable;
 import space.minecraftstl.xyml.util.function.ExceptionalSupplier;
 
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.VarHandle;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
@@ -44,10 +38,7 @@ import java.util.stream.Stream;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Disposable task.
-///
-/// The JavaFX progress property remains available for the transitional launcher, while [#progressObservable()]
-/// provides the same progress contract to toolkit-neutral consumers.
+/// Disposable task with toolkit-neutral lifecycle and progress observation.
 @NotNullByDefault
 public abstract class Task<T> {
 
@@ -335,18 +326,10 @@ public abstract class Task<T> {
             onDone.fireEvent(new TaskEvent(source, this, failed));
     }
 
-    /// JavaFX-facing progress property retained for legacy screens during migration.
-    private final DoubleProperty progress = new SimpleDoubleProperty(this, "progress", -1);
-
-    /// Toolkit-neutral progress source updated on the publishing worker thread.
+    /// Progress source updated on the publishing worker thread.
     private final TaskProgressProperty observableProgress = new TaskProgressProperty(this, "progress", -1.0);
 
-    /// Returns the legacy JavaFX read-only progress property.
-    public ReadOnlyDoubleProperty progressProperty() {
-        return progress;
-    }
-
-    /// Returns the toolkit-neutral read-only progress property.
+    /// Returns the read-only progress property.
     ///
     /// The initial value is `-1.0`, which means that the task has not reported a quantifiable progress value yet.
     /// Changes are delivered synchronously on the thread that calls [#updateProgressImmediately(double)].
@@ -377,40 +360,10 @@ public abstract class Task<T> {
         }
     }
 
-    //region Helpers for updateProgressImmediately
-
-    /// Holds the latest value waiting for the JavaFX event thread.
-    @SuppressWarnings("FieldMayBeFinal")
-    private volatile double pendingProgress = -1.0;
-
-    /// @see Task#pendingProgress
-    private static final VarHandle PENDING_PROGRESS_HANDLE;
-
-    static {
-        try {
-            PENDING_PROGRESS_HANDLE = MethodHandles.lookup()
-                    .findVarHandle(Task.class, "pendingProgress", double.class);
-        } catch (NoSuchFieldException | IllegalAccessException e) {
-            throw new ExceptionInInitializerError(e);
-        }
-    }
-    //endregion updateProgressImmediately
-
-    /// Publishes an immediate progress value to the neutral property and legacy JavaFX bridge.
-    ///
-    /// The neutral publication is synchronous and independent of JavaFX toolkit state. When the toolkit has not
-    /// started, the legacy bridge is skipped and the pending slot is reset so a later toolkit startup can retry.
+    /// Publishes an immediate progress value synchronously to isolated listeners.
     protected void updateProgressImmediately(double progress) {
         // assert progress >= 0 && progress <= 1.0;
         publishObservableProgress(progress);
-        if ((double) PENDING_PROGRESS_HANDLE.getAndSet(this, progress) == -1.0) {
-            try {
-                Platform.runLater(() -> this.progress.set((double) PENDING_PROGRESS_HANDLE.getAndSet(this, -1.0)));
-            } catch (IllegalStateException ignored) {
-                // JavaFX is optional for the neutral task path; do not fail a worker merely because it is absent.
-                PENDING_PROGRESS_HANDLE.getAndSet(this, -1.0);
-            }
-        }
     }
 
     /// Publishes a neutral progress value to independently isolated listeners.
@@ -433,9 +386,8 @@ public abstract class Task<T> {
         return getResult();
     }
 
-    /// Runs one subtask while mirroring both legacy and the latest toolkit-neutral progress into this task.
+    /// Runs one subtask while mirroring its latest progress into this task.
     private void doSubTask(Task<?> task) throws Exception {
-        progress.bind(task.progress);
         @Nullable Double initialProgress = task.progressObservable().getValue();
         if (initialProgress != null) {
             publishObservableProgress(initialProgress);
@@ -450,7 +402,6 @@ public abstract class Task<T> {
             task.run();
         } finally {
             neutralProgressSubscription.unsubscribe();
-            progress.unbind();
         }
     }
 

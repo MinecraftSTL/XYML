@@ -17,8 +17,6 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.accounts;
 
-import javafx.beans.InvalidationListener;
-import javafx.collections.ListChangeListener;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.auth.Account;
@@ -31,23 +29,26 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.Accounts;
 import space.minecraftstl.xyml.util.StringUtils;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.execute;
-import static space.minecraftstl.xyml.ui.swing.legacy.LegacyJavaFxDispatcher.requireEventThread;
+import static space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher.execute;
+import static space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher.requireEventThread;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Transitional adapter that projects legacy JavaFX account state into immutable presentation-safe values.
+/// Adapter that projects the account state model into immutable presentation-safe values.
 ///
-/// Construction must occur on the JavaFX application thread after [Accounts#init()]. The adapter never publishes
+/// Construction must occur on the state event thread after [Accounts#init()]. The adapter never publishes
 /// account objects, server objects, authentication tokens, passwords, or private serialized account data.
 @NotNullByDefault
 public final class LegacyLauncherAccountStore implements AccountStore, AutoCloseable {
@@ -57,18 +58,14 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
     /// Plain account-state transition publisher.
     private final ValueChangeSupport<AccountStoreState> changes = new ValueChangeSupport<>(this);
 
-    /// Listener for account additions, removals, reordering, and extractor-driven account updates.
-    private final ListChangeListener<Account> accountsListener = change -> accountListChanged();
+    /// Subscription for account additions, removals, reordering, and extractor-driven account updates.
+    private final Subscription accountsSubscription;
 
-    /// Listener for the selected legacy account property.
-    private final InvalidationListener selectionListener = observable -> execute(this::refreshSnapshot);
+    /// Subscription for the selected legacy account property.
+    private final Subscription selectionSubscription;
 
-    /// Listener for display metadata changes on authlib-injector servers referenced by current accounts.
-    private final InvalidationListener serverMetadataListener = observable -> refreshSnapshot();
-
-    /// Server instances currently observed by identity to balance each listener registration exactly once.
-    private final Set<AuthlibInjectorServer> observedServers =
-            Collections.newSetFromMap(new IdentityHashMap<>());
+    /// Neutral server metadata subscriptions indexed by server identity.
+    private final Map<AuthlibInjectorServer, Subscription> observedServers = new IdentityHashMap<>();
 
     /// Whether closure has been requested from any thread.
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -76,13 +73,14 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
     /// Latest immutable cross-thread-safe account projection.
     private volatile AccountStoreState currentSnapshot;
 
-    /// Creates the bridge and attaches legacy listeners on the JavaFX application thread.
+    /// Creates the bridge and attaches neutral state subscriptions on the legacy state event thread.
     public LegacyLauncherAccountStore() {
         requireEventThread();
         synchronizeServerListeners();
         currentSnapshot = readSnapshot();
-        Accounts.getAccounts().addListener(accountsListener);
-        Accounts.selectedAccountProperty().addListener(selectionListener);
+        accountsSubscription = Accounts.getAccountsValue().subscribe(change -> execute(this::accountListChanged));
+        selectionSubscription = Accounts.selectedAccountValueProperty()
+                .subscribe(change -> execute(this::refreshSnapshot));
     }
 
     /// Returns the latest immutable presentation-safe account state.
@@ -108,7 +106,7 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
 
     /// Selects an account by stable identifier without synchronously waiting across UI toolkit threads.
     ///
-    /// A selection that became stale before the JavaFX operation runs is ignored. The current list projection will
+    /// A selection that became stale before the state operation runs is ignored. The current list projection will
     /// subsequently reconcile the Swing model instead of retaining a legacy account object outside this adapter.
     ///
     /// @param accountId stable persisted account identifier
@@ -121,7 +119,22 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
         execute(() -> selectAccountOnEventThread(accountId));
     }
 
-    /// Requests idempotent listener removal without blocking a Swing EDT caller on JavaFX.
+    /// Removes an account by stable identifier while keeping the legacy selection valid.
+    ///
+    /// Read-only account files require prior user consent before backup-and-overwrite recovery.
+    ///
+    /// @param accountId stable persisted account identifier
+    /// @param allowReadOnlyOverwrite whether confirmed backup-and-overwrite may make storage writable
+    @Override
+    public void removeAccount(String accountId, boolean allowReadOnlyOverwrite) {
+        Objects.requireNonNull(accountId, "accountId");
+        if (closed.get()) {
+            throw new IllegalStateException("Legacy launcher account store is closed");
+        }
+        execute(() -> removeAccountOnEventThread(accountId, allowReadOnlyOverwrite));
+    }
+
+    /// Requests idempotent subscription removal without blocking a Swing EDT caller on the state event thread.
     @Override
     public void close() {
         synchronized (lifecycleLock) {
@@ -158,7 +171,7 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
         }
     }
 
-    /// Applies a stable selection command on the JavaFX application thread when the account still exists.
+    /// Applies a stable selection command on the state event thread when the account still exists.
     ///
     /// @param accountId stable account identifier captured as plain text
     private void selectAccountOnEventThread(String accountId) {
@@ -166,7 +179,7 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
         if (closed.get()) {
             return;
         }
-        for (Account account : Accounts.getAccounts()) {
+        for (Account account : Accounts.getAccountsValue()) {
             if (account.getAccountID().toString().equals(accountId)) {
                 Accounts.setSelectedAccount(account);
                 return;
@@ -174,39 +187,77 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
         }
     }
 
+    /// Removes one exact account and selects the first remaining account before structural publication.
+    ///
+    /// @param accountId stable account identifier
+    /// @param allowReadOnlyOverwrite whether the user confirmed destructive storage recovery
+    private static void removeAccountOnEventThread(
+            String accountId,
+            boolean allowReadOnlyOverwrite) {
+        requireEventThread();
+        Account target = Accounts.getAccountsValue().stream()
+                .filter(account -> account.getAccountID().toString().equals(accountId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Unknown account: " + accountId));
+        if (!Accounts.canRemoveAccount(target)) {
+            if (!allowReadOnlyOverwrite) {
+                throw new AccountStorageOverwriteRequiredException(
+                        accountId,
+                        i18n("account.storage.read_only"));
+            }
+            try {
+                Accounts.forceOverwriteAccountFiles(target);
+            } catch (IOException failure) {
+                throw new UncheckedIOException(i18n("message.failed"), failure);
+            }
+        }
+
+        if (Accounts.getSelectedAccount() == target) {
+            @Nullable Account replacement = Accounts.getAccountsValue().stream()
+                    .filter(account -> account != target)
+                    .findFirst()
+                    .orElse(null);
+            Accounts.setSelectedAccount(replacement);
+        }
+        Accounts.getAccountsValue().remove(target);
+    }
+
     /// Attaches and detaches server metadata listeners to match current account references by identity.
     private void synchronizeServerListeners() {
         requireEventThread();
         Set<AuthlibInjectorServer> requiredServers =
                 Collections.newSetFromMap(new IdentityHashMap<>());
-        for (Account account : Accounts.getAccounts()) {
+        for (Account account : Accounts.getAccountsValue()) {
             if (account instanceof AuthlibInjectorAccount authlibAccount) {
                 requiredServers.add(authlibAccount.getServer());
             }
         }
 
-        Iterator<AuthlibInjectorServer> iterator = observedServers.iterator();
+        Iterator<Map.Entry<AuthlibInjectorServer, Subscription>> iterator = observedServers.entrySet().iterator();
         while (iterator.hasNext()) {
-            AuthlibInjectorServer server = iterator.next();
+            Map.Entry<AuthlibInjectorServer, Subscription> entry = iterator.next();
+            AuthlibInjectorServer server = entry.getKey();
             if (!requiredServers.contains(server)) {
-                server.removeListener(serverMetadataListener);
+                entry.getValue().unsubscribe();
                 iterator.remove();
             }
         }
         for (AuthlibInjectorServer server : requiredServers) {
-            if (observedServers.add(server)) {
-                server.addListener(serverMetadataListener);
+            if (!observedServers.containsKey(server)) {
+                Subscription subscription = server.changes().subscribe(
+                        change -> execute(this::refreshSnapshot));
+                observedServers.put(server, subscription);
             }
         }
     }
 
-    /// Removes every JavaFX listener owned by this adapter on the JavaFX application thread.
+    /// Removes every neutral subscription owned by this adapter on the state event thread.
     private void removeLegacyListeners() {
         requireEventThread();
-        Accounts.getAccounts().removeListener(accountsListener);
-        Accounts.selectedAccountProperty().removeListener(selectionListener);
-        for (AuthlibInjectorServer server : observedServers) {
-            server.removeListener(serverMetadataListener);
+        accountsSubscription.unsubscribe();
+        selectionSubscription.unsubscribe();
+        for (Subscription subscription : observedServers.values()) {
+            subscription.unsubscribe();
         }
         observedServers.clear();
     }
@@ -216,8 +267,8 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
     /// @return presentation-safe account state
     private static AccountStoreState readSnapshot() {
         requireEventThread();
-        List<AccountDescriptor> descriptors = new ArrayList<>(Accounts.getAccounts().size());
-        for (Account account : Accounts.getAccounts()) {
+        List<AccountDescriptor> descriptors = new ArrayList<>(Accounts.getAccountsValue().size());
+        for (Account account : Accounts.getAccountsValue()) {
             descriptors.add(toDescriptor(account));
         }
 
@@ -230,7 +281,7 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
 
     /// Projects one authentication object without retaining it or reading credential-bearing fields.
     ///
-    /// @param account legacy account read only during this JavaFX-thread call
+    /// @param account legacy account read only during this state-event-thread call
     /// @return immutable presentation-safe descriptor
     private static AccountDescriptor toDescriptor(Account account) {
         String profileName = account.getProfileName();
@@ -249,7 +300,7 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
 
     /// Builds localized provider, authlib-injector server, and portable-storage detail text.
     ///
-    /// @param account legacy account read only during this JavaFX-thread call
+    /// @param account legacy account read only during this state-event-thread call
     /// @return comma-separated user-visible detail text
     private static String accountDetail(Account account) {
         List<String> details = new ArrayList<>(3);
