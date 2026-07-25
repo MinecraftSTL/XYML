@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.XYMLCacheRepository;
+import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.setting.*;
 import space.minecraftstl.xyml.task.AsyncTaskExecutor;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -203,6 +204,7 @@ public final class Launcher {
                 SwingStartupSafetyDialogs.showMessage(WARNING, i18n("fatal.illegal_char"));
             }
 
+            Lang.thread(JavaManager::initialize, "Search Java", true);
             startSwingWindow();
         } catch (Throwable e) {
             try {
