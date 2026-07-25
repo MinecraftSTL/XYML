@@ -80,6 +80,7 @@ public final class AppShellFrame extends JFrame {
         setUndecorated(false);
         setResizable(true);
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        setIconImages(LauncherIconImages.windowIcons());
         shellPanel = new AppShellPanel(
                 pageFactories, initialPage, pagePresentations, animator, pageTransitionDuration);
         setContentPane(shellPanel);

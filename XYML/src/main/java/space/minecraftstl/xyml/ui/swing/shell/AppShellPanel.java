@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
 import javax.swing.ButtonGroup;
+import javax.swing.Icon;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -188,7 +189,8 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 "[]16[]push",
                 "[grow,fill]"));
 
-        JLabel brand = new JLabel("XYML", new ShellBrandIcon(), SwingConstants.LEFT);
+        @Nullable Icon brandIcon = LauncherIconImages.headerIcon();
+        JLabel brand = new JLabel("XYML", brandIcon, SwingConstants.LEFT);
         @Nullable Font configuredBrandFont = brand.getFont();
         Font brandFont = Objects.requireNonNullElse(
                 configuredBrandFont,

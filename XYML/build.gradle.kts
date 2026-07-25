@@ -623,6 +623,7 @@ val jpackageInstaller = tasks.register<Exec>("jpackageInstaller") {
 
     dependsOn(verifyPackagedRuntime)
     inputs.dir(packagedAppImage)
+    inputs.file(platformIcon)
     inputs.property("nativeInstallerType", nativeInstallerType)
     inputs.property("nativePackageVersion", nativePackageVersion)
     outputs.dir(installerDirectory)
@@ -640,6 +641,9 @@ val jpackageInstaller = tasks.register<Exec>("jpackageInstaller") {
             "--dest", destination,
             "--app-image", packagedAppImage.get().asFile,
         )
+        if (platformIcon.asFile.isFile) {
+            arguments.addAll(listOf("--icon", platformIcon.asFile))
+        }
         when {
             isWindowsHost -> arguments.addAll(listOf(
                 "--win-dir-chooser",

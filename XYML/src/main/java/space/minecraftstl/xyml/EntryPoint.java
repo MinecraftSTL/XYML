@@ -23,6 +23,7 @@ import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.JarUtils;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
+import space.minecraftstl.xyml.ui.swing.shell.LauncherIconImages;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -33,6 +34,7 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -189,9 +191,9 @@ public final class EntryPoint {
     /// Installs the launcher icon when macOS is not already managing it through an application bundle.
     private static void initIcon() {
         try {
-            if (java.awt.Taskbar.isTaskbarSupported()) {
-                var image = java.awt.Toolkit.getDefaultToolkit().getImage(EntryPoint.class.getResource("/assets/img/icon-mac.png"));
-                java.awt.Taskbar.getTaskbar().setIconImage(image);
+            List<java.awt.Image> iconImages = LauncherIconImages.windowIcons();
+            if (java.awt.Taskbar.isTaskbarSupported() && !iconImages.isEmpty()) {
+                java.awt.Taskbar.getTaskbar().setIconImage(iconImages.get(iconImages.size() - 1));
             }
         } catch (Throwable e) {
             LOG.warning("Failed to set application icon", e);

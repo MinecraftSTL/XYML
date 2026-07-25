@@ -133,6 +133,7 @@ public final class AppShellFrameTest {
                     () -> assertEquals(AppShellPanel.MINIMUM_HEIGHT, frame.getMinimumSize().height),
                     () -> assertTrue(frame.getWidth() >= AppShellPanel.PREFERRED_WIDTH),
                     () -> assertTrue(frame.getHeight() >= AppShellPanel.PREFERRED_HEIGHT),
+                    () -> assertEquals(4, frame.getIconImages().size()),
                     () -> assertTrue(frame.isVisible()));
             frame.hideWindow();
             assertFalse(frame.isVisible());
