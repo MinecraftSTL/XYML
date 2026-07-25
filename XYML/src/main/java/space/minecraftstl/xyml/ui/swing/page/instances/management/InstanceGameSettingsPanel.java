@@ -45,7 +45,7 @@ import java.util.Objects;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Edits a bounded, safe subset of launch settings for one managed game instance.
+/// Edits launch settings for one managed game instance.
 ///
 /// The page exposes both values and local-override choices. Saving through [InstanceGameSettingsStore] therefore
 /// changes only settings the user explicitly marks as instance-specific; clearing an override resumes preset
@@ -323,26 +323,126 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         String customJavaVersion = customJavaVersionField.getText().trim();
         String customJavaPath = customJavaPathField.getText().trim();
         if (javaOverrideBox.isSelected()) {
-            validateJavaSelection(javaVersionType, customJavaVersion, customJavaPath, current.detectedJavaAvailable());
+            validateJavaSelection(
+                    javaVersionType,
+                    customJavaVersion,
+                    customJavaPath,
+                    !current.javaRuntime().detectedJava().isEmpty());
         }
         String runningDirectory = runningDirectoryField.getText().trim();
         if (runningDirectoryOverrideBox.isSelected()) {
             validatePath(runningDirectory, "game working directory");
         }
-        return new InstanceGameSettingsSnapshot(
-                current.writable(),
-                memoryOverrideBox.isSelected(),
-                automaticMemoryBox.isSelected(),
-                maximumMemory,
-                javaOverrideBox.isSelected(),
-                javaVersionType,
-                customJavaVersion,
-                customJavaPath,
-                current.detectedJavaAvailable(),
+
+        InstanceGameSettingsSnapshot.MemorySettings memory = editedMemorySettings(current, maximumMemory);
+        InstanceGameSettingsSnapshot.JavaRuntimeSettings javaRuntime =
+                editedJavaSettings(current, javaVersionType, customJavaVersion, customJavaPath);
+        InstanceGameSettingsSnapshot.LaunchOptionsSettings currentLaunchOptions = current.launchOptions();
+        InstanceGameSettingsSnapshot.LaunchOptionsSettings launchOptions =
+                new InstanceGameSettingsSnapshot.LaunchOptionsSettings(
+                        runningDirectoryOverrideBox.isSelected(),
+                        runningDirectory,
+                        currentLaunchOptions.gameArgumentsOverridden(),
+                        currentLaunchOptions.gameArguments(),
+                        currentLaunchOptions.environmentOverridden(),
+                        currentLaunchOptions.environmentVariables(),
+                        currentLaunchOptions.priorityOverridden(),
+                        currentLaunchOptions.priority());
+        InstanceGameSettingsSnapshot.JvmSettings currentJvm = current.jvm();
+        InstanceGameSettingsSnapshot.JvmSettings jvm = new InstanceGameSettingsSnapshot.JvmSettings(
+                currentJvm.noOptionsOverridden(),
+                currentJvm.noOptions(),
+                currentJvm.noOptimizingOptionsOverridden(),
+                currentJvm.noOptimizingOptions(),
+                currentJvm.notCheckJvmOverridden(),
+                currentJvm.notCheckJvm(),
                 jvmOptionsOverrideBox.isSelected(),
                 jvmOptionsArea.getText().trim(),
-                runningDirectoryOverrideBox.isSelected(),
-                runningDirectory);
+                currentJvm.minimumMemoryOverridden(),
+                currentJvm.minimumMemoryMiB(),
+                currentJvm.permanentGenerationOverridden(),
+                currentJvm.permanentGenerationMiB());
+        return new InstanceGameSettingsSnapshot(
+                current.writable(),
+                memory,
+                javaRuntime,
+                current.window(),
+                current.launcher(),
+                current.quickPlay(),
+                launchOptions,
+                jvm,
+                current.commands(),
+                current.graphics(),
+                current.nativeLibraries());
+    }
+
+    /// Builds memory settings while preserving independent legacy override markers until a value is edited.
+    ///
+    /// @param current currently displayed snapshot
+    /// @param maximumMemory parsed maximum heap value
+    /// @return edited memory settings
+    private InstanceGameSettingsSnapshot.MemorySettings editedMemorySettings(
+            InstanceGameSettingsSnapshot current,
+            int maximumMemory) {
+        InstanceGameSettingsSnapshot.MemorySettings previous = current.memory();
+        boolean selected = memoryOverrideBox.isSelected();
+        if (!selected) {
+            return new InstanceGameSettingsSnapshot.MemorySettings(
+                    false,
+                    automaticMemoryBox.isSelected(),
+                    false,
+                    maximumMemory);
+        }
+
+        boolean newlySelected = !previous.anyOverridden();
+        return new InstanceGameSettingsSnapshot.MemorySettings(
+                previous.automaticOverridden()
+                        || newlySelected
+                        || automaticMemoryBox.isSelected() != previous.automatic(),
+                automaticMemoryBox.isSelected(),
+                previous.maximumOverridden() || newlySelected || maximumMemory != previous.maximumMiB(),
+                maximumMemory);
+    }
+
+    /// Builds Java settings while preserving untouched per-property overrides from existing instance files.
+    ///
+    /// @param current currently displayed snapshot
+    /// @param type selected Java strategy
+    /// @param customVersion edited Java major text
+    /// @param customPath edited Java executable path
+    /// @return edited Java settings
+    private InstanceGameSettingsSnapshot.JavaRuntimeSettings editedJavaSettings(
+            InstanceGameSettingsSnapshot current,
+            JavaVersionType type,
+            String customVersion,
+            String customPath) {
+        InstanceGameSettingsSnapshot.JavaRuntimeSettings previous = current.javaRuntime();
+        if (!javaOverrideBox.isSelected()) {
+            return new InstanceGameSettingsSnapshot.JavaRuntimeSettings(
+                    false,
+                    type,
+                    false,
+                    customVersion,
+                    false,
+                    customPath,
+                    false,
+                    previous.detectedJava());
+        }
+
+        boolean newlySelected = !previous.anyOverridden();
+        return new InstanceGameSettingsSnapshot.JavaRuntimeSettings(
+                previous.typeOverridden() || newlySelected || type != previous.type(),
+                type,
+                previous.customVersionOverridden()
+                        || (newlySelected && type == JavaVersionType.VERSION)
+                        || !customVersion.equals(previous.customVersion()),
+                customVersion,
+                previous.customPathOverridden()
+                        || (newlySelected && type == JavaVersionType.CUSTOM)
+                        || !customPath.equals(previous.customPath()),
+                customPath,
+                previous.detectedJavaOverridden() || (newlySelected && type == JavaVersionType.DETECTED),
+                previous.detectedJava());
     }
 
     /// Parses and bounds one manual maximum-memory input.
@@ -429,17 +529,17 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         applyingSnapshot = true;
         try {
             displayedSnapshot = snapshot;
-            memoryOverrideBox.setSelected(snapshot.memoryOverridden());
-            automaticMemoryBox.setSelected(snapshot.automaticMemory());
-            maximumMemoryField.setText(Integer.toString(snapshot.maximumMemoryMiB()));
-            javaOverrideBox.setSelected(snapshot.javaOverridden());
-            javaVersionTypeBox.setSelectedItem(snapshot.javaVersionType());
-            customJavaVersionField.setText(snapshot.customJavaVersion());
-            customJavaPathField.setText(snapshot.customJavaPath());
-            jvmOptionsOverrideBox.setSelected(snapshot.jvmOptionsOverridden());
-            jvmOptionsArea.setText(snapshot.jvmOptions());
-            runningDirectoryOverrideBox.setSelected(snapshot.runningDirectoryOverridden());
-            runningDirectoryField.setText(snapshot.runningDirectory());
+            memoryOverrideBox.setSelected(snapshot.memory().anyOverridden());
+            automaticMemoryBox.setSelected(snapshot.memory().automatic());
+            maximumMemoryField.setText(Integer.toString(snapshot.memory().maximumMiB()));
+            javaOverrideBox.setSelected(snapshot.javaRuntime().anyOverridden());
+            javaVersionTypeBox.setSelectedItem(snapshot.javaRuntime().type());
+            customJavaVersionField.setText(snapshot.javaRuntime().customVersion());
+            customJavaPathField.setText(snapshot.javaRuntime().customPath());
+            jvmOptionsOverrideBox.setSelected(snapshot.jvm().optionsOverridden());
+            jvmOptionsArea.setText(snapshot.jvm().options());
+            runningDirectoryOverrideBox.setSelected(snapshot.launchOptions().runningDirectoryOverridden());
+            runningDirectoryField.setText(snapshot.launchOptions().runningDirectory());
             updateEditingAvailability();
         } finally {
             applyingSnapshot = false;

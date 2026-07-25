@@ -20,7 +20,14 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GraphicsAPI;
+import space.minecraftstl.xyml.game.ProcessPriority;
+import space.minecraftstl.xyml.game.QuickPlayType;
+import space.minecraftstl.xyml.game.Renderer;
+import space.minecraftstl.xyml.setting.GameSettings;
+import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
+import space.minecraftstl.xyml.setting.LauncherVisibility;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JButton;
@@ -98,16 +105,18 @@ final class InstanceGameSettingsPanelTest {
 
             assertEquals(1, store.saveCount.get());
             InstanceGameSettingsSnapshot saved = store.snapshot();
-            assertTrue(saved.memoryOverridden());
-            assertFalse(saved.automaticMemory());
-            assertEquals(6144, saved.maximumMemoryMiB());
-            assertTrue(saved.javaOverridden());
-            assertEquals(JavaVersionType.VERSION, saved.javaVersionType());
-            assertEquals("21", saved.customJavaVersion());
-            assertTrue(saved.jvmOptionsOverridden());
-            assertEquals("-XX:+UseG1GC", saved.jvmOptions());
-            assertTrue(saved.runningDirectoryOverridden());
-            assertEquals("instance-run", saved.runningDirectory());
+            assertTrue(saved.memory().automaticOverridden());
+            assertTrue(saved.memory().maximumOverridden());
+            assertFalse(saved.memory().automatic());
+            assertEquals(6144, saved.memory().maximumMiB());
+            assertTrue(saved.javaRuntime().typeOverridden());
+            assertTrue(saved.javaRuntime().customVersionOverridden());
+            assertEquals(JavaVersionType.VERSION, saved.javaRuntime().type());
+            assertEquals("21", saved.javaRuntime().customVersion());
+            assertTrue(saved.jvm().optionsOverridden());
+            assertEquals("-XX:+UseG1GC", saved.jvm().options());
+            assertTrue(saved.launchOptions().runningDirectoryOverridden());
+            assertEquals("instance-run", saved.launchOptions().runningDirectory());
         } finally {
             @Nullable InstanceGameSettingsPanel panel = panelReference.get();
             if (panel != null) {
@@ -152,18 +161,86 @@ final class InstanceGameSettingsPanelTest {
     private static InstanceGameSettingsSnapshot snapshot() {
         return new InstanceGameSettingsSnapshot(
                 true,
-                false,
-                true,
-                4096,
-                false,
-                JavaVersionType.AUTO,
-                "",
-                "",
-                false,
-                false,
-                "",
-                false,
-                "");
+                new InstanceGameSettingsSnapshot.MemorySettings(false, true, false, 4096),
+                new InstanceGameSettingsSnapshot.JavaRuntimeSettings(
+                        false,
+                        JavaVersionType.AUTO,
+                        false,
+                        "",
+                        false,
+                        "",
+                        false,
+                        GameSettings.DetectedJava.EMPTY),
+                new InstanceGameSettingsSnapshot.WindowSettings(
+                        false,
+                        GameWindowType.WINDOWED,
+                        false,
+                        854,
+                        false,
+                        480),
+                new InstanceGameSettingsSnapshot.LauncherSettings(
+                        false,
+                        LauncherVisibility.HIDE,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false),
+                new InstanceGameSettingsSnapshot.QuickPlaySettings(
+                        false,
+                        QuickPlayType.NONE,
+                        false,
+                        "",
+                        false,
+                        "",
+                        false,
+                        ""),
+                new InstanceGameSettingsSnapshot.LaunchOptionsSettings(
+                        false,
+                        "",
+                        false,
+                        "",
+                        false,
+                        "",
+                        false,
+                        ProcessPriority.NORMAL),
+                new InstanceGameSettingsSnapshot.JvmSettings(
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        "",
+                        false,
+                        null,
+                        false,
+                        ""),
+                new InstanceGameSettingsSnapshot.CommandSettings(false, "", false, "", false, ""),
+                new InstanceGameSettingsSnapshot.GraphicsSettings(
+                        false,
+                        GraphicsAPI.DEFAULT,
+                        false,
+                        Renderer.DEFAULT,
+                        false,
+                        Renderer.DEFAULT),
+                new InstanceGameSettingsSnapshot.NativeLibrarySettings(
+                        false,
+                        false,
+                        false,
+                        "",
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false));
     }
 
     /// Finds one named descendant of the required Swing component type.

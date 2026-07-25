@@ -19,10 +19,10 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Reads and persists the editable launch-settings subset for one game instance.
+/// Reads and persists the complete editable launch-settings surface for one game instance.
 ///
 /// Implementations own the mapping between instance inheritance flags and their durable configuration format. The
-/// Swing page deliberately receives only snapshots so it does not need direct access to legacy settings properties.
+/// Swing page deliberately receives only snapshots so it does not need direct access to observable model properties.
 @NotNullByDefault
 public interface InstanceGameSettingsStore {
     /// Returns the latest effective values and local-override state.
