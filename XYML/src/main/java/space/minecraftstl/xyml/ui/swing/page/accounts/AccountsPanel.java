@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.task.Schedulers;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -43,6 +44,8 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Presents a sparse, viewport-driven list for choosing exactly one launcher account.
 ///
@@ -74,11 +77,17 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
     /// Add-account command.
     private final JButton addButton = new JButton();
 
+    /// Configured authlib-injector server management command when the model supports it.
+    private final JButton authlibServersButton = new JButton();
+
     /// Refresh or reauthentication command for the loaded selection.
     private final JButton refreshButton = new JButton();
 
     /// Profile UUID clipboard command for the loaded selection.
     private final JButton copyUuidButton = new JButton();
+
+    /// Offline-skin management command for the selected loaded offline account.
+    private final JButton offlineSkinButton = new JButton();
 
     /// Permanent removal command for the loaded selection.
     private final JButton removeButton = new JButton();
@@ -189,7 +198,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
     private void configureComponents(AccountsStrings strings) {
         JPanel toolbar = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[grow,fill][]",
+                "[grow,fill][][]",
                 "[]"));
         toolbar.setOpaque(false);
 
@@ -197,6 +206,12 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         heading.setName("accountsPageTitle");
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 28.0F));
         toolbar.add(heading);
+
+        authlibServersButton.setName("accountsAuthlibServers");
+        authlibServersButton.setText(i18n("account.methods.authlib_injector"));
+        authlibServersButton.addActionListener(event -> openAuthlibServerManagement());
+        authlibServersButton.setVisible(model.authlibServerStore().isPresent());
+        toolbar.add(authlibServersButton, "h 40!");
 
         addButton.setName("accountsAdd");
         addButton.setText(strings.addAction());
@@ -206,7 +221,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
 
         JPanel actions = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[grow][][][]",
+                "[grow][][][][]",
                 "[]"));
         actions.setOpaque(false);
         actions.add(new JLabel(), "growx, pushx");
@@ -220,6 +235,12 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         copyUuidButton.setText(strings.copyUuidAction());
         copyUuidButton.addActionListener(event -> copySelectedUuid());
         actions.add(copyUuidButton, "h 36!");
+
+        offlineSkinButton.setName("accountsOfflineSkin");
+        offlineSkinButton.setText(i18n("account.skin"));
+        offlineSkinButton.addActionListener(event -> openOfflineSkinManagement());
+        offlineSkinButton.setVisible(model.offlineSkinStore().isPresent());
+        actions.add(offlineSkinButton, "h 36!");
 
         removeButton.setName("accountsRemove");
         removeButton.setText(strings.removeAction());
@@ -422,6 +443,33 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         }
     }
 
+    /// Opens the owned persistent authlib-injector server workflow when this account source supports it.
+    private void openAuthlibServerManagement() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || refreshInProgress) {
+            return;
+        }
+        model.authlibServerStore().ifPresent(
+                store -> new SwingAuthlibServerManagementDialog(this, store, Schedulers.io()).open());
+    }
+
+    /// Opens local skin management only when the loaded selection remains an actual offline account.
+    private void openOfflineSkinManagement() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || refreshInProgress) {
+            return;
+        }
+        @Nullable AccountListItem selected = selectedItem();
+        if (selected == null) {
+            return;
+        }
+        model.offlineSkinStore().ifPresent(store -> {
+            if (store.snapshot(selected.accountId()).isPresent()) {
+                new SwingOfflineSkinManagementDialog(this, store, selected.accountId()).open();
+            }
+        });
+    }
+
     /// Returns the currently loaded selected row, excluding sparse placeholders.
     ///
     /// @return selected account row, or null while no loaded row is selected
@@ -437,7 +485,25 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         copyUuidButton.setEnabled(hasSelection);
         removeButton.setEnabled(hasSelection);
         addButton.setEnabled(!closed && !refreshInProgress);
+        authlibServersButton.setEnabled(
+                !closed && !refreshInProgress && model.authlibServerStore().isPresent());
+        offlineSkinButton.setVisible(model.offlineSkinStore().isPresent());
+        offlineSkinButton.setEnabled(
+                hasSelection && selectedOfflineSkin() != null);
         choiceList.getList().setEnabled(!closed && !refreshInProgress);
+    }
+
+    /// Returns the selected account's offline-skin state only after its sparse row has loaded.
+    ///
+    /// @return selected offline account skin state, or null for another account type or no selection
+    private @Nullable OfflineSkinSnapshot selectedOfflineSkin() {
+        @Nullable AccountListItem selected = selectedItem();
+        if (selected == null) {
+            return null;
+        }
+        return model.offlineSkinStore()
+                .flatMap(store -> store.snapshot(selected.accountId()))
+                .orElse(null);
     }
 
     /// Presents one synchronous or asynchronous account-action failure through Swing.

@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -179,6 +180,28 @@ public final class LauncherAccountsModel implements AccountsModel, AutoCloseable
         return Objects.requireNonNull(
                 refreshAccountCommand.refresh(accountId),
                 "refreshAccountCommand returned null");
+    }
+
+    /// Returns the optional persistent server manager exposed by the underlying launcher account store.
+    ///
+    /// @return available authlib-injector server store, or empty for generic account sources
+    @Override
+    public Optional<AuthlibServerStore> authlibServerStore() {
+        if (accountStore instanceof AuthlibServerStoreProvider provider) {
+            return Optional.of(provider.authlibServerStore());
+        }
+        return Optional.empty();
+    }
+
+    /// Returns the optional offline-skin bridge exposed by the underlying launcher account store.
+    ///
+    /// @return available offline-skin store, or empty for generic account sources
+    @Override
+    public Optional<OfflineSkinStore> offlineSkinStore() {
+        if (accountStore instanceof OfflineSkinStoreProvider provider) {
+            return Optional.of(provider.offlineSkinStore());
+        }
+        return Optional.empty();
     }
 
     /// Releases the account-store subscription exactly once.

@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.auth.offline.Skin;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
@@ -38,10 +39,12 @@ import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -291,6 +294,60 @@ public final class AccountsPanelTest {
         });
     }
 
+    /// The persistent authlib-injector server command is visible only for a model that actually owns it.
+    @Test
+    public void showsAuthlibServerManagementOnlyWhenModelSupportsIt() {
+        FakeAccountsModel generic = FakeAccountsModel.immediate(items(1), snapshot(0, 1, 0L));
+        AccountsPanel genericPanel = onEventDispatchThread(() -> new AccountsPanel(generic, STRINGS));
+
+        FakeAccountsModel capable = FakeAccountsModel.immediate(items(1), snapshot(0, 1, 0L));
+        capable.setAuthlibServerStore(new FakeAuthlibServerStore());
+        AccountsPanel capablePanel = onEventDispatchThread(() -> new AccountsPanel(capable, STRINGS));
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertFalse(findButton(genericPanel, "accountsAuthlibServers").isVisible()),
+                    () -> assertTrue(findButton(capablePanel, "accountsAuthlibServers").isVisible()));
+            genericPanel.close();
+            capablePanel.close();
+        });
+    }
+
+    /// The local skin command remains unavailable for non-offline rows even when the model owns a skin store.
+    @Test
+    public void enablesOfflineSkinManagementOnlyForSelectedOfflineAccount() {
+        FakeAccountsModel generic = FakeAccountsModel.immediate(items(2), snapshot(0, 2, 0L));
+        AccountsPanel genericPanel = onEventDispatchThread(() -> new AccountsPanel(generic, STRINGS));
+
+        FakeAccountsModel capable = FakeAccountsModel.immediate(items(2), snapshot(0, 2, 0L));
+        capable.setOfflineSkinStore(new FakeOfflineSkinStore("account-0"));
+        AccountsPanel capablePanel = onEventDispatchThread(() -> new AccountsPanel(capable, STRINGS));
+
+        onEventDispatchThread(() -> {
+            genericPanel.setSize(new Dimension(820, 420));
+            capablePanel.setSize(new Dimension(820, 420));
+            layoutRecursively(genericPanel);
+            layoutRecursively(capablePanel);
+            genericPanel.choiceList().refreshLoadPlan();
+            capablePanel.choiceList().refreshLoadPlan();
+        });
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            AbstractButton genericButton = findButton(genericPanel, "accountsOfflineSkin");
+            AbstractButton capableButton = findButton(capablePanel, "accountsOfflineSkin");
+            assertAll(
+                    () -> assertFalse(genericButton.isVisible()),
+                    () -> assertTrue(capableButton.isVisible()),
+                    () -> assertTrue(capableButton.isEnabled()));
+
+            capablePanel.choiceList().getList().setSelectedIndex(1);
+            assertFalse(capableButton.isEnabled());
+            genericPanel.close();
+            capablePanel.close();
+        });
+    }
+
     /// Creates deterministic account rows.
     ///
     /// @param count item count
@@ -455,6 +512,74 @@ public final class AccountsPanelTest {
         }
     }
 
+    /// Minimal configured-server source used only to exercise account-page capability visibility.
+    @NotNullByDefault
+    private static final class FakeAuthlibServerStore implements AuthlibServerStore {
+        /// Empty immutable source sufficient for a page-level command-availability check.
+        private final AuthlibServerSnapshot snapshot = new AuthlibServerSnapshot(List.of());
+
+        /// Returns the immutable empty configured-server snapshot.
+        @Override
+        public AuthlibServerSnapshot snapshot() {
+            return snapshot;
+        }
+
+        /// Registers a no-op listener because this focused test does not publish server mutations.
+        @Override
+        public Subscription subscribe(
+                ValueChangeListener<AuthlibServerSnapshot> listener) {
+            Objects.requireNonNull(listener, "listener");
+            return Subscription.create(() -> { });
+        }
+
+        /// Rejects endpoint discovery because this focused page test never opens the native dialog.
+        @Override
+        public PreparedAuthlibServer prepareServer(String endpoint) throws IOException {
+            throw new UnsupportedOperationException("Not used by account page visibility test");
+        }
+
+        /// Rejects persistence because this focused page test never opens the native dialog.
+        @Override
+        public void addServer(PreparedAuthlibServer server, boolean allowReadOnlyOverwrite) {
+            throw new UnsupportedOperationException("Not used by account page visibility test");
+        }
+
+        /// Rejects removal because this focused page test never opens the native dialog.
+        @Override
+        public void removeServer(String serverUrl, boolean allowReadOnlyOverwrite) {
+            throw new UnsupportedOperationException("Not used by account page visibility test");
+        }
+    }
+
+    /// Minimal offline-account skin source used only to exercise account-page eligibility.
+    @NotNullByDefault
+    private static final class FakeOfflineSkinStore implements OfflineSkinStore {
+        /// Stable identifier treated as an actual offline account by this fake source.
+        private final String offlineAccountId;
+
+        /// Creates a fake source for one exact account row.
+        ///
+        /// @param offlineAccountId stable offline account identifier
+        private FakeOfflineSkinStore(String offlineAccountId) {
+            this.offlineAccountId = Objects.requireNonNull(offlineAccountId, "offlineAccountId");
+        }
+
+        /// Returns a writable default-skin state for the supported fake account only.
+        @Override
+        public Optional<OfflineSkinSnapshot> snapshot(String accountId) {
+            Objects.requireNonNull(accountId, "accountId");
+            return offlineAccountId.equals(accountId)
+                    ? Optional.of(new OfflineSkinSnapshot(accountId, "Player 0", null, true))
+                    : Optional.empty();
+        }
+
+        /// Rejects mutations because the focused account-page test never opens the native dialog.
+        @Override
+        public void setSkin(String accountId, @Nullable Skin skin) {
+            throw new UnsupportedOperationException("Not used by account page eligibility test");
+        }
+    }
+
     /// A captured viewport load whose completion can be controlled by a test.
     ///
     /// @param range requested source range
@@ -502,6 +627,12 @@ public final class AccountsPanelTest {
 
         /// Whether removal requires explicit backup-and-overwrite consent.
         private boolean removalRequiresOverwrite;
+
+        /// Optional configured-server persistence capability exposed to the tested page.
+        private @Nullable AuthlibServerStore authlibServerStore;
+
+        /// Optional offline-account skin persistence capability exposed to the tested page.
+        private @Nullable OfflineSkinStore offlineSkinStore;
 
         /// Add command count.
         private final AtomicInteger additions = new AtomicInteger();
@@ -602,6 +733,32 @@ public final class AccountsPanelTest {
         public synchronized CompletionStage<Void> refreshAccount(String accountId) {
             refreshedIds.add(accountId);
             return refreshCompletion;
+        }
+
+        /// Returns this test source's optional configured-server persistence capability.
+        @Override
+        public Optional<AuthlibServerStore> authlibServerStore() {
+            return Optional.ofNullable(authlibServerStore);
+        }
+
+        /// Returns this test source's optional offline-skin persistence capability.
+        @Override
+        public Optional<OfflineSkinStore> offlineSkinStore() {
+            return Optional.ofNullable(offlineSkinStore);
+        }
+
+        /// Exposes configured-server management to the tested page.
+        ///
+        /// @param store configured-server persistence source
+        private void setAuthlibServerStore(AuthlibServerStore store) {
+            authlibServerStore = Objects.requireNonNull(store, "store");
+        }
+
+        /// Exposes offline-skin management to the tested page.
+        ///
+        /// @param store offline-skin persistence source
+        private void setOfflineSkinStore(OfflineSkinStore store) {
+            offlineSkinStore = Objects.requireNonNull(store, "store");
         }
 
         /// Replaces the completion returned by later refresh commands.

@@ -23,6 +23,8 @@ import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.auth.ClassicAccount;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorAccount;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorServer;
+import space.minecraftstl.xyml.auth.offline.OfflineAccount;
+import space.minecraftstl.xyml.auth.offline.Skin;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
@@ -38,6 +40,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -51,7 +54,8 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// Construction must occur on the state event thread after [Accounts#init()]. The adapter never publishes
 /// account objects, server objects, authentication tokens, passwords, or private serialized account data.
 @NotNullByDefault
-public final class LegacyLauncherAccountStore implements AccountStore, AutoCloseable {
+public final class LegacyLauncherAccountStore
+        implements AccountStore, AuthlibServerStoreProvider, OfflineSkinStoreProvider, OfflineSkinStore, AutoCloseable {
     /// Serializes listener registration with the transition to the closed lifecycle state.
     private final Object lifecycleLock = new Object();
 
@@ -63,6 +67,9 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
 
     /// Subscription for the selected legacy account property.
     private final Subscription selectionSubscription;
+
+    /// Persists and projects configured authlib-injector servers for the accounts page.
+    private final LegacyAuthlibServerStore authlibServerStore;
 
     /// Neutral server metadata subscriptions indexed by server identity.
     private final Map<AuthlibInjectorServer, Subscription> observedServers = new IdentityHashMap<>();
@@ -76,11 +83,17 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
     /// Creates the bridge and attaches neutral state subscriptions on the legacy state event thread.
     public LegacyLauncherAccountStore() {
         requireEventThread();
-        synchronizeServerListeners();
-        currentSnapshot = readSnapshot();
-        accountsSubscription = Accounts.getAccountsValue().subscribe(change -> execute(this::accountListChanged));
-        selectionSubscription = Accounts.selectedAccountValueProperty()
-                .subscribe(change -> execute(this::refreshSnapshot));
+        authlibServerStore = new LegacyAuthlibServerStore();
+        try {
+            synchronizeServerListeners();
+            currentSnapshot = readSnapshot();
+            accountsSubscription = Accounts.getAccountsValue().subscribe(change -> execute(this::accountListChanged));
+            selectionSubscription = Accounts.selectedAccountValueProperty()
+                    .subscribe(change -> execute(this::refreshSnapshot));
+        } catch (RuntimeException | Error failure) {
+            authlibServerStore.close();
+            throw failure;
+        }
     }
 
     /// Returns the latest immutable presentation-safe account state.
@@ -102,6 +115,70 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
             }
             return changes.subscribe(listener);
         }
+    }
+
+    /// Returns the owned persistent authlib-injector server management bridge.
+    ///
+    /// @return configured server store associated with this account source
+    @Override
+    public AuthlibServerStore authlibServerStore() {
+        return authlibServerStore;
+    }
+
+    /// Returns this legacy bridge as the owner of offline-account skin persistence.
+    ///
+    /// @return persistent offline-skin bridge
+    @Override
+    public OfflineSkinStore offlineSkinStore() {
+        return this;
+    }
+
+    /// Reads a presentation-safe skin snapshot for one exact current offline account.
+    ///
+    /// @param accountId stable launcher account identifier
+    /// @return skin state, or empty when the account is absent or not offline
+    @Override
+    public Optional<OfflineSkinSnapshot> snapshot(String accountId) {
+        Objects.requireNonNull(accountId, "accountId");
+        requireEventThread();
+        if (closed.get()) {
+            throw new IllegalStateException("Legacy launcher account store is closed");
+        }
+        for (Account account : Accounts.getAccountsValue()) {
+            if (account.getAccountID().toString().equals(accountId)
+                    && account instanceof OfflineAccount offlineAccount) {
+                return Optional.of(new OfflineSkinSnapshot(
+                        accountId,
+                        offlineAccount.getProfileName(),
+                        offlineAccount.getSkin(),
+                        !Accounts.isAccountFilesReadOnly(offlineAccount)));
+            }
+        }
+        return Optional.empty();
+    }
+
+    /// Replaces an offline account skin only when its backing metadata can be persisted.
+    ///
+    /// [OfflineAccount#setSkin(Skin)] publishes the change signal consumed by [Accounts], which in
+    /// turn rewrites account metadata through its established persistence flow.
+    ///
+    /// @param accountId stable launcher account identifier
+    /// @param skin replacement skin, or null to restore the launcher default
+    /// @throws AccountStorageOverwriteRequiredException when newer account files are read-only
+    @Override
+    public void setSkin(String accountId, @Nullable Skin skin) {
+        Objects.requireNonNull(accountId, "accountId");
+        requireEventThread();
+        if (closed.get()) {
+            throw new IllegalStateException("Legacy launcher account store is closed");
+        }
+        OfflineAccount offlineAccount = findOfflineAccount(accountId);
+        if (Accounts.isAccountFilesReadOnly(offlineAccount)) {
+            throw new AccountStorageOverwriteRequiredException(
+                    accountId,
+                    i18n("account.storage.read_only"));
+        }
+        offlineAccount.setSkin(skin);
     }
 
     /// Selects an account by stable identifier without synchronously waiting across UI toolkit threads.
@@ -142,6 +219,7 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
                 return;
             }
         }
+        authlibServerStore.close();
         execute(this::removeLegacyListeners);
     }
 
@@ -220,6 +298,21 @@ public final class LegacyLauncherAccountStore implements AccountStore, AutoClose
             Accounts.setSelectedAccount(replacement);
         }
         Accounts.getAccountsValue().remove(target);
+    }
+
+    /// Locates one existing offline account by its persisted launcher identifier.
+    ///
+    /// @param accountId stable launcher account identifier
+    /// @return matching offline account
+    /// @throws IllegalArgumentException when the identifier is missing or belongs to another account type
+    private static OfflineAccount findOfflineAccount(String accountId) {
+        requireEventThread();
+        return Accounts.getAccountsValue().stream()
+                .filter(account -> account.getAccountID().toString().equals(accountId))
+                .filter(OfflineAccount.class::isInstance)
+                .map(OfflineAccount.class::cast)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Unknown offline account: " + accountId));
     }
 
     /// Attaches and detaches server metadata listeners to match current account references by identity.

@@ -22,6 +22,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
 
+import java.util.Optional;
 import java.util.concurrent.CompletionStage;
 
 /// Supplies exact account-list state, viewport rows, selection, and the add-account command.
@@ -61,4 +62,24 @@ public interface AccountsModel extends ViewportChoiceDataSource<AccountListItem>
     /// @param accountId stable account identifier
     /// @return completion after refreshed authentication data has been persisted and released
     CompletionStage<Void> refreshAccount(String accountId);
+
+    /// Returns optional persistent authlib-injector server management for this account source.
+    ///
+    /// Generic or test account sources may not own the launcher configuration file and therefore
+    /// return an empty result.
+    ///
+    /// @return available server management bridge, or empty when unsupported
+    default Optional<AuthlibServerStore> authlibServerStore() {
+        return Optional.empty();
+    }
+
+    /// Returns optional persistent offline-account skin management for this account source.
+    ///
+    /// Generic or test account sources may not own launcher account objects and therefore return an
+    /// empty result. A returned store exposes entries only for actual offline accounts.
+    ///
+    /// @return available offline-skin store, or empty when unsupported
+    default Optional<OfflineSkinStore> offlineSkinStore() {
+        return Optional.empty();
+    }
 }
