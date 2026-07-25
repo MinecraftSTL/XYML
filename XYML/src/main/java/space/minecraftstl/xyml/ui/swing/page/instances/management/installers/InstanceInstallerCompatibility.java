@@ -118,9 +118,10 @@ public final class InstanceInstallerCompatibility {
 
     /// Validates a library removal that can affect the shared API-parent invariant.
     ///
-    /// Unknown non-base-game identifiers remain valid Core removal requests because this service does
-    /// not own every library type that a modpack may install. Recognized parent loaders cannot be
-    /// removed while their corresponding API companion remains installed.
+    /// Only a library present in the current snapshot with a clear Core patch structure may be removed.
+    /// This keeps the presentation rule authoritative even when a caller bypasses Swing. Recognized
+    /// parent loaders additionally cannot be removed while their corresponding API companion remains
+    /// installed.
     ///
     /// @param snapshot authoritative existing-instance snapshot
     /// @param libraryId exact Core library identifier requested for removal
@@ -133,12 +134,29 @@ public final class InstanceInstallerCompatibility {
                     InstanceInstallerValidationException.Reason.BASE_GAME_REMOVAL_FORBIDDEN,
                     "Minecraft base-game metadata cannot be removed through installer management");
         }
+        if ("mcbbs".equals(requestedLibraryId)) {
+            throw removalNotAllowed(requestedLibraryId, "the protected mcbbs patch");
+        }
 
         Optional<GameLoaderKind> optionalKind = Optional.ofNullable(KINDS_BY_LIBRARY_ID.get(requestedLibraryId));
         if (optionalKind.isEmpty()) {
+            @Nullable InstanceOtherLibraryEntry otherEntry = findOtherLibrary(current, requestedLibraryId);
+            if (otherEntry == null) {
+                throw removalNotAllowed(requestedLibraryId, "no current snapshot entry");
+            }
+            if (otherEntry.structureState() != InstanceOtherLibraryEntry.StructureState.CLEAR) {
+                throw removalNotAllowed(requestedLibraryId, "an externally uncertain structure");
+            }
             return;
         }
         GameLoaderKind removedKind = optionalKind.get();
+        @Nullable InstanceInstallerEntry installedEntry = findInstalledLoader(current, removedKind);
+        if (installedEntry == null) {
+            throw removalNotAllowed(requestedLibraryId, "no installed loader entry");
+        }
+        if (installedEntry.status() != LibraryAnalyzer.LibraryMark.LibraryStatus.CLEAR) {
+            throw removalNotAllowed(requestedLibraryId, "an externally uncertain loader structure");
+        }
         for (InstanceInstallerEntry entry : current.installedLoaders()) {
             Optional<GameLoaderKind> requiredParent = GameLoaderCompatibilityMatrix.requiredParent(entry.kind());
             if (requiredParent.isPresent() && requiredParent.get() == removedKind) {
@@ -147,6 +165,55 @@ public final class InstanceInstallerCompatibility {
                         "Removing " + removedKind + " would orphan " + entry.kind());
             }
         }
+    }
+
+    /// Finds one recognized loader entry from the current immutable snapshot.
+    ///
+    /// @param snapshot authoritative current instance state
+    /// @param kind managed loader kind to locate
+    /// @return matching installed entry, or null when the loader is absent
+    private static @Nullable InstanceInstallerEntry findInstalledLoader(
+            InstanceInstallerSnapshot snapshot,
+            GameLoaderKind kind) {
+        for (InstanceInstallerEntry entry : Objects.requireNonNull(snapshot, "snapshot").installedLoaders()) {
+            if (entry.kind() == Objects.requireNonNull(kind, "kind")) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    /// Finds one third-party library entry from the current immutable snapshot.
+    ///
+    /// @param snapshot authoritative current instance state
+    /// @param libraryId exact Core library identifier to locate
+    /// @return matching third-party entry, or null when it is absent
+    private static @Nullable InstanceOtherLibraryEntry findOtherLibrary(
+            InstanceInstallerSnapshot snapshot,
+            String libraryId) {
+        String requestedLibraryId = requireNonBlankLibraryId(libraryId);
+        for (InstanceOtherLibraryEntry entry : Objects.requireNonNull(
+                snapshot,
+                "snapshot").otherRemovableLibraries()) {
+            if (entry.libraryId().equals(requestedLibraryId)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    /// Creates one typed rejection for an absent, protected, or structurally uncertain removal target.
+    ///
+    /// @param libraryId exact requested Core library identifier
+    /// @param explanation concise safe-removal reason
+    /// @return never returns normally
+    private static InstanceInstallerValidationException removalNotAllowed(
+            String libraryId,
+            String explanation) {
+        throw new InstanceInstallerValidationException(
+                InstanceInstallerValidationException.Reason.LIBRARY_REMOVAL_NOT_ALLOWED,
+                "Removal is not allowed for " + requireNonBlankLibraryId(libraryId) + ": "
+                        + Objects.requireNonNull(explanation, "explanation"));
     }
 
     /// Converts the snapshot's stable recognized entries into a mutable enum set for validation.

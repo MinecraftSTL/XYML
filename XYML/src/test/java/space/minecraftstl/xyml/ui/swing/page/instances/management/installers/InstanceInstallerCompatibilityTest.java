@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -178,6 +179,35 @@ final class InstanceInstallerCompatibilityTest {
                         () -> snapshotWithOtherLibrary("forge")));
     }
 
+    /// Ensures direct callers cannot bypass the page's clear-structure removal boundary.
+    @Test
+    void rejectsProtectedAbsentAndExternallyUncertainRemovalTargets() {
+        InstanceInstallerSnapshot snapshot = new InstanceInstallerSnapshot(
+                "existing-instance",
+                Optional.of("1.21.1"),
+                List.of(new InstanceInstallerEntry(
+                        GameLoaderKind.FORGE,
+                        "47.2.0",
+                        LibraryAnalyzer.LibraryMark.LibraryStatus.JUST_EXISTED)),
+                List.of(
+                        new InstanceOtherLibraryEntry(
+                                "clear-third-party",
+                                "1.0.0",
+                                InstanceOtherLibraryEntry.StructureState.CLEAR),
+                        new InstanceOtherLibraryEntry(
+                                "uncertain-third-party",
+                                "2.0.0",
+                                InstanceOtherLibraryEntry.StructureState.EXTERNALLY_UNCERTAIN)));
+
+        assertAll(
+                () -> assertDoesNotThrow(
+                        () -> InstanceInstallerCompatibility.validateRemoval(snapshot, "clear-third-party")),
+                () -> assertRemovalRejected(snapshot, "mcbbs"),
+                () -> assertRemovalRejected(snapshot, "missing-library"),
+                () -> assertRemovalRejected(snapshot, "uncertain-third-party"),
+                () -> assertRemovalRejected(snapshot, "forge"));
+    }
+
     /// Creates an empty modern-instance snapshot for validation tests.
     ///
     /// @param entries recognized installed loaders
@@ -207,6 +237,17 @@ final class InstanceInstallerCompatibilityTest {
                         libraryId,
                         "1.0.0",
                         InstanceOtherLibraryEntry.StructureState.EXTERNALLY_UNCERTAIN)));
+    }
+
+    /// Asserts that a removal request fails with the non-bypassable safe-removal reason.
+    ///
+    /// @param snapshot authoritative instance state
+    /// @param libraryId requested library identifier
+    private static void assertRemovalRejected(InstanceInstallerSnapshot snapshot, String libraryId) {
+        InstanceInstallerValidationException exception = assertThrows(
+                InstanceInstallerValidationException.class,
+                () -> InstanceInstallerCompatibility.validateRemoval(snapshot, libraryId));
+        assertEquals(InstanceInstallerValidationException.Reason.LIBRARY_REMOVAL_NOT_ALLOWED, exception.reason());
     }
 
     /// Creates a minimal original Core remote version for matrix-only tests.

@@ -99,6 +99,9 @@ public final class InstanceInstallerValidationException extends IllegalArgumentE
         /// Removing a parent loader would leave an installed API companion without its parent.
         REQUIRED_COMPANION_WOULD_BE_ORPHANED,
 
+        /// The requested library is absent, protected, or lacks an explicit safe removal structure.
+        LIBRARY_REMOVAL_NOT_ALLOWED,
+
         /// A requested offline installer path is missing or is not a regular file.
         OFFLINE_INSTALLER_NOT_A_REGULAR_FILE
     }
