@@ -23,7 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.install.DefaultGameInstallService;
 import space.minecraftstl.xyml.game.install.GameInstallService;
-import space.minecraftstl.xyml.game.install.RepositoryVanillaInstallTaskFactory;
+import space.minecraftstl.xyml.game.install.RepositoryGameInstallTaskFactory;
 import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -471,7 +471,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 () -> new DownloadProviderGameVersionCatalogSource(DownloadProviders.getDownloadProvider()),
                 source -> new DefaultGameVersionCatalogModel(source, presentation.gameVersionsStatus()),
                 () -> new DefaultGameInstallService(
-                        new RepositoryVanillaInstallTaskFactory(
+                        new RepositoryGameInstallTaskFactory(
                                 legacy.repository(),
                                 DownloadProviders.getDownloadProvider(),
                                 Schedulers.io(),

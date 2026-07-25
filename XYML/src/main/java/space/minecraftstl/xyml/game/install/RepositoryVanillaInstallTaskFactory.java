@@ -18,38 +18,25 @@
 package space.minecraftstl.xyml.game.install;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.download.DownloadProviderWrapper;
-import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.task.Task;
 
-import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.Executor;
 
-/// Creates a vanilla installation task against one selected repository and download provider.
+/// Compatibility facade for callers that still use the former vanilla-only factory name.
 ///
-/// Repository refresh and selection are appended on separate caller-selected executors. This keeps
-/// blocking scans off UI dispatchers while remaining independent of presentation-toolkit APIs.
+/// New code should use [RepositoryGameInstallTaskFactory], which supports both vanilla and selected
+/// remote loader installers. This facade preserves the original constructor and delegates without
+/// changing task behavior.
+@Deprecated
 @NotNullByDefault
 public final class RepositoryVanillaInstallTaskFactory implements GameInstallTaskFactory {
-    /// Repository receiving the new instance.
-    private final XYMLGameRepository repository;
+    /// General-purpose implementation receiving all installation requests.
+    private final RepositoryGameInstallTaskFactory delegate;
 
-    /// Provider used to resolve vanilla metadata and artifacts.
-    private final DownloadProvider downloadProvider;
-
-    /// Caller-owned background executor used for repository scanning after every outcome.
-    private final Executor repositoryRefreshExecutor;
-
-    /// Caller-owned dispatcher used only to publish the selected instance after success.
-    private final Executor instanceSelectionExecutor;
-
-    /// Creates a repository-backed vanilla installation factory.
+    /// Creates a compatibility facade around the general repository-backed factory.
     ///
     /// @param repository selected target repository
     /// @param downloadProvider provider used for this installation
@@ -60,69 +47,19 @@ public final class RepositoryVanillaInstallTaskFactory implements GameInstallTas
             DownloadProvider downloadProvider,
             Executor repositoryRefreshExecutor,
             Executor instanceSelectionExecutor) {
-        this.repository = Objects.requireNonNull(repository, "repository");
-        this.downloadProvider = Objects.requireNonNull(downloadProvider, "downloadProvider");
-        this.repositoryRefreshExecutor = Objects.requireNonNull(
-                repositoryRefreshExecutor,
-                "repositoryRefreshExecutor");
-        this.instanceSelectionExecutor = Objects.requireNonNull(
-                instanceSelectionExecutor,
-                "instanceSelectionExecutor");
+        delegate = new RepositoryGameInstallTaskFactory(
+                Objects.requireNonNull(repository, "repository"),
+                Objects.requireNonNull(downloadProvider, "downloadProvider"),
+                Objects.requireNonNull(repositoryRefreshExecutor, "repositoryRefreshExecutor"),
+                Objects.requireNonNull(instanceSelectionExecutor, "instanceSelectionExecutor"));
     }
 
-    /// Validates the destination and creates the complete vanilla install and repository-update chain.
+    /// Creates the stopped installation task through the general-purpose implementation.
+    ///
+    /// @param request immutable game-installation request
+    /// @return stopped task whose success includes repository post-processing
     @Override
     public Task<?> create(GameInstallRequest request) {
-        Objects.requireNonNull(request, "request");
-        return Task.composeAsync(() -> createDeferredInstallTask(
-                request,
-                unwrapProvider(downloadProvider)));
-    }
-
-    /// Performs destination validation and side-effectful task construction only after execution starts.
-    ///
-    /// @param request captured installation request
-    /// @param requestProvider concrete provider snapshotted for this request
-    /// @return complete install, refresh, and selection task chain
-    private Task<?> createDeferredInstallTask(
-            GameInstallRequest request,
-            DownloadProvider requestProvider) {
-        if (!XYMLGameRepository.isValidVersionId(request.instanceName())) {
-            throw new GameInstallRequestRejectedException(
-                    request,
-                    GameInstallRequestRejectedException.Reason.INVALID_INSTANCE_NAME);
-        }
-        if (repository.versionIdConflicts(request.instanceName())) {
-            throw new GameInstallRequestRejectedException(
-                    request,
-                    GameInstallRequestRejectedException.Reason.INSTANCE_ALREADY_EXISTS);
-        }
-
-        GameBuilder builder = repository.getDependency(requestProvider).gameBuilder()
-                .name(request.instanceName())
-                .gameVersion(request.versionId());
-        repository.applyDefaultIsolationSettingForNewInstance(request.instanceName(), false);
-        return builder.buildAsync()
-                .whenComplete(repositoryRefreshExecutor, ignoredFailure -> repository.refreshVersions())
-                .thenRunAsync(
-                        instanceSelectionExecutor,
-                        () -> repository.setSelectedInstance(request.instanceName()));
-    }
-
-    /// Resolves a stable concrete provider snapshot while rejecting wrapper cycles and null links.
-    ///
-    /// @param provider configured provider or mutable wrapper
-    /// @return concrete provider used throughout one installation task
-    private static DownloadProvider unwrapProvider(DownloadProvider provider) {
-        DownloadProvider current = Objects.requireNonNull(provider, "provider");
-        Set<DownloadProvider> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-        while (current instanceof DownloadProviderWrapper wrapper) {
-            if (!visited.add(current)) {
-                throw new IllegalStateException("Download-provider wrapper cycle detected");
-            }
-            @Nullable DownloadProvider nestedProvider = wrapper.getProvider();
-            current = Objects.requireNonNull(nestedProvider, "download-provider wrapper contains null");
-        }
-        return current;
+        return delegate.create(Objects.requireNonNull(request, "request"));
     }
 }
