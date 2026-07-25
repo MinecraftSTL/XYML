@@ -79,9 +79,9 @@ final class InstanceGameSettingsMapper {
                         isOverridden(instance, GameSettings::windowTypeProperty),
                         effective.getInheritable(GameSettings::windowTypeProperty),
                         isOverridden(instance, GameSettings::widthProperty),
-                        nonNegativeDimension(effective.getInheritable(GameSettings::widthProperty)),
+                        normalizedDimension(effective.getInheritable(GameSettings::widthProperty)),
                         isOverridden(instance, GameSettings::heightProperty),
-                        nonNegativeDimension(effective.getInheritable(GameSettings::heightProperty))),
+                        normalizedDimension(effective.getInheritable(GameSettings::heightProperty))),
                 new LauncherSettings(
                         isOverridden(instance, GameSettings::launcherVisibilityProperty),
                         effective.getInheritable(GameSettings::launcherVisibilityProperty),
@@ -206,8 +206,8 @@ final class InstanceGameSettingsMapper {
     /// Applies game-window properties.
     private static void applyWindow(GameSettings.Instance settings, WindowSettings values) {
         apply(settings, values.typeOverridden(), values.type(), GameSettings::windowTypeProperty);
-        apply(settings, values.widthOverridden(), (double) values.width(), GameSettings::widthProperty);
-        apply(settings, values.heightOverridden(), (double) values.height(), GameSettings::heightProperty);
+        apply(settings, values.widthOverridden(), values.width(), GameSettings::widthProperty);
+        apply(settings, values.heightOverridden(), values.height(), GameSettings::heightProperty);
     }
 
     /// Applies launcher behavior and diagnostics properties.
@@ -379,12 +379,11 @@ final class InstanceGameSettingsMapper {
                 && instance.getOverrideProperties().contains(propertyGetter.apply(instance).getName());
     }
 
-    /// Converts a model dimension to the non-negative integral representation used by Swing.
+    /// Normalizes an invalid model dimension without narrowing valid persisted precision or range.
     ///
     /// @param value effective model dimension
-    /// @return rounded non-negative dimension
-    private static int nonNegativeDimension(double value) {
-        long rounded = Math.max(0L, Math.round(value));
-        return rounded > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) rounded;
+    /// @return finite non-negative dimension
+    private static double normalizedDimension(double value) {
+        return Double.isFinite(value) && value >= 0.0D ? value : 0.0D;
     }
 }

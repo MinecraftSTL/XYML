@@ -152,14 +152,14 @@ public record InstanceGameSettingsSnapshot(
             boolean typeOverridden,
             GameWindowType type,
             boolean widthOverridden,
-            int width,
+            double width,
             boolean heightOverridden,
-            int height) {
-        /// Validates a non-negative resolution representation.
+            double height) {
+        /// Validates a finite non-negative resolution representation.
         public WindowSettings {
             Objects.requireNonNull(type, "type");
-            if (width < 0 || height < 0) {
-                throw new IllegalArgumentException("window dimensions must not be negative");
+            if (!Double.isFinite(width) || !Double.isFinite(height) || width < 0.0D || height < 0.0D) {
+                throw new IllegalArgumentException("window dimensions must be finite and non-negative");
             }
         }
     }

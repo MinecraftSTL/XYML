@@ -142,9 +142,9 @@ final class InstanceGameSettingsMapperTest {
                         overridden,
                         GameWindowType.MAXIMIZED,
                         overridden,
-                        1920,
+                        854.5D,
                         overridden,
-                        1080),
+                        100_000.25D),
                 new InstanceGameSettingsSnapshot.LauncherSettings(
                         overridden,
                         LauncherVisibility.KEEP,

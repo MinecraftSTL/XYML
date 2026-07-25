@@ -249,7 +249,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                         this.instanceId,
                         executor,
                         returnCommand);
-                createdGameSettings = new InstanceGameSettingsPanel(xymlRepository, this.instanceId);
+                createdGameSettings = new InstanceGameSettingsPanel(xymlRepository, this.instanceId, executor);
                 createdInstallers = new InstanceInstallerPanel(
                         xymlRepository,
                         this.instanceId,
