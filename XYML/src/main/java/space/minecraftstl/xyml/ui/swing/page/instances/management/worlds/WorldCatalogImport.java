@@ -22,7 +22,10 @@ import org.jetbrains.annotations.NotNullByDefault;
 import java.nio.file.Path;
 import java.util.Objects;
 
-/// A validated local world archive ready for a user-confirmed installation name.
+/// A readable local world archive preview ready for a user-confirmed installation name.
+///
+/// The actual extraction policy is intentionally enforced again by Core at mutation time. This
+/// record therefore captures preview metadata, not an authorization to skip final validation.
 ///
 /// @param source normalized archive path selected by the user
 /// @param suggestedName non-blank Core-derived world name proposed to the user

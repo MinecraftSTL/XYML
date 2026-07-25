@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.World;
+import space.minecraftstl.xyml.game.WorldArchiveImporter;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
 import java.io.IOException;
@@ -117,7 +118,11 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
         }
     }
 
-    /// Validates a selected archive through Core before asking the user for its target name.
+    /// Reads a selected archive through Core before asking the user for its target name.
+    ///
+    /// The later mutation reruns strict central-directory validation through [WorldArchiveImporter]
+    /// immediately before any bytes are extracted. This read-only preview deliberately performs no
+    /// filesystem mutation, so a changed source archive cannot bypass the import policy.
     ///
     /// @param archive selected local archive
     /// @param cancellation cooperative cancellation signal
@@ -137,12 +142,12 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
         return new WorldCatalogImport(normalizedArchive, suggestedName);
     }
 
-    /// Creates the destination directory and delegates installation to Core's World API.
+    /// Validates, stages, and atomically publishes one archive through Core's strict importer.
     ///
     /// @param world validated source archive
     /// @param targetName non-blank destination name
     /// @param cancellation cooperative cancellation signal
-    /// @throws IOException when creation or Core installation fails
+    /// @throws IOException when validation, staging, or atomic publication fails
     @Override
     public void install(
             WorldCatalogImport world,
@@ -153,10 +158,12 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
         LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");
         signal.throwIfCancelled();
         Path savesDirectory = savesDirectory();
-        Files.createDirectories(savesDirectory);
-        World sourceWorld = new World(importWorld.source());
-        signal.throwIfCancelled();
-        sourceWorld.install(savesDirectory, normalizedTargetName);
+        // Revalidate the source immediately before extraction so the preview cannot authorize
+        // a later replaced archive with different paths or entry data.
+        new WorldArchiveImporter().importArchive(
+                importWorld.source(),
+                savesDirectory,
+                normalizedTargetName);
         signal.throwIfCancelled();
     }
 
