@@ -79,6 +79,9 @@ public final class DefaultRemoteModpackInstallLauncher implements RemoteModpackI
                 downloadProvider.injectURLWithCandidates(installRequest.version().file().url()),
                 archive,
                 installRequest.version().file().getIntegrityCheck());
+        download.setName(installRequest.version().name().isBlank()
+                ? installRequest.version().file().filename()
+                : installRequest.version().name());
         download.addIntegrityCheckHandler(FileDownloadTask.ZIP_INTEGRITY_CHECK_HANDLER);
         return download
                 .thenComposeAsync(Schedulers.io(), ignored -> createInstallTask(repository, installRequest, archive))
