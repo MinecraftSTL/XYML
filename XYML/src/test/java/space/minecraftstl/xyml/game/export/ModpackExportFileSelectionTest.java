@@ -18,9 +18,12 @@
 package space.minecraftstl.xyml.game.export;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -91,5 +94,27 @@ public final class ModpackExportFileSelectionTest {
         ModpackExportFileSelection selection = ModpackExportFileSelection.of(List.of("missing.txt"));
 
         assertThrows(NoSuchFileException.class, () -> selection.expand(runDirectory));
+    }
+
+    /// Explicit symbolic-link selections fail and directory expansion omits nested links when supported.
+    @Test
+    public void excludesSymbolicLinksFromSelectionsWhenSupported() throws Exception {
+        Path configuration = Files.createDirectories(runDirectory.resolve("config"));
+        Files.writeString(configuration.resolve("options.txt"), "options");
+        Path externalFile = Files.writeString(runDirectory.resolveSibling("secret.txt"), "secret");
+        Path link = configuration.resolve("external-link.txt");
+        try {
+            Files.createSymbolicLink(link, externalFile);
+        } catch (UnsupportedOperationException | SecurityException | IOException unavailable) {
+            Assumptions.assumeTrue(false, "Symbolic links are unavailable: " + unavailable.getMessage());
+            return;
+        }
+
+        assertEquals(
+                List.of("config", "config/options.txt"),
+                ModpackExportFileSelection.of(List.of("config")).expand(runDirectory));
+        assertThrows(
+                FileSystemException.class,
+                () -> ModpackExportFileSelection.of(List.of("config/external-link.txt")).expand(runDirectory));
     }
 }

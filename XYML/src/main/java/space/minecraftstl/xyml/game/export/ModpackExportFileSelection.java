@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -34,8 +35,9 @@ import java.util.Objects;
 /// Immutable non-empty selection of files or directory roots relative to an instance run directory.
 ///
 /// A selected file implicitly selects every ancestor directory. A selected directory expands to every
-/// descendant directory and file. This exact expansion is required because the legacy core exporters
-/// match whitelist entries literally and otherwise prune a selected file when its parent is absent.
+/// descendant directory and file. Symbolic links are excluded so a local archive never follows an
+/// instance entry outside its run directory. This exact expansion is required because the legacy core
+/// exporters match whitelist entries literally and otherwise prune a selected file when its parent is absent.
 @NotNullByDefault
 public final class ModpackExportFileSelection {
     /// Normalized portable relative roots in stable user-selected order.
@@ -73,7 +75,7 @@ public final class ModpackExportFileSelection {
     ///
     /// @param runDirectory effective instance run directory
     /// @return immutable portable relative paths including required ancestors and descendants
-    /// @throws IOException when a selected path disappeared or the directory cannot be enumerated
+    /// @throws IOException when a selected path disappeared, is a symbolic link, or cannot be enumerated
     public @Unmodifiable List<String> expand(Path runDirectory) throws IOException {
         Path normalizedRunDirectory = Objects.requireNonNull(runDirectory, "runDirectory")
                 .toAbsolutePath()
@@ -87,12 +89,19 @@ public final class ModpackExportFileSelection {
             if (Files.notExists(selected)) {
                 throw new NoSuchFileException(selected.toString());
             }
+            if (Files.isSymbolicLink(selected)) {
+                throw new FileSystemException(
+                        selected.toString(),
+                        null,
+                        "Symbolic links cannot be included in modpack exports");
+            }
 
             addAncestors(selectedPath, expanded);
             if (Files.isDirectory(selected)) {
                 try (var stream = Files.walk(selected)) {
                     stream
                             .filter(path -> !path.equals(selected))
+                            .filter(path -> !Files.isSymbolicLink(path))
                             .sorted(Comparator.comparing(
                                     path -> toPortablePath(normalizedRunDirectory.relativize(path))))
                             .map(normalizedRunDirectory::relativize)
