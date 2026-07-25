@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.management.addonupdates.A
 import space.minecraftstl.xyml.ui.swing.page.instances.management.backups.WorldBackupsPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.export.ModpackExportPanel;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.installers.InstanceInstallerPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogActionStrings;
@@ -61,7 +62,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Hosts one instance overview alongside lifecycle, settings, add-on, world, backup, and schematic tools.
+/// Hosts one instance overview alongside lifecycle, settings, loader, add-on, world, backup, and schematic tools.
 ///
 /// All tabs are constructed on the EDT, while their filesystem work remains lazy and uses the supplied
 /// executor. The view owns all child lifecycles and returns to the instance list through one shared toolbar.
@@ -78,6 +79,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
 
     /// Instance-specific launch settings when the repository exposes XYML settings persistence, or null otherwise.
     private final @Nullable InstanceGameSettingsPanel gameSettings;
+
+    /// Lazy existing-instance loader and installer management when XYML dependency APIs are available.
+    private final @Nullable InstanceInstallerPanel installers;
 
     /// Installed-Mod catalog owned by the Mods tab.
     private final ModCatalogPanel mods;
@@ -175,9 +179,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     /// @param resourcePackActionStrings localized resource-pack action text
     /// @param resourcePackInteractions resource-pack dialog and desktop interactions
     /// @param returnCommand coordinator command returning to the instance list
-    /// @param taskProgressStrings localized task-progress labels for the modpack exporter
+    /// @param taskProgressStrings localized task-progress labels for long-running instance operations
     /// @param animator optional shared motion-aware progress animator
-    /// @param progressAnimationDuration non-negative modpack-export progress animation duration
+    /// @param progressAnimationDuration non-negative progress animation duration for instance operations
     public DefaultInstanceManagementView(
             GameRepository repository,
             SchematicDirectoryResolver schematicDirectoryResolver,
@@ -228,6 +232,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         @Nullable InstanceOverviewPanel createdOverview = null;
         @Nullable InstanceLifecyclePanel createdLifecycle = null;
         @Nullable InstanceGameSettingsPanel createdGameSettings = null;
+        @Nullable InstanceInstallerPanel createdInstallers = null;
         @Nullable ModCatalogPanel createdMods = null;
         @Nullable ResourcePackCatalogPanel createdResourcePacks = null;
         @Nullable WorldCatalogPanel createdWorlds = null;
@@ -245,6 +250,12 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                         executor,
                         returnCommand);
                 createdGameSettings = new InstanceGameSettingsPanel(xymlRepository, this.instanceId);
+                createdInstallers = new InstanceInstallerPanel(
+                        xymlRepository,
+                        this.instanceId,
+                        taskProgressStrings,
+                        animator,
+                        progressAnimationDuration);
                 createdModpackExport = new ModpackExportPanel(
                         xymlRepository,
                         this.instanceId,
@@ -288,6 +299,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             overview = createdOverview;
             lifecycle = createdLifecycle;
             gameSettings = createdGameSettings;
+            installers = createdInstallers;
             mods = createdMods;
             resourcePacks = createdResourcePacks;
             worlds = createdWorlds;
@@ -327,6 +339,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             }
             if (createdMods != null) {
                 cleanupFailure = attemptCleanup(cleanupFailure, createdMods::close);
+            }
+            if (createdInstallers != null) {
+                cleanupFailure = attemptCleanup(cleanupFailure, createdInstallers::close);
             }
             if (createdGameSettings != null) {
                 cleanupFailure = attemptCleanup(cleanupFailure, createdGameSettings::close);
@@ -382,6 +397,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                 failure = attemptCleanup(failure, worlds::close);
                 failure = attemptCleanup(failure, resourcePacks::close);
                 failure = attemptCleanup(failure, mods::close);
+                @Nullable InstanceInstallerPanel currentInstallers = installers;
+                if (currentInstallers != null) {
+                    failure = attemptCleanup(failure, currentInstallers::close);
+                }
                 @Nullable InstanceGameSettingsPanel currentGameSettings = gameSettings;
                 if (currentGameSettings != null) {
                     failure = attemptCleanup(failure, currentGameSettings::close);
@@ -447,6 +466,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         if (currentGameSettings != null) {
             tabs.addTab(i18n("settings.game"), currentGameSettings);
         }
+        @Nullable InstanceInstallerPanel currentInstallers = installers;
+        if (currentInstallers != null) {
+            tabs.addTab(i18n("settings.tabs.installers"), currentInstallers);
+        }
         tabs.addTab(modStrings.title(), mods);
         tabs.addTab(resourcePackStrings.pageTitle(), resourcePacks);
         tabs.addTab(worlds.title(), worlds);
@@ -481,6 +504,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         }
         if (tabs.getSelectedComponent() == backups) {
             backups.activate();
+        }
+        @Nullable InstanceInstallerPanel currentInstallers = installers;
+        if (tabs.getSelectedComponent() == currentInstallers && currentInstallers != null) {
+            currentInstallers.activate();
         }
         @Nullable ModpackExportPanel currentModpackExport = modpackExport;
         if (tabs.getSelectedComponent() == currentModpackExport && currentModpackExport != null) {
