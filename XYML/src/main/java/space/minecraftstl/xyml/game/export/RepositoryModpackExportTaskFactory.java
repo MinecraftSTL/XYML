@@ -31,9 +31,9 @@ import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.Lang;
 
-import java.io.FileAlreadyExistsException;
-import java.io.FileSystemException;
 import java.io.IOException;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;

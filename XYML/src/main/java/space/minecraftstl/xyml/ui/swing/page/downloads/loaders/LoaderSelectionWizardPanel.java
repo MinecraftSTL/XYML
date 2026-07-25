@@ -39,6 +39,7 @@ import javax.swing.ListSelectionModel;
 import java.awt.Component;
 import java.awt.Font;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
