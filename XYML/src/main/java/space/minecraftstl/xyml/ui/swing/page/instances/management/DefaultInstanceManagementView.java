@@ -57,7 +57,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Hosts an instance overview alongside settings, add-on, world, backup, and schematic tools for one managed game instance.
+/// Hosts an instance overview alongside lifecycle, settings, add-on, world, backup, and schematic tools for one managed game instance.
 ///
 /// All tabs are constructed on the EDT, while their filesystem work remains lazy and uses the supplied
 /// executor. The view owns all child lifecycles and returns to the instance list through one shared toolbar.
@@ -68,6 +68,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
 
     /// Overview and local file operations owned by the first management tab.
     private final InstanceOverviewPanel overview;
+
+    /// Rename, duplicate, and delete controls when the repository exposes XYML lifecycle APIs, or null otherwise.
+    private final @Nullable InstanceLifecyclePanel lifecycle;
 
     /// Instance-specific launch settings when the repository exposes XYML settings persistence, or null otherwise.
     private final @Nullable InstanceGameSettingsPanel gameSettings;
@@ -163,6 +166,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         Objects.requireNonNull(returnCommand, "returnCommand");
 
         @Nullable InstanceOverviewPanel createdOverview = null;
+        @Nullable InstanceLifecyclePanel createdLifecycle = null;
         @Nullable InstanceGameSettingsPanel createdGameSettings = null;
         @Nullable ModCatalogPanel createdMods = null;
         @Nullable ResourcePackCatalogPanel createdResourcePacks = null;
@@ -174,6 +178,11 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         try {
             createdOverview = new InstanceOverviewPanel(repository, this.instanceId, executor);
             if (repository instanceof XYMLGameRepository xymlRepository) {
+                createdLifecycle = new InstanceLifecyclePanel(
+                        xymlRepository,
+                        this.instanceId,
+                        executor,
+                        returnCommand);
                 createdGameSettings = new InstanceGameSettingsPanel(xymlRepository, this.instanceId);
             }
             createdMods = new ModCatalogPanel(
@@ -209,6 +218,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     () -> { },
                     false);
             overview = createdOverview;
+            lifecycle = createdLifecycle;
             gameSettings = createdGameSettings;
             mods = createdMods;
             resourcePacks = createdResourcePacks;
@@ -248,6 +258,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             }
             if (createdGameSettings != null) {
                 cleanupFailure = attemptCleanup(cleanupFailure, createdGameSettings::close);
+            }
+            if (createdLifecycle != null) {
+                cleanupFailure = attemptCleanup(cleanupFailure, createdLifecycle::close);
             }
             if (createdOverview != null) {
                 cleanupFailure = attemptCleanup(cleanupFailure, createdOverview::close);
@@ -296,6 +309,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                 @Nullable InstanceGameSettingsPanel currentGameSettings = gameSettings;
                 if (currentGameSettings != null) {
                     failure = attemptCleanup(failure, currentGameSettings::close);
+                }
+                @Nullable InstanceLifecyclePanel currentLifecycle = lifecycle;
+                if (currentLifecycle != null) {
+                    failure = attemptCleanup(failure, currentLifecycle::close);
                 }
                 failure = attemptCleanup(failure, overview::close);
                 returnButton.setEnabled(false);
@@ -346,6 +363,10 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         tabs.setName("instanceManagementTabs");
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         tabs.addTab(overview.title(), overview);
+        @Nullable InstanceLifecyclePanel currentLifecycle = lifecycle;
+        if (currentLifecycle != null) {
+            tabs.addTab(currentLifecycle.title(), currentLifecycle);
+        }
         @Nullable InstanceGameSettingsPanel currentGameSettings = gameSettings;
         if (currentGameSettings != null) {
             tabs.addTab(i18n("settings.game"), currentGameSettings);
