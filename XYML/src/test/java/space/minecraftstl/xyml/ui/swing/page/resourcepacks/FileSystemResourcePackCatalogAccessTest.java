@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Proxy;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -236,9 +237,38 @@ public final class FileSystemResourcePackCatalogAccessTest {
                 () -> assertTrue(items.get(0).enabled()));
     }
 
-    /// Propagates malformed JSON, malformed UTF-8, and safe-save failures instead of guessing.
+    /// Preserves a detected legacy encoding while updating only the resource-pack option lines.
     @Test
-    public void rejectsUnreadableOrUnpersistableOptions() throws IOException {
+    public void preservesLegacyOptionsEncodingAndUnknownText() throws IOException {
+        Fixture fixture = fixture("legacy-options");
+        Path pack = createPackDirectory(
+                fixture.packDirectory().resolve("legacy-pack"),
+                15,
+                "Legacy");
+        Files.createDirectories(fixture.runDirectory());
+        Charset legacyEncoding = Charset.forName("GB18030");
+        String marker = "保留未知中文设置：资源包启用时不应破坏原始编码。".repeat(20);
+        String original = marker + "\r\n"
+                + "resourcePacks:[]\r\n"
+                + "incompatibleResourcePacks:[]\r\n";
+        Files.write(fixture.optionsFile(), original.getBytes(legacyEncoding));
+
+        ResourcePackCatalogMutationAccessResult result = fixture.access().mutateAndLoadIndex(
+                new ResourcePackEnabledMutation(pack.toAbsolutePath().normalize(), true),
+                new LoadCancellation(),
+                () -> { });
+        String persisted = new String(Files.readAllBytes(fixture.optionsFile()), legacyEncoding);
+
+        assertAll(
+                () -> assertEquals(null, result.mutationFailure()),
+                () -> assertTrue(persisted.startsWith(marker + "\r\n")),
+                () -> assertTrue(persisted.contains("resourcePacks:[\"file/legacy-pack\"]\r\n")),
+                () -> assertTrue(persisted.endsWith("incompatibleResourcePacks:[]\r\n")));
+    }
+
+    /// Propagates malformed JSON and safe-save failures instead of silently discarding them.
+    @Test
+    public void rejectsMalformedOrUnpersistableOptions() throws IOException {
         Fixture fixture = fixture("strict-options");
         Path pack = createPackDirectory(
                 fixture.packDirectory().resolve("strict-pack"),
@@ -250,11 +280,6 @@ public final class FileSystemResourcePackCatalogAccessTest {
                 "resourcePacks:[broken\nincompatibleResourcePacks:[]\n",
                 StandardCharsets.UTF_8);
         ResourcePackCatalogIndex index = fixture.access().loadIndex(new LoadCancellation());
-        assertThrows(
-                IOException.class,
-                () -> fixture.access().loadItems(index.paths(), new LoadCancellation()));
-
-        Files.write(fixture.optionsFile(), new byte[]{(byte) 0xC3, (byte) 0x28});
         assertThrows(
                 IOException.class,
                 () -> fixture.access().loadItems(index.paths(), new LoadCancellation()));

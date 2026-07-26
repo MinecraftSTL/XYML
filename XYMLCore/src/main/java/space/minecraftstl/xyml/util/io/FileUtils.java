@@ -25,6 +25,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFileAttributeView;
@@ -485,14 +487,25 @@ public final class FileUtils {
         return file.toAbsolutePath().resolveSibling("." + file.getFileName().toString() + ".tmp");
     }
 
+    /// Saves UTF-8 text through a same-directory temporary file and atomic replacement boundary.
     public static void saveSafely(Path file, String content) throws IOException {
+        saveSafely(file, content, StandardCharsets.UTF_8);
+    }
+
+    /// Saves text using the requested encoding, falling back to UTF-8 when no encoding was detected.
+    ///
+    /// @param file destination path
+    /// @param content complete text to write
+    /// @param charset detected source encoding, or null to use UTF-8
+    /// @throws IOException when temporary output or replacement fails
+    public static void saveSafely(Path file, String content, @Nullable Charset charset) throws IOException {
         Path parent = file.toAbsolutePath().getParent();
         if (parent != null) {
             Files.createDirectories(parent);
         }
 
         Path tmpFile = tmpSaveFile(file);
-        try (BufferedWriter writer = Files.newBufferedWriter(tmpFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE)) {
+        try (BufferedWriter writer = Files.newBufferedWriter(tmpFile, charset != null ? charset : StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE)) {
             writer.write(content);
         }
 
