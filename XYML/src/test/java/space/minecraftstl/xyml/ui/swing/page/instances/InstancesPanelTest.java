@@ -390,8 +390,10 @@ public final class InstancesPanelTest {
         InstancesPanel emptyPanel = onEventDispatchThread(
                 () -> new InstancesPanel(empty, STRINGS, emptyCoordinator));
         onEventDispatchThread(() -> {
-            Component emptyLabel = findComponent(emptyPanel, "instancesEmpty");
-            assertTrue(emptyLabel.isVisible());
+            AbstractButton emptyAction = findButton(emptyPanel, "instancesEmpty");
+            assertTrue(emptyAction.isVisible());
+            emptyAction.doClick();
+            assertEquals(1, empty.additions.get());
             emptyPanel.close();
             emptyCoordinator.close();
         });

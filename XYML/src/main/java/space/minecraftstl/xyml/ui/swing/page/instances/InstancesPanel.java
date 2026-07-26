@@ -109,6 +109,9 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
     /// Add-instance command.
     private final JButton addButton = new JButton();
 
+    /// Empty-state command that opens the same new-instance workflow.
+    private final JButton emptyButton = new JButton();
+
     /// Manage-selected-instance command.
     private final JButton manageButton = new JButton();
 
@@ -368,11 +371,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
 
         addButton.setName("instancesAdd");
         addButton.setText(strings.addAction());
-        addButton.addActionListener(event -> {
-            if (!closed) {
-                model.addInstance();
-            }
-        });
+        addButton.addActionListener(event -> requestAddInstance());
         toolbar.add(addButton, "h 40!");
         instancesWorkspace.setName("instancesListWorkspace");
         managementWorkspace.setName("instancesManagementHost");
@@ -395,12 +394,17 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         });
         choiceList.getChoiceModel().addListDataListener(listDataListener);
 
-        JLabel emptyLabel = new JLabel(strings.emptyText(), SwingConstants.CENTER);
-        emptyLabel.setName("instancesEmpty");
+        emptyButton.setName("instancesEmpty");
+        emptyButton.setText(strings.emptyText());
+        emptyButton.setBorderPainted(false);
+        emptyButton.setContentAreaFilled(false);
+        emptyButton.setFocusPainted(false);
+        emptyButton.setOpaque(false);
+        emptyButton.addActionListener(event -> requestAddInstance());
         JLabel noSearchResultsLabel = new JLabel(strings.noSearchResultsText(), SwingConstants.CENTER);
         noSearchResultsLabel.setName("instancesNoSearchResults");
         listCards.add(choiceList, LIST_CARD);
-        listCards.add(emptyLabel, EMPTY_CARD);
+        listCards.add(emptyButton, EMPTY_CARD);
         listCards.add(noSearchResultsLabel, NO_SEARCH_RESULTS_CARD);
         instancesWorkspace.add(listCards, "grow");
 
@@ -486,6 +490,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
                 : strings.refreshAction());
         refreshButton.setEnabled(snapshot.refreshEnabled());
         addButton.setEnabled(snapshot.addEnabled());
+        emptyButton.setEnabled(snapshot.addEnabled());
         manageButton.setEnabled(snapshot.manageEnabled()
                 && visibleSelectedIndex.isPresent()
                 && pendingUserSelectionIndex < 0
@@ -595,6 +600,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         searchField.setEnabled(false);
         refreshButton.setEnabled(false);
         addButton.setEnabled(false);
+        emptyButton.setEnabled(false);
         manageButton.setEnabled(false);
 
         @Nullable Throwable failure = null;
@@ -609,6 +615,13 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         failure = attempt(failure, choiceList::close);
         if (failure != null) {
             rethrowUnchecked(failure);
+        }
+    }
+
+    /// Opens the shared new-instance workflow only while this panel remains active.
+    private void requestAddInstance() {
+        if (!closed) {
+            model.addInstance();
         }
     }
 
