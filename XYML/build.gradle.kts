@@ -226,16 +226,142 @@ tasks.shadowJar {
     }
 }
 
-val requiredOfflineUiEntries = listOf(
+val requiredOfflineLibraryEntries = listOf(
     "com/formdev/flatlaf/FlatLaf.class",
     "com/formdev/flatlaf/FlatLaf.properties",
     "com/formdev/flatlaf/FlatLightLaf.properties",
     "com/formdev/flatlaf/FlatDarkLaf.properties",
     "com/formdev/flatlaf/extras/FlatSVGIcon.class",
     "com/github/weisj/jsvg/SVGDocument.class",
+    "com/google/gson/Gson.class",
+    "com/google/gson/GsonBuilder.class",
+    "com/google/gson/reflect/TypeToken.class",
+    "com/google/gson/stream/JsonReader.class",
     "net/miginfocom/layout/LC.class",
     "net/miginfocom/swing/MigLayout.class",
+    "net/jpountz/lz4/LZ4BlockInputStream.class",
+    "net/jpountz/lz4/LZ4Factory.class",
+    "org/glavo/nbt/NBTElement.class",
+    "org/glavo/nbt/chunk/ChunkRegion.class",
+    "org/glavo/nbt/io/NBTCodec.class",
+    "org/glavo/nbt/tag/CompoundTag.class",
 )
+
+val requiredOfflineSwingIconEntries = listOf(
+    "add.svg",
+    "arrow-back.svg",
+    "arrow-forward.svg",
+    "create-new-folder.svg",
+    "content-copy.svg",
+    "delete.svg",
+    "delete-forever.svg",
+    "file-import.svg",
+    "folder-open.svg",
+    "format-list-bulleted.svg",
+    "image.svg",
+    "nav-accounts.svg",
+    "nav-downloads.svg",
+    "nav-home.svg",
+    "nav-instances.svg",
+    "nav-settings.svg",
+    "open-in-new.svg",
+    "output.svg",
+    "refresh.svg",
+    "restore.svg",
+    "rocket-launch.svg",
+    "save.svg",
+    "script.svg",
+).map { "assets/swing/icons/$it" }
+
+val requiredOfflineInstanceIconEntries = listOf(
+    "april_fools",
+    "chest",
+    "chicken",
+    "cleanroom",
+    "command",
+    "craft_table",
+    "fabric",
+    "forge",
+    "furnace",
+    "grass",
+    "legacyfabric",
+    "neoforge",
+    "optifine",
+    "quilt",
+).map { "assets/img/$it@2x.png" }
+
+val requiredOfflineNbtIconEntries = listOf(
+    "TAG_Byte.png",
+    "TAG_Byte_Array.png",
+    "TAG_Compound.png",
+    "TAG_Double.png",
+    "TAG_Float.png",
+    "TAG_Int.png",
+    "TAG_Int_Array.png",
+    "TAG_List.png",
+    "TAG_Long.png",
+    "TAG_Long_Array.png",
+    "TAG_Short.png",
+    "TAG_String.png",
+).map { "assets/img/nbt/$it" }
+
+val requiredOfflineThemeEntries = listOf(
+    "assets/themes/hmcl.classic/manifest.json",
+    "assets/themes/hmcl.default/manifest.json",
+    "assets/themes/hmcl.default/assets/background-dark.png",
+    "assets/themes/hmcl.default/assets/background-light.png",
+)
+
+val requiredOfflineSkinEntries = listOf(
+    "alex",
+    "ari",
+    "efe",
+    "kai",
+    "makena",
+    "noor",
+    "steve",
+    "sunny",
+    "zuri",
+).flatMap { name ->
+    listOf(
+        "assets/img/skin/slim/$name.png",
+        "assets/img/skin/wide/$name.png",
+    )
+}
+
+val requiredOfflineSwingFeatureEntries = listOf(
+    "space/minecraftstl/xyml/ui/swing/application/SwingApplicationComposition.class",
+    "space/minecraftstl/xyml/ui/swing/page/accounts/AccountListCellRenderer.class",
+    "space/minecraftstl/xyml/ui/swing/page/accounts/OfflineSkinPreviewPanel.class",
+    "space/minecraftstl/xyml/ui/swing/page/accounts/SwingOfflineSkinManagementDialog.class",
+    "space/minecraftstl/xyml/ui/swing/page/accounts/SwingOnlineSkinUploadDialog.class",
+    "space/minecraftstl/xyml/ui/swing/page/downloads/WorldDownloadPanel.class",
+    "space/minecraftstl/xyml/ui/swing/page/downloads/SwingRemoteWorldSaveTargetResolver.class",
+    "space/minecraftstl/xyml/ui/swing/page/instances/importing/InstanceJsonImportPanel.class",
+    "space/minecraftstl/xyml/ui/swing/page/instances/importing/RepositoryInstanceJsonImportService.class",
+    "space/minecraftstl/xyml/ui/swing/page/instances/importing/SwingInstanceJsonImportLauncher.class",
+    "space/minecraftstl/xyml/ui/swing/page/instances/management/maintenance/InstanceMaintenancePanel.class",
+    "space/minecraftstl/xyml/ui/swing/page/instances/management/worlds/WorldQuickPlayActions.class",
+    "space/minecraftstl/xyml/ui/swing/page/nbt/SwingNBTEditorDialog.class",
+    "space/minecraftstl/xyml/ui/swing/page/settings/JavaRuntimeAcquisitionPanel.class",
+    "space/minecraftstl/xyml/ui/swing/page/settings/theme/LegacyThemeRuntimeController.class",
+    "space/minecraftstl/xyml/ui/swing/page/settings/theme/ThemePackManagementPanel.class",
+)
+
+val requiredOfflineUiEntries = buildList {
+    addAll(requiredOfflineLibraryEntries)
+    addAll(requiredOfflineSwingIconEntries)
+    addAll(requiredOfflineInstanceIconEntries)
+    addAll(requiredOfflineNbtIconEntries)
+    addAll(requiredOfflineThemeEntries)
+    addAll(requiredOfflineSkinEntries)
+    addAll(requiredOfflineSwingFeatureEntries)
+}
+
+fun findMissingOrEmptyOfflineEntries(jar: ZipFile): List<String> = requiredOfflineUiEntries.filter { name ->
+    val entry = jar.getEntry(name)
+    entry == null || entry.isDirectory || entry.size <= 0L
+}
 
 val forbiddenRuntimePatcherEntries = listOf(
     "assets/openjfx-dependencies.json",
@@ -265,16 +391,16 @@ fun findForbiddenLegacyUiEntries(jar: ZipFile): List<String> = jar.entries().asS
 
 val verifyOfflineUiArtifact = tasks.register("verifyOfflineUiArtifact") {
     group = "verification"
-    description = "Verifies that pure-Java Swing UI dependencies are embedded in the launcher artifact."
+    description = "Verifies that Swing runtime dependencies and feature resources are embedded in the launcher artifact."
 
     dependsOn(tasks.shadowJar)
     inputs.file(jarPath)
 
     doLast {
         ZipFile(jarPath).use { jar ->
-            val missingEntries = requiredOfflineUiEntries.filter { jar.getEntry(it) == null }
+            val missingEntries = findMissingOrEmptyOfflineEntries(jar)
             if (missingEntries.isNotEmpty()) {
-                throw GradleException("Missing offline UI entries: ${missingEntries.joinToString()}")
+                throw GradleException("Missing or empty offline runtime entries: ${missingEntries.joinToString()}")
             }
             val forbiddenEntries = findForbiddenLegacyUiEntries(jar)
             if (forbiddenEntries.isNotEmpty()) {
@@ -584,9 +710,11 @@ val verifyPackagedRuntime = tasks.register("verifyPackagedRuntime") {
             throw GradleException("Packaged app-image does not contain the staged shadow JAR")
         }
         ZipFile(packagedJar).use { jar ->
-            val missingEntries = requiredOfflineUiEntries.filter { jar.getEntry(it) == null }
+            val missingEntries = findMissingOrEmptyOfflineEntries(jar)
             if (missingEntries.isNotEmpty()) {
-                throw GradleException("Packaged app-image is missing offline dependencies: ${missingEntries.joinToString()}")
+                throw GradleException(
+                    "Packaged app-image has missing or empty offline runtime entries: ${missingEntries.joinToString()}"
+                )
             }
             val forbiddenEntries = findForbiddenLegacyUiEntries(jar)
             if (forbiddenEntries.isNotEmpty()) {
