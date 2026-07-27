@@ -24,10 +24,14 @@ import space.minecraftstl.xyml.event.EventBus;
 import space.minecraftstl.xyml.event.EventManager;
 import space.minecraftstl.xyml.event.RefreshedVersionsEvent;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.image.InstanceIconData;
+import space.minecraftstl.xyml.image.InstanceIconLoader;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.setting.GameSettings;
+import space.minecraftstl.xyml.setting.VersionIconType;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -83,6 +87,9 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
 
     /// Cancellable selected-instance registration for this repository.
     private final Subscription selectionSubscription;
+
+    /// Cancellable icon-change registration for this repository.
+    private final Subscription iconEventSubscription;
 
     /// Active model-owned refresh, or null while idle or awaiting an external initial scan.
     private @Nullable RefreshOperation activeRefresh;
@@ -152,6 +159,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
                 false));
         refreshEventSubscription = refreshedVersionsEvents.subscribe(this::repositoryRefreshed);
         selectionSubscription = repository.subscribeSelectedInstance(this::selectionChanged);
+        iconEventSubscription = repository.subscribeIconChanges(this::iconsChanged);
 
         if (repository.isLoaded()) {
             replaceInitialRepositoryContent();
@@ -314,6 +322,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         }
         refreshEventSubscription.unsubscribe();
         selectionSubscription.unsubscribe();
+        iconEventSubscription.unsubscribe();
     }
 
     /// Runs one model-owned blocking refresh only while its operation remains active.
@@ -348,7 +357,9 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             checkLoadActive(cancellation);
             RepositoryEntry entry = requestSource.entries().get(index);
             String detail = entry.resolveGameVersion().orElse(statusStrings.unknownVersionDetail());
-            items.add(new InstanceListItem(entry.id(), entry.id(), detail));
+            checkLoadActive(cancellation);
+            InstanceIconData icon = repository.resolveIcon(entry.id());
+            items.add(new InstanceListItem(entry.id(), entry.id(), detail, icon));
         }
         checkLoadActive(cancellation);
         return new ChoicePage<>(
@@ -399,6 +410,38 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
                     previous.addEnabled(),
                     !previous.refreshing() && selectedIndex.isPresent());
             state = new ModelState(current.source(), replacement);
+        }
+        publish(previous, replacement);
+    }
+
+    /// Publishes a fresh content revision after the repository changes any instance icon.
+    ///
+    /// The ordered descriptor list and selection remain unchanged. Incrementing only the content revision lets
+    /// [InstancesPanel] invalidate its sparse rows, after which the viewport model resolves icons for the measured
+    /// visible range instead of eagerly decoding every installed instance.
+    private void iconsChanged() {
+        InstancesSnapshot previous;
+        InstancesSnapshot replacement;
+        synchronized (stateLock) {
+            if (closed) {
+                return;
+            }
+            ModelState current = state;
+            SourceSnapshot source = new SourceSnapshot(
+                    current.source().contentRevision() + 1L,
+                    current.source().entries());
+            previous = current.snapshot();
+            replacement = new InstancesSnapshot(
+                    previous.selectedIndex(),
+                    previous.itemCount(),
+                    source.contentRevision(),
+                    previous.statusText(),
+                    previous.refreshing(),
+                    previous.listEnabled(),
+                    previous.refreshEnabled(),
+                    previous.addEnabled(),
+                    previous.manageEnabled());
+            state = new ModelState(source, replacement);
         }
         publish(previous, replacement);
     }
@@ -794,6 +837,21 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         /// @return independently cancellable listener registration
         Subscription subscribeSelectedInstance(ValueChangeListener<String> listener);
 
+        /// Registers for repository-confirmed instance-icon transitions.
+        ///
+        /// @param listener no-argument icon transition listener
+        /// @return independently cancellable listener registration
+        Subscription subscribeIconChanges(Runnable listener);
+
+        /// Resolves one normalized icon for a viewport-demanded instance row.
+        ///
+        /// This method may perform filesystem and image-decoding work and therefore runs only on the model's
+        /// caller-owned background executor.
+        ///
+        /// @param instanceId stable instance ID
+        /// @return immutable normalized icon pixels
+        InstanceIconData resolveIcon(String instanceId);
+
         /// Persists the selected stable instance ID.
         ///
         /// @param instanceId stable instance ID
@@ -852,6 +910,33 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         @Override
         public Subscription subscribeSelectedInstance(ValueChangeListener<String> listener) {
             return repository.subscribeSelectedInstance(listener);
+        }
+
+        /// Registers for this repository's instance-icon transitions.
+        ///
+        /// @param listener no-argument icon transition listener
+        /// @return independently cancellable listener registration
+        @Override
+        public Subscription subscribeIconChanges(Runnable listener) {
+            return repository.onVersionIconChanged.subscribe(listener);
+        }
+
+        /// Resolves custom or configured bundled icon pixels for one demanded row.
+        ///
+        /// @param instanceId stable instance ID
+        /// @return immutable normalized icon pixels
+        @Override
+        public InstanceIconData resolveIcon(String instanceId) {
+            @Nullable GameSettings.Instance settings = repository.getInstanceGameSettings(instanceId);
+            @Nullable VersionIconType configuredType = settings == null
+                    ? null
+                    : settings.iconProperty().getValue();
+            VersionIconType builtInType = configuredType == null
+                    ? VersionIconType.DEFAULT
+                    : configuredType;
+            @Nullable java.nio.file.Path customIcon = repository.getVersionIconFile(instanceId)
+                    .orElse(null);
+            return InstanceIconLoader.load(builtInType, customIcon);
         }
 
         /// Queues one selected repository instance ID on the Swing event thread.

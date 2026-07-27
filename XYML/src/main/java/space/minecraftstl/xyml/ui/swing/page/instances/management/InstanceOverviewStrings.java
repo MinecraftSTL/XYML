@@ -31,13 +31,15 @@ final class InstanceOverviewStrings {
             "Instance name",
             "Instance folder",
             "Game folder",
+            "Current instance icon",
             "Loading...",
             "Open instance folder",
             "Open game folder",
             "Refresh instance information",
-            "Choose custom instance icon",
+            "Choose instance icon",
             "Remove custom instance icon",
             "Choose instance icon",
+            "Choose custom image",
             "Image files",
             "Remove the custom icon for \"%s\"?",
             "Remove custom icon",
@@ -54,6 +56,9 @@ final class InstanceOverviewStrings {
 
     /// Label for the effective game running directory.
     private final String gameDirectoryLabel;
+
+    /// Assistive name for the fixed-size active icon preview.
+    private final String iconPreviewAccessibleName;
 
     /// Initial value shown while directory metadata is loading.
     private final String loadingValue;
@@ -76,6 +81,9 @@ final class InstanceOverviewStrings {
     /// Title for the custom-icon file chooser.
     private final String iconChooserTitle;
 
+    /// Assistive text for the dialog's custom-image entry.
+    private final String customIconTooltip;
+
     /// File-filter description for supported icon images.
     private final String imageFileDescription;
 
@@ -94,6 +102,7 @@ final class InstanceOverviewStrings {
     /// @param instanceNameLabel instance identifier label
     /// @param instanceRootLabel instance-root directory label
     /// @param gameDirectoryLabel effective game directory label
+    /// @param iconPreviewAccessibleName active icon preview assistive name
     /// @param loadingValue initial loading value
     /// @param openInstanceDirectoryTooltip instance-directory tooltip
     /// @param openGameDirectoryTooltip game-directory tooltip
@@ -101,6 +110,7 @@ final class InstanceOverviewStrings {
     /// @param chooseIconTooltip custom-icon chooser tooltip
     /// @param deleteIconTooltip custom-icon deletion tooltip
     /// @param iconChooserTitle chooser title
+    /// @param customIconTooltip custom-image entry tooltip
     /// @param imageFileDescription image-file filter description
     /// @param deleteIconConfirmationFormat deletion confirmation format
     /// @param deleteIconTitle deletion confirmation title
@@ -110,6 +120,7 @@ final class InstanceOverviewStrings {
             String instanceNameLabel,
             String instanceRootLabel,
             String gameDirectoryLabel,
+            String iconPreviewAccessibleName,
             String loadingValue,
             String openInstanceDirectoryTooltip,
             String openGameDirectoryTooltip,
@@ -117,6 +128,7 @@ final class InstanceOverviewStrings {
             String chooseIconTooltip,
             String deleteIconTooltip,
             String iconChooserTitle,
+            String customIconTooltip,
             String imageFileDescription,
             String deleteIconConfirmationFormat,
             String deleteIconTitle,
@@ -125,6 +137,9 @@ final class InstanceOverviewStrings {
         this.instanceNameLabel = requireNonBlank(instanceNameLabel, "instanceNameLabel");
         this.instanceRootLabel = requireNonBlank(instanceRootLabel, "instanceRootLabel");
         this.gameDirectoryLabel = requireNonBlank(gameDirectoryLabel, "gameDirectoryLabel");
+        this.iconPreviewAccessibleName = requireNonBlank(
+                iconPreviewAccessibleName,
+                "iconPreviewAccessibleName");
         this.loadingValue = requireNonBlank(loadingValue, "loadingValue");
         this.openInstanceDirectoryTooltip = requireNonBlank(
                 openInstanceDirectoryTooltip,
@@ -134,6 +149,7 @@ final class InstanceOverviewStrings {
         this.chooseIconTooltip = requireNonBlank(chooseIconTooltip, "chooseIconTooltip");
         this.deleteIconTooltip = requireNonBlank(deleteIconTooltip, "deleteIconTooltip");
         this.iconChooserTitle = requireNonBlank(iconChooserTitle, "iconChooserTitle");
+        this.customIconTooltip = requireNonBlank(customIconTooltip, "customIconTooltip");
         this.imageFileDescription = requireNonBlank(imageFileDescription, "imageFileDescription");
         this.deleteIconConfirmationFormat = requireNonBlank(
                 deleteIconConfirmationFormat,
@@ -175,6 +191,13 @@ final class InstanceOverviewStrings {
     /// @return non-blank label
     String gameDirectoryLabel() {
         return gameDirectoryLabel;
+    }
+
+    /// Returns the active icon preview's assistive name.
+    ///
+    /// @return non-blank accessible name
+    String iconPreviewAccessibleName() {
+        return iconPreviewAccessibleName;
     }
 
     /// Returns the loading placeholder text.
@@ -224,6 +247,13 @@ final class InstanceOverviewStrings {
     /// @return non-blank dialog title
     String iconChooserTitle() {
         return iconChooserTitle;
+    }
+
+    /// Returns the custom-image tile tooltip.
+    ///
+    /// @return non-blank tooltip
+    String customIconTooltip() {
+        return customIconTooltip;
     }
 
     /// Returns the supported-image file filter description.

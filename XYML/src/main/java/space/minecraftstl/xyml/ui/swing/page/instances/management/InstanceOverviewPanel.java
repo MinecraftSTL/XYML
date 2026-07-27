@@ -21,13 +21,12 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.event.Event;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
-import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.VersionIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
@@ -35,6 +34,8 @@ import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+import java.awt.Color;
 import java.awt.Font;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -46,9 +47,8 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Shows one managed instance's identity and resolved local directories with real file operations.
 ///
-/// Directory discovery, repository refresh, and custom-icon copying execute off the EDT. The panel
-/// exposes custom icon controls only when backed by `XYMLGameRepository`, whose persistent icon API
-/// is the same one used by the former launcher UI.
+/// Directory discovery, repository refresh, image decoding, and icon persistence execute off the EDT.
+/// The fixed-size preview and icon controls are enabled only when a persistent icon store is available.
 @NotNullByDefault
 public final class InstanceOverviewPanel extends JPanel implements AutoCloseable {
     /// Repository providing the instance's root and effective running directories.
@@ -56,6 +56,9 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
 
     /// XYML repository providing persistent custom-icon operations, or `null` for a generic repository.
     private final @Nullable XYMLGameRepository xymlRepository;
+
+    /// Persistent icon boundary, or `null` when the repository does not support instance icons.
+    private final @Nullable InstanceIconStore iconStore;
 
     /// Stable identifier of the instance represented by this panel.
     private final String instanceId;
@@ -71,6 +74,9 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
 
     /// Visible immutable instance identifier.
     private final JLabel instanceNameValue = new JLabel();
+
+    /// Fixed-size preview of the active custom or bundled instance icon.
+    private final JLabel iconPreview = new IconPreviewLabel();
 
     /// Read-only field containing the version-root directory after loading.
     private final JTextField instanceRootValue = new JTextField();
@@ -93,7 +99,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// Refreshes the repository and recalculates displayed metadata.
     private final JButton refreshButton = new JButton();
 
-    /// Opens the chooser for a custom per-instance image.
+    /// Opens the complete bundled and custom per-instance icon chooser.
     private final JButton chooseIconButton = new JButton();
 
     /// Deletes the stored custom per-instance image after confirmation.
@@ -135,6 +141,30 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
             Executor executor,
             InstanceOverviewStrings strings,
             InstanceOverviewInteractions interactions) {
+        this(
+                repository,
+                instanceId,
+                executor,
+                strings,
+                interactions,
+                createIconStore(repository, instanceId));
+    }
+
+    /// Creates an overview with an explicit icon store for focused persistence and preview testing.
+    ///
+    /// @param repository repository containing the managed instance
+    /// @param instanceId stable non-blank instance identifier
+    /// @param executor caller-owned executor for repository operations
+    /// @param strings stable visible text
+    /// @param interactions Swing and desktop interaction boundary
+    /// @param iconStore persistent icon boundary, or `null` when unsupported
+    InstanceOverviewPanel(
+            GameRepository repository,
+            String instanceId,
+            Executor executor,
+            InstanceOverviewStrings strings,
+            InstanceOverviewInteractions interactions,
+            @Nullable InstanceIconStore iconStore) {
         super(new MigLayout(
                 "insets 16, fillx, wrap 3",
                 "[][grow,fill][40!]",
@@ -142,6 +172,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         EdtDispatcher.requireEventDispatchThread();
         this.repository = Objects.requireNonNull(repository, "repository");
         this.xymlRepository = this.repository instanceof XYMLGameRepository candidate ? candidate : null;
+        this.iconStore = iconStore;
         this.instanceId = requireNonBlank(instanceId, "instanceId");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.strings = Objects.requireNonNull(strings, "strings");
@@ -174,6 +205,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         EdtDispatcher.executeAndWait(() -> {
             snapshot = null;
             instanceNameValue.setText("");
+            iconPreview.setIcon(null);
             instanceRootValue.setText("");
             gameDirectoryValue.setText("");
             updateActionState();
@@ -189,12 +221,18 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         JLabel title = new JLabel(strings.title());
         title.setName("instanceOverviewTitle");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 18.0F));
-        add(title, "span 3, growx");
+        add(title, "span 2, growx");
+
+        iconPreview.setName("instanceOverviewIconPreview");
+        iconPreview.setHorizontalAlignment(JLabel.CENTER);
+        iconPreview.setVerticalAlignment(JLabel.CENTER);
+        iconPreview.getAccessibleContext().setAccessibleName(strings.iconPreviewAccessibleName());
+        add(iconPreview, "w 40!, h 40!, spany 2");
 
         instanceNameValue.setName("instanceOverviewName");
         instanceNameValue.setText(instanceId);
         add(createLabel(strings.instanceNameLabel()), "aligny center");
-        add(instanceNameValue, "span 2, growx");
+        add(instanceNameValue, "growx");
 
         configureReadOnlyPathField(instanceRootValue, "instanceOverviewRootDirectory");
         configureCommand(
@@ -231,7 +269,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
                 chooseIconButton,
                 "instanceOverviewChooseIcon",
                 strings.chooseIconTooltip(),
-                "assets/swing/icons/file-import.svg",
+                "assets/swing/icons/image.svg",
                 this::chooseIcon);
         configureCommand(
                 deleteIconButton,
@@ -298,6 +336,18 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         button.addActionListener(event -> action.run());
     }
 
+    /// Creates the production icon adapter only for repositories that expose persistent icon APIs.
+    ///
+    /// @param repository candidate repository
+    /// @param instanceId target instance identifier
+    /// @return repository-backed icon store, or `null` when icons are unsupported
+    private static @Nullable InstanceIconStore createIconStore(GameRepository repository, String instanceId) {
+        if (repository instanceof XYMLGameRepository xymlRepository) {
+            return new RepositoryInstanceIconStore(xymlRepository, instanceId);
+        }
+        return null;
+    }
+
     /// Starts a background metadata read, optionally refreshing the repository before reading paths.
     ///
     /// @param refreshRepository whether to rescan the repository first
@@ -338,7 +388,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
 
     /// Resolves one complete metadata snapshot on the caller-owned background executor.
     ///
-    /// @return resolved instance paths and custom-icon availability
+    /// @return resolved instance paths, persisted icon identity, and decoded 40-pixel preview
     private InstanceSnapshot readSnapshot() {
         Path instanceRoot = Objects.requireNonNull(repository.getVersionRoot(instanceId), "instance root")
                 .toAbsolutePath()
@@ -346,10 +396,15 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         Path gameDirectory = Objects.requireNonNull(repository.getRunDirectory(instanceId), "game directory")
                 .toAbsolutePath()
                 .normalize();
-        @Nullable XYMLGameRepository localXymlRepository = xymlRepository;
-        boolean hasCustomIcon = localXymlRepository != null
-                && localXymlRepository.getVersionIconFile(instanceId).isPresent();
-        return new InstanceSnapshot(instanceRoot, gameDirectory, hasCustomIcon);
+        @Nullable InstanceIconStore localIconStore = iconStore;
+        InstanceIconStore.Snapshot iconState = localIconStore != null
+                ? localIconStore.load()
+                : new InstanceIconStore.Snapshot(VersionIconType.DEFAULT, null);
+        if (localIconStore != null) {
+            InstanceIconImages.preloadBuiltIns();
+        }
+        ImageIcon preview = InstanceIconImages.load(iconState, 40);
+        return new InstanceSnapshot(instanceRoot, gameDirectory, iconState, preview);
     }
 
     /// Applies a completed metadata load on the EDT.
@@ -379,6 +434,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         instanceRootValue.setToolTipText(loadedSnapshot.instanceRoot().toString());
         gameDirectoryValue.setText(loadedSnapshot.gameDirectory().toString());
         gameDirectoryValue.setToolTipText(loadedSnapshot.gameDirectory().toString());
+        iconPreview.setIcon(loadedSnapshot.iconPreview());
         updateActionState();
     }
 
@@ -481,31 +537,42 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         requestSnapshot(true);
     }
 
-    /// Shows the custom icon chooser and copies an accepted image through the persistent repository API.
+    /// Shows the complete icon chooser and persists the selected bundled type or custom image.
     private void chooseIcon() {
         EdtDispatcher.requireEventDispatchThread();
-        @Nullable XYMLGameRepository localXymlRepository = xymlRepository;
+        @Nullable InstanceIconStore localIconStore = iconStore;
         @Nullable InstanceSnapshot currentSnapshot = snapshot;
-        if (localXymlRepository == null || currentSnapshot == null || closed.get()) {
+        if (localIconStore == null || currentSnapshot == null || closed.get()) {
             return;
         }
-        @Nullable Path iconFile = interactions.chooseIcon(this, currentSnapshot.instanceRoot());
-        if (iconFile == null) {
+        InstanceIconStore.Snapshot iconState = currentSnapshot.iconState();
+        @Nullable InstanceIconChoice choice = interactions.chooseInstanceIcon(
+                this,
+                iconState.builtInType(),
+                iconState.customImage() != null,
+                currentSnapshot.instanceRoot());
+        if (choice == null) {
             return;
         }
-        submitRepositoryOperation(
-                () -> localXymlRepository.setVersionIconFile(instanceId, iconFile),
-                () -> customIconChanged(localXymlRepository));
+        if (choice instanceof InstanceIconChoice.BuiltIn builtIn) {
+            submitRepositoryOperation(
+                    () -> localIconStore.selectBuiltIn(builtIn.iconType()),
+                    () -> iconChanged(localIconStore));
+        } else if (choice instanceof InstanceIconChoice.Custom custom) {
+            submitRepositoryOperation(
+                    () -> localIconStore.selectCustom(custom.file()),
+                    () -> iconChanged(localIconStore));
+        }
     }
 
     /// Confirms and deletes the stored custom icon through the persistent repository API.
     private void deleteIcon() {
         EdtDispatcher.requireEventDispatchThread();
-        @Nullable XYMLGameRepository localXymlRepository = xymlRepository;
+        @Nullable InstanceIconStore localIconStore = iconStore;
         @Nullable InstanceSnapshot currentSnapshot = snapshot;
-        if (localXymlRepository == null
+        if (localIconStore == null
                 || currentSnapshot == null
-                || !currentSnapshot.hasCustomIcon()
+                || currentSnapshot.iconState().customImage() == null
                 || closed.get()) {
             return;
         }
@@ -513,13 +580,8 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
             return;
         }
         submitRepositoryOperation(
-                () -> {
-                    localXymlRepository.deleteIconFile(instanceId);
-                    if (localXymlRepository.getVersionIconFile(instanceId).isPresent()) {
-                        throw new IllegalStateException("The custom icon could not be removed");
-                    }
-                },
-                () -> customIconDeleted(localXymlRepository));
+                localIconStore::deleteCustom,
+                () -> iconChanged(localIconStore));
     }
 
     /// Runs one repository mutation outside the EDT and posts its terminal state to the panel.
@@ -557,23 +619,11 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         }
     }
 
-    /// Persists the default built-in icon setting and publishes a custom-icon replacement.
+    /// Publishes a successful icon transition and reloads its persisted 40-pixel preview.
     ///
-    /// @param iconRepository repository that accepted the custom icon
-    private void customIconChanged(XYMLGameRepository iconRepository) {
-        @Nullable GameSettings.Instance settings = iconRepository.getInstanceGameSettingsOrCreate(instanceId);
-        if (settings != null) {
-            settings.iconProperty().setValue(VersionIconType.DEFAULT);
-        }
-        iconRepository.onVersionIconChanged.fireEvent(new Event(this));
-        requestSnapshot(false);
-    }
-
-    /// Publishes custom-icon removal and reloads icon availability.
-    ///
-    /// @param iconRepository repository that removed the custom icon
-    private void customIconDeleted(XYMLGameRepository iconRepository) {
-        iconRepository.onVersionIconChanged.fireEvent(new Event(this));
+    /// @param changedIconStore persistent store that completed the transition
+    private void iconChanged(InstanceIconStore changedIconStore) {
+        changedIconStore.publishChanged(this);
         requestSnapshot(false);
     }
 
@@ -616,19 +666,19 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         boolean idle = !closed.get() && !operationPending.get();
         @Nullable InstanceSnapshot currentSnapshot = snapshot;
         boolean hasSnapshot = currentSnapshot != null;
-        boolean supportsCustomIcons = xymlRepository != null;
+        boolean supportsIcons = iconStore != null;
 
         refreshButton.setEnabled(idle);
         openInstanceDirectoryButton.setEnabled(idle && hasSnapshot);
         openGameDirectoryButton.setEnabled(idle && hasSnapshot);
         exploreDirectoriesButton.setEnabled(idle && hasSnapshot);
-        chooseIconButton.setVisible(supportsCustomIcons);
-        chooseIconButton.setEnabled(idle && hasSnapshot && supportsCustomIcons);
-        deleteIconButton.setVisible(supportsCustomIcons);
+        chooseIconButton.setVisible(supportsIcons);
+        chooseIconButton.setEnabled(idle && hasSnapshot && supportsIcons);
+        deleteIconButton.setVisible(supportsIcons);
         deleteIconButton.setEnabled(idle
                 && hasSnapshot
-                && supportsCustomIcons
-                && Objects.requireNonNull(currentSnapshot, "snapshot").hasCustomIcon());
+                && supportsIcons
+                && Objects.requireNonNull(currentSnapshot, "snapshot").iconState().customImage() != null);
     }
 
     /// Shows one terminal operation failure without leaking a null or blank message to the UI.
@@ -676,12 +726,32 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     ///
     /// @param instanceRoot resolved version-root directory
     /// @param gameDirectory resolved effective game running directory
-    /// @param hasCustomIcon whether an image file is stored for this instance
-    private record InstanceSnapshot(Path instanceRoot, Path gameDirectory, boolean hasCustomIcon) {
+    /// @param iconState persisted custom and bundled icon identity
+    /// @param iconPreview exact-size decoded Swing preview
+    @NotNullByDefault
+    private record InstanceSnapshot(
+            Path instanceRoot,
+            Path gameDirectory,
+            InstanceIconStore.Snapshot iconState,
+            ImageIcon iconPreview) {
+    }
+
+    /// Preview label whose contrast surface follows live FlatLaf theme changes.
+    @NotNullByDefault
+    private static final class IconPreviewLabel extends JLabel {
+        /// Refreshes the preview background after the application switches light or dark mode.
+        @Override
+        public void updateUI() {
+            super.updateUI();
+            @Nullable Color selectedBackground = UIManager.getColor("ToggleButton.selectedBackground");
+            setOpaque(selectedBackground != null);
+            setBackground(selectedBackground);
+        }
     }
 
     /// Background operation that may perform repository-backed checked I/O.
     @FunctionalInterface
+    @NotNullByDefault
     private interface RepositoryOperation {
         /// Runs the operation on the caller-owned background executor.
         ///

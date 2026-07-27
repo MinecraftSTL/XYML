@@ -21,8 +21,10 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.event.Event;
 import space.minecraftstl.xyml.event.EventManager;
 import space.minecraftstl.xyml.event.RefreshedVersionsEvent;
+import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
@@ -76,6 +78,7 @@ public final class RepositoryInstancesModelTest {
                 () -> assertEquals(3, model.exactItemCount().orElseThrow()),
                 () -> assertEquals(OptionalInt.of(1), model.snapshot().selectedIndex()),
                 () -> assertEquals(List.of(), repository.resolvedIds()),
+                () -> assertEquals(List.of(), repository.resolvedIconIds()),
                 () -> assertFalse(stage.toCompletableFuture().isDone()));
 
         executor.runNext();
@@ -89,10 +92,38 @@ public final class RepositoryInstancesModelTest {
                 () -> assertEquals(List.of("beta", "gamma"),
                         page.items().stream().map(InstanceListItem::id).toList()),
                 () -> assertEquals(List.of("beta", "gamma"), repository.resolvedIds()),
+                () -> assertEquals(List.of("beta", "gamma"), repository.resolvedIconIds()),
                 () -> assertEquals("alpha", repository.selectedInstanceId()),
                 () -> assertEquals(OptionalInt.of(0), model.snapshot().selectedIndex()),
                 () -> assertEquals(1, additions.get()),
                 () -> assertEquals(List.of("alpha"), managedIds));
+        model.close();
+    }
+
+    /// An icon event invalidates sparse rows without eagerly resolving icons outside a requested range.
+    @Test
+    public void iconChangeReloadsOnlyLaterViewportDemand() {
+        EventManager<RefreshedVersionsEvent> events = new EventManager<>();
+        QueuedExecutor executor = new QueuedExecutor();
+        FakeRepository repository = new FakeRepository(events, List.of("alpha", "beta", "gamma"), "alpha");
+        RepositoryInstancesModel model = new RepositoryInstancesModel(
+                repository, events, executor, () -> { }, ignored -> { }, STATUS_STRINGS);
+
+        CompletionStage<ChoicePage<InstanceListItem>> initialLoad = model.load(
+                new IndexRange(0, 1), new LoadCancellation());
+        executor.runNext();
+        InstanceIconData initialIcon = initialLoad.toCompletableFuture().join().items().get(0).icon();
+
+        repository.fireIconChanged();
+        CompletionStage<ChoicePage<InstanceListItem>> replacementLoad = model.load(
+                new IndexRange(1, 2), new LoadCancellation());
+        executor.runNext();
+        InstanceIconData replacementIcon = replacementLoad.toCompletableFuture().join().items().get(0).icon();
+
+        assertAll(
+                () -> assertEquals(1L, model.snapshot().contentRevision()),
+                () -> assertEquals(List.of("alpha", "beta"), repository.resolvedIconIds()),
+                () -> assertFalse(initialIcon.equals(replacementIcon)));
         model.close();
     }
 
@@ -188,6 +219,7 @@ public final class RepositoryInstancesModelTest {
         model.close();
         repository.replaceImmediately(List.of("gamma"), "gamma");
         events.fireEvent(new RefreshedVersionsEvent(repository));
+        repository.fireIconChanged();
         repository.setSelectedInstanceId("beta");
         executor.runNext();
 
@@ -357,8 +389,14 @@ public final class RepositoryInstancesModelTest {
         /// Toolkit-neutral selected-instance transition publisher.
         private final ValueChangeSupport<String> selectionChanges = new ValueChangeSupport<>(this);
 
+        /// Repository-local icon transition publisher.
+        private final EventManager<Event> iconEvents = new EventManager<>();
+
         /// IDs whose details were requested.
         private final List<String> resolvedIds = new ArrayList<>();
+
+        /// IDs whose normalized icons were requested.
+        private final List<String> resolvedIconIds = new ArrayList<>();
 
         /// IDs installed by the next successful refresh.
         private @Unmodifiable List<String> nextDisplayedIds = List.of();
@@ -430,6 +468,30 @@ public final class RepositoryInstancesModelTest {
             return selectionChanges.subscribe(listener);
         }
 
+        /// Registers for fake repository icon transitions.
+        ///
+        /// @param listener no-argument icon transition listener
+        /// @return independently cancellable listener registration
+        @Override
+        public Subscription subscribeIconChanges(Runnable listener) {
+            return iconEvents.subscribe(listener);
+        }
+
+        /// Records and returns deterministic non-transparent pixels for one demanded row.
+        ///
+        /// @param instanceId stable instance ID
+        /// @return immutable normalized icon pixels
+        @Override
+        public synchronized InstanceIconData resolveIcon(String instanceId) {
+            resolvedIconIds.add(instanceId);
+            int[] pixels = new int[InstanceIconData.PIXEL_COUNT];
+            int color = 0xFF000000 | (instanceId.hashCode() & 0x00FFFFFF);
+            for (int index = 0; index < pixels.length; index++) {
+                pixels[index] = color;
+            }
+            return new InstanceIconData(pixels);
+        }
+
         /// Stores the selected ID.
         @Override
         public void setSelectedInstanceId(String instanceId) {
@@ -484,6 +546,18 @@ public final class RepositoryInstancesModelTest {
         /// @return resolved stable IDs in call order
         private synchronized @Unmodifiable List<String> resolvedIds() {
             return List.copyOf(resolvedIds);
+        }
+
+        /// Returns an immutable snapshot of icon-resolution calls.
+        ///
+        /// @return resolved stable IDs in call order
+        private synchronized @Unmodifiable List<String> resolvedIconIds() {
+            return List.copyOf(resolvedIconIds);
+        }
+
+        /// Publishes one repository-local icon transition.
+        private void fireIconChanged() {
+            iconEvents.fireEvent(new Event(this));
         }
 
         /// Configures the next refresh outcome.

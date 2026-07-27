@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.setting.VersionIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JFileChooser;
@@ -87,6 +88,28 @@ public final class DefaultInstanceOverviewInteractions implements InstanceOvervi
 
         @Nullable File selected = chooser.getSelectedFile();
         return selected != null ? selected.toPath() : null;
+    }
+
+    /// Displays the complete single-select icon grid and reuses the supported-image chooser for its custom entry.
+    ///
+    /// @param owner parent component for both dialogs
+    /// @param currentIconType persisted built-in fallback type
+    /// @param hasCustomIcon whether a custom image currently overrides the fallback
+    /// @param initialDirectory initial local directory for custom image acquisition
+    /// @return completed icon choice, or `null` when either dialog is cancelled
+    @Override
+    public @Nullable InstanceIconChoice chooseInstanceIcon(
+            Component owner,
+            VersionIconType currentIconType,
+            boolean hasCustomIcon,
+            Path initialDirectory) {
+        EdtDispatcher.requireEventDispatchThread();
+        return InstanceIconChooserDialog.show(
+                owner,
+                currentIconType,
+                hasCustomIcon,
+                strings,
+                () -> chooseIcon(owner, initialDirectory));
     }
 
     /// Displays the destructive custom-icon confirmation on the EDT.

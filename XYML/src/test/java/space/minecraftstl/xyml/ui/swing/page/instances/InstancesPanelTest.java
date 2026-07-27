@@ -17,10 +17,13 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances;
 
+import com.formdev.flatlaf.FlatDarkLaf;
+import com.formdev.flatlaf.FlatLightLaf;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
@@ -36,7 +39,9 @@ import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManage
 
 import javax.swing.AbstractButton;
 import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.ListCellRenderer;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
@@ -69,6 +74,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests installed-instance commands, placeholder selection, dynamic reload, and viewport-sized demand.
 @NotNullByDefault
 public final class InstancesPanelTest {
+    /// Exact opaque accent painted by the test instance icon.
+    private static final int TEST_ICON_ARGB = 0xFFFF3366;
+
     /// Localized strings used by the focused page tests.
     private static final InstancesStrings STRINGS = new InstancesStrings(
             "Instances", "Refresh", "Refreshing", "Add", "Manage", "No installed instances");
@@ -256,6 +264,69 @@ public final class InstancesPanelTest {
         });
     }
 
+    /// The dedicated renderer paints fixed-size instance pixels under both FlatLaf palettes.
+    @Test
+    public void paintsStableInstanceIconInLightAndDarkThemes() {
+        InstanceIconData icon = solidIcon(TEST_ICON_ARGB);
+        for (boolean dark : List.of(false, true)) {
+            assertTrue(dark ? FlatDarkLaf.setup() : FlatLightLaf.setup());
+            BufferedImage image = renderPanelWithIcon(icon);
+            int iconPixels = countPixels(image, TEST_ICON_ARGB);
+            assertTrue(
+                    iconPixels >= InstanceIconData.PIXEL_COUNT / 2,
+                    "Expected at least half of the instance icon pixels but painted " + iconPixels);
+        }
+    }
+
+    /// Loaded, loading, and failed sparse rows reuse identical measured geometry and selection colors.
+    @Test
+    public void keepsRendererGeometryStableAcrossSparseStates() {
+        onEventDispatchThread(() -> {
+            InstanceListCellRenderer renderer = new InstanceListCellRenderer();
+            JList<ChoiceListEntry<InstanceListItem>> list = new JList<>();
+            Component loading = renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loading(0),
+                    0,
+                    false,
+                    false);
+            int loadingHeight = loading.getPreferredSize().height;
+            Component failed = renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.failed(0, new IllegalStateException("load failed")),
+                    0,
+                    false,
+                    false);
+            int failedHeight = failed.getPreferredSize().height;
+            Component loaded = renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loaded(0, new InstanceListItem(
+                            "id",
+                            "A very long modded instance name",
+                            "Minecraft 1.21.1 / Fabric")),
+                    0,
+                    true,
+                    true);
+            loaded.setSize(new Dimension(470, InstanceListCellRenderer.ROW_HEIGHT));
+            layoutRecursively((Container) loaded);
+            JLabel nameLabel = (JLabel) findComponent((Container) loaded, "instanceListName");
+            JLabel detailLabel = (JLabel) findComponent((Container) loaded, "instanceListDetail");
+
+            assertAll(
+                    () -> assertSame(loading, failed),
+                    () -> assertSame(failed, loaded),
+                    () -> assertEquals(InstanceListCellRenderer.ROW_HEIGHT, loadingHeight),
+                    () -> assertEquals(InstanceListCellRenderer.ROW_HEIGHT, failedHeight),
+                    () -> assertEquals(InstanceListCellRenderer.ROW_HEIGHT,
+                            loaded.getPreferredSize().height),
+                    () -> assertEquals(list.getSelectionBackground(), loaded.getBackground()),
+                    () -> assertEquals("A very long modded instance name", nameLabel.getText()),
+                    () -> assertEquals("Minecraft 1.21.1 / Fabric", detailLabel.getText()),
+                    () -> assertTrue(nameLabel.getWidth() >= 300),
+                    () -> assertEquals(nameLabel.getWidth(), detailLabel.getWidth()));
+        });
+    }
+
     /// The coordinator mount replaces the list card and its return command restores it.
     @Test
     public void mountsAndReturnsCoordinatorOwnedManagementView() {
@@ -430,6 +501,66 @@ public final class InstancesPanelTest {
         return List.copyOf(result);
     }
 
+    /// Creates one opaque fixed-size icon for deterministic renderer verification.
+    ///
+    /// @param argb packed ARGB color used for every pixel
+    /// @return immutable normalized icon data
+    private static InstanceIconData solidIcon(int argb) {
+        int[] pixels = new int[InstanceIconData.PIXEL_COUNT];
+        java.util.Arrays.fill(pixels, argb);
+        return new InstanceIconData(pixels);
+    }
+
+    /// Creates and off-screen paints an instance panel containing one explicit icon.
+    ///
+    /// @param icon normalized icon to paint
+    /// @return rendered page image
+    private static BufferedImage renderPanelWithIcon(InstanceIconData icon) {
+        FakeInstancesModel model = FakeInstancesModel.immediate(
+                List.of(new InstanceListItem(
+                        "icon-instance",
+                        "Icon instance",
+                        "Minecraft 1.21.1",
+                        icon)),
+                snapshot(0, 1, 0L));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS, coordinator));
+        return onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(720, 420));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            JList<ChoiceListEntry<InstanceListItem>> list = panel.choiceList().getList();
+            assertTrue(list.getCellRenderer() instanceof InstanceListCellRenderer);
+            assertEquals(InstanceListCellRenderer.ROW_HEIGHT,
+                    list.getFixedCellHeight());
+
+            ChoiceListEntry<InstanceListItem> entry = list.getModel().getElementAt(0);
+            assertSame(icon, Objects.requireNonNull(entry.value(), "instance row was not loaded").icon());
+            ListCellRenderer<? super ChoiceListEntry<InstanceListItem>> renderer = list.getCellRenderer();
+            Component row = renderer.getListCellRendererComponent(list, entry, 0, true, true);
+            Dimension size = new Dimension(640, list.getFixedCellHeight());
+            row.setSize(size);
+            if (row instanceof Container rowContainer) {
+                layoutRecursively(rowContainer);
+            }
+
+            BufferedImage rendered = new BufferedImage(
+                    size.width,
+                    size.height,
+                    BufferedImage.TYPE_INT_ARGB);
+            Graphics2D graphics = rendered.createGraphics();
+            try {
+                row.printAll(graphics);
+            } finally {
+                graphics.dispose();
+                panel.close();
+                coordinator.close();
+            }
+            return rendered;
+        });
+    }
+
     /// Creates a normal command-enabled snapshot.
     ///
     /// @param selectedIndex selected source index, or -1 for no selection
@@ -528,6 +659,23 @@ public final class InstancesPanelTest {
             }
         }
         return colors;
+    }
+
+    /// Counts exact occurrences of one packed ARGB color in an off-screen rendering.
+    ///
+    /// @param image rendered instance page
+    /// @param argb packed ARGB color to count
+    /// @return matching pixel count
+    private static int countPixels(BufferedImage image, int argb) {
+        int matches = 0;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                if (image.getRGB(x, y) == argb) {
+                    matches++;
+                }
+            }
+        }
+        return matches;
     }
 
     /// Records coordinator-created management views for panel lifecycle assertions.

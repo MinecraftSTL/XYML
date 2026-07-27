@@ -156,7 +156,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
         Objects.requireNonNull(managementCoordinator, "managementCoordinator");
-        choiceList = new ViewportChoiceList<>(model, InstanceListItem::displayText);
+        choiceList = new ViewportChoiceList<>(model, new InstanceListCellRenderer());
 
         @Nullable Subscription createdModelSubscription = null;
         @Nullable Subscription createdManagementHostLease = null;
