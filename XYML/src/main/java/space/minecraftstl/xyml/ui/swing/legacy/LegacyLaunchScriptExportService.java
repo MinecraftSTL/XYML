@@ -331,11 +331,25 @@ public final class LegacyLaunchScriptExportService implements AutoCloseable {
             return scriptFile;
         }
 
-        /// Returns a minimal completion-stage view for the UI command boundary.
+        /// Returns an isolated completion-stage view for the UI command boundary.
+        ///
+        /// A manual relay preserves a direct `CancellationException`; the JDK minimal-stage relay
+        /// wraps cancellation in `CompletionException` when callers request a completable future.
+        /// External completion of the returned future cannot mutate the operation-owned future.
         ///
         /// @return terminal script result stage
         private CompletionStage<Path> completion() {
-            return completion.minimalCompletionStage();
+            CompletableFuture<Path> exposedCompletion = new CompletableFuture<>();
+            completion.whenComplete((@Nullable Path result, @Nullable Throwable failure) -> {
+                if (failure != null) {
+                    exposedCompletion.completeExceptionally(failure);
+                } else {
+                    exposedCompletion.complete(Objects.requireNonNull(
+                            result,
+                            "Successful launch-script export completed without a path"));
+                }
+            });
+            return exposedCompletion;
         }
 
         /// Installs an executor only while close has not cancelled this reservation.

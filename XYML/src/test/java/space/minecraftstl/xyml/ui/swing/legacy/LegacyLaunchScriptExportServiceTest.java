@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.task.Task;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -35,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests stable request capture and close cancellation for the local script-export task service.
 @NotNullByDefault
@@ -79,11 +81,13 @@ public final class LegacyLaunchScriptExportServiceTest {
         CompletionStage<Path> completion = service.export(
                 new LaunchRequest("account-a", "directory-a", "instance-a"),
                 target);
+        CompletableFuture<Path> exposedCompletion = completion.toCompletableFuture();
         service.close();
         Objects.requireNonNull(queuedCommand.get(), "queued export command").run();
 
         assertAll(
-                () -> assertThrows(CancellationException.class, () -> completion.toCompletableFuture().join()),
+                () -> assertThrows(CancellationException.class, exposedCompletion::join),
+                () -> assertTrue(exposedCompletion.isCancelled()),
                 () -> assertFalse(taskBuilderCalled.get()));
     }
 }

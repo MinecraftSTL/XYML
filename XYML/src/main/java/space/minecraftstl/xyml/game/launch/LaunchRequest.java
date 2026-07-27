@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.game.launch;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
@@ -28,13 +29,62 @@ import java.util.Objects;
 /// @param accountId stable selected-account identifier
 /// @param gameDirectoryId stable selected game-directory identifier
 /// @param instanceId stable selected-instance identifier within the game directory
+/// @param quickPlaySingleplayer single-player world folder to enter after launch, or `null` for an ordinary launch
+/// @param testMode whether this request launches the instance with the launcher's isolated test-game policy
 @NotNullByDefault
-public record LaunchRequest(String accountId, String gameDirectoryId, String instanceId) {
+public record LaunchRequest(
+        String accountId,
+        String gameDirectoryId,
+        String instanceId,
+        @Nullable String quickPlaySingleplayer,
+        boolean testMode) {
+    /// Creates an ordinary launch request without a quick-play destination.
+    ///
+    /// @param accountId stable selected-account identifier
+    /// @param gameDirectoryId stable selected game-directory identifier
+    /// @param instanceId stable selected-instance identifier within the game directory
+    public LaunchRequest(String accountId, String gameDirectoryId, String instanceId) {
+        this(accountId, gameDirectoryId, instanceId, null, false);
+    }
+
+    /// Creates a single-player quick-play request without enabling test-game policy.
+    ///
+    /// @param accountId stable selected-account identifier
+    /// @param gameDirectoryId stable selected game-directory identifier
+    /// @param instanceId stable selected-instance identifier within the game directory
+    /// @param quickPlaySingleplayer exact single-player world folder
+    public LaunchRequest(
+            String accountId,
+            String gameDirectoryId,
+            String instanceId,
+            String quickPlaySingleplayer) {
+        this(accountId, gameDirectoryId, instanceId, quickPlaySingleplayer, false);
+    }
+
+    /// Creates a test-game request without a quick-play destination.
+    ///
+    /// @param accountId stable selected-account identifier
+    /// @param gameDirectoryId stable selected game-directory identifier
+    /// @param instanceId stable selected-instance identifier within the game directory
+    /// @return immutable test-game request
+    public static LaunchRequest test(
+            String accountId,
+            String gameDirectoryId,
+            String instanceId) {
+        return new LaunchRequest(accountId, gameDirectoryId, instanceId, null, true);
+    }
+
     /// Validates that every identity component is present without rewriting its stored representation.
     public LaunchRequest {
         requireIdentifier(accountId, "accountId");
         requireIdentifier(gameDirectoryId, "gameDirectoryId");
         requireIdentifier(instanceId, "instanceId");
+        if (quickPlaySingleplayer != null) {
+            requireIdentifier(quickPlaySingleplayer, "quickPlaySingleplayer");
+        }
+        if (testMode && quickPlaySingleplayer != null) {
+            throw new IllegalArgumentException("Test mode and single-player quick play are mutually exclusive");
+        }
     }
 
     /// Rejects null and blank identity components while preserving non-blank identifiers exactly.

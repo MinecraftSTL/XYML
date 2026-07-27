@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.legacy;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.QuickPlayOption;
 import space.minecraftstl.xyml.game.launch.LaunchRequest;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
 import space.minecraftstl.xyml.task.Task;
@@ -28,14 +29,17 @@ import space.minecraftstl.xyml.util.platform.ManagedProcess;
 
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -69,6 +73,86 @@ final class LegacyLauncherLaunchTaskFactoryTest {
         assertSame(request, observedRequest.get());
         assertEquals(1, dispatchCalls.get());
         assertEquals(0, task.executionCount());
+    }
+
+    /// Confirms script export preserves the exact request and normalized target without starting its task.
+    @Test
+    void dispatchesExactLaunchScriptRequestAndReturnsExactTask() {
+        LaunchRequest request = new LaunchRequest(
+                "account:00000000-0000-0000-0000-000000000001",
+                "game-directory:00000000-0000-0000-0000-000000000002",
+                "instance-a");
+        Path requestedTarget = Path.of("build", "launch-script-test.bat");
+        Path normalizedTarget = requestedTarget.toAbsolutePath().normalize();
+        Task<Path> scriptTask = Task.completed(normalizedTarget);
+        AtomicInteger dispatchCalls = new AtomicInteger();
+        AtomicReference<@Nullable LaunchRequest> observedRequest = new AtomicReference<>();
+        AtomicReference<@Nullable Path> observedTarget = new AtomicReference<>();
+        LegacyLauncherLaunchTaskFactory factory = new LegacyLauncherLaunchTaskFactory(
+                operation -> {
+                    dispatchCalls.incrementAndGet();
+                    operation.run();
+                },
+                ignored -> new RecordingTask(),
+                (captured, target) -> {
+                    observedRequest.set(captured);
+                    observedTarget.set(target);
+                    return scriptTask;
+                },
+                new LaunchVisibilityActions(() -> { }, () -> { }, () -> { }));
+
+        Task<Path> result = factory.createLaunchScriptTask(request, requestedTarget);
+
+        assertSame(scriptTask, result);
+        assertSame(request, observedRequest.get());
+        assertEquals(normalizedTarget, observedTarget.get());
+        assertEquals(1, dispatchCalls.get());
+        assertNull(scriptTask.getResult());
+    }
+
+    /// Confirms both launch paths can apply the exact immutable single-player target to `LauncherHelper`.
+    @Test
+    void configuresCapturedSingleplayerQuickPlayTarget() {
+        LaunchRequest request = new LaunchRequest(
+                "account",
+                "directory",
+                "instance",
+                "World Folder");
+        AtomicReference<@Nullable QuickPlayOption> observedOption = new AtomicReference<>();
+
+        LegacyLauncherLaunchTaskFactory.configureLaunchModes(request, observedOption::set, () -> { });
+
+        QuickPlayOption.SinglePlayer option = (QuickPlayOption.SinglePlayer) Objects.requireNonNull(
+                observedOption.get());
+        assertEquals("World Folder", option.worldFolderName());
+    }
+
+    /// Confirms ordinary requests leave the helper's persisted quick-play behavior untouched.
+    @Test
+    void ordinaryRequestDoesNotOverrideQuickPlayTarget() {
+        AtomicInteger setterCalls = new AtomicInteger();
+
+        LegacyLauncherLaunchTaskFactory.configureLaunchModes(
+                new LaunchRequest("account", "directory", "instance"),
+                ignored -> setterCalls.incrementAndGet(),
+                setterCalls::incrementAndGet);
+
+        assertEquals(0, setterCalls.get());
+    }
+
+    /// Confirms a test request enables only the launcher's isolated test-game policy.
+    @Test
+    void configuresCapturedTestMode() {
+        AtomicInteger quickPlaySetterCalls = new AtomicInteger();
+        AtomicInteger testModeSetterCalls = new AtomicInteger();
+
+        LegacyLauncherLaunchTaskFactory.configureLaunchModes(
+                LaunchRequest.test("account", "directory", "instance"),
+                ignored -> quickPlaySetterCalls.incrementAndGet(),
+                testModeSetterCalls::incrementAndGet);
+
+        assertEquals(0, quickPlaySetterCalls.get());
+        assertEquals(1, testModeSetterCalls.get());
     }
 
     /// Confirms that a caller on the Swing EDT is rejected before any blocking legacy dispatch.

@@ -86,10 +86,10 @@ public final class LauncherHelper {
     private final GameSettings.Effective setting;
 
     /// Configured launcher behavior after process creation.
-    private final LauncherVisibility launcherVisibility;
+    private LauncherVisibility launcherVisibility;
 
     /// Whether the process listener should open its native Swing log window.
-    private final boolean showLogs;
+    private boolean showLogs;
 
     /// Log retention limit captured from launcher settings before process monitoring starts.
     private final int logLineLimit;
@@ -149,6 +149,15 @@ public final class LauncherHelper {
     /// @return shared process-listener completion
     public CompletionStage<@Nullable Void> processLifecycleCompletion() {
         return processLifecycleCompletion;
+    }
+
+    /// Applies the legacy test-launch behavior before task construction.
+    ///
+    /// Test launches always retain the launcher window and show the native log window, regardless of the
+    /// instance's ordinary visibility and log preferences. Calling this method repeatedly is harmless.
+    public void setTestMode() {
+        launcherVisibility = LauncherVisibility.KEEP;
+        showLogs = true;
     }
 
     /// Sets the optional quick-play destination for the next task.

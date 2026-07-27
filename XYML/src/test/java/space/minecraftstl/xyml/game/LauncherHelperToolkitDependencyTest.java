@@ -28,6 +28,9 @@ import java.util.Objects;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /// Guards the production launch helper against reintroducing removed toolkit and legacy dialog linkage.
+///
+/// Toolkit-neutral launch operations, including standalone script generation through
+/// `XYMLGameLauncher`, remain valid responsibilities of this helper.
 @NotNullByDefault
 final class LauncherHelperToolkitDependencyTest {
     /// Compiled launch helper constants must not reference removed UI toolkits or controllers.
@@ -38,7 +41,6 @@ final class LauncherHelperToolkitDependencyTest {
         assertFalse(constants.contains("com/jfoenix/"));
         assertFalse(constants.contains("space/minecraftstl/xyml/ui/Controllers"));
         assertFalse(constants.contains("javafx.stage.Stage"));
-        assertFalse(constants.contains("makeLaunchScript"));
     }
 
     /// Reads the compiled helper without initializing it.

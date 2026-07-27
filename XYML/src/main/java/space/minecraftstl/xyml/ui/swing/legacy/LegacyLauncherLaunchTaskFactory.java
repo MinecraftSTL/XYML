@@ -22,6 +22,8 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.auth.AccountID;
 import space.minecraftstl.xyml.game.LauncherHelper;
+import space.minecraftstl.xyml.game.QuickPlayOption;
+import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchRequest;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
@@ -35,6 +37,7 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.launch.LaunchInteraction;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountReauthentication;
 import space.minecraftstl.xyml.util.platform.ManagedProcess;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import javax.swing.SwingUtilities;
 import java.nio.file.Path;
@@ -313,6 +316,7 @@ public final class LegacyLauncherLaunchTaskFactory implements LaunchTaskFactory,
                 throw new IllegalArgumentException(
                         "Unknown instance " + request.instanceId() + " in " + gameDirectoryId);
             }
+            requireSupportedQuickPlay(repository, request);
 
             LauncherHelper helper = new LauncherHelper(
                     repository,
@@ -320,6 +324,7 @@ public final class LegacyLauncherLaunchTaskFactory implements LaunchTaskFactory,
                     request.instanceId(),
                     launchInteraction,
                     accountReauthentication);
+            configureLaunchModes(request, helper::setQuickPlayOption, helper::setTestMode);
             LauncherVisibility originalVisibility = helper.getLauncherVisibility();
             Task<ManagedProcess> processTask = helper.createLaunchTask();
             result.set(processTask.thenApplyAsync(Runnable::run, (@Nullable ManagedProcess value) -> {
@@ -364,6 +369,7 @@ public final class LegacyLauncherLaunchTaskFactory implements LaunchTaskFactory,
                 throw new IllegalArgumentException(
                         "Unknown instance " + capturedRequest.instanceId() + " in " + gameDirectoryId);
             }
+            requireSupportedQuickPlay(repository, capturedRequest);
 
             LauncherHelper helper = new LauncherHelper(
                     repository,
@@ -371,9 +377,50 @@ public final class LegacyLauncherLaunchTaskFactory implements LaunchTaskFactory,
                     capturedRequest.instanceId(),
                     launchInteraction,
                     accountReauthentication);
+            configureLaunchModes(capturedRequest, helper::setQuickPlayOption, helper::setTestMode);
             result.set(helper.createLaunchScriptTask(destination));
         });
         return Objects.requireNonNull(result.get(), "legacy dispatcher did not build launch-script task");
+    }
+
+    /// Applies the immutable quick-play or test-game mode to a newly created helper.
+    ///
+    /// Keeping this operation shared by process launch and script export guarantees both paths receive request-local
+    /// mode state instead of consulting later UI selections or mutable game settings.
+    ///
+    /// @param request captured launch request
+    /// @param quickPlaySetter helper target setter invoked only when the request contains a world folder
+    /// @param testModeSetter helper test-mode setter invoked only for an explicit test request
+    static void configureLaunchModes(
+            LaunchRequest request,
+            Consumer<QuickPlayOption> quickPlaySetter,
+            Runnable testModeSetter) {
+        LaunchRequest capturedRequest = Objects.requireNonNull(request, "request");
+        Consumer<QuickPlayOption> setter = Objects.requireNonNull(quickPlaySetter, "quickPlaySetter");
+        Runnable checkedTestModeSetter = Objects.requireNonNull(testModeSetter, "testModeSetter");
+        @Nullable String worldFolder = capturedRequest.quickPlaySingleplayer();
+        if (worldFolder != null) {
+            setter.accept(new QuickPlayOption.SinglePlayer(worldFolder));
+        }
+        if (capturedRequest.testMode()) {
+            checkedTestModeSetter.run();
+        }
+    }
+
+    /// Rejects single-player quick play when the target instance would silently discard its launch argument.
+    ///
+    /// @param repository loaded repository containing the target instance
+    /// @param request captured launch request
+    private static void requireSupportedQuickPlay(
+            XYMLGameRepository repository,
+            LaunchRequest request) {
+        XYMLGameRepository targetRepository = Objects.requireNonNull(repository, "repository");
+        LaunchRequest capturedRequest = Objects.requireNonNull(request, "request");
+        if (capturedRequest.quickPlaySingleplayer() != null
+                && !World.supportQuickPlay(GameVersionNumber.asGameVersion(
+                        targetRepository.getGameVersion(capturedRequest.instanceId())))) {
+            throw new IllegalArgumentException("Single-player quick play requires Minecraft 1.20 or newer");
+        }
     }
 
     /// Registers one original policy without running runtime actions inside the root launch task.
