@@ -60,8 +60,11 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Native Swing surface for searching, importing, selecting, locating, and deleting local theme packs.
 ///
@@ -99,6 +102,9 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
     /// Opens the local archive chooser.
     private final JButton importButton = new JButton();
 
+    /// Saves the current rendered launcher appearance as a portable theme pack.
+    private final JButton exportButton = new JButton();
+
     /// Applies the exact selected theme reference.
     private final JButton applyButton = new JButton();
 
@@ -129,6 +135,9 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
     /// Background load for bundled toolbar SVGs, or `null` after rejected submission.
     private final @Nullable CompletableFuture<@Unmodifiable Map<String, Icon>> iconLoad;
 
+    /// Optional current-theme export service supplied by production composition.
+    private final @Nullable CurrentThemePackExportService exportService;
+
     /// Last snapshot represented by the component tree.
     private ThemePackManagementSnapshot displayedSnapshot;
 
@@ -137,6 +146,9 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
 
     /// Prevents programmatic selection changes from re-entering command updates.
     private boolean synchronizing;
+
+    /// Whether a current-theme archive is being prepared or written.
+    private boolean exporting;
 
     /// Creates and activates an embeddable theme-pack management panel on the EDT.
     ///
@@ -149,11 +161,28 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
             ThemePackManagementStrings strings,
             ThemePackManagementInteractions interactions,
             Executor iconExecutor) {
+        this(model, strings, interactions, iconExecutor, null);
+    }
+
+    /// Creates and activates a theme-pack panel with optional current-theme export support on the EDT.
+    ///
+    /// @param model owned management model
+    /// @param strings localized text
+    /// @param interactions chooser, confirmation, feedback, and desktop boundary
+    /// @param iconExecutor caller-owned non-EDT executor for bundled SVG loading
+    /// @param exportService current-theme exporter, or `null` to omit the command
+    public ThemePackManagementPanel(
+            ThemePackManagementModel model,
+            ThemePackManagementStrings strings,
+            ThemePackManagementInteractions interactions,
+            Executor iconExecutor,
+            @Nullable CurrentThemePackExportService exportService) {
         super(new java.awt.BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
+        this.exportService = exportService;
         displayedSnapshot = this.model.snapshot();
         itemRenderer = new ThemePackItemRenderer(this.strings);
         choiceList = new ViewportChoiceList<>(this.model, itemRenderer);
@@ -234,12 +263,17 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
         searchField.getAccessibleContext().setAccessibleName(strings.searchLabel());
         header.add(searchField, "growx, h 36!");
 
-        JPanel commands = new JPanel(new MigLayout("insets 0, gap 8", "[36!][36!]", "[36!]"));
+        String commandColumns = exportService == null ? "[36!][36!]" : "[36!][36!][36!]";
+        JPanel commands = new JPanel(new MigLayout("insets 0, gap 8", commandColumns, "[36!]"));
         commands.setOpaque(false);
         configureIconButton(refreshButton, "themePacksRefresh", strings.refreshTooltip(), event -> refresh());
         configureIconButton(importButton, "themePacksImport", strings.importTooltip(), event -> chooseAndImport());
         commands.add(refreshButton, fixedCommandConstraint());
         commands.add(importButton, fixedCommandConstraint());
+        if (exportService != null) {
+            configureIconButton(exportButton, "themePacksExport", i18n("theme_pack.export"), event -> chooseAndExport());
+            commands.add(exportButton, fixedCommandConstraint());
+        }
         header.add(commands);
         return header;
     }
@@ -346,6 +380,60 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
         }
     }
 
+    /// Collects metadata and starts one current-theme export without blocking the EDT.
+    private void chooseAndExport() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable CurrentThemePackExportService service = exportService;
+        if (service == null || exporting || displayedSnapshot.busy()) {
+            return;
+        }
+        final ThemePackExportDefaults defaults;
+        final @Nullable ThemePackExportRequest request;
+        try {
+            defaults = service.defaults();
+            request = interactions.chooseThemePackExport(this, defaults);
+        } catch (Throwable failure) {
+            interactions.showThemePackExportFailure(this, unwrap(failure));
+            return;
+        }
+        if (request == null) {
+            return;
+        }
+
+        exporting = true;
+        statusLabel.setText(i18n("theme_pack.exporting"));
+        updateActions();
+        try {
+            service.export(request).whenComplete((
+                    @Nullable Path output,
+                    @Nullable Throwable failure) -> EdtDispatcher.execute(() ->
+                    finishExport(output, failure)));
+        } catch (Throwable failure) {
+            finishExport(null, failure);
+        }
+    }
+
+    /// Restores action state and reports exactly one export completion on the EDT.
+    ///
+    /// @param output published archive, or `null` after failure
+    /// @param failure export failure, or `null` after success
+    private void finishExport(@Nullable Path output, @Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) {
+            return;
+        }
+        exporting = false;
+        statusLabel.setText(statusText(displayedSnapshot));
+        updateActions();
+        if (failure != null) {
+            interactions.showThemePackExportFailure(this, unwrap(failure));
+        } else {
+            interactions.showThemePackExportSuccess(
+                    this,
+                    Objects.requireNonNull(output, "successful export returned no path"));
+        }
+    }
+
     /// Applies the exact currently loaded selection.
     private void applySelected() {
         @Nullable ThemePackItem selected = choiceList.getSelectedValue();
@@ -423,6 +511,9 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
 
     /// Chooses factual status text for current inventory and mutation state.
     private String statusText(ThemePackManagementSnapshot current) {
+        if (exporting) {
+            return i18n("theme_pack.exporting");
+        }
         if (current.operation() != ThemePackManagementOperation.NONE) {
             return switch (current.operation()) {
                 case IMPORTING -> strings.importingText();
@@ -471,10 +562,13 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
     /// Applies busy, origin, and current-theme authorization to all commands.
     private void updateActions() {
         @Nullable ThemePackItem selected = choiceList.getSelectedValue();
-        boolean busy = displayedSnapshot.busy();
+        boolean busy = displayedSnapshot.busy() || exporting;
         boolean ready = displayedSnapshot.status() == ThemePackManagementStatus.READY && !busy;
         refreshButton.setEnabled(!busy && displayedSnapshot.status() != ThemePackManagementStatus.CLOSED);
         importButton.setEnabled(ready);
+        exportButton.setEnabled(exportService != null
+                && !busy
+                && displayedSnapshot.status() != ThemePackManagementStatus.CLOSED);
         searchField.setEnabled(!busy && displayedSnapshot.status() != ThemePackManagementStatus.CLOSED);
         choiceList.getList().setEnabled(ready);
         applyButton.setEnabled(ready
@@ -517,6 +611,7 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
                         if (!closed.get() && failure == null && icons != null) {
                             refreshButton.setIcon(icons.get("refresh"));
                             importButton.setIcon(icons.get("import"));
+                            exportButton.setIcon(icons.get("export"));
                             applyButton.setIcon(icons.get("apply"));
                             locateButton.setIcon(icons.get("locate"));
                             deleteButton.setIcon(icons.get("delete"));
@@ -536,10 +631,23 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
         Map<String, Icon> icons = new LinkedHashMap<>();
         icons.put("refresh", svgIcon("assets/swing/icons/refresh.svg"));
         icons.put("import", svgIcon("assets/swing/icons/file-import.svg"));
+        icons.put("export", svgIcon("assets/swing/icons/save.svg"));
         icons.put("apply", svgIcon("assets/swing/icons/save.svg"));
         icons.put("locate", svgIcon("assets/swing/icons/folder-open.svg"));
         icons.put("delete", svgIcon("assets/swing/icons/delete.svg"));
         return Map.copyOf(icons);
+    }
+
+    /// Removes completion wrappers before forwarding a failure to the interaction boundary.
+    ///
+    /// @param failure asynchronous or immediate failure
+    /// @return most specific available cause
+    private static Throwable unwrap(Throwable failure) {
+        Throwable current = Objects.requireNonNull(failure, "failure");
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     /// Constructs one 18-pixel theme-aware SVG icon.
