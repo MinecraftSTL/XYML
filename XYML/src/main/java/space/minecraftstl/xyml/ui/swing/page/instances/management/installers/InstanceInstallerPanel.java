@@ -52,7 +52,6 @@ import javax.swing.SwingConstants;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.BorderLayout;
-import java.awt.Component;
 import java.awt.Font;
 import java.nio.file.Path;
 import java.time.Duration;

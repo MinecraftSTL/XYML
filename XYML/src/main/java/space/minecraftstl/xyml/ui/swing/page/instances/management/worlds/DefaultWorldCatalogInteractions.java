@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -27,9 +28,11 @@ import javax.swing.SwingUtilities;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.Component;
 import java.awt.Desktop;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -118,6 +121,112 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
     }
 
+    /// Prompts for one sibling copy name on the EDT.
+    ///
+    /// @param owner dialog owner
+    /// @param world selected world
+    /// @return trimmed copy name, or null after cancellation or blank input
+    @Override
+    public @Nullable String chooseCopyName(Component owner, WorldCatalogItem world) {
+        EdtDispatcher.requireEventDispatchThread();
+        WorldCatalogItem selectedWorld = Objects.requireNonNull(world, "world");
+        @Nullable Object input = JOptionPane.showInputDialog(
+                Objects.requireNonNull(owner, "owner"),
+                strings.copyNamePrompt(),
+                strings.copyDialogTitle(),
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                null,
+                selectedWorld.directoryName() + " - Copy");
+        if (!(input instanceof String text)) {
+            return null;
+        }
+        String normalized = text.trim();
+        return normalized.isBlank() ? null : normalized;
+    }
+
+    /// Shows a ZIP save chooser and explicitly confirms replacement of an existing path.
+    ///
+    /// @param owner dialog owner
+    /// @param world selected world
+    /// @return normalized ZIP destination, or null after cancellation
+    @Override
+    public @Nullable Path chooseExportArchive(Component owner, WorldCatalogItem world) {
+        EdtDispatcher.requireEventDispatchThread();
+        Component checkedOwner = Objects.requireNonNull(owner, "owner");
+        WorldCatalogItem selectedWorld = Objects.requireNonNull(world, "world");
+        @Nullable Path initialDirectory = selectedWorld.path().getParent();
+        JFileChooser chooser = new JFileChooser(initialDirectory == null ? null : initialDirectory.toFile());
+        chooser.setDialogTitle(strings.exportDialogTitle());
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setMultiSelectionEnabled(false);
+        chooser.setAcceptAllFileFilterUsed(false);
+        chooser.setFileFilter(new FileNameExtensionFilter(strings.archiveDescription(), "zip"));
+        chooser.setSelectedFile(new java.io.File(selectedWorld.directoryName() + ".zip"));
+        if (chooser.showSaveDialog(checkedOwner) != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        Path destination = chooser.getSelectedFile().toPath().toAbsolutePath().normalize();
+        @Nullable Path fileName = destination.getFileName();
+        if (fileName == null) {
+            return null;
+        }
+        if (!fileName.toString().toLowerCase(Locale.ROOT).endsWith(".zip")) {
+            destination = destination.resolveSibling(fileName + ".zip");
+            fileName = destination.getFileName();
+        }
+        if (Files.exists(destination)
+                && JOptionPane.showConfirmDialog(
+                        checkedOwner,
+                        strings.overwriteConfirmation(Objects.requireNonNull(fileName).toString()),
+                        strings.exportDialogTitle(),
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION) {
+            return null;
+        }
+        return destination;
+    }
+
+    /// Shows a platform-aware standalone launch-script save chooser on the EDT.
+    ///
+    /// @param owner dialog owner
+    /// @param world selected world used to retain the exact interaction boundary
+    /// @return normalized supported script destination, or null after cancellation
+    @Override
+    public @Nullable Path chooseLaunchScriptDestination(Component owner, WorldCatalogItem world) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(world, "world");
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle(strings.launchScriptDialogTitle());
+        chooser.setDialogType(JFileChooser.SAVE_DIALOG);
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setMultiSelectionEnabled(false);
+        chooser.setAcceptAllFileFilterUsed(false);
+        configureScriptFilters(chooser);
+        chooser.setSelectedFile(new File("launch." + defaultScriptExtension()));
+        if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        @Nullable File selected = chooser.getSelectedFile();
+        return selected == null ? null : ensureScriptExtension(selected.toPath());
+    }
+
+    /// Shows the exact successfully generated quick-play script path on the EDT.
+    ///
+    /// @param owner dialog owner
+    /// @param scriptFile exact generated script path
+    @Override
+    public void launchScriptSucceeded(Component owner, Path scriptFile) {
+        EdtDispatcher.requireEventDispatchThread();
+        Path destination = Objects.requireNonNull(scriptFile, "scriptFile").toAbsolutePath().normalize();
+        JOptionPane.showMessageDialog(
+                Objects.requireNonNull(owner, "owner"),
+                strings.launchScriptSuccess(destination),
+                strings.launchScriptDialogTitle(),
+                JOptionPane.INFORMATION_MESSAGE);
+    }
+
     /// Schedules directory creation and a platform open call.
     ///
     /// @param directory target directory
@@ -178,5 +287,63 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
         if (SwingUtilities.isEventDispatchThread()) {
             throw new IllegalStateException("World desktop work must not run on the EDT");
         }
+    }
+
+    /// Adds only script formats supported by the current packaged launcher runtime.
+    ///
+    /// @param chooser chooser receiving extension filters
+    private static void configureScriptFilters(JFileChooser chooser) {
+        JFileChooser target = Objects.requireNonNull(chooser, "chooser");
+        if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS) {
+            target.addChoosableFileFilter(new FileNameExtensionFilter("macOS command scripts", "command"));
+        }
+        if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
+            target.addChoosableFileFilter(new FileNameExtensionFilter("Windows batch scripts", "bat"));
+        } else {
+            target.addChoosableFileFilter(new FileNameExtensionFilter("Shell scripts", "sh"));
+        }
+        target.addChoosableFileFilter(new FileNameExtensionFilter("PowerShell scripts", "ps1"));
+    }
+
+    /// Appends the platform-default extension when the selected filename has no supported script suffix.
+    ///
+    /// @param selected selected local target
+    /// @return normalized target using a supported extension
+    private static Path ensureScriptExtension(Path selected) {
+        Path destination = Objects.requireNonNull(selected, "selected").toAbsolutePath().normalize();
+        Path fileName = Objects.requireNonNull(destination.getFileName(), "selected file name");
+        String name = fileName.toString();
+        int separator = name.lastIndexOf('.');
+        String extension = separator >= 0 ? name.substring(separator + 1) : "";
+        if (isSupportedScriptExtension(extension)) {
+            return destination;
+        }
+        return destination.resolveSibling(name + "." + defaultScriptExtension());
+    }
+
+    /// Reports whether the packaged launcher can generate one filename extension on the current platform.
+    ///
+    /// @param extension extension without its leading dot
+    /// @return whether the extension is supported
+    private static boolean isSupportedScriptExtension(String extension) {
+        String value = Objects.requireNonNull(extension, "extension");
+        if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
+            return value.equalsIgnoreCase("bat") || value.equalsIgnoreCase("ps1");
+        }
+        return value.equalsIgnoreCase("sh")
+                || value.equalsIgnoreCase("bash")
+                || value.equalsIgnoreCase("command")
+                || value.equalsIgnoreCase("ps1");
+    }
+
+    /// Returns the default script suffix for the active operating system.
+    ///
+    /// @return non-blank extension without its leading dot
+    private static String defaultScriptExtension() {
+        return switch (OperatingSystem.CURRENT_OS) {
+            case WINDOWS -> "bat";
+            case MACOS -> "command";
+            default -> "sh";
+        };
     }
 }

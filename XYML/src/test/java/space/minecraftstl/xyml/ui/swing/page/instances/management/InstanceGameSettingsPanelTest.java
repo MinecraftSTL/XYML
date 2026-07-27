@@ -68,6 +68,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Verifies the complete instance launch-settings page renders and persists independent local overrides.
 @NotNullByDefault
@@ -398,7 +399,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsMaximumMemory", JTextField.class).setText("not-a-number");
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
                 JLabel status = findNamed(panel, "instanceGameSettingsStatus", JLabel.class);
-                assertTrue(status.getText().startsWith("Cannot save:"));
+                assertTrue(status.getText().startsWith(i18n("swing.instance_settings.save_failed", "")));
             });
             assertEquals(0, store.saveCount.get());
         } finally {
@@ -576,7 +577,7 @@ final class InstanceGameSettingsPanelTest {
                     width.setText(invalidValue);
                     save.doClick();
                     assertEquals(0, store.saveCount.get());
-                    assertTrue(status.getText().startsWith("Cannot save:"));
+                    assertTrue(status.getText().startsWith(i18n("swing.instance_settings.save_failed", "")));
                 }
             });
         } finally {

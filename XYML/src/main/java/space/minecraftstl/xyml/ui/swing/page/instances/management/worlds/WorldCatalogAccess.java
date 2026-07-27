@@ -74,4 +74,34 @@ interface WorldCatalogAccess {
     /// @param cancellation cooperative operation cancellation signal
     /// @throws IOException when Core cannot delete the world
     void delete(WorldCatalogItem world, LoadCancellation cancellation) throws IOException;
+
+    /// Copies one validated, unlocked current world beside its source.
+    ///
+    /// Implementations that do not support mutation may retain this default failure.
+    ///
+    /// @param world current loaded world row
+    /// @param targetName non-blank sibling directory and stored level name
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when Core cannot copy the world
+    default void copy(
+            WorldCatalogItem world,
+            String targetName,
+            LoadCancellation cancellation) throws IOException {
+        throw new UnsupportedOperationException("World copying is unavailable");
+    }
+
+    /// Exports one validated, unlocked current world to an atomic ZIP destination.
+    ///
+    /// Implementations that do not support export may retain this default failure.
+    ///
+    /// @param world current loaded world row
+    /// @param archive normalized ZIP destination
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when Core cannot export the world
+    default void export(
+            WorldCatalogItem world,
+            Path archive,
+            LoadCancellation cancellation) throws IOException {
+        throw new UnsupportedOperationException("World export is unavailable");
+    }
 }

@@ -688,8 +688,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             applySnapshot(store.snapshot());
             statusLabel.setText(i18n("message.success"));
         } catch (IllegalArgumentException | IllegalStateException exception) {
-            statusLabel.setText("Cannot save: "
-                    + Objects.requireNonNullElse(exception.getMessage(), "invalid settings"));
+            statusLabel.setText(i18n(
+                    "swing.instance_settings.save_failed",
+                    Objects.requireNonNullElse(
+                            exception.getMessage(),
+                            i18n("swing.instance_settings.invalid"))));
         }
     }
 
@@ -703,8 +706,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             applySnapshot(store.snapshot());
             statusLabel.setText(i18n("message.success"));
         } catch (IllegalStateException exception) {
-            statusLabel.setText("Cannot reload: "
-                    + Objects.requireNonNullElse(exception.getMessage(), "settings unavailable"));
+            statusLabel.setText(i18n(
+                    "swing.instance_settings.reload_failed",
+                    Objects.requireNonNullElse(
+                            exception.getMessage(),
+                            i18n("swing.instance_settings.unavailable"))));
         }
     }
 

@@ -85,7 +85,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
     private final JButton openDirectoryButton = new JButton();
 
     /// Restores the selected archive to a user-confirmed new save directory.
-    private final JButton restoreButton = new JButton("Restore as new save");
+    private final JButton restoreButton = new JButton(i18n("swing.world_backup.restore"));
 
     /// Permanently deletes the selected backup archive after confirmation.
     private final JButton deleteButton = new JButton();
@@ -94,7 +94,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
     private final JLabel archiveDetailLabel = new JLabel();
 
     /// Presents scan and operation progress or terminal result text.
-    private final JLabel statusLabel = new JLabel("Select this tab to load local saves and backups.");
+    private final JLabel statusLabel = new JLabel(i18n("swing.world_backup.idle"));
 
     /// Guards one-time initial activation and terminal component cleanup.
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -247,7 +247,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
 
         JPanel sourceRow = new JPanel(new MigLayout("insets 0, fillx", "[][grow,fill]8[]", "[]"));
         sourceRow.setOpaque(false);
-        sourceRow.add(new JLabel("Source save"));
+        sourceRow.add(new JLabel(i18n("swing.world_backup.source")));
         sourceRow.add(sourceBox, "growx");
         sourceRow.add(createButton);
         content.add(sourceRow, "growx");
@@ -284,9 +284,9 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         if (closed.get() || operationPending) {
             return;
         }
-        long request = beginOperation("Loading local saves and backups...");
+        long request = beginOperation(i18n("swing.world_backup.loading"));
         try {
-            observeSnapshot(catalog.load(), request, "Local saves and backups loaded.");
+            observeSnapshot(catalog.load(), request, i18n("swing.world_backup.loaded"));
         } catch (RuntimeException exception) {
             completeFailure(request, exception);
         }
@@ -301,7 +301,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         }
         long request = beginOperation(i18n("world.backup.processing"));
         try {
-            observeSnapshot(catalog.createBackup(source), request, "Backup created.");
+            observeSnapshot(catalog.createBackup(source), request, i18n("swing.world_backup.created"));
         } catch (RuntimeException exception) {
             completeFailure(request, exception);
         }
@@ -331,9 +331,9 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         if (archive == null || closed.get() || operationPending || !interactions.confirmDelete(this, archive)) {
             return;
         }
-        long request = beginOperation("Deleting backup...");
+        long request = beginOperation(i18n("swing.world_backup.deleting"));
         try {
-            observeSnapshot(catalog.deleteBackup(archive), request, "Backup deleted.");
+            observeSnapshot(catalog.deleteBackup(archive), request, i18n("swing.world_backup.deleted"));
         } catch (RuntimeException exception) {
             completeFailure(request, exception);
         }
@@ -350,9 +350,12 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         if (destinationName == null || !interactions.confirmRestore(this, archive, destinationName)) {
             return;
         }
-        long request = beginOperation("Restoring backup...");
+        long request = beginOperation(i18n("swing.world_backup.restoring"));
         try {
-            observeSnapshot(catalog.restoreBackup(archive, destinationName), request, "Backup restored as a new save.");
+            observeSnapshot(
+                    catalog.restoreBackup(archive, destinationName),
+                    request,
+                    i18n("swing.world_backup.restored"));
         } catch (RuntimeException exception) {
             completeFailure(request, exception);
         }
@@ -405,7 +408,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
             return;
         }
         operationPending = false;
-        statusLabel.setText("Operation failed.");
+        statusLabel.setText(i18n("message.failed"));
         updateControls();
         showFailureIfOpen(failure);
     }

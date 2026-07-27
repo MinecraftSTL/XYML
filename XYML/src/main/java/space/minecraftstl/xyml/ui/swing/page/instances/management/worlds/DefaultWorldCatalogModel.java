@@ -232,6 +232,51 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
                 selectedWorld);
     }
 
+    /// Starts one serialized Core copy followed by a fresh shallow index.
+    ///
+    /// @param world exact materialized current row
+    /// @param targetName requested sibling directory and stored level name
+    /// @return terminal catalog snapshot
+    @Override
+    public CompletionStage<WorldCatalogSnapshot> copyWorld(WorldCatalogItem world, String targetName) {
+        WorldCatalogItem selectedWorld;
+        String normalizedTargetName;
+        try {
+            selectedWorld = Objects.requireNonNull(world, "world");
+            normalizedTargetName = requireNonBlank(targetName, "targetName");
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+        return startMutation(
+                strings.copyingText(),
+                (source, cancellation) -> source.copy(selectedWorld, normalizedTargetName, cancellation),
+                selectedWorld);
+    }
+
+    /// Starts one serialized atomic ZIP export followed by a fresh shallow index.
+    ///
+    /// The reindex keeps action ownership identical to copy, import, and delete while preserving
+    /// the viewport-only metadata contract.
+    ///
+    /// @param world exact materialized current row
+    /// @param archive requested ZIP destination
+    /// @return terminal catalog snapshot
+    @Override
+    public CompletionStage<WorldCatalogSnapshot> exportWorld(WorldCatalogItem world, Path archive) {
+        WorldCatalogItem selectedWorld;
+        Path normalizedArchive;
+        try {
+            selectedWorld = Objects.requireNonNull(world, "world");
+            normalizedArchive = Objects.requireNonNull(archive, "archive").toAbsolutePath().normalize();
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+        return startMutation(
+                strings.exportingText(),
+                (source, cancellation) -> source.export(selectedWorld, normalizedArchive, cancellation),
+                selectedWorld);
+    }
+
     /// Schedules one exact range of NBT-backed rows after the shallow index is ready.
     ///
     /// @param desiredRange requested logical viewport range

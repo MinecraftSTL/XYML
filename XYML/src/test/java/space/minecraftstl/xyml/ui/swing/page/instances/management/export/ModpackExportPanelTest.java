@@ -101,6 +101,7 @@ final class ModpackExportPanelTest {
             assertEquals(2, root.getChildCount());
             DefaultMutableTreeNode config = childNamed(root, "config");
             assertEquals(0, config.getChildCount());
+            assertFalse(config.isLeaf());
             configReference.set(config);
 
             DefaultMutableTreeNode topLevel = childNamed(root, "top-level.txt");

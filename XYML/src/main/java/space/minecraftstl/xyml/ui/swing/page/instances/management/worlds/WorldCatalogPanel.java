@@ -22,6 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameRepository;
+import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
@@ -68,6 +69,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Native dialog and desktop boundary.
     private final WorldCatalogInteractions interactions;
 
+    /// Existing launch-service callbacks bound to this managed instance, or an unavailable boundary.
+    private final WorldQuickPlayActions quickPlayActions;
+
     /// Viewport-driven sparse list backed by the shallow source index.
     private final ViewportChoiceList<WorldCatalogItem> choiceList;
 
@@ -82,6 +86,18 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Opens the exact selected world directory.
     private final JButton openWorldButton = new JButton();
+
+    /// Launches the managed instance and enters the exact selected world.
+    private final JButton quickPlayButton = new JButton();
+
+    /// Generates a standalone script that enters the exact selected world.
+    private final JButton launchScriptButton = new JButton();
+
+    /// Copies the exact selected readable and unlocked world.
+    private final JButton copyButton = new JButton();
+
+    /// Exports the exact selected readable and unlocked world to ZIP.
+    private final JButton exportButton = new JButton();
 
     /// Permanently deletes the exact selected readable world after confirmation.
     private final JButton deleteButton = new JButton();
@@ -137,12 +153,32 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Prevents programmatic reloads from interpreting transient selection events as user input.
     private boolean synchronizing;
 
+    /// Local quick-play or launch-script status, or null while neither command owns the page.
+    private @Nullable String quickPlayOperationText;
+
+    /// Monotonic identity that prevents stale command completions from mutating a later operation.
+    private long quickPlayOperationRevision;
+
     /// Creates the production panel with the real repository adapter and desktop interactions.
     ///
     /// @param repository managed game repository
     /// @param instanceId stable managed instance identifier
     /// @param executor caller-owned background executor
     public WorldCatalogPanel(GameRepository repository, String instanceId, Executor executor) {
+        this(repository, instanceId, executor, WorldQuickPlayActions.unavailable());
+    }
+
+    /// Creates the production panel with real repository, desktop, and quick-play boundaries.
+    ///
+    /// @param repository managed game repository
+    /// @param instanceId stable managed instance identifier
+    /// @param executor caller-owned background executor
+    /// @param quickPlayActions non-blocking launcher callbacks already bound to this instance
+    public WorldCatalogPanel(
+            GameRepository repository,
+            String instanceId,
+            Executor executor,
+            WorldQuickPlayActions quickPlayActions) {
         this(
                 new DefaultWorldCatalogModel(
                         Objects.requireNonNull(repository, "repository"),
@@ -150,7 +186,8 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                         Objects.requireNonNull(executor, "executor"),
                         WorldCatalogStrings.english()),
                 WorldCatalogStrings.english(),
-                new DefaultWorldCatalogInteractions(WorldCatalogStrings.english(), executor));
+                new DefaultWorldCatalogInteractions(WorldCatalogStrings.english(), executor),
+                quickPlayActions);
     }
 
     /// Creates a panel with injected filesystem and desktop boundaries for deterministic tests.
@@ -164,11 +201,28 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             WorldCatalogModel model,
             WorldCatalogStrings strings,
             WorldCatalogInteractions interactions) {
+        this(model, strings, interactions, WorldQuickPlayActions.unavailable());
+    }
+
+    /// Creates a panel with injected catalog, interaction, and quick-play boundaries for deterministic tests.
+    ///
+    /// The panel owns the supplied model and closes it after detaching every Swing listener.
+    ///
+    /// @param model catalog model
+    /// @param strings stable page text
+    /// @param interactions dialog and desktop interaction boundary
+    /// @param quickPlayActions non-blocking launcher callbacks already bound to this instance
+    public WorldCatalogPanel(
+            WorldCatalogModel model,
+            WorldCatalogStrings strings,
+            WorldCatalogInteractions interactions,
+            WorldQuickPlayActions quickPlayActions) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
+        this.quickPlayActions = Objects.requireNonNull(quickPlayActions, "quickPlayActions");
         displayedSnapshot = this.model.snapshot();
         choiceList = new ViewportChoiceList<>(this.model, WorldCatalogItem::displayText);
         listDataListener = createListDataListener();
@@ -313,8 +367,23 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         addDetailRow(details, strings.lockedLabel(), lockedValue, "worldsLocked");
         addDetailRow(details, strings.readabilityLabel(), readabilityValue, "worldsMetadata");
 
-        JPanel actions = new JPanel(new MigLayout("insets 0, gap 8", "[40!][40!]", "[40!]"));
+        JPanel actions = new JPanel(new MigLayout(
+                "insets 0, gap 8",
+                "[40!][40!][40!][40!][40!][40!]",
+                "[40!]"));
         actions.setOpaque(false);
+        configureIconButton(
+                quickPlayButton,
+                "worldsQuickPlay",
+                "assets/swing/icons/rocket-launch.svg",
+                strings.quickPlayTooltip(),
+                this::launchSelectedWorld);
+        configureIconButton(
+                launchScriptButton,
+                "worldsLaunchScript",
+                "assets/swing/icons/script.svg",
+                strings.launchScriptTooltip(),
+                this::generateSelectedWorldLaunchScript);
         configureIconButton(
                 openWorldButton,
                 "worldsOpenSelected",
@@ -322,12 +391,28 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 strings.openWorldTooltip(),
                 this::openSelectedWorld);
         configureIconButton(
+                copyButton,
+                "worldsCopy",
+                "assets/swing/icons/content-copy.svg",
+                strings.copyTooltip(),
+                this::copySelectedWorld);
+        configureIconButton(
+                exportButton,
+                "worldsExport",
+                "assets/swing/icons/output.svg",
+                strings.exportTooltip(),
+                this::exportSelectedWorld);
+        configureIconButton(
                 deleteButton,
                 "worldsDelete",
                 "assets/swing/icons/delete.svg",
                 strings.deleteTooltip(),
                 this::deleteSelectedWorld);
+        actions.add(quickPlayButton, "w 40!, h 40!");
+        actions.add(launchScriptButton, "w 40!, h 40!");
         actions.add(openWorldButton, "w 40!, h 40!");
+        actions.add(copyButton, "w 40!, h 40!");
+        actions.add(exportButton, "w 40!, h 40!");
         actions.add(deleteButton, "w 40!, h 40!");
         details.add(actions, "span 2, right");
         return details;
@@ -427,12 +512,18 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 appliedContentRevision = snapshot.contentRevision();
                 choiceList.reloadData();
             }
-            choiceList.getList().setEnabled(snapshot.listEnabled());
+            boolean commandIdle = quickPlayOperationText == null;
+            choiceList.getList().setEnabled(snapshot.listEnabled() && commandIdle);
             statusLabel.setText(snapshot.statusText());
-            operationLabel.setText(snapshot.operationText());
-            refreshButton.setEnabled(snapshot.refreshEnabled());
-            importButton.setEnabled(snapshot.status() == WorldCatalogStatus.READY && !snapshot.operationPending());
-            openSavesButton.setEnabled(!snapshot.operationPending());
+            operationLabel.setText(commandIdle
+                    ? snapshot.operationText()
+                    : Objects.requireNonNull(quickPlayOperationText));
+            refreshButton.setEnabled(snapshot.refreshEnabled() && commandIdle);
+            importButton.setEnabled(
+                    snapshot.status() == WorldCatalogStatus.READY
+                            && !snapshot.operationPending()
+                            && commandIdle);
+            openSavesButton.setEnabled(!snapshot.operationPending() && commandIdle);
         } finally {
             synchronizing = false;
         }
@@ -446,8 +537,8 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// @param world selected loaded row, or null for no loaded selection
     private void showDetails(@Nullable WorldCatalogItem world) {
         detailTitle.setText(world == null ? strings.emptySelectionText() : world.displayText());
-        directoryValue.setText(world == null ? "" : world.directoryName());
-        pathValue.setText(world == null ? "" : world.path().toString());
+        directoryValue.setText(world == null ? strings.unavailableValue() : world.directoryName());
+        pathValue.setText(world == null ? strings.unavailableValue() : world.path().toString());
         gameVersionValue.setText(world == null || world.gameVersion() == null
                 ? strings.unavailableValue()
                 : Objects.requireNonNull(world.gameVersion()));
@@ -467,9 +558,18 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private void updateSelectionActions(@Nullable WorldCatalogItem world) {
         boolean usableSelection = world != null
                 && displayedSnapshot.listEnabled()
-                && !displayedSnapshot.operationPending();
+                && !displayedSnapshot.operationPending()
+                && quickPlayOperationText == null;
         openWorldButton.setEnabled(usableSelection);
-        deleteButton.setEnabled(usableSelection && Objects.requireNonNull(world).readable());
+        boolean mutableSelection = usableSelection
+                && Objects.requireNonNull(world).readable()
+                && !world.locked();
+        boolean launchableSelection = mutableSelection && quickPlayActions.available();
+        quickPlayButton.setEnabled(launchableSelection);
+        launchScriptButton.setEnabled(launchableSelection);
+        copyButton.setEnabled(mutableSelection);
+        exportButton.setEnabled(mutableSelection);
+        deleteButton.setEnabled(mutableSelection);
     }
 
     /// Starts an explicit fresh shallow directory index.
@@ -527,6 +627,181 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
         if (selected != null) {
             observeFailure(interactions.openDirectory(selected.path()));
+        }
+    }
+
+    /// Starts ordinary launch preparation with the selected world folder captured in its immutable request.
+    private void launchSelectedWorld() {
+        @Nullable WorldCatalogItem selected = launchableSelection();
+        if (selected == null) {
+            return;
+        }
+        long revision = beginQuickPlayOperation(strings.launchingText());
+        final LaunchSession session;
+        try {
+            session = quickPlayActions.launch(selected);
+        } catch (RuntimeException | Error failure) {
+            completeQuickPlayLaunch(revision, failure);
+            return;
+        }
+        try {
+            Objects.requireNonNull(session.completion(), "world quick-play session returned null completion")
+                    .whenComplete((process, failure) -> EdtDispatcher.execute(
+                            () -> completeQuickPlayLaunch(revision, failure)));
+        } catch (RuntimeException | Error failure) {
+            completeQuickPlayLaunch(revision, failure);
+        }
+    }
+
+    /// Chooses a local destination and starts quick-play script generation through the existing launch chain.
+    private void generateSelectedWorldLaunchScript() {
+        @Nullable WorldCatalogItem selected = launchableSelection();
+        if (selected == null) {
+            return;
+        }
+        final @Nullable Path destination;
+        try {
+            destination = interactions.chooseLaunchScriptDestination(this, selected);
+        } catch (RuntimeException | Error failure) {
+            showFailure(failure);
+            return;
+        }
+        if (destination == null) {
+            return;
+        }
+        long revision = beginQuickPlayOperation(strings.generatingLaunchScriptText());
+        final CompletionStage<Path> completion;
+        try {
+            completion = quickPlayActions.exportLaunchScript(selected, destination);
+        } catch (RuntimeException | Error failure) {
+            completeLaunchScript(revision, null, failure);
+            return;
+        }
+        try {
+            completion.whenComplete((scriptFile, failure) -> EdtDispatcher.execute(
+                    () -> completeLaunchScript(revision, scriptFile, failure)));
+        } catch (RuntimeException | Error failure) {
+            completeLaunchScript(revision, null, failure);
+        }
+    }
+
+    /// Returns the exact selected row only while quick play can safely start.
+    ///
+    /// @return launchable selected row, or null while unavailable or busy
+    private @Nullable WorldCatalogItem launchableSelection() {
+        @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
+        if (closed.get()
+                || quickPlayOperationText != null
+                || !quickPlayActions.available()
+                || selected == null
+                || !selected.readable()
+                || selected.locked()) {
+            return null;
+        }
+        return selected;
+    }
+
+    /// Claims the page-local quick-play slot and refreshes command availability.
+    ///
+    /// @param statusText non-blank local operation status
+    /// @return unique operation revision
+    private long beginQuickPlayOperation(String statusText) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get() || quickPlayOperationText != null) {
+            throw new IllegalStateException("A world quick-play operation is already active or closed");
+        }
+        String checkedStatus = Objects.requireNonNull(statusText, "statusText");
+        if (checkedStatus.isBlank()) {
+            throw new IllegalArgumentException("statusText must not be blank");
+        }
+        quickPlayOperationText = checkedStatus;
+        long revision = ++quickPlayOperationRevision;
+        applySnapshot(displayedSnapshot);
+        return revision;
+    }
+
+    /// Releases one matching process-preparation slot and reports a terminal failure.
+    ///
+    /// @param revision operation identity
+    /// @param failure terminal failure, or null after process creation
+    private void completeQuickPlayLaunch(long revision, @Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!finishQuickPlayOperation(revision)) {
+            return;
+        }
+        if (failure != null) {
+            showFailure(failure);
+        }
+    }
+
+    /// Releases one matching script-generation slot and reports its exact terminal result.
+    ///
+    /// @param revision operation identity
+    /// @param scriptFile generated script path, or null after failure
+    /// @param failure terminal failure, or null after success
+    private void completeLaunchScript(
+            long revision,
+            @Nullable Path scriptFile,
+            @Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!finishQuickPlayOperation(revision)) {
+            return;
+        }
+        if (failure != null) {
+            showFailure(failure);
+        } else if (scriptFile == null) {
+            showFailure(new IllegalStateException("Quick-play script generation returned no path"));
+        } else {
+            interactions.launchScriptSucceeded(this, scriptFile);
+        }
+    }
+
+    /// Clears one current page-local operation without accepting stale completion callbacks.
+    ///
+    /// @param revision operation identity
+    /// @return whether this completion owned the current slot
+    private boolean finishQuickPlayOperation(long revision) {
+        if (closed.get() || quickPlayOperationText == null || revision != quickPlayOperationRevision) {
+            return false;
+        }
+        quickPlayOperationText = null;
+        applySnapshot(displayedSnapshot);
+        return true;
+    }
+
+    /// Prompts for a sibling name and delegates one lock-aware world copy.
+    private void copySelectedWorld() {
+        @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
+        if (selected == null || !selected.readable() || selected.locked()) {
+            return;
+        }
+        @Nullable String targetName;
+        try {
+            targetName = interactions.chooseCopyName(this, selected);
+        } catch (RuntimeException failure) {
+            showFailure(failure);
+            return;
+        }
+        if (targetName != null) {
+            observeFailure(model.copyWorld(selected, targetName));
+        }
+    }
+
+    /// Chooses a ZIP destination and delegates one lock-aware atomic world export.
+    private void exportSelectedWorld() {
+        @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
+        if (selected == null || !selected.readable() || selected.locked()) {
+            return;
+        }
+        @Nullable Path archive;
+        try {
+            archive = interactions.chooseExportArchive(this, selected);
+        } catch (RuntimeException failure) {
+            showFailure(failure);
+            return;
+        }
+        if (archive != null) {
+            observeFailure(model.exportWorld(selected, archive));
         }
     }
 
@@ -601,6 +876,8 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Detaches all UI listeners and closes owned resources on the EDT.
     private void closeOnEventDispatchThread() {
+        quickPlayOperationRevision++;
+        quickPlayOperationText = null;
         choiceList.getList().removeListSelectionListener(selectionListener);
         choiceList.getChoiceModel().removeListDataListener(listDataListener);
         modelSubscription.unsubscribe();
@@ -610,6 +887,10 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         importButton.setEnabled(false);
         openSavesButton.setEnabled(false);
         openWorldButton.setEnabled(false);
+        quickPlayButton.setEnabled(false);
+        launchScriptButton.setEnabled(false);
+        copyButton.setEnabled(false);
+        exportButton.setEnabled(false);
         deleteButton.setEnabled(false);
         removeAll();
     }

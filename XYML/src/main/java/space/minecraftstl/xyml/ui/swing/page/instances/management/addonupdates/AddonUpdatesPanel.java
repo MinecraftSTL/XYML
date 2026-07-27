@@ -308,7 +308,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         configureIconButton(
                 openSourceButton,
                 "addonUpdatesOpenSource",
-                "assets/swing/icons/arrow-forward.svg",
+                "assets/swing/icons/open-in-new.svg",
                 strings.sourceTooltip(),
                 this::openSelectedSourcePage);
         heading.add(openSourceButton, "w 40!, h 40!");

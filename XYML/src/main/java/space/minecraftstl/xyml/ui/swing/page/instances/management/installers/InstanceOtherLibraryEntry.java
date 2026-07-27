@@ -20,7 +20,6 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
 
 import java.util.Objects;
 

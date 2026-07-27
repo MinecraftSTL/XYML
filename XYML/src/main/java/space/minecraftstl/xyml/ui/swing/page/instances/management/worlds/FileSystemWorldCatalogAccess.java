@@ -23,11 +23,17 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.game.WorldArchiveImporter;
+import space.minecraftstl.xyml.game.WorldLockedException;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -184,6 +190,138 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
         signal.throwIfCancelled();
         sourceWorld.delete();
         signal.throwIfCancelled();
+    }
+
+    /// Reopens and copies one current readable world after enforcing a direct, absent sibling target.
+    ///
+    /// @param world selected current row
+    /// @param targetName requested sibling directory and stored level name
+    /// @param cancellation cooperative cancellation signal
+    /// @throws IOException when the source is locked or the target is invalid or already present
+    @Override
+    public void copy(
+            WorldCatalogItem world,
+            String targetName,
+            LoadCancellation cancellation) throws IOException {
+        WorldCatalogItem selectedWorld = requireReadableWorld(world);
+        String normalizedTargetName = requireNonBlank(targetName, "targetName");
+        if (!FileUtils.isNameValid(normalizedTargetName)) {
+            throw new IOException("Invalid world copy name: " + normalizedTargetName);
+        }
+        LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");
+        signal.throwIfCancelled();
+        Path parent = Objects.requireNonNull(selectedWorld.path().getParent(), "world parent");
+        Path target = parent.resolve(normalizedTargetName).toAbsolutePath().normalize();
+        if (!parent.equals(target.getParent())) {
+            throw new IOException("World copy target must remain inside the saves directory");
+        }
+        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+            throw new FileAlreadyExistsException(target.toString());
+        }
+        World sourceWorld = new World(selectedWorld.path());
+        rejectLocked(sourceWorld);
+        signal.throwIfCancelled();
+        sourceWorld.copy(normalizedTargetName);
+        signal.throwIfCancelled();
+    }
+
+    /// Exports one current readable world through a sibling temporary archive and atomic publication.
+    ///
+    /// @param world selected current row
+    /// @param archive requested final ZIP destination
+    /// @param cancellation cooperative cancellation signal
+    /// @throws IOException when the source is locked or the destination cannot be published
+    @Override
+    public void export(
+            WorldCatalogItem world,
+            Path archive,
+            LoadCancellation cancellation) throws IOException {
+        WorldCatalogItem selectedWorld = requireReadableWorld(world);
+        Path destination = Objects.requireNonNull(archive, "archive").toAbsolutePath().normalize();
+        LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");
+        @Nullable Path fileName = destination.getFileName();
+        if (fileName == null || !fileName.toString().toLowerCase(java.util.Locale.ROOT).endsWith(".zip")) {
+            throw new IOException("World export destination must use the .zip extension");
+        }
+        if (destination.startsWith(selectedWorld.path())) {
+            throw new IOException("World export destination cannot be inside the source world");
+        }
+        @Nullable Path parent = destination.getParent();
+        if (parent == null) {
+            throw new IOException("World export destination has no parent directory");
+        }
+        signal.throwIfCancelled();
+        Files.createDirectories(parent);
+        World sourceWorld = new World(selectedWorld.path());
+        rejectLocked(sourceWorld);
+        Path staging = Files.createTempFile(parent, ".xyml-world-export-", ".zip.tmp")
+                .toAbsolutePath()
+                .normalize();
+        boolean published = false;
+        @Nullable Throwable failure = null;
+        try {
+            Files.delete(staging);
+            signal.throwIfCancelled();
+            sourceWorld.export(staging, selectedWorld.directoryName());
+            signal.throwIfCancelled();
+            publishExport(staging, destination);
+            published = true;
+        } catch (IOException | RuntimeException | Error thrown) {
+            failure = thrown;
+            throw thrown;
+        } finally {
+            if (!published) {
+                try {
+                    Files.deleteIfExists(staging);
+                } catch (IOException cleanupFailure) {
+                    if (failure != null) {
+                        failure.addSuppressed(cleanupFailure);
+                    } else {
+                        throw cleanupFailure;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Publishes a complete temporary archive without exposing partial destination bytes.
+    ///
+    /// @param staging complete sibling temporary archive
+    /// @param destination final archive path
+    /// @throws IOException when neither atomic nor ordinary replacement succeeds
+    private static void publishExport(Path staging, Path destination) throws IOException {
+        try {
+            Files.move(
+                    staging,
+                    destination,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException ignored) {
+            Files.move(staging, destination, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    /// Rejects a row that Core could not decode before any mutation or export starts.
+    ///
+    /// @param world selected row
+    /// @return validated readable row
+    /// @throws IOException when the row is unreadable
+    private static WorldCatalogItem requireReadableWorld(WorldCatalogItem world) throws IOException {
+        WorldCatalogItem selectedWorld = Objects.requireNonNull(world, "world");
+        if (!selectedWorld.readable()) {
+            throw new IOException("Unreadable worlds cannot be modified through the World API");
+        }
+        return selectedWorld;
+    }
+
+    /// Rejects copying or exporting a world while Minecraft owns its session lock.
+    ///
+    /// @param world reopened Core world
+    /// @throws WorldLockedException when the session lock is held
+    private static void rejectLocked(World world) throws WorldLockedException {
+        if (world.isLocked()) {
+            throw new WorldLockedException("The world " + world.getFile() + " has been locked");
+        }
     }
 
     /// Extracts a directory name used for deterministic shallow-index sorting.

@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -94,6 +95,60 @@ final class DefaultWorldCatalogModelTest {
         }
     }
 
+    /// Copy and export reuse the selected materialized row while refreshing only the shallow path index.
+    @Test
+    void delegatesCopyAndExportWithoutMaterializingUnrequestedRows() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        RecordingAccess access = new RecordingAccess(temporaryDirectory, 6);
+        DefaultWorldCatalogModel model = new DefaultWorldCatalogModel(
+                access,
+                executor,
+                WorldCatalogStrings.english());
+        try {
+            CompletableFuture<WorldCatalogSnapshot> ready = nextReadySnapshot(model);
+            model.loadIfNeeded();
+            ready.get(5, TimeUnit.SECONDS);
+            WorldCatalogItem selected = model.load(
+                            IndexRange.ofLength(2, 1),
+                            new LoadCancellation())
+                    .toCompletableFuture()
+                    .get(5, TimeUnit.SECONDS)
+                    .items()
+                    .get(0);
+
+            model.copyWorld(selected, "Copied world").toCompletableFuture().get(5, TimeUnit.SECONDS);
+            Path archive = temporaryDirectory.resolve("exported.zip");
+            model.exportWorld(selected, archive).toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+            assertEquals(selected, access.copiedWorld());
+            assertEquals("Copied world", access.copyName());
+            assertEquals(selected, access.exportedWorld());
+            assertEquals(archive.toAbsolutePath().normalize(), access.exportedArchive());
+            assertEquals(3, access.indexCalls());
+            assertEquals(List.of(selected.path()), access.materializedDirectories());
+        } finally {
+            model.close();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Subscribes to the next ready state without retaining the registration after completion.
+    ///
+    /// @param model model whose next terminal refresh is observed
+    /// @return completion for the next ready snapshot
+    private static CompletableFuture<WorldCatalogSnapshot> nextReadySnapshot(DefaultWorldCatalogModel model) {
+        CompletableFuture<WorldCatalogSnapshot> ready = new CompletableFuture<>();
+        Subscription subscription = model.subscribe(change -> {
+            @Nullable WorldCatalogSnapshot snapshot = change.currentValue();
+            if (snapshot != null && snapshot.status() == WorldCatalogStatus.READY) {
+                ready.complete(snapshot);
+            }
+        });
+        ready.whenComplete((snapshot, failure) -> subscription.unsubscribe());
+        return ready;
+    }
+
     /// Deterministic blocking source that records shallow indexes and per-range materialization separately.
     @NotNullByDefault
     private static final class RecordingAccess implements WorldCatalogAccess {
@@ -105,6 +160,18 @@ final class DefaultWorldCatalogModelTest {
 
         /// Ordered directories for which row metadata was requested.
         private final List<Path> materializedDirectories = new ArrayList<>();
+
+        /// World most recently delegated to copy, or null before a copy.
+        private volatile @Nullable WorldCatalogItem copiedWorld;
+
+        /// Copy target most recently delegated, or null before a copy.
+        private volatile @Nullable String copyName;
+
+        /// World most recently delegated to export, or null before an export.
+        private volatile @Nullable WorldCatalogItem exportedWorld;
+
+        /// Export path most recently delegated, or null before an export.
+        private volatile @Nullable Path exportedArchive;
 
         /// Creates a source with deterministic ordered world directory paths.
         ///
@@ -197,6 +264,36 @@ final class DefaultWorldCatalogModelTest {
             cancellation.throwIfCancelled();
         }
 
+        /// Records one synthetic copy delegation.
+        ///
+        /// @param world selected synthetic row
+        /// @param targetName requested copy name
+        /// @param cancellation cooperative cancellation signal
+        @Override
+        public void copy(
+                WorldCatalogItem world,
+                String targetName,
+                LoadCancellation cancellation) {
+            cancellation.throwIfCancelled();
+            copiedWorld = world;
+            copyName = targetName;
+        }
+
+        /// Records one synthetic export delegation.
+        ///
+        /// @param world selected synthetic row
+        /// @param archive requested archive path
+        /// @param cancellation cooperative cancellation signal
+        @Override
+        public void export(
+                WorldCatalogItem world,
+                Path archive,
+                LoadCancellation cancellation) {
+            cancellation.throwIfCancelled();
+            exportedWorld = world;
+            exportedArchive = archive;
+        }
+
         /// Returns the number of shallow-index calls observed so far.
         ///
         /// @return non-negative index call count
@@ -218,6 +315,34 @@ final class DefaultWorldCatalogModelTest {
         /// @return ordered direct-child paths
         private @Unmodifiable List<Path> directories() {
             return directories;
+        }
+
+        /// Returns the most recently copied row.
+        ///
+        /// @return copied row, or null before copy
+        private @Nullable WorldCatalogItem copiedWorld() {
+            return copiedWorld;
+        }
+
+        /// Returns the most recently requested copy name.
+        ///
+        /// @return copy name, or null before copy
+        private @Nullable String copyName() {
+            return copyName;
+        }
+
+        /// Returns the most recently exported row.
+        ///
+        /// @return exported row, or null before export
+        private @Nullable WorldCatalogItem exportedWorld() {
+            return exportedWorld;
+        }
+
+        /// Returns the most recently requested export path.
+        ///
+        /// @return archive path, or null before export
+        private @Nullable Path exportedArchive() {
+            return exportedArchive;
         }
     }
 }

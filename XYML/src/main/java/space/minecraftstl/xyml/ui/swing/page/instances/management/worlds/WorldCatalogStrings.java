@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 
@@ -186,5 +187,110 @@ public record WorldCatalogStrings(
             throw new IllegalArgumentException("detail must not be blank");
         }
         return loadFailureTextFormat.formatted(checkedDetail);
+    }
+
+    /// Returns the active copy operation text.
+    ///
+    /// @return non-blank copy status
+    public String copyingText() {
+        return "Copying world...";
+    }
+
+    /// Returns the active export operation text.
+    ///
+    /// @return non-blank export status
+    public String exportingText() {
+        return "Exporting world...";
+    }
+
+    /// Returns the selected-world copy tooltip.
+    ///
+    /// @return non-blank copy tooltip
+    public String copyTooltip() {
+        return "Copy selected world";
+    }
+
+    /// Returns the selected-world export tooltip.
+    ///
+    /// @return non-blank export tooltip
+    public String exportTooltip() {
+        return "Export selected world";
+    }
+
+    /// Returns the copy-name prompt.
+    ///
+    /// @return non-blank copy-name prompt
+    public String copyNamePrompt() {
+        return "New world name:";
+    }
+
+    /// Returns the copy dialog title.
+    ///
+    /// @return non-blank copy dialog title
+    public String copyDialogTitle() {
+        return "Copy world";
+    }
+
+    /// Returns the export chooser title.
+    ///
+    /// @return non-blank export chooser title
+    public String exportDialogTitle() {
+        return "Export world";
+    }
+
+    /// Returns the overwrite confirmation message.
+    ///
+    /// @param fileName selected existing archive file name
+    /// @return non-blank overwrite confirmation
+    public String overwriteConfirmation(String fileName) {
+        String checkedName = Objects.requireNonNull(fileName, "fileName");
+        if (checkedName.isBlank()) {
+            throw new IllegalArgumentException("fileName must not be blank");
+        }
+        return "Replace existing archive \"" + checkedName + "\"?";
+    }
+
+    /// Returns the selected-world quick-play tooltip.
+    ///
+    /// @return non-blank quick-play tooltip
+    public String quickPlayTooltip() {
+        return "Launch and enter selected world";
+    }
+
+    /// Returns the selected-world standalone script tooltip.
+    ///
+    /// @return non-blank quick-play script tooltip
+    public String launchScriptTooltip() {
+        return "Generate quick-play launch script";
+    }
+
+    /// Returns the status shown while quick-play process preparation owns this page.
+    ///
+    /// @return non-blank launch preparation status
+    public String launchingText() {
+        return "Preparing quick play...";
+    }
+
+    /// Returns the status shown while quick-play script generation owns this page.
+    ///
+    /// @return non-blank script preparation status
+    public String generatingLaunchScriptText() {
+        return "Generating quick-play script...";
+    }
+
+    /// Returns the standalone quick-play script chooser and success-dialog title.
+    ///
+    /// @return non-blank dialog title
+    public String launchScriptDialogTitle() {
+        return "Launch script";
+    }
+
+    /// Formats one successfully generated script path for native feedback.
+    ///
+    /// @param scriptFile exact generated script path
+    /// @return non-blank success message
+    public String launchScriptSuccess(Path scriptFile) {
+        Path destination = Objects.requireNonNull(scriptFile, "scriptFile").toAbsolutePath().normalize();
+        return "Launch script saved to " + destination;
     }
 }

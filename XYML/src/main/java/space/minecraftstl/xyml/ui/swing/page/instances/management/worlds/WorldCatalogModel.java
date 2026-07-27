@@ -23,6 +23,8 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
 
 import java.nio.file.Path;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 /// Supplies one lazily indexed instance-world catalog to a viewport-driven Swing list.
@@ -68,6 +70,30 @@ public interface WorldCatalogModel extends ViewportChoiceDataSource<WorldCatalog
     /// @param world exact current materialized row
     /// @return terminal catalog state
     CompletionStage<WorldCatalogSnapshot> deleteWorld(WorldCatalogItem world);
+
+    /// Copies one current readable world under a user-selected sibling name.
+    ///
+    /// @param world exact current materialized row
+    /// @param targetName requested sibling directory and stored level name
+    /// @return terminal catalog state
+    default CompletionStage<WorldCatalogSnapshot> copyWorld(WorldCatalogItem world, String targetName) {
+        Objects.requireNonNull(world, "world");
+        Objects.requireNonNull(targetName, "targetName");
+        return CompletableFuture.failedFuture(
+                new UnsupportedOperationException("World copying is unavailable"));
+    }
+
+    /// Exports one current readable world to a local ZIP archive.
+    ///
+    /// @param world exact current materialized row
+    /// @param archive requested local ZIP destination
+    /// @return terminal catalog state
+    default CompletionStage<WorldCatalogSnapshot> exportWorld(WorldCatalogItem world, Path archive) {
+        Objects.requireNonNull(world, "world");
+        Objects.requireNonNull(archive, "archive");
+        return CompletableFuture.failedFuture(
+                new UnsupportedOperationException("World export is unavailable"));
+    }
 
     /// Cancels owned work and rejects future calls.
     @Override

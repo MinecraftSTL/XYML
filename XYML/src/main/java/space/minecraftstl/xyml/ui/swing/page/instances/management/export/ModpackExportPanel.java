@@ -1200,6 +1200,17 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
                     source.displayName());
         }
 
+        /// Returns whether this entry is a terminal file rather than a lazily expandable directory.
+        ///
+        /// Swing otherwise treats an unloaded directory with zero materialized children as a leaf and never
+        /// delivers the expansion event that starts its first child enumeration.
+        ///
+        /// @return `true` only for files
+        @Override
+        public boolean isLeaf() {
+            return !directory;
+        }
+
         /// Formats in-flight and failed state without replacing the underlying filesystem name.
         ///
         /// @return visible node label
