@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.accounts;
 
+import com.formdev.flatlaf.FlatLightLaf;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -31,7 +32,10 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
+import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
+import javax.swing.ImageIcon;
+import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.ListSelectionModel;
 import java.awt.Component;
@@ -40,6 +44,8 @@ import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -258,8 +264,10 @@ public final class AccountsPanelTest {
     }
 
     /// Exact empty and long-row states paint correctly inside a constrained page surface.
+    ///
+    /// @throws IOException when the visual report cannot be written
     @Test
-    public void paintsConstrainedAndEmptySurfaces() {
+    public void paintsConstrainedAndEmptySurfaces() throws IOException {
         FakeAccountsModel populated = FakeAccountsModel.immediate(
                 List.of(new AccountListItem(
                         "long-account",
@@ -267,13 +275,25 @@ public final class AccountsPanelTest {
                         "External authentication provider with a long descriptive status",
                         "profile-long-account")),
                 snapshot(0, 1, 0L));
+        populated.setOfflineSkinStore(new FakeOfflineSkinStore("long-account"));
+        populated.setAccountPortabilityStore(new FakeAccountPortabilityStore("long-account", false, true));
+        populated.setAccountSkinUploadStore(new FakeAccountSkinUploadStore("long-account"));
+        onEventDispatchThread(() -> {
+            FlatLightLaf.setup();
+        });
         AccountsPanel panel = onEventDispatchThread(() -> new AccountsPanel(populated, STRINGS));
 
-        BufferedImage image = onEventDispatchThread(() -> {
+        onEventDispatchThread(() -> {
             Dimension size = new Dimension(720, 420);
             panel.setSize(size);
             layoutRecursively(panel);
             panel.choiceList().refreshLoadPlan();
+        });
+        awaitLoadedAvatar(panel);
+
+        BufferedImage image = onEventDispatchThread(() -> {
+            Dimension size = new Dimension(720, 420);
+            layoutRecursively(panel);
             BufferedImage rendered = new BufferedImage(size.width, size.height, BufferedImage.TYPE_INT_ARGB);
             Graphics2D graphics = rendered.createGraphics();
             try {
@@ -285,6 +305,12 @@ public final class AccountsPanelTest {
             return rendered;
         });
         assertTrue(distinctColors(image).size() > 4);
+        String configuredReportRoot = Objects.toString(System.getenv("XYML_VISUAL_REPORT_DIR"), "");
+        Path reportRoot = configuredReportRoot.isBlank()
+                ? Path.of("build", "reports", "swing-pages").toAbsolutePath()
+                : Path.of(configuredReportRoot).toAbsolutePath();
+        Files.createDirectories(reportRoot);
+        assertTrue(ImageIO.write(image, "PNG", reportRoot.resolve("accounts-page.png").toFile()));
 
         FakeAccountsModel empty = FakeAccountsModel.immediate(List.of(), snapshot(-1, 0, 0L));
         AccountsPanel emptyPanel = onEventDispatchThread(() -> new AccountsPanel(empty, STRINGS));
@@ -292,6 +318,43 @@ public final class AccountsPanelTest {
             assertTrue(findComponent(emptyPanel, "accountsEmpty").isVisible());
             emptyPanel.close();
         });
+    }
+
+    /// Waits for one real viewport row and its asynchronously decoded bundled avatar.
+    ///
+    /// @param panel account page whose first row is being rendered
+    private static void awaitLoadedAvatar(AccountsPanel panel) {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+        while (System.nanoTime() < deadline) {
+            boolean loaded = onEventDispatchThread(() -> {
+                JList<ChoiceListEntry<AccountListItem>> list = panel.choiceList().getList();
+                if (list.getModel().getSize() == 0) {
+                    return false;
+                }
+                ChoiceListEntry<AccountListItem> entry = list.getModel().getElementAt(0);
+                Component renderer = list.getCellRenderer().getListCellRendererComponent(
+                        list,
+                        entry,
+                        0,
+                        true,
+                        false);
+                if (!(renderer instanceof Container container)) {
+                    return false;
+                }
+                Component avatar = findComponent(container, "accountListAvatar");
+                return avatar instanceof JLabel label && label.getIcon() instanceof ImageIcon;
+            });
+            if (loaded) {
+                return;
+            }
+            try {
+                Thread.sleep(10L);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for account avatar", interrupted);
+            }
+        }
+        assertTrue(false, "Timed out waiting for account avatar");
     }
 
     /// The persistent authlib-injector server command is visible only for a model that actually owns it.
@@ -343,6 +406,62 @@ public final class AccountsPanelTest {
 
             capablePanel.choiceList().getList().setSelectedIndex(1);
             assertFalse(capableButton.isEnabled());
+            genericPanel.close();
+            capablePanel.close();
+        });
+    }
+
+    /// Portability and online upload commands reflect exact model capabilities without eager uploads.
+    @Test
+    public void exposesPortableStorageAndExplicitOnlineSkinCommands() {
+        FakeAccountsModel generic = FakeAccountsModel.immediate(items(1), snapshot(0, 1, 0L));
+        AccountsPanel genericPanel = onEventDispatchThread(() -> new AccountsPanel(generic, STRINGS));
+
+        FakeAccountsModel capable = FakeAccountsModel.immediate(items(1), snapshot(0, 1, 0L));
+        FakeAccountPortabilityStore portability = new FakeAccountPortabilityStore("account-0", false, false);
+        FakeAccountSkinUploadStore uploads = new FakeAccountSkinUploadStore("account-0");
+        capable.setAccountPortabilityStore(portability);
+        capable.setAccountSkinUploadStore(uploads);
+        RecordingAccountManagementInteraction interaction = new RecordingAccountManagementInteraction();
+        interaction.allowOverwrite = true;
+        AccountsPanel capablePanel = onEventDispatchThread(
+                () -> new AccountsPanel(capable, STRINGS, interaction));
+
+        onEventDispatchThread(() -> {
+            genericPanel.setSize(new Dimension(680, 420));
+            capablePanel.setSize(new Dimension(680, 420));
+            layoutRecursively(genericPanel);
+            layoutRecursively(capablePanel);
+            genericPanel.choiceList().refreshLoadPlan();
+            capablePanel.choiceList().refreshLoadPlan();
+        });
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            AbstractButton genericMove = findButton(genericPanel, "accountsMove");
+            AbstractButton genericUpload = findButton(genericPanel, "accountsOnlineSkin");
+            AbstractButton move = findButton(capablePanel, "accountsMove");
+            AbstractButton upload = findButton(capablePanel, "accountsOnlineSkin");
+            assertAll(
+                    () -> assertFalse(genericMove.isVisible()),
+                    () -> assertFalse(genericUpload.isVisible()),
+                    () -> assertTrue(move.isVisible()),
+                    () -> assertTrue(move.isEnabled()),
+                    () -> assertTrue(upload.isVisible()),
+                    () -> assertTrue(upload.isEnabled()),
+                    () -> assertEquals(null, move.getText()),
+                    () -> assertEquals(null, upload.getText()),
+                    () -> assertTrue(move.getIcon() != null),
+                    () -> assertTrue(upload.getIcon() != null),
+                    () -> assertEquals(0, uploads.uploads.get()));
+
+            String previousMoveTooltip = Objects.requireNonNull(move.getToolTipText());
+            move.doClick();
+            assertAll(
+                    () -> assertEquals(List.of(false, true), portability.overwritePermissions),
+                    () -> assertTrue(portability.portable),
+                    () -> assertEquals(1, interaction.overwriteConfirmations.get()),
+                    () -> assertFalse(previousMoveTooltip.equals(move.getToolTipText())));
             genericPanel.close();
             capablePanel.close();
         });
@@ -580,6 +699,88 @@ public final class AccountsPanelTest {
         }
     }
 
+    /// In-memory portable/global store that can require explicit recovery consent.
+    @NotNullByDefault
+    private static final class FakeAccountPortabilityStore implements AccountPortabilityStore {
+        /// Stable supported account identifier.
+        private final String accountId;
+
+        /// Whether the account is currently launcher-local.
+        private boolean portable;
+
+        /// Whether ordinary movement is writable.
+        private final boolean writable;
+
+        /// Overwrite permissions received by movement attempts.
+        private final List<Boolean> overwritePermissions = new ArrayList<>();
+
+        /// Creates a deterministic fake storage bridge.
+        ///
+        /// @param accountId supported stable account identifier
+        /// @param portable initial storage location
+        /// @param writable whether movement succeeds without recovery consent
+        private FakeAccountPortabilityStore(String accountId, boolean portable, boolean writable) {
+            this.accountId = Objects.requireNonNull(accountId, "accountId");
+            this.portable = portable;
+            this.writable = writable;
+        }
+
+        /// Returns state only for the supported fake account.
+        @Override
+        public Optional<AccountPortabilitySnapshot> portability(String requestedAccountId) {
+            return accountId.equals(Objects.requireNonNull(requestedAccountId, "requestedAccountId"))
+                    ? Optional.of(new AccountPortabilitySnapshot(accountId, portable, writable))
+                    : Optional.empty();
+        }
+
+        /// Records consent, rejects an ordinary read-only attempt, and otherwise toggles storage.
+        @Override
+        public void move(String requestedAccountId, boolean allowReadOnlyOverwrite) {
+            if (!accountId.equals(Objects.requireNonNull(requestedAccountId, "requestedAccountId"))) {
+                throw new IllegalArgumentException("Unknown fake account");
+            }
+            overwritePermissions.add(allowReadOnlyOverwrite);
+            if (!writable && !allowReadOnlyOverwrite) {
+                throw new AccountStorageOverwriteRequiredException(accountId, "read-only fake storage");
+            }
+            portable = !portable;
+        }
+    }
+
+    /// Online skin-upload capability recorder used to prove page opening is side-effect free.
+    @NotNullByDefault
+    private static final class FakeAccountSkinUploadStore implements AccountSkinUploadStore {
+        /// Stable upload-capable account identifier.
+        private final String accountId;
+
+        /// Provider upload invocation count.
+        private final AtomicInteger uploads = new AtomicInteger();
+
+        /// Creates one exact upload-capable fake account.
+        ///
+        /// @param accountId supported stable account identifier
+        private FakeAccountSkinUploadStore(String accountId) {
+            this.accountId = Objects.requireNonNull(accountId, "accountId");
+        }
+
+        /// Reports capability only for the configured account.
+        @Override
+        public boolean canUpload(String requestedAccountId) {
+            return accountId.equals(Objects.requireNonNull(requestedAccountId, "requestedAccountId"));
+        }
+
+        /// Records an explicit upload command.
+        @Override
+        public CompletionStage<Void> upload(String requestedAccountId, Path skinFile, boolean slim) {
+            if (!canUpload(requestedAccountId)) {
+                return CompletableFuture.failedFuture(new IllegalArgumentException("Unknown fake account"));
+            }
+            Objects.requireNonNull(skinFile, "skinFile");
+            uploads.incrementAndGet();
+            return CompletableFuture.completedFuture(null);
+        }
+    }
+
     /// A captured viewport load whose completion can be controlled by a test.
     ///
     /// @param range requested source range
@@ -633,6 +834,12 @@ public final class AccountsPanelTest {
 
         /// Optional offline-account skin persistence capability exposed to the tested page.
         private @Nullable OfflineSkinStore offlineSkinStore;
+
+        /// Optional portable/global account persistence capability exposed to the tested page.
+        private @Nullable AccountPortabilityStore accountPortabilityStore;
+
+        /// Optional online skin upload capability exposed to the tested page.
+        private @Nullable AccountSkinUploadStore accountSkinUploadStore;
 
         /// Add command count.
         private final AtomicInteger additions = new AtomicInteger();
@@ -747,6 +954,18 @@ public final class AccountsPanelTest {
             return Optional.ofNullable(offlineSkinStore);
         }
 
+        /// Returns this test source's optional portable/global account bridge.
+        @Override
+        public Optional<AccountPortabilityStore> accountPortabilityStore() {
+            return Optional.ofNullable(accountPortabilityStore);
+        }
+
+        /// Returns this test source's optional online skin-upload bridge.
+        @Override
+        public Optional<AccountSkinUploadStore> accountSkinUploadStore() {
+            return Optional.ofNullable(accountSkinUploadStore);
+        }
+
         /// Exposes configured-server management to the tested page.
         ///
         /// @param store configured-server persistence source
@@ -759,6 +978,20 @@ public final class AccountsPanelTest {
         /// @param store offline-skin persistence source
         private void setOfflineSkinStore(OfflineSkinStore store) {
             offlineSkinStore = Objects.requireNonNull(store, "store");
+        }
+
+        /// Exposes portable/global account movement to the tested page.
+        ///
+        /// @param store portable/global persistence source
+        private void setAccountPortabilityStore(AccountPortabilityStore store) {
+            accountPortabilityStore = Objects.requireNonNull(store, "store");
+        }
+
+        /// Exposes explicit online skin upload to the tested page.
+        ///
+        /// @param store online upload source
+        private void setAccountSkinUploadStore(AccountSkinUploadStore store) {
+            accountSkinUploadStore = Objects.requireNonNull(store, "store");
         }
 
         /// Replaces the completion returned by later refresh commands.

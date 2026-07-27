@@ -195,8 +195,10 @@ public final class SwingAccountCreationCoordinatorTest {
     }
 
     /// Gateway failures are localized once and reported without committing partial state.
+    ///
+    /// @throws InterruptedException when callback delivery waiting is interrupted
     @Test
-    public void localizesFailureAndDoesNotCommit() {
+    public void localizesFailureAndDoesNotCommit() throws InterruptedException {
         FakeGateway gateway = new FakeGateway();
         gateway.authenticationFailure = new IllegalStateException("raw failure");
         FakeInteraction interaction = new FakeInteraction();
@@ -209,6 +211,7 @@ public final class SwingAccountCreationCoordinatorTest {
 
         assertThrows(java.util.concurrent.CompletionException.class,
                 () -> operation.completion().toCompletableFuture().join());
+        assertTrue(listener.failureDelivered.await(5, TimeUnit.SECONDS));
         assertAll(
                 () -> assertEquals("localized: raw failure", listener.failureMessage.get()),
                 () -> assertEquals(gateway.authenticationFailure, listener.failure.get()),
@@ -512,6 +515,9 @@ public final class SwingAccountCreationCoordinatorTest {
         /// Original failure.
         private final AtomicReference<@Nullable Throwable> failure = new AtomicReference<>();
 
+        /// Signals terminal failure callback delivery independently from completion-future wakeup order.
+        private final CountDownLatch failureDelivered = new CountDownLatch(1);
+
         /// Captures progress.
         @Override
         public synchronized void onProgress(AccountCreationNotice notice) {
@@ -535,6 +541,7 @@ public final class SwingAccountCreationCoordinatorTest {
         public void onFailed(String localizedMessage, Throwable originalFailure) {
             failureMessage.set(localizedMessage);
             failure.set(originalFailure);
+            failureDelivered.countDown();
         }
     }
 }

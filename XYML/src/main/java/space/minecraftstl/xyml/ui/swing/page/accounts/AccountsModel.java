@@ -82,4 +82,21 @@ public interface AccountsModel extends ViewportChoiceDataSource<AccountListItem>
     default Optional<OfflineSkinStore> offlineSkinStore() {
         return Optional.empty();
     }
+
+    /// Returns optional portable/global account storage management for this account source.
+    ///
+    /// @return available portability store, or empty when unsupported
+    default Optional<AccountPortabilityStore> accountPortabilityStore() {
+        return Optional.empty();
+    }
+
+    /// Returns optional online-account skin upload support for this account source.
+    ///
+    /// Opening the accounts page must not perform network access. A returned store may contact its
+    /// provider only after an explicit upload command.
+    ///
+    /// @return available online skin upload store, or empty when unsupported
+    default Optional<AccountSkinUploadStore> accountSkinUploadStore() {
+        return Optional.empty();
+    }
 }

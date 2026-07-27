@@ -31,6 +31,7 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -67,5 +68,78 @@ public final class OfflineSkinServiceTest {
         assertThrows(
                 IOException.class,
                 () -> OfflineSkinService.createLocalSkin(invalid, TextureModel.WIDE));
+    }
+
+    /// A validated optional cape is retained alongside the normalized local skin path.
+    @Test
+    public void createsLocalSkinWithOptionalCape() throws IOException {
+        Path skinFile = writePng("skin.png", 64, 64);
+        Path capeFile = writePng("cape.png", 64, 32);
+
+        Skin skin = OfflineSkinService.createLocalSkin(skinFile, capeFile, TextureModel.WIDE);
+
+        assertAll(
+                () -> assertEquals(skinFile.toAbsolutePath().normalize().toString(), skin.localSkinPath()),
+                () -> assertEquals(capeFile.toAbsolutePath().normalize().toString(), skin.localCapePath()),
+                () -> assertEquals(TextureModel.WIDE, skin.textureModel()));
+    }
+
+    /// A decodable image of another format is rejected even when its filename ends in PNG.
+    @Test
+    public void rejectsRenamedNonPngImage() throws IOException {
+        Path renamedJpeg = temporaryDirectory.resolve("renamed.png");
+        BufferedImage pixels = new BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB);
+        assertTrue(ImageIO.write(pixels, "JPEG", renamedJpeg.toFile()));
+
+        assertThrows(
+                IOException.class,
+                () -> OfflineSkinService.createLocalSkin(renamedJpeg, TextureModel.WIDE));
+    }
+
+    /// Provider creation accepts HTTPS-defaulted hosts and preserves the user's trimmed endpoint.
+    @Test
+    public void validatesCustomProviderWithoutNetworkAccess() {
+        Skin littleSkin = OfflineSkinService.createProviderSkin(Skin.Type.LITTLE_SKIN, null);
+        Skin custom = OfflineSkinService.createProviderSkin(
+                Skin.Type.CUSTOM_SKIN_LOADER_API,
+                "  skins.example.test/csl  ");
+
+        assertAll(
+                () -> assertEquals(Skin.Type.LITTLE_SKIN, littleSkin.type()),
+                () -> assertNull(littleSkin.cslApi()),
+                () -> assertEquals(Skin.Type.CUSTOM_SKIN_LOADER_API, custom.type()),
+                () -> assertEquals("skins.example.test/csl", custom.cslApi()),
+                () -> assertNull(OfflineSkinService.normalizeProviderAddress("ftp://skins.example.test")),
+                () -> assertNull(OfflineSkinService.normalizeProviderAddress("https://user@skins.example.test")),
+                () -> assertNull(OfflineSkinService.normalizeProviderAddress("https://skins.example.test?a=b")));
+    }
+
+    /// Every selectable bundled source receives an exact no-network persisted configuration.
+    @Test
+    public void createsBundledSkinConfiguration() {
+        Skin alex = OfflineSkinService.createBundledSkin(Skin.Type.ALEX);
+
+        assertAll(
+                () -> assertEquals(Skin.Type.ALEX, alex.type()),
+                () -> assertNull(alex.cslApi()),
+                () -> assertNull(alex.localSkinPath()),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> OfflineSkinService.createBundledSkin(Skin.Type.LOCAL_FILE)),
+                () -> assertNotNull(OfflineSkinService.normalizeProviderAddress("https://skins.example.test/csl")));
+    }
+
+    /// Writes one PNG fixture into the isolated test directory.
+    ///
+    /// @param name fixture filename
+    /// @param width image width
+    /// @param height image height
+    /// @return written fixture path
+    /// @throws IOException when the image cannot be written
+    private Path writePng(String name, int width, int height) throws IOException {
+        Path image = temporaryDirectory.resolve(name);
+        BufferedImage pixels = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        assertTrue(ImageIO.write(pixels, "PNG", image.toFile()));
+        return image;
     }
 }

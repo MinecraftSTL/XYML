@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.accounts;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -37,6 +38,8 @@ import javax.swing.SwingConstants;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import java.awt.CardLayout;
+import java.awt.Color;
+import java.awt.Component;
 import java.awt.Font;
 import java.util.Objects;
 import java.util.OptionalInt;
@@ -88,6 +91,12 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
 
     /// Offline-skin management command for the selected loaded offline account.
     private final JButton offlineSkinButton = new JButton();
+
+    /// Portable/global storage movement command for the selected account.
+    private final JButton moveButton = new JButton();
+
+    /// Explicit online skin upload command for the selected upload-capable account.
+    private final JButton onlineSkinButton = new JButton();
 
     /// Permanent removal command for the loaded selection.
     private final JButton removeButton = new JButton();
@@ -156,7 +165,7 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.interaction = Objects.requireNonNull(interaction, "interaction");
-        choiceList = new ViewportChoiceList<>(model, AccountsPanel::displayText);
+        choiceList = new ViewportChoiceList<>(model, new AccountListCellRenderer());
 
         configureComponents(strings);
         modelSubscription = model.subscribe(this::modelChanged);
@@ -220,32 +229,62 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         add(toolbar, "growx");
 
         JPanel actions = new JPanel(new MigLayout(
-                "insets 0, fillx",
-                "[grow][][][][]",
+                "insets 0, fillx, hidemode 3",
+                "[grow][][][][][][]",
                 "[]"));
         actions.setOpaque(false);
         actions.add(new JLabel(), "growx, pushx");
 
-        refreshButton.setName("accountsRefresh");
-        refreshButton.setText(strings.refreshAction());
+        configureActionButton(
+                refreshButton,
+                "accountsRefresh",
+                "assets/swing/icons/refresh.svg",
+                strings.refreshAction());
         refreshButton.addActionListener(event -> refreshSelectedAccount());
-        actions.add(refreshButton, "h 36!");
+        actions.add(refreshButton, "w 36!, h 36!");
 
-        copyUuidButton.setName("accountsCopyUuid");
-        copyUuidButton.setText(strings.copyUuidAction());
+        configureActionButton(
+                copyUuidButton,
+                "accountsCopyUuid",
+                "assets/swing/icons/content-copy.svg",
+                strings.copyUuidAction());
         copyUuidButton.addActionListener(event -> copySelectedUuid());
-        actions.add(copyUuidButton, "h 36!");
+        actions.add(copyUuidButton, "w 36!, h 36!");
 
-        offlineSkinButton.setName("accountsOfflineSkin");
-        offlineSkinButton.setText(i18n("account.skin"));
+        configureActionButton(
+                offlineSkinButton,
+                "accountsOfflineSkin",
+                "assets/swing/icons/image.svg",
+                i18n("account.skin"));
         offlineSkinButton.addActionListener(event -> openOfflineSkinManagement());
         offlineSkinButton.setVisible(model.offlineSkinStore().isPresent());
-        actions.add(offlineSkinButton, "h 36!");
+        actions.add(offlineSkinButton, "w 36!, h 36!");
 
-        removeButton.setName("accountsRemove");
-        removeButton.setText(strings.removeAction());
+        configureActionButton(
+                moveButton,
+                "accountsMove",
+                "assets/swing/icons/output.svg",
+                i18n("account.move_to_portable"));
+        moveButton.addActionListener(event -> moveSelectedAccount());
+        moveButton.setVisible(model.accountPortabilityStore().isPresent());
+        actions.add(moveButton, "w 36!, h 36!");
+
+        configureActionButton(
+                onlineSkinButton,
+                "accountsOnlineSkin",
+                "assets/swing/icons/file-import.svg",
+                i18n("account.skin.upload"));
+        onlineSkinButton.addActionListener(event -> openOnlineSkinUpload());
+        onlineSkinButton.setVisible(model.accountSkinUploadStore().isPresent());
+        actions.add(onlineSkinButton, "w 36!, h 36!");
+
+        configureActionButton(
+                removeButton,
+                "accountsRemove",
+                "assets/swing/icons/delete-forever.svg",
+                strings.removeAction());
         removeButton.addActionListener(event -> removeSelectedAccount());
-        actions.add(removeButton, "h 36!");
+        actions.add(removeButton, "w 36!, h 36!");
         add(actions, "growx");
 
         choiceList.setName("accountsList");
@@ -470,6 +509,63 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         });
     }
 
+    /// Moves the loaded selection between portable and global storage with read-only recovery consent.
+    private void moveSelectedAccount() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || refreshInProgress) {
+            return;
+        }
+        @Nullable AccountListItem selected = selectedItem();
+        if (selected == null) {
+            return;
+        }
+        model.accountPortabilityStore().ifPresent(store -> {
+            try {
+                store.move(selected.accountId(), false);
+            } catch (AccountStorageOverwriteRequiredException failure) {
+                if (!selected.accountId().equals(failure.accountId())) {
+                    showActionFailure(failure);
+                } else if (interaction.confirmReadOnlyOverwrite(this)) {
+                    try {
+                        store.move(selected.accountId(), true);
+                    } catch (RuntimeException retryFailure) {
+                        showActionFailure(retryFailure);
+                    }
+                }
+            } catch (RuntimeException failure) {
+                showActionFailure(failure);
+            }
+        });
+        updateActionAvailability();
+    }
+
+    /// Opens local validation and preview for an upload-capable online account.
+    private void openOnlineSkinUpload() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || refreshInProgress) {
+            return;
+        }
+        @Nullable AccountListItem selected = selectedItem();
+        if (selected == null) {
+            return;
+        }
+        model.accountSkinUploadStore().ifPresent(store -> {
+            if (!store.canUpload(selected.accountId())) {
+                return;
+            }
+            AccountSkinUploadCommand command = (skinFile, slim) -> model
+                    .refreshAccount(selected.accountId())
+                    .thenComposeAsync(
+                            ignored -> store.upload(selected.accountId(), skinFile, slim),
+                            Schedulers.ui())
+                    .thenComposeAsync(
+                            ignored -> model.refreshAccount(selected.accountId()),
+                            Schedulers.ui());
+            new SwingOnlineSkinUploadDialog(this, selected.displayName(), command).open();
+            updateActionAvailability();
+        });
+    }
+
     /// Returns the currently loaded selected row, excluding sparse placeholders.
     ///
     /// @return selected account row, or null while no loaded row is selected
@@ -490,6 +586,23 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         offlineSkinButton.setVisible(model.offlineSkinStore().isPresent());
         offlineSkinButton.setEnabled(
                 hasSelection && selectedOfflineSkin() != null);
+        moveButton.setVisible(model.accountPortabilityStore().isPresent());
+        @Nullable AccountPortabilitySnapshot portability = hasSelection ? selectedPortability() : null;
+        moveButton.setEnabled(hasSelection && portability != null);
+        if (portability != null) {
+            updateButtonDescription(
+                    moveButton,
+                    i18n(portability.portable()
+                            ? "account.move_to_global"
+                            : "account.move_to_portable"));
+        }
+        onlineSkinButton.setVisible(model.accountSkinUploadStore().isPresent());
+        @Nullable AccountListItem selected = selectedItem();
+        onlineSkinButton.setEnabled(hasSelection
+                && selected != null
+                && model.accountSkinUploadStore()
+                        .map(store -> store.canUpload(selected.accountId()))
+                        .orElse(false));
         choiceList.getList().setEnabled(!closed && !refreshInProgress);
     }
 
@@ -503,6 +616,19 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         }
         return model.offlineSkinStore()
                 .flatMap(store -> store.snapshot(selected.accountId()))
+                .orElse(null);
+    }
+
+    /// Returns storage-location state only for a currently loaded selected account.
+    ///
+    /// @return selected account portability, or null for no loaded selection or unsupported source
+    private @Nullable AccountPortabilitySnapshot selectedPortability() {
+        @Nullable AccountListItem selected = selectedItem();
+        if (selected == null) {
+            return null;
+        }
+        return model.accountPortabilityStore()
+                .flatMap(store -> store.portability(selected.accountId()))
                 .orElse(null);
     }
 
@@ -531,13 +657,51 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         return current;
     }
 
-    /// Returns the compact text rendered by the reusable viewport-list cell.
+    /// Configures one fixed icon-only account command with tooltip and accessibility text.
     ///
-    /// @param item loaded account row
-    /// @return account display name followed by detail when available
-    private static String displayText(AccountListItem item) {
-        return item.detailText().isBlank()
-                ? item.displayName()
-                : item.displayName() + " - " + item.detailText();
+    /// @param button target command button
+    /// @param name stable component name
+    /// @param iconResource bundled SVG resource
+    /// @param description localized command description
+    private static void configureActionButton(
+            JButton button,
+            String name,
+            String iconResource,
+            String description) {
+        button.setName(Objects.requireNonNull(name, "name"));
+        button.setText(null);
+        button.setIcon(themeIcon(iconResource));
+        updateButtonDescription(button, description);
+    }
+
+    /// Creates a bundled SVG command icon that follows the owning button foreground.
+    ///
+    /// @param iconResource classpath SVG resource
+    /// @return theme-aware fixed-size icon
+    private static FlatSVGIcon themeIcon(String iconResource) {
+        FlatSVGIcon icon = new FlatSVGIcon(Objects.requireNonNull(iconResource, "iconResource"), 18, 18);
+        icon.setColorFilter(new FlatSVGIcon.ColorFilter(AccountsPanel::resolveIconColor));
+        return icon;
+    }
+
+    /// Resolves SVG color from its current owning component in light and dark themes.
+    ///
+    /// @param component owning button, or null during standalone rendering
+    /// @param originalColor authored SVG fallback color
+    /// @return current component foreground or the authored fallback
+    private static Color resolveIconColor(@Nullable Component component, Color originalColor) {
+        Color fallback = Objects.requireNonNull(originalColor, "originalColor");
+        @Nullable Color foreground = component == null ? null : component.getForeground();
+        return foreground == null ? fallback : foreground;
+    }
+
+    /// Updates tooltip and accessibility text for a state-dependent icon command.
+    ///
+    /// @param button target command button
+    /// @param description localized command description, possibly containing line breaks
+    private static void updateButtonDescription(JButton button, String description) {
+        String value = Objects.requireNonNull(description, "description");
+        button.setToolTipText("<html>" + value.replace("\n", "<br>") + "</html>");
+        button.getAccessibleContext().setAccessibleName(value.replace('\n', ' '));
     }
 }

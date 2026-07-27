@@ -204,6 +204,28 @@ public final class LauncherAccountsModel implements AccountsModel, AutoCloseable
         return Optional.empty();
     }
 
+    /// Returns the optional portable/global account bridge exposed by the underlying store.
+    ///
+    /// @return available portability store, or empty for generic account sources
+    @Override
+    public Optional<AccountPortabilityStore> accountPortabilityStore() {
+        if (accountStore instanceof AccountPortabilityStoreProvider provider) {
+            return Optional.of(provider.accountPortabilityStore());
+        }
+        return Optional.empty();
+    }
+
+    /// Returns the optional online skin-upload bridge exposed by the underlying store.
+    ///
+    /// @return available upload store, or empty for generic account sources
+    @Override
+    public Optional<AccountSkinUploadStore> accountSkinUploadStore() {
+        if (accountStore instanceof AccountSkinUploadStoreProvider provider) {
+            return Optional.of(provider.accountSkinUploadStore());
+        }
+        return Optional.empty();
+    }
+
     /// Releases the account-store subscription exactly once.
     @Override
     public void close() {

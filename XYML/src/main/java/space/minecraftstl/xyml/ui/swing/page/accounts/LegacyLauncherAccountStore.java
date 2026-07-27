@@ -25,14 +25,17 @@ import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorAccount;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorServer;
 import space.minecraftstl.xyml.auth.offline.OfflineAccount;
 import space.minecraftstl.xyml.auth.offline.Skin;
+import space.minecraftstl.xyml.auth.yggdrasil.TextureType;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.Accounts;
+import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.util.StringUtils;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -42,6 +45,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher.execute;
@@ -55,7 +61,15 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// account objects, server objects, authentication tokens, passwords, or private serialized account data.
 @NotNullByDefault
 public final class LegacyLauncherAccountStore
-        implements AccountStore, AuthlibServerStoreProvider, OfflineSkinStoreProvider, OfflineSkinStore, AutoCloseable {
+        implements AccountStore,
+        AuthlibServerStoreProvider,
+        OfflineSkinStoreProvider,
+        OfflineSkinStore,
+        AccountPortabilityStoreProvider,
+        AccountPortabilityStore,
+        AccountSkinUploadStoreProvider,
+        AccountSkinUploadStore,
+        AutoCloseable {
     /// Serializes listener registration with the transition to the closed lifecycle state.
     private final Object lifecycleLock = new Object();
 
@@ -133,6 +147,135 @@ public final class LegacyLauncherAccountStore
         return this;
     }
 
+    /// Returns this bridge as the owner of portable/global account storage movement.
+    ///
+    /// @return persistent account portability bridge
+    @Override
+    public AccountPortabilityStore accountPortabilityStore() {
+        return this;
+    }
+
+    /// Returns this bridge as the owner of explicit online-account skin uploads.
+    ///
+    /// @return online skin-upload bridge
+    @Override
+    public AccountSkinUploadStore accountSkinUploadStore() {
+        return this;
+    }
+
+    /// Reads one account's current portable/global persistence location.
+    ///
+    /// @param accountId stable launcher account identifier
+    /// @return storage state, or empty when the account disappeared
+    @Override
+    public Optional<AccountPortabilitySnapshot> portability(String accountId) {
+        Objects.requireNonNull(accountId, "accountId");
+        requireEventThread();
+        if (closed.get()) {
+            throw new IllegalStateException("Legacy launcher account store is closed");
+        }
+        return findAccountOptional(accountId).map(account -> new AccountPortabilitySnapshot(
+                accountId,
+                account.isPortable(),
+                Accounts.canMoveAccount(account)));
+    }
+
+    /// Moves one account between launcher-local and user-global persistence on the state event thread.
+    ///
+    /// @param accountId stable launcher account identifier
+    /// @param allowReadOnlyOverwrite whether confirmed backup-and-overwrite may recover both stores
+    @Override
+    public void move(String accountId, boolean allowReadOnlyOverwrite) {
+        Objects.requireNonNull(accountId, "accountId");
+        requireEventThread();
+        if (closed.get()) {
+            throw new IllegalStateException("Legacy launcher account store is closed");
+        }
+        Account account = findAccount(accountId);
+        if (!Accounts.canMoveAccount(account)) {
+            if (!allowReadOnlyOverwrite) {
+                throw new AccountStorageOverwriteRequiredException(
+                        accountId,
+                        i18n("account.storage.read_only"));
+            }
+            try {
+                Accounts.forceOverwriteAccountFiles();
+            } catch (IOException failure) {
+                throw new UncheckedIOException(i18n("message.failed"), failure);
+            }
+        }
+
+        boolean selected = Accounts.getSelectedAccount() == account;
+        Accounts.getAccountsValue().remove(account);
+        if (account.isPortable()) {
+            account.setPortable(false);
+            Accounts.getAccountsValue().add(account);
+        } else {
+            account.setPortable(true);
+            int insertionIndex = 0;
+            for (int index = Accounts.getAccountsValue().size() - 1; index >= 0; --index) {
+                if (Accounts.getAccountsValue().get(index).isPortable()) {
+                    insertionIndex = index + 1;
+                    break;
+                }
+            }
+            Accounts.getAccountsValue().add(insertionIndex, account);
+        }
+        if (selected) {
+            Accounts.setSelectedAccount(account);
+        }
+    }
+
+    /// Reports whether one current online account advertises skin upload support.
+    ///
+    /// @param accountId stable launcher account identifier
+    /// @return whether the account exists and its provider supports skin upload
+    @Override
+    public boolean canUpload(String accountId) {
+        Objects.requireNonNull(accountId, "accountId");
+        requireEventThread();
+        if (closed.get()) {
+            return false;
+        }
+        return findAccountOptional(accountId).map(LegacyLauncherAccountStore::supportsSkinUpload).orElse(false);
+    }
+
+    /// Resolves the current account on the EDT, then performs the explicit provider upload on I/O workers.
+    ///
+    /// @param accountId stable launcher account identifier
+    /// @param skinFile normalized local PNG path
+    /// @param slim whether the decoded texture uses slim arms
+    /// @return completion after the provider accepts or rejects the upload
+    @Override
+    public CompletionStage<Void> upload(String accountId, Path skinFile, boolean slim) {
+        Objects.requireNonNull(accountId, "accountId");
+        Path normalizedFile = Objects.requireNonNull(skinFile, "skinFile")
+                .toAbsolutePath()
+                .normalize();
+        CompletableFuture<Account> resolvedAccount = new CompletableFuture<>();
+        execute(() -> {
+            try {
+                if (closed.get()) {
+                    throw new IllegalStateException("Legacy launcher account store is closed");
+                }
+                Account account = findAccount(accountId);
+                if (!supportsSkinUpload(account)) {
+                    throw new UnsupportedOperationException("Account does not support skin uploads");
+                }
+                resolvedAccount.complete(account);
+            } catch (Throwable failure) {
+                resolvedAccount.completeExceptionally(failure);
+            }
+        });
+        return resolvedAccount.thenAcceptAsync(account -> {
+            try {
+                account.uploadSkin(slim, normalizedFile);
+            } catch (Exception failure) {
+                throw new CompletionException(failure);
+            }
+        }, Schedulers.io());
+    }
+
     /// Reads a presentation-safe skin snapshot for one exact current offline account.
     ///
     /// @param accountId stable launcher account identifier
@@ -151,7 +294,8 @@ public final class LegacyLauncherAccountStore
                         accountId,
                         offlineAccount.getProfileName(),
                         offlineAccount.getSkin(),
-                        !Accounts.isAccountFilesReadOnly(offlineAccount)));
+                        !Accounts.isAccountFilesReadOnly(offlineAccount),
+                        offlineAccount.getProfileID().toString()));
             }
         }
         return Optional.empty();
@@ -313,6 +457,51 @@ public final class LegacyLauncherAccountStore
                 .map(OfflineAccount.class::cast)
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Unknown offline account: " + accountId));
+    }
+
+    /// Locates one current account by its stable persisted identifier.
+    ///
+    /// @param accountId stable launcher account identifier
+    /// @return matching account
+    /// @throws IllegalArgumentException when the identifier is missing
+    private static Account findAccount(String accountId) {
+        requireEventThread();
+        return findAccountOptional(accountId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown account: " + accountId));
+    }
+
+    /// Locates one current account without leaking the mutable account outside this adapter.
+    ///
+    /// @param accountId stable launcher account identifier
+    /// @return current account when present
+    private static Optional<Account> findAccountOptional(String accountId) {
+        requireEventThread();
+        return Accounts.getAccountsValue().stream()
+                .filter(account -> account.getAccountID().toString().equals(accountId))
+                .findFirst();
+    }
+
+    /// Preserves the legacy provider-specific skin-upload capability check.
+    ///
+    /// Authlib-injector accounts advertise uploadable texture kinds in the cached complete profile.
+    /// Other online providers use their account-level capability contract; offline accounts use the
+    /// separate local skin editor and are intentionally excluded here.
+    ///
+    /// @param account current launcher account
+    /// @return whether explicit online skin upload is currently available
+    private static boolean supportsSkinUpload(Account account) {
+        if (account instanceof OfflineAccount) {
+            return false;
+        }
+        if (account instanceof AuthlibInjectorAccount authlibAccount) {
+            return authlibAccount.getYggdrasilService()
+                    .getProfileRepository()
+                    .getImmediately(authlibAccount.getProfileID())
+                    .map(AuthlibInjectorAccount::getUploadableTextures)
+                    .orElse(Set.of())
+                    .contains(TextureType.SKIN);
+        }
+        return account.canUploadSkin();
     }
 
     /// Attaches and detaches server metadata listeners to match current account references by identity.
