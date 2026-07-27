@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.settings;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 
 /// Persists raw appearance values without exposing a UI toolkit property type.
 @NotNullByDefault
@@ -39,6 +40,20 @@ public interface AppearanceSettingsStore {
     ///
     /// @param themeModeValue `auto`, `light`, or `dark`
     void setThemeModeValue(String themeModeValue);
+
+    /// Persists a four-state brightness preference.
+    ///
+    /// Compatibility stores support explicit system, light, and dark values through [setThemeModeValue]. Stores that
+    /// can mutate appearance override membership should override this method to support [ThemeBrightnessPreference#THEME].
+    ///
+    /// @param preference requested brightness preference
+    default void setThemeBrightnessPreference(ThemeBrightnessPreference preference) {
+        String value = java.util.Objects.requireNonNull(preference, "preference").settingValue();
+        if (value == null) {
+            throw new UnsupportedOperationException("This appearance store cannot inherit theme brightness");
+        }
+        setThemeModeValue(value);
+    }
 
     /// Persists a validated corner radius.
     ///

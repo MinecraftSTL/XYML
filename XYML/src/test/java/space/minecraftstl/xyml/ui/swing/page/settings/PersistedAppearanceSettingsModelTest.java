@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
@@ -37,6 +38,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -57,10 +59,37 @@ public final class PersistedAppearanceSettingsModelTest {
 
         assertAll(
                 () -> assertEquals(ThemeMode.SYSTEM, model.snapshot().themeMode()),
+                () -> assertEquals(ThemeBrightnessPreference.SYSTEM,
+                        model.snapshot().brightnessPreference()),
                 () -> assertEquals(6, model.snapshot().cornerRadius()),
                 () -> assertFalse(model.snapshot().animationsEnabled()),
                 () -> assertTrue(model.snapshot().writable()),
                 () -> assertEquals(List.of(model.snapshot()), applied));
+        model.close();
+    }
+
+    /// Theme inheritance remains distinct from system mode while retaining the compatible three-state view.
+    @Test
+    public void persistsThemeBrightnessInheritance() {
+        FakeStore store = new FakeStore(new StoredAppearanceSettings(
+                "dark",
+                6,
+                0,
+                20,
+                1,
+                false,
+                true,
+                true));
+        PersistedAppearanceSettingsModel model = new PersistedAppearanceSettingsModel(store, ignored -> { });
+
+        model.setThemeBrightnessPreference(ThemeBrightnessPreference.THEME);
+
+        assertAll(
+                () -> assertEquals(ThemeBrightnessPreference.THEME,
+                        model.snapshot().brightnessPreference()),
+                () -> assertEquals(ThemeMode.SYSTEM, model.snapshot().themeMode()),
+                () -> assertEquals("dark", store.snapshot().themeModeValue()),
+                () -> assertFalse(store.snapshot().themeBrightnessOverridden()));
         model.close();
     }
 
@@ -129,6 +158,22 @@ public final class PersistedAppearanceSettingsModelTest {
                 () -> assertFalse(store.hasSubscribers()),
                 () -> assertThrows(IllegalStateException.class,
                         () -> model.setThemeMode(ThemeMode.SYSTEM)));
+    }
+
+    /// Closing the appearance model releases an injected application runtime exactly once.
+    @Test
+    public void closesOwnedRuntimeExactlyOnce() {
+        FakeStore store = new FakeStore(raw("light", 6, false, true));
+        AtomicInteger closeCount = new AtomicInteger();
+        PersistedAppearanceSettingsModel model = new PersistedAppearanceSettingsModel(
+                store,
+                ignored -> { },
+                closeCount::incrementAndGet);
+
+        model.close();
+        model.close();
+
+        assertEquals(1, closeCount.get());
     }
 
     /// A store publishing on another UI thread cannot deadlock that thread against the blocked Swing EDT.
@@ -208,7 +253,23 @@ public final class PersistedAppearanceSettingsModelTest {
                     current.maximumCornerRadius(),
                     current.cornerRadiusStep(),
                     current.animationsDisabled(),
-                    current.writable()));
+                    current.writable(),
+                    true));
+        }
+
+        /// Replaces the four-state brightness preference while retaining an inherited raw value.
+        @Override
+        public void setThemeBrightnessPreference(ThemeBrightnessPreference preference) {
+            @Nullable String value = preference.settingValue();
+            publish(new StoredAppearanceSettings(
+                    value != null ? value : current.themeModeValue(),
+                    current.cornerRadius(),
+                    current.minimumCornerRadius(),
+                    current.maximumCornerRadius(),
+                    current.cornerRadiusStep(),
+                    current.animationsDisabled(),
+                    current.writable(),
+                    value != null));
         }
 
         /// Replaces the persisted radius.
@@ -221,7 +282,8 @@ public final class PersistedAppearanceSettingsModelTest {
                     current.maximumCornerRadius(),
                     current.cornerRadiusStep(),
                     current.animationsDisabled(),
-                    current.writable()));
+                    current.writable(),
+                    current.themeBrightnessOverridden()));
         }
 
         /// Replaces the legacy animation-disable flag.
@@ -234,7 +296,8 @@ public final class PersistedAppearanceSettingsModelTest {
                     current.maximumCornerRadius(),
                     current.cornerRadiusStep(),
                     disabled,
-                    current.writable()));
+                    current.writable(),
+                    current.themeBrightnessOverridden()));
         }
 
         /// Publishes one raw replacement synchronously.

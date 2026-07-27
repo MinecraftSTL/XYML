@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.ThemeMode;
 
@@ -49,7 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public final class AppearanceSettingsPanelTest {
     /// Localized text used by focused panel tests.
     private static final AppearanceSettingsStrings STRINGS = new AppearanceSettingsStrings(
-            "Appearance", "Theme mode", "System", "Light", "Dark", "Corner radius", "Animations");
+            "Appearance", "Theme mode", "Theme", "System", "Light", "Dark", "Corner radius", "Animations");
 
     /// User controls persist theme, aligned radius, and animation changes through the model.
     @Test
@@ -91,6 +92,28 @@ public final class AppearanceSettingsPanelTest {
 
             slider.setValueIsAdjusting(false);
             assertEquals(9, model.snapshot().cornerRadius());
+            panel.close();
+        });
+    }
+
+    /// The dedicated theme segment removes the brightness override instead of masquerading as system mode.
+    @Test
+    public void selectsThemeBrightnessInheritance() {
+        FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                ThemeMode.SYSTEM, 6, true, true));
+        AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
+
+        onEventDispatchThread(() -> {
+            findComponent(panel, "appearanceThemeTHEME", AbstractButton.class).doClick();
+
+            assertAll(
+                    () -> assertEquals(
+                            ThemeBrightnessPreference.THEME,
+                            panel.selectedBrightnessPreference()),
+                    () -> assertEquals(
+                            ThemeBrightnessPreference.THEME,
+                            model.snapshot().brightnessPreference()),
+                    () -> assertEquals(ThemeMode.SYSTEM, panel.selectedThemeMode()));
             panel.close();
         });
     }
@@ -291,6 +314,21 @@ public final class AppearanceSettingsPanelTest {
                     value.cornerRadiusStep(),
                     value.animationsEnabled(),
                     value.writable()));
+        }
+
+        /// Replaces the four-state preference while preserving all other fields.
+        @Override
+        public void setThemeBrightnessPreference(ThemeBrightnessPreference preference) {
+            AppearanceSettingsSnapshot value = snapshot();
+            publish(new AppearanceSettingsSnapshot(
+                    AppearanceSettingsSnapshot.compatibilityMode(preference),
+                    value.cornerRadius(),
+                    value.minimumCornerRadius(),
+                    value.maximumCornerRadius(),
+                    value.cornerRadiusStep(),
+                    value.animationsEnabled(),
+                    value.writable(),
+                    preference));
         }
 
         /// Replaces the aligned corner radius while preserving all other fields.

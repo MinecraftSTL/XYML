@@ -25,6 +25,7 @@ import java.util.Objects;
 ///
 /// @param pageTitle page heading
 /// @param themeModeLabel theme-mode field label
+/// @param followThemeLabel selected-theme brightness option
 /// @param systemThemeLabel system-following theme option
 /// @param lightThemeLabel light theme option
 /// @param darkThemeLabel dark theme option
@@ -34,6 +35,7 @@ import java.util.Objects;
 public record AppearanceSettingsStrings(
         String pageTitle,
         String themeModeLabel,
+        String followThemeLabel,
         String systemThemeLabel,
         String lightThemeLabel,
         String darkThemeLabel,
@@ -43,6 +45,7 @@ public record AppearanceSettingsStrings(
     public AppearanceSettingsStrings {
         Objects.requireNonNull(pageTitle, "pageTitle");
         Objects.requireNonNull(themeModeLabel, "themeModeLabel");
+        Objects.requireNonNull(followThemeLabel, "followThemeLabel");
         Objects.requireNonNull(systemThemeLabel, "systemThemeLabel");
         Objects.requireNonNull(lightThemeLabel, "lightThemeLabel");
         Objects.requireNonNull(darkThemeLabel, "darkThemeLabel");

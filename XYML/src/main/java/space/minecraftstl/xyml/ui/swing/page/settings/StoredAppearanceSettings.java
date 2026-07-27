@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 
 import java.util.Objects;
 
@@ -30,6 +31,7 @@ import java.util.Objects;
 /// @param cornerRadiusStep supported radius increment
 /// @param animationsDisabled whether non-essential motion is disabled
 /// @param writable whether this store accepts changes
+/// @param themeBrightnessOverridden whether brightness overrides the selected theme
 @NotNullByDefault
 public record StoredAppearanceSettings(
         String themeModeValue,
@@ -38,7 +40,36 @@ public record StoredAppearanceSettings(
         int maximumCornerRadius,
         int cornerRadiusStep,
         boolean animationsDisabled,
-        boolean writable) {
+        boolean writable,
+        boolean themeBrightnessOverridden) {
+    /// Creates a compatibility snapshot whose legacy brightness value is explicitly overridden.
+    ///
+    /// @param themeModeValue persisted brightness identifier
+    /// @param cornerRadius current component radius
+    /// @param minimumCornerRadius minimum supported radius
+    /// @param maximumCornerRadius maximum supported radius
+    /// @param cornerRadiusStep supported radius increment
+    /// @param animationsDisabled whether non-essential motion is disabled
+    /// @param writable whether this store accepts changes
+    public StoredAppearanceSettings(
+            String themeModeValue,
+            int cornerRadius,
+            int minimumCornerRadius,
+            int maximumCornerRadius,
+            int cornerRadiusStep,
+            boolean animationsDisabled,
+            boolean writable) {
+        this(
+                themeModeValue,
+                cornerRadius,
+                minimumCornerRadius,
+                maximumCornerRadius,
+                cornerRadiusStep,
+                animationsDisabled,
+                writable,
+                true);
+    }
+
     /// Validates one raw settings snapshot.
     public StoredAppearanceSettings {
         Objects.requireNonNull(themeModeValue, "themeModeValue");
@@ -55,5 +86,12 @@ public record StoredAppearanceSettings(
                 || (cornerRadius - minimumCornerRadius) % cornerRadiusStep != 0) {
             throw new IllegalArgumentException("Corner radius must align to a positive step");
         }
+    }
+
+    /// Reconstructs the four-state brightness preference from value and override membership.
+    ///
+    /// @return theme, system, light, or dark preference
+    public ThemeBrightnessPreference brightnessPreference() {
+        return ThemeBrightnessPreference.fromSetting(themeBrightnessOverridden, themeModeValue);
     }
 }

@@ -57,6 +57,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -104,6 +105,30 @@ public final class AppShellPanelTest {
                     () -> assertEquals(presentation.label(), button.getAccessibleContext().getAccessibleName()),
                     () -> assertTrue(icon.hasFound(), page + " navigation SVG was not found"));
         }
+    }
+
+    /// The generic file-tool slot stays hidden until configured and remains keyboard accessible.
+    @Test
+    public void configuresDiscoverableFileToolCommand() {
+        AppShellPanel panel = createPanel(creationCounts());
+        AtomicInteger invocations = new AtomicInteger();
+
+        EdtDispatcher.executeAndWait(() -> {
+            assertFalse(panel.fileToolButton().isVisible());
+            panel.configureFileTool("Open NBT file", invocations::incrementAndGet);
+            JButton button = panel.fileToolButton();
+            FlatSVGIcon icon = assertInstanceOf(FlatSVGIcon.class, button.getIcon());
+            assertAll(
+                    () -> assertTrue(button.isVisible()),
+                    () -> assertTrue(button.isFocusable()),
+                    () -> assertTrue(icon.hasFound()),
+                    () -> assertEquals("Open NBT file", button.getText()),
+                    () -> assertEquals("Open NBT file",
+                            button.getAccessibleContext().getAccessibleName()));
+            button.doClick();
+        });
+
+        assertEquals(1, invocations.get());
     }
 
     /// The preferred layout uses normal Swing painting, produces varied pixels, and keeps navigation text bounded.
@@ -167,9 +192,11 @@ public final class AppShellPanelTest {
 
         EdtDispatcher.executeAndWait(() -> {
             panel.navigateTo(ShellPageId.INSTANCES);
+            panel.setTransferHandler(new ShellFileDropHandler(path -> true, ignored -> { }));
             panel.close();
             panel.close();
             assertEquals(0, panel.cachedPageCount());
+            assertNull(panel.getTransferHandler());
             assertThrows(IllegalStateException.class, () -> panel.navigateTo(ShellPageId.SETTINGS));
         });
 

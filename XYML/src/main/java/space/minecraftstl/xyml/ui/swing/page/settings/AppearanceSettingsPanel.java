@@ -22,9 +22,11 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
+import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.ThemeMode;
+import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementPanel;
 
 import javax.swing.ButtonGroup;
 import javax.swing.JCheckBox;
@@ -49,8 +51,12 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// Localized page text.
     private final AppearanceSettingsStrings strings;
 
+    /// Optional local theme-pack surface owned with this appearance page.
+    private final @Nullable ThemePackManagementPanel themePackManagementPanel;
+
     /// Theme buttons keyed by persisted mode.
-    private final EnumMap<ThemeMode, JToggleButton> themeButtons = new EnumMap<>(ThemeMode.class);
+    private final EnumMap<ThemeBrightnessPreference, JToggleButton> themeButtons =
+            new EnumMap<>(ThemeBrightnessPreference.class);
 
     /// Slider configured from model-provided radius bounds and increment.
     private final JSlider cornerRadiusSlider = new JSlider();
@@ -78,13 +84,26 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// @param model the toolkit-neutral settings model
     /// @param strings localized page text
     public AppearanceSettingsPanel(AppearanceSettingsModel model, AppearanceSettingsStrings strings) {
+        this(model, strings, null);
+    }
+
+    /// Creates an appearance settings panel with an optional local theme-pack manager.
+    ///
+    /// @param model the toolkit-neutral settings model
+    /// @param strings localized page text
+    /// @param themePackManagementPanel local theme-pack surface to embed and own, or `null`
+    public AppearanceSettingsPanel(
+            AppearanceSettingsModel model,
+            AppearanceSettingsStrings strings,
+            @Nullable ThemePackManagementPanel themePackManagementPanel) {
         super(new MigLayout(
-                "insets 0, fillx, wrap 1",
+                "insets 20 24 24 24, fill, wrap 1",
                 "[grow,fill]",
-                "[]22[]18[]18[]"));
+                "[]22[]18[]18[]18[]18[]18[]18[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
+        this.themePackManagementPanel = themePackManagementPanel;
 
         configureComponents();
         modelSubscription = model.subscribe(this::modelChanged);
@@ -104,12 +123,24 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// @return selected light, dark, or system mode
     public ThemeMode selectedThemeMode() {
         EdtDispatcher.requireEventDispatchThread();
-        for (ThemeMode mode : ThemeMode.values()) {
-            if (themeButtons.get(mode).isSelected()) {
-                return mode;
+        return switch (selectedBrightnessPreference()) {
+            case THEME, SYSTEM -> ThemeMode.SYSTEM;
+            case LIGHT -> ThemeMode.LIGHT;
+            case DARK -> ThemeMode.DARK;
+        };
+    }
+
+    /// Returns the selected four-state brightness preference.
+    ///
+    /// @return theme, system, light, or dark preference
+    public ThemeBrightnessPreference selectedBrightnessPreference() {
+        EdtDispatcher.requireEventDispatchThread();
+        for (ThemeBrightnessPreference preference : ThemeBrightnessPreference.values()) {
+            if (themeButtons.get(preference).isSelected()) {
+                return preference;
             }
         }
-        throw new IllegalStateException("No theme mode is selected");
+        throw new IllegalStateException("No brightness preference is selected");
     }
 
     /// Returns the radius currently represented by the slider.
@@ -135,6 +166,9 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
             if (!closed) {
                 closed = true;
                 modelSubscription.unsubscribe();
+                if (themePackManagementPanel != null) {
+                    themePackManagementPanel.close();
+                }
             }
         });
     }
@@ -151,6 +185,10 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         add(createRadiusRow());
         add(new JSeparator(), "growx");
         add(createAnimationRow());
+        if (themePackManagementPanel != null) {
+            add(new JSeparator(), "growx");
+            add(themePackManagementPanel, "grow, hmin 320");
+        }
     }
 
     /// Creates the theme field with one keyboard-accessible segmented control.
@@ -159,13 +197,34 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     private JPanel createThemeRow() {
         JPanel row = fieldRow();
         JLabel label = new JLabel(strings.themeModeLabel());
-        JPanel segments = new JPanel(new MigLayout("insets 0, gap 0", "[][][]", "[]"));
+        JPanel segments = new JPanel(new MigLayout("insets 0, gap 0", "[][][][]", "[]"));
         segments.setOpaque(false);
         ButtonGroup group = new ButtonGroup();
 
-        addThemeButton(segments, group, ThemeMode.SYSTEM, strings.systemThemeLabel(), "first");
-        addThemeButton(segments, group, ThemeMode.LIGHT, strings.lightThemeLabel(), "middle");
-        addThemeButton(segments, group, ThemeMode.DARK, strings.darkThemeLabel(), "last");
+        addThemeButton(
+                segments,
+                group,
+                ThemeBrightnessPreference.THEME,
+                strings.followThemeLabel(),
+                "first");
+        addThemeButton(
+                segments,
+                group,
+                ThemeBrightnessPreference.SYSTEM,
+                strings.systemThemeLabel(),
+                "middle");
+        addThemeButton(
+                segments,
+                group,
+                ThemeBrightnessPreference.LIGHT,
+                strings.lightThemeLabel(),
+                "middle");
+        addThemeButton(
+                segments,
+                group,
+                ThemeBrightnessPreference.DARK,
+                strings.darkThemeLabel(),
+                "last");
 
         row.add(label, "growx");
         row.add(segments, "alignx right");
@@ -176,25 +235,25 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     ///
     /// @param host segmented-control host
     /// @param group exclusive selection group
-    /// @param mode represented theme mode
+    /// @param preference represented brightness preference
     /// @param text localized button label
     /// @param position FlatLaf segment position
     private void addThemeButton(
             JPanel host,
             ButtonGroup group,
-            ThemeMode mode,
+            ThemeBrightnessPreference preference,
             String text,
             String position) {
         JToggleButton button = new JToggleButton(text);
-        button.setName("appearanceTheme" + mode.name());
+        button.setName("appearanceTheme" + preference.name());
         button.putClientProperty("JButton.buttonType", "segmented");
         button.putClientProperty("JButton.segmentPosition", position);
         button.addActionListener(event -> {
             if (!applyingSnapshot && button.isSelected()) {
-                model.setThemeMode(mode);
+                model.setThemeBrightnessPreference(preference);
             }
         });
-        themeButtons.put(mode, button);
+        themeButtons.put(preference, button);
         group.add(button);
         host.add(button);
     }
@@ -303,7 +362,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         applyingSnapshot = true;
         try {
             displayedSnapshot = snapshot;
-            themeButtons.get(snapshot.themeMode()).setSelected(true);
+            themeButtons.get(snapshot.brightnessPreference()).setSelected(true);
 
             cornerRadiusSlider.setMinimum(snapshot.minimumCornerRadius());
             cornerRadiusSlider.setMaximum(snapshot.maximumCornerRadius());

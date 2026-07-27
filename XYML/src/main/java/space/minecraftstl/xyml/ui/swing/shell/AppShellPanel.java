@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -26,6 +27,7 @@ import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
 import javax.swing.ButtonGroup;
 import javax.swing.Icon;
+import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -71,6 +73,9 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Header label that identifies the currently visible destination.
     private final JLabel pageTitle = new JLabel();
 
+    /// Discoverable caller-configured file tool hidden until production supplies its workflow.
+    private final JButton fileToolButton = new JButton();
+
     /// Stable content area that owns page transitions.
     private final ShellPageDeck pageDeck;
 
@@ -79,6 +84,9 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
     /// Whether this shell has released all cached page resources.
     private boolean closed;
+
+    /// Current file-tool command, or `null` while the generic header slot is hidden.
+    private @Nullable Runnable fileToolCommand;
 
     /// Creates the application shell on the EDT.
     ///
@@ -154,12 +162,37 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         return pageCache.cachedPageCount();
     }
 
+    /// Configures and reveals the discoverable file-tool command in the stable header.
+    ///
+    /// @param label localized visible command label and accessible name
+    /// @param command caller-owned command invoked on the EDT
+    public void configureFileTool(String label, Runnable command) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            throw new IllegalStateException("Application shell is closed");
+        }
+        String validatedLabel = Objects.requireNonNull(label, "label").strip();
+        if (validatedLabel.isEmpty()) {
+            throw new IllegalArgumentException("File-tool label cannot be blank");
+        }
+        fileToolCommand = Objects.requireNonNull(command, "command");
+        fileToolButton.setText(validatedLabel);
+        fileToolButton.setToolTipText(validatedLabel);
+        fileToolButton.getAccessibleContext().setAccessibleName(validatedLabel);
+        fileToolButton.setVisible(true);
+        revalidate();
+        repaint();
+    }
+
     /// Closes all created destination pages from any caller thread.
     @Override
     public void close() {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             if (!closed) {
                 closed = true;
+                fileToolCommand = null;
+                fileToolButton.setEnabled(false);
+                setTransferHandler(null);
                 pageCache.close();
             }
         });
@@ -180,13 +213,20 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         return Objects.requireNonNull(navigationButtons.get(Objects.requireNonNull(page)));
     }
 
+    /// Returns the optional header file-tool button for focused accessibility verification.
+    ///
+    /// @return stable header command button
+    JButton fileToolButton() {
+        return fileToolButton;
+    }
+
     /// Creates the full-width brand and current-destination header.
     ///
     /// @return the configured header band
     private JPanel createHeader() {
         JPanel header = new JPanel(new MigLayout(
                 "insets 0 24 0 24, fill",
-                "[]16[]push",
+                "[]16[]push[]",
                 "[grow,fill]"));
 
         @Nullable Icon brandIcon = LauncherIconImages.headerIcon();
@@ -204,8 +244,21 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 new Font(Font.SANS_SERIF, Font.PLAIN, 13));
         pageTitle.setFont(titleFont.deriveFont(Font.PLAIN, 15.0f));
 
+        fileToolButton.setName("shellFileTool");
+        fileToolButton.setIcon(new FlatSVGIcon("assets/swing/icons/file-import.svg", 18, 18));
+        fileToolButton.setIconTextGap(8);
+        fileToolButton.setFocusable(true);
+        fileToolButton.setVisible(false);
+        fileToolButton.addActionListener(event -> {
+            @Nullable Runnable command = fileToolCommand;
+            if (command != null) {
+                command.run();
+            }
+        });
+
         header.add(brand);
         header.add(pageTitle);
+        header.add(fileToolButton, "h 40!, hidemode 3");
         header.setBorder(ShellSeparatorBorder.bottom());
         return header;
     }

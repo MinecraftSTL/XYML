@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
+import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -50,7 +51,7 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
     /// Raw store transition publisher.
     private final ValueChangeSupport<StoredAppearanceSettings> changes = new ValueChangeSupport<>(this);
 
-    /// Subscriptions shared by the three persisted appearance properties.
+    /// Subscriptions shared by persisted appearance properties and override membership.
     private final java.util.List<Subscription> propertySubscriptions = new java.util.ArrayList<>();
 
     /// Latest raw store snapshot available outside the launcher state event thread.
@@ -58,6 +59,12 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
 
     /// Whether closure has been requested from any thread.
     private final AtomicBoolean closed = new AtomicBoolean();
+
+    /// Whether a multi-property preference write is suppressing intermediate snapshots.
+    private boolean batchingPreferenceWrite;
+
+    /// Whether a suppressed legacy property event requires one final snapshot publication.
+    private boolean snapshotRefreshPending;
 
     /// Creates an adapter on the Swing state event thread.
     ///
@@ -70,9 +77,10 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
         this.settings = Objects.requireNonNull(settings, "settings");
         this.writableSupplier = Objects.requireNonNull(writableSupplier, "writableSupplier");
         currentSnapshot = readSnapshot();
-        propertySubscriptions.add(settings.themeBrightnessModeProperty().subscribe(change -> refreshSnapshot()));
-        propertySubscriptions.add(settings.cornerRadiusProperty().subscribe(change -> refreshSnapshot()));
-        propertySubscriptions.add(settings.animationDisabledProperty().subscribe(change -> refreshSnapshot()));
+        propertySubscriptions.add(settings.themeBrightnessModeProperty().subscribe(change -> requestSnapshotRefresh()));
+        propertySubscriptions.add(settings.cornerRadiusProperty().subscribe(change -> requestSnapshotRefresh()));
+        propertySubscriptions.add(settings.animationDisabledProperty().subscribe(change -> requestSnapshotRefresh()));
+        propertySubscriptions.add(settings.getThemeAppearanceOverrides().subscribe(change -> requestSnapshotRefresh()));
     }
 
     /// Creates an adapter for the process-wide loaded launcher settings.
@@ -107,10 +115,23 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
     @Override
     public void setThemeModeValue(String themeModeValue) {
         String validatedValue = Objects.requireNonNull(themeModeValue, "themeModeValue");
+        ThemeBrightnessPreference preference = ThemeBrightnessPreference.fromSetting(true, validatedValue);
+        setThemeBrightnessPreference(preference);
+    }
+
+    /// Queues a four-state brightness preference for atomic persistence on the Swing state event thread.
+    ///
+    /// Theme inheritance removes only the override key and deliberately retains the previous raw value. The other
+    /// preferences add the key and write their canonical legacy values.
+    ///
+    /// @param preference requested brightness preference
+    @Override
+    public void setThemeBrightnessPreference(ThemeBrightnessPreference preference) {
+        ThemeBrightnessPreference checkedPreference = Objects.requireNonNull(preference, "preference");
         requireOpen();
         execute(() -> {
             if (!closed.get()) {
-                settings.themeBrightnessModeProperty().set(validatedValue);
+                writeBrightnessPreference(checkedPreference);
             }
         });
     }
@@ -160,6 +181,40 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
         changes.fireChange(previous, replacement);
     }
 
+    /// Defers snapshot rebuilding while one preference mutates both its value and override membership.
+    private void requestSnapshotRefresh() {
+        requireEventThread();
+        if (batchingPreferenceWrite) {
+            snapshotRefreshPending = true;
+        } else {
+            refreshSnapshot();
+        }
+    }
+
+    /// Writes one preference without publishing an impossible intermediate combination.
+    ///
+    /// @param preference requested preference
+    private void writeBrightnessPreference(ThemeBrightnessPreference preference) {
+        requireEventThread();
+        batchingPreferenceWrite = true;
+        snapshotRefreshPending = false;
+        try {
+            @Nullable String value = preference.settingValue();
+            if (value == null) {
+                settings.getThemeAppearanceOverrides().remove(LauncherSettings.THEME_APPEARANCE_BRIGHTNESS_MODE);
+            } else {
+                settings.themeBrightnessModeProperty().set(value);
+                settings.getThemeAppearanceOverrides().add(LauncherSettings.THEME_APPEARANCE_BRIGHTNESS_MODE);
+            }
+        } finally {
+            batchingPreferenceWrite = false;
+        }
+        if (snapshotRefreshPending) {
+            snapshotRefreshPending = false;
+            refreshSnapshot();
+        }
+    }
+
     /// Reads and normalizes the three persisted settings on the Swing state event thread.
     ///
     /// @return raw immutable store snapshot
@@ -174,7 +229,9 @@ public final class LegacyLauncherAppearanceStore implements AppearanceSettingsSt
                 LauncherSettings.MAXIMUM_CORNER_RADIUS,
                 LauncherSettings.CORNER_RADIUS_STEP,
                 settings.animationDisabledProperty().get(),
-                writableSupplier.getAsBoolean());
+                writableSupplier.getAsBoolean(),
+                settings.getThemeAppearanceOverrides().contains(
+                        LauncherSettings.THEME_APPEARANCE_BRIGHTNESS_MODE));
     }
 
     /// Constrains a legacy or externally edited radius to the supported stepped range.
