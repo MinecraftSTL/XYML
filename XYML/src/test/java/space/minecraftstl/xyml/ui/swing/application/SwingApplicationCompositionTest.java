@@ -769,7 +769,7 @@ class SwingApplicationCompositionTest {
                         "Account error",
                         "Empty"),
                 new AppearanceSettingsStrings(
-                        "Appearance", "Theme", "System", "Light", "Dark", "Radius", "Animations"),
+                        "Appearance", "Theme", "Follow theme", "System", "Light", "Dark", "Radius", "Animations"),
                 Duration.ZERO,
                 new TaskProgressStrings(
                         "Waiting", "Running", "Completed", "Failed", "Cancelled",

@@ -469,6 +469,7 @@ public final class SwingApplicationPresentationFactory {
         return new AppearanceSettingsStrings(
                 i18n("settings.launcher.appearance"),
                 i18n("settings.launcher.brightness"),
+                i18n("theme_pack.theme"),
                 i18n("settings.launcher.brightness.auto"),
                 i18n("settings.launcher.brightness.light"),
                 i18n("settings.launcher.brightness.dark"),

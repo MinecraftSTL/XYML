@@ -26,6 +26,8 @@ import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
+import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementModel;
+import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementModelFactory;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 
 import java.util.List;
@@ -60,6 +62,9 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// Persisted appearance state and commands.
     private final AppearanceSettingsModel appearance;
 
+    /// Optional production factory for independently owned theme-pack page models.
+    private final @Nullable ThemePackManagementModelFactory themePackManagementModelFactory;
+
     /// Ordered model and store resources owned by this bundle.
     private final @Unmodifiable List<AutoCloseable> ownedResources;
 
@@ -85,6 +90,39 @@ public final class SwingApplicationPageModels implements AutoCloseable {
             AccountsModel accounts,
             AppearanceSettingsModel appearance,
             List<? extends AutoCloseable> ownedResources) {
+        this(
+                home,
+                instances,
+                instanceManagement,
+                gameVersions,
+                gameInstaller,
+                accounts,
+                appearance,
+                ownedResources,
+                null);
+    }
+
+    /// Creates an explicitly owned model bundle with optional local theme-pack management.
+    ///
+    /// @param home launcher-home model
+    /// @param instances installed-instance model
+    /// @param instanceManagement dynamic instance-management view coordinator
+    /// @param gameVersions lazy game-version catalog model
+    /// @param gameInstaller single-flight vanilla installation service
+    /// @param accounts account-selection model
+    /// @param appearance appearance-settings model
+    /// @param ownedResources resources closed in the supplied order
+    /// @param themePackManagementModelFactory optional fresh theme-pack model factory
+    public SwingApplicationPageModels(
+            HomeModel home,
+            InstancesModel instances,
+            InstanceManagementCoordinator instanceManagement,
+            GameVersionCatalogModel gameVersions,
+            GameInstallService gameInstaller,
+            AccountsModel accounts,
+            AppearanceSettingsModel appearance,
+            List<? extends AutoCloseable> ownedResources,
+            @Nullable ThemePackManagementModelFactory themePackManagementModelFactory) {
         this.home = Objects.requireNonNull(home, "home");
         this.instances = Objects.requireNonNull(instances, "instances");
         this.instanceManagement = Objects.requireNonNull(instanceManagement, "instanceManagement");
@@ -92,6 +130,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
         this.gameInstaller = Objects.requireNonNull(gameInstaller, "gameInstaller");
         this.accounts = Objects.requireNonNull(accounts, "accounts");
         this.appearance = Objects.requireNonNull(appearance, "appearance");
+        this.themePackManagementModelFactory = themePackManagementModelFactory;
         Objects.requireNonNull(ownedResources, "ownedResources");
         this.ownedResources = List.copyOf(ownedResources);
     }
@@ -143,6 +182,18 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// @return appearance-settings model
     public AppearanceSettingsModel appearance() {
         return appearance;
+    }
+
+    /// Creates the theme-pack model for a settings page when production supplied the feature.
+    ///
+    /// @return fresh independently owned model, or `null` when unavailable
+    public @Nullable ThemePackManagementModel createThemePackManagementModel() {
+        if (themePackManagementModelFactory == null) {
+            return null;
+        }
+        return Objects.requireNonNull(
+                themePackManagementModelFactory.create(),
+                "theme-pack management model factory returned null");
     }
 
     /// Closes every model and store at most once, attempting all cleanup after a failure.

@@ -22,24 +22,41 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.GameRepository;
+import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.game.launch.LaunchSession;
+import space.minecraftstl.xyml.setting.GameDirectory;
+import space.minecraftstl.xyml.setting.GameDirectoryID;
+import space.minecraftstl.xyml.setting.GameSettings;
+import space.minecraftstl.xyml.setting.GameSettingsPresetID;
+import space.minecraftstl.xyml.setting.GameSettingsPresets;
+import space.minecraftstl.xyml.setting.LauncherSettings;
+import space.minecraftstl.xyml.setting.SettingsManager;
+import space.minecraftstl.xyml.setting.UserSettings;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentation;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentationFactory;
-import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementStrings;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenanceLaunchActions;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenancePanel;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldQuickPlayActions;
+import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.DefaultResourcePackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserInteractions;
-import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogStrings;
+import space.minecraftstl.xyml.util.PortablePath;
+import space.minecraftstl.xyml.util.i18n.LocalizedText;
 
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JTabbedPane;
 import java.awt.Component;
 import java.awt.Container;
+import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -51,6 +68,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies that production instance management exposes every recovered local-content tool.
@@ -128,6 +146,94 @@ final class DefaultInstanceManagementViewTest {
         }
     }
 
+    /// A real XYML repository receives the maintenance tab without starting its lazy filesystem snapshot.
+    @Test
+    void exposesProductionMaintenanceTabWithoutEagerLoading()
+            throws InterruptedException, ReflectiveOperationException {
+        Field launcherSettingsField = SettingsManager.class.getDeclaredField("launcherSettings");
+        Field gameSettingsPresetsField = SettingsManager.class.getDeclaredField("gameSettingsPresets");
+        Field userSettingsField = SettingsManager.class.getDeclaredField("userSettingsInstance");
+        launcherSettingsField.setAccessible(true);
+        gameSettingsPresetsField.setAccessible(true);
+        userSettingsField.setAccessible(true);
+        @Nullable Object previousLauncherSettings = launcherSettingsField.get(null);
+        @Nullable Object previousGameSettingsPresets = gameSettingsPresetsField.get(null);
+        @Nullable Object previousUserSettings = userSettingsField.get(null);
+        LauncherSettings temporarySettings = new LauncherSettings();
+        GameSettingsPresetID presetId = GameSettingsPresetID.generate();
+        GameSettingsPresets temporaryPresets = new GameSettingsPresets();
+        temporaryPresets.getPresets().add(new GameSettings.Preset(presetId));
+        temporarySettings.defaultGameSettingsPresetProperty().set(presetId);
+        launcherSettingsField.set(null, temporarySettings);
+        gameSettingsPresetsField.set(null, temporaryPresets);
+        userSettingsField.set(null, new UserSettings());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable DefaultInstanceManagementView> viewReference = new AtomicReference<>();
+        try {
+            SwingApplicationPresentation presentation = SwingApplicationPresentationFactory.create(
+                    "XYML test",
+                    Duration.ZERO,
+                    Duration.ZERO);
+            XYMLGameRepository repository = new XYMLGameRepository(new GameDirectory(
+                    GameDirectoryID.generate(),
+                    LocalizedText.plain("Maintenance test"),
+                    PortablePath.of(repositoryRoot.toString())));
+            EdtDispatcher.executeAndWait(() -> viewReference.set(new DefaultInstanceManagementView(
+                    repository,
+                    ignored -> repositoryRoot.resolve("schematics"),
+                    "instance",
+                    executor,
+                    presentation.schematicManagement(),
+                    presentation.schematics(),
+                    new DefaultSchematicBrowserInteractions(
+                            presentation.schematics().actions(),
+                            executor),
+                    presentation.mods(),
+                    presentation.modsStatus(),
+                    presentation.modsActions(),
+                    new DefaultModCatalogInteractions(
+                            presentation.modsActions(),
+                            executor),
+                    presentation.resourcePacks(),
+                    presentation.resourcePacksStatus(),
+                    presentation.resourcePacksActions(),
+                    new DefaultResourcePackCatalogInteractions(
+                            presentation.resourcePacksActions(),
+                            executor),
+                    () -> { },
+                    presentation.taskProgress(),
+                    null,
+                    Duration.ZERO,
+                    WorldQuickPlayActions.unavailable(),
+                    new UnusedMaintenanceLaunchActions())));
+            DefaultInstanceManagementView view = Objects.requireNonNull(viewReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                JTabbedPane tabs = findNamed(view, "instanceManagementTabs", JTabbedPane.class);
+                InstanceMaintenancePanel maintenance =
+                        findNamed(view, "instanceMaintenancePage", InstanceMaintenancePanel.class);
+                assertNotNull(tabs);
+                assertNotNull(maintenance);
+                assertTrue(tabs.indexOfComponent(maintenance) >= 0);
+                assertEquals(maintenance.title(), tabs.getTitleAt(tabs.indexOfComponent(maintenance)));
+                assertNull(maintenance.displayedSnapshot());
+            });
+        } finally {
+            try {
+                @Nullable DefaultInstanceManagementView view = viewReference.get();
+                if (view != null) {
+                    view.close();
+                }
+                executor.shutdownNow();
+                assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+            } finally {
+                launcherSettingsField.set(null, previousLauncherSettings);
+                gameSettingsPresetsField.set(null, previousGameSettingsPresets);
+                userSettingsField.set(null, previousUserSettings);
+            }
+        }
+    }
+
     /// Creates the minimum repository contract required before lazy management tabs become displayable.
     ///
     /// @return repository proxy rooted in the temporary directory
@@ -148,6 +254,27 @@ final class DefaultInstanceManagementViewTest {
                     default -> throw new AssertionError(
                             "Instance-management construction used repository eagerly: " + method.getName());
                 }));
+    }
+
+    /// Launch boundary that fails immediately if lazy construction invokes an operation.
+    @NotNullByDefault
+    private static final class UnusedMaintenanceLaunchActions implements InstanceMaintenanceLaunchActions {
+        /// Rejects an unexpected eager test launch.
+        ///
+        /// @return never returns
+        @Override
+        public LaunchSession testLaunch() {
+            throw new AssertionError("Maintenance construction started a test launch eagerly");
+        }
+
+        /// Rejects an unexpected eager script export.
+        ///
+        /// @param scriptFile unexpected destination
+        /// @return never returns
+        @Override
+        public CompletionStage<Path> exportLaunchScript(Path scriptFile) {
+            throw new AssertionError("Maintenance construction exported a launch script eagerly: " + scriptFile);
+        }
     }
 
     /// Finds one named descendant of the requested Swing type.
