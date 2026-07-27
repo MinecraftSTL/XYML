@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.awt.Component;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Path;
 
 /// Isolates native Java-management interactions from the lifecycle panel that requests them.
@@ -32,6 +33,12 @@ interface JavaManagementInteractions {
     /// @param parent dialog parent component
     /// @return selected path, or null when the chooser is cancelled
     @Nullable Path chooseLocalRuntime(Component parent);
+
+    /// Lets the user choose one local Java installation archive.
+    ///
+    /// @param parent dialog parent component
+    /// @return selected `.zip` or `.tar.gz` path, or null when the chooser is cancelled
+    @Nullable Path chooseLocalJavaArchive(Component parent);
 
     /// Requests confirmation for one destructive Java-management action.
     ///
@@ -46,4 +53,11 @@ interface JavaManagementInteractions {
     /// @param directory existing directory to open
     /// @throws IOException when the platform file manager cannot open the directory
     void revealDirectory(Path directory) throws IOException;
+
+    /// Opens one validated external Java download URI in the platform browser.
+    ///
+    /// @param parent owning component used for interaction context
+    /// @param uri validated HTTP or HTTPS destination
+    /// @throws IOException when browser integration is unavailable or rejects the URI
+    void openExternalJavaDownload(Component parent, URI uri) throws IOException;
 }

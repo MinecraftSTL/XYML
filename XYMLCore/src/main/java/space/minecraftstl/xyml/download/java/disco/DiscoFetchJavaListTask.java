@@ -17,9 +17,12 @@
  */
 package space.minecraftstl.xyml.download.java.disco;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.java.JavaPackageType;
-import space.minecraftstl.xyml.task.GetTask;
+import space.minecraftstl.xyml.task.BoundedTextFetchTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
@@ -27,21 +30,45 @@ import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
 
-import java.util.*;
+import java.io.IOException;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Objects;
+import java.util.TreeMap;
 
-/**
- * @author Glavo
- */
+/// Fetches the latest directly downloadable Disco Java package for every package type and feature version.
+///
+/// Directory JSON is capped before parsing so an oversized or compressed response cannot allocate without bound.
+@NotNullByDefault
 public final class DiscoFetchJavaListTask extends Task<EnumMap<JavaPackageType, TreeMap<Integer, DiscoJavaRemoteVersion>>> {
+    /// Maximum decoded bytes accepted for one Disco package directory response.
+    private static final long MAXIMUM_DIRECTORY_RESPONSE_BYTES = 16L * 1024L * 1024L;
 
+    /// Configurable Disco API root used by launcher and focused integration tests.
     public static final String API_ROOT = System.getProperty("hmcl.discoapi.override", "https://api.foojay.io/disco/v3.0");
 
+    /// Explicitly selected distribution used to reject inconsistent response entries.
     private final DiscoJavaDistribution distribution;
+
+    /// Platform archive type requested from Disco and rechecked in the response.
     private final String archiveType;
+
+    /// Bounded provider-aware package directory request.
     private final Task<String> fetchPackagesTask;
 
-    public DiscoFetchJavaListTask(DownloadProvider downloadProvider, DiscoJavaDistribution distribution, Platform platform) {
-        this.distribution = distribution;
+    /// Creates a stopped package directory request for one distribution and exact platform.
+    ///
+    /// @param downloadProvider provider supplying ordered API candidates
+    /// @param distribution explicitly selected distribution
+    /// @param platform exact target platform
+    public DiscoFetchJavaListTask(
+            DownloadProvider downloadProvider,
+            DiscoJavaDistribution distribution,
+            Platform platform) {
+        this.distribution = Objects.requireNonNull(distribution, "distribution");
         this.archiveType = platform.getOperatingSystem() == OperatingSystem.WINDOWS ? "zip" : "tar.gz";
 
         HashMap<String, String> params = new HashMap<>();
@@ -53,18 +80,32 @@ public final class DiscoFetchJavaListTask extends Task<EnumMap<JavaPackageType, 
         if (platform.getOperatingSystem() == OperatingSystem.LINUX)
             params.put("lib_c_type", "glibc");
 
-        this.fetchPackagesTask = new GetTask(downloadProvider.injectURLWithCandidates(NetworkUtils.withQuery(API_ROOT + "/packages", params)));
+        this.fetchPackagesTask = new BoundedTextFetchTask(
+                downloadProvider.injectURLWithCandidates(
+                        NetworkUtils.withQuery(API_ROOT + "/packages", params)),
+                MAXIMUM_DIRECTORY_RESPONSE_BYTES);
     }
 
+    /// Returns the sole bounded directory request prerequisite.
+    ///
+    /// @return immutable singleton prerequisite collection
     @Override
-    public Collection<Task<?>> getDependents() {
+    public @Unmodifiable Collection<Task<?>> getDependents() {
         return Collections.singleton(fetchPackagesTask);
     }
 
+    /// Parses the bounded response and retains the newest distribution build for each Java feature version.
+    ///
+    /// @throws Exception when the directory response is malformed
     @Override
     public void execute() throws Exception {
-        String json = fetchPackagesTask.getResult();
-        List<DiscoJavaRemoteVersion> list = JsonUtils.fromNonNullJson(json, DiscoResult.typeOf(DiscoJavaRemoteVersion.class)).getResult();
+        String json = Objects.requireNonNull(fetchPackagesTask.getResult(), "Disco package directory response");
+        @Nullable List<DiscoJavaRemoteVersion> list = JsonUtils.fromNonNullJson(
+                json,
+                DiscoResult.typeOf(DiscoJavaRemoteVersion.class)).getResult();
+        if (list == null) {
+            throw new IOException("Disco package directory has no result list");
+        }
         EnumMap<JavaPackageType, TreeMap<Integer, DiscoJavaRemoteVersion>> result = new EnumMap<>(JavaPackageType.class);
 
         for (DiscoJavaRemoteVersion version : list) {

@@ -21,6 +21,11 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.download.java.JavaPackageType;
+import space.minecraftstl.xyml.download.java.disco.DiscoJavaDistribution;
+import space.minecraftstl.xyml.download.java.disco.DiscoJavaRemoteVersion;
+import space.minecraftstl.xyml.game.GameJavaVersion;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
@@ -46,25 +51,34 @@ import javax.swing.ListSelectionModel;
 import javax.swing.ScrollPaneConstants;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
+import java.awt.Color;
+import java.awt.Component;
 import java.awt.Font;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Manages discovered and disabled Java runtimes through two lifecycle-aware Swing views.
+/// Manages active, disabled, and launcher-acquired Java runtimes through lifecycle-aware Swing views.
 ///
-/// All persistence and runtime validation remain in [JavaRuntimeManagementService]. This panel owns at most one
-/// operation executor, progress presentation, and completion subscription at a time. Closing it synchronously rejects
-/// late service publications and task callbacks before EDT resource cleanup is dispatched.
+/// Runtime lifecycle persistence remains in [JavaRuntimeManagementService], while acquisition work remains in
+/// [JavaRuntimeAcquisitionService]. This panel owns at most one operation executor, progress presentation, and
+/// completion subscription at a time. Closing it synchronously rejects late service publications and task callbacks
+/// before EDT resource cleanup is dispatched.
 @NotNullByDefault
 public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// Card identifier for the active-runtime view.
@@ -73,11 +87,30 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// Card identifier for disabled-runtime maintenance.
     private static final String DISABLED_CARD = "disabled";
 
+    /// Card identifier for Mojang downloads and local archive installation.
+    private static final String ACQUIRE_CARD = "acquire";
+
     /// Toolkit-neutral source of runtime snapshots and mutation tasks.
     private final JavaRuntimeManagementService service;
 
+    /// Toolkit-neutral source of stopped Java acquisition tasks.
+    private final JavaRuntimeAcquisitionService acquisitionService;
+
+    /// Lazy third-party distribution discovery and safe installation service.
+    private final DiscoJavaRuntimeAcquisitionService discoAcquisitionService;
+
+    /// Independently cancellable third-party version-load lifecycle.
+    private final DiscoJavaVersionLoadController discoVersionLoadController;
+
     /// Native interactions isolated for deterministic panel tests.
     private final JavaManagementInteractions interactions;
+
+    /// Routes pure acquisition-panel commands through this parent's lifecycle and progress gate.
+    private final JavaRuntimeAcquisitionPanel.Listener acquisitionListener = new AcquisitionListener();
+
+    /// Serial daemon executor used only for delayed local installation-name validation.
+    private final ScheduledExecutorService nameValidationExecutor = Executors.newSingleThreadScheduledExecutor(
+            JavaManagementPanel::createNameValidationThread);
 
     /// Mutable active-runtime list model rendered from immutable snapshots.
     private final DefaultListModel<JavaRuntime> runtimeListModel = new DefaultListModel<>();
@@ -100,7 +133,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// Layout switching between active and disabled runtime management.
     private final CardLayout cardLayout = new CardLayout();
 
-    /// Container holding the two Java-management cards.
+    /// Container holding the three Java-management cards.
     private final JPanel cards = new JPanel(cardLayout);
 
     /// Active-runtime card used for explicit visibility tests.
@@ -109,11 +142,17 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// Disabled-runtime card used for explicit visibility tests.
     private final JPanel disabledView = new JPanel(new BorderLayout());
 
+    /// Acquisition card populated only after an explicit user request finishes loading capabilities.
+    private final JPanel acquireView = new JPanel(new BorderLayout());
+
     /// Requests a local Java path rescan.
     private final JButton refreshButton = new JButton(i18n("button.refresh"));
 
     /// Opens a chooser for local Java registration.
     private final JButton addButton = new JButton(i18n("java.add"));
+
+    /// Opens the lazy Mojang-download and local-archive acquisition card.
+    private final JButton acquireButton = new JButton(i18n("java.download.title"));
 
     /// Opens disabled-runtime maintenance.
     private final JButton manageDisabledButton = new JButton(i18n("java.disabled.management"));
@@ -160,6 +199,9 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// Snapshot currently rendered by both runtime lists, or null before initial application.
     private @Nullable JavaRuntimeManagementSnapshot displayedSnapshot;
 
+    /// Pure acquisition input surface, or null until the user explicitly opens it.
+    private @Nullable JavaRuntimeAcquisitionPanel acquisitionPanel;
+
     /// Binary path to select after a successful registration or restore operation.
     private @Nullable Path pendingSelectedBinary;
 
@@ -178,8 +220,14 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// Whether the current status awaits a refresh publication.
     private boolean refreshPending;
 
-    /// Whether the disabled-runtime card is currently selected.
-    private boolean disabledCardVisible;
+    /// Single authoritative Java-management card state.
+    private View currentView = View.MAIN;
+
+    /// Most recently scheduled archive installation-name validation, or null when none is pending.
+    private @Nullable Future<?> pendingNameValidation;
+
+    /// Monotonic validation identity used to reject replaced drafts and disposed child panels.
+    private long nameValidationSequence;
 
     /// Whether the panel has rejected future input and callbacks.
     private volatile boolean closed;
@@ -188,7 +236,11 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     ///
     /// @param service toolkit-neutral Java runtime service
     public JavaManagementPanel(JavaRuntimeManagementService service) {
-        this(service, new SwingJavaManagementInteractions());
+        this(
+                service,
+                new JavaManagerRuntimeAcquisitionService(),
+                new JavaManagerDiscoRuntimeAcquisitionService(),
+                new SwingJavaManagementInteractions());
     }
 
     /// Creates a Java management page with injectable native interactions for package tests.
@@ -196,9 +248,48 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// @param service toolkit-neutral Java runtime service
     /// @param interactions chooser, confirmation, and directory reveal interactions
     JavaManagementPanel(JavaRuntimeManagementService service, JavaManagementInteractions interactions) {
+        this(
+                service,
+                new JavaManagerRuntimeAcquisitionService(),
+                new JavaManagerDiscoRuntimeAcquisitionService(),
+                interactions);
+    }
+
+    /// Creates a Java management page with injectable lifecycle, acquisition, and native interaction boundaries.
+    ///
+    /// @param service toolkit-neutral Java runtime lifecycle service
+    /// @param acquisitionService stopped Java acquisition task service
+    /// @param interactions chooser, confirmation, and directory reveal interactions
+    JavaManagementPanel(
+            JavaRuntimeManagementService service,
+            JavaRuntimeAcquisitionService acquisitionService,
+            JavaManagementInteractions interactions) {
+        this(
+                service,
+                acquisitionService,
+                new JavaManagerDiscoRuntimeAcquisitionService(),
+                interactions);
+    }
+
+    /// Creates a Java management page with every lifecycle, acquisition, and native boundary injectable.
+    ///
+    /// @param service toolkit-neutral Java runtime lifecycle service
+    /// @param acquisitionService built-in and local-archive acquisition service
+    /// @param discoAcquisitionService third-party distribution acquisition service
+    /// @param interactions chooser, confirmation, external-link, and directory interactions
+    JavaManagementPanel(
+            JavaRuntimeManagementService service,
+            JavaRuntimeAcquisitionService acquisitionService,
+            DiscoJavaRuntimeAcquisitionService discoAcquisitionService,
+            JavaManagementInteractions interactions) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.service = Objects.requireNonNull(service, "service");
+        this.acquisitionService = Objects.requireNonNull(acquisitionService, "acquisitionService");
+        this.discoAcquisitionService = Objects.requireNonNull(
+                discoAcquisitionService,
+                "discoAcquisitionService");
+        discoVersionLoadController = new DiscoJavaVersionLoadController(this.discoAcquisitionService);
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         progressHost = new TaskProgressHostPanel(createTaskProgressStrings(), null, Duration.ZERO);
         configureComponents();
@@ -238,9 +329,13 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         disabledView.setName("javaManagementDisabledView");
         disabledView.setOpaque(false);
         disabledView.add(createDisabledContent(), BorderLayout.CENTER);
+        acquireView.setName("javaManagementAcquireView");
+        acquireView.setOpaque(false);
+        acquireView.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         cards.setOpaque(false);
         cards.add(mainView, MAIN_CARD);
         cards.add(disabledView, DISABLED_CARD);
+        cards.add(acquireView, ACQUIRE_CARD);
 
         JPanel root = new JPanel(new MigLayout(
                 "insets 0, fill, wrap 1",
@@ -280,13 +375,14 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     private JPanel createMainHeader() {
         JPanel header = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[grow,fill]8[]8[]8[]",
+                "[grow,fill]8[]8[]8[]8[]",
                 "[]"));
         header.setOpaque(false);
         JLabel heading = new JLabel(i18n("java.management"));
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 20.0F));
         header.add(heading, "growx");
         header.add(refreshButton);
+        header.add(acquireButton);
         header.add(addButton);
         header.add(manageDisabledButton);
         return header;
@@ -386,7 +482,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         disabledList.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting()) {
                 updateActionAvailability();
-                if (disabledCardVisible) {
+                if (currentView == View.DISABLED) {
                     inspectSelectedDisabledRuntime();
                 }
             }
@@ -397,6 +493,11 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     private void configureButtons() {
         configureIconButton(refreshButton, "javaManagementRefresh", "assets/swing/icons/refresh.svg");
         refreshButton.addActionListener(event -> refreshLocalRuntimes());
+        configureIconButton(
+                acquireButton,
+                "javaManagementAcquire",
+                "assets/swing/icons/nav-downloads.svg");
+        acquireButton.addActionListener(event -> openAcquisitionView());
         configureIconButton(addButton, "javaManagementAdd", "assets/swing/icons/add.svg");
         addButton.addActionListener(event -> chooseLocalRuntime());
         configureIconButton(
@@ -439,8 +540,29 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     private static void configureButton(JButton button, String name, String iconResource) {
         JButton target = Objects.requireNonNull(button, "button");
         target.setName(Objects.requireNonNull(name, "name"));
-        target.setIcon(new FlatSVGIcon(Objects.requireNonNull(iconResource, "iconResource"), 18, 18));
+        target.setIcon(themeIcon(iconResource));
         target.setToolTipText(target.getText());
+    }
+
+    /// Creates a bundled SVG icon that follows its component foreground in light and dark themes.
+    ///
+    /// @param iconResource classpath SVG resource
+    /// @return configured theme-aware icon
+    private static FlatSVGIcon themeIcon(String iconResource) {
+        FlatSVGIcon icon = new FlatSVGIcon(Objects.requireNonNull(iconResource, "iconResource"), 18, 18);
+        icon.setColorFilter(new FlatSVGIcon.ColorFilter(JavaManagementPanel::resolveIconColor));
+        return icon;
+    }
+
+    /// Resolves an SVG color from its owning component's current foreground.
+    ///
+    /// @param component owning component, or null during standalone rendering
+    /// @param originalColor SVG fallback color
+    /// @return component foreground when available, otherwise the authored color
+    private static Color resolveIconColor(@Nullable Component component, Color originalColor) {
+        Color fallback = Objects.requireNonNull(originalColor, "originalColor");
+        @Nullable Color foreground = component == null ? null : component.getForeground();
+        return foreground == null ? fallback : foreground;
     }
 
     /// Configures one compact icon command while retaining its label for tooltips and assistive technology.
@@ -540,7 +662,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// Shows the active-runtime card.
     private void showMainView() {
         EdtDispatcher.requireEventDispatchThread();
-        disabledCardVisible = false;
+        currentView = View.MAIN;
         cardLayout.show(cards, MAIN_CARD);
         updateActionAvailability();
     }
@@ -551,9 +673,94 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         if (closed) {
             return;
         }
-        disabledCardVisible = true;
+        currentView = View.DISABLED;
         cardLayout.show(cards, DISABLED_CARD);
         updateActionAvailability();
+    }
+
+    /// Lazily loads local acquisition capabilities after the user explicitly opens the acquisition card.
+    private void openAcquisitionView() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || activeExecutor != null) {
+            return;
+        }
+        @Nullable JavaRuntimeAcquisitionPanel requestedPanel = acquisitionPanel;
+
+        final Task<JavaRuntimeAcquisitionSnapshot> task;
+        try {
+            task = Objects.requireNonNull(
+                    acquisitionService.loadSnapshot(),
+                    "acquisition service returned null capability task");
+        } catch (RuntimeException failure) {
+            setStatus(i18n("java.download.load_list.failed"));
+            return;
+        }
+        startOperation(
+                task,
+                i18n("java.download.title"),
+                i18n("java.download.load_list.failed"),
+                result -> {
+                    if (result != null && acquisitionPanel == requestedPanel) {
+                        if (requestedPanel == null) {
+                            installAcquisitionPanel(result);
+                        } else {
+                            requestedPanel.applySnapshot(result);
+                        }
+                        showAcquisitionView();
+                    }
+                });
+    }
+
+    /// Installs one pure acquisition surface into the persistent third card.
+    ///
+    /// @param snapshot already-loaded local capability snapshot
+    private void installAcquisitionPanel(JavaRuntimeAcquisitionSnapshot snapshot) {
+        EdtDispatcher.requireEventDispatchThread();
+        discardAcquisitionPanel();
+        @Unmodifiable List<DiscoJavaDistribution> distributions =
+                discoAcquisitionService.supportedDistributions();
+        JavaRuntimeAcquisitionPanel replacement = new JavaRuntimeAcquisitionPanel(
+                Objects.requireNonNull(snapshot, "snapshot"),
+                distributions,
+                JavaRuntimePlatformLinks.forPlatform(discoAcquisitionService.platform()),
+                acquisitionListener);
+        acquisitionPanel = replacement;
+        acquireView.add(replacement, BorderLayout.CENTER);
+        acquireView.revalidate();
+        acquireView.repaint();
+    }
+
+    /// Shows the already-loaded acquisition card without starting another task.
+    private void showAcquisitionView() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || acquisitionPanel == null) {
+            return;
+        }
+        currentView = View.ACQUISITION;
+        cardLayout.show(cards, ACQUIRE_CARD);
+        updateActionAvailability();
+    }
+
+    /// Releases the current pure acquisition surface and its viewport resources.
+    private void discardAcquisitionPanel() {
+        EdtDispatcher.requireEventDispatchThread();
+        cancelPendingNameValidation();
+        discoVersionLoadController.cancel();
+        @Nullable JavaRuntimeAcquisitionPanel panel = acquisitionPanel;
+        acquisitionPanel = null;
+        acquireView.removeAll();
+        if (panel != null) {
+            panel.close();
+        }
+        acquireView.revalidate();
+        acquireView.repaint();
+    }
+
+    /// Returns the current acquisition panel only while it remains owned by this page.
+    ///
+    /// @return current acquisition surface, or null before loading or after disposal
+    private @Nullable JavaRuntimeAcquisitionPanel currentAcquisitionPanel() {
+        return closed ? null : acquisitionPanel;
     }
 
     /// Starts a local Java path rescan without fetching a remote distribution.
@@ -598,6 +805,339 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
                 selectRuntime(pendingSelectedBinary);
             }
         });
+    }
+
+    /// Opens the local Java archive chooser and forwards one accepted path to the pure acquisition panel.
+    private void chooseLocalJavaArchive() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable JavaRuntimeAcquisitionPanel panel = currentAcquisitionPanel();
+        if (panel == null || activeExecutor != null) {
+            return;
+        }
+        @Nullable Path selectedArchive = interactions.chooseLocalJavaArchive(this);
+        if (selectedArchive == null) {
+            return;
+        }
+        if (!acquisitionService.supportsLocalArchive(selectedArchive)
+                || !panel.selectArchive(selectedArchive)) {
+            setStatus(i18n("java.install.failed.invalid"));
+        }
+    }
+
+    /// Starts one explicit local-archive inspection and preserves its selection revision.
+    ///
+    /// @param revision acquisition-panel archive selection identity
+    /// @param archiveFile explicitly selected local archive
+    private void inspectLocalJavaArchive(long revision, Path archiveFile) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable JavaRuntimeAcquisitionPanel requestedPanel = currentAcquisitionPanel();
+        if (requestedPanel == null || activeExecutor != null) {
+            return;
+        }
+        final Task<LocalJavaArchiveInspection> task;
+        try {
+            task = Objects.requireNonNull(
+                    acquisitionService.inspectLocalArchive(archiveFile),
+                    "acquisition service returned null archive inspection task");
+        } catch (RuntimeException failure) {
+            setStatus(i18n("java.install.failed.invalid"));
+            return;
+        }
+        startOperation(
+                task,
+                i18n("java.install"),
+                i18n("java.install.failed.invalid"),
+                result -> {
+                    if (acquisitionPanel == requestedPanel && result != null) {
+                        requestedPanel.applyArchiveInspection(revision, result);
+                    }
+                });
+    }
+
+    /// Starts one explicitly selected built-in Mojang runtime download.
+    ///
+    /// @param version selected canonical Mojang Java component
+    private void downloadMojangRuntime(GameJavaVersion version) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable JavaRuntimeAcquisitionPanel requestedPanel = currentAcquisitionPanel();
+        if (requestedPanel == null || activeExecutor != null) {
+            return;
+        }
+        final Task<JavaRuntime> task;
+        try {
+            task = Objects.requireNonNull(
+                    acquisitionService.downloadMojangRuntime(version),
+                    "acquisition service returned null Mojang download task");
+        } catch (RuntimeException failure) {
+            setStatus(i18n("message.failed"));
+            return;
+        }
+        startOperation(
+                task,
+                i18n("java.download"),
+                i18n("message.failed"),
+                result -> {
+                    if (acquisitionPanel == requestedPanel && result != null) {
+                        completeAcquisition(result);
+                    }
+                });
+    }
+
+    /// Delegates one independently cancellable inline third-party version fetch.
+    ///
+    /// @param revision child-panel version request revision
+    /// @param distribution explicit distribution
+    /// @param packageType explicit non-JavaFX package type
+    private void loadDiscoVersions(
+            long revision,
+            DiscoJavaDistribution distribution,
+            JavaPackageType packageType) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable JavaRuntimeAcquisitionPanel requestedPanel = currentAcquisitionPanel();
+        if (requestedPanel == null || activeExecutor != null) {
+            return;
+        }
+        discoVersionLoadController.load(revision, requestedPanel, distribution, packageType);
+    }
+
+    /// Supplies and validates the service-owned suggested name for one exact third-party version.
+    ///
+    /// @param revision child-panel install selection revision
+    /// @param distribution selected distribution
+    /// @param packageType selected package type
+    /// @param version selected remote version
+    private void suggestDiscoInstallName(
+            long revision,
+            DiscoJavaDistribution distribution,
+            JavaPackageType packageType,
+            DiscoJavaRemoteVersion version) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable JavaRuntimeAcquisitionPanel requestedPanel = currentAcquisitionPanel();
+        if (requestedPanel == null || activeExecutor != null) {
+            return;
+        }
+        try {
+            String suggestion = discoAcquisitionService.suggestedInstallName(
+                    distribution,
+                    packageType,
+                    version);
+            JavaRuntimeInstallNameStatus status = discoAcquisitionService.validateInstallName(suggestion);
+            requestedPanel.applyDiscoInstallNameSuggestion(
+                    revision,
+                    distribution,
+                    packageType,
+                    version,
+                    suggestion,
+                    status);
+        } catch (RuntimeException failure) {
+            setStatus(i18n("message.failed"));
+        }
+    }
+
+    /// Validates one edited third-party managed-runtime name after a short replacement-aware delay.
+    ///
+    /// @param revision child-panel install selection revision
+    /// @param distribution selected distribution
+    /// @param packageType selected package type
+    /// @param version selected remote version
+    /// @param candidate exact trimmed candidate
+    private void validateDiscoInstallName(
+            long revision,
+            DiscoJavaDistribution distribution,
+            JavaPackageType packageType,
+            DiscoJavaRemoteVersion version,
+            String candidate) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable JavaRuntimeAcquisitionPanel requestedPanel = currentAcquisitionPanel();
+        if (requestedPanel == null || activeExecutor != null) {
+            return;
+        }
+        cancelPendingNameValidation();
+        long sequence = ++nameValidationSequence;
+        try {
+            pendingNameValidation = nameValidationExecutor.schedule(() -> {
+                final JavaRuntimeInstallNameStatus status;
+                try {
+                    status = discoAcquisitionService.validateInstallName(candidate);
+                } catch (RuntimeException failure) {
+                    SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+                        if (!closed
+                                && sequence == nameValidationSequence
+                                && acquisitionPanel == requestedPanel) {
+                            pendingNameValidation = null;
+                            setStatus(i18n("message.failed"));
+                        }
+                    });
+                    return;
+                }
+                SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+                    if (!closed
+                            && sequence == nameValidationSequence
+                            && acquisitionPanel == requestedPanel) {
+                        pendingNameValidation = null;
+                        requestedPanel.applyDiscoInstallNameStatus(
+                                revision,
+                                distribution,
+                                packageType,
+                                version,
+                                candidate,
+                                status);
+                    }
+                });
+            }, 200L, TimeUnit.MILLISECONDS);
+        } catch (RuntimeException failure) {
+            setStatus(i18n("message.failed"));
+        }
+    }
+
+    /// Starts the existing unified progress workflow for a validated third-party install selection.
+    ///
+    /// @param distribution selected distribution
+    /// @param packageType selected package type
+    /// @param version selected remote version
+    /// @param installName validated managed-runtime name
+    private void installDiscoRuntime(
+            DiscoJavaDistribution distribution,
+            JavaPackageType packageType,
+            DiscoJavaRemoteVersion version,
+            String installName) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable JavaRuntimeAcquisitionPanel requestedPanel = currentAcquisitionPanel();
+        if (requestedPanel == null || activeExecutor != null) {
+            return;
+        }
+        discoVersionLoadController.cancel();
+        final Task<JavaRuntime> task;
+        try {
+            task = Objects.requireNonNull(
+                    discoAcquisitionService.install(distribution, packageType, version, installName),
+                    "Disco acquisition service returned null installation task");
+        } catch (RuntimeException failure) {
+            setStatus(i18n("java.install.failed.invalid"));
+            return;
+        }
+        startOperation(
+                task,
+                i18n("java.installing"),
+                i18n("java.install.failed.invalid"),
+                result -> {
+                    if (acquisitionPanel == requestedPanel && result != null) {
+                        completeAcquisition(result);
+                    }
+                });
+    }
+
+    /// Opens one panel-provided external Java download destination through the native interaction boundary.
+    ///
+    /// @param uri validated external destination
+    private void openExternalJavaDownload(URI uri) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || activeExecutor != null) {
+            return;
+        }
+        try {
+            interactions.openExternalJavaDownload(this, Objects.requireNonNull(uri, "uri"));
+        } catch (IOException | SecurityException | UnsupportedOperationException failure) {
+            setStatus(i18n("message.failed"));
+        }
+    }
+
+    /// Validates one archive installation name after explicit archive input or user editing.
+    ///
+    /// @param revision acquisition-panel archive selection identity
+    /// @param inspection inspected archive tied to the candidate
+    /// @param candidate exact candidate text
+    private void validateLocalArchiveInstallName(
+            long revision,
+            LocalJavaArchiveInspection inspection,
+            String candidate) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable JavaRuntimeAcquisitionPanel requestedPanel = currentAcquisitionPanel();
+        if (requestedPanel == null || activeExecutor != null) {
+            return;
+        }
+        cancelPendingNameValidation();
+        long sequence = ++nameValidationSequence;
+        try {
+            pendingNameValidation = nameValidationExecutor.schedule(() -> {
+                final JavaRuntimeInstallNameStatus status;
+                try {
+                    status = acquisitionService.validateInstallName(inspection, candidate);
+                } catch (RuntimeException failure) {
+                    SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+                        if (!closed
+                                && sequence == nameValidationSequence
+                                && acquisitionPanel == requestedPanel) {
+                            pendingNameValidation = null;
+                            setStatus(i18n("message.failed"));
+                        }
+                    });
+                    return;
+                }
+                SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+                    if (!closed
+                            && sequence == nameValidationSequence
+                            && acquisitionPanel == requestedPanel) {
+                        pendingNameValidation = null;
+                        requestedPanel.applyInstallNameStatus(revision, inspection, candidate, status);
+                    }
+                });
+            }, 200L, TimeUnit.MILLISECONDS);
+        } catch (RuntimeException failure) {
+            setStatus(i18n("message.failed"));
+        }
+    }
+
+    /// Cancels one delayed name validation and invalidates any callback already queued for the EDT.
+    private void cancelPendingNameValidation() {
+        nameValidationSequence++;
+        @Nullable Future<?> validation = pendingNameValidation;
+        pendingNameValidation = null;
+        if (validation != null) {
+            validation.cancel(true);
+        }
+    }
+
+    /// Starts installation of one already-inspected local Java archive.
+    ///
+    /// @param inspection inspected local archive
+    /// @param name validated launcher-managed installation name
+    private void installLocalJavaArchive(LocalJavaArchiveInspection inspection, String name) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable JavaRuntimeAcquisitionPanel requestedPanel = currentAcquisitionPanel();
+        if (requestedPanel == null || activeExecutor != null) {
+            return;
+        }
+        final Task<JavaRuntime> task;
+        try {
+            task = Objects.requireNonNull(
+                    acquisitionService.installLocalArchive(inspection, name),
+                    "acquisition service returned null local archive installation task");
+        } catch (RuntimeException failure) {
+            setStatus(i18n("java.install.failed.invalid"));
+            return;
+        }
+        startOperation(
+                task,
+                i18n("java.installing"),
+                i18n("java.install.failed.invalid"),
+                result -> {
+                    if (acquisitionPanel == requestedPanel && result != null) {
+                        completeAcquisition(result);
+                    }
+                });
+    }
+
+    /// Returns to active runtimes while retaining the acquired binary for the next lifecycle snapshot.
+    ///
+    /// @param runtime newly downloaded or installed managed runtime
+    private void completeAcquisition(JavaRuntime runtime) {
+        EdtDispatcher.requireEventDispatchThread();
+        JavaRuntime acquiredRuntime = Objects.requireNonNull(runtime, "runtime");
+        pendingSelectedBinary = acquiredRuntime.getBinary();
+        discardAcquisitionPanel();
+        showMainView();
+        selectRuntime(pendingSelectedBinary);
     }
 
     /// Dispatches the selected runtime's disable or uninstall command according to its ownership.
@@ -855,16 +1395,27 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
             unsubscribe(activeCompletionSubscription);
             activeCompletionSubscription = null;
             activeExecutor = null;
-            if (succeeded) {
-                successAction.accept(task.getResult());
-                setStatus(i18n("message.success"));
-            } else if (executor.isCancelled()) {
-                setStatus(i18n("message.cancelled"));
-            } else {
-                failureAction.run();
+            try {
+                if (succeeded) {
+                    successAction.accept(task.getResult());
+                    setStatus(i18n("message.success"));
+                } else if (executor.isCancelled()) {
+                    setStatus(i18n("message.cancelled"));
+                } else {
+                    failureAction.run();
+                    setStatus(failureStatus);
+                }
+            } catch (RuntimeException | Error callbackFailure) {
                 setStatus(failureStatus);
+                throw callbackFailure;
+            } finally {
+                if (!closed) {
+                    if (succeeded || executor.isCancelled()) {
+                        releaseCompletedPresentation();
+                    }
+                    updateActionAvailability();
+                }
             }
-            updateActionAvailability();
         });
     }
 
@@ -1016,7 +1567,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
             architectureField.setText("");
             pathField.setText("");
             setIconButtonLabel(runtimeActionButton, i18n("java.disable"));
-            runtimeActionButton.setIcon(new FlatSVGIcon("assets/swing/icons/delete.svg", 18, 18));
+            runtimeActionButton.setIcon(themeIcon("assets/swing/icons/delete.svg"));
         } else {
             versionField.setText(runtime.getVersion());
             vendorField.setText(displayText(runtime.getVendor()));
@@ -1025,12 +1576,10 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
             setIconButtonLabel(
                     runtimeActionButton,
                     i18n(runtime.isManaged() ? "java.uninstall" : "java.disable"));
-            runtimeActionButton.setIcon(new FlatSVGIcon(
+            runtimeActionButton.setIcon(themeIcon(
                     runtime.isManaged()
                             ? "assets/swing/icons/delete-forever.svg"
-                            : "assets/swing/icons/delete.svg",
-                    18,
-                    18));
+                            : "assets/swing/icons/delete.svg"));
         }
         updateActionAvailability();
     }
@@ -1045,6 +1594,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         @Nullable DisabledJavaRuntimeEntry disabledEntry = disabledList.getSelectedValue();
 
         refreshButton.setEnabled(idle);
+        acquireButton.setEnabled(idle);
         addButton.setEnabled(idle && writable);
         manageDisabledButton.setEnabled(idle
                 && snapshot != null
@@ -1069,8 +1619,13 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
                 && disabledEntry != null
                 && canRemoveDisabledEntry(disabledEntry));
 
-        mainView.setEnabled(!disabledCardVisible);
-        disabledView.setEnabled(disabledCardVisible);
+        @Nullable JavaRuntimeAcquisitionPanel panel = acquisitionPanel;
+        if (panel != null) {
+            panel.setBusy(!idle);
+        }
+        mainView.setEnabled(currentView == View.MAIN);
+        disabledView.setEnabled(currentView == View.DISABLED);
+        acquireView.setEnabled(currentView == View.ACQUISITION);
     }
 
     /// Resolves the directory that should be opened for a Java executable.
@@ -1152,8 +1707,21 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         if (presentation != null) {
             presentation.close();
         }
+        discardAcquisitionPanel();
+        discoVersionLoadController.close();
+        nameValidationExecutor.shutdownNow();
         progressHost.close();
         updateActionAvailability();
+    }
+
+    /// Creates one daemon worker for delayed local archive installation-name validation.
+    ///
+    /// @param task executor worker task
+    /// @return named daemon thread
+    private static Thread createNameValidationThread(Runnable task) {
+        Thread thread = new Thread(Objects.requireNonNull(task, "task"), "xyml-java-name-validation");
+        thread.setDaemon(true);
+        return thread;
     }
 
     /// Removes one optional task listener registration.
@@ -1187,6 +1755,135 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// @return visible value or the localized unknown marker
     private static String displayText(@Nullable String value) {
         return value == null || value.isBlank() ? i18n("message.unknown") : value;
+    }
+
+    /// Identifies the single visible Java-management card.
+    @NotNullByDefault
+    private enum View {
+        /// Active Java runtime list and details.
+        MAIN,
+
+        /// Disabled Java record maintenance.
+        DISABLED,
+
+        /// Mojang download and local archive acquisition.
+        ACQUISITION
+    }
+
+    /// Routes pure acquisition-panel events through the parent's single-operation lifecycle gate.
+    @NotNullByDefault
+    private final class AcquisitionListener implements JavaRuntimeAcquisitionPanel.Listener {
+        /// Returns to active Java management while preserving the loaded acquisition draft.
+        @Override
+        public void backRequested() {
+            if (activeExecutor == null) {
+                showMainView();
+            }
+        }
+
+        /// Opens the parent-owned native archive chooser.
+        @Override
+        public void archiveChooserRequested() {
+            chooseLocalJavaArchive();
+        }
+
+        /// Starts parent-owned archive inspection for one exact selection revision.
+        ///
+        /// @param revision archive selection identity
+        /// @param archiveFile selected local archive
+        @Override
+        public void archiveInspectionRequested(long revision, Path archiveFile) {
+            inspectLocalJavaArchive(revision, archiveFile);
+        }
+
+        /// Starts the explicitly selected Mojang runtime download.
+        ///
+        /// @param version selected canonical Mojang Java component
+        @Override
+        public void mojangDownloadRequested(GameJavaVersion version) {
+            downloadMojangRuntime(version);
+        }
+
+        /// Validates one exact installation-name candidate against current local repository state.
+        ///
+        /// @param revision archive selection identity
+        /// @param inspection inspected archive tied to the candidate
+        /// @param candidate candidate installation name
+        @Override
+        public void installNameValidationRequested(
+                long revision,
+                LocalJavaArchiveInspection inspection,
+                String candidate) {
+            validateLocalArchiveInstallName(revision, inspection, candidate);
+        }
+
+        /// Starts installation of one inspected local archive under its validated name.
+        ///
+        /// @param inspection inspected local archive
+        /// @param name validated launcher-managed installation name
+        @Override
+        public void archiveInstallRequested(LocalJavaArchiveInspection inspection, String name) {
+            installLocalJavaArchive(inspection, name);
+        }
+
+        /// Returns service-authoritative package choices for one explicit third-party distribution.
+        @Override
+        public @Unmodifiable List<JavaPackageType> discoPackageTypesRequested(
+                DiscoJavaDistribution distribution) {
+            return discoAcquisitionService.supportedPackageTypes(distribution);
+        }
+
+        /// Starts one explicit third-party version request.
+        @Override
+        public void discoVersionsRequested(
+                long revision,
+                DiscoJavaDistribution distribution,
+                JavaPackageType packageType) {
+            loadDiscoVersions(revision, distribution, packageType);
+        }
+
+        /// Cancels a replaced or closed third-party version request.
+        @Override
+        public void discoVersionLoadCancellationRequested() {
+            discoVersionLoadController.cancel();
+        }
+
+        /// Supplies one service-owned suggested name and immediate validation.
+        @Override
+        public void discoInstallNameSuggestionRequested(
+                long revision,
+                DiscoJavaDistribution distribution,
+                JavaPackageType packageType,
+                DiscoJavaRemoteVersion version) {
+            suggestDiscoInstallName(revision, distribution, packageType, version);
+        }
+
+        /// Validates one exact edited third-party install name.
+        @Override
+        public void discoInstallNameValidationRequested(
+                long revision,
+                DiscoJavaDistribution distribution,
+                JavaPackageType packageType,
+                DiscoJavaRemoteVersion version,
+                String candidate) {
+            validateDiscoInstallName(revision, distribution, packageType, version, candidate);
+        }
+
+        /// Starts one validated third-party download and safe installation task.
+        @Override
+        public void discoInstallRequested(
+                DiscoJavaDistribution distribution,
+                JavaPackageType packageType,
+                DiscoJavaRemoteVersion version,
+                String installName) {
+            installDiscoRuntime(distribution, packageType, version, installName);
+        }
+
+        /// Opens one external Java download page through the native interaction boundary.
+        @Override
+        public void externalJavaDownloadRequested(URI uri) {
+            openExternalJavaDownload(uri);
+        }
     }
 
     /// Consumes one operation result after its complete task chain succeeds.

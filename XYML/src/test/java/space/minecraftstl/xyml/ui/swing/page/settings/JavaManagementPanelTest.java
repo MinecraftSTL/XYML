@@ -20,8 +20,13 @@ package space.minecraftstl.xyml.ui.swing.page.settings;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.download.java.JavaPackageType;
+import space.minecraftstl.xyml.download.java.disco.DiscoJavaDistribution;
+import space.minecraftstl.xyml.download.java.disco.DiscoJavaRemoteVersion;
+import space.minecraftstl.xyml.game.GameJavaVersion;
 import space.minecraftstl.xyml.java.JavaInfo;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -29,20 +34,29 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
+import space.minecraftstl.xyml.ui.swing.choice.ScrollDirection;
+import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.choice.ViewportLoadPlan;
 import space.minecraftstl.xyml.util.platform.Platform;
 
 import javax.swing.AbstractButton;
+import javax.swing.JComboBox;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Container;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -52,6 +66,8 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
@@ -382,7 +398,325 @@ public final class JavaManagementPanelTest {
         onEventDispatchThread(() -> assertAll(
                 () -> assertEquals(initial, panel.displayedSnapshot()),
                 () -> assertFalse(findComponent(panel, "javaManagementAdd", AbstractButton.class).isEnabled()),
-                () -> assertFalse(findComponent(panel, "javaManagementRefresh", AbstractButton.class).isEnabled())));
+                    () -> assertFalse(findComponent(panel, "javaManagementRefresh", AbstractButton.class).isEnabled())));
+    }
+
+    /// Defers every acquisition service call until explicit input and reloads capabilities when the user reopens it.
+    @Test
+    public void lazilyLoadsUnselectedAcquisitionCardAndReloadsOnReopen() throws InterruptedException {
+        FakeJavaRuntimeManagementService service = new FakeJavaRuntimeManagementService(
+                snapshot(true, List.of(), List.of()));
+        FakeJavaRuntimeAcquisitionService acquisitionService = new FakeJavaRuntimeAcquisitionService();
+        JavaManagementPanel panel = onEventDispatchThread(() -> new JavaManagementPanel(
+                service,
+                acquisitionService,
+                new FakeJavaManagementInteractions()));
+
+        onEventDispatchThread(() -> assertAll(
+                () -> assertEquals(0, acquisitionService.loadCalls.get()),
+                () -> assertEquals(0, acquisitionService.loadStarts.get()),
+                () -> assertEquals(0, acquisitionService.inspectionCalls.get()),
+                () -> assertEquals(0, acquisitionService.downloadCalls.get()),
+                () -> assertEquals(0, acquisitionService.validationCalls.get()),
+                () -> assertEquals(0, acquisitionService.installCalls.get()),
+                () -> assertNull(findOptionalComponent(
+                        panel,
+                        "javaManagementAcquirePanel",
+                        JavaRuntimeAcquisitionPanel.class)),
+                () -> assertTrue(findComponent(
+                        panel,
+                        "javaManagementMainView",
+                        JPanel.class).isVisible())));
+
+        onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquire", AbstractButton.class).doClick());
+        awaitCondition(() -> acquisitionService.loadStarts.get() == 1 && onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquireView", JPanel.class).isVisible()));
+
+        onEventDispatchThread(() -> {
+            loadMojangChoices(panel, 2);
+            JList<?> choices = findComponent(panel, "javaManagementAcquireMojangList", JList.class);
+            assertAll(
+                    () -> assertEquals(1, acquisitionService.loadCalls.get()),
+                    () -> assertEquals(2, choices.getModel().getSize()),
+                    () -> assertTrue(choices.isSelectionEmpty()),
+                    () -> assertFalse(findComponent(
+                            panel,
+                            "javaManagementAcquireDownload",
+                            AbstractButton.class).isEnabled()));
+            findComponent(panel, "javaManagementAcquireBack", AbstractButton.class).doClick();
+            assertTrue(findComponent(panel, "javaManagementMainView", JPanel.class).isVisible());
+            findComponent(panel, "javaManagementAcquire", AbstractButton.class).doClick();
+        });
+        awaitCondition(() -> acquisitionService.loadStarts.get() == 2 && onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquireView", JPanel.class).isVisible()));
+
+        onEventDispatchThread(() -> {
+            loadMojangChoices(panel, 2);
+            JList<?> choices = findComponent(panel, "javaManagementAcquireMojangList", JList.class);
+            assertAll(
+                    () -> assertEquals(2, acquisitionService.loadCalls.get()),
+                    () -> assertEquals(2, choices.getModel().getSize()),
+                    () -> assertTrue(choices.isSelectionEmpty()));
+            panel.close();
+        });
+    }
+
+    /// Routes archive choosing, inspection, debounced validation, installation, and deferred runtime selection.
+    @Test
+    public void installsChosenArchiveAfterDebouncedNameValidation() throws InterruptedException {
+        JavaRuntime installedRuntime = runtime(
+                "C:/java/managed/archive-runtime/bin/java.exe",
+                "21.0.8",
+                "Eclipse Adoptium",
+                true);
+        Path archive = Path.of("runtime.ZIP").toAbsolutePath().normalize();
+        LocalJavaArchiveInspection inspection = new LocalJavaArchiveInspection(
+                archive,
+                "suggested-runtime",
+                "suggested-runtime",
+                new JavaInfo(Platform.WINDOWS_X86_64, "21.0.8", "Eclipse Adoptium"),
+                4096L,
+                "0".repeat(64));
+        FakeJavaRuntimeManagementService service = new FakeJavaRuntimeManagementService(
+                snapshot(true, List.of(), List.of()));
+        FakeJavaRuntimeAcquisitionService acquisitionService = new FakeJavaRuntimeAcquisitionService();
+        acquisitionService.archiveInspection.set(inspection);
+        acquisitionService.installedRuntime.set(installedRuntime);
+        FakeJavaManagementInteractions interactions = new FakeJavaManagementInteractions();
+        interactions.chosenArchive = archive;
+        JavaManagementPanel panel = onEventDispatchThread(() -> new JavaManagementPanel(
+                service,
+                acquisitionService,
+                interactions));
+
+        onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquire", AbstractButton.class).doClick());
+        awaitCondition(() -> acquisitionService.loadStarts.get() == 1 && onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquireView", JPanel.class).isVisible()));
+        onEventDispatchThread(() -> {
+            findComponent(panel, "javaManagementAcquireArchiveMode", AbstractButton.class).doClick();
+            findComponent(panel, "javaManagementAcquireChooseArchive", AbstractButton.class).doClick();
+        });
+        awaitCondition(() -> acquisitionService.validationCalls.get() == 1 && onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquireInstall", AbstractButton.class).isEnabled()));
+
+        acquisitionService.validationCalls.set(0);
+        acquisitionService.lastValidatedName.set(null);
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertEquals(archive.toString(), findComponent(
+                            panel,
+                            "javaManagementAcquireArchivePath",
+                            JTextField.class).getText()),
+                    () -> assertEquals("21.0.8", findComponent(
+                            panel,
+                            "javaManagementAcquireArchiveVersion",
+                            JTextField.class).getText()),
+                    () -> assertEquals("Eclipse Adoptium", findComponent(
+                            panel,
+                            "javaManagementAcquireArchiveVendor",
+                            JTextField.class).getText()),
+                    () -> assertEquals(Platform.WINDOWS_X86_64.toString(), findComponent(
+                            panel,
+                            "javaManagementAcquireArchiveArchitecture",
+                            JTextField.class).getText()));
+            JTextField installName = findComponent(
+                    panel,
+                    "javaManagementAcquireInstallName",
+                    JTextField.class);
+            installName.setText("draft-runtime");
+            installName.setText("archive-runtime");
+        });
+        Thread.sleep(100L);
+        assertEquals(0, acquisitionService.validationCalls.get());
+        awaitCondition(() -> acquisitionService.validationCalls.get() == 1 && onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquireInstall", AbstractButton.class).isEnabled()));
+
+        onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquireInstall", AbstractButton.class).doClick());
+        awaitCondition(() -> acquisitionService.installCalls.get() == 1 && onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementMainView", JPanel.class).isVisible()));
+
+        onEventDispatchThread(() -> assertAll(
+                () -> assertEquals(1, acquisitionService.inspectionCalls.get()),
+                () -> assertEquals(archive, acquisitionService.lastInspectedArchive.get()),
+                () -> assertEquals("archive-runtime", acquisitionService.lastValidatedName.get()),
+                () -> assertSame(inspection, acquisitionService.lastInstalledInspection.get()),
+                () -> assertEquals("archive-runtime", acquisitionService.lastInstalledName.get()),
+                () -> assertNull(findOptionalComponent(
+                        panel,
+                        "javaManagementAcquirePanel",
+                        JavaRuntimeAcquisitionPanel.class)),
+                () -> assertNull(panel.selectedRuntime())));
+        service.publish(snapshot(true, List.of(installedRuntime), List.of()));
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            assertEquals(installedRuntime, panel.selectedRuntime());
+            panel.close();
+        });
+    }
+
+    /// Downloads only an explicitly selected Mojang row, then rebuilds the discarded card on the next open.
+    @Test
+    public void downloadsSelectedMojangRuntimeAndRebuildsAcquisitionCard() throws InterruptedException {
+        JavaRuntime downloadedRuntime = runtime(
+                "C:/java/managed/mojang-21/bin/java.exe",
+                "21.0.8",
+                "Microsoft",
+                true);
+        FakeJavaRuntimeManagementService service = new FakeJavaRuntimeManagementService(
+                snapshot(true, List.of(), List.of()));
+        FakeJavaRuntimeAcquisitionService acquisitionService = new FakeJavaRuntimeAcquisitionService();
+        acquisitionService.downloadedRuntime.set(downloadedRuntime);
+        JavaManagementPanel panel = onEventDispatchThread(() -> new JavaManagementPanel(
+                service,
+                acquisitionService,
+                new FakeJavaManagementInteractions()));
+
+        onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquire", AbstractButton.class).doClick());
+        awaitCondition(() -> acquisitionService.loadStarts.get() == 1 && onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquireView", JPanel.class).isVisible()));
+        onEventDispatchThread(() -> {
+            loadMojangChoices(panel, 2);
+            findComponent(panel, "javaManagementAcquireMojangList", JList.class).setSelectedIndex(1);
+            findComponent(panel, "javaManagementAcquireDownload", AbstractButton.class).doClick();
+        });
+        awaitCondition(() -> acquisitionService.downloadCalls.get() == 1 && onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementMainView", JPanel.class).isVisible()));
+
+        onEventDispatchThread(() -> assertAll(
+                () -> assertEquals(GameJavaVersion.JAVA_21, acquisitionService.lastDownloadedVersion.get()),
+                () -> assertNull(findOptionalComponent(
+                        panel,
+                        "javaManagementAcquirePanel",
+                        JavaRuntimeAcquisitionPanel.class)),
+                () -> assertNull(panel.selectedRuntime())));
+        service.publish(snapshot(true, List.of(downloadedRuntime), List.of()));
+        EdtDispatcher.executeAndWait(() -> { });
+        awaitCondition(() -> onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquire", AbstractButton.class).isEnabled()));
+
+        onEventDispatchThread(() -> {
+            assertEquals(downloadedRuntime, panel.selectedRuntime());
+            findComponent(panel, "javaManagementAcquire", AbstractButton.class).doClick();
+        });
+        awaitCondition(() -> acquisitionService.loadStarts.get() == 2 && onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquireView", JPanel.class).isVisible()));
+        onEventDispatchThread(() -> {
+            loadMojangChoices(panel, 2);
+            JList<?> choices = findComponent(panel, "javaManagementAcquireMojangList", JList.class);
+            assertAll(
+                    () -> assertEquals(2, acquisitionService.loadCalls.get()),
+                    () -> assertEquals(2, choices.getModel().getSize()),
+                    () -> assertTrue(choices.isSelectionEmpty()));
+            panel.close();
+        });
+    }
+
+    /// Cancels a running acquisition load and rejects its result when the underlying future completes after close.
+    @Test
+    public void cancelsAcquisitionLoadAndRejectsLateResultAfterClose() throws InterruptedException {
+        FakeJavaRuntimeManagementService service = new FakeJavaRuntimeManagementService(
+                snapshot(true, List.of(), List.of()));
+        FakeJavaRuntimeAcquisitionService acquisitionService = new FakeJavaRuntimeAcquisitionService();
+        CompletableFuture<JavaRuntimeAcquisitionSnapshot> lateSnapshot = new CompletableFuture<>();
+        acquisitionService.pendingLoad.set(lateSnapshot);
+        JavaManagementPanel panel = onEventDispatchThread(() -> new JavaManagementPanel(
+                service,
+                acquisitionService,
+                new FakeJavaManagementInteractions()));
+
+        onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquire", AbstractButton.class).doClick());
+        awaitCondition(() -> acquisitionService.loadStarts.get() == 1);
+        onEventDispatchThread(panel::close);
+        lateSnapshot.complete(acquisitionSnapshot());
+        awaitCondition(acquisitionService.loadCancellationObserved::get);
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> assertAll(
+                () -> assertEquals(1, acquisitionService.loadCalls.get()),
+                () -> assertNull(findOptionalComponent(
+                        panel,
+                        "javaManagementAcquirePanel",
+                        JavaRuntimeAcquisitionPanel.class)),
+                () -> assertFalse(findComponent(
+                        panel,
+                        "javaManagementAcquire",
+                        AbstractButton.class).isEnabled())));
+    }
+
+    /// Runs explicit third-party loading, validated installation, and exceptional-platform link routing end to end.
+    @Test
+    public void runsDiscoSelectionInstallAndExternalLinkThroughParentBoundaries() throws Exception {
+        FakeJavaRuntimeManagementService service = new FakeJavaRuntimeManagementService(snapshot(
+                true,
+                List.of(),
+                List.of()));
+        FakeJavaRuntimeAcquisitionService acquisitionService = new FakeJavaRuntimeAcquisitionService();
+        FakeDiscoJavaRuntimeAcquisitionService discoService = new FakeDiscoJavaRuntimeAcquisitionService();
+        FakeJavaManagementInteractions interactions = new FakeJavaManagementInteractions();
+        JavaManagementPanel panel = onEventDispatchThread(() -> new JavaManagementPanel(
+                service,
+                acquisitionService,
+                discoService,
+                interactions));
+
+        onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquire", AbstractButton.class).doClick());
+        awaitCondition(() -> acquisitionService.loadStarts.get() == 1 && onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquireView", JPanel.class).isVisible()));
+
+        onEventDispatchThread(() -> {
+            findComponent(panel, "javaManagementAcquireDiscoMode", AbstractButton.class).doClick();
+            JComboBox<?> distributions = findComponent(
+                    panel,
+                    "javaManagementAcquireDiscoDistribution",
+                    JComboBox.class);
+            JComboBox<?> packages = findComponent(
+                    panel,
+                    "javaManagementAcquireDiscoPackageType",
+                    JComboBox.class);
+            assertEquals(-1, distributions.getSelectedIndex());
+            assertEquals(-1, packages.getSelectedIndex());
+            distributions.setSelectedItem(DiscoJavaDistribution.TEMURIN);
+            packages.setSelectedItem(JavaPackageType.JDK);
+        });
+
+        awaitCondition(() -> discoService.loadCalls.get() == 1 && onEventDispatchThread(() ->
+                findComponent(
+                        panel,
+                        "javaManagementAcquireDiscoVersions",
+                        ViewportChoiceList.class).getChoiceModel().getSize() == 1));
+        onEventDispatchThread(() -> {
+            loadDiscoChoices(panel, 1);
+            findComponent(panel, "javaManagementAcquireDiscoVersionList", JList.class).setSelectedIndex(0);
+            JTextField name = findComponent(
+                    panel,
+                    "javaManagementAcquireDiscoInstallName",
+                    JTextField.class);
+            assertEquals("temurin-21-jdk", name.getText());
+            assertTrue(findComponent(
+                    panel,
+                    "javaManagementAcquireDiscoInstall",
+                    AbstractButton.class).isEnabled());
+            findComponent(panel, "javaManagementAcquireExternalLink0", AbstractButton.class).doClick();
+            findComponent(panel, "javaManagementAcquireDiscoInstall", AbstractButton.class).doClick();
+        });
+
+        awaitCondition(() -> discoService.installCalls.get() == 1 && onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementMainView", JPanel.class).isVisible()));
+        assertAll(
+                () -> assertEquals(DiscoJavaDistribution.TEMURIN, discoService.lastDistribution.get()),
+                () -> assertEquals(JavaPackageType.JDK, discoService.lastPackageType.get()),
+                () -> assertEquals("temurin-21-jdk", discoService.lastInstallName.get()),
+                () -> assertEquals(
+                        URI.create("https://www.zthread.cn/#product"),
+                        interactions.openedExternalUri.get()));
+        panel.close();
     }
 
     /// Waits briefly for an asynchronous task or EDT callback condition.
@@ -423,6 +757,55 @@ public final class JavaManagementPanelTest {
                 new JavaInfo(Platform.WINDOWS_X86_64, version, vendor),
                 managed,
                 true);
+    }
+
+    /// Creates deterministic built-in acquisition choices with one installed and one downloadable runtime.
+    ///
+    /// @return immutable acquisition capability snapshot
+    private static JavaRuntimeAcquisitionSnapshot acquisitionSnapshot() {
+        return new JavaRuntimeAcquisitionSnapshot(
+                Platform.WINDOWS_X86_64,
+                List.of(
+                        new MojangJavaRuntimeOption(GameJavaVersion.JAVA_17, true),
+                        new MojangJavaRuntimeOption(GameJavaVersion.JAVA_21, false)));
+    }
+
+    /// Materializes the bounded Mojang fixture rows through the viewport-list loading contract.
+    ///
+    /// @param panel parent Java management panel
+    /// @param itemCount exact fixture row count
+    private static void loadMojangChoices(JavaManagementPanel panel, int itemCount) {
+        ViewportChoiceList<?> choices = findComponent(
+                panel,
+                "javaManagementAcquireMojangChoices",
+                ViewportChoiceList.class);
+        IndexRange range = IndexRange.ofLength(0, itemCount);
+        choices.getChoiceModel().applyPlan(new ViewportLoadPlan(
+                range,
+                range,
+                Set.of(),
+                ScrollDirection.STATIONARY,
+                0.0,
+                0));
+    }
+
+    /// Materializes a bounded third-party version fixture through the viewport-list loading contract.
+    ///
+    /// @param panel parent Java management panel
+    /// @param itemCount exact fixture row count
+    private static void loadDiscoChoices(JavaManagementPanel panel, int itemCount) {
+        ViewportChoiceList<?> choices = findComponent(
+                panel,
+                "javaManagementAcquireDiscoVersions",
+                ViewportChoiceList.class);
+        IndexRange range = IndexRange.ofLength(0, itemCount);
+        choices.getChoiceModel().applyPlan(new ViewportLoadPlan(
+                range,
+                range,
+                Set.of(),
+                ScrollDirection.STATIONARY,
+                0.0,
+                0));
     }
 
     /// Finds one named component in a Swing hierarchy.
@@ -489,6 +872,9 @@ public final class JavaManagementPanelTest {
         /// Path returned by the next chooser invocation, or null to simulate cancellation.
         private @Nullable Path chosenPath;
 
+        /// Archive path returned by the next acquisition chooser invocation, or null to simulate cancellation.
+        private @Nullable Path chosenArchive;
+
         /// Whether destructive actions are confirmed.
         private boolean confirmation = true;
 
@@ -498,6 +884,9 @@ public final class JavaManagementPanelTest {
         /// Most recently revealed directory.
         private final AtomicReference<@Nullable Path> revealedDirectory = new AtomicReference<>();
 
+        /// Most recently opened external Java download destination.
+        private final AtomicReference<@Nullable URI> openedExternalUri = new AtomicReference<>();
+
         /// Returns the configured chooser result.
         ///
         /// @param parent dialog parent component
@@ -506,6 +895,16 @@ public final class JavaManagementPanelTest {
         public @Nullable Path chooseLocalRuntime(Component parent) {
             Objects.requireNonNull(parent, "parent");
             return chosenPath;
+        }
+
+        /// Returns the configured local Java archive chooser result.
+        ///
+        /// @param parent dialog parent component
+        /// @return configured archive path, or null
+        @Override
+        public @Nullable Path chooseLocalJavaArchive(Component parent) {
+            Objects.requireNonNull(parent, "parent");
+            return chosenArchive;
         }
 
         /// Records and returns the configured confirmation result.
@@ -529,6 +928,358 @@ public final class JavaManagementPanelTest {
         @Override
         public void revealDirectory(Path directory) {
             revealedDirectory.set(Objects.requireNonNull(directory, "directory"));
+        }
+
+        /// Records one external Java download destination.
+        ///
+        /// @param parent owning component
+        /// @param uri validated external destination
+        @Override
+        public void openExternalJavaDownload(Component parent, URI uri) {
+            Objects.requireNonNull(parent, "parent");
+            openedExternalUri.set(Objects.requireNonNull(uri, "uri"));
+        }
+    }
+
+    /// Provides stopped, observable acquisition tasks without filesystem or network access.
+    @NotNullByDefault
+    private static final class FakeJavaRuntimeAcquisitionService implements JavaRuntimeAcquisitionService {
+        /// Number of capability task requests.
+        private final AtomicInteger loadCalls = new AtomicInteger();
+
+        /// Number of capability task bodies actually started by the parent.
+        private final AtomicInteger loadStarts = new AtomicInteger();
+
+        /// Number of archive inspection task requests.
+        private final AtomicInteger inspectionCalls = new AtomicInteger();
+
+        /// Number of Mojang download task requests.
+        private final AtomicInteger downloadCalls = new AtomicInteger();
+
+        /// Number of installation-name validations that survived parent debouncing.
+        private final AtomicInteger validationCalls = new AtomicInteger();
+
+        /// Number of local archive installation task requests.
+        private final AtomicInteger installCalls = new AtomicInteger();
+
+        /// Optional capability gate used to hold a running load until a test completes it.
+        private final AtomicReference<@Nullable CompletableFuture<JavaRuntimeAcquisitionSnapshot>> pendingLoad =
+                new AtomicReference<>();
+
+        /// Whether a blocked capability task observed the parent's cooperative cancellation request.
+        private final AtomicBoolean loadCancellationObserved = new AtomicBoolean();
+
+        /// Capability snapshot returned by an unblocked load.
+        private final AtomicReference<JavaRuntimeAcquisitionSnapshot> acquisitionSnapshot =
+                new AtomicReference<>(JavaManagementPanelTest.acquisitionSnapshot());
+
+        /// Inspection returned for the next supported archive.
+        private final AtomicReference<LocalJavaArchiveInspection> archiveInspection = new AtomicReference<>(
+                new LocalJavaArchiveInspection(
+                        Path.of("runtime.zip"),
+                        "runtime",
+                        "runtime",
+                        new JavaInfo(Platform.WINDOWS_X86_64, "21", "Test")));
+
+        /// Runtime returned by the next Mojang download.
+        private final AtomicReference<JavaRuntime> downloadedRuntime = new AtomicReference<>(runtime(
+                "C:/java/managed/mojang/bin/java.exe",
+                "21",
+                "Mojang",
+                true));
+
+        /// Runtime returned by the next local archive installation.
+        private final AtomicReference<JavaRuntime> installedRuntime = new AtomicReference<>(runtime(
+                "C:/java/managed/archive/bin/java.exe",
+                "21",
+                "Archive",
+                true));
+
+        /// Validation status returned for the latest candidate.
+        private final AtomicReference<JavaRuntimeInstallNameStatus> validationStatus =
+                new AtomicReference<>(JavaRuntimeInstallNameStatus.VALID);
+
+        /// Most recently inspected archive path.
+        private final AtomicReference<@Nullable Path> lastInspectedArchive = new AtomicReference<>();
+
+        /// Most recently requested Mojang runtime version.
+        private final AtomicReference<@Nullable GameJavaVersion> lastDownloadedVersion = new AtomicReference<>();
+
+        /// Most recently validated installation name.
+        private final AtomicReference<@Nullable String> lastValidatedName = new AtomicReference<>();
+
+        /// Most recent inspection passed to archive installation.
+        private final AtomicReference<@Nullable LocalJavaArchiveInspection> lastInstalledInspection =
+                new AtomicReference<>();
+
+        /// Most recent managed name passed to archive installation.
+        private final AtomicReference<@Nullable String> lastInstalledName = new AtomicReference<>();
+
+        /// Creates an in-memory service with deterministic acquisition fixtures.
+        private FakeJavaRuntimeAcquisitionService() {
+        }
+
+        /// Creates a stopped capability task whose body records actual startup.
+        ///
+        /// @return stopped capability task
+        @Override
+        public Task<JavaRuntimeAcquisitionSnapshot> loadSnapshot() {
+            loadCalls.incrementAndGet();
+            @Nullable CompletableFuture<JavaRuntimeAcquisitionSnapshot> gate = pendingLoad.get();
+            return new ControlledAcquisitionLoadTask(
+                    gate,
+                    acquisitionSnapshot.get(),
+                    loadStarts,
+                    loadCancellationObserved);
+        }
+
+        /// Performs lexical, case-insensitive validation of supported archive suffixes.
+        ///
+        /// @param archiveFile candidate archive path
+        /// @return whether the path ends with `.zip` or `.tar.gz`
+        @Override
+        public boolean supportsLocalArchive(Path archiveFile) {
+            String normalized = Objects.requireNonNull(archiveFile, "archiveFile")
+                    .toString()
+                    .toLowerCase(Locale.ROOT);
+            return normalized.endsWith(".zip") || normalized.endsWith(".tar.gz");
+        }
+
+        /// Records one explicit Mojang version and returns a stopped completed download task.
+        ///
+        /// @param version explicitly selected Mojang runtime version
+        /// @return stopped configured download task
+        @Override
+        public Task<JavaRuntime> downloadMojangRuntime(GameJavaVersion version) {
+            lastDownloadedVersion.set(Objects.requireNonNull(version, "version"));
+            downloadCalls.incrementAndGet();
+            return Task.completed(downloadedRuntime.get());
+        }
+
+        /// Records one explicit archive path and returns a stopped completed inspection task.
+        ///
+        /// @param archiveFile selected archive path
+        /// @return stopped configured inspection task
+        @Override
+        public Task<LocalJavaArchiveInspection> inspectLocalArchive(Path archiveFile) {
+            lastInspectedArchive.set(Objects.requireNonNull(archiveFile, "archiveFile"));
+            inspectionCalls.incrementAndGet();
+            return Task.completed(archiveInspection.get());
+        }
+
+        /// Records one validation that survived parent debouncing.
+        ///
+        /// @param inspection current archive inspection
+        /// @param name current installation-name candidate
+        /// @return configured validation status
+        @Override
+        public JavaRuntimeInstallNameStatus validateInstallName(
+                LocalJavaArchiveInspection inspection,
+                String name) {
+            Objects.requireNonNull(inspection, "inspection");
+            lastValidatedName.set(Objects.requireNonNull(name, "name"));
+            validationCalls.incrementAndGet();
+            return validationStatus.get();
+        }
+
+        /// Records one validated archive installation and returns its stopped completed task.
+        ///
+        /// @param inspection inspected archive metadata
+        /// @param name validated managed-runtime name
+        /// @return stopped configured installation task
+        @Override
+        public Task<JavaRuntime> installLocalArchive(
+                LocalJavaArchiveInspection inspection,
+                String name) {
+            lastInstalledInspection.set(Objects.requireNonNull(inspection, "inspection"));
+            lastInstalledName.set(Objects.requireNonNull(name, "name"));
+            installCalls.incrementAndGet();
+            return Task.completed(installedRuntime.get());
+        }
+    }
+
+    /// Provides deterministic third-party choices, validation, and installation without network access.
+    @NotNullByDefault
+    private static final class FakeDiscoJavaRuntimeAcquisitionService
+            implements DiscoJavaRuntimeAcquisitionService {
+        /// Number of explicit remote version requests.
+        private final AtomicInteger loadCalls = new AtomicInteger();
+
+        /// Number of validated installation task requests.
+        private final AtomicInteger installCalls = new AtomicInteger();
+
+        /// Most recent selected distribution.
+        private final AtomicReference<@Nullable DiscoJavaDistribution> lastDistribution = new AtomicReference<>();
+
+        /// Most recent selected package type.
+        private final AtomicReference<@Nullable JavaPackageType> lastPackageType = new AtomicReference<>();
+
+        /// Most recent validated installation name.
+        private final AtomicReference<@Nullable String> lastInstallName = new AtomicReference<>();
+
+        /// Deterministic explicit version result.
+        private final DiscoJavaRemoteVersion version = new DiscoJavaRemoteVersion(
+                "temurin-21",
+                "zip",
+                "temurin",
+                21,
+                "21.0.8+9",
+                "21.0.8+9",
+                21,
+                true,
+                "ga",
+                "lts",
+                "linux",
+                "c_std_lib",
+                "riscv64",
+                "unknown",
+                "jdk",
+                false,
+                true,
+                "temurin-21.zip",
+                new DiscoJavaRemoteVersion.Links(
+                        "https://example.invalid/pkg/temurin-21",
+                        "https://example.invalid/download/temurin-21"),
+                true,
+                "yes",
+                "https://example.invalid/tck",
+                "yes",
+                "https://example.invalid/aqavit",
+                1024L);
+
+        /// Returns the deterministic RISC-V platform used to expose its external fallback link.
+        @Override
+        public Platform platform() {
+            return Platform.LINUX_RISCV64;
+        }
+
+        /// Returns one supported distribution without remote access.
+        @Override
+        public @Unmodifiable List<DiscoJavaDistribution> supportedDistributions() {
+            return List.of(DiscoJavaDistribution.TEMURIN);
+        }
+
+        /// Returns deterministic non-JavaFX package choices.
+        ///
+        /// @param distribution explicit distribution
+        /// @return immutable JRE and JDK choices
+        @Override
+        public @Unmodifiable List<JavaPackageType> supportedPackageTypes(
+                DiscoJavaDistribution distribution) {
+            Objects.requireNonNull(distribution, "distribution");
+            return List.of(JavaPackageType.JRE, JavaPackageType.JDK);
+        }
+
+        /// Records one explicit version request and returns a stopped completed task.
+        ///
+        /// @param distribution explicit distribution
+        /// @param packageType explicit package type
+        /// @return stopped immutable result task
+        @Override
+        public Task<@Unmodifiable List<DiscoJavaRemoteVersion>> loadVersions(
+                DiscoJavaDistribution distribution,
+                JavaPackageType packageType) {
+            lastDistribution.set(Objects.requireNonNull(distribution, "distribution"));
+            lastPackageType.set(Objects.requireNonNull(packageType, "packageType"));
+            loadCalls.incrementAndGet();
+            return Task.completed(List.of(version));
+        }
+
+        /// Returns the deterministic managed name for the explicit fixture.
+        ///
+        /// @param distribution explicit distribution
+        /// @param packageType explicit package type
+        /// @param selectedVersion explicit version
+        /// @return fixture installation name
+        @Override
+        public String suggestedInstallName(
+                DiscoJavaDistribution distribution,
+                JavaPackageType packageType,
+                DiscoJavaRemoteVersion selectedVersion) {
+            Objects.requireNonNull(distribution, "distribution");
+            Objects.requireNonNull(packageType, "packageType");
+            Objects.requireNonNull(selectedVersion, "selectedVersion");
+            return "temurin-21-jdk";
+        }
+
+        /// Accepts the deterministic name and rejects every other candidate.
+        ///
+        /// @param name proposed managed-runtime name
+        /// @return exact fixture validation status
+        @Override
+        public JavaRuntimeInstallNameStatus validateInstallName(String name) {
+            return "temurin-21-jdk".equals(Objects.requireNonNull(name, "name"))
+                    ? JavaRuntimeInstallNameStatus.VALID
+                    : JavaRuntimeInstallNameStatus.INVALID_CHARACTERS;
+        }
+
+        /// Records one validated selection and returns a stopped completed managed runtime task.
+        ///
+        /// @param distribution explicit distribution
+        /// @param packageType explicit package type
+        /// @param selectedVersion explicit version
+        /// @param installName validated managed-runtime name
+        /// @return stopped completed installation task
+        @Override
+        public Task<JavaRuntime> install(
+                DiscoJavaDistribution distribution,
+                JavaPackageType packageType,
+                DiscoJavaRemoteVersion selectedVersion,
+                String installName) {
+            lastDistribution.set(Objects.requireNonNull(distribution, "distribution"));
+            lastPackageType.set(Objects.requireNonNull(packageType, "packageType"));
+            Objects.requireNonNull(selectedVersion, "selectedVersion");
+            lastInstallName.set(Objects.requireNonNull(installName, "installName"));
+            installCalls.incrementAndGet();
+            return Task.completed(runtime(
+                    "C:/java/managed/disco/bin/java.exe",
+                    "21.0.8",
+                    "Eclipse Temurin",
+                    true));
+        }
+    }
+
+    /// Holds one capability load until its optional test gate opens and records cooperative cancellation.
+    @NotNullByDefault
+    private static final class ControlledAcquisitionLoadTask extends Task<JavaRuntimeAcquisitionSnapshot> {
+        /// Optional future that delays task completion.
+        private final @Nullable CompletableFuture<JavaRuntimeAcquisitionSnapshot> gate;
+
+        /// Capability result captured when the stopped task is created.
+        private final JavaRuntimeAcquisitionSnapshot snapshot;
+
+        /// Counter incremented only when the task body actually starts.
+        private final AtomicInteger starts;
+
+        /// Shared cancellation observation recorded after the optional gate opens.
+        private final AtomicBoolean cancellationObserved;
+
+        /// Creates one stopped and optionally gated capability task.
+        ///
+        /// @param gate optional future controlling task completion
+        /// @param snapshot capability result returned after startup
+        /// @param starts actual task-body startup counter
+        /// @param cancellationObserved cooperative cancellation observation target
+        private ControlledAcquisitionLoadTask(
+                @Nullable CompletableFuture<JavaRuntimeAcquisitionSnapshot> gate,
+                JavaRuntimeAcquisitionSnapshot snapshot,
+                AtomicInteger starts,
+                AtomicBoolean cancellationObserved) {
+            this.gate = gate;
+            this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
+            this.starts = Objects.requireNonNull(starts, "starts");
+            this.cancellationObserved = Objects.requireNonNull(
+                    cancellationObserved,
+                    "cancellationObserved");
+        }
+
+        /// Waits for the optional gate, records the executor's cancellation flag, and stores the captured snapshot.
+        @Override
+        public void execute() throws Exception {
+            starts.incrementAndGet();
+            JavaRuntimeAcquisitionSnapshot result = gate == null ? snapshot : gate.get();
+            cancellationObserved.set(isCancelled());
+            setResult(result);
         }
     }
 
