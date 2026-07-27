@@ -109,23 +109,6 @@ public final class EntryPoint {
             }
         }
 
-        @Nullable String animationFrameRate = System.getenv("XYML_ANIMATION_FRAME_RATE");
-        if (animationFrameRate != null) {
-            LOG.info("XYML_ANIMATION_FRAME_RATE: " + animationFrameRate);
-
-            try {
-                int framesPerSecond = Integer.parseInt(animationFrameRate);
-                if (framesPerSecond <= 0)
-                    throw new NumberFormatException(animationFrameRate);
-                int frameDelayMillis = Math.max(1, Math.round(1000.0f / framesPerSecond));
-                System.getProperties().putIfAbsent(
-                        "xyml.swing.animationFrameDelayMillis",
-                        Integer.toString(frameDelayMillis));
-            } catch (NumberFormatException e) {
-                LOG.warning("Invalid animation frame rate: " + animationFrameRate);
-            }
-        }
-
         @Nullable String uiScale = System.getProperty("xyml.uiScale", System.getenv("XYML_UI_SCALE"));
         if (uiScale != null) {
             uiScale = uiScale.trim();

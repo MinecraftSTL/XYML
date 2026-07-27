@@ -25,8 +25,9 @@ import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.setting.*;
 import space.minecraftstl.xyml.task.AsyncTaskExecutor;
 import space.minecraftstl.xyml.task.Schedulers;
-import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.NativeSystemThemeDetector;
+import space.minecraftstl.xyml.ui.swing.SwingAnimationFrameRateResolver;
+import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentation;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentationFactory;
@@ -88,11 +89,6 @@ public final class Launcher {
     /// Task-surface transition duration kept slightly shorter than full page navigation.
     private static final java.time.Duration SWING_TASK_TRANSITION_DURATION =
             java.time.Duration.ofMillis(140L);
-
-    /// Swing timer delay targeting approximately sixty animation updates per second.
-    private static final int SWING_ANIMATION_FRAME_DELAY_MILLIS = Math.max(
-            1,
-            Integer.getInteger("xyml.swing.animationFrameDelayMillis", 16));
 
     /// Process-wide active Swing runtime used to enforce a single native application owner.
     private static final AtomicReference<@Nullable SwingApplicationRuntime> ACTIVE_SWING_RUNTIME =
@@ -228,7 +224,8 @@ public final class Launcher {
                         launchInteraction,
                         accountReauthentication,
                         captureSystemThemeDetector(),
-                        SWING_ANIMATION_FRAME_DELAY_MILLIS,
+                        SwingAnimationFrameRateResolver.resolveFrameDelayMillis(
+                                settings().animationDisabledProperty().get()),
                         Schedulers.io(),
                         this::stop);
             } catch (RuntimeException | Error creationFailure) {
