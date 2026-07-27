@@ -48,8 +48,8 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 ///
 /// Mods, resource packs, and shader packs use native explicit-search catalogs that install to a
 /// selected instance. Modpack imports remain local in this panel, while their remote catalog has
-/// its dedicated download-center tab. Worlds use the same native, safe archive workflow as the
-/// instance-management page and never require an external browser to import a local archive.
+/// its dedicated download-center tab. Worlds combine native CurseForge discovery and safe save-as
+/// downloads with the same local archive workflow as the instance-management page.
 @NotNullByDefault
 public final class DownloadCategoryPanel extends JPanel implements AutoCloseable {
     /// Category tab host retained for keyboard navigation and focused UI verification.
@@ -67,8 +67,8 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     /// Native explicit-search remote shader-pack catalog owned by the Shaders content tab.
     private final RemoteAddonCatalogPanel shaderPackCatalog;
 
-    /// Native local world archive workflow activated only after the Worlds category becomes visible.
-    private final WorldArchiveDownloadPanel worldArchivePanel;
+    /// Native remote and local world workflows activated only after the Worlds category becomes visible.
+    private final WorldDownloadPanel worldDownloadPanel;
 
     /// Feedback for the latest external browse or directory-reveal request.
     private final JLabel statusLabel;
@@ -110,7 +110,10 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration);
-        worldArchivePanel = new WorldArchiveDownloadPanel();
+        worldDownloadPanel = new WorldDownloadPanel(
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration);
         for (DownloadCategory category : DownloadCategory.values()) {
             categoryTabs.addTab(
                     i18n(category.titleKey()),
@@ -138,7 +141,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         modsCatalog.close();
         resourcePackCatalog.close();
         shaderPackCatalog.close();
-        worldArchivePanel.close();
+        worldDownloadPanel.close();
         localModpackImporter.close();
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             categoryTabs.setEnabled(false);
@@ -157,7 +160,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
             case MODS -> modsCatalog;
             case RESOURCE_PACKS -> resourcePackCatalog;
             case SHADERS -> shaderPackCatalog;
-            case WORLDS -> worldArchivePanel;
+            case WORLDS -> worldDownloadPanel;
         };
     }
 
@@ -336,8 +339,8 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     /// so selection itself must not trigger their network work.
     private void activateSelectedCategory() {
         EdtDispatcher.requireEventDispatchThread();
-        if (!closed && categoryTabs.getSelectedComponent() == worldArchivePanel) {
-            worldArchivePanel.activate();
+        if (!closed && categoryTabs.getSelectedComponent() == worldDownloadPanel) {
+            worldDownloadPanel.activate();
         }
     }
 
@@ -367,7 +370,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         /// Instance shader packs and their standard shaderpacks directory.
         SHADERS("download.shader", "folder.shaderpacks", true, "https://modrinth.com/shaders"),
 
-        /// Instance world archives managed entirely by the native archive workflow.
+        /// Remote world discovery and local world archives managed by native workflows.
         WORLDS("world", "folder.saves", true, "https://modrinth.com/worlds");
 
         /// Localization key used as the tab title.

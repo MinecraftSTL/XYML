@@ -59,25 +59,25 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Native Swing catalog for searching and directly installing remote mods, resource packs, or shader packs.
+/// Native Swing catalog for searching and acquiring remote add-ons or world archives.
 ///
 /// Construction is fully offline. A provider search starts only after the user explicitly presses
 /// Search, and each server request receives the current measured viewport row count. The result
 /// list lazily renders only retained rows. Selecting a loaded project then resolves its versions on
-/// the worker executor; pressing Install requires a selected instance and hands the exact artifact
-/// to the existing task presentation pipeline rather than opening a browser.
+/// the worker executor; pressing the acquisition command resolves its target and hands the exact
+/// artifact to the existing task presentation pipeline rather than opening a browser.
 @NotNullByDefault
 public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseable {
-    /// Immutable category represented by this panel and by all its direct-install requests.
+    /// Immutable category represented by this panel and by all its acquisition requests.
     private final RemoteAddonCatalogKind kind;
 
     /// Blocking Core source gateway called only from the worker executor after explicit commands.
     private final RemoteAddonCatalogBackend backend;
 
-    /// Task factory responsible for direct selected-instance artifact installation.
+    /// Task factory responsible for verified artifact download and publication.
     private final RemoteAddonInstallLauncher installLauncher;
 
-    /// Local-state resolver that snapshots the currently selected install target immediately before install.
+    /// Resolver that snapshots the destination immediately before acquisition.
     private final RemoteAddonInstallTargetResolver targetResolver;
 
     /// Caller-owned worker executor for searches and selected-project version loading.
@@ -120,7 +120,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Explicit next provider-page command.
     private final JButton nextPageButton = new JButton();
 
-    /// Selected-version direct-install command.
+    /// Selected-version acquisition command.
     private final JButton installButton = new JButton();
 
     /// Current catalog, version, selected-target, and task feedback.
@@ -147,7 +147,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Selected materialized result, or null before a selection and after criteria change.
     private @Nullable RemoteAddonCatalogItem selectedItem;
 
-    /// Active direct-install executor, or null while the catalog accepts a future task.
+    /// Active acquisition executor, or null while the catalog accepts a future task.
     private @Nullable TaskExecutor activeExecutor;
 
     /// Active task presentation retained until another task replaces it or the panel closes.
@@ -165,9 +165,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Whether this panel has permanently rejected user commands and worker callbacks.
     private volatile boolean closed;
 
-    /// Creates a production catalog with Core sources, current selected-instance targets, and task-backed installation.
+    /// Creates a production catalog with Core sources, category-appropriate targets, and task-backed acquisition.
     ///
-    /// @param kind direct-install category represented by the panel
+    /// @param kind acquisition category represented by the panel
     /// @param strings localized visible text
     /// @param taskProgressStrings localized task lifecycle controls
     /// @param animator optional shared determinate-progress animator
@@ -182,7 +182,47 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 kind,
                 new CoreRemoteAddonCatalogBackend(),
                 new DefaultRemoteAddonInstallLauncher(),
-                new LegacyRemoteAddonInstallTargetResolver(),
+                defaultTargetResolver(kind),
+                Schedulers.io(),
+                strings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration);
+    }
+
+    /// Selects the production destination policy without performing filesystem or network work.
+    ///
+    /// @param kind acquisition category represented by the panel
+    /// @return save-as world policy or selected-instance managed-directory policy
+    private static RemoteAddonInstallTargetResolver defaultTargetResolver(RemoteAddonCatalogKind kind) {
+        return Objects.requireNonNull(kind, "kind") == RemoteAddonCatalogKind.WORLD
+                ? new SwingRemoteWorldSaveTargetResolver()
+                : new LegacyRemoteAddonInstallTargetResolver();
+    }
+
+    /// Creates a production catalog with an explicit destination policy.
+    ///
+    /// This variant is used by the world catalog so its acquisition command opens a save-as chooser
+    /// only after a project version is selected. Construction remains fully offline.
+    ///
+    /// @param kind acquisition category represented by the panel
+    /// @param targetResolver destination policy for the selected artifact
+    /// @param strings localized visible text
+    /// @param taskProgressStrings localized task lifecycle controls
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative determinate-progress animation duration
+    public RemoteAddonCatalogPanel(
+            RemoteAddonCatalogKind kind,
+            RemoteAddonInstallTargetResolver targetResolver,
+            RemoteAddonCatalogStrings strings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration) {
+        this(
+                kind,
+                new CoreRemoteAddonCatalogBackend(),
+                new DefaultRemoteAddonInstallLauncher(),
+                targetResolver,
                 Schedulers.io(),
                 strings,
                 taskProgressStrings,
@@ -195,10 +235,10 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// The caller retains ownership of the supplied worker executor. The panel releases only its
     /// sparse viewport and task-presentation resources during closure.
     ///
-    /// @param kind direct-install category represented by the panel
+    /// @param kind acquisition category represented by the panel
     /// @param backend blocking source gateway invoked only after explicit commands
     /// @param installLauncher selected-artifact task factory
-    /// @param targetResolver selected-instance target resolver
+    /// @param targetResolver managed-directory or save-as target resolver
     /// @param workerExecutor background executor for provider calls
     /// @param strings visible catalog text
     /// @param taskProgressStrings localized task lifecycle controls
@@ -267,6 +307,16 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     private void configureComponents() {
         setName("remoteAddonCatalog" + kind.name());
 
+        sourceBox.removeAllItems();
+        for (RemoteAddonCatalogSource source : RemoteAddonCatalogSource.values()) {
+            if (source.supports(kind)) {
+                sourceBox.addItem(source);
+            }
+        }
+        if (sourceBox.getItemCount() == 0) {
+            throw new IllegalArgumentException("No remote source supports " + kind.name());
+        }
+
         JPanel headingBand = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[]"));
         headingBand.setOpaque(false);
         JLabel heading = new JLabel(strings.pageTitle());
@@ -276,45 +326,58 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         add(headingBand, "growx");
 
         JPanel filterBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 6",
-                "[][160!][grow,fill][][160!][110!]",
+                "insets 0, fillx, wrap 1",
+                "[grow,fill]",
                 "[40!]8[40!]"));
         filterBand.setOpaque(false);
+        JPanel searchBand = new JPanel(new MigLayout(
+                "insets 0, fill",
+                "[][150!]12[][grow,fill]8[110!]",
+                "[40!]"));
+        searchBand.setOpaque(false);
 
         JLabel sourceLabel = new JLabel(strings.sourceLabel());
         sourceLabel.setLabelFor(sourceBox);
-        filterBand.add(sourceLabel);
+        searchBand.add(sourceLabel);
         sourceBox.setName("remoteAddonSource");
         sourceBox.addActionListener(event -> criteriaChanged());
-        filterBand.add(sourceBox, "h 40!");
+        searchBand.add(sourceBox, "growx, h 40!");
 
         JLabel searchLabel = new JLabel(strings.searchLabel());
         searchLabel.setLabelFor(searchField);
-        filterBand.add(searchLabel);
+        searchBand.add(searchLabel);
         searchField.setName("remoteAddonSearch");
         searchField.getDocument().addDocumentListener(criteriaListener);
-        filterBand.add(searchField, "growx, h 40!");
+        searchBand.add(searchField, "growx, h 40!");
 
         searchButton.setName("remoteAddonSearchAction");
         searchButton.setText(strings.searchAction());
         searchButton.addActionListener(event -> submitFirstPageSearch());
-        filterBand.add(searchButton, "h 40!");
+        searchBand.add(searchButton, "grow, h 40!");
+        filterBand.add(searchBand, "growx");
+
+        JPanel pageBand = new JPanel(new MigLayout(
+                "insets 0, fill",
+                "[][grow,fill]8[120!]8[120!]",
+                "[40!]"));
+        pageBand.setOpaque(false);
 
         JLabel gameVersionLabel = new JLabel(strings.gameVersionLabel());
         gameVersionLabel.setLabelFor(gameVersionField);
-        filterBand.add(gameVersionLabel);
+        pageBand.add(gameVersionLabel);
         gameVersionField.setName("remoteAddonGameVersion");
         gameVersionField.getDocument().addDocumentListener(criteriaListener);
-        filterBand.add(gameVersionField, "h 40!");
+        pageBand.add(gameVersionField, "growx, h 40!");
 
         previousPageButton.setName("remoteAddonPreviousPage");
         previousPageButton.setText(strings.previousPageAction());
         previousPageButton.addActionListener(event -> submitRelativePage(-1));
-        filterBand.add(previousPageButton, "h 40!");
+        pageBand.add(previousPageButton, "grow, h 40!");
         nextPageButton.setName("remoteAddonNextPage");
         nextPageButton.setText(strings.nextPageAction());
         nextPageButton.addActionListener(event -> submitRelativePage(1));
-        filterBand.add(nextPageButton, "h 40!");
+        pageBand.add(nextPageButton, "grow, h 40!");
+        filterBand.add(pageBand, "growx");
         add(filterBand, "growx");
 
         choiceList.setName("remoteAddonResults");
@@ -556,7 +619,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         });
     }
 
-    /// Creates and starts one selected-version direct-install task only against a current selected instance.
+    /// Creates and starts one selected-version acquisition task against a freshly resolved target.
     private void beginInstall() {
         EdtDispatcher.requireEventDispatchThread();
         if (closed || !installButton.isEnabled()) {
@@ -564,8 +627,16 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
         @Nullable RemoteAddonCatalogItem item = selectedItem;
         @Nullable RemoteAddon.Version version = (RemoteAddon.Version) versionBox.getSelectedItem();
-        @Nullable RemoteAddonInstallTarget target = resolveInstallTarget();
         if (item == null || version == null) {
+            updateControls();
+            return;
+        }
+        final @Nullable RemoteAddonInstallTarget target;
+        try {
+            target = resolveInstallTarget(item, version);
+        } catch (RuntimeException targetFailure) {
+            LOG.warning("Failed to resolve a remote acquisition target", targetFailure);
+            setStatus(strings.installFailedStatus());
             updateControls();
             return;
         }
@@ -627,7 +698,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         });
     }
 
-    /// Clears a terminal task presentation before constructing a later direct-install task.
+    /// Clears a terminal task presentation before constructing a later acquisition task.
     private void releaseCompletedPresentation() {
         EdtDispatcher.requireEventDispatchThread();
         if (activeExecutor != null) {
@@ -684,13 +755,17 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         versionBox.removeAllItems();
     }
 
-    /// Resolves the current selected target defensively without allowing launcher-state failures into Swing listeners.
+    /// Resolves the current selected target only after an explicit acquisition command.
     ///
+    /// @param item selected remote project
+    /// @param version exact selected version
     /// @return current selected target, or null when no usable instance is selected
-    private @Nullable RemoteAddonInstallTarget resolveInstallTarget() {
+    private @Nullable RemoteAddonInstallTarget resolveInstallTarget(
+            RemoteAddonCatalogItem item,
+            RemoteAddon.Version version) {
         Optional<RemoteAddonInstallTarget> target = Objects.requireNonNull(
-                targetResolver.resolve(kind),
-                "targetResolver returned null optional");
+                targetResolver.resolveSelection(kind, item, version, this),
+                "targetResolver returned null selection optional");
         return target.orElse(null);
     }
 
@@ -735,7 +810,19 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 && !versionLoading
                 && selectedItem != null
                 && versionBox.getSelectedItem() != null
-                && resolveInstallTarget() != null);
+                && isTargetSelectionAvailable());
+    }
+
+    /// Checks whether the current destination policy can accept an explicit acquisition command.
+    ///
+    /// @return true when target selection can proceed without opening an interactive chooser now
+    private boolean isTargetSelectionAvailable() {
+        try {
+            return targetResolver.isSelectionAvailable(kind);
+        } catch (RuntimeException targetFailure) {
+            LOG.warning("Failed to inspect remote acquisition target availability", targetFailure);
+            return false;
+        }
     }
 
     /// Applies current non-null feedback text with a matching accessibility tooltip.

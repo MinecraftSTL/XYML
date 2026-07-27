@@ -18,17 +18,19 @@
 package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.task.Task;
 
-import java.io.IOException;
+import java.awt.Component;
+import java.nio.file.Path;
+import java.util.Optional;
 
-/// Creates one stopped task graph that safely downloads a selected remote artifact to its resolved target.
+/// Chooses one exact local destination for a remote world archive.
+@FunctionalInterface
 @NotNullByDefault
-public interface RemoteAddonInstallLauncher {
-    /// Builds an acquisition task without starting network or filesystem mutation immediately.
+interface RemoteWorldArchiveSaveChooser {
+    /// Opens or simulates one save-as interaction.
     ///
-    /// @param request selected project version and resolved destination
-    /// @return unstarted task graph
-    /// @throws IOException when local task setup cannot reserve a temporary destination
-    Task<?> createInstallTask(RemoteAddonInstallRequest request) throws IOException;
+    /// @param owner component owning the interaction
+    /// @param suggestedFileName safe provider-derived filename suggestion
+    /// @return selected destination, or empty after cancellation
+    Optional<Path> choose(Component owner, String suggestedFileName);
 }

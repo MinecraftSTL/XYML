@@ -22,17 +22,17 @@ import space.minecraftstl.xyml.addon.RemoteAddon;
 
 import java.util.Objects;
 
-/// Captures one selected remote add-on version and its selected-instance install destination.
+/// Captures one selected remote project version and its exact acquisition destination.
 ///
 /// @param item selected remote project
 /// @param version exact selected project version
-/// @param target selected instance target captured immediately before task creation
+/// @param target managed-directory or save-as target captured immediately before task creation
 @NotNullByDefault
 public record RemoteAddonInstallRequest(
         RemoteAddonCatalogItem item,
         RemoteAddon.Version version,
         RemoteAddonInstallTarget target) {
-    /// Validates that the item and target belong to the same direct-install category.
+    /// Validates that the item and target belong to the same acquisition category.
     public RemoteAddonInstallRequest {
         item = Objects.requireNonNull(item, "item");
         version = Objects.requireNonNull(version, "version");

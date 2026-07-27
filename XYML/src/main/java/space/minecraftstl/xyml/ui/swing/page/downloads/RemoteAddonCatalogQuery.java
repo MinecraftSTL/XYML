@@ -26,7 +26,7 @@ import java.util.Objects;
 /// Instances are created only from user actions. `pageSize` therefore reflects the result list's
 /// actual visible geometry instead of a guessed default item count.
 ///
-/// @param kind direct-install content category
+/// @param kind remote acquisition category
 /// @param source selected provider
 /// @param searchText normalized optional project filter
 /// @param gameVersion normalized optional Minecraft-version filter

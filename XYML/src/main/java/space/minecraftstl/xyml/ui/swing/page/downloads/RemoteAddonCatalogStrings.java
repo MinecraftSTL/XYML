@@ -23,7 +23,7 @@ import java.util.Objects;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Localizable text used by one remote direct-install add-on catalog.
+/// Localizable text used by one native remote acquisition catalog.
 ///
 /// Keeping the state text explicit permits deterministic headless tests without relying on global
 /// locale state, while the production factory reuses existing launcher translations.
@@ -103,7 +103,7 @@ public record RemoteAddonCatalogStrings(
         Objects.requireNonNull(versionLoadFailedStatus, "versionLoadFailedStatus");
     }
 
-    /// Creates explicit English fallback text for one direct-install category and focused tests.
+    /// Creates explicit English fallback text for one acquisition category and focused tests.
     ///
     /// @param kind category represented by the future panel
     /// @return immutable English catalog text
@@ -113,7 +113,9 @@ public record RemoteAddonCatalogStrings(
             case MOD -> "mods";
             case RESOURCE_PACK -> "resource packs";
             case SHADER_PACK -> "shader packs";
+            case WORLD -> "worlds";
         };
+        boolean world = selectedKind == RemoteAddonCatalogKind.WORLD;
         return new RemoteAddonCatalogStrings(
                 "Remote " + category,
                 "Source",
@@ -123,7 +125,7 @@ public record RemoteAddonCatalogStrings(
                 "Search",
                 "Previous page",
                 "Next page",
-                "Install to selected instance",
+                world ? "Save archive as" : "Install to selected instance",
                 "Search a source to browse " + category + ".",
                 "Searching remote " + category + "...",
                 "Loading selected project versions...",
@@ -131,11 +133,12 @@ public record RemoteAddonCatalogStrings(
                 "No projects matched this search.",
                 "This source is unavailable until it is configured.",
                 "Wait until the result list has a measured visible height.",
-                "Select an installed game instance before installing.",
-                "Preparing installation...",
-                "Installing to the selected instance...",
-                "Installation completed.",
-                "Installation failed.",
+                world ? "Choose a destination to save the world archive." :
+                        "Select an installed game instance before installing.",
+                world ? "Preparing world download..." : "Preparing installation...",
+                world ? "Downloading the world archive..." : "Installing to the selected instance...",
+                world ? "World archive saved." : "Installation completed.",
+                world ? "World archive download failed." : "Installation failed.",
                 "Unable to search remote projects.",
                 "Unable to load versions for this project.");
     }
@@ -146,6 +149,32 @@ public record RemoteAddonCatalogStrings(
     /// @return immutable text for the active launcher locale
     public static RemoteAddonCatalogStrings launcherLocalized(RemoteAddonCatalogKind kind) {
         RemoteAddonCatalogKind selectedKind = Objects.requireNonNull(kind, "kind");
+        if (selectedKind == RemoteAddonCatalogKind.WORLD) {
+            return new RemoteAddonCatalogStrings(
+                    i18n("swing.remote_world.title"),
+                    i18n("modpack.origin"),
+                    i18n("search"),
+                    "Minecraft",
+                    i18n("version"),
+                    i18n("search"),
+                    i18n("wizard.prev"),
+                    i18n("wizard.next"),
+                    i18n("button.save_as"),
+                    i18n("swing.remote_world.initial"),
+                    i18n("swing.remote_world.loading"),
+                    i18n("swing.remote_world.loading_versions"),
+                    i18n("swing.remote_world.no_versions"),
+                    i18n("swing.remote_world.no_results"),
+                    i18n("swing.remote_world.source_unavailable"),
+                    i18n("swing.remote_world.viewport_unavailable"),
+                    i18n("swing.remote_world.choose_destination"),
+                    i18n("swing.remote_world.preparing"),
+                    i18n("swing.remote_world.downloading"),
+                    i18n("swing.remote_world.saved"),
+                    i18n("swing.remote_world.failed"),
+                    i18n("swing.remote_world.search_failed"),
+                    i18n("swing.remote_world.version_failed"));
+        }
         return new RemoteAddonCatalogStrings(
                 i18n(selectedKind.titleKey()),
                 i18n("modpack.origin"),

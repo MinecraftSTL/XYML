@@ -28,7 +28,7 @@ import java.util.Objects;
 /// the launcher task pipeline without handing discovery back to a system browser.
 ///
 /// @param addon Core remote add-on result
-/// @param kind direct-install category represented by the result
+/// @param kind acquisition category represented by the result
 /// @param source provider that returned the result
 @NotNullByDefault
 public record RemoteAddonCatalogItem(

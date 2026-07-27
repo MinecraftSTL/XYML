@@ -29,7 +29,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
 
-/// Production direct-install task factory for remote mods, resource packs, and shader packs.
+/// Production verified-download task factory for remote add-ons and world archives.
 ///
 /// Each task downloads into a private sibling temporary file, verifies the provider hash and ZIP/JAR
 /// structure when applicable, then moves it to the selected directory without `REPLACE_EXISTING`.
@@ -53,8 +53,8 @@ public final class DefaultRemoteAddonInstallLauncher implements RemoteAddonInsta
 
     /// Defers target-directory creation and collision validation until the user-started task executes.
     ///
-    /// @param request selected artifact and selected-instance destination
-    /// @return unstarted safe direct-install task graph
+    /// @param request selected artifact and resolved destination
+    /// @return unstarted safe acquisition task graph
     @Override
     public Task<?> createInstallTask(RemoteAddonInstallRequest request) {
         RemoteAddonInstallRequest installRequest = Objects.requireNonNull(request, "request");
@@ -64,7 +64,7 @@ public final class DefaultRemoteAddonInstallLauncher implements RemoteAddonInsta
 
     /// Creates one safe temporary download and no-replace final publication chain on the I/O scheduler.
     ///
-    /// @param request selected artifact and selected-instance target
+    /// @param request selected artifact and resolved target
     /// @return task graph that owns temporary-file cleanup
     /// @throws IOException when local target preparation fails
     private Task<?> createDeferredTask(RemoteAddonInstallRequest request) throws IOException {
@@ -91,7 +91,7 @@ public final class DefaultRemoteAddonInstallLauncher implements RemoteAddonInsta
 
     /// Keeps temporary-file suffixes compatible with ZIP/JAR structural validation.
     ///
-    /// @param destination final selected-instance file path
+    /// @param destination final managed or save-as file path
     /// @return safe non-empty temporary suffix
     private static String temporarySuffix(Path destination) {
         String name = Objects.requireNonNull(destination.getFileName(), "destination file name").toString();

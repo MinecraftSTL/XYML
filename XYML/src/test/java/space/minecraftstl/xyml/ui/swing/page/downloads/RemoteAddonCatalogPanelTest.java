@@ -133,6 +133,62 @@ final class RemoteAddonCatalogPanelTest {
         }
     }
 
+    /// Defers an interactive target resolver until the user presses the enabled acquisition command.
+    @Test
+    void resolvesInteractiveTargetOnlyAfterAcquisitionCommand() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        RecordingInstallLauncher installLauncher = new RecordingInstallLauncher();
+        RecordingInteractiveTargetResolver targetResolver = new RecordingInteractiveTargetResolver();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new RemoteAddonCatalogPanel(
+                    RemoteAddonCatalogKind.MOD,
+                    backend,
+                    installLauncher,
+                    targetResolver,
+                    executor,
+                    RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO)));
+            RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                prepareViewport(panel.choiceList(), 160);
+                JButton search = findNamed(panel, "remoteAddonSearchAction", JButton.class);
+                assertNotNull(search);
+                search.doClick();
+            });
+            awaitBackgroundWork(executor);
+            EdtDispatcher.executeAndWait(() -> {
+                prepareViewport(panel.choiceList(), 160);
+                panel.choiceList().getList().setSelectedIndex(0);
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JButton install = findNamed(panel, "remoteAddonInstall", JButton.class);
+                assertNotNull(install);
+                assertTrue(install.isEnabled());
+                assertEquals(0, targetResolver.selectionRequests.get());
+                install.doClick();
+            });
+            drainEdt();
+
+            assertEquals(1, targetResolver.selectionRequests.get());
+            assertNotNull(targetResolver.owner.get());
+            assertNotNull(installLauncher.request.get());
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Reuses only pages that the user already visited with the identical viewport-derived page-size key.
     @Test
     void reusesVisitedPagesWithoutPrefetchButMissesAfterViewportPageSizeChanges() throws Exception {
@@ -267,6 +323,17 @@ final class RemoteAddonCatalogPanelTest {
 
                     assertEquals(0, backend.searchRequests.get());
                     assertEquals(0, backend.versionRequests.get());
+                    if (kind == RemoteAddonCatalogKind.WORLD) {
+                        EdtDispatcher.executeAndWait(() -> {
+                            JComboBox<?> sourceBox = findNamed(
+                                    Objects.requireNonNull(panelReference.get()),
+                                    "remoteAddonSource",
+                                    JComboBox.class);
+                            assertNotNull(sourceBox);
+                            assertEquals(1, sourceBox.getItemCount());
+                            assertEquals(RemoteAddonCatalogSource.CURSEFORGE, sourceBox.getSelectedItem());
+                        });
+                    }
                 } finally {
                     @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
                     if (panel != null) {
@@ -444,6 +511,56 @@ final class RemoteAddonCatalogPanelTest {
         public Task<?> createInstallTask(RemoteAddonInstallRequest request) {
             this.request.set(Objects.requireNonNull(request, "request"));
             return Task.completed(null);
+        }
+    }
+
+    /// Interactive target substitute proving control refreshes never trigger destination selection.
+    @NotNullByDefault
+    private static final class RecordingInteractiveTargetResolver implements RemoteAddonInstallTargetResolver {
+        /// Count of exact selected-artifact target requests.
+        private final AtomicInteger selectionRequests = new AtomicInteger();
+
+        /// Last component owning the explicit selection request, or null before acquisition.
+        private final AtomicReference<@Nullable Component> owner = new AtomicReference<>();
+
+        /// Returns no noninteractive target so the richer selection method must be used.
+        ///
+        /// @param kind requested category
+        /// @return empty target
+        @Override
+        public Optional<RemoteAddonInstallTarget> resolve(RemoteAddonCatalogKind kind) {
+            Objects.requireNonNull(kind, "kind");
+            return Optional.empty();
+        }
+
+        /// Reports that the explicit acquisition command can request a target.
+        ///
+        /// @param kind requested category
+        /// @return true for the fixture Mod category
+        @Override
+        public boolean isSelectionAvailable(RemoteAddonCatalogKind kind) {
+            return Objects.requireNonNull(kind, "kind") == RemoteAddonCatalogKind.MOD;
+        }
+
+        /// Records the explicit selection context and returns a stable target.
+        ///
+        /// @param kind selected category
+        /// @param item selected project
+        /// @param version selected version
+        /// @param ownerComponent owning panel
+        /// @return stable selected-instance target
+        @Override
+        public Optional<RemoteAddonInstallTarget> resolveSelection(
+                RemoteAddonCatalogKind kind,
+                RemoteAddonCatalogItem item,
+                RemoteAddon.Version version,
+                Component ownerComponent) {
+            assertEquals(RemoteAddonCatalogKind.MOD, kind);
+            assertEquals(RemoteAddonCatalogKind.MOD, item.kind());
+            assertEquals("fixture-mod.jar", version.file().filename());
+            owner.set(Objects.requireNonNull(ownerComponent, "ownerComponent"));
+            selectionRequests.incrementAndGet();
+            return Optional.of(fixtureTarget());
         }
     }
 

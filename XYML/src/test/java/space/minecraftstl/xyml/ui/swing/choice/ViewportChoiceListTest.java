@@ -24,8 +24,11 @@ import org.junit.jupiter.api.Test;
 import javax.swing.JList;
 import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
+import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
+import java.awt.Dimension;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
@@ -62,6 +65,32 @@ public final class ViewportChoiceListTest {
         });
     }
 
+    /// A custom renderer determines both fixed row geometry and viewport-derived source demand.
+    @Test
+    public void measuresInjectedRendererForViewportDemand() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            RecordingDataSource dataSource = new RecordingDataSource(200);
+            JPanel row = new JPanel();
+            row.setPreferredSize(new Dimension(180, 73));
+            ListCellRenderer<ChoiceListEntry<String>> renderer =
+                    (list, entry, index, selected, focused) -> row;
+            ViewportChoiceList<String> choiceList = new ViewportChoiceList<>(dataSource, renderer);
+
+            choiceList.setSize(new Dimension(320, 219));
+            choiceList.doLayout();
+            choiceList.getViewport().doLayout();
+            choiceList.refreshLoadPlan();
+
+            int viewportHeight = choiceList.getViewport().getExtentSize().height;
+            int expectedVisibleRows = (viewportHeight + 72) / 73;
+            assertTrue(viewportHeight > 0);
+            assertSame(renderer, choiceList.getList().getCellRenderer());
+            assertEquals(73, choiceList.getList().getFixedCellHeight());
+            assertEquals(expectedVisibleRows * 2, dataSource.lastRequestedRange().length());
+            choiceList.close();
+        });
+    }
+
     /// A bounded data source that completes requests immediately.
     @NotNullByDefault
     private static final class ImmediateDataSource implements ViewportChoiceDataSource<String> {
@@ -90,6 +119,62 @@ public final class ViewportChoiceListTest {
                     values,
                     OptionalInt.of(2),
                     desiredRange.endExclusive() == 2));
+        }
+    }
+
+    /// Bounded source that records the latest renderer-derived request range.
+    @NotNullByDefault
+    private static final class RecordingDataSource implements ViewportChoiceDataSource<String> {
+        /// Exact logical item count.
+        private final int itemCount;
+
+        /// Latest requested range, initialized to an empty sentinel before first demand.
+        private IndexRange lastRequestedRange = new IndexRange(0, 0);
+
+        /// Creates a recording source.
+        ///
+        /// @param itemCount exact logical item count
+        private RecordingDataSource(int itemCount) {
+            if (itemCount <= 0) {
+                throw new IllegalArgumentException("Item count must be positive");
+            }
+            this.itemCount = itemCount;
+        }
+
+        /// Returns the exact logical source size.
+        ///
+        /// @return exact logical item count
+        @Override
+        public OptionalInt exactItemCount() {
+            return OptionalInt.of(itemCount);
+        }
+
+        /// Records and immediately fulfills one measured viewport request.
+        ///
+        /// @param desiredRange the requested range
+        /// @param cancellation the cooperative cancellation signal
+        /// @return an immediately completed exact page
+        @Override
+        public CompletionStage<ChoicePage<String>> load(
+                IndexRange desiredRange,
+                LoadCancellation cancellation) {
+            lastRequestedRange = desiredRange;
+            List<String> values = new ArrayList<>();
+            for (int index = desiredRange.startInclusive(); index < desiredRange.endExclusive(); index++) {
+                values.add("value-" + index);
+            }
+            return CompletableFuture.completedFuture(new ChoicePage<>(
+                    desiredRange,
+                    List.copyOf(values),
+                    OptionalInt.of(itemCount),
+                    desiredRange.endExclusive() == itemCount));
+        }
+
+        /// Returns the latest recorded request.
+        ///
+        /// @return latest request, or an empty sentinel before first demand
+        private IndexRange lastRequestedRange() {
+            return lastRequestedRange;
         }
     }
 }

@@ -20,11 +20,10 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 
-/// Describes one remote add-on category that can be installed into a selected instance.
+/// Describes one remote add-on category that can be acquired through the native catalog.
 ///
-/// The values deliberately cover only categories with a stable direct-install directory. Worlds
-/// remain a separate import workflow because they need archive inspection and a user-selected
-/// save name after download.
+/// Mods, resource packs, and shader packs install into a selected instance. World archives use the
+/// same verified download pipeline but resolve an explicit user-selected save-as destination.
 @NotNullByDefault
 public enum RemoteAddonCatalogKind {
     /// Remote JAR modifications installed into the selected instance's `mods` directory.
@@ -34,7 +33,10 @@ public enum RemoteAddonCatalogKind {
     RESOURCE_PACK(RemoteAddonRepository.Type.RESOURCE_PACK, "resourcepack"),
 
     /// Remote shader-pack archives installed into the selected instance's `shaderpacks` directory.
-    SHADER_PACK(RemoteAddonRepository.Type.SHADER_PACK, "download.shader");
+    SHADER_PACK(RemoteAddonRepository.Type.SHADER_PACK, "download.shader"),
+
+    /// Remote world archives saved to an explicit local file without automatic extraction.
+    WORLD(RemoteAddonRepository.Type.WORLD, "world");
 
     /// Core repository type used to select a provider-specific catalog.
     private final RemoteAddonRepository.Type repositoryType;
@@ -42,7 +44,7 @@ public enum RemoteAddonCatalogKind {
     /// Existing launcher localization key used for the visible category title.
     private final String titleKey;
 
-    /// Creates one direct-install remote category descriptor.
+    /// Creates one remote category descriptor.
     ///
     /// @param repositoryType Core catalog category
     /// @param titleKey existing launcher localization key

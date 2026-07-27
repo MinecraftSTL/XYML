@@ -91,7 +91,7 @@ final class RemoteAddonCatalogPageCache {
 
     /// Exact provider-page identity, including the viewport-derived source page-size boundary.
     ///
-    /// @param kind direct-install category
+    /// @param kind acquisition category
     /// @param source selected provider
     /// @param searchText normalized project filter
     /// @param gameVersion normalized Minecraft-version filter

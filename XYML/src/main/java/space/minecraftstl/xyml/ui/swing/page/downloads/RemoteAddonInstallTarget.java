@@ -18,31 +18,75 @@
 package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.Objects;
 
-/// Immutable selected-instance destination for one direct remote add-on installation.
+/// Immutable destination for one remote add-on acquisition.
 ///
-/// The target snapshots the selected instance identifier and destination directory before task creation.
-/// It rejects path-bearing provider file names, keeping remote metadata unable to escape the selected
-/// instance's managed add-on directory.
+/// A selected-instance target snapshots its instance identifier and managed directory. A save-as
+/// target additionally snapshots an exact local file chosen by the user. Provider metadata can
+/// never move either form of target outside its normalized parent directory.
 ///
-/// @param kind direct-install category
-/// @param instanceId stable selected instance identifier
-/// @param directory normalized directory where the add-on file will be installed
+/// @param kind acquisition category
+/// @param instanceId stable selected instance identifier or save-as target label
+/// @param directory normalized directory receiving the downloaded artifact
+/// @param exactDestination exact user-selected destination, or null to use the provider filename
 @NotNullByDefault
 public record RemoteAddonInstallTarget(
         RemoteAddonCatalogKind kind,
         String instanceId,
-        Path directory) {
-    /// Validates the selected-instance snapshot and normalizes its directory once.
+        Path directory,
+        @Nullable Path exactDestination) {
+    /// Creates a managed-directory target whose final filename comes from provider metadata.
+    ///
+    /// @param kind managed-directory category
+    /// @param instanceId stable selected instance identifier
+    /// @param directory normalized directory where the add-on file will be installed
+    public RemoteAddonInstallTarget(
+            RemoteAddonCatalogKind kind,
+            String instanceId,
+            Path directory) {
+        this(kind, instanceId, directory, null);
+    }
+
+    /// Validates the target snapshot and normalizes its paths once.
     public RemoteAddonInstallTarget {
         kind = Objects.requireNonNull(kind, "kind");
         instanceId = requireNonBlank(instanceId, "instanceId");
         directory = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
+        if (exactDestination != null) {
+            exactDestination = exactDestination.toAbsolutePath().normalize();
+            @Nullable Path parent = exactDestination.getParent();
+            if (parent == null || !directory.equals(parent)) {
+                throw new IllegalArgumentException("Exact destination must be an immediate child of its directory");
+            }
+            @Nullable Path fileName = exactDestination.getFileName();
+            if (fileName == null || fileName.toString().isBlank()) {
+                throw new IllegalArgumentException("Exact destination must name a file");
+            }
+        }
+    }
+
+    /// Creates an exact world-archive save-as destination selected by the user.
+    ///
+    /// @param destination exact local world archive path
+    /// @return normalized immutable world target
+    public static RemoteAddonInstallTarget worldSaveAs(Path destination) {
+        Path normalized = Objects.requireNonNull(destination, "destination").toAbsolutePath().normalize();
+        @Nullable Path parent = normalized.getParent();
+        @Nullable Path fileName = normalized.getFileName();
+        if (parent == null || fileName == null || fileName.toString().isBlank()) {
+            throw new IllegalArgumentException("World save destination must name a file");
+        }
+        return new RemoteAddonInstallTarget(
+                RemoteAddonCatalogKind.WORLD,
+                fileName.toString(),
+                parent,
+                normalized);
     }
 
     /// Resolves one provider artifact to an immediate child of this target directory.
@@ -52,6 +96,10 @@ public record RemoteAddonInstallTarget(
     /// @throws IllegalArgumentException when provider metadata is blank, absolute, or path-bearing
     public Path resolveDestination(RemoteAddon.Version version) {
         RemoteAddon.Version selected = Objects.requireNonNull(version, "version");
+        @Nullable Path selectedDestination = exactDestination;
+        if (selectedDestination != null) {
+            return selectedDestination;
+        }
         String fileName = requireNonBlank(selected.file().filename(), "version.file.filename");
         final Path relativeName;
         try {

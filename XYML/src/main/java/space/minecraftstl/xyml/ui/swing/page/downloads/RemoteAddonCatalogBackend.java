@@ -24,7 +24,7 @@ import space.minecraftstl.xyml.addon.RemoteAddon;
 import java.io.IOException;
 import java.util.List;
 
-/// Blocking Core gateway for remote direct-install add-on catalogs.
+/// Blocking Core gateway for remote add-on and world catalogs.
 ///
 /// Implementations may access the network, so callers must invoke them only from a worker after an
 /// explicit search, explicit page transition, or selection of a materialized sparse result row.
@@ -37,10 +37,10 @@ public interface RemoteAddonCatalogBackend {
     /// @throws IOException when the provider cannot complete the request
     RemoteAddonCatalogPage search(RemoteAddonCatalogQuery query) throws IOException;
 
-    /// Loads installable project versions after a user selects a materialized result row.
+    /// Loads downloadable project versions after a user selects a materialized result row.
     ///
     /// @param item selected remote project and source provenance
-    /// @return immutable provider-ordered installable versions
+    /// @return immutable provider-ordered downloadable versions
     /// @throws IOException when the provider cannot complete the request
     @Unmodifiable List<RemoteAddon.Version> loadVersions(RemoteAddonCatalogItem item) throws IOException;
 }

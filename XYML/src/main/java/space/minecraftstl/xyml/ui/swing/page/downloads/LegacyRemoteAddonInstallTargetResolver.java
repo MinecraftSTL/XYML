@@ -45,10 +45,14 @@ public final class LegacyRemoteAddonInstallTargetResolver implements RemoteAddon
             if (instanceId == null || instanceId.isBlank() || !repository.hasVersion(instanceId)) {
                 return Optional.empty();
             }
+            if (requestedKind == RemoteAddonCatalogKind.WORLD) {
+                return Optional.empty();
+            }
             Path directory = switch (requestedKind) {
                 case MOD -> repository.getModsDirectory(instanceId);
                 case RESOURCE_PACK -> repository.getResourcePackDirectory(instanceId);
                 case SHADER_PACK -> repository.getRunDirectory(instanceId).resolve("shaderpacks");
+                case WORLD -> throw new IllegalStateException("World targets require an explicit save-as resolver");
             };
             return Optional.of(new RemoteAddonInstallTarget(
                     requestedKind,

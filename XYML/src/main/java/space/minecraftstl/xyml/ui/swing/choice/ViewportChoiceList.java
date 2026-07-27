@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import javax.swing.JList;
 import javax.swing.JScrollPane;
+import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.event.ChangeListener;
@@ -33,6 +34,7 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.time.Duration;
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 
 /// A thin Swing single-choice list that loads only viewport-driven source ranges.
@@ -50,7 +52,7 @@ public final class ViewportChoiceList<T extends Object> extends JScrollPane impl
     private final JList<ChoiceListEntry<T>> list;
 
     /// The one renderer instance reused for all painted rows.
-    private final ChoiceEntryRenderer<T> renderer;
+    private final ListCellRenderer<ChoiceListEntry<T>> renderer;
 
     /// The stateless viewport load-window strategy.
     private final ViewportLoadStrategy loadStrategy;
@@ -84,12 +86,26 @@ public final class ViewportChoiceList<T extends Object> extends JScrollPane impl
     public ViewportChoiceList(
             ViewportChoiceDataSource<T> dataSource,
             ChoiceTextProvider<T> textProvider) {
+        this(dataSource, new ChoiceEntryRenderer<>(textProvider));
+    }
+
+    /// Creates a viewport-driven single-choice list with a custom reusable renderer.
+    ///
+    /// The renderer must return a component with a stable positive preferred height for loading,
+    /// loaded, and failed entries. The list measures that renderer rather than assuming a fixed
+    /// row count, so viewport demand continues to follow the current look and feel and scale.
+    ///
+    /// @param dataSource the indexed choice data source
+    /// @param renderer the renderer used for every sparse row state
+    public ViewportChoiceList(
+            ViewportChoiceDataSource<T> dataSource,
+            ListCellRenderer<ChoiceListEntry<T>> renderer) {
         choiceModel = new ViewportChoiceListModel<>(dataSource);
-        renderer = new ChoiceEntryRenderer<>(textProvider);
+        this.renderer = Objects.requireNonNull(renderer, "renderer");
         loadStrategy = new ViewportLoadStrategy();
         list = new JList<>(choiceModel);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        list.setCellRenderer(renderer);
+        list.setCellRenderer(this.renderer);
         measureRowHeight();
         list.addListSelectionListener(selectionListener);
         setViewportView(list);

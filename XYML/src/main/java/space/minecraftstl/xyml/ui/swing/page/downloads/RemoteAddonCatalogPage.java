@@ -23,7 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import java.util.List;
 import java.util.Objects;
 
-/// One immutable provider page of remote direct-install add-on projects.
+/// One immutable provider page of remote add-on or world projects.
 ///
 /// Core providers expose a total page count rather than a total result count. The Swing surface
 /// uses that count only for explicit adjacent-page commands while its local list stays viewport lazy.

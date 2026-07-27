@@ -25,7 +25,7 @@ import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 
 import java.util.Objects;
 
-/// Selectable Core sources for direct-install remote add-on categories.
+/// Selectable Core sources for native remote add-on acquisition categories.
 ///
 /// Selecting a source only mutates local Swing state. A source becomes network-active exclusively
 /// when the user explicitly starts a catalog search or changes a completed server page.
@@ -59,9 +59,9 @@ public enum RemoteAddonCatalogSource {
         return this != CURSEFORGE || CurseForgeRemoteAddonRepository.isAvailable();
     }
 
-    /// Returns whether this provider exposes a repository for the requested direct-install category.
+    /// Returns whether this provider exposes a repository for the requested category.
     ///
-    /// @param kind requested direct-install category
+    /// @param kind requested acquisition category
     /// @return true when a matching Core repository exists
     public boolean supports(RemoteAddonCatalogKind kind) {
         Objects.requireNonNull(kind, "kind");
@@ -70,7 +70,7 @@ public enum RemoteAddonCatalogSource {
 
     /// Resolves the exact Core repository for one supported category.
     ///
-    /// @param kind requested direct-install category
+    /// @param kind requested acquisition category
     /// @return non-null provider-specific Core repository
     /// @throws IllegalArgumentException when the provider does not support the category
     public RemoteAddonRepository repository(RemoteAddonCatalogKind kind) {
