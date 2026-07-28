@@ -39,6 +39,7 @@ import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -64,6 +65,19 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 /// Verifies deterministic shell disposal and native-frame constraints.
 @NotNullByDefault
 public final class AppShellFrameTest {
+    /// Visibility transitions clear minimization without discarding maximized state.
+    @Test
+    public void clearsOnlyIconifiedWindowState() {
+        assertAll(
+                () -> assertEquals(Frame.NORMAL, AppShellFrame.nonIconifiedState(Frame.ICONIFIED)),
+                () -> assertEquals(
+                        Frame.MAXIMIZED_BOTH,
+                        AppShellFrame.nonIconifiedState(Frame.MAXIMIZED_BOTH | Frame.ICONIFIED)),
+                () -> assertEquals(
+                        Frame.MAXIMIZED_BOTH,
+                        AppShellFrame.nonIconifiedState(Frame.MAXIMIZED_BOTH)));
+    }
+
     /// Shell cleanup precedes native disposal when neither action fails.
     @Test
     public void disposesInOrder() {
