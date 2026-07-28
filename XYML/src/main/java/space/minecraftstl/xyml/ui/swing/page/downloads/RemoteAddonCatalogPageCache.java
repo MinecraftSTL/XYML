@@ -18,49 +18,28 @@
 package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 
 import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.Optional;
 
-/// Bounded access-order cache of provider pages explicitly visited by a remote add-on catalog user.
+/// Viewport-scoped cache of nearby provider pages explicitly visited by a catalog user.
 ///
 /// The cache never schedules speculation or prefetching. It can only store a successful page after
 /// that exact page was requested by the user. The key includes viewport-derived `pageSize`, because
-/// changing the visible result geometry changes server page boundaries and makes an older page unsafe
-/// to reuse for a later request.
+/// changing the visible result geometry changes server page boundaries and starts a new cache scope.
 @NotNullByDefault
 final class RemoteAddonCatalogPageCache {
-    /// Number of user-visited provider pages retained per live panel.
-    ///
-    /// Six pages is the midpoint of the requested four-to-eight neighboring-page retention window:
-    /// it holds the current browsing context plus a short backtrack history without turning a single
-    /// catalog session into unbounded memory retention or generating any unsolicited source traffic.
-    static final int MAXIMUM_PAGE_COUNT = 6;
+    /// Hard upper bound for user-visited pages retained within one exact query and viewport scope.
+    static final int MAXIMUM_PAGE_COUNT = 8;
 
-    /// Maximum number of query-and-page entries retained in access order.
-    private final int capacity;
-
-    /// Access-order page store; the eldest entry is the least recently reused user-visited page.
+    /// Access-order store used only to break ties between equally distant visited pages.
     private final LinkedHashMap<CacheKey, RemoteAddonCatalogPage> entries = new LinkedHashMap<>(
             MAXIMUM_PAGE_COUNT,
             0.75F,
             true);
-
-    /// Creates the production-sized cache.
-    RemoteAddonCatalogPageCache() {
-        this(MAXIMUM_PAGE_COUNT);
-    }
-
-    /// Creates a bounded cache with explicit capacity for deterministic tests.
-    ///
-    /// @param capacity positive maximum number of retained pages
-    RemoteAddonCatalogPageCache(int capacity) {
-        if (capacity < 1) {
-            throw new IllegalArgumentException("capacity must be positive");
-        }
-        this.capacity = capacity;
-    }
 
     /// Returns one previously user-visited page only for an exact query-and-viewport key.
     ///
@@ -70,17 +49,34 @@ final class RemoteAddonCatalogPageCache {
         return Optional.ofNullable(entries.get(new CacheKey(Objects.requireNonNull(query, "query"))));
     }
 
-    /// Stores one successful user-requested provider page and evicts only the least recently used entry.
+    /// Stores one successful page and evicts the farthest visited page from the current offset.
+    ///
+    /// A query or viewport-size change starts a new scope. Within one scope, at most eight actually
+    /// visited pages are retained, further limited by the provider's real total page count; no page
+    /// is prefetched and no guessed default row count participates in retention.
     ///
     /// @param query exact explicit query that produced the page
     /// @param page returned provider page
     void put(RemoteAddonCatalogQuery query, RemoteAddonCatalogPage page) {
-        entries.put(
-                new CacheKey(Objects.requireNonNull(query, "query")),
-                Objects.requireNonNull(page, "page"));
+        RemoteAddonCatalogQuery request = Objects.requireNonNull(query, "query");
+        RemoteAddonCatalogPage result = Objects.requireNonNull(page, "page");
+        CacheKey currentKey = new CacheKey(request);
+        entries.entrySet().removeIf(entry -> !entry.getKey().sameScope(currentKey)
+                || result.totalPages() > 0 && entry.getKey().pageOffset() >= result.totalPages());
+        entries.put(currentKey, result);
+
+        int capacity = Math.min(MAXIMUM_PAGE_COUNT, Math.max(1, result.totalPages()));
         while (entries.size() > capacity) {
-            CacheKey eldest = entries.keySet().iterator().next();
-            entries.remove(eldest);
+            @Nullable CacheKey eviction = null;
+            int greatestDistance = -1;
+            for (CacheKey key : entries.keySet()) {
+                int distance = Math.abs(key.pageOffset() - currentKey.pageOffset());
+                if (distance > greatestDistance) {
+                    eviction = key;
+                    greatestDistance = distance;
+                }
+            }
+            entries.remove(Objects.requireNonNull(eviction, "eviction"));
         }
     }
 
@@ -95,6 +91,8 @@ final class RemoteAddonCatalogPageCache {
     /// @param source selected provider
     /// @param searchText normalized project filter
     /// @param gameVersion normalized Minecraft-version filter
+    /// @param categoryId selected provider category identifier, or null for all categories
+    /// @param sortType selected result ordering
     /// @param pageOffset requested provider page index
     /// @param pageSize measured visible row count sent to the provider
     @NotNullByDefault
@@ -103,6 +101,8 @@ final class RemoteAddonCatalogPageCache {
             RemoteAddonCatalogSource source,
             String searchText,
             String gameVersion,
+            @Nullable String categoryId,
+            RemoteAddonRepository.SortType sortType,
             int pageOffset,
             int pageSize) {
         /// Snapshots every relevant server-page boundary from an immutable user query.
@@ -114,8 +114,25 @@ final class RemoteAddonCatalogPageCache {
                     query.source(),
                     query.searchText(),
                     query.gameVersion(),
+                    query.category() == null ? null : query.category().id(),
+                    query.sortType(),
                     query.pageOffset(),
                     query.pageSize());
+        }
+
+        /// Returns whether another page belongs to the same exact criteria and viewport scope.
+        ///
+        /// @param other candidate cache key
+        /// @return true when only the page offset may differ
+        private boolean sameScope(CacheKey other) {
+            CacheKey candidate = Objects.requireNonNull(other, "other");
+            return kind == candidate.kind
+                    && source == candidate.source
+                    && searchText.equals(candidate.searchText)
+                    && gameVersion.equals(candidate.gameVersion)
+                    && Objects.equals(categoryId, candidate.categoryId)
+                    && sortType == candidate.sortType
+                    && pageSize == candidate.pageSize;
         }
     }
 }

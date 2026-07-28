@@ -20,16 +20,27 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 
 import java.io.IOException;
 import java.util.List;
 
 /// Blocking Core gateway for remote add-on and world catalogs.
 ///
-/// Implementations may access the network, so callers must invoke them only from a worker after an
-/// explicit search, explicit page transition, or selection of a materialized sparse result row.
+/// Implementations may access the network, so callers invoke them only from a worker after display
+/// category discovery, an explicit search or page transition, or selection of a materialized row.
 @NotNullByDefault
 public interface RemoteAddonCatalogBackend {
+    /// Loads provider categories when the catalog becomes displayable or its source changes.
+    ///
+    /// @param kind content category represented by the panel
+    /// @param source selected provider
+    /// @return immutable provider-ordered category roots
+    /// @throws IOException when the provider cannot load categories
+    @Unmodifiable List<RemoteAddonRepository.Category> loadCategories(
+            RemoteAddonCatalogKind kind,
+            RemoteAddonCatalogSource source) throws IOException;
+
     /// Searches one exact source page for the requested content category.
     ///
     /// @param query explicit user-requested category, provider, criteria, and viewport page size

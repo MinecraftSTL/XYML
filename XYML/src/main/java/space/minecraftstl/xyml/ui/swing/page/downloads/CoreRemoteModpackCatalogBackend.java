@@ -50,6 +50,18 @@ public final class CoreRemoteModpackCatalogBackend implements RemoteModpackCatal
         this.downloadProvider = Objects.requireNonNull(downloadProvider, "downloadProvider");
     }
 
+    /// Loads the selected provider's remote modpack category tree.
+    ///
+    /// @param source selected provider
+    /// @return immutable provider-ordered category roots
+    /// @throws IOException when the provider cannot load categories
+    @Override
+    public @Unmodifiable List<RemoteAddonRepository.Category> loadCategories(
+            RemoteModpackCatalogSource source) throws IOException {
+        RemoteModpackCatalogSource requestedSource = Objects.requireNonNull(source, "source");
+        return requestedSource.repository().getCategories().toList();
+    }
+
     /// Queries one server page with the exact viewport-derived page size requested by the user.
     ///
     /// @param query explicit source, filters, offset, and measured row count
@@ -62,11 +74,11 @@ public final class CoreRemoteModpackCatalogBackend implements RemoteModpackCatal
         RemoteAddonRepository.SearchResult result = repository.search(
                 downloadProvider,
                 request.gameVersion(),
-                null,
+                request.category(),
                 request.pageOffset(),
                 request.pageSize(),
                 request.searchText(),
-                RemoteAddonRepository.SortType.POPULARITY,
+                request.sortType(),
                 RemoteAddonRepository.SortOrder.DESC);
         @Unmodifiable List<RemoteModpackCatalogItem> items = result.getResults()
                 .map(addon -> new RemoteModpackCatalogItem(addon, request.source()))

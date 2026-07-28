@@ -32,6 +32,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// @param sourceLabel provider selector label
 /// @param searchLabel project keyword label
 /// @param gameVersionLabel optional Minecraft-version filter label
+/// @param filterStrings shared category and sort filter text
 /// @param versionLabel selected project-version label
 /// @param searchAction explicit source search command
 /// @param previousPageAction previous provider-page command
@@ -57,6 +58,7 @@ public record RemoteAddonCatalogStrings(
         String sourceLabel,
         String searchLabel,
         String gameVersionLabel,
+        RemoteCatalogFilterStrings filterStrings,
         String versionLabel,
         String searchAction,
         String previousPageAction,
@@ -82,6 +84,7 @@ public record RemoteAddonCatalogStrings(
         Objects.requireNonNull(sourceLabel, "sourceLabel");
         Objects.requireNonNull(searchLabel, "searchLabel");
         Objects.requireNonNull(gameVersionLabel, "gameVersionLabel");
+        Objects.requireNonNull(filterStrings, "filterStrings");
         Objects.requireNonNull(versionLabel, "versionLabel");
         Objects.requireNonNull(searchAction, "searchAction");
         Objects.requireNonNull(previousPageAction, "previousPageAction");
@@ -121,6 +124,7 @@ public record RemoteAddonCatalogStrings(
                 "Source",
                 "Search",
                 "Minecraft version",
+                RemoteCatalogFilterStrings.english(),
                 "Version",
                 "Search",
                 "Previous page",
@@ -155,6 +159,7 @@ public record RemoteAddonCatalogStrings(
                     i18n("modpack.origin"),
                     i18n("search"),
                     "Minecraft",
+                    RemoteCatalogFilterStrings.launcherLocalized(),
                     i18n("version"),
                     i18n("search"),
                     i18n("wizard.prev"),
@@ -180,6 +185,7 @@ public record RemoteAddonCatalogStrings(
                 i18n("modpack.origin"),
                 i18n("search"),
                 "Minecraft",
+                RemoteCatalogFilterStrings.launcherLocalized(),
                 i18n("version"),
                 i18n("search"),
                 i18n("wizard.prev"),

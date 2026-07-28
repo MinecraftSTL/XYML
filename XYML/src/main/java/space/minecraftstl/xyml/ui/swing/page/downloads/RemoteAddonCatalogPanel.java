@@ -20,7 +20,9 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
@@ -71,7 +73,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Immutable category represented by this panel and by all its acquisition requests.
     private final RemoteAddonCatalogKind kind;
 
-    /// Blocking Core source gateway called only from the worker executor after explicit commands.
+    /// Blocking Core source gateway used on the worker for categories and explicit content commands.
     private final RemoteAddonCatalogBackend backend;
 
     /// Task factory responsible for verified artifact download and publication.
@@ -98,7 +100,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Presentation host for one active selected-artifact task at a time.
     private final TaskProgressHostPanel progressHost;
 
-    /// Local provider selector with no implicit query side effect.
+    /// Provider selector that refreshes category metadata without starting a project search.
     private final JComboBox<RemoteAddonCatalogSource> sourceBox = new JComboBox<>(
             RemoteAddonCatalogSource.values());
 
@@ -107,6 +109,12 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
     /// Optional Minecraft-version source filter editor.
     private final JTextField gameVersionField = new JTextField();
+
+    /// Provider category selector populated asynchronously after the panel becomes displayable.
+    private final JComboBox<RemoteCatalogCategoryOption> categoryBox = new JComboBox<>();
+
+    /// Core-supported server result ordering selector.
+    private final JComboBox<RemoteAddonRepository.SortType> sortBox = new JComboBox<>();
 
     /// Selected project-version selector populated only after a loaded row is selected.
     private final JComboBox<RemoteAddon.Version> versionBox = new JComboBox<>();
@@ -132,6 +140,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Monotonic selection identity that makes stale selected-project version callbacks harmless.
     private final AtomicLong selectionRequestRevision = new AtomicLong();
 
+    /// Monotonic category request identity that rejects stale provider trees after source changes.
+    private final AtomicLong categoryRequestRevision = new AtomicLong();
+
     /// Criteria listener that clears stale results without issuing a network request.
     private final DocumentListener criteriaListener = new CatalogCriteriaListener();
 
@@ -156,11 +167,23 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Terminal-listener subscription for the active executor, or null while no task is live.
     private @Nullable Subscription activeCompletionSubscription;
 
+    /// Provider whose categories currently populate the selector, or null before a successful load.
+    private @Nullable RemoteAddonCatalogSource loadedCategorySource;
+
     /// Whether a background provider page request is currently outstanding.
     private boolean catalogLoading;
 
     /// Whether the selected project is waiting for background version resolution.
     private boolean versionLoading;
+
+    /// Whether the current provider category tree is loading in the background.
+    private boolean categoryLoading;
+
+    /// Whether selector mutations are internal category publication rather than user criteria edits.
+    private boolean applyingCategoryOptions;
+
+    /// Whether sort selector mutations are internal source publication rather than user criteria edits.
+    private boolean applyingSortOptions;
 
     /// Whether this panel has permanently rejected user commands and worker callbacks.
     private volatile boolean closed;
@@ -291,6 +314,28 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         return choiceList;
     }
 
+    /// Starts category discovery only when this panel receives a peer while visible.
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        EdtDispatcher.requireEventDispatchThread();
+        if (isVisible()) {
+            requestCategoriesForSelectedSource();
+        }
+    }
+
+    /// Lazily loads provider categories when a previously hidden catalog card becomes visible.
+    ///
+    /// @param visible requested local visibility
+    @Override
+    public void setVisible(boolean visible) {
+        super.setVisible(visible);
+        if (visible && isDisplayable()) {
+            EdtDispatcher.requireEventDispatchThread();
+            requestCategoriesForSelectedSource();
+        }
+    }
+
     /// Rejects future callbacks, cancels an active task, and releases owned presentation resources.
     @Override
     public void close() {
@@ -300,6 +345,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         closed = true;
         catalogRequestRevision.incrementAndGet();
         selectionRequestRevision.incrementAndGet();
+        categoryRequestRevision.incrementAndGet();
         SwingUiDispatcher.INSTANCE.dispatchOrRun(this::closeOnEventDispatchThread);
     }
 
@@ -328,19 +374,21 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         JPanel filterBand = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 1",
                 "[grow,fill]",
-                "[40!]8[40!]"));
+                "[40!]8[40!]8[40!]"));
+        filterBand.setName("remoteAddonFilterBand");
         filterBand.setOpaque(false);
         JPanel searchBand = new JPanel(new MigLayout(
                 "insets 0, fill",
                 "[][150!]12[][grow,fill]8[110!]",
                 "[40!]"));
+        searchBand.setName("remoteAddonSearchBand");
         searchBand.setOpaque(false);
 
         JLabel sourceLabel = new JLabel(strings.sourceLabel());
         sourceLabel.setLabelFor(sourceBox);
         searchBand.add(sourceLabel);
         sourceBox.setName("remoteAddonSource");
-        sourceBox.addActionListener(event -> criteriaChanged());
+        sourceBox.addActionListener(event -> sourceChanged());
         searchBand.add(sourceBox, "growx, h 40!");
 
         JLabel searchLabel = new JLabel(strings.searchLabel());
@@ -356,18 +404,49 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         searchBand.add(searchButton, "grow, h 40!");
         filterBand.add(searchBand, "growx");
 
-        JPanel pageBand = new JPanel(new MigLayout(
+        JPanel criteriaBand = new JPanel(new MigLayout(
                 "insets 0, fill",
-                "[][grow,fill]8[120!]8[120!]",
+                "[][grow,fill]12[][grow,fill]12[][180!]",
                 "[40!]"));
-        pageBand.setOpaque(false);
+        criteriaBand.setName("remoteAddonCriteriaBand");
+        criteriaBand.setOpaque(false);
 
         JLabel gameVersionLabel = new JLabel(strings.gameVersionLabel());
         gameVersionLabel.setLabelFor(gameVersionField);
-        pageBand.add(gameVersionLabel);
+        criteriaBand.add(gameVersionLabel);
         gameVersionField.setName("remoteAddonGameVersion");
         gameVersionField.getDocument().addDocumentListener(criteriaListener);
-        pageBand.add(gameVersionField, "growx, h 40!");
+        criteriaBand.add(gameVersionField, "growx, h 40!");
+
+        RemoteCatalogFilterStrings filterStrings = strings.filterStrings();
+        JLabel categoryLabel = new JLabel(filterStrings.categoryLabel());
+        categoryLabel.setLabelFor(categoryBox);
+        criteriaBand.add(categoryLabel);
+        categoryBox.setName("remoteAddonCategory");
+        categoryBox.setRenderer(new RemoteCatalogCategoryRenderer(
+                () -> selectedSource() == RemoteAddonCatalogSource.MODRINTH,
+                filterStrings));
+        resetCategoryOptions();
+        categoryBox.addActionListener(event -> categoryChanged());
+        criteriaBand.add(categoryBox, "growx, h 40!");
+
+        JLabel sortLabel = new JLabel(filterStrings.sortLabel());
+        sortLabel.setLabelFor(sortBox);
+        criteriaBand.add(sortLabel);
+        sortBox.setName("remoteAddonSort");
+        sortBox.setRenderer(new RemoteCatalogSortRenderer(filterStrings));
+        resetSortOptions();
+        sortBox.addActionListener(event -> sortChanged());
+        criteriaBand.add(sortBox, "growx, h 40!");
+        filterBand.add(criteriaBand, "growx");
+
+        JPanel pageBand = new JPanel(new MigLayout(
+                "insets 0, fill",
+                "[grow,fill][120!]8[120!]",
+                "[40!]"));
+        pageBand.setName("remoteAddonPageBand");
+        pageBand.setOpaque(false);
+        pageBand.add(new JLabel(), "growx");
 
         previousPageButton.setName("remoteAddonPreviousPage");
         previousPageButton.setText(strings.previousPageAction());
@@ -413,6 +492,145 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         add(statusLabel, "growx, h 24!");
         progressHost.setName("remoteAddonInstallProgress");
         add(progressHost, "growx");
+    }
+
+    /// Invalidates source-specific categories, clears stale results, and loads the new tree when visible.
+    private void sourceChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        categoryRequestRevision.incrementAndGet();
+        categoryLoading = false;
+        loadedCategorySource = null;
+        resetCategoryOptions();
+        resetSortOptions();
+        criteriaChanged();
+        if (isDisplayable()) {
+            requestCategoriesForSelectedSource();
+        }
+    }
+
+    /// Clears stale results after a user category selection while ignoring internal option publication.
+    private void categoryChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!applyingCategoryOptions) {
+            criteriaChanged();
+        }
+    }
+
+    /// Clears stale results after a user sort selection while ignoring internal source publication.
+    private void sortChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!applyingSortOptions) {
+            criteriaChanged();
+        }
+    }
+
+    /// Schedules category discovery for the selected available provider at most once per successful load.
+    private void requestCategoriesForSelectedSource() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || categoryLoading) {
+            return;
+        }
+        RemoteAddonCatalogSource source = selectedSource();
+        if (loadedCategorySource == source || !source.isAvailable() || !source.supports(kind)) {
+            updateControls();
+            return;
+        }
+        long requestRevision = categoryRequestRevision.incrementAndGet();
+        categoryLoading = true;
+        updateControls();
+        try {
+            workerExecutor.execute(() -> loadCategories(source, requestRevision));
+        } catch (RuntimeException schedulingFailure) {
+            LOG.warning("Failed to schedule remote add-on category loading", schedulingFailure);
+            applyCategoryFailure(source, requestRevision);
+        }
+    }
+
+    /// Loads one provider category tree away from the EDT.
+    ///
+    /// @param source selected provider captured before worker scheduling
+    /// @param requestRevision category request identity
+    private void loadCategories(RemoteAddonCatalogSource source, long requestRevision) {
+        try {
+            @Unmodifiable List<RemoteAddonRepository.Category> categories = backend.loadCategories(kind, source);
+            SwingUiDispatcher.INSTANCE.dispatchOrRun(
+                    () -> applyCategories(source, categories, requestRevision));
+        } catch (IOException | RuntimeException failure) {
+            LOG.warning("Failed to load remote add-on categories", failure);
+            applyCategoryFailure(source, requestRevision);
+        }
+    }
+
+    /// Publishes a provider category tree only while its source and request remain current.
+    ///
+    /// @param source provider that produced the categories
+    /// @param categories immutable provider category roots
+    /// @param requestRevision category request identity
+    private void applyCategories(
+            RemoteAddonCatalogSource source,
+            @Unmodifiable List<RemoteAddonRepository.Category> categories,
+            long requestRevision) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || categoryRequestRevision.get() != requestRevision || selectedSource() != source) {
+            return;
+        }
+        categoryLoading = false;
+        loadedCategorySource = source;
+        applyCategoryOptions(RemoteCatalogCategoryOption.flatten(categories));
+        updateControls();
+    }
+
+    /// Restores the all-categories selector after a current provider category request fails.
+    ///
+    /// @param source provider whose category request failed
+    /// @param requestRevision category request identity
+    private void applyCategoryFailure(RemoteAddonCatalogSource source, long requestRevision) {
+        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+            if (closed || categoryRequestRevision.get() != requestRevision || selectedSource() != source) {
+                return;
+            }
+            categoryLoading = false;
+            loadedCategorySource = null;
+            resetCategoryOptions();
+            updateControls();
+        });
+    }
+
+    /// Replaces category options without interpreting combo-box events as user filter edits.
+    ///
+    /// @param options immutable flattened provider category options
+    private void applyCategoryOptions(@Unmodifiable List<RemoteCatalogCategoryOption> options) {
+        applyingCategoryOptions = true;
+        try {
+            categoryBox.removeAllItems();
+            for (RemoteCatalogCategoryOption option : Objects.requireNonNull(options, "options")) {
+                categoryBox.addItem(option);
+            }
+            if (categoryBox.getItemCount() > 0) {
+                categoryBox.setSelectedIndex(0);
+            }
+        } finally {
+            applyingCategoryOptions = false;
+        }
+    }
+
+    /// Restores the selector's local all-categories option without performing provider work.
+    private void resetCategoryOptions() {
+        applyCategoryOptions(List.of(RemoteCatalogCategoryOption.all()));
+    }
+
+    /// Publishes only the current provider's distinct server sort behaviors.
+    private void resetSortOptions() {
+        applyingSortOptions = true;
+        try {
+            sortBox.removeAllItems();
+            for (RemoteAddonRepository.SortType sortType : selectedSource().supportedSortTypes()) {
+                sortBox.addItem(sortType);
+            }
+            sortBox.setSelectedItem(RemoteAddonRepository.SortType.POPULARITY);
+        } finally {
+            applyingSortOptions = false;
+        }
     }
 
     /// Starts an explicit user-requested first provider page query.
@@ -462,6 +680,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 source,
                 searchField.getText(),
                 gameVersionField.getText(),
+                selectedCategory(),
+                selectedSortType(),
                 pageOffset,
                 pageSize);
         long requestRevision = catalogRequestRevision.incrementAndGet();
@@ -739,6 +959,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         selectionRequestRevision.incrementAndGet();
         completedQuery = null;
         displayedPage = null;
+        pageCache.clear();
         clearSelectedProject();
         dataSource.replaceItems(List.of());
         choiceList.reloadData();
@@ -778,6 +999,24 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 "remote add-on source selection");
     }
 
+    /// Returns the selected provider category, or null for the explicit all-categories option.
+    ///
+    /// @return selected provider category or null
+    private @Nullable RemoteAddonRepository.Category selectedCategory() {
+        @Nullable RemoteCatalogCategoryOption option =
+                (RemoteCatalogCategoryOption) categoryBox.getSelectedItem();
+        return option == null ? null : option.category();
+    }
+
+    /// Returns the selected Core result ordering while preserving the combo-box non-null invariant.
+    ///
+    /// @return selected provider-supported sort
+    private RemoteAddonRepository.SortType selectedSortType() {
+        return Objects.requireNonNull(
+                (RemoteAddonRepository.SortType) sortBox.getSelectedItem(),
+                "remote add-on sort selection");
+    }
+
     /// Returns the current server page size from real visible result-list geometry.
     ///
     /// @return positive measured visible row count, or zero before layout establishes a viewport
@@ -794,10 +1033,13 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     private void updateControls() {
         EdtDispatcher.requireEventDispatchThread();
         boolean inputsEnabled = !closed && activeExecutor == null;
-        sourceBox.setEnabled(inputsEnabled);
-        searchField.setEnabled(inputsEnabled);
-        gameVersionField.setEnabled(inputsEnabled);
-        searchButton.setEnabled(inputsEnabled && !catalogLoading);
+        boolean criteriaEnabled = inputsEnabled && !catalogLoading;
+        sourceBox.setEnabled(criteriaEnabled);
+        searchField.setEnabled(criteriaEnabled);
+        gameVersionField.setEnabled(criteriaEnabled);
+        categoryBox.setEnabled(criteriaEnabled && !categoryLoading);
+        sortBox.setEnabled(criteriaEnabled);
+        searchButton.setEnabled(criteriaEnabled);
 
         @Nullable RemoteAddonCatalogPage page = displayedPage;
         boolean pageButtonsEnabled = inputsEnabled && !catalogLoading && page != null;
@@ -863,6 +1105,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         sourceBox.setEnabled(false);
         searchField.setEnabled(false);
         gameVersionField.setEnabled(false);
+        categoryBox.setEnabled(false);
+        sortBox.setEnabled(false);
         versionBox.setEnabled(false);
         searchButton.setEnabled(false);
         previousPageButton.setEnabled(false);

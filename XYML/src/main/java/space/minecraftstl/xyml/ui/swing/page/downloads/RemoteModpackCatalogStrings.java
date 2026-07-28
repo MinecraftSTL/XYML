@@ -32,6 +32,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// @param sourceLabel provider selector label
 /// @param searchLabel project filter label
 /// @param gameVersionLabel optional game-version filter label
+/// @param filterStrings shared category and sort filter text
 /// @param instanceNameLabel destination identifier label
 /// @param versionLabel selected project version label
 /// @param searchAction explicit source-query command
@@ -58,6 +59,7 @@ public record RemoteModpackCatalogStrings(
         String sourceLabel,
         String searchLabel,
         String gameVersionLabel,
+        RemoteCatalogFilterStrings filterStrings,
         String instanceNameLabel,
         String versionLabel,
         String searchAction,
@@ -84,6 +86,7 @@ public record RemoteModpackCatalogStrings(
         Objects.requireNonNull(sourceLabel, "sourceLabel");
         Objects.requireNonNull(searchLabel, "searchLabel");
         Objects.requireNonNull(gameVersionLabel, "gameVersionLabel");
+        Objects.requireNonNull(filterStrings, "filterStrings");
         Objects.requireNonNull(instanceNameLabel, "instanceNameLabel");
         Objects.requireNonNull(versionLabel, "versionLabel");
         Objects.requireNonNull(searchAction, "searchAction");
@@ -115,6 +118,7 @@ public record RemoteModpackCatalogStrings(
                 "Source",
                 "Search",
                 "Minecraft version",
+                RemoteCatalogFilterStrings.english(),
                 "Instance name",
                 "Version",
                 "Search",
@@ -150,6 +154,7 @@ public record RemoteModpackCatalogStrings(
                 i18n("modpack.origin"),
                 i18n("search"),
                 "Minecraft",
+                RemoteCatalogFilterStrings.launcherLocalized(),
                 i18n("version.name"),
                 i18n("version"),
                 i18n("search"),

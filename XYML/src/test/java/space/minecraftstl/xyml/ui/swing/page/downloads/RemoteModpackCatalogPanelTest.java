@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
@@ -32,6 +33,7 @@ import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JPanel;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -50,6 +52,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies explicit remote discovery, viewport-derived pagination, selected-version loading, and task handoff.
@@ -116,6 +119,74 @@ final class RemoteModpackCatalogPanelTest {
             assertEquals(addon, request.item().addon());
             assertEquals(version, request.version());
             assertEquals("fixture-pack", request.instanceName());
+        } finally {
+            @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Keeps the search form in explicit rows and forwards loaded category and sort selections.
+    @Test
+    void laysOutSearchRowsAndAppliesProviderFilters() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteModpackCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteModpackCatalogPanel panel = new RemoteModpackCatalogPanel(
+                        backend,
+                        request -> Task.completed(null),
+                        executor,
+                        RemoteModpackCatalogStrings.english(),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO);
+                panelReference.set(panel);
+                prepareViewport(panel.choiceList());
+                panel.addNotify();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteModpackCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JPanel searchBand = findNamed(panel, "remoteModpackSearchBand", JPanel.class);
+                JPanel criteriaBand = findNamed(panel, "remoteModpackCriteriaBand", JPanel.class);
+                JPanel pageBand = findNamed(panel, "remoteModpackPageBand", JPanel.class);
+                JComboBox<?> categoryBox = findNamed(panel, "remoteModpackCategory", JComboBox.class);
+                JComboBox<?> sortBox = findNamed(panel, "remoteModpackSort", JComboBox.class);
+                JButton search = findNamed(panel, "remoteModpackSearchAction", JButton.class);
+                JButton previous = findNamed(panel, "remoteModpackPreviousPage", JButton.class);
+                assertNotNull(searchBand);
+                assertNotNull(criteriaBand);
+                assertNotNull(pageBand);
+                assertNotSame(searchBand, criteriaBand);
+                assertNotSame(criteriaBand, pageBand);
+                assertNotNull(categoryBox);
+                assertNotNull(sortBox);
+                assertNotNull(search);
+                assertNotNull(previous);
+                assertEquals(searchBand, search.getParent());
+                assertEquals(criteriaBand, categoryBox.getParent());
+                assertEquals(criteriaBand, sortBox.getParent());
+                assertEquals(pageBand, previous.getParent());
+                assertEquals(3, categoryBox.getItemCount());
+                assertEquals(4, sortBox.getItemCount());
+                categoryBox.setSelectedIndex(2);
+                sortBox.setSelectedItem(RemoteAddonRepository.SortType.TOTAL_DOWNLOADS);
+                search.doClick();
+            });
+            awaitBackgroundWork(executor);
+
+            assertEquals(1, backend.categoryRequests.get());
+            RemoteModpackCatalogQuery query = backend.lastQuery.get();
+            assertNotNull(query);
+            assertNotNull(query.category());
+            assertEquals("adventure-child", query.category().id());
+            assertEquals(RemoteAddonRepository.SortType.TOTAL_DOWNLOADS, query.sortType());
         } finally {
             @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
             if (panel != null) {
@@ -224,6 +295,9 @@ final class RemoteModpackCatalogPanelTest {
         /// Count of selected-item version calls observed by the backend.
         private final AtomicInteger versionRequests = new AtomicInteger();
 
+        /// Count of display-triggered provider category requests.
+        private final AtomicInteger categoryRequests = new AtomicInteger();
+
         /// Last explicit search query, or null before the user invokes Search.
         private final AtomicReference<@Nullable RemoteModpackCatalogQuery> lastQuery = new AtomicReference<>();
 
@@ -234,6 +308,25 @@ final class RemoteModpackCatalogPanelTest {
         private RecordingBackend(RemoteAddon addon, RemoteAddon.Version version) {
             item = new RemoteModpackCatalogItem(addon, RemoteModpackCatalogSource.MODRINTH);
             this.version = Objects.requireNonNull(version, "version");
+        }
+
+        /// Records and returns a nested provider category tree for selector tests.
+        ///
+        /// @param source selected remote provider
+        /// @return immutable nested fixture categories
+        @Override
+        public @Unmodifiable List<RemoteAddonRepository.Category> loadCategories(
+                RemoteModpackCatalogSource source) {
+            assertEquals(RemoteModpackCatalogSource.MODRINTH, source);
+            categoryRequests.incrementAndGet();
+            RemoteAddonRepository.Category child = new RemoteAddonRepository.Category(
+                    new Object(),
+                    "adventure-child",
+                    List.of());
+            return List.of(new RemoteAddonRepository.Category(
+                    new Object(),
+                    "adventure",
+                    List.of(child)));
         }
 
         /// Records and returns a single exact source result page.

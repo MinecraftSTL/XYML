@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
@@ -347,6 +348,62 @@ final class RemoteAddonCatalogPanelTest {
         }
     }
 
+    /// Loads provider categories after display and forwards the selected category and sort to Core search.
+    @Test
+    void loadsAndAppliesProviderCategoryAndSortFilters() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = new RemoteAddonCatalogPanel(
+                        RemoteAddonCatalogKind.MOD,
+                        backend,
+                        request -> Task.completed(null),
+                        kind -> Optional.of(fixtureTarget()),
+                        executor,
+                        RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                        TaskProgressStrings.english(),
+                        null,
+                        Duration.ZERO);
+                panelReference.set(panel);
+                prepareViewport(panel.choiceList(), 160);
+                panel.addNotify();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+                JComboBox<?> categoryBox = findNamed(panel, "remoteAddonCategory", JComboBox.class);
+                JComboBox<?> sortBox = findNamed(panel, "remoteAddonSort", JComboBox.class);
+                JButton search = findNamed(panel, "remoteAddonSearchAction", JButton.class);
+                assertNotNull(categoryBox);
+                assertNotNull(sortBox);
+                assertNotNull(search);
+                assertEquals(3, categoryBox.getItemCount());
+                assertEquals(4, sortBox.getItemCount());
+                categoryBox.setSelectedIndex(2);
+                sortBox.setSelectedItem(RemoteAddonRepository.SortType.LAST_UPDATED);
+                search.doClick();
+            });
+            awaitBackgroundWork(executor);
+
+            assertEquals(1, backend.categoryRequests.get());
+            RemoteAddonCatalogQuery query = backend.lastQuery.get();
+            assertNotNull(query);
+            assertNotNull(query.category());
+            assertEquals("technology-child", query.category().id());
+            assertEquals(RemoteAddonRepository.SortType.LAST_UPDATED, query.sortType());
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Gives a detached sparse list measurable result geometry without invoking a source request.
     ///
     /// @param choiceList detached result list
@@ -459,6 +516,9 @@ final class RemoteAddonCatalogPanelTest {
         /// Count of selected-project version requests.
         private final AtomicInteger versionRequests = new AtomicInteger();
 
+        /// Count of display-triggered provider category requests.
+        private final AtomicInteger categoryRequests = new AtomicInteger();
+
         /// Last exact source query, or null before an explicit search.
         private final AtomicReference<@Nullable RemoteAddonCatalogQuery> lastQuery = new AtomicReference<>();
 
@@ -472,6 +532,28 @@ final class RemoteAddonCatalogPanelTest {
                     RemoteAddonCatalogKind.MOD,
                     RemoteAddonCatalogSource.MODRINTH);
             this.version = Objects.requireNonNull(version, "version");
+        }
+
+        /// Records and returns a nested provider category tree for selector tests.
+        ///
+        /// @param kind requested add-on kind
+        /// @param source selected provider
+        /// @return immutable nested fixture categories
+        @Override
+        public @Unmodifiable List<RemoteAddonRepository.Category> loadCategories(
+                RemoteAddonCatalogKind kind,
+                RemoteAddonCatalogSource source) {
+            assertEquals(RemoteAddonCatalogKind.MOD, kind);
+            assertEquals(RemoteAddonCatalogSource.MODRINTH, source);
+            categoryRequests.incrementAndGet();
+            RemoteAddonRepository.Category child = new RemoteAddonRepository.Category(
+                    new Object(),
+                    "technology-child",
+                    List.of());
+            return List.of(new RemoteAddonRepository.Category(
+                    new Object(),
+                    "technology",
+                    List.of(child)));
         }
 
         /// Records and returns a two-page provider result so next and previous commands are testable.

@@ -49,6 +49,21 @@ public final class CoreRemoteAddonCatalogBackend implements RemoteAddonCatalogBa
         this.downloadProvider = Objects.requireNonNull(downloadProvider, "downloadProvider");
     }
 
+    /// Loads the selected provider's category tree for the requested content kind.
+    ///
+    /// @param kind requested content kind
+    /// @param source selected provider
+    /// @return immutable provider-ordered category roots
+    /// @throws IOException when the provider cannot load categories
+    @Override
+    public @Unmodifiable List<RemoteAddonRepository.Category> loadCategories(
+            RemoteAddonCatalogKind kind,
+            RemoteAddonCatalogSource source) throws IOException {
+        RemoteAddonCatalogKind requestedKind = Objects.requireNonNull(kind, "kind");
+        RemoteAddonCatalogSource requestedSource = Objects.requireNonNull(source, "source");
+        return requestedSource.repository(requestedKind).getCategories().toList();
+    }
+
     /// Queries one provider page with the exact user-measured viewport row count.
     ///
     /// @param query explicit source request
@@ -61,11 +76,11 @@ public final class CoreRemoteAddonCatalogBackend implements RemoteAddonCatalogBa
         RemoteAddonRepository.SearchResult result = repository.search(
                 downloadProvider,
                 request.gameVersion(),
-                null,
+                request.category(),
                 request.pageOffset(),
                 request.pageSize(),
                 request.searchText(),
-                RemoteAddonRepository.SortType.POPULARITY,
+                request.sortType(),
                 RemoteAddonRepository.SortOrder.DESC);
         @Unmodifiable List<RemoteAddonCatalogItem> items = result.getResults()
                 .map(addon -> new RemoteAddonCatalogItem(addon, request.kind(), request.source()))

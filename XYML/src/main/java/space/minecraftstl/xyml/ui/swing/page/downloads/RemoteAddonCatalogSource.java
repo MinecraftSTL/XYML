@@ -19,16 +19,18 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 
+import java.util.List;
 import java.util.Objects;
 
 /// Selectable Core sources for native remote add-on acquisition categories.
 ///
-/// Selecting a source only mutates local Swing state. A source becomes network-active exclusively
-/// when the user explicitly starts a catalog search or changes a completed server page.
+/// Selecting a source updates local criteria and may asynchronously refresh its category metadata
+/// after display; project discovery still requires an explicit catalog search or page command.
 @NotNullByDefault
 public enum RemoteAddonCatalogSource {
     /// Modrinth's public catalog, available without launcher-specific credentials.
@@ -66,6 +68,23 @@ public enum RemoteAddonCatalogSource {
     public boolean supports(RemoteAddonCatalogKind kind) {
         Objects.requireNonNull(kind, "kind");
         return source.getRepoForType(kind.repositoryType()) != null;
+    }
+
+    /// Returns only result orderings that the selected provider maps to distinct server behavior.
+    ///
+    /// Modrinth maps name and author to the same relevance index as popularity, so those misleading
+    /// duplicates are omitted while CurseForge exposes every Core sort field directly.
+    ///
+    /// @return immutable provider-supported result orderings
+    public @Unmodifiable List<RemoteAddonRepository.SortType> supportedSortTypes() {
+        if (this == MODRINTH) {
+            return List.of(
+                    RemoteAddonRepository.SortType.POPULARITY,
+                    RemoteAddonRepository.SortType.DATE_CREATED,
+                    RemoteAddonRepository.SortType.LAST_UPDATED,
+                    RemoteAddonRepository.SortType.TOTAL_DOWNLOADS);
+        }
+        return List.of(RemoteAddonRepository.SortType.values());
     }
 
     /// Resolves the exact Core repository for one supported category.

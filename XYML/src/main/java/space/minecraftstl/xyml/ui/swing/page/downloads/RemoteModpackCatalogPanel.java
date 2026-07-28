@@ -20,7 +20,9 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -61,14 +63,12 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Standalone Swing catalog for discovering and installing remote CurseForge or Modrinth modpacks.
 ///
-/// Construction and first display are strictly offline: the panel holds an empty sparse list until
-/// the user presses Search. A request's server page size is measured from the live result viewport,
-/// while local list rendering remains lazy through `ViewportChoiceList`. Selecting a loaded result
-/// resolves only that project's versions off the EDT; installing a selected version hands it to the
-/// existing task infrastructure rather than opening an external browser.
+/// Construction is offline. Once displayable, the panel loads only the selected provider's category
+/// metadata; project discovery still waits for Search. A request's server page size is measured from
+/// the live result viewport, while local rendering remains lazy through `ViewportChoiceList`.
 @NotNullByDefault
 public final class RemoteModpackCatalogPanel extends JPanel implements AutoCloseable {
-    /// Gateway to blocking Core catalog requests, called only by the background executor.
+    /// Gateway to blocking Core category, project, and version requests on the background executor.
     private final RemoteModpackCatalogBackend backend;
 
     /// Factory for the selected-version FileDownloadTask and ModpackHelper installation chain.
@@ -89,7 +89,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Progress host for one selected-version install task at a time.
     private final TaskProgressHostPanel progressHost;
 
-    /// Source selector with no implicit request side effect.
+    /// Source selector that refreshes category metadata without starting a project search.
     private final JComboBox<RemoteModpackCatalogSource> sourceBox = new JComboBox<>(
             RemoteModpackCatalogSource.values());
 
@@ -98,6 +98,12 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
 
     /// Optional exact Minecraft-version filter editor.
     private final JTextField gameVersionField = new JTextField();
+
+    /// Provider category selector populated asynchronously after the panel becomes displayable.
+    private final JComboBox<RemoteCatalogCategoryOption> categoryBox = new JComboBox<>();
+
+    /// Core-supported server result ordering selector.
+    private final JComboBox<RemoteAddonRepository.SortType> sortBox = new JComboBox<>();
 
     /// Exact destination instance-name editor.
     private final JTextField instanceNameField = new JTextField();
@@ -125,6 +131,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
 
     /// Latest selected-project identity; a newly selected row invalidates older version callbacks.
     private final AtomicLong selectionRequestRevision = new AtomicLong();
+
+    /// Latest provider-category identity; a source change invalidates older category callbacks.
+    private final AtomicLong categoryRequestRevision = new AtomicLong();
 
     /// Listener clearing stale source results after criteria changes without querying the network.
     private final DocumentListener criteriaListener = new CatalogCriteriaListener();
@@ -156,11 +165,23 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Completion subscription owned by the active task executor, or null while idle.
     private @Nullable Subscription activeCompletionSubscription;
 
+    /// Provider whose categories currently populate the selector, or null before a successful load.
+    private @Nullable RemoteModpackCatalogSource loadedCategorySource;
+
     /// Whether a catalog query is waiting for a background result.
     private boolean catalogLoading;
 
     /// Whether the selected item is waiting for its background version list.
     private boolean versionLoading;
+
+    /// Whether the selected provider's category tree is currently loading.
+    private boolean categoryLoading;
+
+    /// Whether category combo-box changes are internal publication rather than user edits.
+    private boolean applyingCategoryOptions;
+
+    /// Whether sort combo-box changes are internal source publication rather than user edits.
+    private boolean applyingSortOptions;
 
     /// Whether programmatic destination suggestions should not be treated as user edits.
     private boolean applyingSuggestedInstanceName;
@@ -242,6 +263,28 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         return choiceList;
     }
 
+    /// Starts provider category discovery only when this panel receives a peer while visible.
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        EdtDispatcher.requireEventDispatchThread();
+        if (isVisible()) {
+            requestCategoriesForSelectedSource();
+        }
+    }
+
+    /// Lazily loads provider categories when a previously hidden catalog card becomes visible.
+    ///
+    /// @param visible requested local visibility
+    @Override
+    public void setVisible(boolean visible) {
+        super.setVisible(visible);
+        if (visible && isDisplayable()) {
+            EdtDispatcher.requireEventDispatchThread();
+            requestCategoriesForSelectedSource();
+        }
+    }
+
     /// Synchronously rejects future callbacks, cancels active installation, and releases owned presentation state.
     @Override
     public void close() {
@@ -251,6 +294,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         closed = true;
         catalogRequestRevision.incrementAndGet();
         selectionRequestRevision.incrementAndGet();
+        categoryRequestRevision.incrementAndGet();
         SwingUiDispatcher.INSTANCE.dispatchOrRun(this::closeOnEventDispatchThread);
     }
 
@@ -267,45 +311,92 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         add(headingBand, "growx");
 
         JPanel filterBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 6",
-                "[][160!][grow,fill][][160!][110!]",
-                "[40!]8[40!]"));
+                "insets 0, fillx, wrap 1",
+                "[grow,fill]",
+                "[40!]8[40!]8[40!]"));
+        filterBand.setName("remoteModpackFilterBand");
         filterBand.setOpaque(false);
+
+        JPanel searchBand = new JPanel(new MigLayout(
+                "insets 0, fill",
+                "[][160!]12[][grow,fill]8[110!]",
+                "[40!]"));
+        searchBand.setName("remoteModpackSearchBand");
+        searchBand.setOpaque(false);
 
         JLabel sourceLabel = new JLabel(strings.sourceLabel());
         sourceLabel.setLabelFor(sourceBox);
-        filterBand.add(sourceLabel);
+        searchBand.add(sourceLabel);
         sourceBox.setName("remoteModpackSource");
-        sourceBox.addActionListener(event -> criteriaChanged());
-        filterBand.add(sourceBox, "h 40!");
+        sourceBox.addActionListener(event -> sourceChanged());
+        searchBand.add(sourceBox, "growx, h 40!");
 
         JLabel searchLabel = new JLabel(strings.searchLabel());
         searchLabel.setLabelFor(searchField);
-        filterBand.add(searchLabel);
+        searchBand.add(searchLabel);
         searchField.setName("remoteModpackSearch");
         searchField.getDocument().addDocumentListener(criteriaListener);
-        filterBand.add(searchField, "growx, h 40!");
+        searchBand.add(searchField, "growx, h 40!");
 
         searchButton.setName("remoteModpackSearchAction");
         searchButton.setText(strings.searchAction());
         searchButton.addActionListener(event -> submitFirstPageSearch());
-        filterBand.add(searchButton, "h 40!");
+        searchBand.add(searchButton, "grow, h 40!");
+        filterBand.add(searchBand, "growx");
+
+        JPanel criteriaBand = new JPanel(new MigLayout(
+                "insets 0, fill",
+                "[][grow,fill]12[][grow,fill]12[][180!]",
+                "[40!]"));
+        criteriaBand.setName("remoteModpackCriteriaBand");
+        criteriaBand.setOpaque(false);
 
         JLabel gameVersionLabel = new JLabel(strings.gameVersionLabel());
         gameVersionLabel.setLabelFor(gameVersionField);
-        filterBand.add(gameVersionLabel);
+        criteriaBand.add(gameVersionLabel);
         gameVersionField.setName("remoteModpackGameVersion");
         gameVersionField.getDocument().addDocumentListener(criteriaListener);
-        filterBand.add(gameVersionField, "h 40!");
+        criteriaBand.add(gameVersionField, "growx, h 40!");
+
+        RemoteCatalogFilterStrings filterStrings = strings.filterStrings();
+        JLabel categoryLabel = new JLabel(filterStrings.categoryLabel());
+        categoryLabel.setLabelFor(categoryBox);
+        criteriaBand.add(categoryLabel);
+        categoryBox.setName("remoteModpackCategory");
+        categoryBox.setRenderer(new RemoteCatalogCategoryRenderer(
+                () -> selectedSource() == RemoteModpackCatalogSource.MODRINTH,
+                filterStrings));
+        resetCategoryOptions();
+        categoryBox.addActionListener(event -> categoryChanged());
+        criteriaBand.add(categoryBox, "growx, h 40!");
+
+        JLabel sortLabel = new JLabel(filterStrings.sortLabel());
+        sortLabel.setLabelFor(sortBox);
+        criteriaBand.add(sortLabel);
+        sortBox.setName("remoteModpackSort");
+        sortBox.setRenderer(new RemoteCatalogSortRenderer(filterStrings));
+        resetSortOptions();
+        sortBox.addActionListener(event -> sortChanged());
+        criteriaBand.add(sortBox, "growx, h 40!");
+        filterBand.add(criteriaBand, "growx");
+
+        JPanel pageBand = new JPanel(new MigLayout(
+                "insets 0, fill",
+                "[grow,fill][120!]8[120!]",
+                "[40!]"));
+        pageBand.setName("remoteModpackPageBand");
+        pageBand.setOpaque(false);
+        pageBand.add(new JLabel(), "growx");
 
         previousPageButton.setName("remoteModpackPreviousPage");
         previousPageButton.setText(strings.previousPageAction());
         previousPageButton.addActionListener(event -> submitRelativePage(-1));
-        filterBand.add(previousPageButton, "h 40!");
+        pageBand.add(previousPageButton, "grow, h 40!");
         nextPageButton.setName("remoteModpackNextPage");
         nextPageButton.setText(strings.nextPageAction());
         nextPageButton.addActionListener(event -> submitRelativePage(1));
-        filterBand.add(nextPageButton, "h 40!");
+        pageBand.add(nextPageButton, "grow, h 40!");
+        filterBand.add(pageBand, "growx");
         add(filterBand, "growx");
 
         choiceList.setName("remoteModpackResults");
@@ -349,6 +440,145 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         add(statusLabel, "growx, h 24!");
         progressHost.setName("remoteModpackInstallProgress");
         add(progressHost, "growx");
+    }
+
+    /// Invalidates source-specific categories, clears stale results, and loads the new tree when visible.
+    private void sourceChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        categoryRequestRevision.incrementAndGet();
+        categoryLoading = false;
+        loadedCategorySource = null;
+        resetCategoryOptions();
+        resetSortOptions();
+        criteriaChanged();
+        if (isDisplayable()) {
+            requestCategoriesForSelectedSource();
+        }
+    }
+
+    /// Clears stale results after a user category selection while ignoring internal option publication.
+    private void categoryChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!applyingCategoryOptions) {
+            criteriaChanged();
+        }
+    }
+
+    /// Clears stale results after a user sort selection while ignoring internal source publication.
+    private void sortChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!applyingSortOptions) {
+            criteriaChanged();
+        }
+    }
+
+    /// Schedules category discovery for the selected available provider at most once per successful load.
+    private void requestCategoriesForSelectedSource() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || categoryLoading) {
+            return;
+        }
+        RemoteModpackCatalogSource source = selectedSource();
+        if (loadedCategorySource == source || !source.isAvailable()) {
+            updateControls();
+            return;
+        }
+        long requestRevision = categoryRequestRevision.incrementAndGet();
+        categoryLoading = true;
+        updateControls();
+        try {
+            workerExecutor.execute(() -> loadCategories(source, requestRevision));
+        } catch (RuntimeException schedulingFailure) {
+            LOG.warning("Failed to schedule remote modpack category loading", schedulingFailure);
+            applyCategoryFailure(source, requestRevision);
+        }
+    }
+
+    /// Loads one provider category tree away from the EDT.
+    ///
+    /// @param source selected provider captured before worker scheduling
+    /// @param requestRevision category request identity
+    private void loadCategories(RemoteModpackCatalogSource source, long requestRevision) {
+        try {
+            @Unmodifiable List<RemoteAddonRepository.Category> categories = backend.loadCategories(source);
+            SwingUiDispatcher.INSTANCE.dispatchOrRun(
+                    () -> applyCategories(source, categories, requestRevision));
+        } catch (IOException | RuntimeException failure) {
+            LOG.warning("Failed to load remote modpack categories", failure);
+            applyCategoryFailure(source, requestRevision);
+        }
+    }
+
+    /// Publishes a provider category tree only while its source and request remain current.
+    ///
+    /// @param source provider that produced the categories
+    /// @param categories immutable provider category roots
+    /// @param requestRevision category request identity
+    private void applyCategories(
+            RemoteModpackCatalogSource source,
+            @Unmodifiable List<RemoteAddonRepository.Category> categories,
+            long requestRevision) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || categoryRequestRevision.get() != requestRevision || selectedSource() != source) {
+            return;
+        }
+        categoryLoading = false;
+        loadedCategorySource = source;
+        applyCategoryOptions(RemoteCatalogCategoryOption.flatten(categories));
+        updateControls();
+    }
+
+    /// Restores the all-categories selector after a current provider category request fails.
+    ///
+    /// @param source provider whose category request failed
+    /// @param requestRevision category request identity
+    private void applyCategoryFailure(RemoteModpackCatalogSource source, long requestRevision) {
+        SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+            if (closed || categoryRequestRevision.get() != requestRevision || selectedSource() != source) {
+                return;
+            }
+            categoryLoading = false;
+            loadedCategorySource = null;
+            resetCategoryOptions();
+            updateControls();
+        });
+    }
+
+    /// Replaces category options without interpreting combo-box events as user filter edits.
+    ///
+    /// @param options immutable flattened provider category options
+    private void applyCategoryOptions(@Unmodifiable List<RemoteCatalogCategoryOption> options) {
+        applyingCategoryOptions = true;
+        try {
+            categoryBox.removeAllItems();
+            for (RemoteCatalogCategoryOption option : Objects.requireNonNull(options, "options")) {
+                categoryBox.addItem(option);
+            }
+            if (categoryBox.getItemCount() > 0) {
+                categoryBox.setSelectedIndex(0);
+            }
+        } finally {
+            applyingCategoryOptions = false;
+        }
+    }
+
+    /// Restores the selector's local all-categories option without performing provider work.
+    private void resetCategoryOptions() {
+        applyCategoryOptions(List.of(RemoteCatalogCategoryOption.all()));
+    }
+
+    /// Publishes only the current provider's distinct server sort behaviors.
+    private void resetSortOptions() {
+        applyingSortOptions = true;
+        try {
+            sortBox.removeAllItems();
+            for (RemoteAddonRepository.SortType sortType : selectedSource().supportedSortTypes()) {
+                sortBox.addItem(sortType);
+            }
+            sortBox.setSelectedItem(RemoteAddonRepository.SortType.POPULARITY);
+        } finally {
+            applyingSortOptions = false;
+        }
     }
 
     /// Starts an explicit user-requested first-page remote source query.
@@ -397,6 +627,8 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 source,
                 searchField.getText(),
                 gameVersionField.getText(),
+                selectedCategory(),
+                selectedSortType(),
                 pageOffset,
                 pageSize);
         long requestRevision = catalogRequestRevision.incrementAndGet();
@@ -701,6 +933,24 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 "remote modpack source selection");
     }
 
+    /// Returns the selected provider category, or null for the explicit all-categories option.
+    ///
+    /// @return selected provider category or null
+    private @Nullable RemoteAddonRepository.Category selectedCategory() {
+        @Nullable RemoteCatalogCategoryOption option =
+                (RemoteCatalogCategoryOption) categoryBox.getSelectedItem();
+        return option == null ? null : option.category();
+    }
+
+    /// Returns the selected Core result ordering while preserving the combo-box non-null invariant.
+    ///
+    /// @return selected provider-supported sort
+    private RemoteAddonRepository.SortType selectedSortType() {
+        return Objects.requireNonNull(
+                (RemoteAddonRepository.SortType) sortBox.getSelectedItem(),
+                "remote modpack sort selection");
+    }
+
     /// Returns the server page size derived from currently visible result rows, or zero before layout exists.
     ///
     /// @return positive measured visible row count, or zero when no actual viewport can be measured
@@ -717,10 +967,13 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     private void updateControls() {
         EdtDispatcher.requireEventDispatchThread();
         boolean inputsEnabled = !closed && activeExecutor == null;
-        sourceBox.setEnabled(inputsEnabled);
-        searchField.setEnabled(inputsEnabled);
-        gameVersionField.setEnabled(inputsEnabled);
-        searchButton.setEnabled(inputsEnabled && !catalogLoading);
+        boolean criteriaEnabled = inputsEnabled && !catalogLoading;
+        sourceBox.setEnabled(criteriaEnabled);
+        searchField.setEnabled(criteriaEnabled);
+        gameVersionField.setEnabled(criteriaEnabled);
+        categoryBox.setEnabled(criteriaEnabled && !categoryLoading);
+        sortBox.setEnabled(criteriaEnabled);
+        searchButton.setEnabled(criteriaEnabled);
 
         @Nullable RemoteModpackCatalogPage page = displayedPage;
         boolean pageButtonsEnabled = inputsEnabled && !catalogLoading && page != null;
@@ -775,6 +1028,8 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         sourceBox.setEnabled(false);
         searchField.setEnabled(false);
         gameVersionField.setEnabled(false);
+        categoryBox.setEnabled(false);
+        sortBox.setEnabled(false);
         versionBox.setEnabled(false);
         instanceNameField.setEnabled(false);
         searchButton.setEnabled(false);

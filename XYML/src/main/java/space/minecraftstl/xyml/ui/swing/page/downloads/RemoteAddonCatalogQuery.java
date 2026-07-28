@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 
 import java.util.Objects;
 
@@ -30,6 +32,8 @@ import java.util.Objects;
 /// @param source selected provider
 /// @param searchText normalized optional project filter
 /// @param gameVersion normalized optional Minecraft-version filter
+/// @param category selected provider category, or null for all categories
+/// @param sortType selected provider-supported result ordering
 /// @param pageOffset zero-based provider page index
 /// @param pageSize positive provider result count requested for the visible viewport
 @NotNullByDefault
@@ -38,6 +42,8 @@ public record RemoteAddonCatalogQuery(
         RemoteAddonCatalogSource source,
         String searchText,
         String gameVersion,
+        @Nullable RemoteAddonRepository.Category category,
+        RemoteAddonRepository.SortType sortType,
         int pageOffset,
         int pageSize) {
     /// Validates local source selection and normalizes free-form criteria without querying a provider.
@@ -46,6 +52,7 @@ public record RemoteAddonCatalogQuery(
         source = Objects.requireNonNull(source, "source");
         searchText = Objects.requireNonNull(searchText, "searchText").trim();
         gameVersion = Objects.requireNonNull(gameVersion, "gameVersion").trim();
+        sortType = Objects.requireNonNull(sortType, "sortType");
         if (pageOffset < 0) {
             throw new IllegalArgumentException("pageOffset must not be negative");
         }

@@ -18,14 +18,17 @@
 package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 
+import java.util.List;
+
 /// Selectable remote catalog backends that provide modpack-capable Core repositories.
 ///
-/// Selection is entirely local state. The page does not make a network request until the user
-/// explicitly presses Search or changes page after completing an earlier search.
+/// Selection updates local criteria and may asynchronously refresh category metadata after display;
+/// project discovery still requires an explicit Search or completed-page navigation command.
 @NotNullByDefault
 public enum RemoteModpackCatalogSource {
     /// Modrinth's public modpack project catalog.
@@ -54,6 +57,23 @@ public enum RemoteModpackCatalogSource {
     /// @return true for Modrinth and for CurseForge when its API key is configured
     public boolean isAvailable() {
         return this != CURSEFORGE || CurseForgeRemoteAddonRepository.isAvailable();
+    }
+
+    /// Returns only result orderings that the selected provider maps to distinct server behavior.
+    ///
+    /// Modrinth maps name and author to relevance, so those duplicate controls are omitted while
+    /// CurseForge exposes every Core sort field directly.
+    ///
+    /// @return immutable provider-supported result orderings
+    public @Unmodifiable List<RemoteAddonRepository.SortType> supportedSortTypes() {
+        if (this == MODRINTH) {
+            return List.of(
+                    RemoteAddonRepository.SortType.POPULARITY,
+                    RemoteAddonRepository.SortType.DATE_CREATED,
+                    RemoteAddonRepository.SortType.LAST_UPDATED,
+                    RemoteAddonRepository.SortType.TOTAL_DOWNLOADS);
+        }
+        return List.of(RemoteAddonRepository.SortType.values());
     }
 
     /// Returns the Core repository dedicated to remote modpack projects.

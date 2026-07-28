@@ -20,16 +20,25 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 
 import java.io.IOException;
 import java.util.List;
 
 /// Blocking Core gateway used by the remote modpack Swing page.
 ///
-/// Implementations may use network access and must only be invoked by the panel's background
-/// executor after the user explicitly requests a search, page transition, or selected-item version list.
+/// Implementations may use network access and run only on the panel's background executor for
+/// display category discovery, explicit search or page transitions, and selected-item versions.
 @NotNullByDefault
 public interface RemoteModpackCatalogBackend {
+    /// Loads provider categories when the catalog becomes displayable or its source changes.
+    ///
+    /// @param source selected remote provider
+    /// @return immutable provider-ordered category roots
+    /// @throws IOException when the provider cannot load categories
+    @Unmodifiable List<RemoteAddonRepository.Category> loadCategories(
+            RemoteModpackCatalogSource source) throws IOException;
+
     /// Searches exactly one source page of remote modpack projects.
     ///
     /// @param query explicit user-requested search parameters

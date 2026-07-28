@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 
 import java.util.List;
 
@@ -29,23 +30,44 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies the finite exact-query cache used only after explicit catalog page visits.
 @NotNullByDefault
 final class RemoteAddonCatalogPageCacheTest {
-    /// Keeps exactly six recent user-visited pages, refreshes on reuse, and separates viewport sizes.
+    /// Keeps the eight closest user-visited pages and starts a new scope after viewport geometry changes.
     @Test
-    void retainsSixLeastRecentlyUsedExactQueryPages() {
+    void retainsClosestVisitedPagesWithinOneExactViewportScope() {
         RemoteAddonCatalogPageCache cache = new RemoteAddonCatalogPageCache();
 
-        assertEquals(6, RemoteAddonCatalogPageCache.MAXIMUM_PAGE_COUNT);
+        assertEquals(8, RemoteAddonCatalogPageCache.MAXIMUM_PAGE_COUNT);
         for (int pageOffset = 0; pageOffset < RemoteAddonCatalogPageCache.MAXIMUM_PAGE_COUNT; pageOffset++) {
-            cache.put(query(pageOffset, 4), page(pageOffset));
+            cache.put(query(pageOffset, 4), page(pageOffset, 20));
         }
 
         assertTrue(cache.get(query(0, 4)).isPresent());
-        cache.put(query(6, 4), page(6));
+        cache.put(query(8, 4), page(8, 20));
+
+        assertFalse(cache.get(query(0, 4)).isPresent());
+        assertTrue(cache.get(query(1, 4)).isPresent());
+        assertTrue(cache.get(query(8, 4)).isPresent());
+        assertFalse(cache.get(query(0, 5)).isPresent());
+
+        cache.put(query(0, 5), page(0, 20));
+        assertFalse(cache.get(query(8, 4)).isPresent());
+        assertTrue(cache.get(query(0, 5)).isPresent());
+    }
+
+    /// Drops previously visited offsets that no longer exist when a provider reports fewer total pages.
+    @Test
+    void followsShrinkingProviderPageBoundaries() {
+        RemoteAddonCatalogPageCache cache = new RemoteAddonCatalogPageCache();
+        for (int pageOffset = 0; pageOffset < 6; pageOffset++) {
+            cache.put(query(pageOffset, 4), page(pageOffset, 20));
+        }
+
+        cache.put(query(2, 4), page(2, 3));
 
         assertTrue(cache.get(query(0, 4)).isPresent());
-        assertFalse(cache.get(query(1, 4)).isPresent());
-        assertTrue(cache.get(query(6, 4)).isPresent());
-        assertFalse(cache.get(query(0, 5)).isPresent());
+        assertTrue(cache.get(query(1, 4)).isPresent());
+        assertTrue(cache.get(query(2, 4)).isPresent());
+        assertFalse(cache.get(query(3, 4)).isPresent());
+        assertFalse(cache.get(query(5, 4)).isPresent());
     }
 
     /// Creates one explicit page query with fixed filters and a chosen viewport-derived size.
@@ -59,6 +81,8 @@ final class RemoteAddonCatalogPageCacheTest {
                 RemoteAddonCatalogSource.MODRINTH,
                 "cache fixture",
                 "1.20.1",
+                null,
+                RemoteAddonRepository.SortType.POPULARITY,
                 pageOffset,
                 pageSize);
     }
@@ -66,8 +90,9 @@ final class RemoteAddonCatalogPageCacheTest {
     /// Creates one empty successful provider page for a known page index.
     ///
     /// @param pageOffset zero-based represented page
+    /// @param totalPages actual provider page count
     /// @return immutable fixture page
-    private static RemoteAddonCatalogPage page(int pageOffset) {
-        return new RemoteAddonCatalogPage(List.of(), pageOffset, 8);
+    private static RemoteAddonCatalogPage page(int pageOffset, int totalPages) {
+        return new RemoteAddonCatalogPage(List.of(), pageOffset, totalPages);
     }
 }
