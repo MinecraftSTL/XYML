@@ -477,17 +477,11 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         return page;
     }
 
-    /// Creates the about page with the running build identity and external release and license actions.
+    /// Creates the about page with identity, acknowledgements, dependency notices, and legal links.
     ///
     /// @return about content
     private JPanel createAboutPage() {
-        JPanel page = createPage();
-        JLabel title = createHeading(Metadata.FULL_TITLE);
-        page.add(title, "growx");
-        page.add(new JLabel("Java " + Runtime.version().feature()), "growx");
-        page.add(createExternalLinkButton(i18n("update"), Metadata.MANUAL_UPDATE_URL), "alignx left");
-        page.add(createExternalLinkButton(i18n("about.claim"), Metadata.EULA_URL), "alignx left");
-        return page;
+        return new AboutPanel(this::openExternalLink);
     }
 
     /// Creates a button that opens one trusted metadata URL through the native browser.
