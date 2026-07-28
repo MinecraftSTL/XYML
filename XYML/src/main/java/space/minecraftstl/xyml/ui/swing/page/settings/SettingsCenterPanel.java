@@ -109,6 +109,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// April Fools behavior suppression preference.
     private final JCheckBox disableAprilFoolsBox = new JCheckBox(i18n("settings.launcher.disable_april_fools"));
 
+    /// Shared restart status and action for the language and April Fools settings.
+    private final SettingsRestartPanel restartPanel;
+
     /// Common-directory mode selector.
     private final JComboBox<EnumCommonDirectory> commonDirectoryTypeBox = new JComboBox<>(EnumCommonDirectory.values());
 
@@ -170,6 +173,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Prevents programmatic component changes from writing a snapshot back to the store.
     private boolean applyingSnapshot;
 
+    /// Whether restart preparation temporarily blocks settings navigation and edits.
+    private boolean restartInProgress;
+
     /// Whether this panel has released its owned store resources.
     private boolean closed;
 
@@ -193,10 +199,26 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// @param store toolkit-neutral general and network settings store
     /// @param appearancePanel appearance page to embed and own
     public SettingsCenterPanel(SettingsCenterStore store, AppearanceSettingsPanel appearancePanel) {
+        this(store, appearancePanel, LauncherSettingsRestartCommand.create());
+    }
+
+    /// Creates an embeddable settings center with an injectable restart lifecycle command.
+    ///
+    /// @param store toolkit-neutral general and network settings store
+    /// @param appearancePanel appearance page to embed and own
+    /// @param restartCommand launcher restart lifecycle command
+    SettingsCenterPanel(
+            SettingsCenterStore store,
+            AppearanceSettingsPanel appearancePanel,
+            SettingsRestartCommand restartCommand) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.store = Objects.requireNonNull(store, "store");
         this.appearancePanel = Objects.requireNonNull(appearancePanel, "appearancePanel");
+        restartPanel = new SettingsRestartPanel(
+                localizedRestartStrings(),
+                restartCommand,
+                this::restartActivityChanged);
         languageBox = new JComboBox<>(new DefaultComboBoxModel<>(
                 SupportedLocale.getSupportedLocales().toArray(SupportedLocale[]::new)));
         javaManagementPanel = new JavaManagementPanel(new JavaManagerRuntimeManagementService());
@@ -253,6 +275,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 gameDirectoryManagementPanel.close();
                 launcherLogPanel.close();
                 nbtSettingsPanel.close();
+                restartPanel.close();
                 setInteractiveControlsEnabled(false);
             }
         });
@@ -284,6 +307,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             @Nullable SupportedLocale selected = (SupportedLocale) languageBox.getSelectedItem();
             if (!applyingSnapshot && selected != null) {
                 store.setLanguage(selected);
+                restartPanel.updateSettings(selected, disableAprilFoolsBox.isSelected());
             }
         });
         previewUpdatesBox.addActionListener(event -> {
@@ -299,6 +323,10 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         disableAprilFoolsBox.addActionListener(event -> {
             if (!applyingSnapshot) {
                 store.setAprilFoolsDisabled(disableAprilFoolsBox.isSelected());
+                @Nullable SupportedLocale selected = (SupportedLocale) languageBox.getSelectedItem();
+                if (selected != null) {
+                    restartPanel.updateSettings(selected, disableAprilFoolsBox.isSelected());
+                }
             }
         });
     }
@@ -366,11 +394,11 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         JPanel page = createPage();
         page.add(createHeading(i18n("settings.launcher.general")), "growx");
         page.add(createFieldRow(i18n("settings.launcher.language"), languageBox), "growx");
-        page.add(createHint(i18n("settings.take_effect_after_restart")), "growx");
+        page.add(disableAprilFoolsBox, "growx");
+        page.add(restartPanel, "growx");
         page.add(new JSeparator(), "growx");
         page.add(previewUpdatesBox, "growx");
         page.add(disableUpdatePromptBox, "growx");
-        page.add(disableAprilFoolsBox, "growx");
         page.add(new JSeparator(), "growx");
         page.add(createHeading(i18n("settings.launcher.debug")), "growx");
         page.add(launcherLogPanel, "growx");
@@ -503,16 +531,6 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         JLabel heading = new JLabel(Objects.requireNonNull(text, "text"));
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 20.0F));
         return heading;
-    }
-
-    /// Creates a muted textual hint for a real preference constraint.
-    ///
-    /// @param text hint text
-    /// @return configured hint label
-    private static JLabel createHint(String text) {
-        JLabel hint = new JLabel(Objects.requireNonNull(text, "text"));
-        hint.setFont(hint.getFont().deriveFont(Font.PLAIN, 12.0F));
-        return hint;
     }
 
     /// Creates a standard two-column label and component row.
@@ -778,6 +796,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             previewUpdatesBox.setSelected(snapshot.acceptPreviewUpdates());
             disableUpdatePromptBox.setSelected(snapshot.disableAutomaticUpdatePrompt());
             disableAprilFoolsBox.setSelected(snapshot.disableAprilFools());
+            restartPanel.updateSettings(snapshot.language(), snapshot.disableAprilFools());
 
             commonDirectoryTypeBox.setSelectedItem(snapshot.commonDirectoryType());
             commonDirectoryField.setText(snapshot.commonDirectory());
@@ -807,28 +826,41 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     ///
     /// @param enabled whether settings changes can be persisted
     private void setInteractiveControlsEnabled(boolean enabled) {
-        languageBox.setEnabled(enabled);
-        previewUpdatesBox.setEnabled(enabled);
-        disableUpdatePromptBox.setEnabled(enabled);
-        disableAprilFoolsBox.setEnabled(enabled);
-        commonDirectoryTypeBox.setEnabled(enabled);
-        chooseDirectoryButton.setEnabled(enabled);
-        automaticThreadsBox.setEnabled(enabled);
-        versionListSourceBox.setEnabled(enabled);
-        fileDownloadSourceBox.setEnabled(enabled);
-        addonSourceBox.setEnabled(enabled);
-        proxyTypeBox.setEnabled(enabled);
-        proxyAuthenticationBox.setEnabled(enabled);
-        confirmNetworkButton.setEnabled(enabled);
-        networkValidationLabel.setEnabled(enabled);
+        boolean interactive = enabled && !restartInProgress;
+        tabs.setEnabled(!restartInProgress);
+        languageBox.setEnabled(interactive);
+        previewUpdatesBox.setEnabled(interactive);
+        disableUpdatePromptBox.setEnabled(interactive);
+        disableAprilFoolsBox.setEnabled(interactive);
+        restartPanel.setAvailable(enabled);
+        commonDirectoryTypeBox.setEnabled(interactive);
+        chooseDirectoryButton.setEnabled(interactive);
+        automaticThreadsBox.setEnabled(interactive);
+        versionListSourceBox.setEnabled(interactive);
+        fileDownloadSourceBox.setEnabled(interactive);
+        addonSourceBox.setEnabled(interactive);
+        proxyTypeBox.setEnabled(interactive);
+        proxyAuthenticationBox.setEnabled(interactive);
+        confirmNetworkButton.setEnabled(interactive);
+        networkValidationLabel.setEnabled(interactive);
         updateDownloadControlAvailability();
         updateProxyControlAvailability();
+    }
+
+    /// Blocks or restores settings edits while a restart waits for persistence and process startup.
+    ///
+    /// @param inProgress whether the restart command is active
+    private void restartActivityChanged(boolean inProgress) {
+        EdtDispatcher.requireEventDispatchThread();
+        restartInProgress = inProgress;
+        @Nullable SettingsCenterSnapshot snapshot = displayedSnapshot;
+        setInteractiveControlsEnabled(snapshot != null && snapshot.writable());
     }
 
     /// Updates controls whose availability depends on directory mode and automatic download concurrency.
     private void updateDownloadControlAvailability() {
         @Nullable SettingsCenterSnapshot snapshot = displayedSnapshot;
-        boolean writable = snapshot != null && snapshot.writable() && !closed;
+        boolean writable = snapshot != null && snapshot.writable() && !closed && !restartInProgress;
         @Nullable EnumCommonDirectory directoryType = (EnumCommonDirectory) commonDirectoryTypeBox.getSelectedItem();
         boolean customDirectory = directoryType == EnumCommonDirectory.CUSTOM;
         commonDirectoryField.setEnabled(writable && customDirectory);
@@ -840,7 +872,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Updates controls whose availability depends on the selected proxy strategy and authentication preference.
     private void updateProxyControlAvailability() {
         @Nullable SettingsCenterSnapshot snapshot = displayedSnapshot;
-        boolean writable = snapshot != null && snapshot.writable() && !closed;
+        boolean writable = snapshot != null && snapshot.writable() && !closed && !restartInProgress;
         @Nullable ProxyType proxyType = (ProxyType) proxyTypeBox.getSelectedItem();
         boolean customProxy = proxyType != null && proxyType.usesCustomAddress();
         boolean authenticatedProxy = customProxy && proxyAuthenticationBox.isSelected();
@@ -849,5 +881,17 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         proxyAuthenticationBox.setEnabled(writable && customProxy);
         proxyUsernameField.setEnabled(writable && authenticatedProxy);
         proxyPasswordField.setEnabled(writable && authenticatedProxy);
+    }
+
+    /// Creates localized restart copy for the two settings that are process-initialized.
+    ///
+    /// @return localized shared restart presentation
+    private static SettingsRestartStrings localizedRestartStrings() {
+        return new SettingsRestartStrings(
+                i18n("settings.restart.prompt"),
+                i18n("settings.restart.required"),
+                i18n("settings.restart.action"),
+                i18n("settings.restart.in_progress"),
+                i18n("settings.restart.failed"));
     }
 }
