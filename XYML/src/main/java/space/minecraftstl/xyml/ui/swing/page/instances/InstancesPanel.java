@@ -42,6 +42,7 @@ import java.awt.CardLayout;
 import java.awt.Font;
 import java.util.Objects;
 import java.util.OptionalInt;
+import java.util.concurrent.CompletionStage;
 
 /// Presents an installed-instance list whose source demand follows measured viewport geometry.
 ///
@@ -66,6 +67,9 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
 
     /// Localized page text.
     private final InstancesStrings strings;
+
+    /// Non-owning coordinator used to leave a dynamic management view from shell navigation.
+    private final InstanceManagementCoordinator managementCoordinator;
 
     /// Viewport-measured single-choice list.
     private final ViewportChoiceList<InstanceListItem> choiceList;
@@ -155,7 +159,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         EdtDispatcher.requireEventDispatchThread();
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
-        Objects.requireNonNull(managementCoordinator, "managementCoordinator");
+        this.managementCoordinator = Objects.requireNonNull(managementCoordinator, "managementCoordinator");
         choiceList = new ViewportChoiceList<>(model, new InstanceListCellRenderer());
 
         @Nullable Subscription createdModelSubscription = null;
@@ -166,7 +170,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
                     model.subscribe(this::modelChanged),
                     "model returned null subscription");
             createdManagementHostLease = Objects.requireNonNull(
-                    managementCoordinator.attachHost(managementHost),
+                    this.managementCoordinator.attachHost(managementHost),
                     "management coordinator returned null host lease");
             applySnapshot(model.snapshot());
         } catch (RuntimeException | Error failure) {
@@ -203,6 +207,13 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
     /// @return viewport-driven instance list
     public ViewportChoiceList<InstanceListItem> choiceList() {
         return choiceList;
+    }
+
+    /// Closes any active instance-management view and restores the installed-instance list.
+    ///
+    /// @return asynchronous coordinator completion
+    public CompletionStage<@Nullable Void> showInstanceList() {
+        return managementCoordinator.returnToInstanceList();
     }
 
     /// Releases the model subscription and viewport requests from any caller thread.

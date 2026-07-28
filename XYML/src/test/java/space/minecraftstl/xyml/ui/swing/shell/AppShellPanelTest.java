@@ -63,6 +63,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Container;
@@ -163,6 +164,7 @@ public final class AppShellPanelTest {
                         () -> assertTrue(rightEdge(toolbar.accountSelector()) <= toolbar.instanceSelector().getX()),
                         () -> assertTrue(rightEdge(toolbar.instanceSelector()) <= toolbar.launchButton().getX()),
                         () -> assertTrue(toolbar.instanceSelector().getX() > toolbar.getWidth() / 2),
+                        () -> assertTrue(toolbar.brandLabel().getX() >= 12),
                         () -> assertEquals(Boolean.TRUE, toolbar.getClientProperty(
                                 FlatClientProperties.COMPONENT_TITLE_BAR_CAPTION)),
                         () -> assertEquals("mac horizontal zeroInFullScreen", placeholderPolicy(
@@ -196,9 +198,9 @@ public final class AppShellPanelTest {
                         () -> assertEquals(
                                 space.minecraftstl.xyml.util.i18n.I18n.i18n("game_directory.new"),
                                 toolbar.gameDirectorySelector().addButton().getText()),
-                        () -> assertThrows(
-                                IllegalArgumentException.class,
-                                () -> panel.navigationButton(ShellPageId.INSTANCES)));
+                        () -> assertEquals(
+                                ShellPageId.INSTANCES,
+                                panel.navigationButton(ShellPageId.INSTANCES).page()));
 
                 FlatSVGIcon accountIcon = assertInstanceOf(
                         FlatSVGIcon.class,
@@ -214,7 +216,9 @@ public final class AppShellPanelTest {
                         () -> assertEquals(1, homeModel.launchCount()),
                         () -> assertEquals(ShellPageId.ACCOUNTS, panel.selectedPage()));
                 panel.navigationButton(ShellPageId.ACCOUNTS).doClick();
-                assertEquals(ShellPageId.INSTANCES, panel.selectedPage());
+                assertAll(
+                        () -> assertEquals(ShellPageId.INSTANCES, panel.selectedPage()),
+                        () -> assertTrue(panel.navigationButton(ShellPageId.INSTANCES).isSelected()));
             });
         } finally {
             panel.close();
@@ -297,9 +301,28 @@ public final class AppShellPanelTest {
                     () -> assertTrue(countOpaquePixels(image) > (long) RENDER_WIDTH * RENDER_HEIGHT * 9 / 10),
                     () -> assertTrue(sampledColors.size() >= 8));
 
+            ShellNavigationButton accountButton = panel.navigationButton(ShellPageId.ACCOUNTS);
+            ShellNavigationButton instancesButton = panel.navigationButton(ShellPageId.INSTANCES);
+            ShellNavigationButton downloadsButton = panel.navigationButton(ShellPageId.DOWNLOADS);
+            ShellNavigationButton settingsButton = panel.navigationButton(ShellPageId.SETTINGS);
+            ShellNavigationRail navigationRail = assertInstanceOf(
+                    ShellNavigationRail.class,
+                    accountButton.getParent().getParent());
+            int accountY = SwingUtilities.convertPoint(accountButton, 0, 0, navigationRail).y;
+            int instancesY = SwingUtilities.convertPoint(instancesButton, 0, 0, navigationRail).y;
+            int downloadsY = SwingUtilities.convertPoint(downloadsButton, 0, 0, navigationRail).y;
+            int settingsY = SwingUtilities.convertPoint(settingsButton, 0, 0, navigationRail).y;
+            assertAll(
+                    () -> assertTrue(accountY < instancesY),
+                    () -> assertTrue(instancesY < downloadsY),
+                    () -> assertTrue(settingsY > navigationRail.getHeight() / 2),
+                    () -> assertTrue(
+                            navigationRail.getHeight() - settingsY - settingsButton.getHeight() <= 10));
+
             for (ShellPageId page : List.of(
-                    ShellPageId.DOWNLOADS,
                     ShellPageId.ACCOUNTS,
+                    ShellPageId.INSTANCES,
+                    ShellPageId.DOWNLOADS,
                     ShellPageId.SETTINGS)) {
                 ShellNavigationButton button = panel.navigationButton(page);
                 FlatSVGIcon icon = assertInstanceOf(FlatSVGIcon.class, button.getIcon());

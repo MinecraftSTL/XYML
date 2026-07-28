@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.SettingsCenterPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
@@ -113,7 +114,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         pageCache = new ShellPageCache<>(Objects.requireNonNull(pageFactories));
         overlayDeck = new ShellPageDeck(animator, pageTransitionDuration);
         instancesPage = pageCache.getOrCreate(ShellPageId.INSTANCES);
-        navigationRail = new ShellNavigationRail(pagePresentations, this::toggleOverlay);
+        navigationRail = new ShellNavigationRail(pagePresentations, this::togglePage);
         toolbar = new ShellToolbarPanel(
                 Objects.requireNonNull(windowTitle, "windowTitle"),
                 toolbarModels.home(),
@@ -156,11 +157,15 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
         Objects.requireNonNull(page);
         if (!navigationState.select(page)) {
+            if (page == ShellPageId.INSTANCES) {
+                showInstanceList();
+            }
             return;
         }
 
         updateSelection(page);
         if (page == ShellPageId.INSTANCES) {
+            showInstanceList();
             overlayDeck.setVisible(false);
             workspace.revalidate();
             workspace.repaint();
@@ -170,21 +175,29 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         overlayDeck.showPage(pageCache.getOrCreate(page), true);
     }
 
-    /// Toggles one transient destination from the left navigation rail.
+    /// Opens the instance list or toggles one transient destination from the left navigation rail.
     ///
     /// Repeating an active rail destination closes its overlay and exposes persistent instance management. Other
     /// programmatic navigation, including popup management footers, continues to keep an already-open page visible.
     ///
-    /// @param page transient destination selected by the user
-    private void toggleOverlay(ShellPageId page) {
+    /// @param page destination selected by the user
+    private void togglePage(ShellPageId page) {
         EdtDispatcher.requireEventDispatchThread();
         ShellPageId destination = Objects.requireNonNull(page, "page");
         if (destination == ShellPageId.INSTANCES) {
-            throw new IllegalArgumentException("Persistent instance management is not an overlay");
+            navigateTo(ShellPageId.INSTANCES);
+            return;
         }
         navigateTo(navigationState.selectedPage() == destination
                 ? ShellPageId.INSTANCES
                 : destination);
+    }
+
+    /// Restores the persistent page's list card when its production component supports management views.
+    private void showInstanceList() {
+        if (instancesPage instanceof InstancesPanel panel) {
+            panel.showInstanceList().toCompletableFuture().join();
+        }
     }
 
     /// Opens the settings directory tab and optionally starts its add workflow.

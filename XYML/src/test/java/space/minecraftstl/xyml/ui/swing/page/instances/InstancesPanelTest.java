@@ -347,7 +347,7 @@ public final class InstancesPanelTest {
         });
     }
 
-    /// The coordinator mount replaces the list card and its return command restores it.
+    /// The coordinator mount replaces the list card and the public list command restores it.
     @Test
     public void mountsAndReturnsCoordinatorOwnedManagementView() {
         FakeInstancesModel model = FakeInstancesModel.immediate(items(1), snapshot(0, 1, 0L));
@@ -375,8 +375,7 @@ public final class InstancesPanelTest {
                         view.component().getParent()),
                 () -> assertEquals("instance-0", coordinator.currentInstanceId())));
 
-        view.requestReturn();
-        EdtDispatcher.executeAndWait(() -> { });
+        panel.showInstanceList().toCompletableFuture().join();
         onEventDispatchThread(() -> assertAll(
                 () -> assertTrue(findComponent(panel, "instancesListWorkspace").isVisible()),
                 () -> assertFalse(findComponent(panel, "instancesManagementHost").isVisible()),
