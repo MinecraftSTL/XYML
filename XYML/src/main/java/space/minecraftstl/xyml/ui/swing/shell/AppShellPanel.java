@@ -23,10 +23,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
-import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
-import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
-import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JComponent;
@@ -83,9 +80,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     ///
     /// @param pageFactories one lazy Swing page factory for every destination
     /// @param pagePresentations localized labels and mnemonics for every destination
-    /// @param homeModel launcher selection and launch model
-    /// @param instancesModel selected-directory lazy instance model
-    /// @param gameDirectories configured game-directory selection service
+    /// @param toolbarModels non-owning launcher workflow models used by the title bar
     /// @param homeStrings localized title-bar launch controls
     /// @param taskProgressStrings localized launch progress controls
     /// @param animator the shared Swing animator
@@ -94,9 +89,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     public AppShellPanel(
             Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> pageFactories,
             ShellPagePresentations pagePresentations,
-            HomeModel homeModel,
-            InstancesModel instancesModel,
-            GameDirectoryManagementService gameDirectories,
+            ShellToolbarModels toolbarModels,
             HomeStrings homeStrings,
             TaskProgressStrings taskProgressStrings,
             SwingAnimator animator,
@@ -104,9 +97,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
             Duration progressAnimationDuration) {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(pagePresentations, "pagePresentations");
-        Objects.requireNonNull(homeModel, "homeModel");
-        Objects.requireNonNull(instancesModel, "instancesModel");
-        Objects.requireNonNull(gameDirectories, "gameDirectories");
+        Objects.requireNonNull(toolbarModels, "toolbarModels");
         Objects.requireNonNull(homeStrings, "homeStrings");
         Objects.requireNonNull(taskProgressStrings, "taskProgressStrings");
         Objects.requireNonNull(animator, "animator");
@@ -117,14 +108,15 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         overlayDeck = new ShellPageDeck(animator, pageTransitionDuration);
         instancesPage = pageCache.getOrCreate(ShellPageId.INSTANCES);
         toolbar = new ShellToolbarPanel(
-                homeModel,
-                instancesModel,
-                gameDirectories,
+                toolbarModels.home(),
+                toolbarModels.instances(),
+                toolbarModels.accounts(),
+                toolbarModels.gameDirectories(),
                 homeStrings,
                 pagePresentations,
                 this::navigateTo);
         launchTaskOverlay = new LaunchTaskOverlayPanel(
-                homeModel,
+                toolbarModels.home(),
                 homeStrings,
                 taskProgressStrings,
                 animator,

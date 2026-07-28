@@ -22,6 +22,7 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -39,6 +40,10 @@ import space.minecraftstl.xyml.ui.swing.ThemeMode;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountListCellRenderer;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountListItem;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
@@ -130,7 +135,7 @@ public final class AppShellPanelTest {
         }
     }
 
-    /// The title bar follows platform-placeholder, account, directory, instance, launch, and native-button order.
+    /// The title bar follows platform-placeholder, directory, account, instance, launch, and native-button order.
     @Test
     public void laysOutTitleBarWorkflowInStableOrder() {
         TestHomeModel homeModel = new TestHomeModel();
@@ -146,13 +151,13 @@ public final class AppShellPanelTest {
                 assertAll(
                         () -> assertEquals(7, components.length),
                         () -> assertSame(toolbar.macWindowButtonsPlaceholder(), components[0]),
-                        () -> assertSame(toolbar.accountButton(), components[1]),
-                        () -> assertSame(toolbar.gameDirectoryBox(), components[2]),
+                        () -> assertSame(toolbar.gameDirectoryBox(), components[1]),
+                        () -> assertSame(toolbar.accountSelector(), components[2]),
                         () -> assertSame(toolbar.instanceSelector(), components[4]),
                         () -> assertSame(toolbar.launchButton(), components[5]),
                         () -> assertSame(toolbar.winWindowButtonsPlaceholder(), components[6]),
-                        () -> assertTrue(rightEdge(toolbar.accountButton()) <= toolbar.gameDirectoryBox().getX()),
-                        () -> assertTrue(rightEdge(toolbar.gameDirectoryBox()) <= toolbar.instanceSelector().getX()),
+                        () -> assertTrue(rightEdge(toolbar.gameDirectoryBox()) <= toolbar.accountSelector().getX()),
+                        () -> assertTrue(rightEdge(toolbar.accountSelector()) <= toolbar.instanceSelector().getX()),
                         () -> assertTrue(rightEdge(toolbar.instanceSelector()) <= toolbar.launchButton().getX()),
                         () -> assertTrue(toolbar.instanceSelector().getX() > toolbar.getWidth() / 2),
                         () -> assertEquals(Boolean.TRUE, toolbar.getClientProperty(
@@ -162,23 +167,79 @@ public final class AppShellPanelTest {
                         () -> assertEquals("win horizontal", placeholderPolicy(
                                 toolbar.winWindowButtonsPlaceholder())),
                         () -> assertEquals(testHomeStrings().accountLabel(),
-                                toolbar.accountButton().getAccessibleContext().getAccessibleName()),
+                                toolbar.accountSelector().valueButton()
+                                        .getAccessibleContext().getAccessibleName()),
+                        () -> assertEquals(
+                                AccountListCellRenderer.ROW_HEIGHT
+                                        + LazyAccountSelector.MANAGEMENT_FOOTER_HEIGHT,
+                                toolbar.accountSelector().preparePopupSize().height),
                         () -> assertEquals(testHomeStrings().launchAction(),
                                 toolbar.launchButton().getAccessibleContext().getAccessibleName()));
 
-                FlatSVGIcon accountIcon = assertInstanceOf(FlatSVGIcon.class, toolbar.accountButton().getIcon());
+                FlatSVGIcon accountIcon = assertInstanceOf(
+                        FlatSVGIcon.class,
+                        toolbar.accountSelector().valueButton().getIcon());
                 FlatSVGIcon launchIcon = assertInstanceOf(FlatSVGIcon.class, toolbar.launchButton().getIcon());
                 assertAll(
                         () -> assertTrue(accountIcon.hasFound()),
                         () -> assertTrue(launchIcon.hasFound()));
 
                 toolbar.launchButton().doClick();
-                toolbar.accountButton().doClick();
+                toolbar.accountSelector().manageButton().doClick();
                 assertAll(
                         () -> assertEquals(1, homeModel.launchCount()),
                         () -> assertEquals(ShellPageId.ACCOUNTS, panel.selectedPage()));
                 toolbar.navigationButton(ShellPageId.INSTANCES).doClick();
                 assertEquals(ShellPageId.INSTANCES, panel.selectedPage());
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
+    /// Empty account state keeps the full selector and management route reachable.
+    @Test
+    public void keepsEmptyAccountSelectorReachable() {
+        AppShellPanel panel = createPanel(
+                pageFactories(creationCounts()),
+                new TestHomeModel(),
+                emptyAccountsModel());
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                LazyAccountSelector selector = panel.toolbar().accountSelector();
+                Dimension popupSize = selector.preparePopupSize();
+                assertAll(
+                        () -> assertTrue(selector.valueButton().isEnabled()),
+                        () -> assertTrue(selector.manageButton().isEnabled()),
+                        () -> assertFalse(selector.choiceList().isEnabled()),
+                        () -> assertTrue(selector.emptyLabel().isVisible()),
+                        () -> assertEquals(testHomeStrings().missingAccountLabel(),
+                                selector.emptyLabel().getText()),
+                        () -> assertEquals(
+                                AccountListCellRenderer.ROW_HEIGHT
+                                        + LazyAccountSelector.MANAGEMENT_FOOTER_HEIGHT,
+                                popupSize.height));
+                selector.manageButton().doClick();
+                assertEquals(ShellPageId.ACCOUNTS, panel.selectedPage());
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
+    /// Launcher selection lock disables account switching and its management footer together.
+    @Test
+    public void disablesAccountSelectorWithSelectionCommands() {
+        AppShellPanel panel = createPanel(creationCounts(), new TestHomeModel(false));
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                LazyAccountSelector selector = panel.toolbar().accountSelector();
+                assertAll(
+                        () -> assertFalse(selector.valueButton().isEnabled()),
+                        () -> assertFalse(selector.manageButton().isEnabled()),
+                        () -> assertFalse(selector.choiceList().isEnabled()));
             });
         } finally {
             panel.close();
@@ -283,6 +344,19 @@ public final class AppShellPanelTest {
     private static AppShellPanel createPanel(
             Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> factories,
             HomeModel homeModel) {
+        return createPanel(factories, homeModel, testAccountsModel());
+    }
+
+    /// Creates a shell around caller-selected factories, launcher state, and account source.
+    ///
+    /// @param factories complete page factories
+    /// @param homeModel caller-owned launcher model
+    /// @param accountsModel caller-owned lazy account model
+    /// @return initialized shell panel
+    private static AppShellPanel createPanel(
+            Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> factories,
+            HomeModel homeModel,
+            AccountsModel accountsModel) {
         AtomicReference<@Nullable AppShellPanel> result = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> {
             SwingThemeManager themeManager = new SwingThemeManager(
@@ -293,9 +367,11 @@ public final class AppShellPanelTest {
             result.set(new AppShellPanel(
                     factories,
                     ShellPagePresentations.englishFallback(),
-                    homeModel,
-                    testInstancesModel(),
-                    testGameDirectories(),
+                    new ShellToolbarModels(
+                            homeModel,
+                            testInstancesModel(),
+                            accountsModel,
+                            testGameDirectories()),
                     testHomeStrings(),
                     TaskProgressStrings.english(),
                     new SwingAnimator(MotionPolicy.OFF, 16),
@@ -345,6 +421,20 @@ public final class AppShellPanelTest {
     /// @return empty enabled instance model
     static InstancesModel testInstancesModel() {
         return new TestInstancesModel();
+    }
+
+    /// Creates the deterministic one-account source shared by shell and frame tests.
+    ///
+    /// @return one-account lazy selection model
+    static AccountsModel testAccountsModel() {
+        return new TestAccountsModel(true);
+    }
+
+    /// Creates the deterministic empty account source used by empty-state tests.
+    ///
+    /// @return empty lazy selection model
+    private static AccountsModel emptyAccountsModel() {
+        return new TestAccountsModel(false);
     }
 
     /// Creates the deterministic selected game-directory service shared by shell tests.
@@ -481,6 +571,21 @@ public final class AppShellPanelTest {
         /// Number of launch commands delegated by the toolbar.
         private final AtomicInteger launches = new AtomicInteger();
 
+        /// Whether this fixture permits account and instance selection commands.
+        private final boolean selectionCommandsEnabled;
+
+        /// Creates the default selection-enabled launcher state.
+        private TestHomeModel() {
+            this(true);
+        }
+
+        /// Creates a launcher state with caller-selected command availability.
+        ///
+        /// @param selectionCommandsEnabled whether selection commands are enabled
+        private TestHomeModel(boolean selectionCommandsEnabled) {
+            this.selectionCommandsEnabled = selectionCommandsEnabled;
+        }
+
         /// Returns a launch-ready toolbar state.
         @Override
         public HomeSnapshot snapshot() {
@@ -492,7 +597,7 @@ public final class AppShellPanelTest {
                     "Ready to launch",
                     true,
                     false,
-                    true);
+                    selectionCommandsEnabled);
         }
 
         /// Registers a no-op test snapshot listener.
@@ -610,6 +715,107 @@ public final class AppShellPanelTest {
         /// Performs no management action because no instance is selected.
         @Override
         public void manageSelectedInstance() {
+        }
+    }
+
+    /// One-account exact-count source that performs no network or filesystem access.
+    @NotNullByDefault
+    private static final class TestAccountsModel implements AccountsModel {
+        /// Stable selected account row.
+        private static final AccountListItem ACCOUNT = new AccountListItem(
+                "account-1",
+                "Player",
+                "Offline",
+                "00000000-0000-0000-0000-000000000001");
+
+        /// Immutable exact source rows.
+        private final @Unmodifiable List<AccountListItem> accounts;
+
+        /// Creates either a one-account or empty exact source.
+        ///
+        /// @param populated whether to expose the stable account row
+        private TestAccountsModel(boolean populated) {
+            accounts = populated ? List.of(ACCOUNT) : List.of();
+        }
+
+        /// Returns the stable one-account selection snapshot.
+        @Override
+        public AccountsSnapshot snapshot() {
+            OptionalInt selection = accounts.isEmpty() ? OptionalInt.empty() : OptionalInt.of(0);
+            return new AccountsSnapshot(selection, accounts.size(), 0L);
+        }
+
+        /// Registers a no-op account listener.
+        ///
+        /// @param listener required listener
+        /// @return independently cancellable no-op registration
+        @Override
+        public Subscription subscribe(ValueChangeListener<AccountsSnapshot> listener) {
+            Objects.requireNonNull(listener, "listener");
+            return Subscription.create(() -> { });
+        }
+
+        /// Reports the exact one-row account count.
+        @Override
+        public OptionalInt exactItemCount() {
+            return OptionalInt.of(accounts.size());
+        }
+
+        /// Completes the requested clamped account range immediately.
+        ///
+        /// @param desiredRange requested viewport range
+        /// @param cancellation cooperative cancellation signal
+        /// @return completed exact account page
+        @Override
+        public CompletionStage<ChoicePage<AccountListItem>> load(
+                IndexRange desiredRange,
+                LoadCancellation cancellation) {
+            Objects.requireNonNull(cancellation, "cancellation");
+            IndexRange range = Objects.requireNonNull(desiredRange, "desiredRange")
+                    .clampToItemCount(accounts.size());
+            @Unmodifiable List<AccountListItem> items = List.copyOf(
+                    accounts.subList(range.startInclusive(), range.endExclusive()));
+            return CompletableFuture.completedFuture(
+                    new ChoicePage<>(
+                            range,
+                            items,
+                            OptionalInt.of(accounts.size()),
+                            range.endExclusive() == accounts.size()));
+        }
+
+        /// Accepts the stable account identifier without mutating the fixture.
+        ///
+        /// @param accountId selected stable identifier
+        @Override
+        public void selectAccount(String accountId) {
+            if (accounts.isEmpty()) {
+                throw new AssertionError("Empty account fixture cannot accept selection");
+            }
+            assertEquals(ACCOUNT.accountId(), accountId);
+        }
+
+        /// Performs no add-account action in the focused shell fixture.
+        @Override
+        public void addAccount() {
+        }
+
+        /// Performs no removal in the immutable focused shell fixture.
+        ///
+        /// @param accountId stable identifier
+        /// @param allowReadOnlyOverwrite ignored overwrite permission
+        @Override
+        public void removeAccount(String accountId, boolean allowReadOnlyOverwrite) {
+            Objects.requireNonNull(accountId, "accountId");
+        }
+
+        /// Completes refresh immediately without external authentication.
+        ///
+        /// @param accountId stable identifier
+        /// @return already-completed refresh stage
+        @Override
+        public CompletionStage<Void> refreshAccount(String accountId) {
+            Objects.requireNonNull(accountId, "accountId");
+            return CompletableFuture.completedFuture(null);
         }
     }
 

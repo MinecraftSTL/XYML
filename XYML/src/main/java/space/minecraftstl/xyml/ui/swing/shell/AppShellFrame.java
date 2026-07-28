@@ -27,10 +27,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.ThemeMode;
-import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
-import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
-import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JComponent;
@@ -72,9 +69,7 @@ public final class AppShellFrame extends JFrame {
     /// @param themeManager the FlatLaf manager initialized before components are created
     /// @param pageFactories one lazy Swing page factory for every destination
     /// @param pagePresentations localized labels and mnemonics for every destination
-    /// @param homeModel launcher selection and launch model
-    /// @param instancesModel selected-directory lazy instance model
-    /// @param gameDirectories configured game-directory selection service
+    /// @param toolbarModels non-owning launcher workflow models used by the title bar
     /// @param homeStrings localized title-bar launch controls
     /// @param taskProgressStrings localized launch progress controls
     /// @param animator the shared Swing animator
@@ -85,9 +80,7 @@ public final class AppShellFrame extends JFrame {
             SwingThemeManager themeManager,
             Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> pageFactories,
             ShellPagePresentations pagePresentations,
-            HomeModel homeModel,
-            InstancesModel instancesModel,
-            GameDirectoryManagementService gameDirectories,
+            ShellToolbarModels toolbarModels,
             HomeStrings homeStrings,
             TaskProgressStrings taskProgressStrings,
             SwingAnimator animator,
@@ -103,9 +96,7 @@ public final class AppShellFrame extends JFrame {
         shellPanel = new AppShellPanel(
                 pageFactories,
                 pagePresentations,
-                homeModel,
-                instancesModel,
-                gameDirectories,
+                toolbarModels,
                 homeStrings,
                 taskProgressStrings,
                 animator,
@@ -128,9 +119,7 @@ public final class AppShellFrame extends JFrame {
     /// @param themeManager the FlatLaf manager initialized before components are created
     /// @param pageFactories one lazy Swing page factory for every destination
     /// @param pagePresentations localized labels and mnemonics for every destination
-    /// @param homeModel launcher selection and launch model
-    /// @param instancesModel selected-directory lazy instance model
-    /// @param gameDirectories configured game-directory selection service
+    /// @param toolbarModels non-owning launcher workflow models used by the title bar
     /// @param homeStrings localized title-bar launch controls
     /// @param taskProgressStrings localized launch progress controls
     /// @param animator the shared Swing animator
@@ -142,9 +131,7 @@ public final class AppShellFrame extends JFrame {
             SwingThemeManager themeManager,
             Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> pageFactories,
             ShellPagePresentations pagePresentations,
-            HomeModel homeModel,
-            InstancesModel instancesModel,
-            GameDirectoryManagementService gameDirectories,
+            ShellToolbarModels toolbarModels,
             HomeStrings homeStrings,
             TaskProgressStrings taskProgressStrings,
             SwingAnimator animator,
@@ -156,9 +143,7 @@ public final class AppShellFrame extends JFrame {
                 themeManager,
                 pageFactories,
                 pagePresentations,
-                homeModel,
-                instancesModel,
-                gameDirectories,
+                toolbarModels,
                 homeStrings,
                 taskProgressStrings,
                 animator,

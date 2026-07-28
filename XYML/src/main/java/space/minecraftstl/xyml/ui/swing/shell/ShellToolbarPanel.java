@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
@@ -53,11 +54,11 @@ import java.util.function.Consumer;
 /// Renders account, directory, navigation, instance, and launch controls inside the window title bar.
 @NotNullByDefault
 final class ShellToolbarPanel extends JPanel implements AutoCloseable {
-    /// Stable account-management command at the far left of Windows and Linux title bars.
-    private final JButton accountButton = new JButton();
-
-    /// Cheap in-memory selector for configured game/version directories.
+    /// Cheap in-memory selector at the far left for configured instance/version directories.
     private final JComboBox<GameDirectoryManagementEntry> gameDirectoryBox = new JComboBox<>();
+
+    /// Lazy account selector immediately following the directory selector.
+    private final LazyAccountSelector accountSelector;
 
     /// Lazy single-instance selector aligned immediately before the launch command.
     private final LazyInstanceSelector instanceSelector;
@@ -103,6 +104,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     ///
     /// @param homeModel launcher selection and launch command model
     /// @param instancesModel selected-directory lazy instance model
+    /// @param accountsModel lazy account selection model
     /// @param gameDirectories configured directory list and selection service
     /// @param homeStrings localized launcher control text
     /// @param pagePresentations localized overlay navigation text
@@ -110,13 +112,14 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     ShellToolbarPanel(
             HomeModel homeModel,
             InstancesModel instancesModel,
+            AccountsModel accountsModel,
             GameDirectoryManagementService gameDirectories,
             HomeStrings homeStrings,
             ShellPagePresentations pagePresentations,
             Consumer<ShellPageId> navigateCommand) {
         super(new MigLayout(
                 "insets 0 0 0 0, fillx",
-                "[]0[148!,shrink 60]8[190!,shrink 70]push[]push[238!,shrink 80]8[132!,shrink 40]2[]",
+                "[]0[190!,shrink 70]8[168!,shrink 60]push[]push[238!,shrink 80]8[132!,shrink 40]2[]",
                 "[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
         this.homeModel = Objects.requireNonNull(homeModel, "homeModel");
@@ -126,6 +129,12 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         Objects.requireNonNull(pagePresentations, "pagePresentations");
         instanceSelector = new LazyInstanceSelector(
                 Objects.requireNonNull(instancesModel, "instancesModel"),
+                navigateCommand);
+        accountSelector = new LazyAccountSelector(
+                Objects.requireNonNull(accountsModel, "accountsModel"),
+                homeStrings.accountLabel(),
+                homeStrings.missingAccountLabel(),
+                space.minecraftstl.xyml.util.i18n.I18n.i18n("account.manage"),
                 navigateCommand);
 
         configureComponents(pagePresentations);
@@ -142,18 +151,17 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     void setSelectedPage(ShellPageId selectedPage) {
         EdtDispatcher.requireEventDispatchThread();
         ShellPageId page = Objects.requireNonNull(selectedPage, "selectedPage");
-        accountButton.putClientProperty("JButton.selectedState",
-                page == ShellPageId.ACCOUNTS ? "selected" : null);
+        accountSelector.setManagementSelected(page == ShellPageId.ACCOUNTS);
         for (ShellNavigationButton button : navigationButtons.values()) {
             button.setSelected(button.page() == page);
         }
     }
 
-    /// Returns the account-management button for focused ordering and accessibility tests.
+    /// Returns the lazy account selector for focused ordering and accessibility tests.
     ///
-    /// @return stable account button
-    JButton accountButton() {
-        return accountButton;
+    /// @return stable account selector
+    LazyAccountSelector accountSelector() {
+        return accountSelector;
     }
 
     /// Returns the game-directory selector for focused ordering and behavior tests.
@@ -209,8 +217,8 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
             closed = true;
             homeSubscription.unsubscribe();
             gameDirectorySubscription.unsubscribe();
+            accountSelector.close();
             instanceSelector.close();
-            accountButton.setEnabled(false);
             gameDirectoryBox.setEnabled(false);
             launchButton.setEnabled(false);
             for (ShellNavigationButton button : navigationButtons.values()) {
@@ -232,17 +240,6 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         configurePlaceholder(winWindowButtonsPlaceholder, "shellWinWindowButtons", "win horizontal");
         add(macWindowButtonsPlaceholder, "growy");
 
-        accountButton.setName("shellAccountManagement");
-        accountButton.setIcon(new FlatSVGIcon("assets/swing/icons/nav-accounts.svg", 18, 18));
-        accountButton.setHorizontalAlignment(SwingConstants.LEFT);
-        accountButton.setIconTextGap(8);
-        accountButton.setMargin(new Insets(4, 10, 4, 10));
-        accountButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        accountButton.putClientProperty("JButton.buttonType", "toolBarButton");
-        accountButton.addActionListener(event -> navigateCommand.accept(ShellPageId.ACCOUNTS));
-        accountButton.getAccessibleContext().setAccessibleName(homeStrings.accountLabel());
-        add(accountButton, "grow, h 40!");
-
         gameDirectoryBox.setName("shellGameDirectory");
         gameDirectoryBox.setRenderer(new GameDirectoryRenderer());
         gameDirectoryBox.setMaximumRowCount(Integer.MAX_VALUE);
@@ -250,6 +247,8 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         gameDirectoryBox.getAccessibleContext().setAccessibleName(gameDirectoryBox.getToolTipText());
         gameDirectoryBox.addActionListener(event -> selectGameDirectory());
         add(gameDirectoryBox, "grow, h 36!");
+
+        add(accountSelector, "grow, h 36!");
 
         JPanel navigation = new JPanel(new MigLayout("insets 0, gap 2", "[][][]", "[40!]"));
         navigation.setName("shellOverlayNavigation");
@@ -321,11 +320,8 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         String accountName = state.accountName().isBlank()
                 ? homeStrings.missingAccountLabel()
                 : state.accountName();
-        accountButton.setText(accountName);
-        accountButton.setToolTipText(state.accountDetail().isBlank()
-                ? accountName
-                : accountName + " - " + state.accountDetail());
-        accountButton.setEnabled(state.selectionCommandsEnabled());
+        accountSelector.setSelectedText(accountName, state.accountDetail());
+        accountSelector.setInteractionEnabled(state.selectionCommandsEnabled());
 
         String instanceName = state.instanceName().isBlank()
                 ? homeStrings.missingInstanceLabel()

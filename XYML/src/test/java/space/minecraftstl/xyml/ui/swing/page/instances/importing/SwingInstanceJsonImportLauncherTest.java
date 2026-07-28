@@ -27,6 +27,8 @@ import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
@@ -40,6 +42,7 @@ import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler.RouteRegistra
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentations;
+import space.minecraftstl.xyml.ui.swing.shell.ShellToolbarModels;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JComponent;
@@ -127,9 +130,11 @@ final class SwingInstanceJsonImportLauncherTest {
         EdtDispatcher.executeAndWait(() -> result.set(new AppShellPanel(
                 pageFactories(),
                 ShellPagePresentations.englishFallback(),
-                homeModel(),
-                instancesModel(),
-                gameDirectories(),
+                new ShellToolbarModels(
+                        homeModel(),
+                        instancesModel(),
+                        accountsModel(),
+                        gameDirectories()),
                 new HomeStrings(
                         "Home",
                         "Account",
@@ -195,6 +200,25 @@ final class SwingInstanceJsonImportLauncherTest {
                     default -> throw new AssertionError("Unexpected instances-model call: " + method.getName());
                 });
         return InstancesModel.class.cast(proxy);
+    }
+
+    /// Creates the empty lazy account source required by the title-bar selector.
+    ///
+    /// @return empty account model that never starts a range request
+    private static AccountsModel accountsModel() {
+        AccountsSnapshot snapshot = new AccountsSnapshot(OptionalInt.empty(), 0, 0L);
+        Object proxy = Proxy.newProxyInstance(
+                AccountsModel.class.getClassLoader(),
+                new Class<?>[]{AccountsModel.class},
+                (ignoredProxy, method, ignoredArguments) -> switch (method.getName()) {
+                    case "snapshot" -> snapshot;
+                    case "subscribe" -> Subscription.create(() -> {
+                    });
+                    case "exactItemCount" -> OptionalInt.of(0);
+                    case "sourceRevision" -> OptionalLong.of(0L);
+                    default -> throw new AssertionError("Unexpected accounts-model call: " + method.getName());
+                });
+        return AccountsModel.class.cast(proxy);
     }
 
     /// Creates the empty configured-directory source required by the title-bar selector.
