@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.setting.ProxyType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.log.LauncherLogPanel;
+import space.minecraftstl.xyml.ui.swing.page.nbt.NBTSettingsPanel;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 
 import javax.swing.BorderFactory;
@@ -64,9 +65,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Renders an embeddable Swing settings center backed by [SettingsCenterStore].
 ///
-/// This panel owns its embedded appearance, preset, directory, Java management, and launcher-log controls, and closes
-/// them with the general and network settings store. That single lifecycle boundary makes the settings center safe to
-/// cache as one shell page.
+/// This panel owns its embedded appearance, preset, directory, Java management, NBT tool, and launcher-log controls,
+/// and closes them with the general and network settings store. That single lifecycle boundary makes the settings
+/// center safe to cache as one shell page.
 @NotNullByDefault
 public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Add-on catalogue IDs exposed by the legacy launcher setting.
@@ -89,6 +90,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
 
     /// Launcher-log actions embedded in the general settings page and closed with this center.
     private final LauncherLogPanel launcherLogPanel;
+
+    /// NBT file tool exposed only as a settings page and closed with this center.
+    private final NBTSettingsPanel nbtSettingsPanel;
 
     /// Stable top-level navigation among functional settings pages.
     private final JTabbedPane tabs = new JTabbedPane();
@@ -199,6 +203,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         gameSettingsPresetsPanel = GameSettingsPresetsPanel.createForCurrentSettings();
         gameDirectoryManagementPanel = GameDirectoryManagementPanel.createForCurrentDirectories();
         launcherLogPanel = LauncherLogPanel.createForCurrentLauncher();
+        nbtSettingsPanel = NBTSettingsPanel.createForCurrentLauncher();
 
         configureComponents();
         storeSubscription = store.subscribe(this::storeChanged);
@@ -234,6 +239,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 gameSettingsPresetsPanel.close();
                 gameDirectoryManagementPanel.close();
                 launcherLogPanel.close();
+                nbtSettingsPanel.close();
                 setInteractiveControlsEnabled(false);
             }
         });
@@ -251,6 +257,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         tabs.addTab(i18n("settings.type.global.preset.manage_all"), gameSettingsPresetsPanel);
         tabs.addTab(i18n("game_directory.title"), gameDirectoryManagementPanel);
         tabs.addTab(i18n("java.management"), javaManagementPanel);
+        tabs.addTab(nbtSettingsPanel.tabTitle(), nbtSettingsPanel);
         tabs.addTab(i18n("help"), createScrollPane(createHelpPage()));
         tabs.addTab(i18n("contact"), createScrollPane(createFeedbackPage()));
         tabs.addTab(i18n("about"), createScrollPane(createAboutPage()));

@@ -21,125 +21,84 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.nbt.NBTFileType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
-import space.minecraftstl.xyml.ui.swing.shell.AppShellFrame;
-import space.minecraftstl.xyml.ui.swing.shell.AppShellPanel;
-import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
+import java.awt.Component;
+import java.awt.Frame;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-/// Installs the temporary NBT editor entry points without adding a permanent shell destination.
+/// Owns the file-selection and modeless-window lifecycle for the settings NBT tool.
 ///
-/// The stable header command owns native file selection while the shell transfer handler accepts
-/// exactly one supported NBT file. A single modeless editor window is reused until it closes.
+/// The launcher has no shell navigation or drag-and-drop responsibilities. Its component owner
+/// supplies native file-dialog placement, while the owner resolver is evaluated only when a new
+/// editor window is required. One editor window is reused until that window closes.
 @NotNullByDefault
 public final class SwingNBTEditorLauncher implements AutoCloseable {
-    /// Shell whose header and drop surface expose this temporary workflow.
-    private final AppShellPanel shellPanel;
-
     /// Native or injected file chooser invoked only from the EDT.
     private final FileChooser fileChooser;
 
     /// Native or injected editor-window factory invoked only from the EDT.
     private final EditorWindowFactory editorWindowFactory;
 
-    /// Independently removable shell-drop route owned by this launcher.
-    private final ShellFileDropHandler.RouteRegistration dropRegistration;
-
     /// Current modeless editor window, or null before opening and after disposal.
     private @Nullable EditorWindow editorWindow;
 
-    /// Whether owner or composition closure has permanently disabled this launcher.
+    /// Whether the owning settings tool has permanently disabled this launcher.
     private boolean closed;
 
-    /// Installs the production NBT entry points and ties their lifetime to the frame.
+    /// Creates the production launcher for one settings component.
     ///
-    /// @param frame production launcher frame
-    /// @param ioExecutor caller-owned executor used for all NBT and bundled-icon I/O
-    /// @return installed launcher lifecycle
-    public static SwingNBTEditorLauncher install(
-            AppShellFrame frame,
+    /// @param chooserOwner component owning the native file chooser
+    /// @param ownerResolver dynamic resolver for the containing launcher frame
+    /// @param ioExecutor caller-owned executor used for NBT and bundled-icon I/O
+    /// @return configured launcher lifecycle
+    static SwingNBTEditorLauncher create(
+            Component chooserOwner,
+            OwnerResolver ownerResolver,
             Executor ioExecutor) {
-        AppShellFrame owner = Objects.requireNonNull(frame, "frame");
+        EdtDispatcher.requireEventDispatchThread();
+        Component component = Objects.requireNonNull(chooserOwner, "chooserOwner");
+        OwnerResolver resolver = Objects.requireNonNull(ownerResolver, "ownerResolver");
         Executor executor = Objects.requireNonNull(ioExecutor, "ioExecutor");
-        AtomicReference<@Nullable SwingNBTEditorLauncher> result = new AtomicReference<>();
-        EdtDispatcher.executeAndWait(() -> {
-            NBTEditorStrings strings = NBTEditorStrings.localized();
-            SwingNBTEditorInteractions interactions = new SwingNBTEditorInteractions(owner, strings);
-            SwingNBTEditorLauncher launcher = install(
-                    owner.shellPanel(),
-                    strings,
-                    () -> interactions.chooseFile(null),
-                    closedObserver -> new SwingNBTEditorDialog(
-                            owner,
-                            executor,
-                            strings,
-                            closedObserver));
-            owner.addWindowListener(new WindowAdapter() {
-                /// Releases the editor after owner disposal regardless of dirty document state.
-                ///
-                /// @param event native owner-window event
-                @Override
-                public void windowClosed(WindowEvent event) {
-                    Objects.requireNonNull(event, "event");
-                    launcher.close();
-                }
-            });
-            result.set(launcher);
-        });
-        return Objects.requireNonNull(result.get(), "NBT editor launcher was not installed");
+        NBTEditorStrings strings = NBTEditorStrings.localized();
+        SwingNBTEditorInteractions interactions = new SwingNBTEditorInteractions(component, strings);
+        return new SwingNBTEditorLauncher(
+                () -> interactions.chooseFile(null),
+                closedObserver -> {
+                    @Nullable Frame owner = resolver.resolve();
+                    return owner == null
+                            ? null
+                            : new SwingNBTEditorDialog(owner, executor, strings, closedObserver);
+                });
     }
 
-    /// Installs a deterministic launcher boundary for headless tests.
+    /// Creates a deterministic launcher boundary for headless tests.
     ///
-    /// @param shellPanel shell receiving the header and drop entries
-    /// @param strings stable text bundle
     /// @param fileChooser injected file chooser
     /// @param editorWindowFactory injected modeless-window factory
-    /// @return installed launcher lifecycle
-    static SwingNBTEditorLauncher install(
-            AppShellPanel shellPanel,
-            NBTEditorStrings strings,
+    SwingNBTEditorLauncher(
             FileChooser fileChooser,
             EditorWindowFactory editorWindowFactory) {
         EdtDispatcher.requireEventDispatchThread();
-        SwingNBTEditorLauncher launcher = new SwingNBTEditorLauncher(
-                shellPanel,
-                fileChooser,
-                editorWindowFactory);
-        launcher.shellPanel.configureFileTool(
-                Objects.requireNonNull(strings, "strings").openTooltip(),
-                launcher::chooseAndOpen);
-        return launcher;
-    }
-
-    /// Creates one uninstalled launcher on the EDT.
-    ///
-    /// @param shellPanel shell later receiving entry points
-    /// @param fileChooser file-selection boundary
-    /// @param editorWindowFactory editor-window factory
-    private SwingNBTEditorLauncher(
-            AppShellPanel shellPanel,
-            FileChooser fileChooser,
-            EditorWindowFactory editorWindowFactory) {
-        EdtDispatcher.requireEventDispatchThread();
-        this.shellPanel = Objects.requireNonNull(shellPanel, "shellPanel");
         this.fileChooser = Objects.requireNonNull(fileChooser, "fileChooser");
-        this.editorWindowFactory = Objects.requireNonNull(
-                editorWindowFactory,
-                "editorWindowFactory");
-        dropRegistration = ShellFileDropHandler.register(
-                this.shellPanel,
-                NBTFileType::supports,
-                this::open);
+        this.editorWindowFactory = Objects.requireNonNull(editorWindowFactory, "editorWindowFactory");
     }
 
-    /// Forces any current editor window closed and removes shell drag-and-drop from any caller thread.
+    /// Selects one local file and opens it when the path has a supported NBT extension.
+    public void chooseAndOpen() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        @Nullable Path selected = fileChooser.chooseFile();
+        if (selected != null) {
+            open(selected);
+        }
+    }
+
+    /// Forces any current editor window closed from any caller thread.
     @Override
     public void close() {
         EdtDispatcher.executeAndWait(() -> {
@@ -147,7 +106,6 @@ public final class SwingNBTEditorLauncher implements AutoCloseable {
                 return;
             }
             closed = true;
-            dropRegistration.close();
             @Nullable EditorWindow currentWindow = editorWindow;
             editorWindow = null;
             if (currentWindow != null) {
@@ -158,7 +116,7 @@ public final class SwingNBTEditorLauncher implements AutoCloseable {
 
     /// Opens a supported path in the current or a newly created modeless editor.
     ///
-    /// @param source normalized or relative source supplied by a chooser or shell drop
+    /// @param source normalized or relative source supplied by the settings chooser
     private void open(Path source) {
         EdtDispatcher.requireEventDispatchThread();
         Path normalizedSource = Objects.requireNonNull(source, "source")
@@ -170,25 +128,14 @@ public final class SwingNBTEditorLauncher implements AutoCloseable {
 
         @Nullable EditorWindow currentWindow = editorWindow;
         if (currentWindow == null) {
-            currentWindow = Objects.requireNonNull(
-                    editorWindowFactory.create(this::editorWindowClosed),
-                    "editorWindowFactory returned null");
+            currentWindow = editorWindowFactory.create(this::editorWindowClosed);
+            if (currentWindow == null) {
+                return;
+            }
             editorWindow = currentWindow;
         }
         currentWindow.open(normalizedSource);
         currentWindow.showOrFocus();
-    }
-
-    /// Chooses one file and forwards only a supported result to the editor.
-    private void chooseAndOpen() {
-        EdtDispatcher.requireEventDispatchThread();
-        if (closed) {
-            return;
-        }
-        @Nullable Path selected = fileChooser.chooseFile();
-        if (selected != null) {
-            open(selected);
-        }
     }
 
     /// Clears the current-window identity after native disposal.
@@ -199,6 +146,16 @@ public final class SwingNBTEditorLauncher implements AutoCloseable {
         if (editorWindow == Objects.requireNonNull(disposedWindow, "disposedWindow")) {
             editorWindow = null;
         }
+    }
+
+    /// Resolves the current launcher frame only when a new editor window is required.
+    @NotNullByDefault
+    @FunctionalInterface
+    interface OwnerResolver {
+        /// Returns the current containing frame, or null while the settings panel is detached.
+        ///
+        /// @return containing launcher frame, or null
+        @Nullable Frame resolve();
     }
 
     /// Selects a lexical file path without performing NBT I/O.
@@ -217,9 +174,12 @@ public final class SwingNBTEditorLauncher implements AutoCloseable {
     interface EditorWindowFactory {
         /// Creates an editor whose terminal disposal reports its own identity.
         ///
+        /// Returning null leaves the selected document unopened, which can occur when the settings
+        /// page is detached between file selection and window creation.
+        ///
         /// @param closedObserver terminal disposal observer
-        /// @return newly created editor window
-        EditorWindow create(Consumer<EditorWindow> closedObserver);
+        /// @return newly created editor window, or null when no owner is available
+        @Nullable EditorWindow create(Consumer<EditorWindow> closedObserver);
     }
 
     /// Minimal modeless editor-window operations required by the launcher.
