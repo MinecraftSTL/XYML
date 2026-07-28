@@ -37,6 +37,9 @@ import java.util.List;
 /// title bar, taskbar, and in-app brand mark cannot silently diverge.
 @NotNullByDefault
 public final class LauncherIconImages {
+    /// Classpath resource for the fully rendered brand mark shown inside launcher chrome.
+    private static final String HEADER_RESOURCE_PATH = "/assets/img/hmcl-icon.png";
+
     /// Classpath resources ordered from the smallest to the largest raster representation.
     private static final String @Unmodifiable [] RESOURCE_PATHS = {
             "/assets/img/icon.png",
@@ -47,6 +50,9 @@ public final class LauncherIconImages {
 
     /// Immutable images decoded once for the native window lifetime.
     private static final @Unmodifiable List<Image> IMAGES = loadImages();
+
+    /// Distinct in-app brand mark, decoded independently from the transparent native icon family.
+    private static final @Nullable Icon HEADER_ICON = loadHeaderIcon();
 
     /// Prevents utility-class construction.
     private LauncherIconImages() {
@@ -63,10 +69,22 @@ public final class LauncherIconImages {
     ///
     /// @return the 32-pixel brand icon, or `null` when the launcher resources are unavailable
     public static @Nullable Icon headerIcon() {
-        if (IMAGES.isEmpty()) {
+        return HEADER_ICON;
+    }
+
+    /// Decodes the bundled in-app brand mark without making launcher startup depend on it.
+    ///
+    /// @return decoded brand icon, or `null` when the optional resource is unavailable
+    private static @Nullable Icon loadHeaderIcon() {
+        try (InputStream stream = LauncherIconImages.class.getResourceAsStream(HEADER_RESOURCE_PATH)) {
+            if (stream == null) {
+                return null;
+            }
+            @Nullable BufferedImage image = ImageIO.read(stream);
+            return image == null ? null : new ImageIcon(image);
+        } catch (IOException ignored) {
             return null;
         }
-        return new ImageIcon(IMAGES.get(0));
     }
 
     /// Decodes the bundled icon family without making startup fail when one optional resolution is absent.

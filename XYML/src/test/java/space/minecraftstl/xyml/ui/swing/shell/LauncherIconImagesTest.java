@@ -20,6 +20,10 @@ package space.minecraftstl.xyml.ui.swing.shell;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import javax.swing.Icon;
+import java.util.Objects;
+
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -29,7 +33,11 @@ public final class LauncherIconImagesTest {
     /// The classpath contains all bundled application icon resolutions and a compact header icon.
     @Test
     public void loadsBundledIconFamily() {
+        Icon headerIcon = Objects.requireNonNull(LauncherIconImages.headerIcon(), "header icon");
         assertEquals(4, LauncherIconImages.windowIcons().size());
-        assertNotNull(LauncherIconImages.headerIcon());
+        assertNotNull(headerIcon);
+        assertAll(
+                () -> assertEquals(32, headerIcon.getIconWidth()),
+                () -> assertEquals(32, headerIcon.getIconHeight()));
     }
 }
