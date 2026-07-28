@@ -37,7 +37,7 @@ public final class LauncherIconImagesTest {
         assertEquals(4, LauncherIconImages.windowIcons().size());
         assertNotNull(headerIcon);
         assertAll(
-                () -> assertEquals(32, headerIcon.getIconWidth()),
-                () -> assertEquals(32, headerIcon.getIconHeight()));
+                () -> assertEquals(24, headerIcon.getIconWidth()),
+                () -> assertEquals(24, headerIcon.getIconHeight()));
     }
 }

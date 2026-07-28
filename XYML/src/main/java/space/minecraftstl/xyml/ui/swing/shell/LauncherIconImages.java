@@ -37,8 +37,8 @@ import java.util.List;
 /// title bar, taskbar, and in-app brand mark cannot silently diverge.
 @NotNullByDefault
 public final class LauncherIconImages {
-    /// Classpath resource for the fully rendered brand mark shown inside launcher chrome.
-    private static final String HEADER_RESOURCE_PATH = "/assets/img/hmcl-icon.png";
+    /// Classpath resource for the current XYML title mark shown inside launcher chrome.
+    private static final String HEADER_RESOURCE_PATH = "/assets/img/icon-title.png";
 
     /// Classpath resources ordered from the smallest to the largest raster representation.
     private static final String @Unmodifiable [] RESOURCE_PATHS = {
@@ -67,7 +67,7 @@ public final class LauncherIconImages {
 
     /// Returns the compact raster icon used next to the in-app XYML word mark.
     ///
-    /// @return the 32-pixel brand icon, or `null` when the launcher resources are unavailable
+    /// @return the 24-pixel title icon, or `null` when the launcher resources are unavailable
     public static @Nullable Icon headerIcon() {
         return HEADER_ICON;
     }
