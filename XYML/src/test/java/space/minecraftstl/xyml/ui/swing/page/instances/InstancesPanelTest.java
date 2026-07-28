@@ -81,9 +81,9 @@ public final class InstancesPanelTest {
     private static final InstancesStrings STRINGS = new InstancesStrings(
             "Instances", "Refresh", "Refreshing", "Add", "Manage", "No installed instances");
 
-    /// A selected-directory context opens its selected instance management exactly once on construction.
+    /// A selected-directory context keeps version management visible until the user opens one instance.
     @Test
-    public void opensSelectedDirectoryManagementByDefault() {
+    public void keepsVersionManagementVisibleByDefault() {
         FakeInstancesModel model = FakeInstancesModel.immediate(items(2), snapshot(0, 2, 0L));
         model.selectionContextRevision = 1L;
         RecordingManagementFactory factory = new RecordingManagementFactory(null);
@@ -92,8 +92,10 @@ public final class InstancesPanelTest {
 
         onEventDispatchThread(() -> {
             assertAll(
-                    () -> assertEquals(1, model.managementRequests.get()),
-                    () -> assertEquals(List.of("instance-0"), model.managedIds()));
+                    () -> assertEquals(0, model.managementRequests.get()),
+                    () -> assertTrue(model.managedIds().isEmpty()),
+                    () -> assertTrue(findComponent(panel, "instancesListWorkspace").isVisible()),
+                    () -> assertFalse(findComponent(panel, "instancesManagementHost").isVisible()));
             panel.close();
             coordinator.close();
         });

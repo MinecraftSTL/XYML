@@ -199,6 +199,7 @@ final class SwingInstanceJsonImportLauncherTest {
                     case "exactItemCount" -> OptionalInt.of(0);
                     case "sourceRevision" -> OptionalLong.of(0L);
                     case "selectionContextRevision" -> 0L;
+                    case "stableItemIds" -> List.of();
                     default -> throw new AssertionError("Unexpected instances-model call: " + method.getName());
                 });
         return InstancesModel.class.cast(proxy);
@@ -218,6 +219,7 @@ final class SwingInstanceJsonImportLauncherTest {
                     });
                     case "exactItemCount" -> OptionalInt.of(0);
                     case "sourceRevision" -> OptionalLong.of(0L);
+                    case "stableItemIds" -> List.of();
                     default -> throw new AssertionError("Unexpected accounts-model call: " + method.getName());
                 });
         return AccountsModel.class.cast(proxy);

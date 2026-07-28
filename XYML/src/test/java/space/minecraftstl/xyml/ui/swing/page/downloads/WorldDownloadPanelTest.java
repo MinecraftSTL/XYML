@@ -109,9 +109,9 @@ final class WorldDownloadPanelTest {
                 assertFalse(previousPageBounds.intersects(nextPageBounds));
                 assertEquals(120, previousPageBounds.width);
                 assertEquals(120, nextPageBounds.width);
-                assertEquals(gameVersionBounds.y, previousPageBounds.y);
+                assertTrue(previousPageBounds.y >= gameVersionBounds.y + gameVersionBounds.height);
                 assertEquals(previousPageBounds.y, nextPageBounds.y);
-                assertTrue(resultBounds.y >= gameVersionBounds.y + gameVersionBounds.height);
+                assertTrue(resultBounds.y >= previousPageBounds.y + previousPageBounds.height);
                 assertFalse(versionBounds.intersects(saveAsBounds));
                 assertTrue(versionBounds.y >= resultBounds.y + resultBounds.height);
 
