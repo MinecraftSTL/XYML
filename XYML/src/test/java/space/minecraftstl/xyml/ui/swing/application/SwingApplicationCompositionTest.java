@@ -65,6 +65,7 @@ import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicMetadataStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
+import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -291,7 +292,7 @@ class SwingApplicationCompositionTest {
                         presentation(),
                         themeManager(),
                         new SwingAnimator(MotionPolicy.OFF, 16),
-                        (ignoredTheme, ignoredPages, ignoredPresentation, ignoredAnimator) -> {
+                        (ignoredTheme, ignoredPages, ignoredPresentation, ignoredAnimator, ignoredModels) -> {
                             throw creationFailure;
                         }));
 
@@ -320,7 +321,7 @@ class SwingApplicationCompositionTest {
                         presentation(),
                         themeManager(),
                         new SwingAnimator(MotionPolicy.OFF, 16),
-                        (ignoredTheme, ignoredPages, ignoredPresentation, ignoredAnimator) -> {
+                        (ignoredTheme, ignoredPages, ignoredPresentation, ignoredAnimator, ignoredModels) -> {
                             throw repeatedFailure;
                         }));
 
@@ -333,6 +334,10 @@ class SwingApplicationCompositionTest {
     void productionOwnershipSharesInternalAddInstanceNavigation() {
         List<String> closeOrder = new ArrayList<>();
         HomeModel home = closeableNoCallModel(HomeModel.class, "home-model", closeOrder);
+        GameDirectoryManagementService gameDirectories = closeableNoCallModel(
+                GameDirectoryManagementService.class,
+                "game-directories",
+                closeOrder);
         InstanceManagementCoordinator instanceManagement = recordingInstanceManagement(closeOrder);
         InstancesModel instances = closeableNoCallModel(InstancesModel.class, "instances-model", closeOrder);
         GameVersionCatalogSource source = closeableNoCallModel(
@@ -365,6 +370,7 @@ class SwingApplicationCompositionTest {
                             homeAddInstanceCommand.set(addInstanceCommand);
                             return home;
                         },
+                        () -> gameDirectories,
                         () -> instanceManagement,
                         (createdManagement, addInstanceCommand) -> {
                             assertSame(instanceManagement, createdManagement);
@@ -389,6 +395,7 @@ class SwingApplicationCompositionTest {
                 navigations::add);
         assertSame(gameVersions, models.gameVersions());
         assertSame(gameInstaller, models.gameInstaller());
+        assertSame(gameDirectories, models.gameDirectories());
         assertSame(instanceManagement, models.instanceManagement());
         Runnable homeCommand = Objects.requireNonNull(homeAddInstanceCommand.get());
         Runnable instancesCommand = Objects.requireNonNull(instancesAddInstanceCommand.get());
@@ -411,6 +418,10 @@ class SwingApplicationCompositionTest {
     void productionConstructionFailureClosesCreatedSource() {
         List<String> closeOrder = new ArrayList<>();
         HomeModel home = closeableNoCallModel(HomeModel.class, "home-model", closeOrder);
+        GameDirectoryManagementService gameDirectories = closeableNoCallModel(
+                GameDirectoryManagementService.class,
+                "game-directories",
+                closeOrder);
         InstanceManagementCoordinator instanceManagement = recordingInstanceManagement(closeOrder);
         InstancesModel instances = closeableNoCallModel(InstancesModel.class, "instances-model", closeOrder);
         GameVersionCatalogSource source = closeableNoCallModel(
@@ -429,6 +440,7 @@ class SwingApplicationCompositionTest {
         SwingApplicationComposition.ProductionPageModelFactories factories =
                 new SwingApplicationComposition.ProductionPageModelFactories(
                         ignoredAddInstanceCommand -> home,
+                        () -> gameDirectories,
                         () -> instanceManagement,
                         (ignoredManagement, ignoredAddInstanceCommand) -> instances,
                         () -> source,
@@ -460,6 +472,7 @@ class SwingApplicationCompositionTest {
         assertSame(creationFailure, thrown);
         assertEquals(List.of(
                 "home-model",
+                "game-directories",
                 "instance-management",
                 "instances-model",
                 "game-versions-source",
@@ -477,6 +490,10 @@ class SwingApplicationCompositionTest {
     void productionConstructionFailureClosesInstallerBeforeModelsAndSource() {
         List<String> closeOrder = new ArrayList<>();
         HomeModel home = closeableNoCallModel(HomeModel.class, "home-model", closeOrder);
+        GameDirectoryManagementService gameDirectories = closeableNoCallModel(
+                GameDirectoryManagementService.class,
+                "game-directories",
+                closeOrder);
         InstanceManagementCoordinator instanceManagement = recordingInstanceManagement(closeOrder);
         InstancesModel instances = closeableNoCallModel(InstancesModel.class, "instances-model", closeOrder);
         GameVersionCatalogSource source = closeableNoCallModel(
@@ -505,6 +522,7 @@ class SwingApplicationCompositionTest {
         SwingApplicationComposition.ProductionPageModelFactories factories =
                 new SwingApplicationComposition.ProductionPageModelFactories(
                         ignoredAddInstanceCommand -> home,
+                        () -> gameDirectories,
                         () -> instanceManagement,
                         (ignoredManagement, ignoredAddInstanceCommand) -> instances,
                         () -> source,
@@ -535,6 +553,7 @@ class SwingApplicationCompositionTest {
         assertEquals(List.of(
                 "game-install-service",
                 "home-model",
+                "game-directories",
                 "instance-management",
                 "instances-model",
                 "game-versions-model",
@@ -564,6 +583,7 @@ class SwingApplicationCompositionTest {
         ownedResources.addAll(resourceSnapshot);
         return new SwingApplicationPageModels(
                 noCallModel(HomeModel.class),
+                noCallModel(GameDirectoryManagementService.class),
                 noCallModel(InstancesModel.class),
                 instanceManagement,
                 gameVersions,
@@ -900,6 +920,7 @@ class SwingApplicationCompositionTest {
         return List.of(
                 "game-install-service",
                 "home-model",
+                "game-directories",
                 "instance-management",
                 "instances-model",
                 "game-versions-model",
@@ -1062,16 +1083,19 @@ class SwingApplicationCompositionTest {
         /// @param pageFactories immutable complete lazy page table
         /// @param presentation unused explicit presentation collaborator
         /// @param animator unused explicit animator collaborator
+        /// @param models complete model bundle used by title-bar controls
         /// @return recording window
         @Override
         public SwingApplicationWindow createWindow(
                 SwingThemeManager themeManager,
                 @Unmodifiable Map<ShellPageId, ShellPageFactory<? extends JComponent>> pageFactories,
                 SwingApplicationPresentation presentation,
-                SwingAnimator animator) {
+                SwingAnimator animator,
+                SwingApplicationPageModels models) {
             Objects.requireNonNull(themeManager, "themeManager");
             Objects.requireNonNull(presentation, "presentation");
             Objects.requireNonNull(animator, "animator");
+            Objects.requireNonNull(models, "models");
             window = new RecordingWindow(pageFactories);
             return window;
         }

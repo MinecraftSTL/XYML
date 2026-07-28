@@ -37,10 +37,12 @@ public interface SwingApplicationWindowFactory {
     /// @param pageFactories immutable complete lazy page table
     /// @param presentation startup-provided text and transition policy
     /// @param animator shared animator owned by the composition
+    /// @param models application models used by title-bar workflow controls
     /// @return application window adapter
     SwingApplicationWindow createWindow(
             SwingThemeManager themeManager,
             @Unmodifiable Map<ShellPageId, ShellPageFactory<? extends JComponent>> pageFactories,
             SwingApplicationPresentation presentation,
-            SwingAnimator animator);
+            SwingAnimator animator,
+            SwingApplicationPageModels models);
 }

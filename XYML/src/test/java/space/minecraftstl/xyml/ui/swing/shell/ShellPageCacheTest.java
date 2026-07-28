@@ -36,24 +36,24 @@ public final class ShellPageCacheTest {
     /// A page factory runs once and the same value is reused after navigation away and back.
     @Test
     public void createsEachPageAtMostOnce() {
-        AtomicInteger homeCreations = new AtomicInteger();
+        AtomicInteger instanceCreations = new AtomicInteger();
         EnumMap<ShellPageId, ShellPageFactory<? extends Object>> factories = completeFactories();
-        Object homePage = new Object();
-        factories.put(ShellPageId.HOME, () -> {
-            homeCreations.incrementAndGet();
-            return homePage;
+        Object instancesPage = new Object();
+        factories.put(ShellPageId.INSTANCES, () -> {
+            instanceCreations.incrementAndGet();
+            return instancesPage;
         });
         ShellPageCache<Object> cache = new ShellPageCache<>(factories);
 
-        Object first = cache.getOrCreate(ShellPageId.HOME);
+        Object first = cache.getOrCreate(ShellPageId.INSTANCES);
         cache.getOrCreate(ShellPageId.SETTINGS);
-        Object second = cache.getOrCreate(ShellPageId.HOME);
+        Object second = cache.getOrCreate(ShellPageId.INSTANCES);
 
-        assertSame(homePage, first);
+        assertSame(instancesPage, first);
         assertSame(first, second);
-        assertEquals(1, homeCreations.get());
+        assertEquals(1, instanceCreations.get());
         assertEquals(2, cache.cachedPageCount());
-        assertTrue(cache.isCached(ShellPageId.HOME));
+        assertTrue(cache.isCached(ShellPageId.INSTANCES));
         assertFalse(cache.isCached(ShellPageId.ACCOUNTS));
     }
 
@@ -61,7 +61,7 @@ public final class ShellPageCacheTest {
     @Test
     public void rejectsMissingFactory() {
         Map<ShellPageId, ShellPageFactory<Object>> incomplete = Map.of(
-                ShellPageId.HOME, Object::new);
+                ShellPageId.INSTANCES, Object::new);
 
         assertThrows(IllegalArgumentException.class, () -> new ShellPageCache<>(incomplete));
     }
@@ -76,8 +76,8 @@ public final class ShellPageCacheTest {
             factories.put(page, () -> new CloseableValue(closes));
         }
         ShellPageCache<CloseableValue> cache = new ShellPageCache<>(factories);
-        cache.getOrCreate(ShellPageId.HOME);
         cache.getOrCreate(ShellPageId.INSTANCES);
+        cache.getOrCreate(ShellPageId.DOWNLOADS);
 
         cache.close();
         cache.close();

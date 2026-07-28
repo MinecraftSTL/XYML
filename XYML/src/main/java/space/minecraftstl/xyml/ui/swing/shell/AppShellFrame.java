@@ -17,6 +17,9 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
+import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.util.SystemInfo;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -24,9 +27,15 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.ThemeMode;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
+import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
+import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JComponent;
 import javax.swing.JFrame;
+import javax.swing.JRootPane;
 import javax.swing.Timer;
 import javax.swing.WindowConstants;
 import java.awt.event.WindowAdapter;
@@ -62,27 +71,46 @@ public final class AppShellFrame extends JFrame {
     /// @param title the native window title
     /// @param themeManager the FlatLaf manager initialized before components are created
     /// @param pageFactories one lazy Swing page factory for every destination
-    /// @param initialPage the initially selected destination
     /// @param pagePresentations localized labels and mnemonics for every destination
+    /// @param homeModel launcher selection and launch model
+    /// @param instancesModel selected-directory lazy instance model
+    /// @param gameDirectories configured game-directory selection service
+    /// @param homeStrings localized title-bar launch controls
+    /// @param taskProgressStrings localized launch progress controls
     /// @param animator the shared Swing animator
     /// @param pageTransitionDuration the non-negative caller-selected page transition duration
+    /// @param progressAnimationDuration non-negative launch progress animation duration
     public AppShellFrame(
             String title,
             SwingThemeManager themeManager,
             Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> pageFactories,
-            ShellPageId initialPage,
             ShellPagePresentations pagePresentations,
+            HomeModel homeModel,
+            InstancesModel instancesModel,
+            GameDirectoryManagementService gameDirectories,
+            HomeStrings homeStrings,
+            TaskProgressStrings taskProgressStrings,
             SwingAnimator animator,
-            Duration pageTransitionDuration) {
+            Duration pageTransitionDuration,
+            Duration progressAnimationDuration) {
         super(initializeTheme(title, themeManager));
 
         this.themeManager = Objects.requireNonNull(themeManager, "themeManager");
-        setUndecorated(false);
+        configureWindowChrome();
         setResizable(true);
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         setIconImages(LauncherIconImages.windowIcons());
         shellPanel = new AppShellPanel(
-                pageFactories, initialPage, pagePresentations, animator, pageTransitionDuration);
+                pageFactories,
+                pagePresentations,
+                homeModel,
+                instancesModel,
+                gameDirectories,
+                homeStrings,
+                taskProgressStrings,
+                animator,
+                pageTransitionDuration,
+                progressAnimationDuration);
         setContentPane(shellPanel);
         setMinimumSize(shellPanel.getMinimumSize());
         pack();
@@ -99,28 +127,43 @@ public final class AppShellFrame extends JFrame {
     /// @param title the native window title
     /// @param themeManager the FlatLaf manager initialized before components are created
     /// @param pageFactories one lazy Swing page factory for every destination
-    /// @param initialPage the initially selected destination
     /// @param pagePresentations localized labels and mnemonics for every destination
+    /// @param homeModel launcher selection and launch model
+    /// @param instancesModel selected-directory lazy instance model
+    /// @param gameDirectories configured game-directory selection service
+    /// @param homeStrings localized title-bar launch controls
+    /// @param taskProgressStrings localized launch progress controls
     /// @param animator the shared Swing animator
     /// @param pageTransitionDuration the non-negative caller-selected page transition duration
+    /// @param progressAnimationDuration non-negative launch progress animation duration
     /// @return the packed frame
     public static AppShellFrame create(
             String title,
             SwingThemeManager themeManager,
             Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> pageFactories,
-            ShellPageId initialPage,
             ShellPagePresentations pagePresentations,
+            HomeModel homeModel,
+            InstancesModel instancesModel,
+            GameDirectoryManagementService gameDirectories,
+            HomeStrings homeStrings,
+            TaskProgressStrings taskProgressStrings,
             SwingAnimator animator,
-            Duration pageTransitionDuration) {
+            Duration pageTransitionDuration,
+            Duration progressAnimationDuration) {
         AtomicReference<@Nullable AppShellFrame> result = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> result.set(new AppShellFrame(
                 title,
                 themeManager,
                 pageFactories,
-                initialPage,
                 pagePresentations,
+                homeModel,
+                instancesModel,
+                gameDirectories,
+                homeStrings,
+                taskProgressStrings,
                 animator,
-                pageTransitionDuration)));
+                pageTransitionDuration,
+                progressAnimationDuration)));
         return Objects.requireNonNull(result.get());
     }
 
@@ -212,6 +255,36 @@ public final class AppShellFrame extends JFrame {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(themeManager).initialize();
         return Objects.requireNonNull(title);
+    }
+
+    /// Extends the Swing content into the title bar while retaining platform-native window controls.
+    ///
+    /// Windows 10/11 use FlatLaf's DWM-backed decorations. Linux falls back to FlatLaf client decorations when
+    /// native decorations are unavailable. macOS retains its native leading traffic-light controls and exposes
+    /// their bounds through the matching title-bar placeholder.
+    private void configureWindowChrome() {
+        EdtDispatcher.requireEventDispatchThread();
+        JRootPane rootPane = getRootPane();
+        rootPane.putClientProperty(FlatClientProperties.USE_WINDOW_DECORATIONS, true);
+        rootPane.putClientProperty(FlatClientProperties.FULL_WINDOW_CONTENT, true);
+        rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_SHOW_ICON, false);
+        rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_SHOW_TITLE, false);
+        rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_SHOW_ICONIFFY, true);
+        rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_SHOW_MAXIMIZE, true);
+        rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_SHOW_CLOSE, true);
+        rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_HEIGHT, AppShellPanel.HEADER_HEIGHT);
+
+        if (SystemInfo.isMacOS) {
+            setUndecorated(false);
+            rootPane.putClientProperty("apple.awt.fullWindowContent", true);
+            rootPane.putClientProperty("apple.awt.transparentTitleBar", true);
+            rootPane.putClientProperty("apple.awt.windowTitleVisible", false);
+        } else if (FlatLaf.supportsNativeWindowDecorations()) {
+            setUndecorated(false);
+        } else {
+            setUndecorated(true);
+            rootPane.setWindowDecorationStyle(JRootPane.FRAME);
+        }
     }
 
     /// Requests one non-overlapping native appearance read away from the Swing event dispatch thread.

@@ -21,15 +21,26 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.launch.LaunchSession;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeSnapshot;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstancesSnapshot;
+import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
+import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementSnapshot;
 import space.minecraftstl.xyml.ui.swing.shell.AppShellPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler.RouteRegistration;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentations;
+import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
@@ -39,6 +50,7 @@ import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -46,6 +58,9 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -111,11 +126,93 @@ final class SwingInstanceJsonImportLauncherTest {
         AtomicReference<@Nullable AppShellPanel> result = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> result.set(new AppShellPanel(
                 pageFactories(),
-                ShellPageId.HOME,
                 ShellPagePresentations.englishFallback(),
+                homeModel(),
+                instancesModel(),
+                gameDirectories(),
+                new HomeStrings(
+                        "Home",
+                        "Account",
+                        "None",
+                        "Instance",
+                        "None",
+                        "Add",
+                        "Export",
+                        "Launch",
+                        "Launching",
+                        "Back"),
+                TaskProgressStrings.english(),
                 new SwingAnimator(MotionPolicy.OFF, 16),
+                Duration.ZERO,
                 Duration.ZERO)));
         return Objects.requireNonNull(result.get(), "shell was not created");
+    }
+
+    /// Creates the launcher-state fixture required by the persistent title bar.
+    ///
+    /// @return empty launcher model with independently removable subscriptions
+    private static HomeModel homeModel() {
+        HomeSnapshot snapshot = new HomeSnapshot("", "", "", "", "", false, false, true);
+        SimpleObjectProperty<Optional<LaunchSession>> launchSessions =
+                new SimpleObjectProperty<>(Optional.empty());
+        Object proxy = Proxy.newProxyInstance(
+                HomeModel.class.getClassLoader(),
+                new Class<?>[]{HomeModel.class},
+                (ignoredProxy, method, ignoredArguments) -> switch (method.getName()) {
+                    case "snapshot" -> snapshot;
+                    case "subscribe" -> Subscription.create(() -> {
+                    });
+                    case "launchSessionProperty" -> launchSessions;
+                    default -> throw new AssertionError("Unexpected home-model call: " + method.getName());
+                });
+        return HomeModel.class.cast(proxy);
+    }
+
+    /// Creates the empty lazy instance source required by the persistent title bar.
+    ///
+    /// @return empty instance model that never starts a range request
+    private static InstancesModel instancesModel() {
+        InstancesSnapshot snapshot = new InstancesSnapshot(
+                OptionalInt.empty(),
+                0,
+                0L,
+                "",
+                false,
+                false,
+                false,
+                false,
+                false);
+        Object proxy = Proxy.newProxyInstance(
+                InstancesModel.class.getClassLoader(),
+                new Class<?>[]{InstancesModel.class},
+                (ignoredProxy, method, ignoredArguments) -> switch (method.getName()) {
+                    case "snapshot" -> snapshot;
+                    case "subscribe" -> Subscription.create(() -> {
+                    });
+                    case "exactItemCount" -> OptionalInt.of(0);
+                    case "sourceRevision" -> OptionalLong.of(0L);
+                    case "selectionContextRevision" -> 0L;
+                    default -> throw new AssertionError("Unexpected instances-model call: " + method.getName());
+                });
+        return InstancesModel.class.cast(proxy);
+    }
+
+    /// Creates the empty configured-directory source required by the title-bar selector.
+    ///
+    /// @return empty directory service with removable subscriptions
+    private static GameDirectoryManagementService gameDirectories() {
+        GameDirectoryManagementSnapshot snapshot = new GameDirectoryManagementSnapshot(0L, List.of());
+        Object proxy = Proxy.newProxyInstance(
+                GameDirectoryManagementService.class.getClassLoader(),
+                new Class<?>[]{GameDirectoryManagementService.class},
+                (ignoredProxy, method, ignoredArguments) -> switch (method.getName()) {
+                    case "snapshot" -> snapshot;
+                    case "subscribe" -> Subscription.create(() -> {
+                    });
+                    case "close" -> null;
+                    default -> throw new AssertionError("Unexpected directory-service call: " + method.getName());
+                });
+        return GameDirectoryManagementService.class.cast(proxy);
     }
 
     /// Creates one lightweight page factory for every permanent shell destination.

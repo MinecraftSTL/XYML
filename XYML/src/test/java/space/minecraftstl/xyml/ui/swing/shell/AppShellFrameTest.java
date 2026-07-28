@@ -17,6 +17,9 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
+import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.util.SystemInfo;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -28,8 +31,10 @@ import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.ThemeMode;
 
 import javax.swing.JComponent;
+import javax.swing.JRootPane;
 import javax.swing.JPanel;
 import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -38,6 +43,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -102,9 +108,9 @@ public final class AppShellFrameTest {
                 () -> assertSame(nativeFailure, thrown.getSuppressed()[0]));
     }
 
-    /// The frame remains operating-system decorated, resizable, and packed to the shell's preferred bounds.
+    /// The frame installs full-window FlatLaf chrome and opens on persistent instance management.
     @Test
-    public void createsSystemDecoratedFrame() {
+    public void createsFullWindowContentFrame() {
         assumeFalse(GraphicsEnvironment.isHeadless());
         EnumMap<ShellPageId, ShellPageFactory<? extends JComponent>> factories =
                 new EnumMap<>(ShellPageId.class);
@@ -120,14 +126,66 @@ public final class AppShellFrameTest {
                 "XYML",
                 themeManager,
                 factories,
-                ShellPageId.HOME,
                 ShellPagePresentations.englishFallback(),
+                AppShellPanelTest.testHomeModel(),
+                AppShellPanelTest.testInstancesModel(),
+                AppShellPanelTest.testGameDirectories(),
+                AppShellPanelTest.testHomeStrings(),
+                space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings.english(),
                 new SwingAnimator(MotionPolicy.OFF, 16),
+                Duration.ZERO,
                 Duration.ZERO);
         try {
-            frame.open();
+            JRootPane rootPane = frame.getRootPane();
+            boolean clientDecoratedFallback = !SystemInfo.isMacOS
+                    && !FlatLaf.supportsNativeWindowDecorations();
             assertAll(
-                    () -> assertFalse(frame.isUndecorated()),
+                    () -> assertEquals(clientDecoratedFallback, frame.isUndecorated()),
+                    () -> assertEquals(Boolean.TRUE, rootPane.getClientProperty(
+                            FlatClientProperties.USE_WINDOW_DECORATIONS)),
+                    () -> assertEquals(Boolean.TRUE, rootPane.getClientProperty(
+                            FlatClientProperties.FULL_WINDOW_CONTENT)),
+                    () -> assertEquals(Boolean.FALSE, rootPane.getClientProperty(
+                            FlatClientProperties.TITLE_BAR_SHOW_ICON)),
+                    () -> assertEquals(Boolean.FALSE, rootPane.getClientProperty(
+                            FlatClientProperties.TITLE_BAR_SHOW_TITLE)),
+                    () -> assertEquals(Boolean.TRUE, rootPane.getClientProperty(
+                            FlatClientProperties.TITLE_BAR_SHOW_ICONIFFY)),
+                    () -> assertEquals(Boolean.TRUE, rootPane.getClientProperty(
+                            FlatClientProperties.TITLE_BAR_SHOW_MAXIMIZE)),
+                    () -> assertEquals(Boolean.TRUE, rootPane.getClientProperty(
+                            FlatClientProperties.TITLE_BAR_SHOW_CLOSE)),
+                    () -> assertEquals(AppShellPanel.HEADER_HEIGHT, rootPane.getClientProperty(
+                            FlatClientProperties.TITLE_BAR_HEIGHT)),
+                    () -> assertEquals(SystemInfo.isMacOS ? JRootPane.NONE : JRootPane.FRAME,
+                            rootPane.getWindowDecorationStyle()),
+                    () -> assertEquals(ShellPageId.INSTANCES, frame.shellPanel().selectedPage()),
+                    () -> assertTrue(frame.shellPanel().isPageCached(ShellPageId.INSTANCES)),
+                    () -> assertEquals("mac horizontal zeroInFullScreen",
+                            frame.shellPanel().toolbar().macWindowButtonsPlaceholder().getClientProperty(
+                                    FlatClientProperties.FULL_WINDOW_CONTENT_BUTTONS_PLACEHOLDER)),
+                    () -> assertEquals("win horizontal",
+                            frame.shellPanel().toolbar().winWindowButtonsPlaceholder().getClientProperty(
+                                    FlatClientProperties.FULL_WINDOW_CONTENT_BUTTONS_PLACEHOLDER)));
+
+            frame.open();
+            if (!SystemInfo.isMacOS) {
+                Rectangle buttonBounds = assertInstanceOf(
+                        Rectangle.class,
+                        rootPane.getClientProperty(FlatClientProperties.FULL_WINDOW_CONTENT_BUTTONS_BOUNDS));
+                Rectangle launchBounds = javax.swing.SwingUtilities.convertRectangle(
+                        frame.shellPanel().toolbar().launchButton().getParent(),
+                        frame.shellPanel().toolbar().launchButton().getBounds(),
+                        rootPane);
+                assertAll(
+                        () -> assertTrue(
+                                launchBounds.getMaxX() <= buttonBounds.getMinX(),
+                                "launch=" + launchBounds + ", buttons=" + buttonBounds),
+                        () -> assertTrue(
+                                buttonBounds.getMinX() - launchBounds.getMaxX() <= 16.0,
+                                "launch=" + launchBounds + ", buttons=" + buttonBounds));
+            }
+            assertAll(
                     () -> assertTrue(frame.isResizable()),
                     () -> assertEquals(AppShellPanel.MINIMUM_WIDTH, frame.getMinimumSize().width),
                     () -> assertEquals(AppShellPanel.MINIMUM_HEIGHT, frame.getMinimumSize().height),

@@ -53,4 +53,14 @@ public interface InstancesModel extends ViewportChoiceDataSource<InstanceListIte
 
     /// Opens management for the currently selected instance.
     void manageSelectedInstance();
+
+    /// Returns a revision that changes when selection IDs must be interpreted in a new repository context.
+    ///
+    /// Static repository models retain zero. A directory-switching model increments this value so a persistent
+    /// instances page can replace management even when two directories select the same row index or instance ID.
+    ///
+    /// @return non-negative selection-context revision
+    default long selectionContextRevision() {
+        return 0L;
+    }
 }

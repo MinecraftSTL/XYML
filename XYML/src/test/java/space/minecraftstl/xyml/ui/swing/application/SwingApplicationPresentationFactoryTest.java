@@ -99,7 +99,6 @@ public final class SwingApplicationPresentationFactoryTest {
 
         assertAll(
                 () -> assertEquals(Metadata.TITLE, presentation.windowTitle()),
-                () -> assertShellPage(presentation, ShellPageId.HOME, "主页", KeyEvent.VK_H),
                 () -> assertShellPage(presentation, ShellPageId.INSTANCES, "实例列表", KeyEvent.VK_I),
                 () -> assertShellPage(presentation, ShellPageId.DOWNLOADS, "下载", KeyEvent.VK_D),
                 () -> assertShellPage(presentation, ShellPageId.ACCOUNTS, "账户", KeyEvent.VK_A),
@@ -146,7 +145,7 @@ public final class SwingApplicationPresentationFactoryTest {
                                 "castle.litematic")));
     }
 
-    /// Languages without dedicated Swing entries fall back to base text instead of exposing keys.
+    /// Shared labels retain their locale while missing Swing-only entries fall back without exposing keys.
     @Test
     public void fallsBackToBaseResourcesWithoutExposingRawKeys() throws ReflectiveOperationException {
         I18n.setLocale(SupportedLocale.getLocale(Locale.forLanguageTag("es")));
@@ -157,7 +156,9 @@ public final class SwingApplicationPresentationFactoryTest {
         @Unmodifiable List<String> texts = allPresentationText(presentation);
 
         assertAll(
-                () -> assertEquals("Home", presentation.shellPages().get(ShellPageId.HOME).label()),
+                () -> assertEquals(
+                        "Todas las instancias",
+                        presentation.shellPages().get(ShellPageId.INSTANCES).label()),
                 () -> assertEquals("Task progress", presentation.taskProgress().progressAccessibleName()),
                 () -> assertPresentationTextResolved(texts));
     }

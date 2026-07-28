@@ -19,13 +19,10 @@ package space.minecraftstl.xyml.ui.swing.shell;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Identifies the five stable top-level destinations without depending on a UI toolkit.
+/// Identifies the persistent instance workspace and its three top-level overlays.
 @NotNullByDefault
 public enum ShellPageId {
-    /// The launcher's primary overview and launch destination.
-    HOME,
-
-    /// The installed game instance destination.
+    /// The persistent installed-instance management workspace.
     INSTANCES,
 
     /// The game and mod download destination.

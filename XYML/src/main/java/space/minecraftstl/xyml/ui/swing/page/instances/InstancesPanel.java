@@ -136,6 +136,9 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
     /// Whether programmatic selection restoration is suppressing command delegation.
     private boolean applyingSnapshot;
 
+    /// Repository context for which default management was most recently requested.
+    private long managedSelectionContextRevision = Long.MIN_VALUE;
+
     /// Cross-thread gate preventing queued model updates after close begins.
     private volatile boolean closed;
 
@@ -342,6 +345,23 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
                 && pendingModelSelectionIndex < 0);
         statusLabel.setText(snapshot.statusText());
         statusLabel.setToolTipText(snapshot.statusText());
+        openDefaultManagementForNewContext(snapshot);
+    }
+
+    /// Opens selected-instance management once for each selected game-directory context.
+    ///
+    /// Returning from management to the instance list does not change this revision, so that explicit user action
+    /// remains respected. Switching version folders increments the model context and replaces any old view.
+    ///
+    /// @param snapshot current selected-directory state
+    private void openDefaultManagementForNewContext(InstancesSnapshot snapshot) {
+        long contextRevision = model.selectionContextRevision();
+        if (snapshot.manageEnabled()
+                && contextRevision > 0L
+                && contextRevision != managedSelectionContextRevision) {
+            managedSelectionContextRevision = contextRevision;
+            model.manageSelectedInstance();
+        }
     }
 
     /// Restores the model-selected row without delegating it back as a user command.

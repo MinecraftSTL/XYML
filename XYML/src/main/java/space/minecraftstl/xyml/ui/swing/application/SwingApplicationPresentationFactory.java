@@ -119,7 +119,6 @@ public final class SwingApplicationPresentationFactory {
     /// @return complete shell navigation presentation
     private static ShellPagePresentations createShellPages() {
         EnumMap<ShellPageId, ShellPagePresentation> pages = new EnumMap<>(ShellPageId.class);
-        pages.put(ShellPageId.HOME, new ShellPagePresentation(i18n("swing.shell.home"), KeyEvent.VK_H));
         pages.put(ShellPageId.INSTANCES, new ShellPagePresentation(i18n("version.manage"), KeyEvent.VK_I));
         pages.put(ShellPageId.DOWNLOADS, new ShellPagePresentation(i18n("download"), KeyEvent.VK_D));
         pages.put(ShellPageId.ACCOUNTS, new ShellPagePresentation(i18n("account"), KeyEvent.VK_A));

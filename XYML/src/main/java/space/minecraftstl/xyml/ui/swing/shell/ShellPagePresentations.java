@@ -65,7 +65,6 @@ public final class ShellPagePresentations {
     /// @return immutable English fallback presentations
     public static ShellPagePresentations englishFallback() {
         return new ShellPagePresentations(Map.of(
-                ShellPageId.HOME, new ShellPagePresentation("Home", KeyEvent.VK_H),
                 ShellPageId.INSTANCES, new ShellPagePresentation("Instances", KeyEvent.VK_I),
                 ShellPageId.DOWNLOADS, new ShellPagePresentation("Downloads", KeyEvent.VK_D),
                 ShellPageId.ACCOUNTS, new ShellPagePresentation("Accounts", KeyEvent.VK_A),

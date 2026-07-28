@@ -86,7 +86,6 @@ final class ShellNavigationButton extends JToggleButton {
     /// @return classpath-relative SVG resource path
     private static String iconResource(ShellPageId page) {
         return switch (Objects.requireNonNull(page, "page")) {
-            case HOME -> "assets/swing/icons/nav-home.svg";
             case INSTANCES -> "assets/swing/icons/nav-instances.svg";
             case DOWNLOADS -> "assets/swing/icons/nav-downloads.svg";
             case ACCOUNTS -> "assets/swing/icons/nav-accounts.svg";

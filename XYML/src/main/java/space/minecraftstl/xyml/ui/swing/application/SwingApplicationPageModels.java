@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
+import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementModelFactory;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
@@ -34,7 +35,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/// Owns the five toolkit-neutral page models, instance-management coordinator, vanilla installer,
+/// Owns the launcher workflow models, instance-management coordinator, vanilla installer,
 /// and ordered cleanup resources.
 ///
 /// Resources are closed in list order. Production supplies the installer before models, data
@@ -43,6 +44,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class SwingApplicationPageModels implements AutoCloseable {
     /// Launcher-home state and commands.
     private final HomeModel home;
+
+    /// Configured game-directory state used by the title-bar selector.
+    private final GameDirectoryManagementService gameDirectories;
 
     /// Installed-instance state, viewport source, and commands.
     private final InstancesModel instances;
@@ -74,6 +78,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// Creates an explicitly owned model bundle.
     ///
     /// @param home launcher-home model
+    /// @param gameDirectories configured game-directory selection service
     /// @param instances installed-instance model
     /// @param instanceManagement dynamic instance-management view coordinator
     /// @param gameVersions lazy game-version catalog model
@@ -83,6 +88,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// @param ownedResources resources closed in the supplied order
     public SwingApplicationPageModels(
             HomeModel home,
+            GameDirectoryManagementService gameDirectories,
             InstancesModel instances,
             InstanceManagementCoordinator instanceManagement,
             GameVersionCatalogModel gameVersions,
@@ -92,6 +98,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
             List<? extends AutoCloseable> ownedResources) {
         this(
                 home,
+                gameDirectories,
                 instances,
                 instanceManagement,
                 gameVersions,
@@ -105,6 +112,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// Creates an explicitly owned model bundle with optional local theme-pack management.
     ///
     /// @param home launcher-home model
+    /// @param gameDirectories configured game-directory selection service
     /// @param instances installed-instance model
     /// @param instanceManagement dynamic instance-management view coordinator
     /// @param gameVersions lazy game-version catalog model
@@ -115,6 +123,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// @param themePackManagementModelFactory optional fresh theme-pack model factory
     public SwingApplicationPageModels(
             HomeModel home,
+            GameDirectoryManagementService gameDirectories,
             InstancesModel instances,
             InstanceManagementCoordinator instanceManagement,
             GameVersionCatalogModel gameVersions,
@@ -124,6 +133,7 @@ public final class SwingApplicationPageModels implements AutoCloseable {
             List<? extends AutoCloseable> ownedResources,
             @Nullable ThemePackManagementModelFactory themePackManagementModelFactory) {
         this.home = Objects.requireNonNull(home, "home");
+        this.gameDirectories = Objects.requireNonNull(gameDirectories, "gameDirectories");
         this.instances = Objects.requireNonNull(instances, "instances");
         this.instanceManagement = Objects.requireNonNull(instanceManagement, "instanceManagement");
         this.gameVersions = Objects.requireNonNull(gameVersions, "gameVersions");
@@ -140,6 +150,13 @@ public final class SwingApplicationPageModels implements AutoCloseable {
     /// @return launcher-home model
     public HomeModel home() {
         return home;
+    }
+
+    /// Returns configured game-directory state for the title-bar selector.
+    ///
+    /// @return game-directory selection service
+    public GameDirectoryManagementService gameDirectories() {
+        return gameDirectories;
     }
 
     /// Returns the installed-instance model.

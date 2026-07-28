@@ -30,10 +30,12 @@ public final class ShellNavigationStateTest {
     /// Re-selecting the current destination is a no-op while another destination changes state.
     @Test
     public void reportsOnlyRealDestinationChanges() {
-        ShellNavigationState state = new ShellNavigationState(ShellPageId.HOME);
+        ShellNavigationState state = new ShellNavigationState(ShellPageId.INSTANCES);
 
-        assertFalse(state.select(ShellPageId.HOME));
+        assertFalse(state.select(ShellPageId.INSTANCES));
         assertTrue(state.select(ShellPageId.DOWNLOADS));
         assertEquals(ShellPageId.DOWNLOADS, state.selectedPage());
+        assertTrue(state.select(ShellPageId.INSTANCES));
+        assertEquals(ShellPageId.INSTANCES, state.selectedPage());
     }
 }

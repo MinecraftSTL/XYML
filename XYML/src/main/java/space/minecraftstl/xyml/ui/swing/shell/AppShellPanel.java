@@ -17,33 +17,31 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
-import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
+import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
+import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
-import javax.swing.ButtonGroup;
-import javax.swing.Icon;
-import javax.swing.JButton;
 import javax.swing.JComponent;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.SwingConstants;
+import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.Font;
 import java.time.Duration;
-import java.util.EnumMap;
 import java.util.Map;
 import java.util.Objects;
 
-/// Renders the stable XYML brand, navigation, and lazily created top-level page area.
+/// Renders a title-bar workflow above persistent instance management and lazy overlay pages.
 @NotNullByDefault
 public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Minimum shell width that preserves page and navigation readability.
-    public static final int MINIMUM_WIDTH = 900;
+    public static final int MINIMUM_WIDTH = 1040;
 
     /// Minimum shell height that preserves all navigation targets.
     public static final int MINIMUM_HEIGHT = 560;
@@ -54,11 +52,8 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Preferred initial shell height.
     public static final int PREFERRED_HEIGHT = 720;
 
-    /// Stable navigation-band width.
-    public static final int NAVIGATION_WIDTH = 184;
-
-    /// Stable brand-header height.
-    public static final int HEADER_HEIGHT = 72;
+    /// Stable full-window-content title-bar height.
+    public static final int HEADER_HEIGHT = 52;
 
     /// Toolkit-neutral selected-destination state.
     private final ShellNavigationState navigationState;
@@ -66,61 +61,86 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Lazily created Swing destination pages.
     private final ShellPageCache<JComponent> pageCache;
 
-    /// Buttons keyed by their destination for synchronized selection state.
-    private final EnumMap<ShellPageId, ShellNavigationButton> navigationButtons =
-            new EnumMap<>(ShellPageId.class);
+    /// Stable instance-management page retained underneath every top-level overlay.
+    private final JComponent instancesPage;
 
-    /// Header label that identifies the currently visible destination.
-    private final JLabel pageTitle = new JLabel();
+    /// Lazy overlay deck for accounts, downloads, and settings.
+    private final ShellPageDeck overlayDeck;
 
-    /// Discoverable caller-configured file tool hidden until production supplies its workflow.
-    private final JButton fileToolButton = new JButton();
+    /// Full-window-content title-bar workflow controls.
+    private final ShellToolbarPanel toolbar;
 
-    /// Stable content area that owns page transitions.
-    private final ShellPageDeck pageDeck;
+    /// Launch progress temporarily covering both base and top-level overlays.
+    private final LaunchTaskOverlayPanel launchTaskOverlay;
 
-    /// Localized navigation and page-title presentations.
-    private final ShellPagePresentations pagePresentations;
+    /// Layered workspace retaining the base, page overlay, and launch-task overlay.
+    private final ShellWorkspace workspace;
 
     /// Whether this shell has released all cached page resources.
     private boolean closed;
 
-    /// Current file-tool command, or `null` while the generic header slot is hidden.
-    private @Nullable Runnable fileToolCommand;
-
     /// Creates the application shell on the EDT.
     ///
     /// @param pageFactories one lazy Swing page factory for every destination
-    /// @param initialPage the destination shown immediately without animation
     /// @param pagePresentations localized labels and mnemonics for every destination
+    /// @param homeModel launcher selection and launch model
+    /// @param instancesModel selected-directory lazy instance model
+    /// @param gameDirectories configured game-directory selection service
+    /// @param homeStrings localized title-bar launch controls
+    /// @param taskProgressStrings localized launch progress controls
     /// @param animator the shared Swing animator
     /// @param pageTransitionDuration the non-negative caller-selected transition duration
+    /// @param progressAnimationDuration non-negative launch progress animation duration
     public AppShellPanel(
             Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> pageFactories,
-            ShellPageId initialPage,
             ShellPagePresentations pagePresentations,
+            HomeModel homeModel,
+            InstancesModel instancesModel,
+            GameDirectoryManagementService gameDirectories,
+            HomeStrings homeStrings,
+            TaskProgressStrings taskProgressStrings,
             SwingAnimator animator,
-            Duration pageTransitionDuration) {
+            Duration pageTransitionDuration,
+            Duration progressAnimationDuration) {
         EdtDispatcher.requireEventDispatchThread();
-        Objects.requireNonNull(initialPage);
-        this.pagePresentations = Objects.requireNonNull(pagePresentations);
-        navigationState = new ShellNavigationState(initialPage);
+        Objects.requireNonNull(pagePresentations, "pagePresentations");
+        Objects.requireNonNull(homeModel, "homeModel");
+        Objects.requireNonNull(instancesModel, "instancesModel");
+        Objects.requireNonNull(gameDirectories, "gameDirectories");
+        Objects.requireNonNull(homeStrings, "homeStrings");
+        Objects.requireNonNull(taskProgressStrings, "taskProgressStrings");
+        Objects.requireNonNull(animator, "animator");
+        Objects.requireNonNull(pageTransitionDuration, "pageTransitionDuration");
+        Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration");
+        navigationState = new ShellNavigationState(ShellPageId.INSTANCES);
         pageCache = new ShellPageCache<>(Objects.requireNonNull(pageFactories));
-        pageDeck = new ShellPageDeck(Objects.requireNonNull(animator), Objects.requireNonNull(pageTransitionDuration));
+        overlayDeck = new ShellPageDeck(animator, pageTransitionDuration);
+        instancesPage = pageCache.getOrCreate(ShellPageId.INSTANCES);
+        toolbar = new ShellToolbarPanel(
+                homeModel,
+                instancesModel,
+                gameDirectories,
+                homeStrings,
+                pagePresentations,
+                this::navigateTo);
+        launchTaskOverlay = new LaunchTaskOverlayPanel(
+                homeModel,
+                homeStrings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration);
+        workspace = new ShellWorkspace(instancesPage, overlayDeck, launchTaskOverlay);
 
         setLayout(new MigLayout(
                 "insets 0, fill",
-                "[" + NAVIGATION_WIDTH + "!][grow,fill]",
+                "[grow,fill]",
                 "[" + HEADER_HEIGHT + "!][grow,fill]"));
         setMinimumSize(new Dimension(MINIMUM_WIDTH, MINIMUM_HEIGHT));
         setPreferredSize(new Dimension(PREFERRED_WIDTH, PREFERRED_HEIGHT));
 
-        add(createHeader(), "cell 0 0 2 1, grow");
-        add(createNavigation(), "cell 0 1, grow");
-        add(pageDeck, "cell 1 1, grow, gap 24 24 22 24");
-
-        updateSelection(initialPage);
-        pageDeck.showPage(pageCache.getOrCreate(initialPage), false);
+        add(toolbar, "cell 0 0, grow");
+        add(workspace, "cell 0 1, grow, gap 20 20 18 20");
+        updateSelection(ShellPageId.INSTANCES);
     }
 
     /// Selects a destination, creating its page only on first access.
@@ -137,7 +157,14 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
 
         updateSelection(page);
-        pageDeck.showPage(pageCache.getOrCreate(page), true);
+        if (page == ShellPageId.INSTANCES) {
+            overlayDeck.setVisible(false);
+            workspace.revalidate();
+            workspace.repaint();
+            return;
+        }
+        overlayDeck.setVisible(true);
+        overlayDeck.showPage(pageCache.getOrCreate(page), true);
     }
 
     /// Returns the currently selected destination.
@@ -162,38 +189,26 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         return pageCache.cachedPageCount();
     }
 
-    /// Configures and reveals the discoverable file-tool command in the stable header.
-    ///
-    /// @param label localized visible command label and accessible name
-    /// @param command caller-owned command invoked on the EDT
-    public void configureFileTool(String label, Runnable command) {
-        EdtDispatcher.requireEventDispatchThread();
-        if (closed) {
-            throw new IllegalStateException("Application shell is closed");
-        }
-        String validatedLabel = Objects.requireNonNull(label, "label").strip();
-        if (validatedLabel.isEmpty()) {
-            throw new IllegalArgumentException("File-tool label cannot be blank");
-        }
-        fileToolCommand = Objects.requireNonNull(command, "command");
-        fileToolButton.setText(validatedLabel);
-        fileToolButton.setToolTipText(validatedLabel);
-        fileToolButton.getAccessibleContext().setAccessibleName(validatedLabel);
-        fileToolButton.setVisible(true);
-        revalidate();
-        repaint();
-    }
-
     /// Closes all created destination pages from any caller thread.
     @Override
     public void close() {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             if (!closed) {
                 closed = true;
-                fileToolCommand = null;
-                fileToolButton.setEnabled(false);
                 setTransferHandler(null);
-                pageCache.close();
+                @Nullable Throwable failure = null;
+                failure = attemptClose(failure, toolbar);
+                failure = attemptClose(failure, launchTaskOverlay);
+                failure = attemptClose(failure, pageCache);
+                if (failure instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
+                }
+                if (failure instanceof Error error) {
+                    throw error;
+                }
+                if (failure != null) {
+                    throw new IllegalStateException("Application shell cleanup failed", failure);
+                }
             }
         });
     }
@@ -202,7 +217,9 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     ///
     /// @return the active page component
     @Nullable JComponent activePage() {
-        return pageDeck.currentPage();
+        return navigationState.selectedPage() == ShellPageId.INSTANCES
+                ? instancesPage
+                : overlayDeck.currentPage();
     }
 
     /// Returns a navigation button for focused layout and accessibility verification.
@@ -210,87 +227,86 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// @param page the represented destination
     /// @return the corresponding button
     ShellNavigationButton navigationButton(ShellPageId page) {
-        return Objects.requireNonNull(navigationButtons.get(Objects.requireNonNull(page)));
+        return toolbar.navigationButton(Objects.requireNonNull(page));
     }
 
-    /// Returns the optional header file-tool button for focused accessibility verification.
+    /// Returns the title-bar workflow controls for focused layout verification.
     ///
-    /// @return stable header command button
-    JButton fileToolButton() {
-        return fileToolButton;
+    /// @return stable toolbar panel
+    ShellToolbarPanel toolbar() {
+        return toolbar;
     }
 
-    /// Creates the full-width brand and current-destination header.
+    /// Returns the launch task overlay for focused lifecycle verification.
     ///
-    /// @return the configured header band
-    private JPanel createHeader() {
-        JPanel header = new JPanel(new MigLayout(
-                "insets 0 24 0 24, fill",
-                "[]16[]push[]",
-                "[grow,fill]"));
-
-        @Nullable Icon brandIcon = LauncherIconImages.headerIcon();
-        JLabel brand = new JLabel("XYML", brandIcon, SwingConstants.LEFT);
-        @Nullable Font configuredBrandFont = brand.getFont();
-        Font brandFont = Objects.requireNonNullElse(
-                configuredBrandFont,
-                new Font(Font.SANS_SERIF, Font.PLAIN, 13));
-        brand.setFont(brandFont.deriveFont(Font.BOLD, 19.0f));
-        brand.setIconTextGap(10);
-
-        @Nullable Font configuredTitleFont = pageTitle.getFont();
-        Font titleFont = Objects.requireNonNullElse(
-                configuredTitleFont,
-                new Font(Font.SANS_SERIF, Font.PLAIN, 13));
-        pageTitle.setFont(titleFont.deriveFont(Font.PLAIN, 15.0f));
-
-        fileToolButton.setName("shellFileTool");
-        fileToolButton.setIcon(new FlatSVGIcon("assets/swing/icons/file-import.svg", 18, 18));
-        fileToolButton.setIconTextGap(8);
-        fileToolButton.setFocusable(true);
-        fileToolButton.setVisible(false);
-        fileToolButton.addActionListener(event -> {
-            @Nullable Runnable command = fileToolCommand;
-            if (command != null) {
-                command.run();
-            }
-        });
-
-        header.add(brand);
-        header.add(pageTitle);
-        header.add(fileToolButton, "h 40!, hidemode 3");
-        header.setBorder(ShellSeparatorBorder.bottom());
-        return header;
+    /// @return stable launch task overlay
+    LaunchTaskOverlayPanel launchTaskOverlay() {
+        return launchTaskOverlay;
     }
 
-    /// Creates the fixed-width keyboard-accessible navigation band.
-    ///
-    /// @return the configured navigation panel
-    private JPanel createNavigation() {
-        JPanel navigation = new JPanel(new MigLayout(
-                "insets 14 12, fillx, wrap 1",
-                "[grow,fill]",
-                "[]8[]8[]8[]8[]push"));
-        ButtonGroup group = new ButtonGroup();
-
-        for (ShellPageId page : ShellPageId.values()) {
-            ShellNavigationButton button = new ShellNavigationButton(page, pagePresentations.get(page));
-            button.addActionListener(event -> navigateTo(page));
-            navigationButtons.put(page, button);
-            group.add(button);
-            navigation.add(button, "growx, h 44!");
-        }
-
-        navigation.setBorder(ShellSeparatorBorder.right());
-        return navigation;
-    }
-
-    /// Synchronizes title and button selection after a navigation state change.
+    /// Synchronizes title-bar navigation state after a base or overlay change.
     ///
     /// @param page the newly selected destination
     private void updateSelection(ShellPageId page) {
-        pageTitle.setText(pagePresentations.get(page).label());
-        navigationButton(page).setSelected(true);
+        toolbar.setSelectedPage(page);
     }
 
+    /// Attempts one shell-owned cleanup while retaining the first failure.
+    ///
+    /// @param previous earlier failure, or null
+    /// @param resource next resource to close
+    /// @return first failure with later failures suppressed, or null
+    private static @Nullable Throwable attemptClose(
+            @Nullable Throwable previous,
+            AutoCloseable resource) {
+        try {
+            resource.close();
+            return previous;
+        } catch (Throwable failure) {
+            if (previous == null) {
+                return failure;
+            }
+            if (previous != failure) {
+                previous.addSuppressed(failure);
+            }
+            return previous;
+        }
+    }
+
+    /// Fixed-bounds layered workspace keeping instance management alive below transient overlays.
+    @NotNullByDefault
+    private static final class ShellWorkspace extends JPanel {
+        /// Creates the base and both overlay layers in input-facing z-order.
+        ///
+        /// @param base persistent instance page
+        /// @param pageOverlay accounts, downloads, and settings deck
+        /// @param launchOverlay current launch-task surface
+        private ShellWorkspace(
+                JComponent base,
+                ShellPageDeck pageOverlay,
+                LaunchTaskOverlayPanel launchOverlay) {
+            super(null);
+            setOpaque(true);
+            pageOverlay.setVisible(false);
+            add(Objects.requireNonNull(base, "base"));
+            add(Objects.requireNonNull(pageOverlay, "pageOverlay"), 0);
+            add(Objects.requireNonNull(launchOverlay, "launchOverlay"), 0);
+        }
+
+        /// Keeps all layers on identical stable content bounds.
+        @Override
+        public void doLayout() {
+            for (Component child : getComponents()) {
+                child.setBounds(0, 0, getWidth(), getHeight());
+            }
+        }
+
+        /// Reports overlap because hidden or visible overlays share base bounds.
+        ///
+        /// @return always false for layered child painting
+        @Override
+        public boolean isOptimizedDrawingEnabled() {
+            return false;
+        }
+    }
 }

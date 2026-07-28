@@ -81,6 +81,24 @@ public final class InstancesPanelTest {
     private static final InstancesStrings STRINGS = new InstancesStrings(
             "Instances", "Refresh", "Refreshing", "Add", "Manage", "No installed instances");
 
+    /// A selected-directory context opens its selected instance management exactly once on construction.
+    @Test
+    public void opensSelectedDirectoryManagementByDefault() {
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(2), snapshot(0, 2, 0L));
+        model.selectionContextRevision = 1L;
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS, coordinator));
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertEquals(1, model.managementRequests.get()),
+                    () -> assertEquals(List.of("instance-0"), model.managedIds()));
+            panel.close();
+            coordinator.close();
+        });
+    }
+
     /// Loaded rows delegate commands once and warm one measured viewport beyond first display.
     @Test
     public void delegatesCommandsAndUsesMeasuredVisibleRange() {
@@ -878,6 +896,9 @@ public final class InstancesPanelTest {
         /// Manage command count.
         private final AtomicInteger managementRequests = new AtomicInteger();
 
+        /// Selected-directory context revision, or zero for ordinary static model tests.
+        private long selectionContextRevision;
+
         /// Failure raised after the backing model listener is removed, or null for normal cleanup.
         private volatile @Nullable RuntimeException unsubscribeFailure;
 
@@ -1021,6 +1042,12 @@ public final class InstancesPanelTest {
                     managedIds.add(items.get(selectedIndex).id());
                 }
             }
+        }
+
+        /// Returns the selected-directory context revision configured by the focused test.
+        @Override
+        public long selectionContextRevision() {
+            return selectionContextRevision;
         }
 
         /// Returns a snapshot of captured request ranges.

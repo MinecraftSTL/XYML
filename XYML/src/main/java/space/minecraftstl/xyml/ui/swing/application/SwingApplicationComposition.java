@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.game.install.DefaultGameInstallService;
 import space.minecraftstl.xyml.game.install.GameInstallService;
 import space.minecraftstl.xyml.game.install.RepositoryGameInstallTaskFactory;
 import space.minecraftstl.xyml.game.launch.LaunchRequest;
+import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.setting.LauncherSettings;
@@ -51,13 +52,12 @@ import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadProviderGameVersi
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogSource;
-import space.minecraftstl.xyml.ui.swing.page.home.HomePanel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.LauncherHomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.LegacyLauncherHomeStore;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
-import space.minecraftstl.xyml.ui.swing.page.instances.RepositoryInstancesModel;
+import space.minecraftstl.xyml.ui.swing.page.instances.SelectedRepositoryInstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.importing.SwingInstanceJsonImportLauncher;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.DefaultInstanceManagementView;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
@@ -66,13 +66,14 @@ import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.In
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldQuickPlayActions;
 import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.mods.ModCatalogInteractions;
-import space.minecraftstl.xyml.ui.swing.page.nbt.SwingNBTEditorLauncher;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.DefaultResourcePackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsPanel;
+import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
+import space.minecraftstl.xyml.ui.swing.page.settings.LegacyGameDirectoryManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.LegacyLauncherAppearanceStore;
 import space.minecraftstl.xyml.ui.swing.page.settings.PersistedAppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.SettingsCenterPanel;
@@ -306,7 +307,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         final SwingApplicationWindow createdWindow;
         try {
             createdWindow = Objects.requireNonNull(
-                    windowFactory.createWindow(themeManager, pageFactories, presentation, animator),
+                    windowFactory.createWindow(themeManager, pageFactories, presentation, animator, models),
                     "windowFactory returned null");
         } catch (RuntimeException | Error failure) {
             closeAfterFailure(models, failure);
@@ -402,12 +403,6 @@ public final class SwingApplicationComposition implements AutoCloseable {
             SwingAnimator animator) {
         EnumMap<ShellPageId, ShellPageFactory<? extends JComponent>> factories =
                 new EnumMap<>(ShellPageId.class);
-        factories.put(ShellPageId.HOME, () -> new HomePanel(
-                models.home(),
-                presentation.home(),
-                presentation.taskProgress(),
-                animator,
-                presentation.taskProgressAnimationDuration()));
         factories.put(ShellPageId.INSTANCES, () -> new InstancesPanel(
                 models.instances(),
                 presentation.instances(),
@@ -522,6 +517,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         addInstanceCommand,
                         commands.launchCommand(),
                         commands.launchScriptExportCommand()),
+                LegacyGameDirectoryManagementService::new,
                 () -> new InstanceManagementCoordinator((instanceId, returnCommand) -> {
                     WorldQuickPlayActions worldQuickPlayActions = WorldQuickPlayActions.available(
                             worldFolder -> commands.launchCommand().launch(new LaunchRequest(
@@ -565,8 +561,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                 worldQuickPlayActions,
                                 maintenanceLaunchActions);
                 }),
-                (management, addInstanceCommand) -> new RepositoryInstancesModel(
-                        legacy.repository(),
+                (management, addInstanceCommand) -> new SelectedRepositoryInstancesModel(
                         Schedulers.io(),
                         addInstanceCommand,
                         instanceId -> openInstanceManagement(management, instanceId),
@@ -574,11 +569,12 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 () -> new DownloadProviderGameVersionCatalogSource(DownloadProviders.getDownloadProvider()),
                 source -> new DefaultGameVersionCatalogModel(source, presentation.gameVersionsStatus()),
                 () -> new DefaultGameInstallService(
-                        new RepositoryGameInstallTaskFactory(
-                                legacy.repository(),
-                                DownloadProviders.getDownloadProvider(),
-                                Schedulers.io(),
-                                LegacyStateDispatcher::execute),
+                        request -> new RepositoryGameInstallTaskFactory(
+                                        legacy.repository(),
+                                        DownloadProviders.getDownloadProvider(),
+                                        Schedulers.io(),
+                                        LegacyStateDispatcher::execute)
+                                .create(request),
                         Schedulers.io(),
                         presentation.gameInstall().taskTitle(),
                         presentation.gameInstall().preparingPhase()),
@@ -694,13 +690,17 @@ public final class SwingApplicationComposition implements AutoCloseable {
         Objects.requireNonNull(navigateCommand, "navigateCommand");
         Runnable addInstanceCommand = () -> navigateCommand.accept(ShellPageId.DOWNLOADS);
         List<AutoCloseable> services = new ArrayList<>(1);
-        List<AutoCloseable> models = new ArrayList<>(6);
+        List<AutoCloseable> models = new ArrayList<>(7);
         List<AutoCloseable> sources = new ArrayList<>(1);
         try {
             HomeModel home = ownCloseable(
                     factories.home().apply(addInstanceCommand),
                     models,
                     "home model");
+            GameDirectoryManagementService gameDirectories = ownCloseable(
+                    factories.gameDirectories().get(),
+                    models,
+                    "game-directory selection service");
             InstanceManagementCoordinator instanceManagement = ownCloseable(
                     factories.instanceManagement().get(),
                     models,
@@ -736,6 +736,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     appearanceStore);
             return new SwingApplicationPageModels(
                     home,
+                    gameDirectories,
                     instances,
                     instanceManagement,
                     gameVersions,
@@ -846,21 +847,27 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @param pageFactories complete lazy page table
     /// @param presentation localized shell presentation
     /// @param animator shared animator
+    /// @param models application models used by title-bar workflow controls
     /// @return native Swing window adapter
     private static SwingApplicationWindow createFrameWindow(
             SwingThemeManager themeManager,
             @Unmodifiable Map<ShellPageId, ShellPageFactory<? extends JComponent>> pageFactories,
             SwingApplicationPresentation presentation,
-            SwingAnimator animator) {
+            SwingAnimator animator,
+            SwingApplicationPageModels models) {
         AppShellFrame frame = AppShellFrame.create(
                 presentation.windowTitle(),
                 themeManager,
                 pageFactories,
-                ShellPageId.HOME,
                 presentation.shellPages(),
+                models.home(),
+                models.instances(),
+                models.gameDirectories(),
+                presentation.home(),
+                presentation.taskProgress(),
                 animator,
-                presentation.pageTransitionDuration());
-        SwingNBTEditorLauncher.install(frame, Schedulers.io());
+                presentation.pageTransitionDuration(),
+                presentation.taskProgressAnimationDuration());
         SwingInstanceJsonImportLauncher.install(
                 frame,
                 GameDirectoryManager::getSelectedRepository,
@@ -962,6 +969,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// Ordered factories used by the production page-model construction transaction.
     ///
     /// @param home launcher-home model factory receiving the shared add-instance command
+    /// @param gameDirectories configured game-directory selection service factory
     /// @param instanceManagement dynamic instance-management coordinator factory
     /// @param instances installed-instance model factory receiving the registered coordinator and shared
     ///                  add-instance command
@@ -973,6 +981,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     @NotNullByDefault
     record ProductionPageModelFactories(
             Function<Runnable, ? extends HomeModel> home,
+            Supplier<? extends GameDirectoryManagementService> gameDirectories,
             Supplier<? extends InstanceManagementCoordinator> instanceManagement,
             BiFunction<InstanceManagementCoordinator, Runnable, ? extends InstancesModel> instances,
             Supplier<? extends GameVersionCatalogSource> gameVersionSource,
@@ -983,6 +992,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         /// Validates every factory before production construction starts.
         ProductionPageModelFactories {
             Objects.requireNonNull(home, "home");
+            Objects.requireNonNull(gameDirectories, "gameDirectories");
             Objects.requireNonNull(instanceManagement, "instanceManagement");
             Objects.requireNonNull(instances, "instances");
             Objects.requireNonNull(gameVersionSource, "gameVersionSource");
@@ -993,7 +1003,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         }
     }
 
-    /// Captures legacy stores and one real selected repository with idempotent cleanup.
+    /// Captures legacy stores and follows the selected repository with idempotent cleanup.
     @NotNullByDefault
     private static final class LegacyBindings implements AutoCloseable {
         /// Loaded launcher settings retained only for EDT-confined theme resolution and persistence.
@@ -1002,8 +1012,11 @@ public final class SwingApplicationComposition implements AutoCloseable {
         /// Exact selected theme captured on the legacy settings thread.
         private final ThemeReference initialTheme;
 
-        /// Selected game repository captured after game-directory initialization.
-        private final XYMLGameRepository repository;
+        /// Current selected game repository, updated on the legacy Swing state thread.
+        private volatile XYMLGameRepository repository;
+
+        /// Subscription keeping the cross-thread repository snapshot current.
+        private final Subscription repositorySubscription;
 
         /// Legacy account and instance projection for the home model.
         private final LegacyLauncherHomeStore homeStore;
@@ -1038,6 +1051,12 @@ public final class SwingApplicationComposition implements AutoCloseable {
             this.homeStore = Objects.requireNonNull(homeStore, "homeStore");
             this.accountStore = Objects.requireNonNull(accountStore, "accountStore");
             this.appearanceStore = Objects.requireNonNull(appearanceStore, "appearanceStore");
+            repositorySubscription = GameDirectoryManager.selectedRepositoryProperty().subscribe(change -> {
+                @Nullable XYMLGameRepository selectedRepository = change.currentValue();
+                if (selectedRepository != null) {
+                    this.repository = selectedRepository;
+                }
+            });
         }
 
         /// Creates all adapters directly on the initialized Swing event dispatch thread.
@@ -1120,6 +1139,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
             }
 
             @Nullable Throwable failure = null;
+            failure = closeCollecting(repositorySubscription, failure);
             failure = closeCollecting(homeStore, failure);
             failure = closeCollecting(accountStore, failure);
             failure = closeCollecting(appearanceStore, failure);
