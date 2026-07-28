@@ -226,6 +226,19 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         return tabs;
     }
 
+    /// Selects the dedicated game-directory management tab.
+    public void showGameDirectories() {
+        EdtDispatcher.requireEventDispatchThread();
+        tabs.setSelectedComponent(gameDirectoryManagementPanel);
+    }
+
+    /// Selects game-directory management and opens its add editor.
+    public void beginAddingGameDirectory() {
+        EdtDispatcher.requireEventDispatchThread();
+        showGameDirectories();
+        gameDirectoryManagementPanel.beginAddingDirectory();
+    }
+
     /// Releases the owned store subscription, store, and every embedded settings resource.
     @Override
     public void close() {

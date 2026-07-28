@@ -20,7 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
-import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
+import space.minecraftstl.xyml.ui.swing.choice.IdentifiedChoiceDataSource;
 
 /// Supplies installed-instance state, viewport data, and commands without exposing JavaFX or Swing types.
 ///
@@ -28,7 +28,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
 /// [InstancesSnapshot#contentRevision()] value. [InstancesSnapshot#itemCount()] must equal [#exactItemCount()]
 /// when that snapshot is current. Range loading must not block the Swing event dispatch thread.
 @NotNullByDefault
-public interface InstancesModel extends ViewportChoiceDataSource<InstanceListItem> {
+public interface InstancesModel extends IdentifiedChoiceDataSource<InstanceListItem> {
     /// Returns the latest immutable instance-page state.
     ///
     /// @return current page snapshot

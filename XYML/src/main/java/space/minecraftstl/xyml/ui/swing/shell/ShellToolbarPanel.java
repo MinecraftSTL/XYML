@@ -35,40 +35,33 @@ import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementEnt
 import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementSnapshot;
 
-import javax.swing.DefaultComboBoxModel;
-import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
-import javax.swing.JComboBox;
 import javax.swing.JLabel;
-import javax.swing.JList;
 import javax.swing.JPanel;
-import javax.swing.SwingConstants;
-import java.awt.Component;
 import java.awt.Cursor;
-import java.awt.Dimension;
-import java.awt.Insets;
-import java.util.EnumMap;
+import java.awt.Font;
 import java.util.Objects;
 import java.util.function.Consumer;
 
-/// Renders account, directory, navigation, instance, and launch controls inside the window title bar.
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
+/// Renders brand identity and launch workflow controls inside the full-window title bar.
 @NotNullByDefault
 final class ShellToolbarPanel extends JPanel implements AutoCloseable {
-    /// Cheap in-memory selector at the far left for configured instance/version directories.
-    private final JComboBox<GameDirectoryManagementEntry> gameDirectoryBox = new JComboBox<>();
+    /// Self-drawn launcher icon and native-window title replacement.
+    private final JLabel brandLabel = new JLabel();
 
-    /// Lazy account selector immediately following the directory selector.
+    /// Compact current-directory selector with explicit add and management routes.
+    private final LazyGameDirectorySelector gameDirectorySelector;
+
+    /// Lazy current-account selector.
     private final LazyAccountSelector accountSelector;
 
-    /// Lazy single-instance selector aligned immediately before the launch command.
+    /// Lazy current-instance selector aligned immediately before launch.
     private final LazyInstanceSelector instanceSelector;
 
     /// Primary game launch command immediately preceding native window buttons.
     private final JButton launchButton = new JButton();
-
-    /// Compact navigation buttons for the persistent base and two main overlays.
-    private final EnumMap<ShellPageId, ShellNavigationButton> navigationButtons =
-            new EnumMap<>(ShellPageId.class);
 
     /// macOS native traffic-light button placeholder at the platform-defined leading side.
     private final JPanel macWindowButtonsPlaceholder = new JPanel();
@@ -82,11 +75,8 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     /// Current configured game-directory selection service.
     private final GameDirectoryManagementService gameDirectories;
 
-    /// Localized home control labels reused by the title-bar controls.
+    /// Localized home control labels reused by title-bar controls.
     private final HomeStrings homeStrings;
-
-    /// Shell navigation callback.
-    private final Consumer<ShellPageId> navigateCommand;
 
     /// Owned launcher-state subscription.
     private final Subscription homeSubscription;
@@ -94,67 +84,89 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     /// Owned directory-state subscription.
     private final Subscription gameDirectorySubscription;
 
-    /// Whether programmatic combo replacement suppresses selection commands.
-    private boolean applyingDirectories;
-
-    /// Whether owned subscriptions and the lazy popup have been released.
+    /// Whether owned subscriptions and selector popups have been released.
     private boolean closed;
 
     /// Creates the stable title-bar control hierarchy.
     ///
+    /// @param windowTitle visible launcher title beside the bundled icon
     /// @param homeModel launcher selection and launch command model
     /// @param instancesModel selected-directory lazy instance model
     /// @param accountsModel lazy account selection model
     /// @param gameDirectories configured directory list and selection service
+    /// @param recentSelections persistent compact-selector histories
     /// @param homeStrings localized launcher control text
-    /// @param pagePresentations localized overlay navigation text
     /// @param navigateCommand shell navigation callback
+    /// @param addDirectoryCommand command opening the directory add editor
+    /// @param manageDirectoriesCommand command opening directory management
     ShellToolbarPanel(
+            String windowTitle,
             HomeModel homeModel,
             InstancesModel instancesModel,
             AccountsModel accountsModel,
             GameDirectoryManagementService gameDirectories,
+            ShellRecentSelections recentSelections,
             HomeStrings homeStrings,
-            ShellPagePresentations pagePresentations,
-            Consumer<ShellPageId> navigateCommand) {
+            Consumer<ShellPageId> navigateCommand,
+            Runnable addDirectoryCommand,
+            Runnable manageDirectoriesCommand) {
         super(new MigLayout(
-                "insets 0 0 0 0, fillx",
-                "[]0[190!,shrink 70]8[168!,shrink 60]push[]push[238!,shrink 80]8[132!,shrink 40]2[]",
+                "insets 0, fillx",
+                "[]0[168!,shrink 80]12[190!,shrink 90]8[168!,shrink 80]push"
+                        + "[238!,shrink 100]8[132!,shrink 60]2[]",
                 "[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
         this.homeModel = Objects.requireNonNull(homeModel, "homeModel");
         this.gameDirectories = Objects.requireNonNull(gameDirectories, "gameDirectories");
         this.homeStrings = Objects.requireNonNull(homeStrings, "homeStrings");
-        this.navigateCommand = Objects.requireNonNull(navigateCommand, "navigateCommand");
-        Objects.requireNonNull(pagePresentations, "pagePresentations");
+        Consumer<ShellPageId> navigation = Objects.requireNonNull(navigateCommand, "navigateCommand");
+        ShellRecentSelections histories = Objects.requireNonNull(recentSelections, "recentSelections");
         instanceSelector = new LazyInstanceSelector(
                 Objects.requireNonNull(instancesModel, "instancesModel"),
-                navigateCommand);
+                histories,
+                homeStrings.instanceLabel(),
+                homeStrings.missingInstanceLabel(),
+                homeStrings.addInstanceAction(),
+                i18n("version.manage"),
+                navigation);
         accountSelector = new LazyAccountSelector(
                 Objects.requireNonNull(accountsModel, "accountsModel"),
+                histories,
                 homeStrings.accountLabel(),
                 homeStrings.missingAccountLabel(),
-                space.minecraftstl.xyml.util.i18n.I18n.i18n("account.manage"),
-                navigateCommand);
+                i18n("account.create"),
+                i18n("account.manage"),
+                navigation);
+        gameDirectorySelector = new LazyGameDirectorySelector(
+                gameDirectories,
+                histories,
+                i18n("game_directory.title"),
+                i18n("game_directory.new"),
+                i18n("game_directory.manage"),
+                Objects.requireNonNull(addDirectoryCommand, "addDirectoryCommand"),
+                Objects.requireNonNull(manageDirectoriesCommand, "manageDirectoriesCommand"),
+                () -> navigation.accept(ShellPageId.INSTANCES));
 
-        configureComponents(pagePresentations);
+        configureComponents(Objects.requireNonNull(windowTitle, "windowTitle"));
         homeSubscription = homeModel.subscribe(this::homeChanged);
         gameDirectorySubscription = gameDirectories.subscribe(this::gameDirectoriesChanged);
         applyHomeSnapshot(homeModel.snapshot());
         applyGameDirectories(gameDirectories.snapshot());
-        setSelectedPage(ShellPageId.INSTANCES);
     }
 
-    /// Synchronizes compact navigation selection with the active base or overlay page.
+    /// Marks the account-management footer while its page is active.
     ///
     /// @param selectedPage selected shell page
     void setSelectedPage(ShellPageId selectedPage) {
-        EdtDispatcher.requireEventDispatchThread();
-        ShellPageId page = Objects.requireNonNull(selectedPage, "selectedPage");
-        accountSelector.setManagementSelected(page == ShellPageId.ACCOUNTS);
-        for (ShellNavigationButton button : navigationButtons.values()) {
-            button.setSelected(button.page() == page);
-        }
+        accountSelector.setManagementSelected(
+                Objects.requireNonNull(selectedPage, "selectedPage") == ShellPageId.ACCOUNTS);
+    }
+
+    /// Returns the visible brand label for focused icon and title tests.
+    ///
+    /// @return stable brand label
+    JLabel brandLabel() {
+        return brandLabel;
     }
 
     /// Returns the lazy account selector for focused ordering and accessibility tests.
@@ -166,9 +178,9 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
 
     /// Returns the game-directory selector for focused ordering and behavior tests.
     ///
-    /// @return stable directory combo box
-    JComboBox<GameDirectoryManagementEntry> gameDirectoryBox() {
-        return gameDirectoryBox;
+    /// @return stable directory selector
+    LazyGameDirectorySelector gameDirectorySelector() {
+        return gameDirectorySelector;
     }
 
     /// Returns the lazy instance selector for focused geometry tests.
@@ -185,14 +197,6 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         return launchButton;
     }
 
-    /// Returns one compact navigation control.
-    ///
-    /// @param page represented base or overlay page
-    /// @return matching compact navigation button
-    ShellNavigationButton navigationButton(ShellPageId page) {
-        return Objects.requireNonNull(navigationButtons.get(Objects.requireNonNull(page, "page")));
-    }
-
     /// Returns the macOS native-window-controls placeholder.
     ///
     /// @return leading platform placeholder
@@ -207,7 +211,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         return winWindowButtonsPlaceholder;
     }
 
-    /// Releases subscriptions and lazy popup requests on the EDT.
+    /// Releases subscriptions and selector popups on the EDT.
     @Override
     public void close() {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
@@ -217,20 +221,15 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
             closed = true;
             homeSubscription.unsubscribe();
             gameDirectorySubscription.unsubscribe();
+            gameDirectorySelector.close();
             accountSelector.close();
             instanceSelector.close();
-            gameDirectoryBox.setEnabled(false);
             launchButton.setEnabled(false);
-            for (ShellNavigationButton button : navigationButtons.values()) {
-                button.setEnabled(false);
-            }
         });
     }
 
-    /// Configures title-bar order, native-control placeholders, and explicit commands.
-    ///
-    /// @param pagePresentations localized navigation labels
-    private void configureComponents(ShellPagePresentations pagePresentations) {
+    /// Configures title-bar identity, workflow order, and native-control placeholders.
+    private void configureComponents(String windowTitle) {
         setName("shellToolbar");
         setOpaque(true);
         setBorder(ShellSeparatorBorder.bottom());
@@ -240,42 +239,23 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         configurePlaceholder(winWindowButtonsPlaceholder, "shellWinWindowButtons", "win horizontal");
         add(macWindowButtonsPlaceholder, "growy");
 
-        gameDirectoryBox.setName("shellGameDirectory");
-        gameDirectoryBox.setRenderer(new GameDirectoryRenderer());
-        gameDirectoryBox.setMaximumRowCount(Integer.MAX_VALUE);
-        gameDirectoryBox.setToolTipText(space.minecraftstl.xyml.util.i18n.I18n.i18n("game_directory.title"));
-        gameDirectoryBox.getAccessibleContext().setAccessibleName(gameDirectoryBox.getToolTipText());
-        gameDirectoryBox.addActionListener(event -> selectGameDirectory());
-        add(gameDirectoryBox, "grow, h 36!");
+        brandLabel.setName("shellBrand");
+        brandLabel.setText(windowTitle);
+        brandLabel.setIcon(LauncherIconImages.headerIcon());
+        brandLabel.setIconTextGap(8);
+        brandLabel.setFont(brandLabel.getFont().deriveFont(Font.BOLD));
+        brandLabel.setToolTipText(windowTitle);
+        brandLabel.getAccessibleContext().setAccessibleName(windowTitle);
+        add(brandLabel, "growx, h 40!");
 
+        add(gameDirectorySelector, "grow, h 36!");
         add(accountSelector, "grow, h 36!");
-
-        JPanel navigation = new JPanel(new MigLayout("insets 0, gap 2", "[][][]", "[40!]"));
-        navigation.setName("shellOverlayNavigation");
-        navigation.setOpaque(false);
-        for (ShellPageId page : new ShellPageId[] {
-                ShellPageId.INSTANCES,
-                ShellPageId.DOWNLOADS,
-                ShellPageId.SETTINGS}) {
-            ShellNavigationButton button = new ShellNavigationButton(page, pagePresentations.get(page));
-            button.setText(null);
-            button.setHorizontalAlignment(SwingConstants.CENTER);
-            button.setMargin(new Insets(8, 10, 8, 10));
-            button.setPreferredSize(new Dimension(40, 40));
-            button.setToolTipText(pagePresentations.get(page).label());
-            button.addActionListener(event -> navigateCommand.accept(page));
-            navigationButtons.put(page, button);
-            navigation.add(button, "w 40!, h 40!");
-        }
-        add(navigation, "h 40!");
-
         add(instanceSelector, "grow, h 36!");
 
         launchButton.setName("shellLaunch");
         launchButton.setIcon(new FlatSVGIcon("assets/swing/icons/rocket-launch.svg", 18, 18));
         launchButton.setIconTextGap(8);
         launchButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        launchButton.putClientProperty("JButton.buttonType", "roundRect");
         launchButton.addActionListener(event -> {
             if (!closed) {
                 homeModel.launch();
@@ -287,10 +267,6 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     }
 
     /// Configures one platform-aware native-window-controls placeholder.
-    ///
-    /// @param placeholder target placeholder panel
-    /// @param name stable automation name
-    /// @param policy FlatLaf placeholder policy
     private static void configurePlaceholder(JPanel placeholder, String name, String policy) {
         placeholder.setName(name);
         placeholder.setOpaque(false);
@@ -300,8 +276,6 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     }
 
     /// Applies one launcher selection or launch-state transition on the EDT.
-    ///
-    /// @param change transition invalidating title-bar text or commands
     private void homeChanged(ValueChange<HomeSnapshot> change) {
         Objects.requireNonNull(change, "change");
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
@@ -311,9 +285,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         });
     }
 
-    /// Applies one launcher snapshot without retaining the removed home-page status band.
-    ///
-    /// @param snapshot current launcher selection and launch state
+    /// Applies one launcher snapshot to account, instance, and launch controls.
     private void applyHomeSnapshot(HomeSnapshot snapshot) {
         EdtDispatcher.requireEventDispatchThread();
         HomeSnapshot state = Objects.requireNonNull(snapshot, "snapshot");
@@ -336,8 +308,6 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     }
 
     /// Receives one configured-directory transition and coalesces it onto the EDT.
-    ///
-    /// @param change transition invalidating directory options or selection
     private void gameDirectoriesChanged(ValueChange<GameDirectoryManagementSnapshot> change) {
         Objects.requireNonNull(change, "change");
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
@@ -347,12 +317,11 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         });
     }
 
-    /// Replaces directory options from cheap persisted descriptors and restores the selected entry.
-    ///
-    /// @param snapshot current configured directory state
+    /// Applies directory options and qualifies instance history by the exact selected directory.
     private void applyGameDirectories(GameDirectoryManagementSnapshot snapshot) {
         EdtDispatcher.requireEventDispatchThread();
         GameDirectoryManagementSnapshot state = Objects.requireNonNull(snapshot, "snapshot");
+        gameDirectorySelector.applySnapshot(state);
         @Nullable GameDirectoryManagementEntry selected = null;
         for (GameDirectoryManagementEntry entry : state.entries()) {
             if (entry.selected()) {
@@ -360,63 +329,8 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
                 break;
             }
         }
-        applyingDirectories = true;
-        try {
-            gameDirectoryBox.setModel(new DefaultComboBoxModel<>(
-                    state.entries().toArray(GameDirectoryManagementEntry[]::new)));
-            gameDirectoryBox.setSelectedItem(selected);
-        } finally {
-            applyingDirectories = false;
-        }
-        gameDirectoryBox.setEnabled(!closed && !state.entries().isEmpty());
-    }
-
-    /// Selects the exact configured directory chosen by the user.
-    private void selectGameDirectory() {
-        EdtDispatcher.requireEventDispatchThread();
-        if (closed || applyingDirectories) {
-            return;
-        }
-        @Nullable GameDirectoryManagementEntry selected =
-                (GameDirectoryManagementEntry) gameDirectoryBox.getSelectedItem();
-        if (selected != null && !selected.selected()) {
-            gameDirectories.select(selected.id());
-            navigateCommand.accept(ShellPageId.INSTANCES);
-        }
-    }
-
-    /// Renders one directory by its localized display name without filesystem access.
-    @NotNullByDefault
-    private static final class GameDirectoryRenderer extends DefaultListCellRenderer {
-        /// Renders one configured directory option.
-        ///
-        /// @param list owning combo popup list
-        /// @param value entry being rendered, or null while the model is empty
-        /// @param index source index
-        /// @param selected whether the row is selected
-        /// @param focused whether the row owns focus
-        /// @return configured standard label
-        @Override
-        public Component getListCellRendererComponent(
-                JList<?> list,
-                @Nullable Object value,
-                int index,
-                boolean selected,
-                boolean focused) {
-            Component component = super.getListCellRendererComponent(
-                    list,
-                    value,
-                    index,
-                    selected,
-                    focused);
-            if (component instanceof JLabel label) {
-                @Nullable GameDirectoryManagementEntry entry = value instanceof GameDirectoryManagementEntry item
-                        ? item
-                        : null;
-                label.setText(entry == null ? "" : entry.displayName());
-                label.setToolTipText(entry == null ? null : entry.path().getPath());
-            }
-            return component;
+        if (selected != null) {
+            instanceSelector.setDirectoryContext(selected.id().toString());
         }
     }
 }

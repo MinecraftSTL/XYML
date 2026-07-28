@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
@@ -31,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher;
 
 import java.util.Objects;
+import java.util.List;
 import java.util.OptionalInt;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionStage;
@@ -147,6 +149,39 @@ public final class SelectedRepositoryInstancesModel implements InstancesModel, A
             requireOpen();
             return OptionalInt.of(snapshot.itemCount());
         }
+    }
+
+    /// Returns stable IDs from the current selected-repository delegate.
+    @Override
+    public @Unmodifiable List<String> stableItemIds() {
+        return currentDelegate().stableItemIds();
+    }
+
+    /// Loads one identified row while rejecting a completion from a replaced repository.
+    @Override
+    public CompletionStage<InstanceListItem> loadItem(
+            String stableId,
+            LoadCancellation cancellation) {
+        Objects.requireNonNull(stableId, "stableId");
+        Objects.requireNonNull(cancellation, "cancellation");
+        final InstancesModel requestDelegate;
+        final LoadCancellation requestCancellation;
+        final long requestGeneration;
+        synchronized (stateLock) {
+            requireOpen();
+            requestDelegate = delegate;
+            requestGeneration = delegateGeneration;
+            requestCancellation = LoadCancellation.linkedTo(cancellation, delegateCancellation);
+        }
+        return requestDelegate.loadItem(stableId, requestCancellation).thenApply(item -> {
+            requestCancellation.throwIfCancelled();
+            synchronized (stateLock) {
+                if (closed || requestGeneration != delegateGeneration || requestDelegate != delegate) {
+                    throw new CancellationException("Selected repository changed during identified row loading");
+                }
+            }
+            return Objects.requireNonNull(item, "delegate returned null identified row");
+        });
     }
 
     /// Delegates one viewport request while linking it to repository-switch cancellation.

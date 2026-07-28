@@ -34,17 +34,20 @@ import java.util.Objects;
 /// @param instances selected-directory lazy instance source
 /// @param accounts lazy account source and selection commands
 /// @param gameDirectories configured instance/version-folder source and selection commands
+/// @param recentSelections persistent ordering used only by compact shell selectors
 @NotNullByDefault
 public record ShellToolbarModels(
         HomeModel home,
         InstancesModel instances,
         AccountsModel accounts,
-        GameDirectoryManagementService gameDirectories) {
+        GameDirectoryManagementService gameDirectories,
+        ShellRecentSelections recentSelections) {
     /// Validates every required non-owning model reference.
     public ShellToolbarModels {
         Objects.requireNonNull(home, "home");
         Objects.requireNonNull(instances, "instances");
         Objects.requireNonNull(accounts, "accounts");
         Objects.requireNonNull(gameDirectories, "gameDirectories");
+        Objects.requireNonNull(recentSelections, "recentSelections");
     }
 }

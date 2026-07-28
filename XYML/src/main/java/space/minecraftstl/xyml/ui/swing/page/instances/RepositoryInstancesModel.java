@@ -188,6 +188,44 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         return OptionalInt.of(state.source().entries().size());
     }
 
+    /// Returns stable instance identifiers without resolving version details or icons.
+    @Override
+    public @Unmodifiable List<String> stableItemIds() {
+        SourceSnapshot source = state.source();
+        List<String> identifiers = new ArrayList<>(source.entries().size());
+        for (RepositoryEntry entry : source.entries()) {
+            identifiers.add(entry.id());
+        }
+        return List.copyOf(identifiers);
+    }
+
+    /// Resolves one requested instance row away from the event dispatch thread.
+    @Override
+    public CompletionStage<InstanceListItem> loadItem(
+            String stableId,
+            LoadCancellation cancellation) {
+        Objects.requireNonNull(stableId, "stableId");
+        Objects.requireNonNull(cancellation, "cancellation");
+        SourceSnapshot requestSource;
+        synchronized (stateLock) {
+            requireOpen();
+            requestSource = state.source();
+        }
+        int index = indexOf(requestSource.entries(), stableId);
+        if (index < 0) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("Unknown instance: " + stableId));
+        }
+        RepositoryEntry entry = requestSource.entries().get(index);
+        try {
+            return CompletableFuture.supplyAsync(
+                    () -> loadEntry(entry, cancellation),
+                    backgroundExecutor);
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+    }
+
     /// Resolves only the rows demanded by the current measured viewport.
     @Override
     public CompletionStage<ChoicePage<InstanceListItem>> load(
@@ -367,6 +405,22 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
                 List.copyOf(items),
                 OptionalInt.of(requestSource.entries().size()),
                 actualRange.endExclusive() == requestSource.entries().size());
+    }
+
+    /// Resolves one immutable repository descriptor into its visible row.
+    ///
+    /// @param entry captured repository descriptor
+    /// @param cancellation cooperative viewport cancellation signal
+    /// @return resolved visible row
+    private InstanceListItem loadEntry(
+            RepositoryEntry entry,
+            LoadCancellation cancellation) {
+        checkLoadActive(cancellation);
+        String detail = entry.resolveGameVersion().orElse(statusStrings.unknownVersionDetail());
+        checkLoadActive(cancellation);
+        InstanceIconData icon = repository.resolveIcon(entry.id());
+        checkLoadActive(cancellation);
+        return new InstanceListItem(entry.id(), entry.id(), detail, icon);
     }
 
     /// Applies a matching real-repository refresh event without releasing model-owned refresh ownership.

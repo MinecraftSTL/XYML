@@ -57,8 +57,10 @@ public final class LazyAccountSelectorTest {
         SwingUtilities.invokeAndWait(() -> {
             LazyAccountSelector selector = new LazyAccountSelector(
                     model,
+                    ShellRecentSelections.transientSelections(),
                     "Account",
                     "No account",
+                    "Add account",
                     "Account list",
                     ignored -> { });
             selectorReference.set(selector);

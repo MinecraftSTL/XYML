@@ -94,6 +94,7 @@ public final class AppShellFrame extends JFrame {
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         setIconImages(LauncherIconImages.windowIcons());
         shellPanel = new AppShellPanel(
+                title,
                 pageFactories,
                 pagePresentations,
                 toolbarModels,

@@ -128,13 +128,15 @@ final class SwingInstanceJsonImportLauncherTest {
     private static AppShellPanel createShell() {
         AtomicReference<@Nullable AppShellPanel> result = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> result.set(new AppShellPanel(
+                "XYML",
                 pageFactories(),
                 ShellPagePresentations.englishFallback(),
                 new ShellToolbarModels(
                         homeModel(),
                         instancesModel(),
                         accountsModel(),
-                        gameDirectories()),
+                        gameDirectories(),
+                        space.minecraftstl.xyml.ui.swing.shell.ShellRecentSelections.transientSelections()),
                 new HomeStrings(
                         "Home",
                         "Account",

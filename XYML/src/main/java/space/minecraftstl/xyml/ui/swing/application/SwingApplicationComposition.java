@@ -88,6 +88,7 @@ import space.minecraftstl.xyml.ui.swing.shell.AppShellFrame;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageFactory;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 import space.minecraftstl.xyml.ui.swing.shell.ShellToolbarModels;
+import space.minecraftstl.xyml.ui.swing.shell.ShellRecentSelections;
 import space.minecraftstl.xyml.util.i18n.I18n;
 
 import javax.swing.JComponent;
@@ -865,7 +866,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         models.home(),
                         models.instances(),
                         models.accounts(),
-                        models.gameDirectories()),
+                        models.gameDirectories(),
+                        new ShellRecentSelections(SettingsManager.settings())),
                 presentation.home(),
                 presentation.taskProgress(),
                 animator,

@@ -21,17 +21,17 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.JList;
-import javax.swing.JRadioButton;
+import javax.swing.JLabel;
 import javax.swing.ListCellRenderer;
 import javax.swing.UIManager;
 import java.awt.Component;
 
-/// A single reusable radio-style renderer for loaded, loading, and failed choice rows.
+/// A single reusable list-style renderer for loaded, loading, and failed choice rows.
 ///
 /// @param <T> the non-null choice value type
 @NotNullByDefault
 public final class ChoiceEntryRenderer<T extends Object>
-        extends JRadioButton implements ListCellRenderer<ChoiceListEntry<T>> {
+        extends JLabel implements ListCellRenderer<ChoiceListEntry<T>> {
     /// The provider used to localize loaded values.
     private final ChoiceTextProvider<T> textProvider;
 
@@ -51,7 +51,7 @@ public final class ChoiceEntryRenderer<T extends Object>
     /// @param index the logical row index
     /// @param isSelected whether the row is selected
     /// @param cellHasFocus whether the row has keyboard focus
-    /// @return this reused radio-button renderer
+    /// @return this reused label renderer
     @Override
     public Component getListCellRendererComponent(
             JList<? extends ChoiceListEntry<T>> list,
@@ -61,7 +61,6 @@ public final class ChoiceEntryRenderer<T extends Object>
             boolean cellHasFocus) {
         setComponentOrientation(list.getComponentOrientation());
         setFont(list.getFont());
-        setSelected(isSelected);
         setBackground(isSelected ? list.getSelectionBackground() : list.getBackground());
         setForeground(isSelected ? list.getSelectionForeground() : list.getForeground());
         setBorder(UIManager.getBorder(cellHasFocus

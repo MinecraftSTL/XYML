@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
+import space.minecraftstl.xyml.ui.swing.page.settings.SettingsCenterPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JComponent;
@@ -67,6 +68,9 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Full-window-content title-bar workflow controls.
     private final ShellToolbarPanel toolbar;
 
+    /// Icon-only navigation for transient pages beside persistent instance management.
+    private final ShellNavigationRail navigationRail;
+
     /// Launch progress temporarily covering both base and top-level overlays.
     private final LaunchTaskOverlayPanel launchTaskOverlay;
 
@@ -78,6 +82,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
     /// Creates the application shell on the EDT.
     ///
+    /// @param windowTitle visible launcher title beside the bundled icon
     /// @param pageFactories one lazy Swing page factory for every destination
     /// @param pagePresentations localized labels and mnemonics for every destination
     /// @param toolbarModels non-owning launcher workflow models used by the title bar
@@ -87,6 +92,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// @param pageTransitionDuration the non-negative caller-selected transition duration
     /// @param progressAnimationDuration non-negative launch progress animation duration
     public AppShellPanel(
+            String windowTitle,
             Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> pageFactories,
             ShellPagePresentations pagePresentations,
             ShellToolbarModels toolbarModels,
@@ -107,14 +113,18 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         pageCache = new ShellPageCache<>(Objects.requireNonNull(pageFactories));
         overlayDeck = new ShellPageDeck(animator, pageTransitionDuration);
         instancesPage = pageCache.getOrCreate(ShellPageId.INSTANCES);
+        navigationRail = new ShellNavigationRail(pagePresentations, this::toggleOverlay);
         toolbar = new ShellToolbarPanel(
+                Objects.requireNonNull(windowTitle, "windowTitle"),
                 toolbarModels.home(),
                 toolbarModels.instances(),
                 toolbarModels.accounts(),
                 toolbarModels.gameDirectories(),
+                toolbarModels.recentSelections(),
                 homeStrings,
-                pagePresentations,
-                this::navigateTo);
+                this::navigateTo,
+                () -> openGameDirectoryManagement(true),
+                () -> openGameDirectoryManagement(false));
         launchTaskOverlay = new LaunchTaskOverlayPanel(
                 toolbarModels.home(),
                 homeStrings,
@@ -125,13 +135,14 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
         setLayout(new MigLayout(
                 "insets 0, fill",
-                "[grow,fill]",
+                "[52!][grow,fill]",
                 "[" + HEADER_HEIGHT + "!][grow,fill]"));
         setMinimumSize(new Dimension(MINIMUM_WIDTH, MINIMUM_HEIGHT));
         setPreferredSize(new Dimension(PREFERRED_WIDTH, PREFERRED_HEIGHT));
 
-        add(toolbar, "cell 0 0, grow");
-        add(workspace, "cell 0 1, grow, gap 20 20 18 20");
+        add(toolbar, "cell 0 0 2 1, grow");
+        add(navigationRail, "cell 0 1, grow");
+        add(workspace, "cell 1 1, grow, gap 18 20 18 18");
         updateSelection(ShellPageId.INSTANCES);
     }
 
@@ -157,6 +168,39 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
         overlayDeck.setVisible(true);
         overlayDeck.showPage(pageCache.getOrCreate(page), true);
+    }
+
+    /// Toggles one transient destination from the left navigation rail.
+    ///
+    /// Repeating an active rail destination closes its overlay and exposes persistent instance management. Other
+    /// programmatic navigation, including popup management footers, continues to keep an already-open page visible.
+    ///
+    /// @param page transient destination selected by the user
+    private void toggleOverlay(ShellPageId page) {
+        EdtDispatcher.requireEventDispatchThread();
+        ShellPageId destination = Objects.requireNonNull(page, "page");
+        if (destination == ShellPageId.INSTANCES) {
+            throw new IllegalArgumentException("Persistent instance management is not an overlay");
+        }
+        navigateTo(navigationState.selectedPage() == destination
+                ? ShellPageId.INSTANCES
+                : destination);
+    }
+
+    /// Opens the settings directory tab and optionally starts its add workflow.
+    ///
+    /// @param beginAdd whether to enter the add editor after revealing the page
+    private void openGameDirectoryManagement(boolean beginAdd) {
+        EdtDispatcher.requireEventDispatchThread();
+        navigateTo(ShellPageId.SETTINGS);
+        JComponent settingsPage = pageCache.getOrCreate(ShellPageId.SETTINGS);
+        if (settingsPage instanceof SettingsCenterPanel settings) {
+            if (beginAdd) {
+                settings.beginAddingGameDirectory();
+            } else {
+                settings.showGameDirectories();
+            }
+        }
     }
 
     /// Returns the currently selected destination.
@@ -190,6 +234,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 setTransferHandler(null);
                 @Nullable Throwable failure = null;
                 failure = attemptClose(failure, toolbar);
+                navigationRail.disableNavigation();
                 failure = attemptClose(failure, launchTaskOverlay);
                 failure = attemptClose(failure, pageCache);
                 if (failure instanceof RuntimeException runtimeException) {
@@ -219,7 +264,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// @param page the represented destination
     /// @return the corresponding button
     ShellNavigationButton navigationButton(ShellPageId page) {
-        return toolbar.navigationButton(Objects.requireNonNull(page));
+        return navigationRail.button(Objects.requireNonNull(page));
     }
 
     /// Returns the title-bar workflow controls for focused layout verification.
@@ -241,6 +286,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// @param page the newly selected destination
     private void updateSelection(ShellPageId page) {
         toolbar.setSelectedPage(page);
+        navigationRail.setSelectedPage(page);
     }
 
     /// Attempts one shell-owned cleanup while retaining the first failure.

@@ -42,7 +42,7 @@ import java.awt.Graphics2D;
 import java.awt.GridLayout;
 import java.awt.RenderingHints;
 
-/// Renders account rows with a lazy bundled avatar, two text lines, and explicit single selection.
+/// Renders account rows with a lazy bundled avatar, two text lines, and optional explicit selection.
 @NotNullByDefault
 public final class AccountListCellRenderer extends JPanel
         implements ListCellRenderer<ChoiceListEntry<AccountListItem>> {
@@ -73,9 +73,22 @@ public final class AccountListCellRenderer extends JPanel
     /// Explicit selected-account indicator.
     private final JRadioButton selectionIndicator = new JRadioButton();
 
+    /// Whether this renderer exposes a radio indicator in addition to list selection highlighting.
+    private final boolean showSelectionIndicator;
+
     /// Creates one reusable stable renderer hierarchy.
     public AccountListCellRenderer() {
+        this(true);
+    }
+
+    /// Creates one reusable renderer with caller-selected selection-indicator visibility.
+    ///
+    /// Compact dropdowns should pass `false` because their collapsed button already identifies the active value.
+    ///
+    /// @param showSelectionIndicator whether to render a trailing radio indicator
+    public AccountListCellRenderer(boolean showSelectionIndicator) {
         super(new BorderLayout(12, 0));
+        this.showSelectionIndicator = showSelectionIndicator;
         setOpaque(true);
         setPreferredSize(new Dimension(280, ROW_HEIGHT));
 
@@ -98,6 +111,7 @@ public final class AccountListCellRenderer extends JPanel
         selectionIndicator.setName("accountListSelection");
         selectionIndicator.setOpaque(false);
         selectionIndicator.setFocusable(false);
+        selectionIndicator.setVisible(showSelectionIndicator);
         add(avatarLabel, BorderLayout.LINE_START);
         add(labels, BorderLayout.CENTER);
         add(selectionIndicator, BorderLayout.LINE_END);
@@ -123,7 +137,7 @@ public final class AccountListCellRenderer extends JPanel
         Font font = list.getFont();
         nameLabel.setFont(font.deriveFont(Font.BOLD));
         detailLabel.setFont(font.deriveFont(Math.max(9.0F, font.getSize2D() - 1.0F)));
-        selectionIndicator.setSelected(selected);
+        selectionIndicator.setSelected(showSelectionIndicator && selected);
         setToolTipText(null);
 
         @Nullable AccountListItem item = entry.value();

@@ -114,6 +114,43 @@ public final class LauncherAccountsModel implements AccountsModel, AutoCloseable
         return OptionalInt.of(state.source().items().size());
     }
 
+    /// Returns stable account identifiers without resolving avatars or authentication state.
+    @Override
+    public @Unmodifiable List<String> stableItemIds() {
+        SourceSnapshot source = state.source();
+        List<String> identifiers = new ArrayList<>(source.items().size());
+        for (AccountListItem item : source.items()) {
+            identifiers.add(item.accountId());
+        }
+        return List.copyOf(identifiers);
+    }
+
+    /// Loads one immutable account row by stable identifier.
+    @Override
+    public CompletionStage<AccountListItem> loadItem(
+            String stableId,
+            LoadCancellation cancellation) {
+        Objects.requireNonNull(stableId, "stableId");
+        Objects.requireNonNull(cancellation, "cancellation");
+        SourceSnapshot source;
+        synchronized (stateLock) {
+            requireOpen();
+            source = state.source();
+        }
+        try {
+            checkLoadActive(cancellation);
+            int index = indexOf(source.items(), stableId);
+            if (index < 0) {
+                throw new IllegalArgumentException("Unknown account: " + stableId);
+            }
+            AccountListItem item = source.items().get(index);
+            checkLoadActive(cancellation);
+            return CompletableFuture.completedFuture(item);
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+    }
+
     /// Returns a completed range load sliced from one captured immutable text source.
     @Override
     public CompletionStage<ChoicePage<AccountListItem>> load(

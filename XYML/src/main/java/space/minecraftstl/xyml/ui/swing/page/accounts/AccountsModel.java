@@ -20,7 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.accounts;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
-import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
+import space.minecraftstl.xyml.ui.swing.choice.IdentifiedChoiceDataSource;
 
 import java.util.Optional;
 import java.util.concurrent.CompletionStage;
@@ -30,7 +30,7 @@ import java.util.concurrent.CompletionStage;
 /// Implementations must keep [AccountsSnapshot#itemCount()] and [#exactItemCount()] equal. Indexed
 /// content must remain stable for one [AccountsSnapshot#contentRevision()] value.
 @NotNullByDefault
-public interface AccountsModel extends ViewportChoiceDataSource<AccountListItem> {
+public interface AccountsModel extends IdentifiedChoiceDataSource<AccountListItem> {
     /// Returns the latest minimal account-list state.
     ///
     /// @return current account snapshot

@@ -20,11 +20,13 @@ package space.minecraftstl.xyml.ui.swing.shell;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.OrderedChoiceDataSource;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountListItem;
@@ -40,7 +42,6 @@ import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
-import javax.swing.plaf.basic.BasicArrowButton;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Dimension;
@@ -48,6 +49,7 @@ import java.awt.GraphicsConfiguration;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
+import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.function.Consumer;
@@ -64,14 +66,14 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
     /// Height reserved for the account-management footer.
     static final int MANAGEMENT_FOOTER_HEIGHT = 42;
 
+    /// Height reserved for the add-account command above the list.
+    static final int ADD_HEADER_HEIGHT = 42;
+
     /// Space retained around a popup inside its current screen work area.
     private static final int POPUP_SCREEN_MARGIN = 16;
 
     /// Main selected-account display and popup command.
-    private final JButton valueButton = new JButton();
-
-    /// Familiar trailing disclosure control sharing the same popup command.
-    private final BasicArrowButton arrowButton = new BasicArrowButton(SwingConstants.SOUTH);
+    private final ShellDropdownButton valueButton = new ShellDropdownButton();
 
     /// Popup hosting the measured lazy list and explicit account-management command.
     private final JPopupMenu popup = new JPopupMenu();
@@ -85,14 +87,23 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
     /// Existing viewport-driven list used without eager row materialization.
     private final ViewportChoiceList<AccountListItem> choiceList;
 
+    /// Stable-ID projection applying independent recent-use ordering without eager row loading.
+    private final OrderedChoiceDataSource<AccountListItem> orderedSource;
+
     /// Empty state shown when the exact account count is zero.
     private final JLabel emptyLabel = new JLabel();
 
     /// Footer command opening the complete account-management overlay.
     private final JButton manageButton = new JButton();
 
+    /// Top command opening the add-account workflow.
+    private final JButton addButton = new JButton();
+
     /// Lazy account source and selection command model.
     private final AccountsModel model;
+
+    /// Persistent recent-use order shared by shell selectors.
+    private final ShellRecentSelections recentSelections;
 
     /// Command opening the stable account-management overlay.
     private final Consumer<ShellPageId> navigateCommand;
@@ -127,6 +138,9 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
     /// User-selected logical row waiting for its lazy value, or -1 when none is pending.
     private int pendingSelectionIndex = -1;
 
+    /// Projection revision captured with [#pendingSelectionIndex].
+    private long pendingSelectionRevision = -1L;
+
     /// Whether programmatic model selection is suppressing command delegation.
     private boolean applyingSnapshot;
 
@@ -139,25 +153,32 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
     /// Creates one title-bar account selector.
     ///
     /// @param model lazy account model
+    /// @param recentSelections persistent compact-selector history
     /// @param selectorLabel localized account-selector accessible label
     /// @param emptyLabelText localized empty-account state
+    /// @param addLabel localized add-account command label
     /// @param managementLabel localized account-management command label
     /// @param navigateCommand shell navigation command
     LazyAccountSelector(
             AccountsModel model,
+            ShellRecentSelections recentSelections,
             String selectorLabel,
             String emptyLabelText,
+            String addLabel,
             String managementLabel,
             Consumer<ShellPageId> navigateCommand) {
         super(new BorderLayout(0, 0));
         EdtDispatcher.requireEventDispatchThread();
         this.model = Objects.requireNonNull(model, "model");
+        this.recentSelections = Objects.requireNonNull(recentSelections, "recentSelections");
         this.navigateCommand = Objects.requireNonNull(navigateCommand, "navigateCommand");
-        choiceList = new ViewportChoiceList<>(model, new AccountListCellRenderer());
+        orderedSource = new OrderedChoiceDataSource<>(model);
+        choiceList = new ViewportChoiceList<>(orderedSource, new AccountListCellRenderer(false));
         displayedSnapshot = model.snapshot();
         configureComponents(
                 Objects.requireNonNull(selectorLabel, "selectorLabel"),
                 Objects.requireNonNull(emptyLabelText, "emptyLabelText"),
+                Objects.requireNonNull(addLabel, "addLabel"),
                 Objects.requireNonNull(managementLabel, "managementLabel"));
         modelSubscription = model.subscribe(this::modelChanged);
         applySnapshot(displayedSnapshot);
@@ -199,8 +220,15 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
     /// Returns the main selected-account display for focused accessibility tests.
     ///
     /// @return stable selected-account button
-    JButton valueButton() {
+    ShellDropdownButton valueButton() {
         return valueButton;
+    }
+
+    /// Returns the add-account header command for focused popup tests.
+    ///
+    /// @return stable add-account button
+    JButton addButton() {
+        return addButton;
     }
 
     /// Returns the account-management footer command for focused navigation tests.
@@ -232,14 +260,16 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
         int rowCount = displayedSnapshot.itemCount();
         int listBudget = Math.max(
                 0,
-                availablePopupHeight() - MANAGEMENT_FOOTER_HEIGHT);
+                availablePopupHeight() - MANAGEMENT_FOOTER_HEIGHT - ADD_HEADER_HEIGHT);
         int availableRows = Math.max(1, listBudget / AccountListCellRenderer.ROW_HEIGHT);
         int displayedRows = Math.min(Math.max(1, rowCount), availableRows);
         int listHeight = displayedRows * AccountListCellRenderer.ROW_HEIGHT;
         int popupWidth = Math.max(MINIMUM_POPUP_WIDTH, getWidth());
         choiceList.setPreferredSize(new Dimension(popupWidth, listHeight));
         choiceLayout.show(choiceHost, rowCount == 0 ? "empty" : "accounts");
-        Dimension size = new Dimension(popupWidth, listHeight + MANAGEMENT_FOOTER_HEIGHT);
+        Dimension size = new Dimension(
+                popupWidth,
+                listHeight + MANAGEMENT_FOOTER_HEIGHT + ADD_HEADER_HEIGHT);
         popup.setPopupSize(size);
         return size;
     }
@@ -257,7 +287,7 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
             choiceList.getChoiceModel().removeListDataListener(listDataListener);
             choiceList.close();
             valueButton.setEnabled(false);
-            arrowButton.setEnabled(false);
+            addButton.setEnabled(false);
             manageButton.setEnabled(false);
         });
     }
@@ -270,29 +300,34 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
     private void configureComponents(
             String selectorLabel,
             String emptyLabelText,
+            String addLabel,
             String managementLabel) {
         setOpaque(false);
         setName("shellAccountSelector");
 
         valueButton.setName("shellAccountValue");
         valueButton.setIcon(new FlatSVGIcon("assets/swing/icons/nav-accounts.svg", 18, 18));
-        valueButton.setHorizontalAlignment(SwingConstants.LEFT);
         valueButton.setIconTextGap(8);
-        valueButton.putClientProperty("JButton.buttonType", "roundRect");
-        valueButton.setMargin(new Insets(4, 10, 4, 8));
         valueButton.addActionListener(event -> showPopup());
         valueButton.getAccessibleContext().setAccessibleName(selectorLabel);
 
-        arrowButton.setName("shellAccountDisclosure");
-        arrowButton.setFocusable(true);
-        arrowButton.addActionListener(event -> showPopup());
-        arrowButton.getAccessibleContext().setAccessibleName(selectorLabel);
-
         add(valueButton, BorderLayout.CENTER);
-        add(arrowButton, BorderLayout.LINE_END);
 
         popup.setName("shellAccountPopup");
         popup.setLayout(new BorderLayout());
+        addButton.setName("shellAccountAdd");
+        addButton.setText(addLabel);
+        addButton.setIcon(new FlatSVGIcon("assets/swing/icons/add.svg", 18, 18));
+        addButton.setHorizontalAlignment(SwingConstants.LEFT);
+        addButton.putClientProperty("JButton.buttonType", "toolBarButton");
+        addButton.addActionListener(event -> {
+            if (!closed && interactionEnabled) {
+                popup.setVisible(false);
+                model.addAccount();
+            }
+        });
+        addButton.getAccessibleContext().setAccessibleName(addLabel);
+        popup.add(addButton, BorderLayout.NORTH);
         choiceHost.setName("shellAccountChoices");
         choiceHost.add(choiceList, "accounts");
         emptyLabel.setName("shellAccountEmpty");
@@ -307,6 +342,7 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
         list.addListSelectionListener(event -> {
             if (!closed && !applyingSnapshot && !event.getValueIsAdjusting()) {
                 pendingSelectionIndex = list.getSelectedIndex();
+                pendingSelectionRevision = orderedSource.sourceRevision().orElse(-1L);
                 submitPendingSelection();
             }
         });
@@ -333,7 +369,7 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
         if (closed || !interactionEnabled) {
             return;
         }
-        restoreSelection(displayedSnapshot.selectedIndex());
+        restoreSelection(synchronizeOrder(displayedSnapshot));
         Dimension size = preparePopupSize();
         if (displayedSnapshot.itemCount() > 0) {
             choiceList.refreshLoadPlan();
@@ -350,7 +386,7 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
         if (configuration == null || !isShowing()) {
             int localHeight = getRootPane() == null ? 0 : getRootPane().getHeight() - getHeight();
             return Math.max(
-                    MANAGEMENT_FOOTER_HEIGHT + AccountListCellRenderer.ROW_HEIGHT,
+                    MANAGEMENT_FOOTER_HEIGHT + ADD_HEADER_HEIGHT + AccountListCellRenderer.ROW_HEIGHT,
                     localHeight);
         }
         Rectangle screen = configuration.getBounds();
@@ -358,7 +394,7 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
         int workBottom = screen.y + screen.height - screenInsets.bottom;
         int anchorBottom = getLocationOnScreen().y + getHeight();
         return Math.max(
-                MANAGEMENT_FOOTER_HEIGHT + AccountListCellRenderer.ROW_HEIGHT,
+                MANAGEMENT_FOOTER_HEIGHT + ADD_HEADER_HEIGHT + AccountListCellRenderer.ROW_HEIGHT,
                 workBottom - anchorBottom - POPUP_SCREEN_MARGIN);
     }
 
@@ -381,12 +417,17 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
         EdtDispatcher.requireEventDispatchThread();
         AccountsSnapshot previous = displayedSnapshot;
         displayedSnapshot = Objects.requireNonNull(replacement, "replacement");
-        if (previous.contentRevision() != replacement.contentRevision()) {
+        long previousOrderRevision = orderedSource.sourceRevision().orElse(-1L);
+        OptionalInt displaySelection = synchronizeOrder(replacement);
+        boolean orderChanged = previousOrderRevision != orderedSource.sourceRevision().orElse(-1L);
+        if (previous.contentRevision() != replacement.contentRevision()
+                || orderChanged) {
             pendingSelectionIndex = -1;
+            pendingSelectionRevision = -1L;
             popup.setVisible(false);
             choiceList.reloadData();
         }
-        restoreSelection(replacement.selectedIndex());
+        restoreSelection(displaySelection);
         applyEnabledState();
     }
 
@@ -395,7 +436,7 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
         boolean available = !closed && interactionEnabled;
         boolean hasAccounts = displayedSnapshot.itemCount() > 0;
         valueButton.setEnabled(available);
-        arrowButton.setEnabled(available);
+        addButton.setEnabled(available);
         manageButton.setEnabled(available);
         choiceList.setEnabled(available && hasAccounts);
         choiceList.getList().setEnabled(available && hasAccounts);
@@ -428,6 +469,7 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
     private void submitPendingSelection() {
         EdtDispatcher.requireEventDispatchThread();
         if (closed || !interactionEnabled || applyingSnapshot || pendingSelectionIndex < 0
+                || pendingSelectionRevision != orderedSource.sourceRevision().orElse(-1L)
                 || choiceList.getList().getSelectedIndex() != pendingSelectionIndex) {
             return;
         }
@@ -436,7 +478,25 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
             return;
         }
         pendingSelectionIndex = -1;
+        pendingSelectionRevision = -1L;
         model.selectAccount(selected.accountId());
         popup.setVisible(false);
+    }
+
+    /// Reconciles persistent history and translates the model's source selection into display order.
+    ///
+    /// @param snapshot current account model state
+    /// @return selected display index, or empty when no account is selected
+    private OptionalInt synchronizeOrder(AccountsSnapshot snapshot) {
+        @Unmodifiable List<String> sourceIds = model.stableItemIds();
+        @Nullable String selectedId = null;
+        if (snapshot.selectedIndex().isPresent()
+                && snapshot.selectedIndex().getAsInt() < sourceIds.size()) {
+            selectedId = sourceIds.get(snapshot.selectedIndex().getAsInt());
+            recentSelections.recordAccount(selectedId);
+        }
+        @Unmodifiable List<String> orderedIds = recentSelections.orderAccounts(sourceIds);
+        orderedSource.setOrder(orderedIds);
+        return selectedId == null ? OptionalInt.empty() : orderedSource.displayIndexOf(selectedId);
     }
 }

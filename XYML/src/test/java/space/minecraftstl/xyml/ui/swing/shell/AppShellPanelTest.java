@@ -90,6 +90,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -135,7 +136,7 @@ public final class AppShellPanelTest {
         }
     }
 
-    /// The title bar follows platform-placeholder, directory, account, instance, launch, and native-button order.
+    /// The title bar restores brand identity before directory, account, instance, launch, and native controls.
     @Test
     public void laysOutTitleBarWorkflowInStableOrder() {
         TestHomeModel homeModel = new TestHomeModel();
@@ -151,12 +152,14 @@ public final class AppShellPanelTest {
                 assertAll(
                         () -> assertEquals(7, components.length),
                         () -> assertSame(toolbar.macWindowButtonsPlaceholder(), components[0]),
-                        () -> assertSame(toolbar.gameDirectoryBox(), components[1]),
-                        () -> assertSame(toolbar.accountSelector(), components[2]),
+                        () -> assertSame(toolbar.brandLabel(), components[1]),
+                        () -> assertSame(toolbar.gameDirectorySelector(), components[2]),
+                        () -> assertSame(toolbar.accountSelector(), components[3]),
                         () -> assertSame(toolbar.instanceSelector(), components[4]),
                         () -> assertSame(toolbar.launchButton(), components[5]),
                         () -> assertSame(toolbar.winWindowButtonsPlaceholder(), components[6]),
-                        () -> assertTrue(rightEdge(toolbar.gameDirectoryBox()) <= toolbar.accountSelector().getX()),
+                        () -> assertTrue(rightEdge(toolbar.brandLabel()) <= toolbar.gameDirectorySelector().getX()),
+                        () -> assertTrue(rightEdge(toolbar.gameDirectorySelector()) <= toolbar.accountSelector().getX()),
                         () -> assertTrue(rightEdge(toolbar.accountSelector()) <= toolbar.instanceSelector().getX()),
                         () -> assertTrue(rightEdge(toolbar.instanceSelector()) <= toolbar.launchButton().getX()),
                         () -> assertTrue(toolbar.instanceSelector().getX() > toolbar.getWidth() / 2),
@@ -171,10 +174,31 @@ public final class AppShellPanelTest {
                                         .getAccessibleContext().getAccessibleName()),
                         () -> assertEquals(
                                 AccountListCellRenderer.ROW_HEIGHT
+                                        + LazyAccountSelector.ADD_HEADER_HEIGHT
                                         + LazyAccountSelector.MANAGEMENT_FOOTER_HEIGHT,
                                 toolbar.accountSelector().preparePopupSize().height),
+                        () -> assertEquals("XYML", toolbar.brandLabel().getText()),
+                        () -> assertNotNull(toolbar.brandLabel().getIcon()),
                         () -> assertEquals(testHomeStrings().launchAction(),
-                                toolbar.launchButton().getAccessibleContext().getAccessibleName()));
+                                toolbar.launchButton().getAccessibleContext().getAccessibleName()),
+                        () -> assertNull(toolbar.accountSelector().valueButton()
+                                .getClientProperty("JButton.buttonType")),
+                        () -> assertNull(toolbar.instanceSelector().valueButton()
+                                .getClientProperty("JButton.buttonType")),
+                        () -> assertNull(toolbar.launchButton().getClientProperty("JButton.buttonType")),
+                        () -> assertEquals(1, toolbar.accountSelector().getComponentCount()),
+                        () -> assertEquals(1, toolbar.instanceSelector().getComponentCount()),
+                        () -> assertEquals(testHomeStrings().addInstanceAction(),
+                                toolbar.instanceSelector().addButton().getText()),
+                        () -> assertEquals(
+                                space.minecraftstl.xyml.util.i18n.I18n.i18n("account.create"),
+                                toolbar.accountSelector().addButton().getText()),
+                        () -> assertEquals(
+                                space.minecraftstl.xyml.util.i18n.I18n.i18n("game_directory.new"),
+                                toolbar.gameDirectorySelector().addButton().getText()),
+                        () -> assertThrows(
+                                IllegalArgumentException.class,
+                                () -> panel.navigationButton(ShellPageId.INSTANCES)));
 
                 FlatSVGIcon accountIcon = assertInstanceOf(
                         FlatSVGIcon.class,
@@ -189,7 +213,7 @@ public final class AppShellPanelTest {
                 assertAll(
                         () -> assertEquals(1, homeModel.launchCount()),
                         () -> assertEquals(ShellPageId.ACCOUNTS, panel.selectedPage()));
-                toolbar.navigationButton(ShellPageId.INSTANCES).doClick();
+                panel.navigationButton(ShellPageId.ACCOUNTS).doClick();
                 assertEquals(ShellPageId.INSTANCES, panel.selectedPage());
             });
         } finally {
@@ -218,6 +242,7 @@ public final class AppShellPanelTest {
                                 selector.emptyLabel().getText()),
                         () -> assertEquals(
                                 AccountListCellRenderer.ROW_HEIGHT
+                                        + LazyAccountSelector.ADD_HEADER_HEIGHT
                                         + LazyAccountSelector.MANAGEMENT_FOOTER_HEIGHT,
                                 popupSize.height));
                 selector.manageButton().doClick();
@@ -273,8 +298,8 @@ public final class AppShellPanelTest {
                     () -> assertTrue(sampledColors.size() >= 8));
 
             for (ShellPageId page : List.of(
-                    ShellPageId.INSTANCES,
                     ShellPageId.DOWNLOADS,
+                    ShellPageId.ACCOUNTS,
                     ShellPageId.SETTINGS)) {
                 ShellNavigationButton button = panel.navigationButton(page);
                 FlatSVGIcon icon = assertInstanceOf(FlatSVGIcon.class, button.getIcon());
@@ -365,13 +390,15 @@ public final class AppShellPanelTest {
                     SystemThemeDetector.lightFallback());
             themeManager.initialize();
             result.set(new AppShellPanel(
+                    "XYML",
                     factories,
                     ShellPagePresentations.englishFallback(),
                     new ShellToolbarModels(
                             homeModel,
                             testInstancesModel(),
                             accountsModel,
-                            testGameDirectories()),
+                            testGameDirectories(),
+                            ShellRecentSelections.transientSelections()),
                     testHomeStrings(),
                     TaskProgressStrings.english(),
                     new SwingAnimator(MotionPolicy.OFF, 16),

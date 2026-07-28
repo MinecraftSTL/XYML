@@ -48,7 +48,7 @@ import java.awt.image.BufferedImage;
 import java.util.Map;
 import java.util.WeakHashMap;
 
-/// Renders one installed-instance row with a stable icon, name, detail, and selection indicator.
+/// Renders one installed-instance row with a stable icon, name, detail, and optional selection indicator.
 ///
 /// The same 64-pixel row geometry is used for loaded, loading, and failed sparse entries. Icon
 /// conversion is EDT-confined and weakly cached so scrolling does not repeatedly copy pixel data
@@ -77,12 +77,25 @@ public final class InstanceListCellRenderer extends JPanel
     /// Explicit single-choice state indicator.
     private final JRadioButton selectionIndicator = new JRadioButton();
 
+    /// Whether this renderer exposes a radio indicator in addition to list selection highlighting.
+    private final boolean showSelectionIndicator;
+
     /// Weak EDT-confined cache of immutable pixels converted to Swing icons.
     private final Map<InstanceIconData, Icon> iconCache = new WeakHashMap<>();
 
     /// Creates the stable reusable instance renderer hierarchy.
     public InstanceListCellRenderer() {
+        this(true);
+    }
+
+    /// Creates a stable renderer with caller-selected selection-indicator visibility.
+    ///
+    /// Compact dropdowns should pass `false` because the collapsed button already displays the selected instance.
+    ///
+    /// @param showSelectionIndicator whether to render a trailing radio indicator
+    public InstanceListCellRenderer(boolean showSelectionIndicator) {
         super(new BorderLayout(12, 0));
+        this.showSelectionIndicator = showSelectionIndicator;
         setOpaque(true);
         setPreferredSize(new Dimension(280, ROW_HEIGHT));
 
@@ -107,6 +120,7 @@ public final class InstanceListCellRenderer extends JPanel
         selectionIndicator.setOpaque(false);
         selectionIndicator.setFocusable(false);
         selectionIndicator.setHorizontalAlignment(SwingConstants.CENTER);
+        selectionIndicator.setVisible(showSelectionIndicator);
 
         add(iconLabel, BorderLayout.LINE_START);
         add(labels, BorderLayout.CENTER);
@@ -134,7 +148,7 @@ public final class InstanceListCellRenderer extends JPanel
         Font baseFont = list.getFont();
         nameLabel.setFont(baseFont.deriveFont(Font.BOLD));
         detailLabel.setFont(baseFont.deriveFont(Math.max(9.0F, baseFont.getSize2D() - 1.0F)));
-        selectionIndicator.setSelected(isSelected);
+        selectionIndicator.setSelected(showSelectionIndicator && isSelected);
         setToolTipText(null);
 
         @Nullable InstanceListItem item = entry.value();

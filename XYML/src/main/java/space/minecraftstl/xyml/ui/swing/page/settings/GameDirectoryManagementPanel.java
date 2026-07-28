@@ -146,6 +146,12 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         }
     }
 
+    /// Opens the add-directory editor using the same validated workflow as the page toolbar action.
+    public void beginAddingDirectory() {
+        EdtDispatcher.requireEventDispatchThread();
+        beginAdd();
+    }
+
     /// Creates a directory management panel on the event dispatch thread.
     ///
     /// This package-visible constructor supports deterministic Swing tests with an in-memory service and interaction.

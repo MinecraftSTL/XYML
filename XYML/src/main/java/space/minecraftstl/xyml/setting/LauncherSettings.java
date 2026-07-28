@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.auth.AccountID;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableList;
 import space.minecraftstl.xyml.observable.collection.ObservableMap;
 import space.minecraftstl.xyml.observable.collection.ObservableSet;
 import space.minecraftstl.xyml.observable.property.BooleanProperty;
@@ -662,6 +663,46 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         } else {
             this.selectedInstance.put(gameDirectoryId, selectedInstance);
         }
+    }
+
+    /// Game-directory identifiers ordered from most recently selected to least recently selected.
+    ///
+    /// The title-bar selector owns this ordering. Directory-management pages retain their own source order.
+    @SerializedName("recentGameDirectories")
+    private final ObservableList<String> recentGameDirectories = ObservableCollections.observableList();
+
+    /// Returns the persistent title-bar game-directory usage order.
+    ///
+    /// @return mutable observable most-recently-used identifier list
+    public ObservableList<String> getRecentGameDirectories() {
+        return recentGameDirectories;
+    }
+
+    /// Account identifiers ordered from most recently selected to least recently selected.
+    ///
+    /// The account-management page keeps its storage order; only compact selection popups consume this list.
+    @SerializedName("recentAccounts")
+    private final ObservableList<String> recentAccounts = ObservableCollections.observableList();
+
+    /// Returns the persistent title-bar account usage order.
+    ///
+    /// @return mutable observable most-recently-used account identifier list
+    public ObservableList<String> getRecentAccounts() {
+        return recentAccounts;
+    }
+
+    /// Directory-qualified instance identifiers ordered by most recent selection.
+    ///
+    /// Entries use the title-bar store's length-prefixed encoding so equal instance folder names in two
+    /// game directories never share history.
+    @SerializedName("recentInstances")
+    private final ObservableList<String> recentInstances = ObservableCollections.observableList();
+
+    /// Returns the persistent title-bar instance usage order.
+    ///
+    /// @return mutable observable directory-qualified most-recently-used instance list
+    public ObservableList<String> getRecentInstances() {
+        return recentInstances;
     }
 
     // Accounts
