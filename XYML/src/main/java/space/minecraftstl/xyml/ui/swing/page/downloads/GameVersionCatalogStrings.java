@@ -72,4 +72,17 @@ public record GameVersionCatalogStrings(
             case OLD -> oldFilter;
         };
     }
+
+    /// Returns the localized classification shown in one loaded version row.
+    ///
+    /// @param kind exact source-derived version classification
+    /// @return localized classification label
+    public String kindText(GameVersionKind kind) {
+        return switch (Objects.requireNonNull(kind, "kind")) {
+            case RELEASE -> releaseFilter;
+            case SNAPSHOT -> snapshotFilter;
+            case APRIL_FOOLS -> aprilFoolsFilter;
+            case OLD -> oldFilter;
+        };
+    }
 }

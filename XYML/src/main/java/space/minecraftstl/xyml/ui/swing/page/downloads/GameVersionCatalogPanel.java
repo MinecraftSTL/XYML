@@ -34,32 +34,50 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionListener;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionWizardPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.util.i18n.I18n;
 
-import javax.swing.DefaultListCellRenderer;
+import javax.swing.AbstractAction;
+import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
 import javax.swing.JButton;
-import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
-import javax.swing.JTextField;
 import javax.swing.JTabbedPane;
+import javax.swing.JTextField;
+import javax.swing.JToggleButton;
+import javax.swing.KeyStroke;
+import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import java.awt.CardLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
+import java.awt.Rectangle;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.time.Duration;
+import java.time.ZoneId;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
 
@@ -94,6 +112,9 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Card containing the current installation task and terminal return command.
     private static final String TASK_VIEW = "task";
 
+    /// Action-map key that opens the selected version's visible installation configuration.
+    private static final String ACTIVATE_INSTALL_CONFIGURATION = "activateInstallConfiguration";
+
     /// Lock guarding close state and queued model-change revisions.
     private final Object stateLock = new Object();
 
@@ -112,7 +133,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Localized installation controls, task text, and validation feedback.
     private final GameInstallStrings installStrings;
 
-    /// Viewport-measured single-choice list.
+    /// Viewport-measured single-choice list with version metadata rows.
     private final ViewportChoiceList<GameVersionCatalogItem> choiceList;
 
     /// Cards representing lazy loading, failure, empty results, and visible rows.
@@ -142,8 +163,12 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Version-ID query editor.
     private final JTextField searchField = new JTextField();
 
-    /// Game-version kind selector.
-    private final JComboBox<GameVersionFilter> filterBox = new JComboBox<>(GameVersionFilter.values());
+    /// Mutually exclusive visible version-kind controls keyed by their exact model filter.
+    private final Map<GameVersionFilter, JToggleButton> filterButtons =
+            new EnumMap<>(GameVersionFilter.class);
+
+    /// Selection group preventing more than one visible version-kind control from being active.
+    private final ButtonGroup filterButtonGroup = new ButtonGroup();
 
     /// Source refresh command.
     private final JButton refreshButton = new JButton();
@@ -153,6 +178,9 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
     /// Exact destination instance-name editor.
     private final JTextField instanceNameField = new JTextField();
+
+    /// Fixed-width installation configuration kept beside the scrollable version catalog.
+    private final JPanel installConfigurationPanel = new JPanel();
 
     /// Command that captures the loaded selected version and exact instance name.
     private final JButton installButton = new JButton();
@@ -250,6 +278,14 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         }
     };
 
+    /// Reusable double-click listener that activates only a concrete version row.
+    private final VersionActivationMouseListener versionActivationMouseListener =
+            new VersionActivationMouseListener();
+
+    /// Reusable keyboard command mapped to Enter while the version list owns focus.
+    private final ActivateInstallConfigurationAction activateInstallConfigurationAction =
+            new ActivateInstallConfigurationAction();
+
     /// Owned model listener registration.
     private final Subscription modelSubscription;
 
@@ -282,6 +318,9 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
     /// Whether a version-derived destination update suppresses user-edit detection.
     private boolean applyingInstanceNameSuggestion;
+
+    /// Activated sparse row whose eventual load may focus the installation configuration, or -1.
+    private int installConfigurationActivationIndex = -1;
 
     /// Revision invalidating older worker-to-EDT state applications.
     private long updateRevision;
@@ -374,7 +413,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         this.loaderSelectionPanel = Objects.requireNonNull(
                 loaderSelectionPanel,
                 "loaderSelectionPanel");
-        choiceList = new ViewportChoiceList<>(model, GameVersionCatalogItem::versionId);
+        choiceList = new ViewportChoiceList<>(model, new GameVersionEntryRenderer());
 
         configureComponents();
         this.loaderSelectionPanel.addSelectionListener(loaderSelectionListener);
@@ -459,33 +498,67 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         JPanel catalogWorkspace = new JPanel(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
-                "[]12[grow,fill]8[]8[]"));
+                "[]8[]12[grow,fill]"));
         catalogWorkspace.setOpaque(false);
         catalogWorkspace.setName("gameVersionsCatalogWorkspace");
 
-        JPanel filterBand = new JPanel(new MigLayout(
+        JPanel searchBand = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[][grow,fill]16[][220!]",
+                "[][grow,fill]",
                 "[40!]"));
-        filterBand.setOpaque(false);
+        searchBand.setOpaque(false);
 
         JLabel searchLabel = new JLabel(strings.searchLabel());
         searchLabel.setLabelFor(searchField);
-        filterBand.add(searchLabel);
+        searchBand.add(searchLabel);
         searchField.setName("gameVersionsSearch");
         searchField.getDocument().addDocumentListener(searchListener);
-        filterBand.add(searchField, "growx, h 40!");
+        searchBand.add(searchField, "growx, h 40!");
+        catalogWorkspace.add(searchBand, "growx");
+
+        JPanel filterBand = new JPanel(new MigLayout(
+                "insets 0, fillx",
+                "[][grow,fill]",
+                "[36!]"));
+        filterBand.setOpaque(false);
 
         JLabel filterLabel = new JLabel(strings.filterLabel());
-        filterLabel.setLabelFor(filterBox);
         filterBand.add(filterLabel);
-        filterBox.setName("gameVersionsFilter");
-        filterBox.setRenderer(new FilterRenderer());
-        filterBox.addActionListener(event -> filterChanged());
-        filterBand.add(filterBox, "h 40!");
+        JPanel filterOptionsPanel = new JPanel(new MigLayout(
+                "insets 0, fillx",
+                "[grow,fill][grow,fill][grow,fill][grow,fill][grow,fill]",
+                "[36!]"));
+        filterOptionsPanel.setOpaque(false);
+        filterOptionsPanel.setName("gameVersionsFilterOptions");
+        for (GameVersionFilter filter : GameVersionFilter.values()) {
+            JToggleButton button = new JToggleButton(strings.filterText(filter));
+            button.setName("gameVersionsFilter_" + filter.name());
+            button.putClientProperty("JButton.buttonType", "tab");
+            button.addActionListener(event -> filterChanged(filter));
+            filterButtonGroup.add(button);
+            filterButtons.put(filter, button);
+            filterOptionsPanel.add(button, "grow");
+        }
+        filterLabel.setLabelFor(filterButton(GameVersionFilter.RELEASE));
+        filterBand.add(filterOptionsPanel, "growx");
         catalogWorkspace.add(filterBand, "growx");
 
+        JPanel selectionWorkspace = new JPanel(new MigLayout(
+                "insets 0, fill",
+                "[grow,fill]12[300:340:420,fill]",
+                "[grow,fill]"));
+        selectionWorkspace.setOpaque(false);
+        selectionWorkspace.setName("gameVersionsSelectionWorkspace");
+
+        JPanel versionListPanel = new JPanel(new MigLayout(
+                "insets 0, fill, wrap 1",
+                "[grow,fill]",
+                "[grow,fill]4[]"));
+        versionListPanel.setOpaque(false);
+        versionListPanel.setName("gameVersionsListWorkspace");
+
         choiceList.setName("gameVersionsList");
+        choiceList.setMinimumSize(new java.awt.Dimension(0, 0));
         JList<ChoiceListEntry<GameVersionCatalogItem>> list = choiceList.getList();
         list.setName("gameVersionsListView");
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -496,46 +569,64 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 synchronizeLoadedSelection();
             }
         });
+        list.addMouseListener(versionActivationMouseListener);
+        list.getInputMap(JComponent.WHEN_FOCUSED).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0),
+                ACTIVATE_INSTALL_CONFIGURATION);
+        list.getActionMap().put(
+                ACTIVATE_INSTALL_CONFIGURATION,
+                activateInstallConfigurationAction);
         choiceList.getChoiceModel().addListDataListener(listDataListener);
 
         contentCards.add(loadingLabel, LOADING_CARD);
         contentCards.add(failedLabel, FAILED_CARD);
         contentCards.add(emptyLabel, EMPTY_CARD);
         contentCards.add(choiceList, LIST_CARD);
-        catalogWorkspace.add(contentCards, "grow");
+        contentCards.setMinimumSize(new java.awt.Dimension(0, 0));
+        versionListPanel.add(contentCards, "grow");
 
         statusLabel.setName("gameVersionsStatus");
-        catalogWorkspace.add(statusLabel, "growx, h 28!");
+        versionListPanel.add(statusLabel, "growx, h 24!");
+        selectionWorkspace.add(versionListPanel, "grow");
 
-        JPanel installBand = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 4",
-                "[][grow,fill]12[170!]12[180!]",
-                "[40!]4[]4[]"));
-        installBand.setOpaque(false);
-        installBand.setName("gameVersionsInstallBand");
+        installConfigurationPanel.setLayout(new MigLayout(
+                "insets 12, fillx, wrap 2",
+                "[][grow,fill]",
+                "[40!]8[40!]6[]4[]"));
+        installConfigurationPanel.setOpaque(false);
+        installConfigurationPanel.setName("gameVersionsInstallConfiguration");
+        installConfigurationPanel.setBorder(BorderFactory.createTitledBorder(installStrings.taskTitle()));
 
         JLabel instanceNameLabel = new JLabel(installStrings.instanceNameLabel());
         instanceNameLabel.setLabelFor(instanceNameField);
-        installBand.add(instanceNameLabel);
+        installConfigurationPanel.add(instanceNameLabel);
         instanceNameField.setName("gameVersionsInstanceName");
         instanceNameField.getDocument().addDocumentListener(instanceNameListener);
-        installBand.add(instanceNameField, "growx, h 40!");
+        installConfigurationPanel.add(instanceNameField, "growx, h 40!");
+
+        JPanel installActions = new JPanel(new MigLayout(
+                "insets 0, fillx",
+                "[grow,fill]8[grow,fill]",
+                "[40!]"));
+        installActions.setOpaque(false);
         selectLoadersButton.setName("gameVersionsLoaders");
         selectLoadersButton.setText(i18n("settings.tabs.installers"));
         selectLoadersButton.addActionListener(event -> showLoaderSelection());
-        installBand.add(selectLoadersButton, "grow, h 40!");
+        installActions.add(selectLoadersButton, "grow, h 40!");
         installButton.setName("gameVersionsInstall");
         installButton.setText(installStrings.installAction());
         installButton.putClientProperty("JButton.buttonType", "roundRect");
         installButton.addActionListener(event -> startInstallation());
-        installBand.add(installButton, "grow, h 40!");
+        installActions.add(installButton, "grow, h 40!");
+        installConfigurationPanel.add(installActions, "span 2, growx");
 
         installStatusLabel.setName("gameVersionsInstallStatus");
-        installBand.add(installStatusLabel, "skip 1, span 3, growx, h 24!");
+        installConfigurationPanel.add(installStatusLabel, "span 2, growx, h 24!");
         loaderSummaryLabel.setName("gameVersionsLoaderSummary");
         loaderSummaryLabel.setText(formatLoaderSummary(loaderSelectionPanel.selectionSummary()));
-        installBand.add(loaderSummaryLabel, "skip 1, span 3, growx, h 24!");
-        catalogWorkspace.add(installBand, "growx");
+        installConfigurationPanel.add(loaderSummaryLabel, "span 2, growx, h 24!");
+        selectionWorkspace.add(installConfigurationPanel, "grow");
+        catalogWorkspace.add(selectionWorkspace, "grow");
 
         JPanel loaderWorkspace = new JPanel(new MigLayout(
                 "insets 0, fill, wrap 1",
@@ -582,6 +673,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
         workflowCards.setOpaque(false);
         workflowCards.setName("gameVersionsWorkflowCards");
+        workflowCards.setMinimumSize(new java.awt.Dimension(0, 0));
         workflowCards.add(catalogWorkspace, CATALOG_VIEW);
         workflowCards.add(loaderWorkspace, LOADER_VIEW);
         workflowCards.add(taskWorkspace, TASK_VIEW);
@@ -589,6 +681,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
         downloadCenterTabs.setName("downloadCenterTabs");
         downloadCenterTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+        downloadCenterTabs.setMinimumSize(new java.awt.Dimension(0, 0));
         downloadCenterTabs.addTab(strings.pageTitle(), gameVersionsPanel);
         downloadCenterTabs.addTab(i18n("download.content"), downloadCategoryPanel);
         downloadCenterTabs.addTab(i18n("modpack.download"), remoteModpackCatalogPanel);
@@ -643,11 +736,13 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             if (!searchField.getText().equals(snapshot.query())) {
                 searchField.setText(snapshot.query());
             }
-            if (filterBox.getSelectedItem() != snapshot.filter()) {
-                filterBox.setSelectedItem(snapshot.filter());
+            JToggleButton selectedFilterButton = filterButton(snapshot.filter());
+            if (!selectedFilterButton.isSelected()) {
+                selectedFilterButton.setSelected(true);
             }
             if (contentChanged) {
                 pendingUserSelectionIndex = -1;
+                installConfigurationActivationIndex = -1;
                 choiceList.reloadData();
             }
             restoreSelection(snapshot.selectedIndex());
@@ -700,14 +795,32 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         }
     }
 
-    /// Delegates the current kind after a user combo-box change.
-    private void filterChanged() {
+    /// Delegates one explicit visible kind after a user changes the segmented filter.
+    ///
+    /// @param filter exact requested catalog projection
+    private void filterChanged(GameVersionFilter filter) {
         if (applyingSnapshot || !isOpen()) {
             return;
         }
-        @Nullable Object selected = filterBox.getSelectedItem();
-        if (selected instanceof GameVersionFilter filter) {
-            model.setFilter(filter);
+        model.setFilter(Objects.requireNonNull(filter, "filter"));
+    }
+
+    /// Returns the installed visible control for one exhaustive version filter.
+    ///
+    /// @param filter filter whose control is required
+    /// @return non-null registered toggle button
+    private JToggleButton filterButton(GameVersionFilter filter) {
+        return Objects.requireNonNull(
+                filterButtons.get(Objects.requireNonNull(filter, "filter")),
+                "missing game-version filter button");
+    }
+
+    /// Enables or disables all visible kind filters without altering their selected state.
+    ///
+    /// @param enabled whether user filter commands are accepted
+    private void setFilterControlsEnabled(boolean enabled) {
+        for (JToggleButton button : filterButtons.values()) {
+            button.setEnabled(enabled);
         }
     }
 
@@ -729,6 +842,47 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             pendingUserSelectionIndex = -1;
             model.selectVersion(selected.versionId());
         }
+    }
+
+    /// Activates the selected sparse row and focuses its always-visible installation configuration.
+    ///
+    /// A row that is still loading retains the focus request until its exact value is published. This
+    /// does not change viewport demand or start installation; it only makes the next explicit step clear.
+    private void activateSelectedVersion() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!isOpen() || workflowView != WorkflowView.CATALOG) {
+            return;
+        }
+        int selectedIndex = choiceList.getList().getSelectedIndex();
+        if (selectedIndex < 0) {
+            return;
+        }
+        installConfigurationActivationIndex = selectedIndex;
+        pendingUserSelectionIndex = selectedIndex;
+        submitPendingUserSelection();
+        synchronizeLoadedSelection();
+    }
+
+    /// Focuses and selects the destination field after an activated row has resolved.
+    private void focusInstallConfigurationIfRequested() {
+        if (installConfigurationActivationIndex < 0) {
+            return;
+        }
+        if (choiceList.getList().getSelectedIndex() != installConfigurationActivationIndex) {
+            installConfigurationActivationIndex = -1;
+            return;
+        }
+        if (selectedVersionId == null) {
+            return;
+        }
+        installConfigurationActivationIndex = -1;
+        installConfigurationPanel.scrollRectToVisible(new Rectangle(
+                0,
+                0,
+                installConfigurationPanel.getWidth(),
+                installConfigurationPanel.getHeight()));
+        instanceNameField.requestFocusInWindow();
+        instanceNameField.selectAll();
     }
 
     /// Synchronizes installation input with the visible loaded single-choice row.
@@ -769,6 +923,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             }
         }
         updateInstallAction();
+        focusInstallConfigurationIfRequested();
     }
 
     /// Determines whether a completed unfiltered catalog proves the bound game version disappeared.
@@ -1162,10 +1317,20 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                     () -> choiceList.getChoiceModel().removeListDataListener(listDataListener));
             cleanupFailure = attemptCleanup(
                     cleanupFailure,
+                    () -> choiceList.getList().removeMouseListener(versionActivationMouseListener));
+            cleanupFailure = attemptCleanup(
+                    cleanupFailure,
+                    () -> choiceList.getList().getInputMap(JComponent.WHEN_FOCUSED).remove(
+                            KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0)));
+            cleanupFailure = attemptCleanup(
+                    cleanupFailure,
+                    () -> choiceList.getList().getActionMap().remove(ACTIVATE_INSTALL_CONFIGURATION));
+            cleanupFailure = attemptCleanup(
+                    cleanupFailure,
                     () -> loaderSelectionPanel.removeSelectionListener(loaderSelectionListener));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> refreshButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> searchField.setEnabled(false));
-            cleanupFailure = attemptCleanup(cleanupFailure, () -> filterBox.setEnabled(false));
+            cleanupFailure = attemptCleanup(cleanupFailure, () -> setFilterControlsEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> instanceNameField.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> selectLoadersButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> installButton.setEnabled(false));
@@ -1178,6 +1343,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             cleanupFailure = attemptCleanup(cleanupFailure, downloadCategoryPanel::close);
             cleanupFailure = attemptCleanup(cleanupFailure, taskProgressHost::close);
             cleanupFailure = attemptCleanup(cleanupFailure, choiceList::close);
+            installConfigurationActivationIndex = -1;
             throwUncheckedFailure(cleanupFailure);
         }
     }
@@ -1279,33 +1445,144 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         TASK
     }
 
-    /// Renders filter enum values through localized page text.
+    /// Activates only a concrete double-clicked version row.
     @NotNullByDefault
-    private final class FilterRenderer extends DefaultListCellRenderer {
-        /// Presents one filter value in the combo-box popup or selected-value area.
+    private final class VersionActivationMouseListener extends MouseAdapter {
+        /// Moves selection to the clicked row and opens its visible configuration on a primary double click.
         ///
-        /// @param list owning list
-        /// @param value filter value
-        /// @param index row index, or -1 for the selected-value area
-        /// @param selected whether this row is selected
-        /// @param focused whether this row owns focus
-        /// @return configured renderer component
+        /// @param event mouse event delivered by the version list
+        @Override
+        public void mouseClicked(MouseEvent event) {
+            if (event.getClickCount() != 2 || !SwingUtilities.isLeftMouseButton(event)) {
+                return;
+            }
+            JList<ChoiceListEntry<GameVersionCatalogItem>> list = choiceList.getList();
+            int clickedIndex = list.locationToIndex(event.getPoint());
+            @Nullable Rectangle clickedBounds = clickedIndex < 0
+                    ? null
+                    : list.getCellBounds(clickedIndex, clickedIndex);
+            if (clickedBounds == null || !clickedBounds.contains(event.getPoint())) {
+                return;
+            }
+            list.setSelectedIndex(clickedIndex);
+            activateSelectedVersion();
+        }
+    }
+
+    /// Keyboard action focusing installation configuration for the selected version.
+    @NotNullByDefault
+    private final class ActivateInstallConfigurationAction extends AbstractAction {
+        /// Serialization version for Swing action compatibility.
+        private static final long serialVersionUID = 1L;
+
+        /// Delegates the bound Enter command to the same row-activation path as double click.
+        ///
+        /// @param event action event emitted by the list input map
+        @Override
+        public void actionPerformed(ActionEvent event) {
+            activateSelectedVersion();
+        }
+    }
+
+    /// Reusable two-line renderer exposing each loaded version's classification and publication date.
+    @NotNullByDefault
+    private final class GameVersionEntryRenderer extends JPanel
+            implements ListCellRenderer<ChoiceListEntry<GameVersionCatalogItem>> {
+        /// Serialization version for Swing renderer compatibility.
+        private static final long serialVersionUID = 1L;
+
+        /// Primary stable version identifier.
+        private final JLabel versionLabel = new JLabel();
+
+        /// Secondary localized kind and release-date metadata.
+        private final JLabel metadataLabel = new JLabel();
+
+        /// Creates the reusable stable-height row renderer.
+        private GameVersionEntryRenderer() {
+            super(new MigLayout(
+                    "insets 7 10 7 10, fillx, wrap 1",
+                    "[grow,fill]",
+                    "[][]"));
+            setOpaque(true);
+            versionLabel.setName("gameVersionRowTitle");
+            versionLabel.setFont(versionLabel.getFont().deriveFont(Font.BOLD));
+            metadataLabel.setName("gameVersionRowMetadata");
+            metadataLabel.setFont(metadataLabel.getFont().deriveFont(
+                    Math.max(10.0F, metadataLabel.getFont().getSize2D() - 1.0F)));
+            add(versionLabel, "growx");
+            add(metadataLabel, "growx");
+        }
+
+        /// Configures the reusable row for loaded, loading, and failed sparse entries.
+        ///
+        /// @param list owning version list
+        /// @param entry sparse row state
+        /// @param index logical row index
+        /// @param selected whether the row is selected
+        /// @param focused whether the row owns keyboard focus
+        /// @return this configured reusable renderer
         @Override
         public Component getListCellRendererComponent(
-                JList<?> list,
-                @Nullable Object value,
+                JList<? extends ChoiceListEntry<GameVersionCatalogItem>> list,
+                ChoiceListEntry<GameVersionCatalogItem> entry,
                 int index,
                 boolean selected,
                 boolean focused) {
-            Object displayedValue = value instanceof GameVersionFilter filter
-                    ? strings.filterText(filter)
-                    : value;
-            return super.getListCellRendererComponent(
-                    list,
-                    displayedValue,
-                    index,
-                    selected,
-                    focused);
+            setComponentOrientation(list.getComponentOrientation());
+            applyPalette(list, selected, focused);
+            setToolTipText(null);
+
+            @Nullable GameVersionCatalogItem item = entry.value();
+            if (entry.status() == ChoiceLoadStatus.LOADED && item != null) {
+                versionLabel.setText(item.versionId());
+                metadataLabel.setText(formatVersionMetadata(item));
+                setEnabled(list.isEnabled());
+            } else if (entry.status() == ChoiceLoadStatus.ERROR) {
+                versionLabel.setText("!");
+                metadataLabel.setText(" ");
+                setEnabled(false);
+                @Nullable Throwable failure = entry.failure();
+                setToolTipText(failure == null ? null : failure.getMessage());
+            } else {
+                versionLabel.setText("...");
+                metadataLabel.setText(" ");
+                setEnabled(false);
+            }
+            versionLabel.setEnabled(isEnabled());
+            metadataLabel.setEnabled(isEnabled());
+            return this;
+        }
+
+        /// Applies selection and focus colors without changing the renderer's measured height.
+        ///
+        /// @param list owning version list
+        /// @param selected whether the row is selected
+        /// @param focused whether the row owns keyboard focus
+        private void applyPalette(
+                JList<? extends ChoiceListEntry<GameVersionCatalogItem>> list,
+                boolean selected,
+                boolean focused) {
+            Color background = selected ? list.getSelectionBackground() : list.getBackground();
+            Color foreground = selected ? list.getSelectionForeground() : list.getForeground();
+            @Nullable Color secondary = selected ? foreground : UIManager.getColor("Label.disabledForeground");
+            setBackground(background);
+            versionLabel.setForeground(foreground);
+            metadataLabel.setForeground(secondary == null ? foreground : secondary);
+            setBorder(UIManager.getBorder(focused
+                    ? "List.focusCellHighlightBorder"
+                    : "List.cellNoFocusBorder"));
+        }
+
+        /// Formats one loaded row from existing catalog metadata without additional I/O.
+        ///
+        /// @param item loaded immutable version metadata
+        /// @return localized kind and optional release date
+        private String formatVersionMetadata(GameVersionCatalogItem item) {
+            String kind = strings.kindText(item.kind());
+            return item.releaseDate()
+                    .map(releaseDate -> kind + " | " + I18n.formatDateTime(
+                            releaseDate.atZone(ZoneId.systemDefault())))
+                    .orElse(kind);
         }
     }
 }

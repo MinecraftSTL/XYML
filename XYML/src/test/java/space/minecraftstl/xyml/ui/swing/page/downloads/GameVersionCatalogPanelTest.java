@@ -49,12 +49,22 @@ import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionWi
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.AbstractButton;
-import javax.swing.JComboBox;
+import javax.swing.Action;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.JToggleButton;
+import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.Rectangle;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseEvent;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -74,6 +84,7 @@ import java.util.function.Supplier;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -158,7 +169,7 @@ public final class GameVersionCatalogPanelTest {
             int visibleRows = (viewportHeight + rowHeight - 1) / rowHeight;
 
             findTextField(panel, "gameVersionsSearch").setText("version-9");
-            findFilterBox(panel).setSelectedItem(GameVersionFilter.SNAPSHOT);
+            findFilterButton(panel, GameVersionFilter.SNAPSHOT).doClick();
             findButton(panel, "gameVersionsRefresh").doClick();
             list.setSelectedIndex(1);
 
@@ -171,6 +182,115 @@ public final class GameVersionCatalogPanelTest {
                     () -> assertEquals(List.of(GameVersionFilter.SNAPSHOT), model.filters()),
                     () -> assertEquals(1, model.refreshes.get()),
                     () -> assertEquals(List.of("version-1"), model.selectedIds()));
+            panel.close();
+        });
+    }
+
+    /// Shows all five kind filters at once and renders loaded rows with kind and publication metadata.
+    @Test
+    public void exposesVisibleKindFiltersAndVersionMetadata() {
+        GameVersionCatalogItem release = new GameVersionCatalogItem(
+                "1.21.4",
+                GameVersionKind.RELEASE,
+                Optional.of(Instant.parse("2024-12-03T10:00:00Z")));
+        FakeCatalogModel model = FakeCatalogModel.immediate(
+                List.of(release),
+                snapshot(0, 1, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 520));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+
+            for (GameVersionFilter filter : GameVersionFilter.values()) {
+                JToggleButton button = findFilterButton(panel, filter);
+                assertAll(
+                        () -> assertTrue(button.isVisible()),
+                        () -> assertEquals(STRINGS.filterText(filter), button.getText()));
+            }
+            assertTrue(findFilterButton(panel, GameVersionFilter.ALL).isSelected());
+
+            JList<ChoiceListEntry<GameVersionCatalogItem>> list = panel.choiceList().getList();
+            Component rendered = list.getCellRenderer().getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loaded(0, release),
+                    0,
+                    false,
+                    false);
+            Container row = (Container) rendered;
+            JLabel title = findComponent(row, "gameVersionRowTitle", JLabel.class);
+            JLabel metadata = findComponent(row, "gameVersionRowMetadata", JLabel.class);
+            assertAll(
+                    () -> assertEquals("1.21.4", title.getText()),
+                    () -> assertTrue(metadata.getText().contains("Release")),
+                    () -> assertTrue(metadata.getText().contains("2024")));
+            panel.close();
+        });
+    }
+
+    /// Keeps installation controls inside common viewport bounds and activates them by Enter or double click.
+    @Test
+    public void activatesReachableInstallConfigurationFromKeyboardAndMouse() {
+        FakeCatalogModel model = FakeCatalogModel.immediate(
+                items(40),
+                snapshot(-1, 40, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model));
+
+        onEventDispatchThread(() -> {
+            for (Dimension size : List.of(new Dimension(820, 420), new Dimension(1024, 720))) {
+                panel.setSize(size);
+                layoutRecursively(panel);
+                JPanel configuration = findComponent(
+                        panel,
+                        "gameVersionsInstallConfiguration",
+                        JPanel.class);
+                AbstractButton install = findButton(panel, "gameVersionsInstall");
+                Rectangle panelBounds = new Rectangle(0, 0, panel.getWidth(), panel.getHeight());
+                Rectangle configurationBounds = boundsRelativeTo(panel, configuration);
+                Rectangle installBounds = boundsRelativeTo(panel, install);
+                assertAll(
+                        () -> assertTrue(configurationBounds.width > 0),
+                        () -> assertTrue(configurationBounds.height > 0),
+                        () -> assertTrue(
+                                panelBounds.contains(configurationBounds),
+                                () -> "configuration " + configurationBounds + " outside " + panelBounds),
+                        () -> assertTrue(
+                                panelBounds.contains(installBounds),
+                                () -> "install " + installBounds + " outside " + panelBounds));
+            }
+
+            panel.choiceList().refreshLoadPlan();
+            JList<ChoiceListEntry<GameVersionCatalogItem>> list = panel.choiceList().getList();
+            list.setSelectedIndex(0);
+            JTextField instanceName = findTextField(panel, "gameVersionsInstanceName");
+            assertEquals("version-0", instanceName.getText());
+
+            instanceName.select(0, 0);
+            KeyStroke enter = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0);
+            @Nullable Object actionKey = list.getInputMap(JComponent.WHEN_FOCUSED).get(enter);
+            assertNotNull(actionKey);
+            @Nullable Action activation = list.getActionMap().get(actionKey);
+            assertNotNull(activation);
+            Objects.requireNonNull(activation, "Enter activation action").actionPerformed(
+                    new ActionEvent(list, ActionEvent.ACTION_PERFORMED, "enter"));
+            assertEquals(instanceName.getText().length(), instanceName.getSelectionEnd());
+
+            instanceName.select(0, 0);
+            @Nullable Rectangle selectedCell = list.getCellBounds(0, 0);
+            assertNotNull(selectedCell);
+            Rectangle cell = Objects.requireNonNull(selectedCell, "selected cell bounds");
+            list.dispatchEvent(new MouseEvent(
+                    list,
+                    MouseEvent.MOUSE_CLICKED,
+                    System.currentTimeMillis(),
+                    0,
+                    cell.x + 1,
+                    cell.y + 1,
+                    2,
+                    false,
+                    MouseEvent.BUTTON1));
+            assertEquals(instanceName.getText().length(), instanceName.getSelectionEnd());
             panel.close();
         });
     }
@@ -199,6 +319,47 @@ public final class GameVersionCatalogPanelTest {
             assertEquals(List.of("version-2"), model.selectedIds());
             panel.choiceList().refreshLoadPlan();
             assertEquals(List.of("version-2"), model.selectedIds());
+            panel.close();
+        });
+    }
+
+    /// Cancels delayed configuration focus when selection moves away from the activated sparse row.
+    @Test
+    public void doesNotTransferPendingActivationToAnotherVersion() {
+        FakeCatalogModel model = FakeCatalogModel.controlled(
+                items(40),
+                snapshot(-1, 40, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 420));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+
+            JList<ChoiceListEntry<GameVersionCatalogItem>> list = panel.choiceList().getList();
+            list.setSelectedIndex(0);
+            KeyStroke enter = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0);
+            @Nullable Object actionKey = list.getInputMap(JComponent.WHEN_FOCUSED).get(enter);
+            @Nullable Action activation = actionKey == null ? null : list.getActionMap().get(actionKey);
+            Objects.requireNonNull(activation, "Enter activation action").actionPerformed(
+                    new ActionEvent(list, ActionEvent.ACTION_PERFORMED, "enter"));
+
+            list.setSelectedIndex(1);
+            JTextField instanceName = findTextField(panel, "gameVersionsInstanceName");
+            instanceName.setText("custom-name");
+            instanceName.select(0, 0);
+        });
+
+        model.completePendingLoads();
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            JTextField instanceName = findTextField(panel, "gameVersionsInstanceName");
+            assertAll(
+                    () -> assertEquals("custom-name", instanceName.getText()),
+                    () -> assertEquals(0, instanceName.getSelectionStart()),
+                    () -> assertEquals(0, instanceName.getSelectionEnd()),
+                    () -> assertEquals(List.of("version-1"), model.selectedIds()));
             panel.close();
         });
     }
@@ -291,7 +452,7 @@ public final class GameVersionCatalogPanelTest {
         onEventDispatchThread(() -> {
             findButton(panel, "gameVersionsRefresh").doClick();
             findTextField(panel, "gameVersionsSearch").setText("after-close");
-            findFilterBox(panel).setSelectedItem(GameVersionFilter.RELEASE);
+            findFilterButton(panel, GameVersionFilter.RELEASE).doClick();
             assertAll(
                     () -> assertEquals(failed, panel.displayedSnapshot()),
                     () -> assertEquals(0, model.refreshes.get()),
@@ -728,13 +889,16 @@ public final class GameVersionCatalogPanelTest {
         return findComponent(root, name, JTextField.class);
     }
 
-    /// Finds the game-version filter combo box.
+    /// Finds one visible game-version filter control.
     ///
     /// @param root hierarchy root
-    /// @return typed filter combo box
-    @SuppressWarnings("unchecked")
-    private static JComboBox<GameVersionFilter> findFilterBox(Container root) {
-        return (JComboBox<GameVersionFilter>) findComponent(root, "gameVersionsFilter");
+    /// @param filter exact filter represented by the control
+    /// @return matching toggle button
+    private static JToggleButton findFilterButton(Container root, GameVersionFilter filter) {
+        return findComponent(
+                root,
+                "gameVersionsFilter_" + Objects.requireNonNull(filter, "filter").name(),
+                JToggleButton.class);
     }
 
     /// Finds a named component in a Swing hierarchy.
@@ -773,6 +937,16 @@ public final class GameVersionCatalogPanelTest {
             return type.cast(component);
         }
         throw new IllegalArgumentException("Named component has the wrong type: " + name);
+    }
+
+    /// Converts one descendant's bounds into the panel coordinate system used for reachability assertions.
+    ///
+    /// @param root panel whose viewport bounds are authoritative
+    /// @param component descendant whose laid-out bounds are required
+    /// @return descendant bounds expressed relative to the panel
+    private static Rectangle boundsRelativeTo(Container root, Component component) {
+        Container parent = Objects.requireNonNull(component.getParent(), "component parent");
+        return SwingUtilities.convertRectangle(parent, component.getBounds(), root);
     }
 
     /// Runs a value-producing operation synchronously on the EDT.

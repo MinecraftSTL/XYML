@@ -72,6 +72,7 @@ public final class DefaultGameVersionCatalogModelTest {
         assertAll(
                 () -> assertEquals(0, source.requestCount()),
                 () -> assertEquals(GameVersionCatalogStatus.IDLE, model.snapshot().status()),
+                () -> assertEquals(GameVersionFilter.RELEASE, model.snapshot().filter()),
                 () -> assertEquals(OptionalInt.of(0), model.exactItemCount()),
                 () -> assertEquals(new IndexRange(0, 0), initialPage.range()));
 
@@ -105,6 +106,7 @@ public final class DefaultGameVersionCatalogModelTest {
         GameVersionCatalogItem snapshot = item("25w02a", GameVersionKind.SNAPSHOT);
         GameVersionCatalogItem old = item("rd-132211", GameVersionKind.OLD);
 
+        model.setFilter(GameVersionFilter.ALL);
         model.loadIfNeeded();
         source.request(0).complete(List.of(release, snapshot, old));
         ChoicePage<GameVersionCatalogItem> middleAndEnd = model.load(
@@ -216,29 +218,33 @@ public final class DefaultGameVersionCatalogModelTest {
         model.loadIfNeeded();
         source.request(0).complete(List.of(release, snapshot, april, old));
         model.selectVersion(snapshot.versionId());
-        assertEquals(OptionalInt.of(1), model.snapshot().selectedIndex());
-
-        model.setFilter(GameVersionFilter.RELEASE);
         assertAll(
+                () -> assertEquals(GameVersionFilter.RELEASE, model.snapshot().filter()),
                 () -> assertEquals(1, model.snapshot().itemCount()),
-                () -> assertEquals(OptionalInt.empty(), model.snapshot().selectedIndex()),
+                () -> assertEquals(OptionalInt.empty(), model.snapshot().selectedIndex()));
+
+        model.setFilter(GameVersionFilter.ALL);
+        assertAll(
+                () -> assertEquals(4, model.snapshot().itemCount()),
+                () -> assertEquals(OptionalInt.of(1), model.snapshot().selectedIndex()),
                 () -> assertEquals(2L, model.snapshot().contentRevision()));
 
+        model.setFilter(GameVersionFilter.RELEASE);
         model.setQuery("rElEaSe");
-        assertEquals(2L, model.snapshot().contentRevision());
+        assertEquals(3L, model.snapshot().contentRevision());
         model.setQuery("");
         model.setFilter(GameVersionFilter.ALL);
         assertAll(
                 () -> assertEquals(4, model.snapshot().itemCount()),
                 () -> assertEquals(OptionalInt.of(1), model.snapshot().selectedIndex()),
-                () -> assertEquals(3L, model.snapshot().contentRevision()));
+                () -> assertEquals(4L, model.snapshot().contentRevision()));
 
         model.setQuery("sNaPsHoT");
         model.setFilter(GameVersionFilter.SNAPSHOT);
         assertAll(
                 () -> assertEquals(1, model.snapshot().itemCount()),
                 () -> assertEquals(OptionalInt.of(0), model.snapshot().selectedIndex()),
-                () -> assertEquals(4L, model.snapshot().contentRevision()),
+                () -> assertEquals(5L, model.snapshot().contentRevision()),
                 () -> assertEquals("sNaPsHoT", model.snapshot().query()),
                 () -> assertEquals(GameVersionFilter.SNAPSHOT, model.snapshot().filter()),
                 () -> assertThrows(IllegalArgumentException.class,
@@ -262,6 +268,7 @@ public final class DefaultGameVersionCatalogModelTest {
         GameVersionCatalogItem first = item("one", GameVersionKind.RELEASE);
         GameVersionCatalogItem second = item("two", GameVersionKind.SNAPSHOT);
         GameVersionCatalogItem third = item("three", GameVersionKind.OLD);
+        model.setFilter(GameVersionFilter.ALL);
         model.loadIfNeeded();
         source.request(0).complete(List.of(first, second, third));
 

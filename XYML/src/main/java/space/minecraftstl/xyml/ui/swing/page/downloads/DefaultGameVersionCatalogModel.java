@@ -99,7 +99,7 @@ public final class DefaultGameVersionCatalogModel implements GameVersionCatalogM
                 GameVersionCatalogStatus.IDLE,
                 statusStrings.idleStatus(),
                 "",
-                GameVersionFilter.ALL,
+                GameVersionFilter.RELEASE,
                 false,
                 true));
     }
