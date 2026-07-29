@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.image.InstanceIconData;
 
 import java.util.Objects;
@@ -30,7 +31,7 @@ import java.util.Objects;
 /// @param icon normalized non-null instance icon pixels
 @NotNullByDefault
 public record InstanceListItem(
-        String id,
+        GameInstanceID id,
         String name,
         String detail,
         InstanceIconData icon) {
@@ -40,9 +41,6 @@ public record InstanceListItem(
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(detail, "detail");
         Objects.requireNonNull(icon, "icon");
-        if (id.isBlank()) {
-            throw new IllegalArgumentException("Instance id cannot be blank");
-        }
         if (name.isBlank()) {
             throw new IllegalArgumentException("Instance name cannot be blank");
         }

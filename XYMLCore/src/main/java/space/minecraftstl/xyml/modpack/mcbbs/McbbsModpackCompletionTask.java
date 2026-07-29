@@ -21,6 +21,7 @@ import com.google.gson.JsonParseException;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.addon.mod.ModManager;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.modpack.ModpackCompletionException;
 import space.minecraftstl.xyml.modpack.curse.CurseMetaMod;
@@ -54,8 +55,7 @@ public class McbbsModpackCompletionTask extends CompletableFutureTask<Void> {
     private final DefaultDependencyManager dependency;
     private final DefaultGameRepository repository;
     private final ModManager modManager;
-    /// Target installed instance identifier.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
     private final Path configurationFile;
     private @Nullable ModpackConfiguration<McbbsModpackManifest> configuration;
     private @Nullable McbbsModpackManifest manifest;
@@ -65,23 +65,11 @@ public class McbbsModpackCompletionTask extends CompletableFutureTask<Void> {
     private final AtomicInteger finished = new AtomicInteger(0);
     private final AtomicBoolean notFound = new AtomicBoolean(false);
 
-    /// Creates a completion task that loads the instance configuration from disk.
-    ///
-    /// @param dependencyManager dependency manager bound to the target repository
-    /// @param instanceId target installed instance identifier
-    public McbbsModpackCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+    public McbbsModpackCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
         this(dependencyManager, instanceId, null);
     }
 
-    /// Creates a completion task with an optional prefetched instance configuration.
-    ///
-    /// @param dependencyManager dependency manager bound to the target repository
-    /// @param instanceId target installed instance identifier
-    /// @param configuration prefetched configuration, or `null` to load it from disk
-    public McbbsModpackCompletionTask(
-            DefaultDependencyManager dependencyManager,
-            String instanceId,
-            @Nullable ModpackConfiguration<McbbsModpackManifest> configuration) {
+    public McbbsModpackCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId, ModpackConfiguration<McbbsModpackManifest> configuration) {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
         this.modManager = repository.getModManager(instanceId);
@@ -123,7 +111,7 @@ public class McbbsModpackCompletionTask extends CompletableFutureTask<Void> {
                     throw new IOException("Unable to parse server manifest.json from " + manifest.getFileApi(), e);
                 }
 
-                Path rootPath = repository.getVersionRoot(instanceId);
+                Path rootPath = repository.getInstanceRoot(instanceId);
                 Files.createDirectories(rootPath);
 
                 Map<McbbsModpackManifest.File, McbbsModpackManifest.File> localFiles = manifest.getFiles().stream().collect(Collectors.toMap(Function.identity(), Function.identity()));

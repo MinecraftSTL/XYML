@@ -19,7 +19,8 @@ package space.minecraftstl.xyml.setting;
 
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.event.EventBus;
-import space.minecraftstl.xyml.event.RefreshedInstancesEvent;
+import space.minecraftstl.xyml.event.RefreshedGameInstancesEvent;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.collection.ObservableCollections;
@@ -27,8 +28,6 @@ import space.minecraftstl.xyml.observable.collection.ObservableList;
 import space.minecraftstl.xyml.observable.property.ObjectProperty;
 import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
 import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
-import space.minecraftstl.xyml.observable.property.SimpleStringProperty;
-import space.minecraftstl.xyml.observable.property.StringProperty;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.util.PortablePath;
 import space.minecraftstl.xyml.util.i18n.I18n;
@@ -149,8 +148,8 @@ public final class GameDirectoryManager {
             new SimpleObjectProperty<>(GameDirectoryManager.class, "selectedRepository");
 
     /// The selected instance ID projected from the selected repository.
-    private static final StringProperty selectedInstance =
-            new SimpleStringProperty(GameDirectoryManager.class, "selectedInstance");
+    private static final ObjectProperty<@Nullable GameInstanceID> selectedInstance =
+            new SimpleObjectProperty<>(GameDirectoryManager.class, "selectedInstance");
 
     /// Subscription projecting the selected repository's selected instance, or `null` before initialization.
     private static @Nullable Subscription selectedRepositoryInstanceSubscription;
@@ -216,11 +215,11 @@ public final class GameDirectoryManager {
             selectedInstance.set(repository.getSelectedInstance());
             selectedRepositoryInstanceSubscription = repository.selectedInstanceProperty()
                     .subscribe(instanceChange -> selectedInstance.set(instanceChange.currentValue()));
-            repository.refreshInstancesAsync().start();
+            repository.refreshAsync().start();
         });
         selectedGameDirectory.set(currentGameDirectory != null ? currentGameDirectory : mergedGameDirectories.get(0));
 
-        EventBus.EVENT_BUS.channel(RefreshedInstancesEvent.class).registerWeak(event -> {
+        EventBus.EVENT_BUS.channel(RefreshedGameInstancesEvent.class).registerWeak(event -> {
             Schedulers.ui().execute(() -> {
                 @Nullable XYMLGameRepository repository = selectedRepository.get();
                 if (repository != null && repository == event.getSource()) {
@@ -510,17 +509,17 @@ public final class GameDirectoryManager {
     }
 
     /// Returns the selected instance property projected from the selected repository.
-    public static ReadOnlyProperty<String> selectedInstanceProperty() {
+    public static ReadOnlyProperty<@Nullable GameInstanceID> selectedInstanceProperty() {
         return selectedInstance;
     }
 
     /// Returns the selected instance ID for the selected repository.
-    public static @Nullable String getSelectedInstance() {
+    public static @Nullable GameInstanceID getSelectedInstance() {
         return getSelectedRepository().getSelectedInstance();
     }
 
     /// Sets the selected instance ID for the selected repository.
-    public static void setSelectedInstance(@Nullable String instance) {
+    public static void setSelectedInstance(@Nullable GameInstanceID instance) {
         getSelectedRepository().setSelectedInstance(instance);
     }
 

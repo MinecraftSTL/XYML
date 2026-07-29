@@ -23,19 +23,21 @@ import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.game.GameAssetDownloadTask;
 import space.minecraftstl.xyml.download.game.GameDownloadTask;
 import space.minecraftstl.xyml.download.game.GameLibrariesTask;
-import space.minecraftstl.xyml.game.Version;
+import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.util.gson.JsonUtils;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 
-/// Imports a version JSON through the selected repository's established download and save tasks.
+/// Imports an instance manifest JSON through the selected repository's established download and save tasks.
 ///
 /// The returned root is a deferred composition scheduled on the caller-owned I/O executor. JSON
-/// parsing, conflict checks, dependency-manager creation, version resolution, and child-task
+/// parsing, conflict checks, dependency-manager creation, manifest resolution, and child-task
 /// construction therefore never run on the Swing event-dispatch thread.
 @NotNullByDefault
 public final class RepositoryInstanceJsonImportService implements InstanceJsonImportService {
@@ -58,62 +60,61 @@ public final class RepositoryInstanceJsonImportService implements InstanceJsonIm
 
     /// Creates a deferred import chain whose full preparation runs on the I/O executor.
     ///
-    /// @param source local Minecraft version JSON path
+    /// @param source local game instance manifest JSON path
     /// @param instanceId destination instance ID
     /// @return cancellable import task
     @Override
-    public Task<@Nullable Void> createImportTask(Path source, String instanceId) {
+    public Task<@Nullable Void> createImportTask(Path source, GameInstanceID instanceId) {
         Path normalizedSource = Objects.requireNonNull(source, "source")
                 .toAbsolutePath()
                 .normalize();
-        String normalizedInstanceId = Objects.requireNonNull(instanceId, "instanceId").strip();
+        GameInstanceID targetId = Objects.requireNonNull(instanceId, "instanceId");
         return Task.<@Nullable Void>composeAsync(
                 ioExecutor,
-                () -> prepareImport(normalizedSource, normalizedInstanceId))
+                () -> prepareImport(normalizedSource, targetId))
                 .setName("Import Minecraft instance JSON");
     }
 
     /// Parses and validates one source, then creates the established download/save chain.
     ///
     /// @param source normalized local JSON source
-    /// @param instanceId stripped destination instance ID
+    /// @param instanceId destination instance ID
     /// @return task chain ready for executor attachment
     /// @throws InstanceJsonImportException when validation or JSON parsing fails
-    private Task<@Nullable Void> prepareImport(Path source, String instanceId)
+    private Task<@Nullable Void> prepareImport(Path source, GameInstanceID instanceId)
             throws InstanceJsonImportException {
-        if (!XYMLGameRepository.isValidInstanceId(instanceId)) {
-            throw InstanceJsonImportException.invalidInstanceId(instanceId);
-        }
         if (repository.instanceIdConflicts(instanceId)) {
             throw InstanceJsonImportException.instanceAlreadyExists(instanceId);
         }
 
-        final Version parsedVersion;
+        final GameInstanceManifest parsedManifest;
         try {
-            parsedVersion = repository.readVersionJson(source);
+            parsedManifest = Objects.requireNonNull(
+                    JsonUtils.fromJsonFile(source, GameInstanceManifest.class),
+                    "instance manifest");
         } catch (IOException | RuntimeException parseFailure) {
             throw InstanceJsonImportException.malformedJson(source, parseFailure);
         }
 
-        Version importedVersion = parsedVersion.setId(instanceId).setJar(instanceId);
+        GameInstanceManifest importedManifest = parsedManifest.withId(instanceId).withJar(instanceId);
         DefaultDependencyManager dependencyManager = repository.getDependency();
         Task<?> optionalAssetsAndLibraries = Task.allOf(
                 new GameAssetDownloadTask(
                         dependencyManager,
-                        importedVersion,
+                        importedManifest,
                         GameAssetDownloadTask.DOWNLOAD_INDEX_FORCIBLY,
                         true),
-                new GameLibrariesTask(dependencyManager, importedVersion, true))
+                new GameLibrariesTask(dependencyManager, importedManifest, true))
                 .withRunAsync(ioExecutor, () -> {
                     // Match the import contract: core game download and JSON save remain fatal,
                     // while optional asset/library repair can be retried from instance maintenance.
                 });
 
         return Task.allOf(
-                        new GameDownloadTask(dependencyManager, null, importedVersion),
+                        new GameDownloadTask(dependencyManager, null, importedManifest),
                         optionalAssetsAndLibraries)
-                .thenComposeAsync(ioExecutor, ignored -> repository.saveAsync(importedVersion))
-                .thenRunAsync(ioExecutor, repository::refreshInstances)
+                .thenComposeAsync(ioExecutor, ignored -> repository.saveAsync(importedManifest))
+                .thenRunAsync(ioExecutor, repository::refresh)
                 .thenRunAsync(ioExecutor, () -> repository.setSelectedInstance(instanceId));
     }
 }

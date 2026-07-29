@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
@@ -61,7 +62,7 @@ public final class InstanceManagementCoordinatorTest {
 
         Thread opener = new Thread(() -> {
             try {
-                coordinator.open("alpha").toCompletableFuture().join();
+                coordinator.open(id("alpha")).toCompletableFuture().join();
             } catch (Throwable failure) {
                 workerFailure.set(failure);
             }
@@ -95,8 +96,8 @@ public final class InstanceManagementCoordinatorTest {
         InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
         Subscription attachment = coordinator.attachHost(host);
 
-        coordinator.open("alpha").toCompletableFuture().join();
-        coordinator.open("beta").toCompletableFuture().join();
+        coordinator.open(id("alpha")).toCompletableFuture().join();
+        coordinator.open(id("beta")).toCompletableFuture().join();
 
         assertAll(
                 () -> assertEquals(
@@ -104,7 +105,7 @@ public final class InstanceManagementCoordinatorTest {
                         events),
                 () -> assertEquals(1, factory.views().get(0).closeCalls.get()),
                 () -> assertEquals(0, factory.views().get(1).closeCalls.get()),
-                () -> onEventDispatchThread(() -> assertEquals("beta", coordinator.currentInstanceId())));
+                () -> onEventDispatchThread(() -> assertEquals(id("beta"), coordinator.currentInstanceId())));
 
         coordinator.close();
         attachment.unsubscribe();
@@ -121,12 +122,12 @@ public final class InstanceManagementCoordinatorTest {
         InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
         Subscription attachment = coordinator.attachHost(host);
 
-        coordinator.open("alpha")
-                .thenCompose((@Nullable Void ignored) -> coordinator.open("beta"))
+        coordinator.open(id("alpha"))
+                .thenCompose((@Nullable Void ignored) -> coordinator.open(id("beta")))
                 .toCompletableFuture()
                 .join();
         coordinator.returnToInstanceList()
-                .thenCompose((@Nullable Void ignored) -> coordinator.open("gamma"))
+                .thenCompose((@Nullable Void ignored) -> coordinator.open(id("gamma")))
                 .toCompletableFuture()
                 .join();
 
@@ -135,7 +136,7 @@ public final class InstanceManagementCoordinatorTest {
                 () -> assertEquals(1, factory.views().get(0).closeCalls.get()),
                 () -> assertEquals(1, factory.views().get(1).closeCalls.get()),
                 () -> assertEquals(0, factory.views().get(2).closeCalls.get()),
-                () -> onEventDispatchThread(() -> assertEquals("gamma", coordinator.currentInstanceId())));
+                () -> onEventDispatchThread(() -> assertEquals(id("gamma"), coordinator.currentInstanceId())));
         coordinator.close();
         attachment.unsubscribe();
     }
@@ -149,11 +150,11 @@ public final class InstanceManagementCoordinatorTest {
         RecordingHost host = new RecordingHost(new ArrayList<>());
         InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
         Subscription attachment = coordinator.attachHost(host);
-        coordinator.open("alpha").toCompletableFuture().join();
+        coordinator.open(id("alpha")).toCompletableFuture().join();
         factory.views().get(0).closeFailure = viewCloseFailure;
         host.showListFailure = hostRestoreFailure;
 
-        Throwable failure = completionFailure(coordinator.open("beta"));
+        Throwable failure = completionFailure(coordinator.open(id("beta")));
 
         assertAll(
                 () -> assertSame(viewCloseFailure, failure),
@@ -176,7 +177,7 @@ public final class InstanceManagementCoordinatorTest {
         InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
         Subscription firstAttachment = coordinator.attachHost(firstHost);
         assertThrows(IllegalStateException.class, () -> coordinator.attachHost(secondHost));
-        coordinator.open("alpha").toCompletableFuture().join();
+        coordinator.open(id("alpha")).toCompletableFuture().join();
 
         Thread detacher = new Thread(firstAttachment::unsubscribe, "instance-management-detach-worker");
         detacher.start();
@@ -192,11 +193,11 @@ public final class InstanceManagementCoordinatorTest {
                 () -> assertTrue(factory.views().get(0).closedOnEdt.get()),
                 () -> assertEquals(1, firstHost.showListCalls.get()),
                 () -> assertThrows(CompletionException.class,
-                        () -> coordinator.open("without-host").toCompletableFuture().join()));
+                        () -> coordinator.open(id("without-host")).toCompletableFuture().join()));
 
         Subscription secondAttachment = coordinator.attachHost(secondHost);
         firstAttachment.unsubscribe();
-        coordinator.open("beta").toCompletableFuture().join();
+        coordinator.open(id("beta")).toCompletableFuture().join();
         assertEquals(1, secondHost.showManagementCalls.get());
         secondAttachment.unsubscribe();
         coordinator.close();
@@ -216,7 +217,7 @@ public final class InstanceManagementCoordinatorTest {
         InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
         Subscription attachment = coordinator.attachHost(host);
 
-        Throwable failure = completionFailure(coordinator.open("alpha"));
+        Throwable failure = completionFailure(coordinator.open(id("alpha")));
 
         assertAll(
                 () -> assertSame(hostAddFailure, failure),
@@ -244,7 +245,7 @@ public final class InstanceManagementCoordinatorTest {
         InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
         Subscription attachment = coordinator.attachHost(host);
 
-        Throwable failure = completionFailure(coordinator.open("alpha"));
+        Throwable failure = completionFailure(coordinator.open(id("alpha")));
 
         assertAll(
                 () -> assertSame(constructionFailure, failure),
@@ -266,7 +267,7 @@ public final class InstanceManagementCoordinatorTest {
         RecordingHost host = new RecordingHost(new ArrayList<>());
         InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
         Subscription attachment = coordinator.attachHost(host);
-        coordinator.open("alpha").toCompletableFuture().join();
+        coordinator.open(id("alpha")).toCompletableFuture().join();
         factory.views().get(0).closeFailure = viewCloseFailure;
         host.showListFailure = hostRestoreFailure;
 
@@ -298,7 +299,7 @@ public final class InstanceManagementCoordinatorTest {
         });
         assertTrue(blockerStarted.await(5, TimeUnit.SECONDS));
 
-        CompletionStage<@Nullable Void> lateOpen = coordinator.open("late");
+        CompletionStage<@Nullable Void> lateOpen = coordinator.open(id("late"));
         AtomicReference<@Nullable Throwable> closeFailure = new AtomicReference<>();
         Thread closer = new Thread(() -> {
             try {
@@ -336,6 +337,14 @@ public final class InstanceManagementCoordinatorTest {
                 CompletionException.class,
                 () -> stage.toCompletableFuture().join());
         return Objects.requireNonNull(wrapper.getCause(), "completion failure had no cause");
+    }
+
+    /// Creates one strongly typed test instance identifier.
+    ///
+    /// @param value serialized identifier
+    /// @return typed identifier
+    private static GameInstanceID id(String value) {
+        return new GameInstanceID(value);
     }
 
     /// Runs one assertion synchronously on the EDT.
@@ -393,7 +402,7 @@ public final class InstanceManagementCoordinatorTest {
 
         /// Creates or fails one view while recording EDT affinity.
         @Override
-        public InstanceManagementView create(String instanceId, Runnable returnCommand) {
+        public InstanceManagementView create(GameInstanceID instanceId, Runnable returnCommand) {
             createCalls.incrementAndGet();
             allCallsOnEdt.compareAndSet(true, SwingUtilities.isEventDispatchThread());
             events.add("create:" + instanceId);
@@ -474,7 +483,7 @@ public final class InstanceManagementCoordinatorTest {
     @NotNullByDefault
     private static final class FakeView implements InstanceManagementView {
         /// Stable instance identifier.
-        private final String instanceId;
+        private final GameInstanceID instanceId;
 
         /// Named root component.
         private final JPanel component = new JPanel();
@@ -499,16 +508,16 @@ public final class InstanceManagementCoordinatorTest {
         /// @param instanceId stable identifier
         /// @param returnCommand coordinator return command
         /// @param events shared event order
-        private FakeView(String instanceId, Runnable returnCommand, List<String> events) {
+        private FakeView(GameInstanceID instanceId, Runnable returnCommand, List<String> events) {
             this.instanceId = instanceId;
             this.returnCommand = returnCommand;
             this.events = events;
-            component.setName(instanceId);
+            component.setName(instanceId.id());
         }
 
         /// Returns the stable identifier.
         @Override
-        public String instanceId() {
+        public GameInstanceID instanceId() {
             return instanceId;
         }
 

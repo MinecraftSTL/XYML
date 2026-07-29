@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.home;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.auth.Account;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -130,17 +131,18 @@ public final class LauncherHomeStore implements HomeSelectionStore, AutoCloseabl
 
         XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
         String gameDirectoryId = repository.getGameDirectory().getId().toString();
-        @Nullable String instanceId = repository.getSelectedInstance();
-        String instanceDetail = instanceId == null
+        @Nullable GameInstanceID selectedInstanceId = repository.getSelectedInstance();
+        String instanceId = selectedInstanceId == null ? "" : selectedInstanceId.id();
+        String instanceDetail = selectedInstanceId == null
                 ? ""
                 : GameDirectoryManager.getGameDirectoryDisplayName(repository.getGameDirectory());
         return new HomeSelectionState(
                 accountId,
                 gameDirectoryId,
-                Objects.requireNonNullElse(instanceId, ""),
+                instanceId,
                 accountName,
                 accountDetail,
-                Objects.requireNonNullElse(instanceId, ""),
+                instanceId,
                 instanceDetail);
     }
 

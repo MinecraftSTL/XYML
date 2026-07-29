@@ -22,6 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -147,7 +148,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
     /// @param repository repository containing the selected instance
     /// @param instanceId stable non-blank selected instance identifier
     /// @param executor caller-owned background executor
-    public AddonUpdatesPanel(GameRepository repository, String instanceId, Executor executor) {
+    public AddonUpdatesPanel(GameRepository repository, GameInstanceID instanceId, Executor executor) {
         this(
                 repository,
                 instanceId,
@@ -167,7 +168,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
     /// @param progressAnimationDuration non-negative determinate progress animation duration
     public AddonUpdatesPanel(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,

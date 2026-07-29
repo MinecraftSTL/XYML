@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.image.EncodedImage;
 
 import java.io.IOException;
@@ -58,7 +59,7 @@ public final class ResourcePackIconDataTest {
         createZipPack(resourcePacks.resolve("zip-pack.zip"), zipIcon);
 
         ResourcePackManager manager = new ResourcePackManager(
-                new DefaultGameRepository(temporaryDirectory), "instance");
+                new DefaultGameRepository(temporaryDirectory), new GameInstanceID("instance"));
         manager.refresh();
         Files.write(folderPack.resolve("pack.png"), replacementFolderIcon);
         @Unmodifiable List<ResourcePackFile> packs = manager.getLocalFiles();

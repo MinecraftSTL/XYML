@@ -19,7 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.setting.InstanceIconType;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -39,7 +39,7 @@ interface InstanceIconStore {
     ///
     /// @param iconType one of the fourteen independently selectable bundled icon types
     /// @throws IOException when the repository cannot complete the file mutation
-    void selectBuiltIn(InstanceIconType iconType) throws IOException;
+    void selectBuiltIn(GameInstanceIconType iconType) throws IOException;
 
     /// Copies one custom image and restores the default built-in fallback type.
     ///
@@ -62,6 +62,6 @@ interface InstanceIconStore {
     /// @param builtInType persisted bundled fallback type
     /// @param customImage existing custom-image path, or `null` when the bundled image is active
     @NotNullByDefault
-    record Snapshot(InstanceIconType builtInType, @Nullable Path customImage) {
+    record Snapshot(GameInstanceIconType builtInType, @Nullable Path customImage) {
     }
 }

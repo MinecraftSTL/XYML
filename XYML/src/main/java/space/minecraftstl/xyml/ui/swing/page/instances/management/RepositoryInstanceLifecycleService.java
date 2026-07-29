@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 
@@ -30,7 +31,7 @@ import java.util.Objects;
 /// Disk mutations deliberately delegate to the existing repository implementation: rename uses the
 /// `GameRepository` contract, while duplicate and removal use XYML's instance-aware methods. Each
 /// successful mutation synchronously refreshes the repository on the caller's background thread so the
-/// instance-list model receives an authoritative `RefreshedInstancesEvent` before the management page exits.
+/// instance-list model receives an authoritative `RefreshedGameInstancesEvent` before the management page exits.
 @NotNullByDefault
 public final class RepositoryInstanceLifecycleService implements InstanceLifecycleService {
     /// Repository owning the instance files and persistent selection state.
@@ -58,9 +59,9 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
     /// @param destinationId validated target identifier
     /// @throws IOException when the target conflicts or rename reports failure
     @Override
-    public void rename(String sourceId, String destinationId) throws IOException {
-        String source = requireNonBlank(sourceId, "sourceId");
-        String destination = requireDestination(destinationId);
+    public void rename(GameInstanceID sourceId, GameInstanceID destinationId) throws IOException {
+        GameInstanceID source = Objects.requireNonNull(sourceId, "sourceId");
+        GameInstanceID destination = Objects.requireNonNull(destinationId, "destinationId");
         if (source.equals(destination)) {
             throw new IOException("The new instance name must differ from the current name");
         }
@@ -69,7 +70,7 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
         if (!gameRepository.renameInstance(source, destination)) {
             throw new IOException("The instance could not be renamed");
         }
-        repository.refreshInstances();
+        repository.refresh();
     }
 
     /// Copies an instance through the repository's established copy routine and refreshes the index.
@@ -79,15 +80,15 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
     /// @param copySaves whether source worlds should be copied
     /// @throws IOException when the source is missing, destination conflicts, or copying fails
     @Override
-    public void duplicate(String sourceId, String destinationId, boolean copySaves) throws IOException {
-        String source = requireNonBlank(sourceId, "sourceId");
-        String destination = requireDestination(destinationId);
+    public void duplicate(GameInstanceID sourceId, GameInstanceID destinationId, boolean copySaves) throws IOException {
+        GameInstanceID source = Objects.requireNonNull(sourceId, "sourceId");
+        GameInstanceID destination = Objects.requireNonNull(destinationId, "destinationId");
         if (source.equals(destination)) {
             throw new IOException("The duplicate instance name must differ from the source name");
         }
         requireDestinationAvailable(source, destination);
         repository.duplicateInstance(source, destination, copySaves);
-        repository.refreshInstances();
+        repository.refresh();
     }
 
     /// Removes an instance through XYML's recycle-bin-aware removal routine and refreshes the index.
@@ -95,37 +96,24 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
     /// @param sourceId stable existing source identifier
     /// @throws IOException when removal reports failure
     @Override
-    public void delete(String sourceId) throws IOException {
-        String source = requireNonBlank(sourceId, "sourceId");
+    public void delete(GameInstanceID sourceId) throws IOException {
+        GameInstanceID source = Objects.requireNonNull(sourceId, "sourceId");
         if (!repository.removeInstanceFromDisk(source)) {
             throw new IOException("The instance could not be deleted");
         }
-        repository.refreshInstances();
+        repository.refresh();
     }
 
     /// Reconciles the repository's persisted selection on the Swing event dispatch thread.
     ///
     /// @param preferredId renamed or duplicated instance ID, or `null` after deletion
     @Override
-    public void reconcileSelection(@Nullable String preferredId) {
-        if (preferredId != null && repository.hasVersion(preferredId)) {
+    public void reconcileSelection(@Nullable GameInstanceID preferredId) {
+        if (preferredId != null && repository.hasInstance(preferredId)) {
             repository.setSelectedInstance(preferredId);
         } else {
             repository.refreshSelectedInstance();
         }
-    }
-
-    /// Validates a destination ID before it reaches a filesystem operation.
-    ///
-    /// @param destinationId requested destination identifier
-    /// @return normalized non-blank destination identifier
-    /// @throws IOException when the identifier is invalid
-    private String requireDestination(String destinationId) throws IOException {
-        String destination = requireNonBlank(destinationId, "destinationId");
-        if (!isValidDestinationId(destination)) {
-            throw new IOException("The instance name is invalid");
-        }
-        return destination;
     }
 
     /// Rejects a destination already known by the loaded repository before a destructive mutation begins.
@@ -133,22 +121,10 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
     /// @param source current source identifier
     /// @param destination requested destination identifier
     /// @throws IOException when another instance already owns the destination ID
-    private void requireDestinationAvailable(String source, String destination) throws IOException {
+    private void requireDestinationAvailable(GameInstanceID source, GameInstanceID destination) throws IOException {
         if (!source.equals(destination) && repository.instanceIdConflicts(destination)) {
             throw new IOException("An instance with that name already exists");
         }
     }
 
-    /// Validates a stable non-blank identifier while preserving its exact filesystem spelling.
-    ///
-    /// @param value candidate identifier
-    /// @param name parameter name
-    /// @return validated identifier
-    private static String requireNonBlank(String value, String name) {
-        String candidate = Objects.requireNonNull(value, name);
-        if (candidate.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return candidate;
-    }
 }

@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -86,7 +87,7 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     /// @param strings status and action strings
     public DefaultWorldCatalogModel(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             WorldCatalogStrings strings) {
         this(new FileSystemWorldCatalogAccess(repository, instanceId), executor, strings);

@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.game;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.modpack.MinecraftInstanceTask;
@@ -34,64 +36,90 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
+/// Installs or updates an archive in XYML's native modpack format.
+@NotNullByDefault
 public final class XYMLModpackInstallTask extends Task<Void> {
+    /// Source archive to install.
     private final Path zipFile;
-    private final String name;
+    /// Destination game instance identifier.
+    private final GameInstanceID instanceId;
+    /// Destination repository.
     private final XYMLGameRepository repository;
+    /// Repository dependency manager used to install base game files and libraries.
     private final DefaultDependencyManager dependency;
+    /// Parsed modpack metadata.
     private final Modpack modpack;
+    /// Tasks that must finish before this task executes.
     private final List<Task<?>> dependencies = new ArrayList<>(1);
+    /// Tasks that run after this task completes.
     private final List<Task<?>> dependents = new ArrayList<>(4);
 
-    public XYMLModpackInstallTask(XYMLGameRepository repository, Path zipFile, Modpack modpack, String name) {
+    /// Creates a native modpack installation task.
+    public XYMLModpackInstallTask(
+            XYMLGameRepository repository, Path zipFile, Modpack modpack, GameInstanceID instanceId) {
         this.repository = repository;
         this.dependency = repository.getDependency();
         this.zipFile = zipFile;
-        this.name = name;
+        this.instanceId = instanceId;
         this.modpack = modpack;
 
-        Path run = repository.getRunDirectory(name);
-        Path json = repository.getModpackConfiguration(name);
-        if (repository.hasVersion(name) && Files.notExists(json))
-            throw new IllegalArgumentException("Instance " + name + " already exists");
+        Path run = repository.getRunDirectory(this.instanceId);
+        Path json = repository.getModpackConfiguration(this.instanceId);
+        if (repository.hasInstance(this.instanceId) && Files.notExists(json))
+            throw new IllegalArgumentException("Instance " + instanceId + " already exists");
 
-        dependents.add(dependency.gameBuilder().name(name).gameVersion(modpack.getGameVersion()).buildAsync());
+        dependents.add(dependency.newGameBuilder().name(this.instanceId).gameVersion(modpack.getGameVersion()).buildAsync());
 
         onDone().register(event -> {
-            if (event.isFailed()) repository.removeInstanceFromDisk(name);
+            if (event.isFailed()) repository.removeInstanceFromDisk(this.instanceId);
         });
 
-        ModpackConfiguration<Modpack> config = null;
+        @Nullable ModpackConfiguration<Modpack> config = null;
         try {
             if (Files.exists(json)) {
                 config = JsonUtils.fromJsonFile(json, ModpackConfiguration.typeOf(Modpack.class));
 
                 if (!XYMLModpackProvider.INSTANCE.getName().equals(config.getType()))
-                    throw new IllegalArgumentException("Instance " + name + " is not an XYML modpack. Cannot update this instance.");
+                    throw new IllegalArgumentException(
+                            "Instance " + instanceId + " is not an XYML modpack. Cannot update this instance.");
             }
         } catch (JsonParseException | IOException ignore) {
         }
         dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), Collections.singletonList("/minecraft"), it -> !"pack.json".equals(it), config));
-        dependents.add(new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), Collections.singletonList("/minecraft"), modpack, XYMLModpackProvider.INSTANCE, modpack.getName(), modpack.getVersion(), repository.getModpackConfiguration(name)).withStage("xyml.modpack"));
+        dependents.add(new MinecraftInstanceTask<>(
+                zipFile,
+                modpack.getEncoding(),
+                Collections.singletonList("/minecraft"),
+                modpack,
+                XYMLModpackProvider.INSTANCE,
+                modpack.getName(),
+                modpack.getVersion(),
+                repository.getModpackConfiguration(this.instanceId)).withStage("xyml.modpack"));
     }
 
+    /// Returns the dynamically assembled prerequisite task list.
     @Override
     public List<Task<?>> getDependencies() {
         return dependencies;
     }
 
+    /// Returns the installation steps scheduled after manifest preparation.
     @Override
     public List<Task<?>> getDependents() {
         return dependents;
     }
 
+    /// Rewrites the bundled instance manifest and reinstalls loader libraries for the destination ID.
     @Override
     public void execute() throws Exception {
         String json = CompressingUtils.readTextZipEntry(zipFile, "minecraft/pack.json");
-        Version originalVersion = JsonUtils.GSON.fromJson(json, Version.class).setId(name).setJar(null);
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(originalVersion, null);
-        Task<Version> libraryTask = Task.supplyAsync(() -> originalVersion);
+        GameInstanceManifest parsedManifest = Objects.requireNonNull(
+                JsonUtils.GSON.fromJson(json, GameInstanceManifest.class), "Missing minecraft/pack.json manifest");
+        GameInstanceManifest originalManifest = parsedManifest.withId(instanceId).withJar(null);
+        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(originalManifest, null);
+        Task<GameInstanceManifest> libraryTask = Task.supplyAsync(() -> originalManifest);
         // reinstall libraries
         // libraries of Forge and OptiFine should be obtained by installation.
         for (LibraryAnalyzer.LibraryMark mark : analyzer) {

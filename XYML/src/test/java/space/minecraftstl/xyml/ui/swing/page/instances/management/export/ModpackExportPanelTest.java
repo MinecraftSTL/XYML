@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.export.ModpackExportTaskFactory;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
@@ -76,7 +77,7 @@ final class ModpackExportPanelTest {
                         resolverCalls.incrementAndGet();
                         return runDirectory;
                     },
-                    "instance",
+                    new GameInstanceID("instance"),
                     unusedTaskFactory(),
                     fixedOutputChooser(runDirectory.resolve("bundle")),
                     executor,
@@ -152,7 +153,7 @@ final class ModpackExportPanelTest {
                         resolverCalls.incrementAndGet();
                         return runDirectory;
                     },
-                    "instance",
+                    new GameInstanceID("instance"),
                     unusedTaskFactory(),
                     fixedOutputChooser(runDirectory.resolve("bundle")),
                     executor,
@@ -181,7 +182,7 @@ final class ModpackExportPanelTest {
         EdtDispatcher.executeAndWait(() -> {
             ModpackExportPanel panel = new ModpackExportPanel(
                     ignored -> runDirectory,
-                    "instance",
+                    new GameInstanceID("instance"),
                     unusedTaskFactory(),
                     fixedOutputChooser(runDirectory.resolve("bundle")),
                     executor,

@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.download.DownloadProviderWrapper;
 import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.task.Task;
 
@@ -98,20 +99,21 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
                     request,
                     GameInstallRequestRejectedException.Reason.INVALID_INSTANCE_NAME);
         }
-        if (repository.instanceIdConflicts(request.instanceName())) {
+        GameInstanceID instanceId = new GameInstanceID(request.instanceName());
+        if (repository.instanceIdConflicts(instanceId)) {
             throw new GameInstallRequestRejectedException(
                     request,
                     GameInstallRequestRejectedException.Reason.INSTANCE_ALREADY_EXISTS);
         }
 
-        GameBuilder builder = repository.getDependency(requestProvider).gameBuilder();
-        configureBuilder(builder, request);
-        repository.applyDefaultIsolationSettingForNewInstance(request.instanceName(), isModded(request));
+        GameBuilder builder = repository.getDependency(requestProvider).newGameBuilder();
+        configureBuilder(builder, instanceId, request);
+        repository.applyDefaultIsolationSettingForNewInstance(instanceId, isModded(request));
         return builder.buildAsync()
-                .whenComplete(repositoryRefreshExecutor, ignoredFailure -> repository.refreshInstances())
+                .whenComplete(repositoryRefreshExecutor, ignoredFailure -> repository.refresh())
                 .thenRunAsync(
                         instanceSelectionExecutor,
-                        () -> repository.setSelectedInstance(request.instanceName()));
+                        () -> repository.setSelectedInstance(instanceId));
     }
 
     /// Applies the request's base game and remote installers to a newly created game builder.
@@ -121,11 +123,16 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
     /// without opening a repository or starting any download.
     ///
     /// @param builder fresh builder obtained from the selected repository dependency manager
+    /// @param instanceId validated destination instance identifier
     /// @param request immutable request containing the base game and selected installers
-    static void configureBuilder(GameBuilder builder, GameInstallRequest request) {
+    static void configureBuilder(
+            GameBuilder builder,
+            GameInstanceID instanceId,
+            GameInstallRequest request) {
         Objects.requireNonNull(builder, "builder");
+        Objects.requireNonNull(instanceId, "instanceId");
         Objects.requireNonNull(request, "request");
-        builder.name(request.instanceName()).gameVersion(request.versionId());
+        builder.name(instanceId).gameVersion(request.versionId());
         for (RemoteVersion remoteVersion : request.selectedRemoteVersions()) {
             builder.version(remoteVersion);
         }

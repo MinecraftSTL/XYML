@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
 
@@ -41,13 +42,13 @@ import java.util.Set;
 /// @param otherRemovableLibraries unrecognized third-party libraries eligible for the removal workflow
 @NotNullByDefault
 public record InstanceInstallerSnapshot(
-        String instanceId,
+        GameInstanceID instanceId,
         Optional<String> gameVersion,
         @Unmodifiable List<InstanceInstallerEntry> installedLoaders,
         @Unmodifiable List<InstanceOtherLibraryEntry> otherRemovableLibraries) {
     /// Defensively snapshots all entries and rejects ambiguous duplicate loader kinds.
     public InstanceInstallerSnapshot {
-        instanceId = requireNonBlank(instanceId, "instanceId");
+        instanceId = Objects.requireNonNull(instanceId, "instanceId");
         gameVersion = Objects.requireNonNull(gameVersion, "gameVersion").map(
                 value -> requireNonBlank(value, "gameVersion value"));
         installedLoaders = List.copyOf(Objects.requireNonNull(installedLoaders, "installedLoaders"));

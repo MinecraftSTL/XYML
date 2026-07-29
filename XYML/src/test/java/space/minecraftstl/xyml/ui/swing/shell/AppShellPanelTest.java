@@ -24,6 +24,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -876,7 +877,7 @@ public final class AppShellPanelTest {
         ///
         /// @param instanceId required but absent test identifier
         @Override
-        public void selectInstance(String instanceId) {
+        public void selectInstance(GameInstanceID instanceId) {
             Objects.requireNonNull(instanceId, "instanceId");
         }
 

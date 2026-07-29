@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -276,8 +277,8 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
                 return repository.getGameDirectory().getPath().toPath();
             }
 
-            @Nullable String instanceId = repository.getSelectedInstance();
-            if (instanceId == null || instanceId.isBlank()) {
+            @Nullable GameInstanceID instanceId = repository.getSelectedInstance();
+            if (instanceId == null) {
                 return null;
             }
             return switch (category) {

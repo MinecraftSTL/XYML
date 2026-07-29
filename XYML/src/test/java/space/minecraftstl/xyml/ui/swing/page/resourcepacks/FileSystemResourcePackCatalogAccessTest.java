@@ -575,7 +575,7 @@ public final class FileSystemResourcePackCatalogAccessTest {
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "getResourcePackDirectory" -> packDirectory;
                     case "getRunDirectory" -> runDirectory;
-                    case "getVersionJar" -> versionJar;
+                    case "getInstanceJar" -> versionJar;
                     case "getGameVersion" -> Optional.of("1.20.1");
                     case "toString" -> "FileSystemResourcePackCatalogRepository";
                     case "hashCode" -> System.identityHashCode(proxy);

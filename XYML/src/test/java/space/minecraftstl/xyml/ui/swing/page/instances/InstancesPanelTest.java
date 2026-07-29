@@ -23,6 +23,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -185,7 +186,7 @@ public final class InstancesPanelTest {
             @Nullable InstanceListItem visible = panel.choiceList().getChoiceModel().loadedValueAt(0);
             assertAll(
                     () -> assertEquals(1, panel.choiceList().getChoiceModel().getSize()),
-                    () -> assertEquals("instance-37", Objects.requireNonNull(visible).id()),
+                    () -> assertEquals(instanceId("instance-37"), Objects.requireNonNull(visible).id()),
                     () -> assertEquals(0, panel.choiceList().getList().getSelectedIndex()),
                     () -> assertEquals(Set.of("instance-37"), Set.copyOf(model.requestedStableIds())),
                     () -> assertTrue(findButton(panel, "instancesManage").isEnabled()));
@@ -242,7 +243,7 @@ public final class InstancesPanelTest {
                             list.getSelectionMode()),
                     () -> assertEquals(expectedVisibleRows * 2, requested.length()),
                     () -> assertTrue(requested.length() < model.exactItemCount().orElseThrow()),
-                    () -> assertEquals(List.of("instance-1"), model.selectedIds()),
+                    () -> assertEquals(List.of(instanceId("instance-1")), model.selectedIds()),
                     () -> assertEquals(1, model.refreshes.get()),
                     () -> assertEquals(1, model.additions.get()),
                     () -> assertEquals(1, model.managementRequests.get()));
@@ -271,9 +272,9 @@ public final class InstancesPanelTest {
         EdtDispatcher.executeAndWait(() -> { });
 
         onEventDispatchThread(() -> {
-            assertEquals(List.of("instance-2"), model.selectedIds());
+            assertEquals(List.of(instanceId("instance-2")), model.selectedIds());
             panel.choiceList().refreshLoadPlan();
-            assertEquals(List.of("instance-2"), model.selectedIds());
+            assertEquals(List.of(instanceId("instance-2")), model.selectedIds());
             panel.close();
             coordinator.close();
         });
@@ -303,11 +304,11 @@ public final class InstancesPanelTest {
 
         onEventDispatchThread(() -> {
             assertAll(
-                    () -> assertEquals(List.of("instance-2"), model.selectedIds()),
+                    () -> assertEquals(List.of(instanceId("instance-2")), model.selectedIds()),
                     () -> assertEquals(OptionalInt.of(2), panel.displayedSnapshot().selectedIndex()),
                     () -> assertTrue(findButton(panel, "instancesManage").isEnabled()));
             findButton(panel, "instancesManage").doClick();
-            assertEquals(List.of("instance-2"), model.managedIds());
+            assertEquals(List.of(instanceId("instance-2")), model.managedIds());
             panel.close();
             coordinator.close();
         });
@@ -357,7 +358,7 @@ public final class InstancesPanelTest {
     public void paintsConstrainedAndEmptySurfaces() {
         FakeInstancesModel populated = FakeInstancesModel.immediate(
                 List.of(new InstanceListItem(
-                        "long-instance",
+                        instanceId("long-instance"),
                         "A very long modded instance name that must remain inside its viewport row",
                         "Minecraft 1.21.1 with a long loader description",
                         solidIcon(0))),
@@ -436,7 +437,7 @@ public final class InstancesPanelTest {
             Component loaded = renderer.getListCellRendererComponent(
                     list,
                     ChoiceListEntry.loaded(0, new InstanceListItem(
-                            "id",
+                            instanceId("id"),
                             "A very long modded instance name",
                             "Minecraft 1.21.1 / Fabric",
                             solidIcon(0))),
@@ -481,7 +482,7 @@ public final class InstancesPanelTest {
                 () -> assertEquals(1, model.managementRequests.get()),
                 () -> assertEquals(0, factory.creationCount()));
 
-        coordinator.open("instance-0").toCompletableFuture().join();
+        coordinator.open(instanceId("instance-0")).toCompletableFuture().join();
         FakeManagementView view = factory.latestView();
         onEventDispatchThread(() -> assertAll(
                 () -> assertFalse(findComponent(panel, "instancesListWorkspace").isVisible()),
@@ -489,7 +490,7 @@ public final class InstancesPanelTest {
                 () -> assertSame(
                         findComponent(panel, "instancesManagementHost"),
                         view.component().getParent()),
-                () -> assertEquals("instance-0", coordinator.currentInstanceId())));
+                () -> assertEquals(instanceId("instance-0"), coordinator.currentInstanceId())));
 
         panel.showInstanceList().toCompletableFuture().join();
         onEventDispatchThread(() -> assertAll(
@@ -521,7 +522,7 @@ public final class InstancesPanelTest {
         FakeManagementView firstView = factory.latestView();
         onEventDispatchThread(() -> {
             assertAll(
-                    () -> assertEquals("instance-0", coordinator.currentInstanceId()),
+                    () -> assertEquals(instanceId("instance-0"), coordinator.currentInstanceId()),
                     () -> assertTrue(findComponent(panel, "instancesManagementHost").isVisible()),
                     () -> assertEquals(1, factory.creationCount()));
 
@@ -540,16 +541,16 @@ public final class InstancesPanelTest {
                     () -> assertEquals(0, firstView.closeCount()));
 
             panel.showInstanceListPage();
-            coordinator.open("instance-0").toCompletableFuture().join();
+            coordinator.open(instanceId("instance-0")).toCompletableFuture().join();
             assertAll(
                     () -> assertTrue(findComponent(panel, "instancesManagementHost").isVisible()),
                     () -> assertEquals(2, factory.creationCount()),
                     () -> assertEquals(1, firstView.closeCount()),
                     () -> assertEquals(1, defaultPageReveals.get()));
 
-            model.selectInstance("instance-1");
+            model.selectInstance(instanceId("instance-1"));
             assertAll(
-                    () -> assertEquals("instance-1", coordinator.currentInstanceId()),
+                    () -> assertEquals(instanceId("instance-1"), coordinator.currentInstanceId()),
                     () -> assertEquals(3, factory.creationCount()),
                     () -> assertEquals(1, firstView.closeCount()));
 
@@ -557,7 +558,7 @@ public final class InstancesPanelTest {
             model.selectionContextRevision++;
             model.replaceItemsAndPublish(items(2), snapshot(1, 2, 1L));
             assertAll(
-                    () -> assertEquals("instance-1", coordinator.currentInstanceId()),
+                    () -> assertEquals(instanceId("instance-1"), coordinator.currentInstanceId()),
                     () -> assertEquals(4, factory.creationCount()),
                     () -> assertEquals(1, secondView.closeCount()));
             panel.close();
@@ -573,7 +574,7 @@ public final class InstancesPanelTest {
         InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
         InstancesPanel panel = onEventDispatchThread(
                 () -> new InstancesPanel(model, STRINGS, coordinator));
-        coordinator.open("instance-0").toCompletableFuture().join();
+        coordinator.open(instanceId("instance-0")).toCompletableFuture().join();
         FakeManagementView view = factory.latestView();
 
         AtomicReference<@Nullable Throwable> closeFailure = new AtomicReference<>();
@@ -590,7 +591,7 @@ public final class InstancesPanelTest {
 
         CompletionException noHost = assertThrows(
                 CompletionException.class,
-                () -> coordinator.open("instance-after-close").toCompletableFuture().join());
+                () -> coordinator.open(instanceId("instance-after-close")).toCompletableFuture().join());
         onEventDispatchThread(() -> {
             invokeRegisteredActions(findButton(panel, "instancesRefresh"));
             invokeRegisteredActions(findButton(panel, "instancesAdd"));
@@ -624,7 +625,7 @@ public final class InstancesPanelTest {
         InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
         InstancesPanel panel = onEventDispatchThread(
                 () -> new InstancesPanel(model, STRINGS, coordinator));
-        coordinator.open("instance-0").toCompletableFuture().join();
+        coordinator.open(instanceId("instance-0")).toCompletableFuture().join();
         FakeManagementView view = factory.latestView();
         model.failUnsubscribeWith(modelFailure);
 
@@ -682,6 +683,14 @@ public final class InstancesPanelTest {
         coordinator.close();
     }
 
+    /// Creates one stable game-instance identifier from a fixture literal.
+    ///
+    /// @param value serialized fixture identifier
+    /// @return immutable fixture identifier
+    private static GameInstanceID instanceId(String value) {
+        return new GameInstanceID(value);
+    }
+
     /// Creates deterministic installed-instance rows.
     ///
     /// @param count item count
@@ -690,7 +699,7 @@ public final class InstancesPanelTest {
         List<InstanceListItem> result = new ArrayList<>();
         for (int index = 0; index < count; index++) {
             result.add(new InstanceListItem(
-                    "instance-" + index,
+                    instanceId("instance-" + index),
                     "Instance " + index,
                     "Minecraft " + (index % 2 == 0 ? "1.21.1" : "1.20.1"),
                     solidIcon(0)));
@@ -715,7 +724,7 @@ public final class InstancesPanelTest {
     private static BufferedImage renderPanelWithIcon(InstanceIconData icon) {
         FakeInstancesModel model = FakeInstancesModel.immediate(
                 List.of(new InstanceListItem(
-                        "icon-instance",
+                        instanceId("icon-instance"),
                         "Icon instance",
                         "Minecraft 1.21.1",
                         icon)),
@@ -923,7 +932,7 @@ public final class InstancesPanelTest {
         /// @param returnCommand command returning to the instances list
         /// @return newly recorded management view
         @Override
-        public InstanceManagementView create(String instanceId, Runnable returnCommand) {
+        public InstanceManagementView create(GameInstanceID instanceId, Runnable returnCommand) {
             EdtDispatcher.requireEventDispatchThread();
             FakeManagementView view = new FakeManagementView(
                     instanceId,
@@ -953,7 +962,7 @@ public final class InstancesPanelTest {
     @NotNullByDefault
     private static final class FakeManagementView implements InstanceManagementView {
         /// Stable instance identifier represented by this view.
-        private final String instanceId;
+        private final GameInstanceID instanceId;
 
         /// Component mounted into the panel's management host.
         private final JPanel component = new JPanel();
@@ -976,7 +985,7 @@ public final class InstancesPanelTest {
         /// @param returnCommand coordinator return command
         /// @param closeFailure close failure, or null for successful close
         private FakeManagementView(
-                String instanceId,
+                GameInstanceID instanceId,
                 Runnable returnCommand,
                 @Nullable RuntimeException closeFailure) {
             this.instanceId = instanceId;
@@ -989,7 +998,7 @@ public final class InstancesPanelTest {
         ///
         /// @return stable instance identifier
         @Override
-        public String instanceId() {
+        public GameInstanceID instanceId() {
             return instanceId;
         }
 
@@ -1087,10 +1096,10 @@ public final class InstancesPanelTest {
         private final List<String> requestedStableIds = new ArrayList<>();
 
         /// Selected stable instance identifiers.
-        private final List<String> selectedIds = new ArrayList<>();
+        private final List<GameInstanceID> selectedIds = new ArrayList<>();
 
         /// Stable instance identifiers observed by management commands.
-        private final List<String> managedIds = new ArrayList<>();
+        private final List<GameInstanceID> managedIds = new ArrayList<>();
 
         /// Refresh command count.
         private final AtomicInteger refreshes = new AtomicInteger();
@@ -1180,7 +1189,7 @@ public final class InstancesPanelTest {
         public synchronized @Unmodifiable List<String> stableItemIds() {
             List<String> identifiers = new ArrayList<>(items.size());
             for (InstanceListItem item : items) {
-                identifiers.add(item.id());
+                identifiers.add(item.id().id());
             }
             return List.copyOf(identifiers);
         }
@@ -1204,7 +1213,7 @@ public final class InstancesPanelTest {
             Objects.requireNonNull(cancellation, "cancellation").throwIfCancelled();
             requestedStableIds.add(stableId);
             for (InstanceListItem item : items) {
-                if (item.id().equals(stableId)) {
+                if (item.id().id().equals(stableId)) {
                     return CompletableFuture.completedFuture(item);
                 }
             }
@@ -1230,7 +1239,7 @@ public final class InstancesPanelTest {
 
         /// Records one selected stable instance identifier.
         @Override
-        public void selectInstance(String instanceId) {
+        public void selectInstance(GameInstanceID instanceId) {
             InstancesSnapshot previous;
             InstancesSnapshot replacement;
             synchronized (this) {
@@ -1309,14 +1318,14 @@ public final class InstancesPanelTest {
         /// Returns a snapshot of selected instance identifiers.
         ///
         /// @return immutable selected identifiers in command order
-        private synchronized @Unmodifiable List<String> selectedIds() {
+        private synchronized @Unmodifiable List<GameInstanceID> selectedIds() {
             return List.copyOf(selectedIds);
         }
 
         /// Returns stable identifiers observed by management commands.
         ///
         /// @return immutable managed identifiers in command order
-        private synchronized @Unmodifiable List<String> managedIds() {
+        private synchronized @Unmodifiable List<GameInstanceID> managedIds() {
             return List.copyOf(managedIds);
         }
 

@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 
 import java.time.Instant;
@@ -46,9 +47,10 @@ public final class RepositoryGameInstallTaskFactoryTest {
                 List.of(forge, fabric));
         RecordingGameBuilder builder = new RecordingGameBuilder();
 
-        RepositoryGameInstallTaskFactory.configureBuilder(builder, request);
+        GameInstanceID instanceId = new GameInstanceID(request.instanceName());
+        RepositoryGameInstallTaskFactory.configureBuilder(builder, instanceId, request);
 
-        assertEquals("loader-instance", builder.getName());
+        assertEquals(instanceId, builder.getName());
         assertEquals("1.21.1", builder.gameVersion());
         @Unmodifiable List<RemoteVersion> selected = builder.remoteVersionsSnapshot();
         assertEquals(2, selected.size());
@@ -67,7 +69,10 @@ public final class RepositoryGameInstallTaskFactoryTest {
                 List.of(remoteVersion("optifine", "HD_U_I6")));
         RecordingGameBuilder vanillaBuilder = new RecordingGameBuilder();
 
-        RepositoryGameInstallTaskFactory.configureBuilder(vanillaBuilder, vanillaRequest);
+        RepositoryGameInstallTaskFactory.configureBuilder(
+                vanillaBuilder,
+                new GameInstanceID(vanillaRequest.instanceName()),
+                vanillaRequest);
 
         assertTrue(vanillaBuilder.remoteVersionsSnapshot().isEmpty());
         assertFalse(RepositoryGameInstallTaskFactory.isModded(vanillaRequest));

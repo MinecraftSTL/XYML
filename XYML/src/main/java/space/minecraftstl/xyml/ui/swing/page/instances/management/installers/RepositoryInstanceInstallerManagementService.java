@@ -20,12 +20,13 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.DownloadProviderWrapper;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.RemoteVersion;
-import space.minecraftstl.xyml.game.Version;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -81,8 +82,8 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
     /// @param instanceId stable target instance identifier
     /// @return asynchronous immutable snapshot
     @Override
-    public CompletionStage<InstanceInstallerSnapshot> loadSnapshot(String instanceId) {
-        String id = requireNonBlank(instanceId, "instanceId");
+    public CompletionStage<InstanceInstallerSnapshot> loadSnapshot(GameInstanceID instanceId) {
+        GameInstanceID id = Objects.requireNonNull(instanceId, "instanceId");
         return CompletableFuture.supplyAsync(() -> readSnapshot(id), ioExecutor);
     }
 
@@ -93,9 +94,9 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
     /// @return stopped install-save-refresh-snapshot task
     @Override
     public Task<InstanceInstallerSnapshot> installRemoteVersions(
-            String instanceId,
+            GameInstanceID instanceId,
             Collection<? extends RemoteVersion> remoteVersions) {
-        String id = requireNonBlank(instanceId, "instanceId");
+        GameInstanceID id = Objects.requireNonNull(instanceId, "instanceId");
         @Unmodifiable List<RemoteVersion> capturedVersions = copyRemoteVersions(remoteVersions);
         return Task.composeAsync(ioExecutor, () -> {
             InstanceInstallerSnapshot snapshot = readSnapshot(id);
@@ -103,11 +104,13 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
                     InstanceInstallerCompatibility.validateRemoteInstallation(snapshot, capturedVersions);
             DefaultDependencyManager dependencyManager = repository.getDependency(
                     unwrapProvider(DownloadProviders.getDownloadProvider()));
-            Task<Version> mutation = Task.supplyAsync(ioExecutor, () -> repository.getVersion(id));
+            Task<GameInstanceManifest> mutation = Task.supplyAsync(
+                    ioExecutor,
+                    () -> repository.getResolvedInstanceManifest(id).standaloneManifest());
             for (RemoteVersion remoteVersion : validatedVersions) {
                 mutation = mutation.thenComposeAsync(
                         ioExecutor,
-                        version -> dependencyManager.installLibraryAsync(version, remoteVersion));
+                        manifest -> dependencyManager.installLibraryAsync(manifest, remoteVersion));
             }
             return completeMutation(id, mutation);
         });
@@ -119,19 +122,19 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
     /// @param libraryId exact Core library identifier
     /// @return stopped removal-save-refresh-snapshot task
     @Override
-    public Task<InstanceInstallerSnapshot> removeLibrary(String instanceId, String libraryId) {
-        String id = requireNonBlank(instanceId, "instanceId");
+    public Task<InstanceInstallerSnapshot> removeLibrary(GameInstanceID instanceId, String libraryId) {
+        GameInstanceID id = Objects.requireNonNull(instanceId, "instanceId");
         String requestedLibraryId = requireNonBlank(libraryId, "libraryId");
         return Task.composeAsync(ioExecutor, () -> {
             InstanceInstallerSnapshot snapshot = readSnapshot(id);
             InstanceInstallerCompatibility.validateRemoval(snapshot, requestedLibraryId);
             DefaultDependencyManager dependencyManager = repository.getDependency(
                     unwrapProvider(DownloadProviders.getDownloadProvider()));
-            Task<Version> mutation = Task.supplyAsync(
+            Task<GameInstanceManifest> mutation = Task.supplyAsync(
                     ioExecutor,
-                    () -> repository.getVersion(id)).thenComposeAsync(
+                    () -> repository.getResolvedInstanceManifest(id).standaloneManifest()).thenComposeAsync(
                     ioExecutor,
-                    version -> dependencyManager.removeLibraryAsync(version, requestedLibraryId));
+                    manifest -> dependencyManager.removeLibraryAsync(manifest, requestedLibraryId));
             return completeMutation(id, mutation);
         });
     }
@@ -142,8 +145,8 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
     /// @param installer selected local installer path
     /// @return stopped offline-install-save-refresh-snapshot task
     @Override
-    public Task<InstanceInstallerSnapshot> installOffline(String instanceId, Path installer) {
-        String id = requireNonBlank(instanceId, "instanceId");
+    public Task<InstanceInstallerSnapshot> installOffline(GameInstanceID instanceId, Path installer) {
+        GameInstanceID id = Objects.requireNonNull(instanceId, "instanceId");
         Path installerPath = Objects.requireNonNull(installer, "installer");
         return Task.composeAsync(ioExecutor, () -> {
             if (!Files.isRegularFile(installerPath)) {
@@ -153,24 +156,26 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
             }
             DefaultDependencyManager dependencyManager = repository.getDependency(
                     unwrapProvider(DownloadProviders.getDownloadProvider()));
-            Task<Version> mutation = Task.supplyAsync(
+            Task<GameInstanceManifest> mutation = Task.supplyAsync(
                     ioExecutor,
-                    () -> repository.getVersion(id)).thenComposeAsync(
+                    () -> repository.getResolvedInstanceManifest(id).standaloneManifest()).thenComposeAsync(
                     ioExecutor,
-                    version -> dependencyManager.installLibraryAsync(version, installerPath));
+                    manifest -> dependencyManager.installLibraryAsync(manifest, installerPath));
             return completeMutation(id, mutation);
         });
     }
 
-    /// Saves a mutated version, refreshes authoritative repository caches on every outcome, then rereads it.
+    /// Saves a mutated manifest, refreshes authoritative repository caches on every outcome, then rereads it.
     ///
     /// @param instanceId stable target identifier
-    /// @param mutation stopped Core mutation task returning the changed independent version
+    /// @param mutation stopped Core mutation task returning the changed standalone manifest
     /// @return stopped task that returns a fresh snapshot after a successful mutation
-    private Task<InstanceInstallerSnapshot> completeMutation(String instanceId, Task<Version> mutation) {
+    private Task<InstanceInstallerSnapshot> completeMutation(
+            GameInstanceID instanceId,
+            Task<GameInstanceManifest> mutation) {
         Task<@Nullable Void> refreshed = Objects.requireNonNull(mutation, "mutation")
                 .thenComposeAsync(ioExecutor, repository::saveAsync)
-                .whenComplete(ioExecutor, ignoredFailure -> repository.refreshInstances());
+                .whenComplete(ioExecutor, ignoredFailure -> repository.refresh());
         return refreshed.thenComposeAsync(
                 ioExecutor,
                 () -> Task.supplyAsync(ioExecutor, () -> readSnapshot(instanceId)));
@@ -180,9 +185,8 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
     ///
     /// @param instanceId stable existing instance identifier
     /// @return immutable recognized-installer and third-party-library snapshot
-    private InstanceInstallerSnapshot readSnapshot(String instanceId) {
-        Version original = repository.getVersion(instanceId);
-        Version independent = original.resolvePreservingPatches(repository);
+    private InstanceInstallerSnapshot readSnapshot(GameInstanceID instanceId) {
+        GameInstanceManifest independent = repository.getResolvedInstanceManifest(instanceId).standaloneManifest();
         Optional<String> gameVersion = repository.getGameVersion(independent);
         LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(independent, gameVersion.orElse(null));
         List<InstanceInstallerEntry> entries = new ArrayList<>();

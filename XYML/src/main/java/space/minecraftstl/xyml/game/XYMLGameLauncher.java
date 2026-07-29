@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.game;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.auth.AuthInfo;
 import space.minecraftstl.xyml.launch.DefaultLauncher;
@@ -37,23 +39,40 @@ import java.util.stream.Stream;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * @author huangyuhui
- */
+/// Launches a resolved game instance with XYML-specific metadata, locale defaults, and runtime patching.
+///
+/// @author huangyuhui
+@NotNullByDefault
 public final class XYMLGameLauncher extends DefaultLauncher {
 
-    public XYMLGameLauncher(GameRepository repository, Version version, AuthInfo authInfo, LaunchOptions options) {
-        this(repository, version, authInfo, options, null);
+    /// Creates a daemon launcher without a process listener.
+    public XYMLGameLauncher(
+            GameRepository repository, GameInstanceManifest manifest, AuthInfo authInfo, LaunchOptions options) {
+        this(repository, manifest, authInfo, options, null);
     }
 
-    public XYMLGameLauncher(GameRepository repository, Version version, AuthInfo authInfo, LaunchOptions options, ProcessListener listener) {
-        this(repository, version, authInfo, options, listener, true);
+    /// Creates a daemon launcher with an optional process listener.
+    public XYMLGameLauncher(
+            GameRepository repository,
+            GameInstanceManifest manifest,
+            AuthInfo authInfo,
+            LaunchOptions options,
+            @Nullable ProcessListener listener) {
+        this(repository, manifest, authInfo, options, listener, true);
     }
 
-    public XYMLGameLauncher(GameRepository repository, Version version, AuthInfo authInfo, LaunchOptions options, ProcessListener listener, boolean daemon) {
-        super(repository, version, authInfo, options, listener, daemon);
+    /// Creates a launcher with explicit process-listener and daemon behavior.
+    public XYMLGameLauncher(
+            GameRepository repository,
+            GameInstanceManifest manifest,
+            AuthInfo authInfo,
+            LaunchOptions options,
+            @Nullable ProcessListener listener,
+            boolean daemon) {
+        super(repository, manifest, authInfo, options, listener, daemon);
     }
 
+    /// Supplies launcher branding placeholders to the command template.
     @Override
     protected Map<String, String> getConfigurations() {
         Map<String, String> res = super.getConfigurations();
@@ -62,11 +81,12 @@ public final class XYMLGameLauncher extends DefaultLauncher {
         return res;
     }
 
+    /// Creates a locale-appropriate `options.txt` only when the instance has no existing options source.
     private void generateOptionsTxt() {
         if (options.isDisableAutoGameOptions())
             return;
 
-        Path runDir = repository.getRunDirectory(version.getId());
+        Path runDir = repository.getRunDirectory(manifest.id());
         Path optionsFile = runDir.resolve("options.txt");
         Path configFolder = runDir.resolve("config");
 
@@ -91,7 +111,7 @@ public final class XYMLGameLauncher extends DefaultLauncher {
          *  1.11 ~ 1.12 : zh_cn works fine, zh_CN will display Chinese but the language setting will incorrectly show English as selected
          *  1.13+       : zh_cn works fine, zh_CN will automatically switch to English
          */
-        GameVersionNumber gameVersion = GameVersionNumber.asGameVersion(repository.getGameVersion(version));
+        GameVersionNumber gameVersion = GameVersionNumber.asGameVersion(repository.getGameVersion(manifest));
         if (gameVersion.compareTo("1.1") < 0)
             return;
 
@@ -110,6 +130,7 @@ public final class XYMLGameLauncher extends DefaultLauncher {
         }
     }
 
+    /// Maps the system locale to the locale identifier supported by the target Minecraft version.
     private static String normalizedLanguageTag(Locale locale, GameVersionNumber gameVersion) {
         String region = locale.getCountry();
 
@@ -142,18 +163,21 @@ public final class XYMLGameLauncher extends DefaultLauncher {
         };
     }
 
+    /// Generates missing language options before starting the game process.
     @Override
     public ManagedProcess launch() throws IOException, InterruptedException {
         generateOptionsTxt();
         return super.launch();
     }
 
+    /// Generates missing language options before writing a standalone launch script.
     @Override
     public void makeLaunchScript(Path scriptFile) throws IOException {
         generateOptionsTxt();
         super.makeLaunchScript(scriptFile);
     }
 
+    /// Appends the bundled LWJGL unsafe agent when the selected runtime needs the memory-util patch.
     @Override
     protected void appendJvmArgs(CommandBuilder result) {
         super.appendJvmArgs(result);
@@ -161,7 +185,7 @@ public final class XYMLGameLauncher extends DefaultLauncher {
         if (options.isAllowAutoAgent()
                 && !options.isNoGeneratedJVMArgs()
                 && !options.isNoGeneratedOptimizingJVMArgs()
-                && NativePatcher.needPatchMemoryUtil(version, options.getJava().getParsedVersion())) {
+                && NativePatcher.needPatchMemoryUtil(manifest, options.getJava().getParsedVersion())) {
             LOG.info("Attempting to patch game with lwjgl-unsafe-agent");
             try {
                 result.add("-javaagent:" + extractLwjglUnsafeAgent());
@@ -171,16 +195,17 @@ public final class XYMLGameLauncher extends DefaultLauncher {
         }
     }
 
+    /// Extracts the bundled LWJGL unsafe agent into the repository library path.
     private Path extractLwjglUnsafeAgent() throws IOException {
-        String agentVersion = JarUtils.getAttribute("xyml.lwjgl-unsafe-agent.version", null);
+        @Nullable String agentVersion = JarUtils.getAttribute("xyml.lwjgl-unsafe-agent.version", null);
         if (agentVersion == null) {
             throw new IOException("Missing xyml.lwjgl-unsafe-agent.version attribute");
         }
 
         Library library = new Library(new Artifact("org.glavo", "lwjgl-unsafe-agent", agentVersion));
-        String fileName = library.getArtifact().getFileName();
+        String fileName = library.artifact().getFileName();
 
-        Path agentPath = repository.getLibraryFile(version, library).toAbsolutePath().normalize();
+        Path agentPath = repository.getLibraryFile(manifest, library).toAbsolutePath().normalize();
         if (agentPath.toString().contains("=")) {
             throw new IOException("Invalid library path: " + agentPath);
         }

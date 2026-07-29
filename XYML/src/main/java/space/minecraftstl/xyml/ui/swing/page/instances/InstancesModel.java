@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.IdentifiedChoiceDataSource;
@@ -55,7 +56,7 @@ public interface InstancesModel extends IdentifiedChoiceDataSource<InstanceListI
     /// Selects a loaded instance by its stable repository identifier.
     ///
     /// @param instanceId stable instance identifier
-    void selectInstance(String instanceId);
+    void selectInstance(GameInstanceID instanceId);
 
     /// Refreshes installed instances from their repository.
     void refreshInstances();

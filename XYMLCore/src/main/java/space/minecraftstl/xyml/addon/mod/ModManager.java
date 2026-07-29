@@ -22,7 +22,9 @@ import space.minecraftstl.xyml.addon.LocalAddonFile;
 import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.meta.*;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
+import space.minecraftstl.xyml.game.NoSuchGameInstanceException;
 import space.minecraftstl.xyml.util.Pair;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
@@ -68,13 +70,13 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
 
     private boolean loaded = false;
 
-    public ModManager(GameRepository repository, String id) {
+    public ModManager(GameRepository repository, GameInstanceID id) {
         super(repository, id);
     }
 
     @Override
     public Path getDirectory() {
-        return repository.getModsDirectory(id);
+        return repository.getModsDirectory(instanceId);
     }
 
     public LibraryAnalyzer getLibraryAnalyzer() {
@@ -178,7 +180,11 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
             localFiles.clear();
             localMods.clear();
 
-            analyzer = LibraryAnalyzer.analyze(getRepository().getResolvedPreservingPatchesVersion(id), null);
+            try {
+                analyzer = LibraryAnalyzer.analyze(getRepository().getResolvedInstanceManifest(instanceId), null);
+            } catch (NoSuchGameInstanceException e) {
+                throw new IOException(e);
+            }
 
             boolean supportSubfolders = analyzer.has(LibraryAnalyzer.LibraryType.FORGE)
                     || analyzer.has(LibraryAnalyzer.LibraryType.QUILT);

@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -35,5 +36,5 @@ public interface SchematicDirectoryResolver {
     /// @param instanceId stable repository instance identifier
     /// @return schematic navigation root
     /// @throws IOException when repository or file-system state cannot resolve the root
-    Path resolve(String instanceId) throws IOException;
+    Path resolve(GameInstanceID instanceId) throws IOException;
 }

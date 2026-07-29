@@ -18,9 +18,9 @@
 package space.minecraftstl.xyml.modpack.multimc;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModAdviser;
 import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackExportInfo;
@@ -44,37 +44,21 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 public class MultiMCModpackExportTask extends Task<Void> {
     /// Repository containing the exported instance and its version manifests.
     private final DefaultGameRepository repository;
-
-    /// Target installed instance identifier.
-    private final String instanceId;
-
-    /// Immutable exact-path whitelist applied while collecting instance files.
-    private final @Unmodifiable List<String> whitelist;
-
-    /// MultiMC instance properties written beside the component manifest.
+    private final GameInstanceID instanceId;
+    private final List<String> whitelist;
     private final MultiMCInstanceConfiguration configuration;
 
     /// Destination archive path.
     private final Path output;
 
-    /// Creates a MultiMC export task for one installed instance.
-    ///
-    /// The whitelist is copied so later caller mutations cannot change the running export.
-    ///
-    /// @param repository repository containing the target instance
-    /// @param instanceId target installed instance identifier
-    /// @param whitelist exact relative paths allowed in the archive
-    /// @param configuration MultiMC instance properties to export
-    /// @param output destination archive path
-    public MultiMCModpackExportTask(
-            DefaultGameRepository repository,
-            String instanceId,
-            List<String> whitelist,
-            MultiMCInstanceConfiguration configuration,
-            Path output) {
+    /**
+     * @param output    mod pack file.
+     * @param instanceId to locate version.json
+     */
+    public MultiMCModpackExportTask(DefaultGameRepository repository, GameInstanceID instanceId, List<String> whitelist, MultiMCInstanceConfiguration configuration, Path output) {
         this.repository = repository;
         this.instanceId = instanceId;
-        this.whitelist = List.copyOf(whitelist);
+        this.whitelist = whitelist;
         this.configuration = configuration;
         this.output = output;
 
@@ -102,15 +86,11 @@ public class MultiMCModpackExportTask extends Task<Void> {
         blackList.add(instanceId + ".json");
         LOG.info("Compressing game files without some files in blacklist, including files or directories: usernamecache.json, asm, logs, backups, versions, assets, usercache.json, libraries, crash-reports, launcher_profiles.json, NVIDIA, TCNodeTracker");
         try (Zipper zip = new Zipper(output)) {
-            zip.putDirectory(
-                    repository.getRunDirectory(instanceId),
-                    ".minecraft",
-                    path -> Modpack.acceptFile(path, blackList, whitelist));
+            zip.putDirectory(repository.getRunDirectory(instanceId), ".minecraft", path -> Modpack.acceptFile(path, blackList, whitelist));
 
             String gameVersion = repository.getGameVersion(instanceId)
-                    .orElseThrow(() -> new IOException("Cannot parse the game version of instance " + instanceId));
-            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(
-                    repository.getResolvedPreservingPatchesVersion(instanceId), gameVersion);
+                    .orElseThrow(() -> new IOException("Cannot parse the version of " + instanceId));
+            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), gameVersion);
             List<MultiMCManifest.MultiMCManifestComponent> components = new ArrayList<>();
             components.add(new MultiMCManifest.MultiMCManifestComponent(true, false, MultiMCComponents.getComponent(MINECRAFT), gameVersion));
 

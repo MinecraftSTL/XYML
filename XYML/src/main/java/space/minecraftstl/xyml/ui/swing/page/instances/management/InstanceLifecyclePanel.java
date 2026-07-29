@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
@@ -42,7 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @NotNullByDefault
 public final class InstanceLifecyclePanel extends JPanel implements AutoCloseable {
     /// Stable source instance identifier represented by this management view.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Background repository mutation boundary.
     private final InstanceLifecycleService service;
@@ -88,7 +89,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     /// @param mutationCompletedCommand return-to-list command after a successful mutation
     public InstanceLifecyclePanel(
             XYMLGameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             Runnable mutationCompletedCommand) {
         this(
@@ -109,7 +110,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     /// @param interactions native dialog boundary
     /// @param mutationCompletedCommand return-to-list command after a successful mutation
     InstanceLifecyclePanel(
-            String instanceId,
+            GameInstanceID instanceId,
             InstanceLifecycleService service,
             Executor executor,
             InstanceLifecycleStrings strings,
@@ -120,7 +121,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
                 "[160!][grow,fill]",
                 "[]16[]16[]"));
         EdtDispatcher.requireEventDispatchThread();
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
         this.service = Objects.requireNonNull(service, "service");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.strings = Objects.requireNonNull(strings, "strings");
@@ -166,7 +167,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
         instanceNameLabel.setName("instanceLifecycleNameLabel");
         add(instanceNameLabel, "aligny center");
         instanceIdValue.setName("instanceLifecycleName");
-        instanceIdValue.setText(instanceId);
+        instanceIdValue.setText(instanceId.id());
         add(instanceIdValue, "growx");
 
         JPanel actions = new JPanel(new MigLayout(
@@ -212,7 +213,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
             return;
         }
         @Nullable String rawDestination = interactions.requestRename(this, instanceId);
-        @Nullable String destination = normalizeDestination(rawDestination, MutationKind.RENAME);
+        @Nullable GameInstanceID destination = normalizeDestination(rawDestination, MutationKind.RENAME);
         if (destination == null) {
             return;
         }
@@ -229,7 +230,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
         if (request == null) {
             return;
         }
-        @Nullable String destination = normalizeDestination(request.destinationId(), MutationKind.DUPLICATE);
+        @Nullable GameInstanceID destination = normalizeDestination(request.destinationId(), MutationKind.DUPLICATE);
         if (destination == null) {
             return;
         }
@@ -250,17 +251,17 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     /// @param rawDestination dialog input, or `null` after cancellation
     /// @param kind requested rename or duplicate operation
     /// @return normalized valid destination, or `null` when cancelled or invalid
-    private @Nullable String normalizeDestination(@Nullable String rawDestination, MutationKind kind) {
+    private @Nullable GameInstanceID normalizeDestination(@Nullable String rawDestination, MutationKind kind) {
         MutationKind requestedKind = Objects.requireNonNull(kind, "kind");
         if (rawDestination == null) {
             return null;
         }
         String destination = rawDestination.trim();
-        if (destination.equals(instanceId) || !service.isValidDestinationId(destination)) {
+        if (destination.equals(instanceId.id()) || !service.isValidDestinationId(destination)) {
             showFailure(failureTitle(requestedKind), failureStatus(requestedKind));
             return null;
         }
-        return destination;
+        return new GameInstanceID(destination);
     }
 
     /// Starts one mutually exclusive background mutation and applies its result on the EDT.
@@ -270,7 +271,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     /// @param copySaves whether duplication should include worlds
     private void submitMutation(
             MutationKind kind,
-            @Nullable String destinationId,
+            @Nullable GameInstanceID destinationId,
             boolean copySaves) {
         EdtDispatcher.requireEventDispatchThread();
         MutationKind requestedKind = Objects.requireNonNull(kind, "kind");
@@ -296,7 +297,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     /// @param copySaves whether duplication should include worlds
     private void runMutationOnExecutor(
             MutationKind kind,
-            @Nullable String destinationId,
+            @Nullable GameInstanceID destinationId,
             boolean copySaves) {
         try {
             requireBackgroundThread();
@@ -318,7 +319,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     /// @param failure mutation failure, or `null` after success
     private void completeMutation(
             MutationKind kind,
-            @Nullable String destinationId,
+            @Nullable GameInstanceID destinationId,
             @Nullable Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
         operationPending.set(false);
@@ -418,11 +419,11 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     ///
     /// @param destinationId target destination, or `null` for a malformed operation
     /// @return non-blank target destination
-    private static String requireDestination(@Nullable String destinationId) {
+    private static GameInstanceID requireDestination(@Nullable GameInstanceID destinationId) {
         if (destinationId == null) {
             throw new IllegalStateException("A destination is required for this instance lifecycle operation");
         }
-        return requireNonBlank(destinationId, "destinationId");
+        return destinationId;
     }
 
     /// Validates a required text value before it reaches a component or repository boundary.

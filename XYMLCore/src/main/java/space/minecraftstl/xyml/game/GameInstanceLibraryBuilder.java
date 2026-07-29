@@ -17,110 +17,118 @@
  */
 package space.minecraftstl.xyml.game;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.platform.CommandBuilder;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- *
- * @author huangyuhui
- */
-public final class VersionLibraryBuilder {
-    private final Version version;
-    private final List<String> mcArgs;
+/// Mutates launch arguments and libraries while producing a new immutable instance manifest.
+@NotNullByDefault
+public final class GameInstanceLibraryBuilder {
+    /// Original manifest used as the immutable build base.
+    private final GameInstanceManifest manifest;
+
+    /// Legacy tokenized Minecraft arguments, or null when the modern argument model is active.
+    private final @Nullable List<String> mcArgs;
+
+    /// Mutable modern game arguments.
     private final List<Argument> game;
+
+    /// Mutable modern JVM arguments.
     private final List<Argument> jvm;
+
+    /// Mutable manifest libraries.
     private final List<Library> libraries;
+
+    /// Whether the legacy Minecraft argument model is active.
     private final boolean useMcArgs;
+
+    /// Whether callers modified JVM arguments.
     private boolean jvmChanged = false;
 
-    public VersionLibraryBuilder(Version version) {
-        this.version = version;
-        this.libraries = new ArrayList<>(version.getLibraries());
-        this.mcArgs = version.getMinecraftArguments().map(StringUtils::tokenize).map(ArrayList::new).orElse(null);
-        this.game = version.getArguments().map(Arguments::game).map(ArrayList::new).orElseGet(ArrayList::new);
-        this.jvm = new ArrayList<>(version.getArguments().map(Arguments::jvm).orElse(Arguments.DEFAULT_JVM_ARGUMENTS));
+    /// Creates a builder initialized from one manifest.
+    ///
+    /// @param manifest immutable source manifest
+    public GameInstanceLibraryBuilder(GameInstanceManifest manifest) {
+        this.manifest = manifest;
+        this.libraries = new ArrayList<>(manifest.getLibraries());
+        this.mcArgs = Optional.ofNullable(manifest.minecraftArguments()).map(StringUtils::tokenize).map(ArrayList::new).orElse(null);
+        this.game = Optional.ofNullable(manifest.arguments()).map(Arguments::game).map(ArrayList::new).orElseGet(ArrayList::new);
+        this.jvm = new ArrayList<>(Optional.ofNullable(manifest.arguments()).map(Arguments::jvm).orElse(Arguments.DEFAULT_JVM_ARGUMENTS));
         this.useMcArgs = mcArgs != null;
     }
 
-    public Version build() {
-        Version ret = version;
+    /// Builds a manifest copy containing the current arguments and libraries.
+    public GameInstanceManifest build() {
+        GameInstanceManifest ret = manifest;
         if (useMcArgs) {
             // The official launcher will not parse the "arguments" property when it detects the presence of "mcArgs".
             // The "arguments" property with the "rule" is simply ignored here.
             this.mcArgs.addAll(this.game.stream().map(arg -> arg.toString(new HashMap<>(), new HashMap<>())).flatMap(Collection::stream).collect(Collectors.toList()));
-            ret = ret.setArguments(null);
+            ret = ret.withArguments(null);
 
             // Since $ will be escaped in linux, and our maintain of minecraftArgument will not cause escaping,
             // so we regenerate the minecraftArgument without escaping.
-            ret = ret.setMinecraftArguments(new CommandBuilder().addAllWithoutParsing(mcArgs).toString());
+            ret = ret.withMinecraftArguments(new CommandBuilder().addAllWithoutParsing(mcArgs).toString());
         } else {
-            ret = ret.setArguments(ret.getArguments()
+            ret = ret.withArguments(Optional.ofNullable(ret.arguments())
                     .map(args -> args.withGame(game))
                     .map(args -> jvmChanged ? args.withJvm(jvm) : args).orElse(new Arguments(game, jvmChanged ? jvm : null)));
         }
-        return ret.setLibraries(libraries);
+        return ret.withLibraries(libraries);
     }
 
+    /// Returns whether the selected argument model contains a tweak class.
+    ///
+    /// @param tweakClass fully qualified tweak class name
     public boolean hasTweakClass(String tweakClass) {
         return useMcArgs && mcArgs.contains(tweakClass) || game.stream().anyMatch(arg -> arg.toString().equals(tweakClass));
     }
 
+    /// Removes every occurrence of a tweak class.
+    ///
+    /// @param target fully qualified tweak class name
     public void removeTweakClass(String target) {
         replaceTweakClass(target, null, false);
     }
 
-    /**
-     * Replace existing tweak class without reordering.
-     * If the tweak class does not exist, the new tweak class will be appended to the end of argument list.
-     * If the tweak class appears more than one time, the tweak classes will be removed excluding the first one.
-     *
-     * @param target the tweak class to replace
-     * @param replacement the new tweak class to be replaced with
-     */
+    /// Replaces a tweak class in place without reordering its first occurrence.
+    ///
+    /// If the target is absent, the replacement is appended. Duplicate target entries are removed.
+    ///
+    /// @param target tweak class to replace
+    /// @param replacement replacement tweak class
     public void replaceTweakClass(String target, String replacement) {
         replaceTweakClass(target, replacement, true);
     }
 
-    /**
-     * Replace existing tweak class and add the new tweak class to the end of argument list.
-     *
-     * @param target the tweak class to replace
-     * @param replacement the new tweak class to be replaced with
-     */
+    /// Removes a tweak class and appends its replacement to the argument list.
+    ///
+    /// @param target tweak class to replace
+    /// @param replacement replacement tweak class
     public void addTweakClass(String target, String replacement) {
         replaceTweakClass(target, replacement, false);
     }
 
-    /**
-     * Replace existing tweak class.
-     * If the tweak class does not exist, the new tweak class will be appended to the end of argument list.
-     * If the tweak class appears more than one time, the tweak classes will be removed excluding the first one.
-     *
-     * @param target the tweak class to replace
-     * @param replacement the new tweak class to be replaced with, if null, remove the tweak class only
-     * @param inPlace if true, replace the tweak class in place, otherwise add the tweak class to the end of the argument list without replacement.
-     */
-    public void replaceTweakClass(String target, String replacement, boolean inPlace) {
+    /// Replaces or removes a tweak class and eliminates duplicate target entries.
+    ///
+    /// @param target tweak class to replace
+    /// @param replacement replacement tweak class, or null to remove it
+    /// @param inPlace whether to preserve the first target position
+    public void replaceTweakClass(String target, @Nullable String replacement, boolean inPlace) {
         replaceTweakClass(target, replacement, inPlace, false);
     }
 
-    /**
-     * Replace existing tweak class.
-     * If the tweak class does not exist, the new tweak class will be added to argument list.
-     * If the tweak class appears more than one time, the tweak classes will be removed excluding the first one.
-     *
-     * @param target the tweak class to replace
-     * @param replacement the new tweak class to be replaced with, if null, remove the tweak class only
-     * @param inPlace if true, replace the tweak class in place, otherwise add the tweak class to the end of the argument list without replacement.
-     * @param reserve if true, add the tweak class to the start of the argument list.
-     */
-    public void replaceTweakClass(String target, String replacement, boolean inPlace, boolean reserve) {
+    /// Replaces or removes a tweak class with explicit insertion placement.
+    ///
+    /// @param target tweak class to replace
+    /// @param replacement replacement tweak class, or null to remove it
+    /// @param inPlace whether to preserve the first target position
+    /// @param reserve whether an appended replacement is inserted at the beginning
+    public void replaceTweakClass(String target, @Nullable String replacement, boolean inPlace, boolean reserve) {
         if (replacement == null && inPlace)
             throw new IllegalArgumentException("Replacement cannot be null in replace mode");
 
@@ -183,22 +191,32 @@ public final class VersionLibraryBuilder {
         }
     }
 
+    /// Returns the mutable JVM argument list and marks JVM arguments as changed.
     public List<Argument> getMutableJvmArguments() {
         jvmChanged = true;
         return jvm;
     }
 
+    /// Appends literal modern game arguments.
+    ///
+    /// @param args literal arguments
     public void addGameArgument(String... args) {
         for (String arg : args)
             game.add(new StringArgument(arg));
     }
 
+    /// Appends literal modern JVM arguments.
+    ///
+    /// @param args literal arguments
     public void addJvmArgument(String... args) {
         jvmChanged = true;
         for (String arg : args)
             jvm.add(new StringArgument(arg));
     }
 
+    /// Appends a library to the manifest being built.
+    ///
+    /// @param library library descriptor
     public void addLibrary(Library library) {
         libraries.add(library);
     }

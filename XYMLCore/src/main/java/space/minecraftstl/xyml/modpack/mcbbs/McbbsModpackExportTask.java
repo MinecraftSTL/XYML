@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.modpack.mcbbs;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.modpack.ModAdviser;
 import space.minecraftstl.xyml.modpack.Modpack;
@@ -49,24 +50,13 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 public class McbbsModpackExportTask extends Task<Void> {
     /// Repository containing the exported instance and its version manifests.
     private final DefaultGameRepository repository;
-
-    /// Target installed instance identifier.
-    private final String instanceId;
-
-    /// Validated modpack metadata and export selections.
+    private final GameInstanceID instanceId;
     private final ModpackExportInfo info;
 
     /// Destination archive path.
     private final Path modpackFile;
 
-    /// Creates an MCBBS export task for one installed instance.
-    ///
-    /// @param repository repository containing the target instance
-    /// @param instanceId target installed instance identifier
-    /// @param info modpack metadata and export selections
-    /// @param modpackFile destination archive path
-    public McbbsModpackExportTask(
-            DefaultGameRepository repository, String instanceId, ModpackExportInfo info, Path modpackFile) {
+    public McbbsModpackExportTask(DefaultGameRepository repository, GameInstanceID instanceId, ModpackExportInfo info, Path modpackFile) {
         this.repository = repository;
         this.instanceId = instanceId;
         this.info = info.validate();
@@ -112,9 +102,8 @@ public class McbbsModpackExportTask extends Task<Void> {
             });
 
             String gameVersion = repository.getGameVersion(instanceId)
-                    .orElseThrow(() -> new IOException("Cannot parse the game version of instance " + instanceId));
-            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(
-                    repository.getResolvedPreservingPatchesVersion(instanceId), gameVersion);
+                    .orElseThrow(() -> new IOException("Cannot parse the version of " + instanceId));
+            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), gameVersion);
 
             // Mcbbs manifest
             List<McbbsModpackManifest.Addon> addons = new ArrayList<>();

@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -54,8 +55,8 @@ public final class SelectedRepositoryInstancesModelTest {
     /// A directory switch replaces all visible state and closes the previous repository model.
     @Test
     public void switchesRepositoryStateAndRoutesCommandsToNewDelegate() {
-        FakeInstancesModel first = new FakeInstancesModel("First", "first-instance");
-        FakeInstancesModel second = new FakeInstancesModel("Second", "second-instance");
+        FakeInstancesModel first = new FakeInstancesModel("First", instanceId("first-instance"));
+        FakeInstancesModel second = new FakeInstancesModel("Second", instanceId("second-instance"));
         MutableModelSource source = new MutableModelSource(first);
         AtomicReference<SelectedRepositoryInstancesModel> modelReference = new AtomicReference<>();
         AtomicInteger transitions = new AtomicInteger();
@@ -69,7 +70,7 @@ public final class SelectedRepositoryInstancesModelTest {
                     () -> assertEquals(1L, model.selectionContextRevision()),
                     () -> assertEquals(1L, model.snapshot().contentRevision()));
             source.switchTo(second);
-            model.selectInstance("second-instance");
+            model.selectInstance(instanceId("second-instance"));
             model.manageSelectedInstance();
         });
 
@@ -80,7 +81,7 @@ public final class SelectedRepositoryInstancesModelTest {
                 () -> assertEquals(2L, model.snapshot().contentRevision()),
                 () -> assertEquals(1, transitions.get()),
                 () -> assertEquals(1, first.closeCalls.get()),
-                () -> assertEquals(List.of("second-instance"), second.selectedIds),
+                () -> assertEquals(List.of(instanceId("second-instance")), second.selectedIds),
                 () -> assertEquals(1, second.manageCalls.get()));
 
         EdtDispatcher.executeAndWait(model::close);
@@ -92,9 +93,11 @@ public final class SelectedRepositoryInstancesModelTest {
     /// An asynchronous page from the old repository cannot leak across a directory switch.
     @Test
     public void cancelsOldViewportAfterRepositorySwitch() {
-        FakeInstancesModel first = new FakeInstancesModel("Pending", "pending-instance");
+        FakeInstancesModel first = new FakeInstancesModel("Pending", instanceId("pending-instance"));
         first.deferLoads = true;
-        FakeInstancesModel second = new FakeInstancesModel("Replacement", "replacement-instance");
+        FakeInstancesModel second = new FakeInstancesModel(
+                "Replacement",
+                instanceId("replacement-instance"));
         MutableModelSource source = new MutableModelSource(first);
         AtomicReference<SelectedRepositoryInstancesModel> modelReference = new AtomicReference<>();
         AtomicReference<CompletionStage<ChoicePage<InstanceListItem>>> loadReference = new AtomicReference<>();
@@ -113,6 +116,14 @@ public final class SelectedRepositoryInstancesModelTest {
         assertInstanceOf(java.util.concurrent.CancellationException.class, failure.getCause());
         assertTrue(first.lastCancellation.isCancelled());
         EdtDispatcher.executeAndWait(modelReference.get()::close);
+    }
+
+    /// Creates one stable game-instance identifier from a fixture literal.
+    ///
+    /// @param value serialized fixture identifier
+    /// @return immutable fixture identifier
+    private static GameInstanceID instanceId(String value) {
+        return new GameInstanceID(value);
     }
 
     /// Mutable selected-model source used without process-wide settings initialization.
@@ -174,7 +185,7 @@ public final class SelectedRepositoryInstancesModelTest {
         private final InstancesSnapshot snapshot;
 
         /// Selected identifiers received by this model.
-        private final List<String> selectedIds = new java.util.ArrayList<>();
+        private final List<GameInstanceID> selectedIds = new java.util.ArrayList<>();
 
         /// Management invocation count.
         private final AtomicInteger manageCalls = new AtomicInteger();
@@ -195,8 +206,8 @@ public final class SelectedRepositoryInstancesModelTest {
         ///
         /// @param status stable status text
         /// @param itemId stable item identifier
-        private FakeInstancesModel(String status, String itemId) {
-            item = new InstanceListItem(itemId, itemId, "Minecraft test", TEST_ICON);
+        private FakeInstancesModel(String status, GameInstanceID itemId) {
+            item = new InstanceListItem(itemId, itemId.id(), "Minecraft test", TEST_ICON);
             snapshot = new InstancesSnapshot(
                     OptionalInt.of(0), 1, 0L, status,
                     false, true, true, true, true);
@@ -226,7 +237,7 @@ public final class SelectedRepositoryInstancesModelTest {
         /// Returns the single stable instance identifier.
         @Override
         public @Unmodifiable List<String> stableItemIds() {
-            return List.of(item.id());
+            return List.of(item.id().id());
         }
 
         /// Returns the single stable ID and visible name without loading the row.
@@ -255,7 +266,7 @@ public final class SelectedRepositoryInstancesModelTest {
         ///
         /// @param instanceId selected identifier
         @Override
-        public void selectInstance(String instanceId) {
+        public void selectInstance(GameInstanceID instanceId) {
             selectedIds.add(instanceId);
         }
 

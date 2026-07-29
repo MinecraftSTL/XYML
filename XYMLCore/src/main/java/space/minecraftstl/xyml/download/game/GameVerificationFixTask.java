@@ -19,7 +19,7 @@ package space.minecraftstl.xyml.download.game;
 
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
-import space.minecraftstl.xyml.game.Version;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
@@ -40,17 +40,13 @@ import java.util.List;
 public final class GameVerificationFixTask extends Task<Void> {
     private final DefaultDependencyManager dependencyManager;
     private final String gameVersion;
-    private final Version version;
+    private final GameInstanceManifest manifest;
     private final List<Task<?>> dependencies = new ArrayList<>();
 
-    public GameVerificationFixTask(DefaultDependencyManager dependencyManager, String gameVersion, Version version) {
+    public GameVerificationFixTask(DefaultDependencyManager dependencyManager, String gameVersion, GameInstanceManifest manifest) {
         this.dependencyManager = dependencyManager;
         this.gameVersion = gameVersion;
-        this.version = version;
-
-        if (!version.isResolved()) {
-            throw new IllegalArgumentException("GameVerificationFixTask requires a resolved game version");
-        }
+        this.manifest = manifest;
 
         setSignificance(TaskSignificance.MODERATE);
     }
@@ -62,8 +58,8 @@ public final class GameVerificationFixTask extends Task<Void> {
 
     @Override
     public void execute() throws IOException {
-        Path jar = dependencyManager.getGameRepository().getVersionJar(version);
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(version, gameVersion);
+        Path jar = dependencyManager.getGameRepository().getInstanceJar(manifest);
+        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(manifest, gameVersion);
 
         if (Files.exists(jar) && GameVersionNumber.compare(gameVersion, "1.6") < 0 && analyzer.has(LibraryAnalyzer.LibraryType.FORGE)) {
             try (FileSystem fs = CompressingUtils.createWritableZipFileSystem(jar, StandardCharsets.UTF_8)) {

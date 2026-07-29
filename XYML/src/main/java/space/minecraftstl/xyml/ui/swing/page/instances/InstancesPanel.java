@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
@@ -300,13 +301,14 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         EdtDispatcher.requireEventDispatchThread();
         persistentManagementRequested = true;
         instanceListPageVisible = false;
-        @Nullable String selectedId = selectedInstanceId(displayedSnapshot());
-        if (selectedId == null) {
+        @Nullable String serializedSelectedId = selectedInstanceId(displayedSnapshot());
+        if (serializedSelectedId == null) {
             managementContextRevision = Long.MIN_VALUE;
             CompletionStage<@Nullable Void> completion = managementCoordinator.returnToInstanceList();
             persistentManagementRequested = true;
             return completion;
         }
+        GameInstanceID selectedId = new GameInstanceID(serializedSelectedId);
         long requestedContextRevision = model.selectionContextRevision();
         if (selectedId.equals(managementCoordinator.currentInstanceId())
                 && managementContextRevision == requestedContextRevision
@@ -539,7 +541,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
 
         @Nullable InstanceListItem selected = choiceList.getSelectedValue();
         if (selected != null) {
-            pendingModelSelectionId = selected.id();
+            pendingModelSelectionId = selected.id().id();
             pendingUserSelectionIndex = -1;
             model.selectInstance(selected.id());
         }

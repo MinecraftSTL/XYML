@@ -28,6 +28,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.LocalAddonFile;
 import space.minecraftstl.xyml.addon.resourcepack.ResourcePackFile;
 import space.minecraftstl.xyml.addon.resourcepack.ResourcePackManager;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.util.StringUtils;
@@ -102,9 +103,10 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
         if (instanceId.isBlank()) {
             throw new IllegalArgumentException("instanceId must not be blank");
         }
-        manager = new ResourcePackManager(repository, instanceId);
+        GameInstanceID typedInstanceId = new GameInstanceID(instanceId);
+        manager = new ResourcePackManager(repository, typedInstanceId);
         directory = manager.getDirectory().toAbsolutePath().normalize();
-        optionsFile = repository.getRunDirectory(instanceId)
+        optionsFile = repository.getRunDirectory(typedInstanceId)
                 .resolve("options.txt")
                 .toAbsolutePath()
                 .normalize();

@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.install.DefaultGameInstallService;
 import space.minecraftstl.xyml.game.install.GameInstallService;
@@ -549,13 +550,13 @@ public final class SwingApplicationComposition implements AutoCloseable {
                             worldFolder -> commands.launchCommand().launch(new LaunchRequest(
                                     bindings.homeStore().snapshot().accountId(),
                                     bindings.repository().getGameDirectory().getId().toString(),
-                                    instanceId,
+                                    instanceId.id(),
                                     worldFolder)),
                             (worldFolder, destination) -> commands.launchScriptExportCommand().export(
                                     new LaunchRequest(
                                             bindings.homeStore().snapshot().accountId(),
                                             bindings.repository().getGameDirectory().getId().toString(),
-                                            instanceId,
+                                            instanceId.id(),
                                             worldFolder),
                                     destination));
                     InstanceMaintenanceLaunchActions maintenanceLaunchActions =
@@ -637,7 +638,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @param instanceId stable selected repository identifier
     private static void openInstanceManagement(
             InstanceManagementCoordinator management,
-            String instanceId) {
+            GameInstanceID instanceId) {
         Objects.requireNonNull(management, "management");
         Objects.requireNonNull(instanceId, "instanceId");
         management.open(instanceId).whenComplete(

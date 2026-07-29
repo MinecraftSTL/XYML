@@ -21,8 +21,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
-import space.minecraftstl.xyml.setting.InstanceIconType;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JButton;
@@ -68,7 +69,7 @@ final class InstanceOverviewPanelTest {
             GameRepository repository = repository(refreshCount);
             EdtDispatcher.executeAndWait(() -> panelReference.set(new InstanceOverviewPanel(
                     repository,
-                    "instance",
+                    new GameInstanceID("instance"),
                     executor,
                     InstanceOverviewStrings.english(),
                     interactions)));
@@ -141,10 +142,10 @@ final class InstanceOverviewPanelTest {
                 GameRepository.class.getClassLoader(),
                 new Class<?>[]{GameRepository.class},
                 (proxy, method, arguments) -> switch (method.getName()) {
-                    case "getVersionRoot" -> repositoryRoot.resolve("versions").resolve("instance");
+                    case "getInstanceRoot" -> repositoryRoot.resolve("versions").resolve("instance");
                     case "getRunDirectory" -> repositoryRoot.resolve("game");
                     case "getGameVersion" -> Optional.empty();
-                    case "refreshInstances" -> {
+                    case "refresh" -> {
                         refreshCount.incrementAndGet();
                         yield null;
                     }
@@ -209,7 +210,7 @@ final class InstanceOverviewPanelTest {
         @Override
         public @Nullable InstanceIconChoice chooseInstanceIcon(
                 Component owner,
-                InstanceIconType currentIconType,
+                GameInstanceIconType currentIconType,
                 boolean hasCustomIcon,
                 Path initialDirectory) {
             return null;
@@ -221,7 +222,7 @@ final class InstanceOverviewPanelTest {
         /// @param instanceId unused instance identifier
         /// @return always `false`
         @Override
-        public boolean confirmDeleteIcon(Component owner, String instanceId) {
+        public boolean confirmDeleteIcon(Component owner, GameInstanceID instanceId) {
             return false;
         }
 

@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import java.awt.Component;
 
@@ -33,21 +34,21 @@ public interface InstanceLifecycleInteractions {
     /// @param owner native dialog owner
     /// @param sourceId current instance identifier
     /// @return raw requested destination, or `null` after cancellation
-    @Nullable String requestRename(Component owner, String sourceId);
+    @Nullable String requestRename(Component owner, GameInstanceID sourceId);
 
     /// Requests a duplicate destination and whether worlds should be copied.
     ///
     /// @param owner native dialog owner
     /// @param sourceId current instance identifier
     /// @return confirmed duplicate request, or `null` after cancellation
-    @Nullable InstanceLifecycleDuplicateRequest requestDuplicate(Component owner, String sourceId);
+    @Nullable InstanceLifecycleDuplicateRequest requestDuplicate(Component owner, GameInstanceID sourceId);
 
     /// Asks for explicit approval before deleting one instance.
     ///
     /// @param owner native dialog owner
     /// @param sourceId current instance identifier
     /// @return whether deletion is approved
-    boolean confirmDelete(Component owner, String sourceId);
+    boolean confirmDelete(Component owner, GameInstanceID sourceId);
 
     /// Displays one terminal lifecycle failure.
     ///

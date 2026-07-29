@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.download.game.GameAssetDownloadTask;
 import space.minecraftstl.xyml.game.ModpackHelper;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
@@ -45,7 +46,7 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
     private final XYMLGameRepository repository;
 
     /// Stable fixed instance identifier.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Caller-owned executor for filesystem work and task composition.
     private final Executor ioExecutor;
@@ -56,7 +57,7 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
     /// @param instanceId stable fixed instance identifier
     public RepositoryInstanceMaintenanceService(
             XYMLGameRepository repository,
-            String instanceId) {
+            GameInstanceID instanceId) {
         this(repository, instanceId, Schedulers.io());
     }
 
@@ -67,10 +68,10 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
     /// @param ioExecutor caller-owned executor for blocking work
     RepositoryInstanceMaintenanceService(
             XYMLGameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor ioExecutor) {
         this.repository = Objects.requireNonNull(repository, "repository");
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
         this.ioExecutor = Objects.requireNonNull(ioExecutor, "ioExecutor");
     }
 
@@ -120,7 +121,7 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
             requireExistingInstance();
             Task<?> download = new GameAssetDownloadTask(
                     repository.getDependency(),
-                    repository.getVersion(instanceId),
+                    repository.getResolvedInstanceManifest(instanceId).launchManifest(),
                     GameAssetDownloadTask.DOWNLOAD_INDEX_FORCIBLY,
                     true);
             return download.thenComposeAsync(ioExecutor, this::snapshotTask);
@@ -204,22 +205,9 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
 
     /// Rejects a stale management page before constructing any destructive operation.
     private void requireExistingInstance() {
-        if (!repository.isLoaded() || !repository.hasVersion(instanceId)) {
+        if (!repository.isLoaded() || !repository.hasInstance(instanceId)) {
             throw new IllegalStateException("Unknown instance: " + instanceId);
         }
-    }
-
-    /// Rejects missing stable identifiers without rewriting them.
-    ///
-    /// @param value candidate identifier
-    /// @param name diagnostic field name
-    /// @return exact non-blank identifier
-    private static String requireNonBlank(String value, String name) {
-        String candidate = Objects.requireNonNull(value, name);
-        if (candidate.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        return candidate;
     }
 
     /// One checked filesystem mutation executed by a Core task.

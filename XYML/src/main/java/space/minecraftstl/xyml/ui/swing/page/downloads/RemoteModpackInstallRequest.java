@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import java.util.Objects;
 
@@ -29,19 +30,16 @@ import java.util.Objects;
 ///
 /// @param item loaded source project selected by the user
 /// @param version installable project version selected by the user
-/// @param instanceName exact destination instance identifier
+/// @param instanceId exact destination instance identifier
 @NotNullByDefault
 public record RemoteModpackInstallRequest(
         RemoteModpackCatalogItem item,
         RemoteAddon.Version version,
-        String instanceName) {
-    /// Validates the selected Core values and normalizes the user-entered destination name.
+        GameInstanceID instanceId) {
+    /// Validates the selected Core values and destination identifier.
     public RemoteModpackInstallRequest {
         item = Objects.requireNonNull(item, "item");
         version = Objects.requireNonNull(version, "version");
-        instanceName = Objects.requireNonNull(instanceName, "instanceName").trim();
-        if (instanceName.isEmpty()) {
-            throw new IllegalArgumentException("instanceName must not be blank");
-        }
+        instanceId = Objects.requireNonNull(instanceId, "instanceId");
     }
 }

@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.export;
 
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
 
 import com.formdev.flatlaf.extras.FlatSVGIcon;
@@ -102,7 +103,7 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 @NotNullByDefault
 public final class ModpackExportPanel extends JPanel implements AutoCloseable {
     /// Stable repository identifier for the instance being exported.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Resolves the effective instance run directory only when the user opens this page.
     private final RunDirectoryResolver runDirectoryResolver;
@@ -210,7 +211,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
     /// @param progressAnimationDuration non-negative determinate progress animation duration
     public ModpackExportPanel(
             XYMLGameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor directoryExecutor,
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
@@ -238,7 +239,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
     /// @param progressAnimationDuration non-negative determinate progress animation duration
     ModpackExportPanel(
             RunDirectoryResolver runDirectoryResolver,
-            String instanceId,
+            GameInstanceID instanceId,
             ModpackExportTaskFactory exportTaskFactory,
             OutputFileChooser outputFileChooser,
             Executor directoryExecutor,
@@ -248,7 +249,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.runDirectoryResolver = Objects.requireNonNull(runDirectoryResolver, "runDirectoryResolver");
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
         this.exportTaskFactory = Objects.requireNonNull(exportTaskFactory, "exportTaskFactory");
         this.outputFileChooser = Objects.requireNonNull(outputFileChooser, "outputFileChooser");
         this.directoryExecutor = Objects.requireNonNull(directoryExecutor, "directoryExecutor");
@@ -261,7 +262,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         }
 
         configureComponents();
-        nameField.setText(this.instanceId);
+        nameField.setText(this.instanceId.id());
         setStatus(i18n("modpack.wizard.step.2.title"));
         updateControls();
     }
@@ -758,7 +759,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         try {
             request = new ModpackExportRequest(
                     selectedFormat(),
-                    instanceId,
+                    instanceId.id(),
                     createMetadata(),
                     ModpackExportFileSelection.of(selectedPaths),
                     selectedOutput);
@@ -965,7 +966,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
     /// @return portable archive filename suggestion
     private String suggestedFileName(ModpackExportFormat format) {
         String source = nameField.getText().trim();
-        String sanitized = source.isEmpty() ? instanceId : source.replaceAll("[\\\\/:*?\"<>|]", "_");
+        String sanitized = source.isEmpty() ? instanceId.id() : source.replaceAll("[\\\\/:*?\"<>|]", "_");
         return sanitized + format.fileSuffix();
     }
 
@@ -1102,7 +1103,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         ///
         /// @param instanceId source instance identifier
         /// @return effective source run directory
-        Path resolve(String instanceId);
+        Path resolve(GameInstanceID instanceId);
     }
 
     /// Opens one native local save-file chooser without exposing it to task or filesystem code.

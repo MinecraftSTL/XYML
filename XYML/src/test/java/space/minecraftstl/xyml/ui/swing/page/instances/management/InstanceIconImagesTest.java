@@ -22,7 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import space.minecraftstl.xyml.setting.InstanceIconType;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
@@ -52,7 +52,7 @@ final class InstanceIconImagesTest {
     /// Adapts every bundled choice at the exact 40-pixel overview size.
     @Test
     void loadsEveryBundledChoiceAtExactPreviewSize() {
-        for (InstanceIconType iconType : InstanceIconChooserDialog.builtInTypes()) {
+        for (GameInstanceIconType iconType : InstanceIconChooserDialog.builtInTypes()) {
             ImageIcon icon = InstanceIconImages.loadBuiltIn(iconType, 40);
             assertEquals(40, icon.getIconWidth());
             assertEquals(40, icon.getIconHeight());
@@ -74,7 +74,7 @@ final class InstanceIconImagesTest {
         ImageIO.write(source, "PNG", imagePath.toFile());
 
         ImageIcon icon = InstanceIconImages.load(
-                new InstanceIconStore.Snapshot(InstanceIconType.FORGE, imagePath),
+                new InstanceIconStore.Snapshot(GameInstanceIconType.FORGE, imagePath),
                 40);
         BufferedImage rendered = assertInstanceOf(BufferedImage.class, icon.getImage());
         assertEquals(40, rendered.getWidth());
@@ -90,9 +90,9 @@ final class InstanceIconImagesTest {
         Files.writeString(corruptImage, "not an image");
 
         ImageIcon fallback = InstanceIconImages.load(
-                new InstanceIconStore.Snapshot(InstanceIconType.FORGE, corruptImage),
+                new InstanceIconStore.Snapshot(GameInstanceIconType.FORGE, corruptImage),
                 40);
-        ImageIcon expected = InstanceIconImages.loadBuiltIn(InstanceIconType.DEFAULT, 40);
+        ImageIcon expected = InstanceIconImages.loadBuiltIn(GameInstanceIconType.DEFAULT, 40);
         assertSamePixels(expected, fallback);
     }
 

@@ -25,6 +25,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.meta.PackMcMeta;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.util.Pair;
 import space.minecraftstl.xyml.util.StringUtils;
@@ -224,10 +225,10 @@ public final class ResourcePackManager extends LocalAddonManager<ResourcePackFil
 
     private boolean loaded = false;
 
-    public ResourcePackManager(GameRepository repository, String id) {
-        super(repository, id);
-        this.resourcePackDirectory = this.repository.getResourcePackDirectory(this.id);
-        this.optionsFile = repository.getRunDirectory(id).resolve("options.txt");
+    public ResourcePackManager(GameRepository repository, GameInstanceID instanceId) {
+        super(repository, instanceId);
+        this.resourcePackDirectory = this.repository.getResourcePackDirectory(this.instanceId);
+        this.optionsFile = repository.getRunDirectory(instanceId).resolve("options.txt");
     }
 
     /// Reads options with web-compatible encoding detection while retaining the detected encoding for writes.
@@ -279,7 +280,7 @@ public final class ResourcePackManager extends LocalAddonManager<ResourcePackFil
             lock.lock();
             try {
                 if (minecraftVersion == null) {
-                    minecraftVersion = GameVersionNumber.asGameVersion(repository.getGameVersion(id));
+                    minecraftVersion = GameVersionNumber.asGameVersion(repository.getGameVersion(instanceId));
                     supportsNewOptionsFormat = isMcVersionSupportsNewOptionsFormat(minecraftVersion);
                 }
             } finally {
@@ -295,7 +296,7 @@ public final class ResourcePackManager extends LocalAddonManager<ResourcePackFil
             lock.lock();
             try {
                 if (requiredVersion == null)
-                    requiredVersion = getPackVersion(getMinecraftVersion(), repository.getVersionJar(id));
+                    requiredVersion = getPackVersion(getMinecraftVersion(), repository.getInstanceJar(instanceId));
             } finally {
                 lock.unlock();
             }

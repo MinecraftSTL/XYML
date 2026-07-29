@@ -19,7 +19,8 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.setting.InstanceIconType;
+import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 
 import java.awt.Component;
 import java.nio.file.Path;
@@ -40,7 +41,7 @@ public interface InstanceOverviewInteractions {
     /// @return completed icon choice, or `null` when selection is cancelled
     @Nullable InstanceIconChoice chooseInstanceIcon(
             Component owner,
-            InstanceIconType currentIconType,
+            GameInstanceIconType currentIconType,
             boolean hasCustomIcon,
             Path initialDirectory);
 
@@ -51,7 +52,7 @@ public interface InstanceOverviewInteractions {
     /// @param owner parent component for the native dialog
     /// @param instanceId stable instance identifier shown to the user
     /// @return whether the icon should be removed
-    boolean confirmDeleteIcon(Component owner, String instanceId);
+    boolean confirmDeleteIcon(Component owner, GameInstanceID instanceId);
 
     /// Opens one local directory with the platform desktop handler.
     ///

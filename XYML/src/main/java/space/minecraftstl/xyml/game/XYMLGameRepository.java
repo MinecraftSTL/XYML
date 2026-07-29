@@ -23,6 +23,7 @@ import com.google.gson.reflect.TypeToken;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.DownloadProvider;
+import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.event.Event;
 import space.minecraftstl.xyml.event.EventManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
@@ -33,8 +34,8 @@ import space.minecraftstl.xyml.modpack.ModpackProvider;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
-import space.minecraftstl.xyml.observable.property.SimpleStringProperty;
-import space.minecraftstl.xyml.observable.property.StringProperty;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.setting.DefaultIsolationType;
@@ -80,10 +81,10 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param repository the owning game repository
     /// @param instanceId the game instance ID, or `null` when only repository context is available
     @NotNullByDefault
-    public record InstanceReference(XYMLGameRepository repository, @Nullable String instanceId) {
+    public record InstanceReference(XYMLGameRepository repository, @Nullable GameInstanceID instanceId) {
     }
 
-    /// Directory under the version root that stores XYML-managed instance metadata.
+    /// Directory under the instance root that stores XYML-managed instance metadata.
     private static final String INSTANCE_METADATA_DIRECTORY = ".xyml";
 
     /// Directory under the instance metadata directory that stores instance configuration files.
@@ -102,25 +103,25 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     private final GameDirectory gameDirectory;
 
     /// The selected instance ID persisted for this repository's game directory.
-    private final StringProperty selectedInstance;
+    private final ObjectProperty<@Nullable GameInstanceID> selectedInstance;
 
     /// Subscription that keeps the selected instance in sync with launcher settings.
     private final Subscription selectedInstanceSubscription;
 
     /// Toolkit-neutral selected-instance transitions for Swing and later core migration.
-    private final ValueChangeSupport<String> selectedInstanceChanges = new ValueChangeSupport<>(this);
+    private final ValueChangeSupport<GameInstanceID> selectedInstanceChanges = new ValueChangeSupport<>(this);
 
     /// Loaded instance settings indexed by instance ID.
-    private final Map<String, GameSettings.Instance> instanceGameSettings = new HashMap<>();
+    private final Map<GameInstanceID, GameSettings.Instance> instanceGameSettings = new HashMap<>();
 
     /// Instance IDs whose local game settings file has already been checked.
-    private final Set<String> loadedInstanceGameSettings = new HashSet<>();
+    private final Set<GameInstanceID> loadedInstanceGameSettings = new HashSet<>();
 
     /// Instance IDs whose newer settings schema must be preserved without writing.
-    private final Set<String> readOnlyInstanceGameSettings = new HashSet<>();
+    private final Set<GameInstanceID> readOnlyInstanceGameSettings = new HashSet<>();
 
     /// Instance IDs provisionally treated as modpacks while installation is in progress.
-    private final Set<String> beingModpackInstances = new HashSet<>();
+    private final Set<GameInstanceID> beingModpackInstances = new HashSet<>();
 
     /// Publishes changes to per-instance icon files.
     public final EventManager<Event> onInstanceIconChanged = new EventManager<>();
@@ -129,7 +130,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     public XYMLGameRepository(GameDirectory gameDirectory) {
         super(gameDirectory.getPath().toPath());
         this.gameDirectory = gameDirectory;
-        this.selectedInstance = new SimpleStringProperty(
+        this.selectedInstance = new SimpleObjectProperty<>(
                 settings().getSelectedInstance(gameDirectory.getId()));
         this.selectedInstanceSubscription = settings().getSelectedInstance().subscribe(change -> {
             if (change.affectedKeys().contains(gameDirectory.getId())) {
@@ -145,19 +146,19 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     }
 
     /// Returns the selected instance ID property for this repository's game directory.
-    public StringProperty selectedInstanceProperty() {
+    public ObjectProperty<@Nullable GameInstanceID> selectedInstanceProperty() {
         return selectedInstance;
     }
 
     /// Returns the selected instance ID for this repository's game directory.
-    public @Nullable String getSelectedInstance() {
+    public @Nullable GameInstanceID getSelectedInstance() {
         return selectedInstance.get();
     }
 
     /// Sets the selected instance ID for this repository's game directory.
-    public void setSelectedInstance(@Nullable String instance) {
-        @Nullable String previous = getSelectedInstance();
-        settings().setSelectedInstance(gameDirectory.getId(), instance);
+    public void setSelectedInstance(@Nullable GameInstanceID instanceId) {
+        @Nullable GameInstanceID previous = getSelectedInstance();
+        settings().setSelectedInstance(gameDirectory.getId(), instanceId);
         selectedInstanceChanges.fireChange(previous, getSelectedInstance());
     }
 
@@ -165,16 +166,16 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     ///
     /// @param listener selected-instance transition listener
     /// @return independently cancellable listener registration
-    public Subscription subscribeSelectedInstance(ValueChangeListener<String> listener) {
+    public Subscription subscribeSelectedInstance(ValueChangeListener<GameInstanceID> listener) {
         return selectedInstanceChanges.subscribe(listener);
     }
 
-    /// Refreshes the selected instance ID after versions are loaded.
+    /// Refreshes the selected instance ID after instances are loaded.
     public void refreshSelectedInstance() {
-        @Nullable String selectedInstance = settings().getSelectedInstance(gameDirectory.getId());
-        @Nullable String refreshedInstance = selectedInstance;
-        if (!hasVersion(refreshedInstance)) {
-            refreshedInstance = getInstances().isEmpty() ? null : getInstances().iterator().next().getId();
+        @Nullable GameInstanceID selectedInstance = settings().getSelectedInstance(gameDirectory.getId());
+        @Nullable GameInstanceID refreshedInstance = selectedInstance;
+        if (refreshedInstance == null || !hasInstance(refreshedInstance)) {
+            refreshedInstance = getInstanceManifests().isEmpty() ? null : getInstanceManifests().iterator().next().id();
         }
         if (!Objects.equals(selectedInstance, refreshedInstance)) {
             setSelectedInstance(refreshedInstance);
@@ -196,24 +197,24 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param id instance ID
     /// @return isolated, custom, or repository-default running directory
     @Override
-    public Path getRunDirectory(String id) {
-        if (beingModpackInstances.contains(id) || isModpack(id)) {
-            return getVersionRoot(id);
+    public Path getRunDirectory(GameInstanceID instanceId) {
+        if (beingModpackInstances.contains(instanceId) || isModpack(instanceId)) {
+            return getInstanceRoot(instanceId);
         }
 
-        @Nullable GameSettings.Instance localSetting = getInstanceGameSettings(id);
+        @Nullable GameSettings.Instance localSetting = getInstanceGameSettings(instanceId);
         boolean useInstanceRunningDirectory =
                 localSetting != null && localSetting.getOverrideProperties().contains(GameSettings.PROPERTY_RUNNING_DIRECTORY);
 
         String runningDirectory = getSelectedRunningDirectory(localSetting, useInstanceRunningDirectory);
         if (StringUtils.isBlank(runningDirectory)) {
-            return useInstanceRunningDirectory ? getVersionRoot(id) : super.getRunDirectory(id);
+            return useInstanceRunningDirectory ? getInstanceRoot(instanceId) : super.getRunDirectory(instanceId);
         }
 
         try {
             return Path.of(runningDirectory);
         } catch (InvalidPathException ignored) {
-            return getVersionRoot(id);
+            return getInstanceRoot(instanceId);
         }
     }
 
@@ -238,11 +239,11 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// Streams visible installed instances in release-time and version-number order.
     ///
     /// @return lazily filtered and sorted visible instance manifests
-    public Stream<Version> getDisplayInstances() {
-        return getInstances().stream()
+    public Stream<GameInstanceManifest> getDisplayInstanceManifests() {
+        return getInstanceManifests().stream()
                 .filter(v -> !v.isHidden())
-                .sorted(Comparator.comparing((Version v) -> Lang.requireNonNullElse(v.getReleaseTime(), Instant.EPOCH))
-                        .thenComparing(v -> VersionNumber.asVersion(v.getId())));
+                .sorted(Comparator.comparing((GameInstanceManifest v) -> Lang.requireNonNullElse(v.releaseTime(), Instant.EPOCH))
+                        .thenComparing(v -> VersionNumber.asVersion(v.id().id())));
     }
 
     /// Detects the Minecraft version from one already captured primary JAR path.
@@ -259,22 +260,22 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     ///
     /// Separate game repositories may still refresh concurrently.
     @Override
-    public synchronized void refreshInstances() {
-        super.refreshInstances();
+    public synchronized void refresh() {
+        super.refresh();
     }
 
-    /// Rebuilds version and instance-setting caches, then creates the Forge-compatible profile file when needed.
+    /// Rebuilds manifest and instance-setting caches, then creates the Forge-compatible profile file when needed.
     @Override
-    protected void refreshInstancesImpl() {
+    protected void refreshImpl() {
         instanceGameSettings.clear();
         loadedInstanceGameSettings.clear();
         readOnlyInstanceGameSettings.clear();
-        super.refreshInstancesImpl();
-        instances.keySet().forEach(this::loadInstanceGameSettings);
+        super.refreshImpl();
+        getInstanceManifests().stream().map(GameInstanceManifest::id).forEach(this::loadInstanceGameSettings);
 
         try {
             Path file = getBaseDirectory().resolve("launcher_profiles.json");
-            if (!Files.exists(file) && !instances.isEmpty()) {
+            if (!Files.exists(file) && !getInstanceManifests().isEmpty()) {
                 Files.createDirectories(file.getParent());
                 Files.writeString(file, PROFILE);
             }
@@ -288,7 +289,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param newDirectory new repository root
     public void changeDirectory(Path newDirectory) {
         setBaseDirectory(newDirectory);
-        refreshInstancesAsync().start();
+        refreshAsync().start();
     }
 
     /// Removes crash reports and logs from one game directory.
@@ -302,25 +303,25 @@ public final class XYMLGameRepository extends DefaultGameRepository {
 
     /// Removes generated crash reports and logs from shared and instance running directories.
     ///
-    /// @param id instance ID
+    /// @param instanceId instance ID
     /// @throws IOException if generated files cannot be removed
-    public void clean(String id) throws IOException {
+    public void clean(GameInstanceID instanceId) throws IOException {
         clean(getBaseDirectory());
-        clean(getRunDirectory(id));
+        clean(getRunDirectory(instanceId));
     }
 
     /// Removes an instance from disk and drops any cached instance settings for that instance.
     ///
-    /// @param id instance ID
+    /// @param instanceId instance ID
     /// @return whether the instance was removed from disk
     @Override
-    public boolean removeInstanceFromDisk(String id) {
-        boolean removed = super.removeInstanceFromDisk(id);
+    public boolean removeInstanceFromDisk(GameInstanceID instanceId) {
+        boolean removed = super.removeInstanceFromDisk(instanceId);
         if (removed) {
-            instanceGameSettings.remove(id);
-            loadedInstanceGameSettings.remove(id);
-            readOnlyInstanceGameSettings.remove(id);
-            beingModpackInstances.remove(id);
+            instanceGameSettings.remove(instanceId);
+            loadedInstanceGameSettings.remove(instanceId);
+            readOnlyInstanceGameSettings.remove(instanceId);
+            beingModpackInstances.remove(instanceId);
         }
         return removed;
     }
@@ -331,15 +332,15 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param dstId destination instance ID
     /// @param copySaves whether save data should be copied
     /// @throws IOException if the destination already exists or copying fails
-    public void duplicateInstance(String srcId, String dstId, boolean copySaves) throws IOException {
-        Path srcDir = getVersionRoot(srcId);
-        Path dstDir = getVersionRoot(dstId);
+    public void duplicateInstance(GameInstanceID srcId, GameInstanceID dstId, boolean copySaves) throws IOException {
+        Path srcDir = getInstanceRoot(srcId);
+        Path dstDir = getInstanceRoot(dstId);
 
-        Version fromVersion = getVersion(srcId);
+        GameInstanceManifest fromManifest = getInstanceManifest(srcId);
 
         List<String> blackList = new ArrayList<>(ModAdviser.MODPACK_BLACK_LIST);
-        blackList.add(srcId + ".jar");
-        blackList.add(srcId + ".json");
+        blackList.add(srcId.id() + ".jar");
+        blackList.add(srcId.id() + ".json");
         if (!copySaves)
             blackList.add("saves");
 
@@ -348,21 +349,21 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         Files.createDirectories(dstDir);
         FileUtils.copyDirectory(srcDir, dstDir, path -> Modpack.acceptFile(path, blackList, null));
 
-        Path fromJson = srcDir.resolve(srcId + ".json");
-        Path fromJar = srcDir.resolve(srcId + ".jar");
-        Path toJson = dstDir.resolve(dstId + ".json");
-        Path toJar = dstDir.resolve(dstId + ".jar");
+        Path fromJson = srcDir.resolve(srcId.id() + ".json");
+        Path fromJar = srcDir.resolve(srcId.id() + ".jar");
+        Path toJson = dstDir.resolve(dstId.id() + ".json");
+        Path toJar = dstDir.resolve(dstId.id() + ".jar");
 
         if (Files.exists(fromJar)) {
             Files.copy(fromJar, toJar);
         }
         Files.copy(fromJson, toJson);
 
-        JsonUtils.writeToJsonFile(toJson, fromVersion.setId(dstId).setJar(dstId));
+        JsonUtils.writeToJsonFile(toJson, fromManifest.withId(dstId).withJar(dstId));
 
         boolean copyOriginalGameDir;
         try {
-            copyOriginalGameDir = !Files.isSameFile(getRunDirectory(srcId), getVersionRoot(srcId));
+            copyOriginalGameDir = !Files.isSameFile(getRunDirectory(srcId), getInstanceRoot(srcId));
         } catch (IOException e) {
             copyOriginalGameDir = true;
         }
@@ -383,53 +384,54 @@ public final class XYMLGameRepository extends DefaultGameRepository {
 
     /// Copies explicit instance settings or derives a new instance from the effective parent preset.
     ///
-    /// @param id source instance ID
+    /// @param instanceId source instance ID
     /// @return independent mutable settings for a duplicate
-    private GameSettings.Instance copyInstanceGameSettings(String id) {
-        @Nullable GameSettings.Instance setting = getInstanceGameSettings(id);
+    private GameSettings.Instance copyInstanceGameSettings(GameInstanceID instanceId) {
+        @Nullable GameSettings.Instance setting = getInstanceGameSettings(instanceId);
         if (setting != null) {
             return JsonUtils.clone(LauncherSettings.SETTINGS_GSON, setting, TypeToken.get(GameSettings.Instance.class));
         }
 
         GameSettings.Instance copied = new GameSettings.Instance();
-        copied.parentProperty().setValue(getEffectiveGameSettings(id).getPreset().idProperty().getValue());
+        copied.parentProperty().setValue(getEffectiveGameSettings(instanceId).getPreset().idProperty().getValue());
         return copied;
     }
 
-    /// Returns the XYML-managed metadata directory under the version root.
+    /// Returns the XYML-managed metadata directory under the instance root.
     ///
     /// This directory stores instance-scoped files owned by XYML.
-    public Path getInstanceMetadataDirectory(String id) {
-        return getVersionRoot(id).resolve(INSTANCE_METADATA_DIRECTORY);
+    public Path getInstanceMetadataDirectory(GameInstanceID instanceId) {
+        return getInstanceRoot(instanceId).resolve(INSTANCE_METADATA_DIRECTORY);
     }
 
     /// Returns the XYML-managed configuration directory under the instance metadata directory.
-    public Path getInstanceConfigDirectory(String id) {
-        return getInstanceMetadataDirectory(id).resolve(INSTANCE_CONFIG_DIRECTORY);
+    public Path getInstanceConfigDirectory(GameInstanceID instanceId) {
+        return getInstanceMetadataDirectory(instanceId).resolve(INSTANCE_CONFIG_DIRECTORY);
     }
 
     /// Returns the XYML-managed state directory under the instance metadata directory.
-    public Path getInstanceStateDirectory(String id) {
-        return getInstanceMetadataDirectory(id).resolve(INSTANCE_STATE_DIRECTORY);
+    public Path getInstanceStateDirectory(GameInstanceID instanceId) {
+        return getInstanceMetadataDirectory(instanceId).resolve(INSTANCE_STATE_DIRECTORY);
     }
 
     /// Returns the current local game settings path under the instance configuration directory.
-    private Path getInstanceGameSettingsFile(String id) {
-        return getInstanceConfigDirectory(id).resolve(INSTANCE_GAME_SETTINGS_FILENAME);
+    private Path getInstanceGameSettingsFile(GameInstanceID instanceId) {
+        return getInstanceConfigDirectory(instanceId).resolve(INSTANCE_GAME_SETTINGS_FILENAME);
     }
 
     /// Loads current instance settings into the in-memory cache once.
     ///
-    /// @param id instance ID
-    private void loadInstanceGameSettings(String id) {
-        loadedInstanceGameSettings.add(id);
-        InstanceGameSettingsLoadResult result = loadGameSettingsFile(getInstanceGameSettingsFile(id));
+    /// @param instanceId instance ID
+    private void loadInstanceGameSettings(GameInstanceID instanceId) {
+        loadedInstanceGameSettings.add(instanceId);
+        InstanceGameSettingsLoadResult result = loadGameSettingsFile(getInstanceGameSettingsFile(instanceId));
         if (result.setting() != null) {
-            initInstanceGameSettings(id, result.setting(), result.allowSave());
+            initInstanceGameSettings(instanceId, result.setting(), result.allowSave());
             return;
         }
         if (!result.allowSave()) {
-            readOnlyInstanceGameSettings.add(id);
+            readOnlyInstanceGameSettings.add(instanceId);
+            return;
         }
     }
 
@@ -494,47 +496,49 @@ public final class XYMLGameRepository extends DefaultGameRepository {
 
     /// Creates writable settings for an existing instance when none are loaded.
     ///
-    /// @param id instance ID
+    /// @param instanceId instance ID
     /// @return the created settings, existing settings, or `null` for an unknown or read-only instance
-    public @Nullable GameSettings.Instance createInstanceGameSettings(String id) {
-        if (!hasVersion(id)) {
+    public @Nullable GameSettings.Instance createInstanceGameSettings(GameInstanceID instanceId) {
+        if (!hasInstance(instanceId)) {
             return null;
         }
-        if (readOnlyInstanceGameSettings.contains(id)) {
+        if (readOnlyInstanceGameSettings.contains(instanceId)) {
             return null;
         }
-        if (instanceGameSettings.containsKey(id)) {
-            return getInstanceGameSettings(id);
+        if (instanceGameSettings.containsKey(instanceId)) {
+            return getInstanceGameSettings(instanceId);
         }
 
         GameSettings.Instance setting = new GameSettings.Instance();
-        return initInstanceGameSettings(id, setting);
+        return initInstanceGameSettings(instanceId, setting);
     }
 
     /// Registers writable instance settings and their auto-save listener.
     ///
-    /// @param id instance ID
+    /// @param instanceId instance ID
     /// @param setting settings to register
     /// @return the registered settings
-    private GameSettings.Instance initInstanceGameSettings(String id, GameSettings.Instance setting) {
-        return initInstanceGameSettings(id, setting, true);
+    private GameSettings.Instance initInstanceGameSettings(
+            GameInstanceID instanceId, GameSettings.Instance setting) {
+        return initInstanceGameSettings(instanceId, setting, true);
     }
 
     /// Registers instance settings with the requested persistence policy.
     ///
-    /// @param id instance ID
+    /// @param instanceId instance ID
     /// @param setting settings to register
     /// @param allowSave whether changes may overwrite the settings file
     /// @return the registered settings
-    private GameSettings.Instance initInstanceGameSettings(String id, GameSettings.Instance setting, boolean allowSave) {
+    private GameSettings.Instance initInstanceGameSettings(
+            GameInstanceID instanceId, GameSettings.Instance setting, boolean allowSave) {
         setting.setSavable(allowSave);
-        loadedInstanceGameSettings.add(id);
-        instanceGameSettings.put(id, setting);
+        loadedInstanceGameSettings.add(instanceId);
+        instanceGameSettings.put(instanceId, setting);
         if (allowSave) {
-            readOnlyInstanceGameSettings.remove(id);
-            setting.changes().subscribe(change -> saveGameSettings(id));
+            readOnlyInstanceGameSettings.remove(instanceId);
+            setting.changes().subscribe(change -> saveGameSettings(instanceId));
         } else {
-            readOnlyInstanceGameSettings.add(id);
+            readOnlyInstanceGameSettings.add(instanceId);
         }
         return setting;
     }
@@ -544,11 +548,11 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param id instance ID
     /// @return loaded settings, or `null` when no settings exist
     @Nullable
-    public GameSettings.Instance getInstanceGameSettings(String id) {
-        if (!loadedInstanceGameSettings.contains(id)) {
-            loadInstanceGameSettings(id);
+    public GameSettings.Instance getInstanceGameSettings(GameInstanceID instanceId) {
+        if (!loadedInstanceGameSettings.contains(instanceId)) {
+            loadInstanceGameSettings(instanceId);
         }
-        return instanceGameSettings.get(id);
+        return instanceGameSettings.get(instanceId);
     }
 
     /// Returns existing instance settings or creates writable defaults when possible.
@@ -556,51 +560,51 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param id instance ID
     /// @return instance settings, or `null` for an unknown or read-only instance
     @Nullable
-    public GameSettings.Instance getInstanceGameSettingsOrCreate(String id) {
-        @Nullable GameSettings.Instance setting = getInstanceGameSettings(id);
+    public GameSettings.Instance getInstanceGameSettingsOrCreate(GameInstanceID instanceId) {
+        @Nullable GameSettings.Instance setting = getInstanceGameSettings(instanceId);
         if (setting == null) {
-            setting = createInstanceGameSettings(id);
+            setting = createInstanceGameSettings(instanceId);
         }
         return setting;
     }
 
     /// Returns whether the instance-specific game settings file cannot be overwritten safely.
     ///
-    /// @param id the instance ID
+    /// @param instanceId the instance ID
     /// @return whether the instance settings are loaded in read-only mode
-    public boolean isInstanceGameSettingsReadOnly(String id) {
-        if (!loadedInstanceGameSettings.contains(id)) {
-            loadInstanceGameSettings(id);
+    public boolean isInstanceGameSettingsReadOnly(GameInstanceID instanceId) {
+        if (!loadedInstanceGameSettings.contains(instanceId)) {
+            loadInstanceGameSettings(instanceId);
         }
 
-        return readOnlyInstanceGameSettings.contains(id);
+        return readOnlyInstanceGameSettings.contains(instanceId);
     }
 
     /// Backs up and overwrites the instance-specific game settings file with the currently loaded settings.
     ///
-    /// @param id the instance ID
-    public void forceOverwriteInstanceGameSettings(String id) {
-        if (!loadedInstanceGameSettings.contains(id)) {
-            loadInstanceGameSettings(id);
+    /// @param instanceId the instance ID
+    public void forceOverwriteInstanceGameSettings(GameInstanceID instanceId) {
+        if (!loadedInstanceGameSettings.contains(instanceId)) {
+            loadInstanceGameSettings(instanceId);
         }
 
-        @Nullable GameSettings.Instance setting = instanceGameSettings.get(id);
+        @Nullable GameSettings.Instance setting = instanceGameSettings.get(instanceId);
         if (setting == null) {
             setting = new GameSettings.Instance();
-            instanceGameSettings.put(id, setting);
-            loadedInstanceGameSettings.add(id);
+            instanceGameSettings.put(instanceId, setting);
+            loadedInstanceGameSettings.add(instanceId);
         }
 
         boolean installAutoSave = !setting.isSavable();
-        Path file = getInstanceGameSettingsFile(id).toAbsolutePath().normalize();
+        Path file = getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
         SettingFileUtils.backupInvalidConfig(file);
         setting.setSchema(GameSettings.Instance.CURRENT_SCHEMA);
         setting.setSavable(true);
         setting.setBackupOnNextSave(false);
-        readOnlyInstanceGameSettings.remove(id);
-        saveGameSettings(id);
+        readOnlyInstanceGameSettings.remove(instanceId);
+        saveGameSettings(instanceId);
         if (installAutoSave) {
-            setting.changes().subscribe(change -> saveGameSettings(id));
+            setting.changes().subscribe(change -> saveGameSettings(instanceId));
         }
     }
 
@@ -609,6 +613,37 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         @Nullable GameSettingsPresetID parent = instance != null ? instance.parentProperty().getValue() : null;
         @Nullable GameSettings.Preset parentSetting = SettingsManager.getGameSettings(parent);
         return parentSetting != null ? parentSetting : SettingsManager.getDefaultGameSettingsPresetOrCreate();
+    }
+
+    /// Resolves all effective game settings for an instance.
+    public GameSettings.Effective getEffectiveGameSettings(GameInstanceID instanceId) {
+        @Nullable GameSettings.Instance instance = getInstanceGameSettings(instanceId);
+        return GameSettings.resolve(getParentGameSettings(instance), instance);
+    }
+
+    /// Applies the selected preset's default isolation policy to an existing instance.
+    public void applyDefaultIsolationSetting(GameInstanceID instanceId) {
+        if (!hasInstance(instanceId)) {
+            return;
+        }
+
+        @Nullable GameSettings.Instance instanceSetting = getInstanceGameSettings(instanceId);
+        GameSettings.Preset preset = getParentGameSettings(instanceSetting);
+        DefaultIsolationType type = Lang.requireNonNullElse(preset.defaultIsolationTypeProperty().getValue(), DefaultIsolationType.MODDED);
+        boolean isolated = switch (type) {
+            case NEVER -> false;
+            case ALWAYS -> true;
+            case MODDED -> LibraryAnalyzer.isModded(getResolvedInstanceManifest(instanceId));
+        };
+
+        if (isolated) {
+            @Nullable GameSettings.Instance setting = instanceSetting != null
+                    ? instanceSetting
+                    : getInstanceGameSettingsOrCreate(instanceId);
+            if (setting != null && setting.getOverrideProperties().add(GameSettings.PROPERTY_RUNNING_DIRECTORY)) {
+                saveGameSettings(instanceId);
+            }
+        }
     }
 
     /// Returns whether a new instance should use an isolated running directory under the default isolation settings.
@@ -622,36 +657,27 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         };
     }
 
-    /// Applies default isolation to a new instance before the version metadata is saved.
-    public void applyDefaultIsolationSettingForNewInstance(String id, boolean modded) {
-        if (!shouldIsolateNewInstance(modded) || readOnlyInstanceGameSettings.contains(id)) {
+    /// Applies default isolation to a new instance before its manifest is saved.
+    public void applyDefaultIsolationSettingForNewInstance(GameInstanceID instanceId, boolean modded) {
+        if (!shouldIsolateNewInstance(modded) || readOnlyInstanceGameSettings.contains(instanceId)) {
             return;
         }
 
-        @Nullable GameSettings.Instance setting = getInstanceGameSettings(id);
+        @Nullable GameSettings.Instance setting = getInstanceGameSettings(instanceId);
         if (setting == null) {
-            setting = initInstanceGameSettings(id, new GameSettings.Instance());
+            setting = initInstanceGameSettings(instanceId, new GameSettings.Instance());
         }
         if (setting.getOverrideProperties().add(GameSettings.PROPERTY_RUNNING_DIRECTORY)) {
-            saveGameSettings(id);
+            saveGameSettings(instanceId);
         }
-    }
-
-    /// Resolves all effective game settings for an instance.
-    ///
-    /// @param id instance ID
-    /// @return effective settings combining the parent preset and local overrides
-    public GameSettings.Effective getEffectiveGameSettings(String id) {
-        @Nullable GameSettings.Instance instance = getInstanceGameSettings(id);
-        return GameSettings.resolve(getParentGameSettings(instance), instance);
     }
 
     /// Finds the first supported icon file for an instance.
     ///
-    /// @param id instance ID
+    /// @param instanceId instance ID
     /// @return existing icon path, or empty when no icon is stored
-    public Optional<Path> getInstanceIconFile(String id) {
-        Path root = getVersionRoot(id);
+    public Optional<Path> getInstanceIconFile(GameInstanceID instanceId) {
+        Path root = getInstanceRoot(instanceId);
 
         for (String extension : ICON_EXTENSIONS) {
             Path file = root.resolve("icon." + extension);
@@ -665,26 +691,26 @@ public final class XYMLGameRepository extends DefaultGameRepository {
 
     /// Replaces an instance icon with a supported image file.
     ///
-    /// @param id instance ID
+    /// @param instanceId instance ID
     /// @param iconFile source image file
     /// @throws IOException if copying the icon fails
     /// @throws IllegalArgumentException if the image suffix is unsupported
-    public void setInstanceIconFile(String id, Path iconFile) throws IOException {
+    public void setInstanceIconFile(GameInstanceID instanceId, Path iconFile) throws IOException {
         String ext = FileUtils.getExtension(iconFile).toLowerCase(Locale.ROOT);
         if (!ICON_EXTENSIONS.contains(ext)) {
             throw new IllegalArgumentException("Unsupported icon file: " + ext);
         }
 
-        deleteIconFile(id);
+        deleteIconFile(instanceId);
 
-        FileUtils.copyFile(iconFile, getVersionRoot(id).resolve("icon." + ext));
+        FileUtils.copyFile(iconFile, getInstanceRoot(instanceId).resolve("icon." + ext));
     }
 
     /// Deletes every supported icon variant for an instance, logging individual failures.
     ///
-    /// @param id instance ID
-    public void deleteIconFile(String id) {
-        Path root = getVersionRoot(id);
+    /// @param instanceId instance ID
+    public void deleteIconFile(GameInstanceID instanceId) {
+        Path root = getInstanceRoot(instanceId);
         for (String extension : ICON_EXTENSIONS) {
             Path file = root.resolve("icon." + extension);
             try {
@@ -697,15 +723,15 @@ public final class XYMLGameRepository extends DefaultGameRepository {
 
     /// Queues writable instance settings for safe asynchronous persistence.
     ///
-    /// @param id instance ID
-    public void saveGameSettings(String id) {
-        if (!instanceGameSettings.containsKey(id) || readOnlyInstanceGameSettings.contains(id))
+    /// @param instanceId instance ID
+    public void saveGameSettings(GameInstanceID instanceId) {
+        if (!instanceGameSettings.containsKey(instanceId) || readOnlyInstanceGameSettings.contains(instanceId))
             return;
-        @Nullable GameSettings.Instance setting = instanceGameSettings.get(id);
+        @Nullable GameSettings.Instance setting = instanceGameSettings.get(instanceId);
         if (setting == null) {
             return;
         }
-        Path file = getInstanceGameSettingsFile(id).toAbsolutePath().normalize();
+        Path file = getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
         try {
             Files.createDirectories(file.getParent());
         } catch (IOException e) {
@@ -721,19 +747,19 @@ public final class XYMLGameRepository extends DefaultGameRepository {
 
     /// Saves instance-specific game settings synchronously.
     ///
-    /// @param id the instance ID
+    /// @param instanceId the instance ID
     /// @throws IOException if saving the file fails
-    private void saveGameSettingsSync(String id) throws IOException {
-        if (!instanceGameSettings.containsKey(id) || readOnlyInstanceGameSettings.contains(id)) {
+    private void saveGameSettingsSync(GameInstanceID instanceId) throws IOException {
+        if (!instanceGameSettings.containsKey(instanceId) || readOnlyInstanceGameSettings.contains(instanceId)) {
             return;
         }
 
-        @Nullable GameSettings.Instance setting = instanceGameSettings.get(id);
+        @Nullable GameSettings.Instance setting = instanceGameSettings.get(instanceId);
         if (setting == null) {
             return;
         }
 
-        Path file = getInstanceGameSettingsFile(id).toAbsolutePath().normalize();
+        Path file = getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
         Files.createDirectories(file.getParent());
         if (setting.isBackupOnNextSave()) {
             setting.setBackupOnNextSave(false);
@@ -762,7 +788,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param makeLaunchScript whether the result is intended for a standalone launch script
     /// @return populated launch-options builder
     public LaunchOptions.Builder getLaunchOptions(
-            String instanceId,
+            GameInstanceID instanceId,
             JavaRuntime javaVersion,
             Path gameDir,
             List<String> javaAgents,
@@ -783,10 +809,11 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         }
 
         LaunchOptions.Builder builder = new LaunchOptions.Builder()
+                .setInstanceId(instanceId)
                 .setGameDir(gameDir)
                 .setJava(javaVersion)
                 .setVersionType(Metadata.TITLE)
-                .setVersionName(instanceId)
+                .setVersionName(instanceId.id())
                 .setProfileName(Metadata.TITLE)
                 .setGameArguments(StringUtils.tokenize(vs.getInheritable(GameSettings::gameArgumentsProperty)))
                 .setOverrideJavaArguments(StringUtils.tokenize(vs.getInheritable(GameSettings::jvmOptionsProperty)))
@@ -835,9 +862,14 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         if (Files.exists(json)) {
             try {
                 String jsonText = Files.readString(json);
-                @Nullable ModpackConfiguration<?> modpackConfiguration = JsonUtils.GSON.fromJson(jsonText, ModpackConfiguration.class);
-                @Nullable ModpackProvider provider = ModpackHelper.getProviderByType(modpackConfiguration.getType());
-                if (provider != null) provider.injectLaunchOptions(jsonText, builder);
+                @Nullable ModpackConfiguration<?> modpackConfiguration =
+                        JsonUtils.GSON.fromJson(jsonText, ModpackConfiguration.class);
+                if (modpackConfiguration != null) {
+                    @Nullable ModpackProvider provider = ModpackHelper.getProviderByType(modpackConfiguration.getType());
+                    if (provider != null) {
+                        provider.injectLaunchOptions(jsonText, builder);
+                    }
+                }
             } catch (IOException | JsonParseException e) {
                 LOG.warning("Failed to parse modpack configuration file " + json, e);
             }
@@ -854,40 +886,40 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param instanceId target installed instance identifier
     /// @return modpack configuration path
     @Override
-    public Path getModpackConfiguration(String instanceId) {
-        return getVersionRoot(instanceId).resolve("modpack.cfg");
+    public Path getModpackConfiguration(GameInstanceID instanceId) {
+        return getInstanceRoot(instanceId).resolve("modpack.cfg");
     }
 
     /// Marks an instance as a modpack while installation is in progress.
     ///
-    /// @param id instance ID
-    public void markInstanceAsModpack(String id) {
-        beingModpackInstances.add(id);
+    /// @param instanceId instance ID
+    public void markInstanceAsModpack(GameInstanceID instanceId) {
+        beingModpackInstances.add(instanceId);
     }
 
     /// Clears an instance's provisional modpack installation mark.
     ///
-    /// @param id instance ID
-    public void undoMark(String id) {
-        beingModpackInstances.remove(id);
+    /// @param instanceId instance ID
+    public void undoMark(GameInstanceID instanceId) {
+        beingModpackInstances.remove(instanceId);
     }
 
     /// Persists an abnormal-exit marker for an instance.
     ///
-    /// @param id instance ID
-    public void markInstanceLaunchedAbnormally(String id) {
+    /// @param instanceId instance ID
+    public void markInstanceLaunchedAbnormally(GameInstanceID instanceId) {
         try {
-            Files.createFile(getVersionRoot(id).resolve(".abnormal"));
+            Files.createFile(getInstanceRoot(instanceId).resolve(".abnormal"));
         } catch (IOException ignored) {
         }
     }
 
     /// Removes an instance's abnormal-exit marker.
     ///
-    /// @param id instance ID
+    /// @param instanceId instance ID
     /// @return whether an abnormal marker existed
-    public boolean unmarkInstanceLaunchedAbnormally(String id) {
-        Path file = getVersionRoot(id).resolve(".abnormal");
+    public boolean unmarkInstanceLaunchedAbnormally(GameInstanceID instanceId) {
+        Path file = getInstanceRoot(instanceId).resolve(".abnormal");
         if (Files.isRegularFile(file)) {
             try {
                 Files.delete(file);
@@ -923,21 +955,21 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         return FileUtils.isNameValidForJar(id);
     }
 
-    /// Returns whether an instance ID conflicts with an existing installed instance.
+    /// Returns whether a validated instance ID conflicts with an installed instance.
     ///
     /// @param id candidate instance ID
     /// @return whether an existing instance uses the ID, case-insensitively on Windows
-    public boolean instanceIdConflicts(String id) {
+    public boolean instanceIdConflicts(GameInstanceID id) {
         if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
             // on Windows, filenames are case-insensitive
-            for (String existingId : instances.keySet()) {
-                if (existingId.equalsIgnoreCase(id)) {
+            for (GameInstanceManifest manifest : getInstanceManifests()) {
+                if (manifest.id().toString().equalsIgnoreCase(id.toString())) {
                     return true;
                 }
             }
             return false;
         } else {
-            return instances.containsKey(id);
+            return hasInstance(id);
         }
     }
 

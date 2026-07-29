@@ -17,22 +17,30 @@
  */
 package space.minecraftstl.xyml.task;
 
-import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.NotNullByDefault;
 
 import java.io.IOException;
 import java.net.URI;
 
 import static java.util.Objects.requireNonNull;
 
+/// Reports that a resource could not be downloaded from a specific URI.
+@NotNullByDefault
 public class DownloadException extends IOException {
 
+    /// URI whose download failed.
     private final URI uri;
 
-    public DownloadException(URI uri, @NotNull Throwable cause) {
+    /// Creates a download failure with its source URI and underlying cause.
+    ///
+    /// @param uri source URI
+    /// @param cause underlying failure
+    public DownloadException(URI uri, Throwable cause) {
         super("Unable to download " + uri + ", " + cause.getMessage(), requireNonNull(cause));
         this.uri = uri;
     }
 
+    /// Returns the URI whose download failed.
     public URI getUri() {
         return uri;
     }

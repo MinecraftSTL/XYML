@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import javax.swing.JComponent;
 
@@ -29,7 +30,7 @@ public interface InstanceManagementView extends AutoCloseable {
     /// Returns the stable repository identifier captured by this view.
     ///
     /// @return stable instance identifier
-    String instanceId();
+    GameInstanceID instanceId();
 
     /// Returns the root component hosted inside the instances page.
     ///

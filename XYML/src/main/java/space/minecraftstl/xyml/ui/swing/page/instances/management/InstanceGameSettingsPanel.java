@@ -22,6 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GraphicsAPI;
 import space.minecraftstl.xyml.game.ProcessPriority;
 import space.minecraftstl.xyml.game.QuickPlayType;
@@ -74,6 +75,10 @@ import java.util.concurrent.Executor;
 import java.util.function.Function;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsValueCodec.formatWindowDimension;
+import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsValueCodec.parseOptionalInteger;
+import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsValueCodec.parseRequiredDouble;
+import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsValueCodec.parseRequiredInteger;
 
 /// Edits the complete inherited launch-settings surface for one managed game instance.
 ///
@@ -345,7 +350,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// @param executor background executor used for time-consuming game-version detection
     public InstanceGameSettingsPanel(
             XYMLGameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor) {
         this(repository, instanceId, executor, () -> { });
     }
@@ -358,7 +363,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// @param workingDirectoryChanged callback invalidating pages backed by the previous working directory
     InstanceGameSettingsPanel(
             XYMLGameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             Runnable workingDirectoryChanged) {
         this(
@@ -474,10 +479,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// @return asynchronous parsed game version
     private static CompletionStage<GameVersionNumber> loadGameVersion(
             XYMLGameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor) {
         XYMLGameRepository requiredRepository = Objects.requireNonNull(repository, "repository");
-        String requiredInstanceId = Objects.requireNonNull(instanceId, "instanceId");
+        GameInstanceID requiredInstanceId = Objects.requireNonNull(instanceId, "instanceId");
         Executor requiredExecutor = Objects.requireNonNull(executor, "executor");
         return CompletableFuture.supplyAsync(
                 () -> GameVersionNumber.asGameVersion(requiredRepository.getGameVersion(requiredInstanceId)),
@@ -1212,72 +1217,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         return control.overrideBox().isSelected()
                 ? parseOptionalInteger(control.editor().getText(), fieldName, minimum, maximum)
                 : inherited;
-    }
-
-    /// Parses one required integer within an inclusive range.
-    ///
-    /// @param rawValue raw text
-    /// @param fieldName user-facing field name
-    /// @param minimum inclusive minimum
-    /// @param maximum inclusive maximum
-    /// @return parsed integer
-    private static int parseRequiredInteger(String rawValue, String fieldName, int minimum, int maximum) {
-        String value = Objects.requireNonNull(rawValue, "rawValue").trim();
-        try {
-            int parsed = Integer.parseInt(value);
-            if (parsed < minimum || parsed > maximum) {
-                throw new IllegalArgumentException(
-                        fieldName + " must be between " + minimum + " and " + maximum);
-            }
-            return parsed;
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(fieldName + " must be a whole number", exception);
-        }
-    }
-
-    /// Parses one finite non-negative decimal dimension.
-    ///
-    /// @param rawValue raw text
-    /// @param fieldName user-facing field name
-    /// @return parsed dimension
-    private static double parseRequiredDouble(String rawValue, String fieldName) {
-        String value = Objects.requireNonNull(rawValue, "rawValue").trim();
-        try {
-            double parsed = Double.parseDouble(value);
-            if (!Double.isFinite(parsed) || parsed < 0.0D) {
-                throw new IllegalArgumentException(fieldName + " must be finite and non-negative");
-            }
-            return parsed;
-        } catch (NumberFormatException exception) {
-            throw new IllegalArgumentException(fieldName + " must be a number", exception);
-        }
-    }
-
-    /// Formats one dimension without adding `.0` to integral persisted values.
-    ///
-    /// @param value finite non-negative dimension
-    /// @return lossless editor text
-    private static String formatWindowDimension(double value) {
-        if (value == Math.rint(value) && value <= Long.MAX_VALUE) {
-            return Long.toString((long) value);
-        }
-        return Double.toString(value);
-    }
-
-    /// Parses one optional integer within an inclusive range.
-    ///
-    /// @param rawValue raw text
-    /// @param fieldName user-facing field name
-    /// @param minimum inclusive minimum
-    /// @param maximum inclusive maximum
-    /// @return parsed integer, or `null` when blank
-    private static @Nullable Integer parseOptionalInteger(
-            String rawValue,
-            String fieldName,
-            int minimum,
-            int maximum) {
-        String value = Objects.requireNonNull(rawValue, "rawValue").trim();
-        return value.isEmpty() ? null : parseRequiredInteger(value, fieldName, minimum, maximum);
     }
 
     /// Applies a durable snapshot without saving control events back to the store.

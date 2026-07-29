@@ -31,6 +31,7 @@ import java.util.*;
 import space.minecraftstl.xyml.addon.repository.ModrinthRemoteAddonRepository;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModAdviser;
 import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackExportInfo;
@@ -49,24 +50,13 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 public class ModrinthModpackExportTask extends Task<Void> {
     /// Repository containing the exported instance and its version manifests.
     private final DefaultGameRepository repository;
-
-    /// Target installed instance identifier.
-    private final String instanceId;
-
-    /// Validated modpack metadata and export selections.
+    private final GameInstanceID instanceId;
     private final ModpackExportInfo info;
 
     /// Destination archive path.
     private final Path modpackFile;
 
-    /// Creates a Modrinth export task for one installed instance.
-    ///
-    /// @param repository repository containing the target instance
-    /// @param instanceId target installed instance identifier
-    /// @param info modpack metadata and export selections
-    /// @param modpackFile destination archive path
-    public ModrinthModpackExportTask(
-            DefaultGameRepository repository, String instanceId, ModpackExportInfo info, Path modpackFile) {
+    public ModrinthModpackExportTask(DefaultGameRepository repository, GameInstanceID instanceId, ModpackExportInfo info, Path modpackFile) {
         this.repository = repository;
         this.instanceId = instanceId;
         this.info = info.validate();
@@ -203,9 +193,8 @@ public class ModrinthModpackExportTask extends Task<Void> {
             });
 
             String gameVersion = repository.getGameVersion(instanceId)
-                    .orElseThrow(() -> new IOException("Cannot parse the game version of instance " + instanceId));
-            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(
-                    repository.getResolvedPreservingPatchesVersion(instanceId), gameVersion);
+                    .orElseThrow(() -> new IOException("Cannot parse the version of " + instanceId));
+            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.getResolvedInstanceManifest(instanceId), gameVersion);
 
             Map<String, String> dependencies = new HashMap<>();
             dependencies.put("minecraft", gameVersion);

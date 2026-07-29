@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import java.io.IOException;
 
@@ -42,7 +43,7 @@ public interface InstanceLifecycleService {
     /// @param sourceId stable existing source identifier
     /// @param destinationId validated target identifier
     /// @throws IOException when the target conflicts, the source cannot be renamed, or refresh fails
-    void rename(String sourceId, String destinationId) throws IOException;
+    void rename(GameInstanceID sourceId, GameInstanceID destinationId) throws IOException;
 
     /// Duplicates one existing source instance and refreshes the repository after copying files.
     ///
@@ -50,13 +51,13 @@ public interface InstanceLifecycleService {
     /// @param destinationId validated target identifier
     /// @param copySaves whether source saves should be copied
     /// @throws IOException when the target conflicts, copying fails, or refresh fails
-    void duplicate(String sourceId, String destinationId, boolean copySaves) throws IOException;
+    void duplicate(GameInstanceID sourceId, GameInstanceID destinationId, boolean copySaves) throws IOException;
 
     /// Deletes one existing source instance and refreshes the repository after deletion.
     ///
     /// @param sourceId stable existing source identifier
     /// @throws IOException when the instance cannot be removed or refresh fails
-    void delete(String sourceId) throws IOException;
+    void delete(GameInstanceID sourceId) throws IOException;
 
     /// Updates the persisted selected instance after a successful background mutation.
     ///
@@ -64,5 +65,5 @@ public interface InstanceLifecycleService {
     /// chooses its first remaining instance or clears the selection when empty.
     ///
     /// @param preferredId preferred selection after rename or duplication, or `null` after deletion
-    void reconcileSelection(@Nullable String preferredId);
+    void reconcileSelection(@Nullable GameInstanceID preferredId);
 }

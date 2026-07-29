@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -70,7 +71,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 @NotNullByDefault
 public final class DefaultInstanceManagementView extends JPanel implements InstanceManagementView {
     /// Stable repository instance identifier represented by this view.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Persistent identity, version, icon, launch-state, and common-actions header.
     private final InstanceWorkspaceSummaryPanel summary;
@@ -112,7 +113,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             HomeModel homeModel,
             GameRepository repository,
             SchematicDirectoryResolver schematicDirectoryResolver,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             SchematicInstanceManagementStrings managementStrings,
             SchematicBrowserStrings schematicStrings,
@@ -140,7 +141,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         GameRepository requiredRepository = Objects.requireNonNull(repository, "repository");
         SchematicDirectoryResolver requiredSchematicResolver =
                 Objects.requireNonNull(schematicDirectoryResolver, "schematicDirectoryResolver");
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
         Executor requiredExecutor = Objects.requireNonNull(executor, "executor");
         SchematicInstanceManagementStrings requiredManagementStrings =
                 Objects.requireNonNull(managementStrings, "managementStrings");
@@ -254,7 +255,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     ///
     /// @return stable instance identifier
     @Override
-    public String instanceId() {
+    public GameInstanceID instanceId() {
         return instanceId;
     }
 
@@ -340,7 +341,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     /// @return destination factories without eagerly constructing optional pages
     private static EnumMap<InstanceManagementPageId, InstanceManagementPageDeck.PageFactory> createPageFactories(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             SchematicPageDependencies schematicDependencies,
             ModPageDependencies modDependencies,
@@ -357,7 +358,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             ModCatalogPanel panel = new ModCatalogPanel(
                     new DefaultModCatalogModel(
                             repository,
-                            instanceId,
+                            instanceId.id(),
                             executor,
                             modDependencies.statusStrings()),
                     modDependencies.strings(),
@@ -369,7 +370,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             ResourcePackCatalogPanel panel = new ResourcePackCatalogPanel(
                     new DefaultResourcePackCatalogModel(
                             repository,
-                            instanceId,
+                            instanceId.id(),
                             executor,
                             resourcePackDependencies.statusStrings()),
                     resourcePackDependencies.strings(),

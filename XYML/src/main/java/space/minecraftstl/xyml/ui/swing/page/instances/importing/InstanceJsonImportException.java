@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.importing;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import java.nio.file.Path;
 import java.util.Objects;
@@ -67,10 +68,10 @@ public final class InstanceJsonImportException extends Exception {
     ///
     /// @param instanceId conflicting destination ID
     /// @return categorized failure
-    static InstanceJsonImportException instanceAlreadyExists(String instanceId) {
+    static InstanceJsonImportException instanceAlreadyExists(GameInstanceID instanceId) {
         return new InstanceJsonImportException(
                 Reason.INSTANCE_ALREADY_EXISTS,
-                "Destination instance already exists: " + instanceId,
+                "Destination instance already exists: " + Objects.requireNonNull(instanceId, "instanceId"),
                 null);
     }
 
@@ -82,7 +83,7 @@ public final class InstanceJsonImportException extends Exception {
     static InstanceJsonImportException malformedJson(Path source, Throwable cause) {
         return new InstanceJsonImportException(
                 Reason.MALFORMED_JSON,
-                "Unable to read Minecraft version JSON: " + source,
+                "Unable to read game instance manifest JSON: " + source,
                 Objects.requireNonNull(cause, "cause"));
     }
 
@@ -95,7 +96,7 @@ public final class InstanceJsonImportException extends Exception {
         /// Destination ID conflicts with an existing instance.
         INSTANCE_ALREADY_EXISTS,
 
-        /// Source cannot be read as a Minecraft version JSON document.
+        /// Source cannot be read as a game instance manifest JSON document.
         MALFORMED_JSON
     }
 }

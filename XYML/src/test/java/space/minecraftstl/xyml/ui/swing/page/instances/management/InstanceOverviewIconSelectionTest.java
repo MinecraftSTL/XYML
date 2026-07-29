@@ -21,8 +21,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
-import space.minecraftstl.xyml.setting.InstanceIconType;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.imageio.ImageIO;
@@ -70,13 +71,14 @@ final class InstanceOverviewIconSelectionTest {
     void selectsBuiltInIconAndRefreshesPreview() throws Exception {
         Path customImage = createSolidImage(repositoryRoot().resolve("custom.png"), Color.RED);
         RecordingIconStore iconStore = new RecordingIconStore(customImage);
-        ChoiceInteractions interactions = new ChoiceInteractions(new InstanceIconChoice.BuiltIn(InstanceIconType.FORGE));
+        ChoiceInteractions interactions = new ChoiceInteractions(
+                new InstanceIconChoice.BuiltIn(GameInstanceIconType.FORGE));
         ExecutorService executor = Executors.newSingleThreadExecutor();
         AtomicReference<@Nullable InstanceOverviewPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> panelReference.set(new InstanceOverviewPanel(
                     repository(),
-                    "instance",
+                    new GameInstanceID("instance"),
                     executor,
                     InstanceOverviewStrings.english(),
                     interactions,
@@ -103,12 +105,12 @@ final class InstanceOverviewIconSelectionTest {
             awaitBackgroundWork(executor);
             awaitBackgroundWork(executor);
 
-            assertEquals(InstanceIconType.FORGE, iconStore.selectedBuiltIn.get());
+            assertEquals(GameInstanceIconType.FORGE, iconStore.selectedBuiltIn.get());
             assertNull(iconStore.state.get().customImage());
             assertEquals(1, iconStore.publishCount.get());
             assertFalse(iconStore.mutationOnEdt.get());
             assertTrue(iconStore.publishOnEdt.get());
-            assertEquals(InstanceIconType.DEFAULT, interactions.currentType.get());
+            assertEquals(GameInstanceIconType.DEFAULT, interactions.currentType.get());
             assertTrue(interactions.sawCustomImage.get());
             assertNull(interactions.failureDetail.get());
 
@@ -162,10 +164,10 @@ final class InstanceOverviewIconSelectionTest {
                 GameRepository.class.getClassLoader(),
                 new Class<?>[]{GameRepository.class},
                 (proxy, method, arguments) -> switch (method.getName()) {
-                    case "getVersionRoot" -> repositoryRoot().resolve("versions").resolve("instance");
+                    case "getInstanceRoot" -> repositoryRoot().resolve("versions").resolve("instance");
                     case "getRunDirectory" -> repositoryRoot().resolve("game");
                     case "getGameVersion" -> Optional.empty();
-                    case "refreshInstances" -> null;
+                    case "refresh" -> null;
                     case "toString" -> "IconSelectionGameRepository";
                     case "hashCode" -> System.identityHashCode(proxy);
                     case "equals" -> proxy == Objects.requireNonNull(arguments)[0];
@@ -222,7 +224,7 @@ final class InstanceOverviewIconSelectionTest {
         private final AtomicReference<Snapshot> state;
 
         /// Last bundled type selected through the overview, or `null` before selection.
-        private final AtomicReference<@Nullable InstanceIconType> selectedBuiltIn = new AtomicReference<>();
+        private final AtomicReference<@Nullable GameInstanceIconType> selectedBuiltIn = new AtomicReference<>();
 
         /// Number of successful change publications.
         private final AtomicInteger publishCount = new AtomicInteger();
@@ -237,7 +239,7 @@ final class InstanceOverviewIconSelectionTest {
         ///
         /// @param customImage initial custom image
         private RecordingIconStore(Path customImage) {
-            state = new AtomicReference<>(new Snapshot(InstanceIconType.DEFAULT, customImage));
+            state = new AtomicReference<>(new Snapshot(GameInstanceIconType.DEFAULT, customImage));
         }
 
         /// Returns the latest recorded icon state.
@@ -252,7 +254,7 @@ final class InstanceOverviewIconSelectionTest {
         ///
         /// @param iconType selected bundled type
         @Override
-        public void selectBuiltIn(InstanceIconType iconType) {
+        public void selectBuiltIn(GameInstanceIconType iconType) {
             mutationOnEdt.set(javax.swing.SwingUtilities.isEventDispatchThread());
             selectedBuiltIn.set(iconType);
             state.set(new Snapshot(iconType, null));
@@ -264,7 +266,7 @@ final class InstanceOverviewIconSelectionTest {
         @Override
         public void selectCustom(Path sourceImage) {
             mutationOnEdt.set(javax.swing.SwingUtilities.isEventDispatchThread());
-            state.set(new Snapshot(InstanceIconType.DEFAULT, sourceImage));
+            state.set(new Snapshot(GameInstanceIconType.DEFAULT, sourceImage));
         }
 
         /// Removes the current custom override.
@@ -293,7 +295,7 @@ final class InstanceOverviewIconSelectionTest {
         private final InstanceIconChoice choice;
 
         /// Current built-in type observed by the selector.
-        private final AtomicReference<@Nullable InstanceIconType> currentType = new AtomicReference<>();
+        private final AtomicReference<@Nullable GameInstanceIconType> currentType = new AtomicReference<>();
 
         /// Whether the selector observed a custom image override.
         private final AtomicBoolean sawCustomImage = new AtomicBoolean();
@@ -318,7 +320,7 @@ final class InstanceOverviewIconSelectionTest {
         @Override
         public InstanceIconChoice chooseInstanceIcon(
                 Component owner,
-                InstanceIconType currentIconType,
+                GameInstanceIconType currentIconType,
                 boolean hasCustomIcon,
                 Path initialDirectory) {
             currentType.set(currentIconType);
@@ -332,7 +334,7 @@ final class InstanceOverviewIconSelectionTest {
         /// @param instanceId unused instance identifier
         /// @return always `false`
         @Override
-        public boolean confirmDeleteIcon(Component owner, String instanceId) {
+        public boolean confirmDeleteIcon(Component owner, GameInstanceID instanceId) {
             return false;
         }
 
