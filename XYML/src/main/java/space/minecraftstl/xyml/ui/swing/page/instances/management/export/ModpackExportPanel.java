@@ -550,7 +550,9 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         fileTreeModel.setRoot(root);
         fileTreeModel.reload();
         fileTree.expandPath(new TreePath(root.getPath()));
-        setStatus(i18n("modpack.wizard.step.2.title"));
+        setStatus(i18n(entries.isEmpty()
+                ? "modpack.files.empty"
+                : "modpack.wizard.step.2.title"));
         updateControls();
     }
 
@@ -565,7 +567,8 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
                 return;
             }
             rootLoading = false;
-            setStatus(failureStatus(failure));
+            LOG.warning("Failed to load local modpack export file tree", failure);
+            setStatus(i18n("modpack.files.load_failed"));
             updateControls();
         });
     }
