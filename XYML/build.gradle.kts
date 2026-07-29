@@ -896,6 +896,7 @@ val makeDeb = tasks.register("makeDeb", CreateDeb::class) {
 
     version.set(project.version.toString())
     releaseType.set(debChannel)
+    launcherClassName.set("space.minecraftstl.xyml.Launcher")
     appShFile.set(layout.file(provider { artifactFile("sh") }))
     iconFile.set(layout.projectDirectory.file("image/xyml.png"))
     outputFile.set(debFile)
