@@ -39,7 +39,7 @@ public interface ThemePackManagementBackend {
 
     /// Imports one local archive without replacing an existing package.
     ///
-    /// @param archive selected `.hmcl-theme` archive
+    /// @param archive selected `.xyml-theme` archive
     /// @param executor caller-owned non-EDT worker executor
     /// @return immutable imported themes from the newly installed package
     CompletionStage<@Unmodifiable List<ThemePackItem>> importArchive(Path archive, Executor executor);

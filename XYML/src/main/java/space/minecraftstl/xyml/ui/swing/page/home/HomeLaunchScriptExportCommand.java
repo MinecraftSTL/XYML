@@ -27,7 +27,7 @@ import java.util.concurrent.CompletionStage;
 
 /// Starts one standalone launch-script export for an immutable launcher selection.
 ///
-/// Implementations own legacy-state resolution and background task lifetime. The Swing home model only captures
+/// Implementations own launcher-state resolution and background task lifetime. The Swing home model only captures
 /// stable identifiers and observes the completion stage, keeping file chooser and task execution concerns separate.
 @FunctionalInterface
 @NotNullByDefault

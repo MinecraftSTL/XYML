@@ -446,6 +446,18 @@ final class WorldCatalogPanelQuickPlayTest {
             return false;
         }
 
+        /// Returns no copy name because copying is outside this test.
+        @Override
+        public @Nullable String chooseCopyName(Component owner, WorldCatalogItem world) {
+            return null;
+        }
+
+        /// Returns no export path because archive export is outside this test.
+        @Override
+        public @Nullable Path chooseExportArchive(Component owner, WorldCatalogItem world) {
+            return null;
+        }
+
         /// Returns the configured local script destination.
         @Override
         public @Nullable Path chooseLaunchScriptDestination(Component owner, WorldCatalogItem world) {

@@ -53,7 +53,7 @@ import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Edits reusable global game-settings presets without coupling the shell to legacy JavaFX pages.
+/// Edits reusable global game-settings presets without coupling the shell to persistence details.
 ///
 /// All expensive persistence remains behind [GameSettingsPresetsStore]. This panel only changes in-memory controls on
 /// the Swing EDT and completes store stages back on that same EDT, so list selection and editor actions never wait on
@@ -140,7 +140,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
     /// @return configured preset editor panel
     public static GameSettingsPresetsPanel createForCurrentSettings() {
         EdtDispatcher.requireEventDispatchThread();
-        LegacyGameSettingsPresetsStore settingsStore = LegacyGameSettingsPresetsStore.createForCurrentSettings();
+        LauncherGameSettingsPresetsStore settingsStore = LauncherGameSettingsPresetsStore.createForCurrentSettings();
         try {
             return new GameSettingsPresetsPanel(settingsStore);
         } catch (RuntimeException exception) {

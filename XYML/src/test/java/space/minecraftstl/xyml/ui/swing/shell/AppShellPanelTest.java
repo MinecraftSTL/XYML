@@ -30,13 +30,13 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
 import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.setting.GameDirectoryID;
+import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
-import space.minecraftstl.xyml.ui.swing.ThemeMode;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -308,16 +308,25 @@ public final class AppShellPanelTest {
             ShellNavigationRail navigationRail = assertInstanceOf(
                     ShellNavigationRail.class,
                     accountButton.getParent().getParent());
+            JButton officialGroupButton = navigationRail.officialGroupButton();
             int accountY = SwingUtilities.convertPoint(accountButton, 0, 0, navigationRail).y;
             int instancesY = SwingUtilities.convertPoint(instancesButton, 0, 0, navigationRail).y;
             int downloadsY = SwingUtilities.convertPoint(downloadsButton, 0, 0, navigationRail).y;
             int settingsY = SwingUtilities.convertPoint(settingsButton, 0, 0, navigationRail).y;
+            int officialGroupY = SwingUtilities.convertPoint(
+                    officialGroupButton,
+                    0,
+                    0,
+                    navigationRail).y;
             assertAll(
                     () -> assertTrue(accountY < instancesY),
                     () -> assertTrue(instancesY < downloadsY),
                     () -> assertTrue(settingsY > navigationRail.getHeight() / 2),
+                    () -> assertTrue(officialGroupY > settingsY),
                     () -> assertTrue(
-                            navigationRail.getHeight() - settingsY - settingsButton.getHeight() <= 10));
+                            navigationRail.getHeight()
+                                    - officialGroupY
+                                    - officialGroupButton.getHeight() <= 10));
 
             for (ShellPageId page : List.of(
                     ShellPageId.ACCOUNTS,
@@ -408,7 +417,7 @@ public final class AppShellPanelTest {
         AtomicReference<@Nullable AppShellPanel> result = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> {
             SwingThemeManager themeManager = new SwingThemeManager(
-                    ThemeMode.LIGHT,
+                    ThemeBrightnessPreference.LIGHT,
                     new SwingDesignTokens(8),
                     SystemThemeDetector.lightFallback());
             themeManager.initialize();
@@ -671,7 +680,7 @@ public final class AppShellPanelTest {
         public void selectAccount() {
         }
 
-        /// Records no state for the unused legacy instance-selection command.
+        /// Records no state for the unused direct instance-selection command.
         @Override
         public void selectInstance() {
         }

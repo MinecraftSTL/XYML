@@ -32,7 +32,7 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 public final class Restarter {
     /// Restart the current application.
     public static void restartSelf() throws IOException {
-        LOG.info("Restarting HMCL");
+        LOG.info("Restarting XYML");
         if (Metadata.PACKAGED) {
             UpdateApplier.startPackagedApplication();
         } else {

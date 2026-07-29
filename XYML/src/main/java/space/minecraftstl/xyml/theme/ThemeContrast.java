@@ -19,7 +19,7 @@ package space.minecraftstl.xyml.theme;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Toolkit-neutral contrast level in the historical inclusive `-1` to `1` range.
+/// Toolkit-neutral contrast level in the inclusive `-1` to `1` range.
 ///
 /// @param value normalized contrast value
 @NotNullByDefault
@@ -29,9 +29,6 @@ public record ThemeContrast(double value) {
 
     /// Standard contrast preset.
     public static final ThemeContrast STANDARD = new ThemeContrast(0.0);
-
-    /// Default contrast preset retained as an alias for standard.
-    public static final ThemeContrast DEFAULT = STANDARD;
 
     /// Medium-contrast preset.
     public static final ThemeContrast MEDIUM = new ThemeContrast(0.5);

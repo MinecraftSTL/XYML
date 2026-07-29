@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.modpack;
 
 import com.google.gson.JsonParseException;
 import kala.compress.archivers.zip.ZipArchiveReader;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.task.Task;
@@ -27,11 +28,17 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
 
+/// Provides format-specific modpack parsing, installation completion, and update tasks.
 public interface ModpackProvider {
 
     String getName();
 
-    Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String version);
+    /// Creates the optional task that completes metadata and files for an installed modpack instance.
+    ///
+    /// @param dependencyManager dependency manager bound to the target game repository
+    /// @param instanceId target installed instance identifier
+    /// @return completion task, or `null` when this format requires no completion phase
+    @Nullable Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String instanceId);
 
     Task<?> createUpdateTask(DefaultDependencyManager dependencyManager, String name, Path zipFile, Modpack modpack) throws MismatchedModpackTypeException;
 

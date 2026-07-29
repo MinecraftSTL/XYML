@@ -68,7 +68,7 @@ public final class RemoteUpdateCheckSource implements UpdateCheckSource {
     /// @return production remote source
     public static RemoteUpdateCheckSource production() {
         return new RemoteUpdateCheckSource(
-                Metadata.HMCL_UPDATE_URL,
+                Metadata.XYML_UPDATE_URL,
                 Metadata.VERSION,
                 !IntegrityChecker.DISABLE_SELF_INTEGRITY_CHECK,
                 IntegrityChecker::isSelfVerified);

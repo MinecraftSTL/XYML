@@ -99,7 +99,7 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
 
         onDone().register(event -> {
             if (event.isFailed())
-                repository.removeVersionFromDisk(name);
+                repository.removeInstanceFromDisk(name);
         });
     }
 
@@ -132,8 +132,8 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
             }
 
             // TODO: Optimize unbearably slow ModpackInstallTask
-            dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), Collections.singletonList(mcDirectory), any -> true, config).withStage("hmcl.modpack"));
-            dependents.add(new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), Collections.singletonList(mcDirectory), manifest, MultiMCModpackProvider.INSTANCE, manifest.getName(), null, repository.getModpackConfiguration(name)).withStage("hmcl.modpack"));
+            dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), Collections.singletonList(mcDirectory), any -> true, config).withStage("xyml.modpack"));
+            dependents.add(new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), Collections.singletonList(mcDirectory), manifest, MultiMCModpackProvider.INSTANCE, manifest.getName(), null, repository.getModpackConfiguration(name)).withStage("xyml.modpack"));
         }
 
         // Stage #1: Load all related Json-Patch from meta maven or local mod pack.

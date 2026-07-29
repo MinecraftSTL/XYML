@@ -73,7 +73,7 @@ public final class McbbsModpackLocalInstallTask extends Task<Void> {
         dependents.add(builder.buildAsync());
         onDone().register(event -> {
             if (event.isFailed())
-                repository.removeVersionFromDisk(name);
+                repository.removeInstanceFromDisk(name);
         });
 
         ModpackConfiguration<McbbsModpackManifest> config = null;
@@ -86,9 +86,9 @@ public final class McbbsModpackLocalInstallTask extends Task<Void> {
             }
         } catch (JsonParseException | IOException ignore) {
         }
-        dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), Collections.singletonList("/overrides"), any -> true, config).withStage("hmcl.modpack"));
+        dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), Collections.singletonList("/overrides"), any -> true, config).withStage("xyml.modpack"));
         instanceTask = new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), Collections.singletonList("/overrides"), manifest, McbbsModpackProvider.INSTANCE, modpack.getName(), modpack.getVersion(), repository.getModpackConfiguration(name));
-        dependents.add(instanceTask.withStage("hmcl.modpack"));
+        dependents.add(instanceTask.withStage("xyml.modpack"));
     }
 
     @Override

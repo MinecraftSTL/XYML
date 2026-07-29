@@ -247,7 +247,8 @@ public final class InstancesPanelTest {
                 List.of(new InstanceListItem(
                         "long-instance",
                         "A very long modded instance name that must remain inside its viewport row",
-                        "Minecraft 1.21.1 with a long loader description")),
+                        "Minecraft 1.21.1 with a long loader description",
+                        solidIcon(0))),
                 snapshot(0, 1, 0L));
         RecordingManagementFactory factory = new RecordingManagementFactory(null);
         InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
@@ -323,7 +324,8 @@ public final class InstancesPanelTest {
                     ChoiceListEntry.loaded(0, new InstanceListItem(
                             "id",
                             "A very long modded instance name",
-                            "Minecraft 1.21.1 / Fabric")),
+                            "Minecraft 1.21.1 / Fabric",
+                            solidIcon(0))),
                     0,
                     true,
                     true);
@@ -515,7 +517,8 @@ public final class InstancesPanelTest {
             result.add(new InstanceListItem(
                     "instance-" + index,
                     "Instance " + index,
-                    "Minecraft " + (index % 2 == 0 ? "1.21.1" : "1.20.1")));
+                    "Minecraft " + (index % 2 == 0 ? "1.21.1" : "1.20.1"),
+                    solidIcon(0)));
         }
         return List.copyOf(result);
     }

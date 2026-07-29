@@ -17,8 +17,6 @@
  */
 package space.minecraftstl.xyml.setting;
 
-import com.google.common.jimfs.Configuration;
-import com.google.common.jimfs.Jimfs;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import space.minecraftstl.xyml.game.Renderer;
@@ -27,18 +25,11 @@ import space.minecraftstl.xyml.observable.property.ObjectProperty;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 
-import java.io.IOException;
-import java.nio.file.FileSystem;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests for instance-specific game settings.
@@ -101,67 +92,6 @@ public final class GameSettingsInstanceTest {
         assertEquals(Renderer.Vulkan.LAVAPIPE, deserialized.vulkanRendererProperty().getValue());
     }
 
-    /// Tests that legacy default Java selections are migrated to automatic selection.
-    @ParameterizedTest
-    @CsvSource({
-            "java, Default, false",
-            "javaVersionType, 0, true",
-            "javaVersionType, DEFAULT, false"
-    })
-    public void migratesLegacyDefaultJavaSelectionsToAuto(String propertyName, String value, boolean numericValue) {
-        JsonObject source = new JsonObject();
-        if (numericValue) {
-            source.addProperty(propertyName, Integer.parseInt(value));
-        } else {
-            source.addProperty(propertyName, value);
-        }
-        GameSettings.Instance instance = LegacyGameSettingsMigrator.toInstance(null, source, false);
-
-        assertEquals(JavaVersionType.AUTO, instance.javaTypeProperty().getValue());
-    }
-
-    /// Tests that legacy detected Java selection is migrated to a detected Java reference.
-    @Test
-    public void migratesLegacyDetectedJavaSelection() throws IOException {
-        try (FileSystem fileSystem = Jimfs.newFileSystem(Configuration.unix())) {
-            Path tempDir = createInstanceSettingsTestDirectory(fileSystem, "legacy-detected-java");
-            Path javaBinary = tempDir.resolve("java.exe");
-            Files.writeString(javaBinary, "");
-
-            JsonObject source = new JsonObject();
-            source.addProperty("javaVersionType", "DETECTED");
-            source.addProperty("java", "17.0.11+9");
-            source.addProperty("defaultJavaPath", javaBinary.toString());
-
-            GameSettings.Instance instance = LegacyGameSettingsMigrator.toInstance(null, source, false, (version, javaBinaryPath) -> {
-                assertEquals(javaBinary.toString(), javaBinaryPath);
-                return new GameSettings.DetectedJava(version, GameSettings.DetectedJava.hashExistingPath(javaBinary));
-            });
-
-            assertEquals(JavaVersionType.DETECTED, instance.javaTypeProperty().getValue());
-            assertEquals("17.0.11+9", instance.detectedJavaProperty().getValue().version());
-            assertEquals(GameSettings.DetectedJava.hashExistingPath(javaBinary), instance.detectedJavaProperty().getValue().pathHash());
-            assertTrue(instance.getOverrideProperties().contains(GameSettings.PROPERTY_JAVA_TYPE));
-            assertTrue(instance.getOverrideProperties().contains(GameSettings.PROPERTY_DETECTED_JAVA));
-        }
-    }
-
-    /// Tests that legacy Java version selection is migrated to the custom Java version field.
-    @Test
-    public void migratesLegacyVersionJavaSelection() {
-        GameSettings.Instance instance = LegacyGameSettingsMigrator.toInstance(null, JsonParser.parseString("""
-                {
-                  "javaVersionType": "VERSION",
-                  "java": "17"
-                }
-                """).getAsJsonObject(), false);
-
-        assertEquals(JavaVersionType.VERSION, instance.javaTypeProperty().getValue());
-        assertEquals("17", instance.customJavaVersionProperty().getValue());
-        assertTrue(instance.getOverrideProperties().contains(GameSettings.PROPERTY_JAVA_TYPE));
-        assertTrue(instance.getOverrideProperties().contains(GameSettings.PROPERTY_CUSTOM_JAVA_VERSION));
-    }
-
     /// Tests that Java payload settings inherit independently from the Java selection mode.
     @Test
     public void inheritsJavaPayloadPropertiesIndependently() {
@@ -188,85 +118,4 @@ public final class GameSettingsInstanceTest {
         assertEquals("17.0.11+9", effective.getInheritable(GameSettings::detectedJavaProperty).version());
     }
 
-    /// Tests that legacy non-positive maximum memory values are normalized to the suggested memory.
-    @Test
-    public void normalizesLegacyNonPositiveMaxMemory() {
-        GameSettings.Instance instance = LegacyGameSettingsMigrator.toInstance(null, JsonParser.parseString("""
-                {
-                  "maxMemory": 0
-                }
-                """).getAsJsonObject(), false);
-
-        assertEquals(GameSettings.SUGGESTED_MEMORY, instance.maxMemoryProperty().getValue());
-    }
-
-    /// Tests that legacy native directory fields migrate to the renamed game setting properties.
-    @ParameterizedTest
-    @CsvSource({
-            "CUSTOM, false",
-            "1, true"
-    })
-    public void migratesLegacyNativeDirectoryFields(String value, boolean numericValue) {
-        JsonObject source = new JsonObject();
-        if (numericValue) {
-            source.addProperty("nativesDirType", Integer.parseInt(value));
-        } else {
-            source.addProperty("nativesDirType", value);
-        }
-        source.addProperty("nativesDir", "natives");
-        GameSettings.Instance instance = LegacyGameSettingsMigrator.toInstance(null, source, false);
-
-        assertTrue(instance.useCustomNativesProperty().getValue());
-        assertEquals("natives", instance.nativesDirectoryProperty().getValue());
-        assertTrue(instance.getOverrideProperties().contains(GameSettings.PROPERTY_USE_CUSTOM_NATIVES));
-        assertTrue(instance.getOverrideProperties().contains(GameSettings.PROPERTY_NATIVES_DIRECTORY));
-    }
-
-    /// Tests that inheriting a legacy parent keeps copied fields unset on the instance itself.
-    @Test
-    public void preservesLegacyParentInheritanceWithoutCopyingValues() {
-        GameSettings.Instance instance = LegacyGameSettingsMigrator.toInstance(null, JsonParser.parseString("""
-                {
-                  "javaVersionType": "VERSION",
-                  "java": "17",
-                  "maxMemory": 4096
-                }
-                """).getAsJsonObject(), true);
-
-        assertEquals(JavaVersionType.AUTO, instance.javaTypeProperty().getValue());
-        assertEquals("", instance.customJavaVersionProperty().getValue());
-        assertEquals(GameSettings.SUGGESTED_MEMORY, instance.maxMemoryProperty().getValue());
-        assertNull(instance.minMemoryProperty().getValue());
-    }
-
-    /// Tests that legacy global version-folder isolation is preserved for inherited instance settings.
-    @Test
-    public void preservesInheritedLegacyVersionFolderIsolation() {
-        GameSettingsPresetID parentId =
-                GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174000");
-        GameSettings.Preset parent = new GameSettings.Preset(parentId);
-        parent.defaultIsolationTypeProperty().setValue(DefaultIsolationType.ALWAYS);
-
-        GameSettings.Instance instance = LegacyGameSettingsMigrator.toInstance(
-                parentId,
-                parent,
-                JsonParser.parseString("""
-                        {
-                          "usesGlobal": true
-                        }
-                        """).getAsJsonObject(),
-                true,
-                GameSettings.DetectedJava::ofLegacyPath);
-
-        assertEquals(parentId, instance.parentProperty().getValue());
-        assertTrue(instance.getOverrideProperties().contains(GameSettings.PROPERTY_RUNNING_DIRECTORY));
-        assertEquals("", instance.runningDirectoryProperty().getValue());
-    }
-
-    /// Creates a temporary directory in an in-memory file system for instance settings tests.
-    private static Path createInstanceSettingsTestDirectory(FileSystem fileSystem, String prefix) throws IOException {
-        Path root = fileSystem.getPath("/instance-settings-tests");
-        Files.createDirectories(root);
-        return Files.createTempDirectory(root, prefix + "-");
-    }
 }

@@ -38,7 +38,7 @@ public record ResolvedTheme(
             ThemeColor.DEFAULT,
             ThemeBrightness.LIGHT,
             ThemeColorStyle.FIDELITY,
-            ThemeContrast.DEFAULT);
+            ThemeContrast.STANDARD);
 
     /// Validates the resolved values.
     public ResolvedTheme {

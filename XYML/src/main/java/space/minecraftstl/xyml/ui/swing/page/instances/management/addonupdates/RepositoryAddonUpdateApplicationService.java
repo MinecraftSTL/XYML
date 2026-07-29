@@ -275,7 +275,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
         }
     }
 
-    /// Commits a staged replacement without overwrite, then applies legacy old-file retention behavior.
+    /// Commits a staged replacement without overwrite, then applies the configured old-file retention behavior.
     ///
     /// Cancellation remains effective through the final read-only path validation. Once the last cancellation
     /// check passes, archive and publication execute as one non-cancellable transaction under [#STATE_LOCK].
@@ -590,7 +590,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
 
     /// Deletes the archived original only for local add-on types that do not retain old versions.
     ///
-    /// Cleanup failure matches the legacy behavior: the replacement remains successful and the obsolete local
+    /// Cleanup failure does not invalidate replacement success; the obsolete local
     /// file is retained with a warning instead of corrupting the completed update.
     ///
     /// @param localAddonFile exact archived local add-on
@@ -1162,7 +1162,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
         /// Immutable operation tasks in exact caller selection order.
         private final @Unmodifiable List<Task<UpdateOutcome>> operations;
 
-        /// Creates a stopped aggregate task with legacy progress metadata.
+        /// Creates a stopped aggregate task with launcher progress metadata.
         ///
         /// @param selectedUpdates exact caller selection
         /// @param operations ordered per-item operation tasks

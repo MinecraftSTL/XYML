@@ -35,7 +35,7 @@ public final class XYMLMultiMCBootstrap {
     }
 
     public static void main(String[] args) throws Throwable {
-        String profile = System.getProperty("hmcl.mmc.bootstrap");
+        String profile = System.getProperty("xyml.mmc.bootstrap");
         if (profile == null) {
             launchLegacy(args);
             return;
@@ -55,8 +55,8 @@ public final class XYMLMultiMCBootstrap {
     }
 
     private static void launchLegacy(String[] args) throws Throwable {
-        String mainClass = new String(Base64.getUrlDecoder().decode(System.getProperty("hmcl.mmc.bootstrap.main")), StandardCharsets.UTF_8);
-        String installerInfo = new String(Base64.getUrlDecoder().decode(System.getProperty("hmcl.mmc.bootstrap.installer")), StandardCharsets.UTF_8);
+        String mainClass = new String(Base64.getUrlDecoder().decode(System.getProperty("xyml.mmc.bootstrap.main")), StandardCharsets.UTF_8);
+        String installerInfo = new String(Base64.getUrlDecoder().decode(System.getProperty("xyml.mmc.bootstrap.installer")), StandardCharsets.UTF_8);
 
         launch(installerInfo, mainClass, args);
     }

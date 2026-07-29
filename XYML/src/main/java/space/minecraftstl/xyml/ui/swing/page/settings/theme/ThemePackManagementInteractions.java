@@ -27,7 +27,7 @@ import java.util.concurrent.CompletionStage;
 /// Native chooser, confirmation, and desktop boundary injected into the theme management panel.
 @NotNullByDefault
 public interface ThemePackManagementInteractions {
-    /// Selects one local `.hmcl-theme` archive on the EDT.
+    /// Selects one local `.xyml-theme` archive on the EDT.
     ///
     /// @param owner dialog owner
     /// @return selected archive, or `null` after cancellation

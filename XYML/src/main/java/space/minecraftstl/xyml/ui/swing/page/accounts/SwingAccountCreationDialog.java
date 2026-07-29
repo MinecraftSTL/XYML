@@ -125,7 +125,7 @@ public final class SwingAccountCreationDialog extends JDialog
     /// Authlib-injector password field.
     private final JPasswordField authlibPassword = new JPasswordField();
 
-    /// Shared target-storage choice; unchecked preserves legacy shared-user storage.
+    /// Shared target-storage choice; unchecked selects shared-user storage.
     private final JCheckBox portable = new JCheckBox(i18n("account.portable"));
 
     /// User-visible status text.
@@ -154,7 +154,7 @@ public final class SwingAccountCreationDialog extends JDialog
     /// @param owner owning Swing component, or null for an unowned dialog
     /// @param initialMethod explicit initial authentication method
     /// @param gateway authentication and storage boundary
-    /// @param executor caller-owned executor for authentication and legacy bridge work
+    /// @param executor caller-owned executor for authentication and launcher-state work
     public SwingAccountCreationDialog(
             @Nullable Component owner,
             AccountCreationMethod initialMethod,
@@ -169,7 +169,7 @@ public final class SwingAccountCreationDialog extends JDialog
     /// @param initialMethod explicit initial authentication method
     /// @param microsoftOnly whether policy suppresses every non-Microsoft method
     /// @param gateway authentication and storage boundary
-    /// @param executor caller-owned executor for authentication and legacy bridge work
+    /// @param executor caller-owned executor for authentication and launcher-state work
     SwingAccountCreationDialog(
             @Nullable Component owner,
             AccountCreationMethod initialMethod,
@@ -733,7 +733,7 @@ public final class SwingAccountCreationDialog extends JDialog
         }
     }
 
-    /// Returns a renderer showing authlib server name and URL without retaining legacy objects.
+    /// Returns a renderer showing authlib server name and URL without retaining mutable configuration objects.
     ///
     /// @return combo-box renderer
     private static ListCellRenderer<? super AuthlibServerOption> serverRenderer() {
@@ -837,7 +837,7 @@ public final class SwingAccountCreationDialog extends JDialog
                 : message;
     }
 
-    /// Replaces localized punctuation with spaces for typed acknowledgement parity with the legacy dialog.
+    /// Replaces localized punctuation with spaces for stable typed acknowledgement matching.
     ///
     /// @param text localized acknowledgement
     /// @return punctuation-free text

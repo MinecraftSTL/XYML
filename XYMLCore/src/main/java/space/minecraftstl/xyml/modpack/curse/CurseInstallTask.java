@@ -97,7 +97,7 @@ public final class CurseInstallTask extends Task<Void> {
             Exception ex = event.getTask().getException();
             if (event.isFailed()) {
                 if (!(ex instanceof ModpackCompletionException)) {
-                    repository.removeVersionFromDisk(name);
+                    repository.removeInstanceFromDisk(name);
                 }
             }
         });
@@ -113,8 +113,8 @@ public final class CurseInstallTask extends Task<Void> {
         } catch (JsonParseException | IOException ignore) {
         }
         this.config = config;
-        dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), Collections.singletonList(manifest.overrides()), any -> true, config).withStage("hmcl.modpack"));
-        dependents.add(new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), Collections.singletonList(manifest.overrides()), manifest, CurseModpackProvider.INSTANCE, manifest.name(), manifest.version(), repository.getModpackConfiguration(name)).withStage("hmcl.modpack"));
+        dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), Collections.singletonList(manifest.overrides()), any -> true, config).withStage("xyml.modpack"));
+        dependents.add(new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), Collections.singletonList(manifest.overrides()), manifest, CurseModpackProvider.INSTANCE, manifest.name(), manifest.version(), repository.getModpackConfiguration(name)).withStage("xyml.modpack"));
 
         URI iconUri = NetworkUtils.toURIOrNull(iconUrl);
         if (iconUri != null) {

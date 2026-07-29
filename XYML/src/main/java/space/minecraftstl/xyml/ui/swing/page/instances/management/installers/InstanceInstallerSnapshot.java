@@ -38,7 +38,7 @@ import java.util.Set;
 /// @param instanceId stable existing instance identifier
 /// @param gameVersion detected Minecraft version, when available
 /// @param installedLoaders recognized loaders in stable historical kind order
-/// @param otherRemovableLibraries unrecognized third-party libraries eligible for the legacy removal workflow
+/// @param otherRemovableLibraries unrecognized third-party libraries eligible for the removal workflow
 @NotNullByDefault
 public record InstanceInstallerSnapshot(
         String instanceId,
@@ -78,18 +78,6 @@ public record InstanceInstallerSnapshot(
                         "otherRemovableLibraries contains a protected or recognized library ID: " + libraryId);
             }
         }
-    }
-
-    /// Creates a snapshot without third-party library entries for compatibility with loader-only callers.
-    ///
-    /// @param instanceId stable existing instance identifier
-    /// @param gameVersion detected Minecraft version, when available
-    /// @param installedLoaders recognized loaders in stable historical kind order
-    public InstanceInstallerSnapshot(
-            String instanceId,
-            Optional<String> gameVersion,
-            List<InstanceInstallerEntry> installedLoaders) {
-        this(instanceId, gameVersion, installedLoaders, List.of());
     }
 
     /// Validates a non-blank identifier or detected version without rewriting user-visible text.

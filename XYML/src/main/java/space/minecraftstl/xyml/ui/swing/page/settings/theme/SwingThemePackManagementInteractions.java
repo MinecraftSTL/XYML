@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings.theme;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -51,18 +53,18 @@ public final class SwingThemePackManagementInteractions implements ThemePackMana
         this.executor = Objects.requireNonNull(executor, "executor");
     }
 
-    /// Shows a native file chooser constrained to `.hmcl-theme` archives.
+    /// Shows a native file chooser constrained to `.xyml-theme` archives.
     ///
     /// @param owner dialog owner
     /// @return selected archive, or `null`
     @Override
     public @Nullable Path chooseImportArchive(Component owner) {
         EdtDispatcher.requireEventDispatchThread();
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setDialogTitle(strings.chooserTitle());
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setAcceptAllFileFilterUsed(false);
-        chooser.setFileFilter(new FileNameExtensionFilter(strings.chooserFilter(), "hmcl-theme"));
+        chooser.setFileFilter(new FileNameExtensionFilter(strings.chooserFilter(), "xyml-theme"));
         return chooser.showOpenDialog(Objects.requireNonNull(owner, "owner")) == JFileChooser.APPROVE_OPTION
                 ? chooser.getSelectedFile().toPath().toAbsolutePath().normalize()
                 : null;

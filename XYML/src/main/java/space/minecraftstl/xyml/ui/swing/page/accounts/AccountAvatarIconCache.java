@@ -19,8 +19,14 @@ package space.minecraftstl.xyml.ui.swing.page.accounts;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.auth.offline.Skin;
 import space.minecraftstl.xyml.task.Schedulers;
+import space.minecraftstl.xyml.util.io.NetworkUtils;
 
+import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JList;
@@ -28,26 +34,39 @@ import javax.swing.SwingUtilities;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.util.Iterator;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-/// Lazily derives UUID-stable account head icons from launcher-bundled skin textures.
+/// Lazily derives account head icons from detached online, offline, or launcher-bundled skin sources.
 ///
-/// The first renderer request returns immediately. Classpath image decoding and nearest-neighbor
-/// head extraction run on the shared I/O scheduler, then only a repaint is posted to the EDT.
-/// No account page open or row paint performs network or filesystem work.
+/// The first renderer request returns immediately. Network access, filesystem access, image decoding, and
+/// nearest-neighbor head extraction run on the shared I/O scheduler, then only a repaint is posted to the EDT.
+/// The process-wide future cache lets the accounts page and top selector share in-flight and completed work.
 @NotNullByDefault
 final class AccountAvatarIconCache {
     /// Fixed account avatar edge matching the stable row icon slot.
     static final int ICON_SIZE = 40;
 
-    /// In-flight and completed icon loads keyed by immutable profile identity.
-    private final ConcurrentMap<AvatarKey, CompletableFuture<Icon>> icons = new ConcurrentHashMap<>();
+    /// Maximum encoded online texture size accepted before decoding.
+    private static final int MAX_REMOTE_TEXTURE_BYTES = 4 * 1024 * 1024;
 
-    /// Returns a completed icon or null while its bundled texture is still decoding.
+    /// Maximum decoded skin edge accepted before head extraction.
+    private static final int MAX_TEXTURE_EDGE = 4096;
+
+    /// Process-wide in-flight and completed icon loads keyed by immutable presentation state.
+    private static final ConcurrentMap<AvatarKey, CompletableFuture<Icon>> ICONS = new ConcurrentHashMap<>();
+
+    /// Pending repaint callbacks already registered by this renderer cache.
+    private final ConcurrentMap<AvatarKey, Boolean> pendingRepaints = new ConcurrentHashMap<>();
+
+    /// Returns a completed icon or null while its detached source is still loading.
     ///
     /// @param item loaded account row
     /// @param list owning list repainted after asynchronous completion
@@ -55,15 +74,21 @@ final class AccountAvatarIconCache {
     @Nullable Icon iconFor(AccountListItem item, JList<?> list) {
         AccountListItem row = Objects.requireNonNull(item, "item");
         JList<?> owner = Objects.requireNonNull(list, "list");
-        AvatarKey key = new AvatarKey(row.displayName(), row.profileId());
-        CompletableFuture<Icon> future = icons.computeIfAbsent(key, ignored ->
+        AvatarKey key = new AvatarKey(row.displayName(), row.profileId(), row.avatarSource());
+        CompletableFuture<Icon> future = ICONS.computeIfAbsent(key, ignored ->
                 CompletableFuture.supplyAsync(() -> loadIcon(key), Schedulers.io())
-                        .exceptionally(AccountAvatarIconCache::failureIcon)
-                        .whenComplete((icon, failure) -> SwingUtilities.invokeLater(owner::repaint)));
+                        .exceptionally(AccountAvatarIconCache::failureIcon));
+        if (!future.isDone() && pendingRepaints.putIfAbsent(key, Boolean.TRUE) == null) {
+            future.whenComplete((@Nullable Icon ignoredIcon, @Nullable Throwable ignoredFailure) ->
+                    SwingUtilities.invokeLater(() -> {
+                        pendingRepaints.remove(key);
+                        owner.repaint();
+                    }));
+        }
         return future.getNow(null);
     }
 
-    /// Replaces an unexpected bundled-resource failure with a stable non-null marker.
+    /// Replaces an unexpected source-and-fallback failure with a stable non-null marker.
     ///
     /// @param failure avatar decoding failure
     /// @return fixed failure icon retained in the cache
@@ -85,32 +110,150 @@ final class AccountAvatarIconCache {
         return new ImageIcon(image);
     }
 
-    /// Decodes one UUID-derived bundled skin and extracts its base and hat head layers.
+    /// Loads one detached skin source, falls back to the UUID-derived bundled skin, and extracts its head.
     ///
     /// @param key immutable profile identity
     /// @return crisp fixed-size head icon
     private static Icon loadIcon(AvatarKey key) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            throw new IllegalStateException("Account avatars must not load on the EDT");
+        }
         try {
-            OfflineSkinPreview preview = OfflineSkinPreviewLoader.load(
-                    null,
-                    key.profileName(),
-                    key.profileId());
-            BufferedImage texture = preview.skin();
-            int textureScale = Math.max(1, texture.getWidth() / 64);
-            BufferedImage head = new BufferedImage(ICON_SIZE, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D graphics = head.createGraphics();
+            return createHeadIcon(loadSourceTexture(key));
+        } catch (Exception sourceFailure) {
             try {
-                graphics.setRenderingHint(
-                        RenderingHints.KEY_INTERPOLATION,
-                        RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-                drawLayer(graphics, texture, 8, 8, textureScale);
-                drawLayer(graphics, texture, 40, 8, textureScale);
-            } finally {
-                graphics.dispose();
+                return createHeadIcon(loadDefaultTexture(key));
+            } catch (IOException | RuntimeException fallbackFailure) {
+                fallbackFailure.addSuppressed(sourceFailure);
+                throw new IllegalStateException("Failed to load account avatar and bundled fallback", fallbackFailure);
             }
-            return new ImageIcon(head);
-        } catch (IOException | RuntimeException failure) {
-            throw new IllegalStateException("Failed to load bundled account avatar", failure);
+        }
+    }
+
+    /// Loads one detached account texture without touching a live account object.
+    ///
+    /// @param key immutable avatar request
+    /// @return decoded skin texture
+    /// @throws Exception when the selected source cannot be fetched or decoded
+    private static BufferedImage loadSourceTexture(AvatarKey key) throws Exception {
+        AccountAvatarSource source = key.source();
+        if (source instanceof AccountAvatarSource.RemoteSource remoteSource) {
+            return loadRemoteTexture(remoteSource);
+        }
+        if (source instanceof AccountAvatarSource.OfflineSource offlineSource) {
+            @Nullable Skin.LoadedSkin loaded = offlineSource.toSkin().load(key.profileName()).run();
+            if (loaded == null || loaded.skin() == null) {
+                throw new IOException("Configured offline skin did not provide a texture");
+            }
+            return loaded.skin().image();
+        }
+        return loadDefaultTexture(key);
+    }
+
+    /// Downloads and decodes one bounded public texture response.
+    ///
+    /// @param source validated remote texture source
+    /// @return decoded skin image
+    /// @throws IOException when the response is unavailable, oversized, or undecodable
+    private static BufferedImage loadRemoteTexture(AccountAvatarSource.RemoteSource source) throws IOException {
+        HttpURLConnection connection = NetworkUtils.resolveConnection(
+                NetworkUtils.createHttpConnection(source.uri()));
+        try {
+            long contentLength = connection.getContentLengthLong();
+            if (contentLength > MAX_REMOTE_TEXTURE_BYTES) {
+                throw new IOException("Remote account texture exceeds the encoded size limit");
+            }
+            byte @Unmodifiable [] encoded;
+            try (InputStream input = connection.getInputStream()) {
+                encoded = input.readNBytes(MAX_REMOTE_TEXTURE_BYTES + 1);
+            }
+            if (encoded.length > MAX_REMOTE_TEXTURE_BYTES) {
+                throw new IOException("Remote account texture exceeds the encoded size limit");
+            }
+            return decodeRemoteTexture(encoded);
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    /// Checks remote image dimensions before allocating its complete decoded raster.
+    ///
+    /// @param encoded bounded remote response bytes
+    /// @return decoded supported skin image
+    /// @throws IOException when no reader accepts the image or dimensions exceed the avatar limit
+    private static BufferedImage decodeRemoteTexture(byte @Unmodifiable [] encoded) throws IOException {
+        try (@Nullable ImageInputStream imageInput = ImageIO.createImageInputStream(
+                new ByteArrayInputStream(encoded))) {
+            if (imageInput == null) {
+                throw new IOException("Remote account texture is not a supported image");
+            }
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(imageInput);
+            if (!readers.hasNext()) {
+                throw new IOException("Remote account texture is not a supported image");
+            }
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(imageInput, true, true);
+                int width = reader.getWidth(0);
+                int height = reader.getHeight(0);
+                validateTextureDimensions(width, height);
+                @Nullable BufferedImage image = reader.read(0);
+                if (image == null) {
+                    throw new IOException("Remote account texture could not be decoded");
+                }
+                return image;
+            } finally {
+                reader.dispose();
+            }
+        }
+    }
+
+    /// Loads the exact UUID-derived launcher-bundled fallback for one profile.
+    ///
+    /// @param key immutable profile identity
+    /// @return decoded bundled texture
+    /// @throws IOException when the packaged texture is missing or invalid
+    private static BufferedImage loadDefaultTexture(AvatarKey key) throws IOException {
+        return OfflineSkinPreviewLoader.load(null, key.profileName(), key.profileId()).skin();
+    }
+
+    /// Validates a Minecraft skin layout and extracts its base and hat head layers.
+    ///
+    /// @param texture decoded skin texture
+    /// @return crisp fixed-size head icon
+    /// @throws IOException when the texture dimensions are not a supported scaled skin layout
+    private static Icon createHeadIcon(BufferedImage texture) throws IOException {
+        int width = texture.getWidth();
+        int height = texture.getHeight();
+        validateTextureDimensions(width, height);
+        int textureScale = width / 64;
+        BufferedImage head = new BufferedImage(ICON_SIZE, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = head.createGraphics();
+        try {
+            graphics.setRenderingHint(
+                    RenderingHints.KEY_INTERPOLATION,
+                    RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            drawLayer(graphics, texture, 8, 8, textureScale);
+            drawLayer(graphics, texture, 40, 8, textureScale);
+        } finally {
+            graphics.dispose();
+        }
+        return new ImageIcon(head);
+    }
+
+    /// Validates one decoded or reader-reported image against supported Minecraft skin layouts.
+    ///
+    /// @param width texture width
+    /// @param height texture height
+    /// @throws IOException when dimensions cannot represent a bounded scaled Minecraft skin
+    private static void validateTextureDimensions(int width, int height) throws IOException {
+        if (width <= 0
+                || height <= 0
+                || width > MAX_TEXTURE_EDGE
+                || height > MAX_TEXTURE_EDGE
+                || width % 64 != 0
+                || !(width == height || width == height * 2)) {
+            throw new IOException("Invalid account skin dimensions: " + width + "x" + height);
         }
     }
 
@@ -143,16 +286,18 @@ final class AccountAvatarIconCache {
                 null);
     }
 
-    /// Immutable key for one UUID-derived default avatar.
+    /// Immutable key for one account avatar presentation state.
     ///
     /// @param profileName profile name used only if the profile ID is malformed
     /// @param profileId stable Minecraft profile UUID text
+    /// @param source detached selected texture source
     @NotNullByDefault
-    private record AvatarKey(String profileName, String profileId) {
+    private record AvatarKey(String profileName, String profileId, AccountAvatarSource source) {
         /// Validates one immutable avatar key.
         private AvatarKey {
             Objects.requireNonNull(profileName, "profileName");
             Objects.requireNonNull(profileId, "profileId");
+            Objects.requireNonNull(source, "source");
         }
     }
 }

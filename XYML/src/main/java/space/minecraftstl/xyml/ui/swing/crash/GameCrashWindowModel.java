@@ -93,7 +93,7 @@ final class GameCrashWindowModel {
 
         List<Detail> details = new ArrayList<>();
         details.add(new Detail(i18n("launcher"), Metadata.VERSION));
-        details.add(new Detail(i18n("game.version"), version.getId()));
+        details.add(new Detail(i18n("game.instance"), version.getId()));
         details.add(new Detail(
                 i18n("settings.physical_memory"),
                 MEGABYTES.formatBytes(SystemInfo.getTotalMemorySize())));

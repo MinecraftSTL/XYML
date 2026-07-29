@@ -43,7 +43,7 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
  * @author huangyuhui
  */
 public final class NetworkUtils {
-    public static final String USER_AGENT = System.getProperty("http.agent", "HMCL");
+    public static final String USER_AGENT = System.getProperty("http.agent", "XYML");
 
     public static final String PARAMETER_SEPARATOR = "&";
     public static final String NAME_VALUE_SEPARATOR = "=";

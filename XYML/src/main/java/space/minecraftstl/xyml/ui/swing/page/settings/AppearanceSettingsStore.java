@@ -36,24 +36,10 @@ public interface AppearanceSettingsStore {
     /// @return independently cancellable registration
     Subscription subscribe(ValueChangeListener<StoredAppearanceSettings> listener);
 
-    /// Persists the canonical theme-mode identifier.
-    ///
-    /// @param themeModeValue `auto`, `light`, or `dark`
-    void setThemeModeValue(String themeModeValue);
-
     /// Persists a four-state brightness preference.
     ///
-    /// Compatibility stores support explicit system, light, and dark values through [setThemeModeValue]. Stores that
-    /// can mutate appearance override membership should override this method to support [ThemeBrightnessPreference#THEME].
-    ///
     /// @param preference requested brightness preference
-    default void setThemeBrightnessPreference(ThemeBrightnessPreference preference) {
-        String value = java.util.Objects.requireNonNull(preference, "preference").settingValue();
-        if (value == null) {
-            throw new UnsupportedOperationException("This appearance store cannot inherit theme brightness");
-        }
-        setThemeModeValue(value);
-    }
+    void setThemeBrightnessPreference(ThemeBrightnessPreference preference);
 
     /// Persists a validated corner radius.
     ///
@@ -64,4 +50,9 @@ public interface AppearanceSettingsStore {
     ///
     /// @param disabled whether animation is disabled
     void setAnimationsDisabled(boolean disabled);
+
+    /// Persists every background field and its selected-theme override membership atomically.
+    ///
+    /// @param background complete replacement background settings
+    void setBackgroundAppearance(BackgroundAppearanceSettings background);
 }

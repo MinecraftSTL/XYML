@@ -22,7 +22,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.setting.GameDirectoryID;
 
-/// Exposes game-directory state and mutations without coupling a Swing page directly to legacy observables.
+/// Exposes game-directory state and mutations without coupling a Swing page directly to launcher observables.
 ///
 /// Implementations keep all selection and persistence behavior behind the established game-directory manager. Calls
 /// that alter state are made on the Swing event dispatch thread by [GameDirectoryManagementPanel].

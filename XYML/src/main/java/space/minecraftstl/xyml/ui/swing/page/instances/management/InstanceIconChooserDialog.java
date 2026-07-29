@@ -22,7 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.setting.VersionIconType;
+import space.minecraftstl.xyml.setting.InstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.ButtonGroup;
@@ -37,7 +37,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 
-/// Presents the legacy fourteen bundled instance icons and one custom-image entry as a Swing dialog.
+/// Presents the fourteen bundled instance icons and one custom-image entry as a Swing dialog.
 ///
 /// The fixed five-column grid is keyboard navigable through a native `ButtonGroup`, keeps exactly one
 /// option selected, and delegates custom-file acquisition to the existing safe file chooser boundary.
@@ -47,21 +47,21 @@ final class InstanceIconChooserDialog {
     private static final String ICON_TYPE_PROPERTY = "instanceIconType";
 
     /// Exact bundled choices exposed by the former JavaFX dialog, in its established order.
-    private static final @Unmodifiable List<VersionIconType> BUILT_IN_TYPES = List.of(
-            VersionIconType.GRASS,
-            VersionIconType.CHEST,
-            VersionIconType.CHICKEN,
-            VersionIconType.COMMAND,
-            VersionIconType.APRIL_FOOLS,
-            VersionIconType.OPTIFINE,
-            VersionIconType.CRAFT_TABLE,
-            VersionIconType.FABRIC,
-            VersionIconType.LEGACY_FABRIC,
-            VersionIconType.FORGE,
-            VersionIconType.CLEANROOM,
-            VersionIconType.NEO_FORGE,
-            VersionIconType.FURNACE,
-            VersionIconType.QUILT);
+    private static final @Unmodifiable List<InstanceIconType> BUILT_IN_TYPES = List.of(
+            InstanceIconType.GRASS,
+            InstanceIconType.CHEST,
+            InstanceIconType.CHICKEN,
+            InstanceIconType.COMMAND,
+            InstanceIconType.APRIL_FOOLS,
+            InstanceIconType.OPTIFINE,
+            InstanceIconType.CRAFT_TABLE,
+            InstanceIconType.FABRIC,
+            InstanceIconType.LEGACY_FABRIC,
+            InstanceIconType.FORGE,
+            InstanceIconType.CLEANROOM,
+            InstanceIconType.NEO_FORGE,
+            InstanceIconType.FURNACE,
+            InstanceIconType.QUILT);
 
     /// Stable visible and assistive text supplied by the overview.
     private final InstanceOverviewStrings strings;
@@ -84,11 +84,11 @@ final class InstanceIconChooserDialog {
     /// @param hasCustomImage whether a custom image currently overrides the bundled type
     /// @param strings stable dialog text
     InstanceIconChooserDialog(
-            VersionIconType currentType,
+            InstanceIconType currentType,
             boolean hasCustomImage,
             InstanceOverviewStrings strings) {
         EdtDispatcher.requireEventDispatchThread();
-        VersionIconType validatedType = Objects.requireNonNull(currentType, "currentType");
+        InstanceIconType validatedType = Objects.requireNonNull(currentType, "currentType");
         this.strings = Objects.requireNonNull(strings, "strings");
         content.setName("instanceIconChooser");
         content.setOpaque(false);
@@ -99,10 +99,10 @@ final class InstanceIconChooserDialog {
         content.add(customButton, "w 64!, h 64!");
 
         List<JToggleButton> mutableButtons = new ArrayList<>(BUILT_IN_TYPES.size());
-        VersionIconType activeBuiltIn = validatedType == VersionIconType.DEFAULT
-                ? VersionIconType.GRASS
+        InstanceIconType activeBuiltIn = validatedType == InstanceIconType.DEFAULT
+                ? InstanceIconType.GRASS
                 : validatedType;
-        for (VersionIconType iconType : BUILT_IN_TYPES) {
+        for (InstanceIconType iconType : BUILT_IN_TYPES) {
             JToggleButton button = createBuiltInButton(iconType);
             button.setSelected(!hasCustomImage && iconType == activeBuiltIn);
             choices.add(button);
@@ -123,7 +123,7 @@ final class InstanceIconChooserDialog {
     /// @return completed icon selection, or `null` when either dialog is cancelled
     static @Nullable InstanceIconChoice show(
             Component owner,
-            VersionIconType currentType,
+            InstanceIconType currentType,
             boolean hasCustomImage,
             InstanceOverviewStrings strings,
             Supplier<@Nullable Path> customFileChooser) {
@@ -149,10 +149,10 @@ final class InstanceIconChooserDialog {
         return content;
     }
 
-    /// Returns the exact legacy built-in type order.
+    /// Returns the exact built-in type order.
     ///
     /// @return immutable list containing fourteen distinct selectable types
-    static @Unmodifiable List<VersionIconType> builtInTypes() {
+    static @Unmodifiable List<InstanceIconType> builtInTypes() {
         return BUILT_IN_TYPES;
     }
 
@@ -172,7 +172,7 @@ final class InstanceIconChooserDialog {
         for (JToggleButton button : builtInButtons) {
             if (button.isSelected()) {
                 @Nullable Object property = button.getClientProperty(ICON_TYPE_PROPERTY);
-                if (property instanceof VersionIconType iconType) {
+                if (property instanceof InstanceIconType iconType) {
                     return new InstanceIconChoice.BuiltIn(iconType);
                 }
             }
@@ -190,8 +190,8 @@ final class InstanceIconChooserDialog {
     ///
     /// @param iconType icon represented by the tile
     /// @return configured single-select toggle button
-    private static JToggleButton createBuiltInButton(VersionIconType iconType) {
-        VersionIconType validatedType = Objects.requireNonNull(iconType, "iconType");
+    private static JToggleButton createBuiltInButton(InstanceIconType iconType) {
+        InstanceIconType validatedType = Objects.requireNonNull(iconType, "iconType");
         JToggleButton button = new JToggleButton();
         String displayName = displayName(validatedType);
         configureTile(button, "instanceIcon" + validatedType.name(), displayName);
@@ -222,7 +222,7 @@ final class InstanceIconChooserDialog {
     ///
     /// @param iconType bundled icon type
     /// @return non-blank assistive display name
-    private static String displayName(VersionIconType iconType) {
+    private static String displayName(InstanceIconType iconType) {
         return switch (Objects.requireNonNull(iconType, "iconType")) {
             case DEFAULT, GRASS -> "Grass";
             case CHEST -> "Chest";

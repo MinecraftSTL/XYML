@@ -21,7 +21,7 @@ import java.util.Objects;
 
 /// @author Glavo
 public final class GitHubActionUtils {
-    private static final String OFFICIAL_ORGANIZATION = "HMCL-dev";
+    private static final String OFFICIAL_ORGANIZATION = "MinecraftSTL";
 
     public static final boolean IS_ON_OFFICIAL_REPO =
             OFFICIAL_ORGANIZATION.equalsIgnoreCase(System.getenv("GITHUB_REPOSITORY_OWNER"))

@@ -38,7 +38,7 @@ import java.util.concurrent.Executor;
 @NotNullByDefault
 public final class BuiltinThemePackCatalog {
     /// Stable built-in pack IDs in presentation order.
-    public static final @Unmodifiable List<String> PACK_IDS = List.of("hmcl.default", "hmcl.classic");
+    public static final @Unmodifiable List<String> PACK_IDS = List.of("xyml.default", "xyml.classic");
 
     /// Resource ceilings applied to bundled content as defense against broken build artifacts.
     private final ThemePackArchiveLimits limits;

@@ -80,7 +80,7 @@ public final class LauncherHelper {
     private final Account account;
 
     /// Stable instance identifier selected for this helper.
-    private final String selectedVersion;
+    private final String selectedInstance;
 
     /// Effective settings captured for the selected instance.
     private final GameSettings.Effective setting;
@@ -111,22 +111,22 @@ public final class LauncherHelper {
     ///
     /// @param repository repository containing the selected instance
     /// @param account account used for launch authentication
-    /// @param selectedVersion stable selected instance identifier
+    /// @param selectedInstance stable selected instance identifier
     /// @param launchInteraction production launch-decision presenter
     /// @param accountReauthentication production credential-expiry recovery service
     public LauncherHelper(
             XYMLGameRepository repository,
             Account account,
-            String selectedVersion,
+            String selectedInstance,
             LaunchInteraction launchInteraction,
             AccountReauthentication accountReauthentication) {
         this.repository = Objects.requireNonNull(repository);
         this.account = Objects.requireNonNull(account);
-        this.selectedVersion = Objects.requireNonNull(selectedVersion);
+        this.selectedInstance = Objects.requireNonNull(selectedInstance);
         this.productionInteractions = new ProductionInteractions(
                 launchInteraction,
                 accountReauthentication);
-        this.setting = repository.getEffectiveGameSettings(selectedVersion);
+        this.setting = repository.getEffectiveGameSettings(selectedInstance);
         this.launcherVisibility = setting.getInheritable(GameSettings::launcherVisibilityProperty);
         this.showLogs = setting.getInheritable(GameSettings::showLogsProperty);
         this.logLineLimit = Log.getLogLines();
@@ -151,7 +151,7 @@ public final class LauncherHelper {
         return processLifecycleCompletion;
     }
 
-    /// Applies the legacy test-launch behavior before task construction.
+    /// Applies test-launch behavior before task construction.
     ///
     /// Test launches always retain the launcher window and show the native log window, regardless of the
     /// instance's ordinary visibility and log preferences. Calling this method repeatedly is harmless.
@@ -182,7 +182,7 @@ public final class LauncherHelper {
     ///
     /// @return not-yet-started task whose successful result is the actual managed game process
     public Task<ManagedProcess> createLaunchTask() {
-        LOG.info("Launching game version: " + selectedVersion);
+        LOG.info("Launching game instance: " + selectedInstance);
         return createGameLaunchTask();
     }
 
@@ -196,7 +196,7 @@ public final class LauncherHelper {
     /// @return not-yet-started task that completes with the normalized written script path
     public Task<Path> createLaunchScriptTask(Path scriptFile) {
         Path destination = Objects.requireNonNull(scriptFile, "scriptFile").toAbsolutePath().normalize();
-        LOG.info("Creating launch script for game version: " + selectedVersion);
+        LOG.info("Creating launch script for game instance: " + selectedInstance);
         return applyLaunchProgressPolicy(
                 createLaunchPreparation(true).thenComposeAsync((@Nullable XYMLGameLauncher launcher) ->
                         Task.supplyAsync(() -> {
@@ -224,9 +224,9 @@ public final class LauncherHelper {
         PROCESSES.removeIf(it -> it.get() == null);
 
         DefaultDependencyManager dependencyManager = repository.getDependency();
-        AtomicReference<Version> version = new AtomicReference<>(MaintainTask.maintain(repository, repository.getResolvedVersion(selectedVersion)));
+        AtomicReference<Version> version = new AtomicReference<>(MaintainTask.maintain(repository, repository.getResolvedVersion(selectedInstance)));
         Optional<String> gameVersion = repository.getGameVersion(version.get());
-        boolean integrityCheck = repository.unmarkVersionLaunchedAbnormally(selectedVersion);
+        boolean integrityCheck = repository.unmarkInstanceLaunchedAbnormally(selectedInstance);
         List<String> javaAgents = new ArrayList<>(0);
         List<String> javaArguments = new ArrayList<>(0);
 
@@ -242,10 +242,10 @@ public final class LauncherHelper {
                             dependencyManager.checkGameCompletionAsync(version.get(), integrityCheck),
                             Task.composeAsync(() -> {
                                 try {
-                                    ModpackConfiguration<?> configuration = ModpackHelper.readModpackConfiguration(repository.getModpackConfiguration(selectedVersion));
+                                    ModpackConfiguration<?> configuration = ModpackHelper.readModpackConfiguration(repository.getModpackConfiguration(selectedInstance));
                                     @Nullable ModpackProvider provider = ModpackHelper.getProviderByType(configuration.getType());
                                     if (provider == null) return null;
-                                    else return provider.createCompletionTask(dependencyManager, selectedVersion);
+                                    else return provider.createCompletionTask(dependencyManager, selectedInstance);
                                 } catch (IOException e) {
                                     return null;
                                 }
@@ -320,7 +320,7 @@ public final class LauncherHelper {
                 .thenComposeAsync(() -> logIn(account).withStage("launch.state.logging_in"))
                 .thenComposeAsync((@Nullable AuthInfo authInfo) -> Task.supplyAsync(() -> {
                     LaunchOptions.Builder launchOptionsBuilder = repository.getLaunchOptions(
-                            selectedVersion,
+                            selectedInstance,
                             Objects.requireNonNull(javaVersionRef.get(), "selected Java runtime"),
                             repository.getBaseDirectory(),
                             javaAgents,
@@ -335,7 +335,7 @@ public final class LauncherHelper {
 
                     LaunchOptions launchOptions = launchOptionsBuilder.create();
 
-                    LOG.info("Here's the structure of game mod directory:\n" + FileUtils.printFileStructure(repository.getModsDirectory(selectedVersion), 10));
+                    LOG.info("Here's the structure of game mod directory:\n" + FileUtils.printFileStructure(repository.getModsDirectory(selectedInstance), 10));
 
                     return new XYMLGameLauncher(
                             repository,
@@ -381,7 +381,7 @@ public final class LauncherHelper {
                         new Task.StagesHint("launch.state.java"),
                         new Task.StagesHint(
                                 "launch.state.dependencies",
-                                List.of("hmcl.install.assets", "hmcl.install.libraries", "hmcl.modpack.download")),
+                                List.of("xyml.install.assets", "xyml.install.libraries", "xyml.modpack.download")),
                         new Task.StagesHint("launch.state.logging_in"),
                         new Task.StagesHint("launch.state.waiting_launching"));
     }
@@ -1148,7 +1148,7 @@ public final class LauncherHelper {
         @Override
         public void onExit(int exitCode, ExitType exitType) {
             if (showLogs) {
-                Objects.requireNonNull(logBuffer, "log buffer").add(new Log(String.format("[%s] [HMCL ProcessListener] Minecraft exit with code %d(0x%x), type is %s.", TIME_FORMATTER.format(Instant.now()), exitCode, exitCode, exitType), Log4jLevel.INFO));
+                Objects.requireNonNull(logBuffer, "log buffer").add(new Log(String.format("[%s] [XYML ProcessListener] Minecraft exit with code %d(0x%x), type is %s.", TIME_FORMATTER.format(Instant.now()), exitCode, exitCode, exitType), Log4jLevel.INFO));
                 Thread logThread = Objects.requireNonNull(submitLogThread, "log submitter");
                 logThread.interrupt();
                 try {
@@ -1162,7 +1162,7 @@ public final class LauncherHelper {
                 return;
 
             if (exitType != ExitType.NORMAL) {
-                repository.markVersionLaunchedAbnormally(version.getId());
+                repository.markInstanceLaunchedAbnormally(version.getId());
                 SwingGameCrashWindow.open(
                         Objects.requireNonNull(process, "managed process"),
                         exitType,

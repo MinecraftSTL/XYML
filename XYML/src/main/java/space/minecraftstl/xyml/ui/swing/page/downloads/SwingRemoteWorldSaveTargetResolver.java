@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.downloads;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
@@ -106,7 +108,7 @@ public final class SwingRemoteWorldSaveTargetResolver implements RemoteAddonInst
     /// @param suggestedFileName safe single-component suggested filename
     /// @return selected path, or empty after cancellation
     private static Optional<Path> showSaveDialog(Component owner, String suggestedFileName) {
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setDialogTitle(i18n("world.download"));
         chooser.setDialogType(JFileChooser.SAVE_DIALOG);
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);

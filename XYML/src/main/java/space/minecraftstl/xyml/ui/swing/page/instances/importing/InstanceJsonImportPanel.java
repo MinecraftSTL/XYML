@@ -176,7 +176,7 @@ public final class InstanceJsonImportPanel extends JPanel implements AutoCloseab
         if (closed || activeExecutor != null || selectedSource == null) {
             return;
         }
-        if (!XYMLGameRepository.isValidVersionId(instanceId)) {
+        if (!XYMLGameRepository.isValidInstanceId(instanceId)) {
             setStatus(strings.invalidInstanceIdStatus());
             updateImportEligibility();
             return;
@@ -313,7 +313,7 @@ public final class InstanceJsonImportPanel extends JPanel implements AutoCloseab
         return !closed
                 && activeExecutor == null
                 && source != null
-                && XYMLGameRepository.isValidVersionId(instanceIdField.getText().strip());
+                && XYMLGameRepository.isValidInstanceId(instanceIdField.getText().strip());
     }
 
     /// Updates visible and assistive status feedback.

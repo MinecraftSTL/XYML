@@ -247,11 +247,11 @@ public final class Logger {
                 throw new AssertionError("This thread cannot be interrupted", e);
             }
         });
-        loggerThread.setName("HMCL Logger Thread");
+        loggerThread.setName("XYML Logger Thread");
         loggerThread.start();
 
         Thread cleanerThread = new Thread(this::onExit);
-        cleanerThread.setName("HMCL Logger Shutdown Hook");
+        cleanerThread.setName("XYML Logger Shutdown Hook");
         Runtime.getRuntime().addShutdownHook(cleanerThread);
     }
 

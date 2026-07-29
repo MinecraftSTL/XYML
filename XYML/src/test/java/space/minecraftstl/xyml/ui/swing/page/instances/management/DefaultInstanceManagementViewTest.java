@@ -111,7 +111,12 @@ final class DefaultInstanceManagementViewTest {
                     new DefaultResourcePackCatalogInteractions(
                             presentation.resourcePacksActions(),
                             executor),
-                    () -> returned.set(true))));
+                    () -> returned.set(true),
+                    presentation.taskProgress(),
+                    null,
+                    Duration.ZERO,
+                    unusedWorldQuickPlayActions(),
+                    null)));
             DefaultInstanceManagementView view = Objects.requireNonNull(viewReference.get());
 
             EdtDispatcher.executeAndWait(() -> {
@@ -204,7 +209,7 @@ final class DefaultInstanceManagementViewTest {
                     presentation.taskProgress(),
                     null,
                     Duration.ZERO,
-                    WorldQuickPlayActions.unavailable(),
+                    unusedWorldQuickPlayActions(),
                     new UnusedMaintenanceLaunchActions())));
             DefaultInstanceManagementView view = Objects.requireNonNull(viewReference.get());
 
@@ -254,6 +259,23 @@ final class DefaultInstanceManagementViewTest {
                     default -> throw new AssertionError(
                             "Instance-management construction used repository eagerly: " + method.getName());
                 }));
+    }
+
+    /// Creates quick-play callbacks that fail if view construction invokes them eagerly.
+    ///
+    /// @return available quick-play boundary for construction-only tests
+    private static WorldQuickPlayActions unusedWorldQuickPlayActions() {
+        return WorldQuickPlayActions.available(
+                worldFolder -> {
+                    throw new AssertionError("Construction started world quick play eagerly: " + worldFolder);
+                },
+                (worldFolder, destination) -> {
+                    throw new AssertionError(
+                            "Construction exported a world launch script eagerly: "
+                                    + worldFolder
+                                    + " -> "
+                                    + destination);
+                });
     }
 
     /// Launch boundary that fails immediately if lazy construction invokes an operation.

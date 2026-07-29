@@ -81,43 +81,14 @@ public final class GameDirectory {
         this.name.set(name);
     }
 
-    /// The migrated legacy game settings preset ID, or `null` when this game directory uses the default preset.
-    private final ObjectProperty<@Nullable GameSettingsPresetID> legacyGameSettings;
-
-    /// Returns the migrated legacy game settings preset ID property.
-    public ObjectProperty<@Nullable GameSettingsPresetID> legacyGameSettingsProperty() {
-        return legacyGameSettings;
-    }
-
-    /// Returns the migrated legacy game settings preset ID, or `null` when this game directory uses the default preset.
-    public @Nullable GameSettingsPresetID getLegacyGameSettings() {
-        return legacyGameSettings.get();
-    }
-
-    /// Sets the migrated legacy game settings preset ID.
-    public void setLegacyGameSettings(@Nullable GameSettingsPresetID legacyGameSettings) {
-        this.legacyGameSettings.set(legacyGameSettings);
-    }
-
     /// Creates a game directory.
     public GameDirectory(GameDirectoryID id, @Nullable LocalizedText name, PortablePath path) {
-        this(id, name, path, null);
-    }
-
-    /// Creates a game directory.
-    public GameDirectory(
-            GameDirectoryID id,
-            @Nullable LocalizedText name,
-            PortablePath path,
-            @Nullable GameSettingsPresetID legacyGameSettings) {
         this.id = Objects.requireNonNull(id);
         this.name = new SimpleObjectProperty<>(this, "name", name);
         this.path = new SimpleObjectProperty<>(this, "path", Objects.requireNonNull(path));
-        this.legacyGameSettings = new SimpleObjectProperty<>(this, "legacyGameSettings", legacyGameSettings);
 
         this.name.subscribe(change -> invalidate());
         this.path.subscribe(change -> invalidate());
-        this.legacyGameSettings.subscribe(change -> invalidate());
     }
 
     /// Returns a debug string containing the game directory path and display metadata.
@@ -168,10 +139,6 @@ public final class GameDirectory {
                 }
             }
             jsonObject.add("path", context.serialize(src.getPath(), PortablePath.class));
-            if (src.getLegacyGameSettings() != null) {
-                jsonObject.add("legacyGameSettings", context.serialize(src.getLegacyGameSettings(), GameSettingsPresetID.class));
-            }
-
             return jsonObject;
         }
 
@@ -191,10 +158,7 @@ public final class GameDirectory {
             }
             @Nullable LocalizedText name = context.deserialize(obj.get("name"), LocalizedText.class);
 
-            return new GameDirectory(id,
-                    name,
-                    path,
-                    context.deserialize(obj.get("legacyGameSettings"), GameSettingsPresetID.class));
+            return new GameDirectory(id, name, path);
         }
 
     }

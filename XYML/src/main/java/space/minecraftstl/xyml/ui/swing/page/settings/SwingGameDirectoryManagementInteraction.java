@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -45,8 +47,8 @@ final class SwingGameDirectoryManagementInteraction implements GameDirectoryMana
     public @Nullable Path chooseDirectory(Component owner, @Nullable Path initialDirectory) {
         EdtDispatcher.requireEventDispatchThread();
         JFileChooser chooser = initialDirectory == null
-                ? new JFileChooser()
-                : new JFileChooser(initialDirectory.toFile());
+                ? new EditablePathChooser()
+                : new EditablePathChooser(initialDirectory.toFile());
         chooser.setDialogTitle(i18n("game_directory.instance_directory.choose"));
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
         chooser.setMultiSelectionEnabled(false);

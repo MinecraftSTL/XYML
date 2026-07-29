@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -67,7 +69,7 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
     @Override
     public @Nullable Path chooseWorldArchive(Component owner, Path currentDirectory) {
         EdtDispatcher.requireEventDispatchThread();
-        JFileChooser chooser = new JFileChooser(
+        JFileChooser chooser = new EditablePathChooser(
                 Objects.requireNonNull(currentDirectory, "currentDirectory").toFile());
         chooser.setDialogTitle(strings.importDialogTitle());
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
@@ -156,7 +158,9 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
         Component checkedOwner = Objects.requireNonNull(owner, "owner");
         WorldCatalogItem selectedWorld = Objects.requireNonNull(world, "world");
         @Nullable Path initialDirectory = selectedWorld.path().getParent();
-        JFileChooser chooser = new JFileChooser(initialDirectory == null ? null : initialDirectory.toFile());
+        JFileChooser chooser = initialDirectory == null
+                ? new EditablePathChooser()
+                : new EditablePathChooser(initialDirectory.toFile());
         chooser.setDialogTitle(strings.exportDialogTitle());
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setMultiSelectionEnabled(false);
@@ -197,7 +201,7 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(owner, "owner");
         Objects.requireNonNull(world, "world");
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setDialogTitle(strings.launchScriptDialogTitle());
         chooser.setDialogType(JFileChooser.SAVE_DIALOG);
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);

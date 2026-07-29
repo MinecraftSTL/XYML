@@ -25,6 +25,7 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.theme.ResolvedTheme;
 import space.minecraftstl.xyml.theme.ThemeBrightness;
+import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.theme.ThemeColorStyle;
 import space.minecraftstl.xyml.theme.ThemeContrast;
@@ -49,7 +50,7 @@ public final class SwingThemeManagerTest {
     @Test
     public void initializesAndUpdatesFlatLaf() {
         SwingThemeManager manager = new SwingThemeManager(
-                ThemeMode.LIGHT,
+                ThemeBrightnessPreference.LIGHT,
                 new SwingDesignTokens(4),
                 SystemThemeDetector.lightFallback());
 
@@ -62,7 +63,7 @@ public final class SwingThemeManagerTest {
                 () -> assertInstanceOf(FlatLightLaf.class, UIManager.getLookAndFeel()),
                 () -> assertEquals(4, UIManager.getInt("Component.arc")));
 
-        manager.update(ThemeMode.DARK, new SwingDesignTokens(13));
+        manager.update(ThemeBrightnessPreference.DARK, new SwingDesignTokens(13));
 
         assertAll(
                 () -> assertEquals(ThemeVariant.DARK, manager.effectiveVariant()),
@@ -75,7 +76,7 @@ public final class SwingThemeManagerTest {
     public void refreshesSystemAppearance() {
         AtomicBoolean dark = new AtomicBoolean();
         SwingThemeManager manager = new SwingThemeManager(
-                ThemeMode.SYSTEM,
+                ThemeBrightnessPreference.SYSTEM,
                 new SwingDesignTokens(6),
                 dark::get);
         manager.initialize();
@@ -94,33 +95,42 @@ public final class SwingThemeManagerTest {
         AtomicInteger refreshRequests = new AtomicInteger();
         ThemeColor accent = new ThemeColor("resolved", "#147D64");
         SwingThemeManager manager = new SwingThemeManager(
-                resolved(accent, ThemeBrightness.LIGHT),
+                ThemeBrightnessPreference.SYSTEM,
                 new SwingDesignTokens(6),
                 SystemThemeDetector.lightFallback());
         manager.setSystemThemeRefreshHandler(refreshRequests::incrementAndGet);
         manager.initialize();
-        manager.update(resolved(accent, ThemeBrightness.LIGHT), new SwingDesignTokens(6), true);
+        manager.update(
+                resolved(accent, ThemeBrightness.LIGHT),
+                new SwingDesignTokens(6),
+                ThemeBrightnessPreference.SYSTEM);
 
         manager.refreshSystemTheme();
 
         assertAll(
-                () -> assertEquals(ThemeMode.SYSTEM, manager.mode()),
+                () -> assertEquals(
+                        ThemeBrightnessPreference.SYSTEM,
+                        manager.brightnessPreference()),
                 () -> assertEquals(1, refreshRequests.get()),
                 () -> assertEquals(accent, manager.effectiveAccentColor()));
     }
 
-    /// Resolved brightness and accent values install through FlatLaf and update without changing legacy APIs.
+    /// Resolved brightness and accent values install through FlatLaf and update through current APIs.
     @Test
     public void appliesResolvedThemeBrightnessAndAccent() {
         @Nullable Map<String, String> previousExtraDefaults = FlatLaf.getGlobalExtraDefaults();
         try {
             ThemeColor firstAccent = new ThemeColor("first", "#147D64");
             SwingThemeManager manager = new SwingThemeManager(
-                    resolved(firstAccent, ThemeBrightness.DARK),
+                    ThemeBrightnessPreference.DARK,
                     new SwingDesignTokens(7),
                     SystemThemeDetector.lightFallback());
 
             manager.initialize();
+            manager.update(
+                    resolved(firstAccent, ThemeBrightness.DARK),
+                    new SwingDesignTokens(7),
+                    ThemeBrightnessPreference.DARK);
 
             assertAll(
                     () -> assertEquals(ThemeVariant.DARK, manager.effectiveVariant()),
@@ -129,7 +139,10 @@ public final class SwingThemeManagerTest {
                     () -> assertEquals(Color.decode(firstAccent.color()), UIManager.getColor("Component.accentColor")));
 
             ThemeColor secondAccent = new ThemeColor("second", "#E67E22");
-            manager.update(resolved(secondAccent, ThemeBrightness.DARK), new SwingDesignTokens(7));
+            manager.update(
+                    resolved(secondAccent, ThemeBrightness.DARK),
+                    new SwingDesignTokens(7),
+                    ThemeBrightnessPreference.DARK);
 
             assertAll(
                     () -> assertEquals(secondAccent, manager.effectiveAccentColor()),
@@ -137,7 +150,7 @@ public final class SwingThemeManagerTest {
                     () -> assertEquals(secondAccent.color(),
                             FlatLaf.getGlobalExtraDefaults().get("@accentColor")));
 
-            manager.update(ThemeMode.LIGHT, new SwingDesignTokens(7));
+            manager.update(ThemeBrightnessPreference.LIGHT, new SwingDesignTokens(7));
 
             assertAll(
                     () -> assertEquals(ThemeVariant.LIGHT, manager.effectiveVariant()),
@@ -156,6 +169,6 @@ public final class SwingThemeManagerTest {
     /// @param brightness concrete brightness
     /// @return resolved test theme
     private static ResolvedTheme resolved(ThemeColor color, ThemeBrightness brightness) {
-        return new ResolvedTheme(color, brightness, ThemeColorStyle.FIDELITY, ThemeContrast.DEFAULT);
+        return new ResolvedTheme(color, brightness, ThemeColorStyle.FIDELITY, ThemeContrast.STANDARD);
     }
 }

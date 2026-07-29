@@ -33,18 +33,6 @@ public record HomeStatusStrings(
         String missingAccountStatus,
         String missingInstanceStatus,
         String exportingLaunchScriptStatus) {
-    /// Creates status text without a distinct script-export state for source-compatible callers.
-    ///
-    /// Production presentation supplies a dedicated localized export status. This overload preserves the previous
-    /// three-field contract for focused tests and callers that do not expose script export.
-    ///
-    /// @param readyStatus status when both selections exist
-    /// @param missingAccountStatus status when no account is selected
-    /// @param missingInstanceStatus status when no instance is selected
-    public HomeStatusStrings(String readyStatus, String missingAccountStatus, String missingInstanceStatus) {
-        this(readyStatus, missingAccountStatus, missingInstanceStatus, readyStatus);
-    }
-
     /// Validates localized status text.
     public HomeStatusStrings {
         Objects.requireNonNull(readyStatus, "readyStatus");

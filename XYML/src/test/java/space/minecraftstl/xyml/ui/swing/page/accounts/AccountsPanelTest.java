@@ -688,7 +688,7 @@ public final class AccountsPanelTest {
         public Optional<OfflineSkinSnapshot> snapshot(String accountId) {
             Objects.requireNonNull(accountId, "accountId");
             return offlineAccountId.equals(accountId)
-                    ? Optional.of(new OfflineSkinSnapshot(accountId, "Player 0", null, true))
+                    ? Optional.of(new OfflineSkinSnapshot(accountId, "Player 0", null, true, null))
                     : Optional.empty();
         }
 

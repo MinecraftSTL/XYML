@@ -25,7 +25,7 @@ import java.util.Objects;
 
 /// Immutable description of a removable library not represented by [GameLoaderKind].
 ///
-/// This preserves the legacy installer-page behavior for third-party patches while explicitly
+/// This preserves installer behavior for third-party patches while explicitly
 /// distinguishing a structure that XYML can see clearly from an external or uncertain discovery.
 /// It deliberately does not infer a loader kind for unknown Core library identifiers.
 ///

@@ -55,7 +55,7 @@ final class DiscoJavaRuntimeAcquisitionProcessBackend
     DiscoJavaRuntimeAcquisitionProcessBackend() {
         this(
                 DownloadProviders.getDownloadProvider(),
-                new JavaManagerRuntimeAcquisitionService.ProcessBackend());
+                new JavaRuntimeAcquisitionProcessBackend());
     }
 
     /// Creates a backend around explicit collaborators for focused integration tests.

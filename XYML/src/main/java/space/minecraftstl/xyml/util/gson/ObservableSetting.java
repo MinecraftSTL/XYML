@@ -194,19 +194,12 @@ public abstract class ObservableSetting {
         /// Primary JSON member name.
         private final String serializedName;
 
-        /// Accepted legacy JSON member names.
-        private final @Unmodifiable List<String> alternateNames;
-
         /// Direct accessor for the final observable field.
         private final VarHandle varHandle;
 
         /// Creates metadata shared by all observable field strategies.
-        private ObservableField(
-                String serializedName,
-                @Unmodifiable List<String> alternateNames,
-                VarHandle varHandle) {
+        private ObservableField(String serializedName, VarHandle varHandle) {
             this.serializedName = serializedName;
-            this.alternateNames = alternateNames;
             this.varHandle = varHandle;
         }
 
@@ -216,10 +209,6 @@ public abstract class ObservableSetting {
             String name = serializedNameAnnotation == null
                     ? field.getName()
                     : serializedNameAnnotation.value();
-            @Unmodifiable List<String> alternateNames = serializedNameAnnotation == null
-                    ? List.of()
-                    : List.of(serializedNameAnnotation.alternate());
-
             VarHandle varHandle;
             try {
                 varHandle = lookup.unreflectVarHandle(field);
@@ -230,7 +219,7 @@ public abstract class ObservableSetting {
             Class<?> fieldClass = field.getType();
             if (isListClass(fieldClass)) {
                 Type listType = requireParameterizedSupertype(field, List.class, "list");
-                return new CollectionField<>(name, alternateNames, varHandle, listType, listType);
+                return new CollectionField<>(name, varHandle, listType, listType);
             }
             if (isSetClass(fieldClass)) {
                 ParameterizedType setType = requireParameterizedSupertype(field, Set.class, "set");
@@ -238,11 +227,11 @@ public abstract class ObservableSetting {
                         null,
                         List.class,
                         setType.getActualTypeArguments()[0]);
-                return new CollectionField<>(name, alternateNames, varHandle, setType, listType);
+                return new CollectionField<>(name, varHandle, setType, listType);
             }
             if (isMapClass(fieldClass)) {
                 Type mapType = requireParameterizedSupertype(field, Map.class, "map");
-                return new MapField<>(name, alternateNames, varHandle, mapType);
+                return new MapField<>(name, varHandle, mapType);
             }
             if (Property.class.isAssignableFrom(fieldClass)) {
                 ParameterizedType propertyType = requireParameterizedSupertype(
@@ -251,7 +240,6 @@ public abstract class ObservableSetting {
                         "property");
                 return new PropertyField<>(
                         name,
-                        alternateNames,
                         varHandle,
                         propertyType.getActualTypeArguments()[0]);
             }
@@ -292,11 +280,6 @@ public abstract class ObservableSetting {
             return serializedName;
         }
 
-        /// Returns the immutable accepted legacy JSON member names.
-        final @Unmodifiable List<String> getAlternateNames() {
-            return alternateNames;
-        }
-
         /// Returns the non-null observable field value from the supplied settings instance.
         final Object get(T value) {
             return Objects.requireNonNull(varHandle.get(value), "Observable setting field " + serializedName);
@@ -317,10 +300,9 @@ public abstract class ObservableSetting {
             /// Creates scalar property metadata.
             private PropertyField(
                     String serializedName,
-                    @Unmodifiable List<String> alternateNames,
                     VarHandle varHandle,
                     Type elementType) {
-                super(serializedName, alternateNames, varHandle);
+                super(serializedName, varHandle);
                 this.elementType = elementType;
             }
 
@@ -389,11 +371,10 @@ public abstract class ObservableSetting {
             /// Creates observable collection metadata.
             private CollectionField(
                     String serializedName,
-                    @Unmodifiable List<String> alternateNames,
                     VarHandle varHandle,
                     Type collectionType,
                     Type listType) {
-                super(serializedName, alternateNames, varHandle);
+                super(serializedName, varHandle);
                 this.collectionType = collectionType;
                 this.listType = listType;
             }
@@ -438,10 +419,9 @@ public abstract class ObservableSetting {
             /// Creates observable map metadata.
             private MapField(
                     String serializedName,
-                    @Unmodifiable List<String> alternateNames,
                     VarHandle varHandle,
                     Type mapType) {
-                super(serializedName, alternateNames, varHandle);
+                super(serializedName, varHandle);
                 this.mapType = mapType;
             }
 
@@ -498,7 +478,7 @@ public abstract class ObservableSetting {
             return result;
         }
 
-        /// Deserializes known fields by primary or alternate name and retains every unrecognized member.
+        /// Deserializes known fields by their current names and retains every unrecognized member.
         @Override
         public @Nullable T deserialize(
                 @Nullable JsonElement json,
@@ -515,15 +495,6 @@ public abstract class ObservableSetting {
             LinkedHashMap<String, JsonElement> values = new LinkedHashMap<>(json.getAsJsonObject().asMap());
             for (ObservableField<T> field : observableFields(setting)) {
                 @Nullable JsonElement value = values.remove(field.getSerializedName());
-                if (value == null) {
-                    for (String alternateName : field.getAlternateNames()) {
-                        value = values.remove(alternateName);
-                        if (value != null) {
-                            break;
-                        }
-                    }
-                }
-
                 if (value != null) {
                     setting.markDirty(field.get(setting));
                     try {

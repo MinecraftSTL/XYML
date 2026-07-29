@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.downloads;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -168,7 +170,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
             return;
         }
 
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setDialogTitle(i18n("modpack.choose"));
         chooser.setFileFilter(new FileNameExtensionFilter(i18n("modpack"), "zip", "mrpack"));
         if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
@@ -204,7 +206,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
             updateImportButton();
             return;
         }
-        if (!XYMLGameRepository.isValidVersionId(instanceName)) {
+        if (!XYMLGameRepository.isValidInstanceId(instanceName)) {
             setStatus(i18n("install.new_game.malformed"));
             updateImportButton();
             return;
@@ -215,7 +217,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
             repository = GameDirectoryManager.getSelectedRepository();
         } catch (RuntimeException selectionFailure) {
             LOG.warning("Unable to resolve the selected repository for local modpack import", selectionFailure);
-            setStatus(i18n("version.empty"));
+            setStatus(i18n("instance.empty"));
             return;
         }
         if (repository.hasVersion(instanceName)) {
@@ -429,7 +431,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
                 && archive != null
                 && Files.isRegularFile(archive)
                 && ModpackHelper.isFileModpackByExtension(archive)
-                && XYMLGameRepository.isValidVersionId(instanceNameField.getText().trim());
+                && XYMLGameRepository.isValidInstanceId(instanceNameField.getText().trim());
     }
 
     /// Updates the visible feedback label and its assistive tooltip on the EDT.

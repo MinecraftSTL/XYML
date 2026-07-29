@@ -47,8 +47,7 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 ///
 /// The session creates and owns a [TaskExecutorPresentationModel] before executor startup, then republishes that
 /// model through its stable [LaunchSession] identity. This session intentionally has no operation that stops a
-/// [ManagedProcess]. Once a process exists, ownership passes to the launcher process-monitoring layer that will be
-/// connected in a later migration step.
+/// [ManagedProcess]. Once a process exists, ownership passes to the launcher process-monitoring layer.
 @NotNullByDefault
 public final class DefaultLaunchSession implements LaunchSession {
     /// Serializes startup, cancellation, and terminal-state selection.
@@ -496,10 +495,9 @@ public final class DefaultLaunchSession implements LaunchSession {
 
         @Nullable Throwable executorFailure = taskExecutor.getFailure();
         @Nullable Exception taskFailure = task.getException();
-        @Nullable Exception legacyExecutorFailure = taskExecutor.getException();
         @Nullable Throwable resolvedFailure = executorFailure != null
                 ? executorFailure
-                : taskFailure != null ? taskFailure : legacyExecutorFailure;
+                : taskFailure;
         if (resolvedFailure instanceof CancellationException
                 || taskExecutor.isCancelled() && resolvedFailure == null) {
             finish(LaunchStatus.CANCELLED, null, null);

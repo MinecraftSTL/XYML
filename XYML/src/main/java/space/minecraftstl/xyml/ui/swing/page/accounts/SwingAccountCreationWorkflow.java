@@ -33,7 +33,7 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// Production entry point for opening the native add-account dialog.
 ///
 /// The caller supplies the executor and remains responsible for its lifecycle. This facade intentionally
-/// does not reference `Launcher` or `Controllers`, allowing production wiring to replace the legacy dialog
+/// does not reference `Launcher` or `Controllers`, allowing production wiring to replace the launcher dialog
 /// in one later composition change without reintroducing JavaFX into Swing UI classes.
 @NotNullByDefault
 public final class SwingAccountCreationWorkflow {
@@ -49,7 +49,7 @@ public final class SwingAccountCreationWorkflow {
     ///
     /// @param owner owning component, or null for an unowned dialog
     /// @param initialMethod explicit method selected when the dialog opens
-    /// @param executor caller-owned executor for authentication and legacy bridge work
+    /// @param executor caller-owned executor for authentication and launcher bridge work
     /// @return newly created native dialog
     public static SwingAccountCreationDialog create(
             @Nullable Component owner,
@@ -59,7 +59,7 @@ public final class SwingAccountCreationWorkflow {
         return new SwingAccountCreationDialog(
                 owner,
                 Objects.requireNonNull(initialMethod, "initialMethod"),
-                new LegacyAccountCreationGateway(),
+                new LauncherAccountCreationGateway(),
                 Objects.requireNonNull(executor, "executor"));
     }
 
@@ -67,7 +67,7 @@ public final class SwingAccountCreationWorkflow {
     ///
     /// @param owner owning component, or null for an unowned dialog
     /// @param initialMethod explicit method selected when the dialog opens
-    /// @param executor caller-owned executor for authentication and legacy bridge work
+    /// @param executor caller-owned executor for authentication and launcher bridge work
     public static void open(
             @Nullable Component owner,
             AccountCreationMethod initialMethod,
@@ -80,20 +80,20 @@ public final class SwingAccountCreationWorkflow {
         });
     }
 
-    /// Resolves the legacy preferred method and restriction policy off the EDT, then opens the native dialog.
+    /// Resolves the launcher preferred method and restriction policy off the EDT, then opens the native dialog.
     ///
-    /// This is the production command intended to replace the legacy `CreateAccountPane` entry point. Preference
+    /// This is the production command intended to replace the launcher `CreateAccountPane` entry point. Preference
     /// reads happen on `executor`; the gateway confines launcher-state property access to
-    /// [space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher]. A restricted environment displays only
+    /// [space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher]. A restricted environment displays only
     /// Microsoft, while an unrestricted environment persists later tab changes through the same gateway.
     ///
     /// @param owner owning component, or null for an unowned dialog
-    /// @param executor caller-owned executor for preference loading, authentication, and legacy bridge work
+    /// @param executor caller-owned executor for preference loading, authentication, and launcher bridge work
     public static AccountCreationWorkflowHandle openPreferred(
             @Nullable Component owner,
             ExecutorService executor) {
         Objects.requireNonNull(executor, "executor");
-        LegacyAccountCreationGateway gateway = new LegacyAccountCreationGateway();
+        LauncherAccountCreationGateway gateway = new LauncherAccountCreationGateway();
         DefaultWorkflowHandle handle = new DefaultWorkflowHandle();
         Future<?> preferenceLoad = executor.submit(() -> {
             try {
@@ -145,7 +145,7 @@ public final class SwingAccountCreationWorkflow {
         /// @param owner owning component, or null
         /// @param initialMethod resolved initial method
         /// @param microsoftOnly resolved restriction policy
-        /// @param gateway legacy gateway used during preference resolution
+        /// @param gateway launcher gateway used during preference resolution
         /// @param executor caller-owned executor
         private void openDialog(
                 @Nullable Component owner,

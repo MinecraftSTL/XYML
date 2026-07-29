@@ -34,7 +34,7 @@ import java.util.Objects;
 @NotNullByDefault
 public final class ThemeSelectionResolver {
     /// Built-in default reference used by the convenience constructor.
-    public static final ThemeReference DEFAULT_FALLBACK = new ThemeReference("hmcl.default", null);
+    public static final ThemeReference DEFAULT_FALLBACK = new ThemeReference("xyml.default", null);
 
     /// Validated packages retained in deterministic encounter order.
     private final @Unmodifiable List<ThemePackPackage> packages;
@@ -90,6 +90,8 @@ public final class ThemeSelectionResolver {
         return new ResolvedThemeSelection(
                 request.selectedTheme(),
                 selected.reference(),
+                selected.themePackage(),
+                appearance,
                 effective,
                 fallbackUsed);
     }
@@ -104,18 +106,23 @@ public final class ThemeSelectionResolver {
             return null;
         }
         @Nullable Theme theme = themePackage.manifest().findTheme(reference.themeId());
-        return theme != null ? new SelectedTheme(themePackage.referenceFor(theme), theme) : null;
+        return theme != null ? new SelectedTheme(themePackage.referenceFor(theme), themePackage, theme) : null;
     }
 
     /// One exact package-owned theme declaration.
     ///
     /// @param reference canonical reference
+    /// @param themePackage package owning the declaration and its assets
     /// @param theme parsed declaration
     @NotNullByDefault
-    private record SelectedTheme(ThemeReference reference, Theme theme) {
+    private record SelectedTheme(
+            ThemeReference reference,
+            ThemePackPackage themePackage,
+            Theme theme) {
         /// Validates both selected declaration values.
         private SelectedTheme {
             Objects.requireNonNull(reference, "reference");
+            Objects.requireNonNull(themePackage, "themePackage");
             Objects.requireNonNull(theme, "theme");
         }
     }

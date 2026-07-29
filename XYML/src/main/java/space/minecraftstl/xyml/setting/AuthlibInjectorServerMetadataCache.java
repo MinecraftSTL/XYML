@@ -38,7 +38,7 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// Stores derived authlib-injector server metadata separately from the user-managed server list.
 ///
 /// The JSON representation is saved as `cache/authlib-injector-server-metadata.json`
-/// under the current HMCL directory.
+/// under the current XYML directory.
 @JsonAdapter(AuthlibInjectorServerMetadataCache.Adapter.class)
 @NotNullByDefault
 @JsonSerializable

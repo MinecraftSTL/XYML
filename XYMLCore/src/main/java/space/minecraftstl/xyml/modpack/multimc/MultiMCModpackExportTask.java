@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.modpack.multimc;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.modpack.ModAdviser;
@@ -37,24 +39,42 @@ import java.util.Map;
 import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * Export the game to a mod pack file.
- */
+/// Exports one installed instance as a MultiMC-compatible modpack archive.
+@NotNullByDefault
 public class MultiMCModpackExportTask extends Task<Void> {
+    /// Repository containing the exported instance and its version manifests.
     private final DefaultGameRepository repository;
-    private final String versionId;
-    private final List<String> whitelist;
+
+    /// Target installed instance identifier.
+    private final String instanceId;
+
+    /// Immutable exact-path whitelist applied while collecting instance files.
+    private final @Unmodifiable List<String> whitelist;
+
+    /// MultiMC instance properties written beside the component manifest.
     private final MultiMCInstanceConfiguration configuration;
+
+    /// Destination archive path.
     private final Path output;
 
-    /**
-     * @param output    mod pack file.
-     * @param versionId to locate version.json
-     */
-    public MultiMCModpackExportTask(DefaultGameRepository repository, String versionId, List<String> whitelist, MultiMCInstanceConfiguration configuration, Path output) {
+    /// Creates a MultiMC export task for one installed instance.
+    ///
+    /// The whitelist is copied so later caller mutations cannot change the running export.
+    ///
+    /// @param repository repository containing the target instance
+    /// @param instanceId target installed instance identifier
+    /// @param whitelist exact relative paths allowed in the archive
+    /// @param configuration MultiMC instance properties to export
+    /// @param output destination archive path
+    public MultiMCModpackExportTask(
+            DefaultGameRepository repository,
+            String instanceId,
+            List<String> whitelist,
+            MultiMCInstanceConfiguration configuration,
+            Path output) {
         this.repository = repository;
-        this.versionId = versionId;
-        this.whitelist = whitelist;
+        this.instanceId = instanceId;
+        this.whitelist = List.copyOf(whitelist);
         this.configuration = configuration;
         this.output = output;
 
@@ -69,18 +89,28 @@ public class MultiMCModpackExportTask extends Task<Void> {
         });
     }
 
+    /// Writes selected instance files, the component manifest, and MultiMC instance properties.
+    ///
+    /// A failed task removes the partial destination archive through the completion listener installed
+    /// by the constructor.
+    ///
+    /// @throws Exception if instance inspection, property serialization, or archive writing fails
     @Override
     public void execute() throws Exception {
         ArrayList<String> blackList = new ArrayList<>(ModAdviser.MODPACK_BLACK_LIST);
-        blackList.add(versionId + ".jar");
-        blackList.add(versionId + ".json");
+        blackList.add(instanceId + ".jar");
+        blackList.add(instanceId + ".json");
         LOG.info("Compressing game files without some files in blacklist, including files or directories: usernamecache.json, asm, logs, backups, versions, assets, usercache.json, libraries, crash-reports, launcher_profiles.json, NVIDIA, TCNodeTracker");
         try (Zipper zip = new Zipper(output)) {
-            zip.putDirectory(repository.getRunDirectory(versionId), ".minecraft", path -> Modpack.acceptFile(path, blackList, whitelist));
+            zip.putDirectory(
+                    repository.getRunDirectory(instanceId),
+                    ".minecraft",
+                    path -> Modpack.acceptFile(path, blackList, whitelist));
 
-            String gameVersion = repository.getGameVersion(versionId)
-                    .orElseThrow(() -> new IOException("Cannot parse the version of " + versionId));
-            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.getResolvedPreservingPatchesVersion(versionId), gameVersion);
+            String gameVersion = repository.getGameVersion(instanceId)
+                    .orElseThrow(() -> new IOException("Cannot parse the game version of instance " + instanceId));
+            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(
+                    repository.getResolvedPreservingPatchesVersion(instanceId), gameVersion);
             List<MultiMCManifest.MultiMCManifestComponent> components = new ArrayList<>();
             components.add(new MultiMCManifest.MultiMCManifestComponent(true, false, MultiMCComponents.getComponent(MINECRAFT), gameVersion));
 
@@ -96,13 +126,14 @@ public class MultiMCModpackExportTask extends Task<Void> {
             zip.putTextFile(JsonUtils.GSON.toJson(mmcPack), "mmc-pack.json");
 
             StringWriter writer = new StringWriter();
-            configuration.toProperties().store(writer, "Auto generated by Hello Minecraft! Launcher");
+            configuration.toProperties().store(writer, "Auto generated by XYML");
             zip.putTextFile(writer.toString(), "instance.cfg");
 
             zip.putTextFile("", ".packignore");
         }
     }
 
+    /// Metadata fields exposed for the MultiMC format.
     public static final ModpackExportInfo.Options OPTION = new ModpackExportInfo.Options()
             .requireAuthor()
             .requireMinMemory();

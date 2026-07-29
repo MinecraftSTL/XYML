@@ -352,28 +352,28 @@ public final class TaskExecutorPresentationModelTest {
 
         /// Publishes the executor start event.
         private void fireStart() {
-            taskListeners.forEach(listener -> listener.onStart());
+            notifyTaskListeners(listener -> listener.onStart());
         }
 
         /// Publishes one ready-task event.
         ///
         /// @param task task entering ready state
         private void fireReady(Task<?> task) {
-            taskListeners.forEach(listener -> listener.onReady(task));
+            notifyTaskListeners(listener -> listener.onReady(task));
         }
 
         /// Publishes one running-task event.
         ///
         /// @param task task entering running state
         private void fireRunning(Task<?> task) {
-            taskListeners.forEach(listener -> listener.onRunning(task));
+            notifyTaskListeners(listener -> listener.onRunning(task));
         }
 
         /// Publishes one successful task completion event.
         ///
         /// @param task task that completed
         private void fireFinished(Task<?> task) {
-            taskListeners.forEach(listener -> listener.onFinished(task));
+            notifyTaskListeners(listener -> listener.onFinished(task));
         }
 
         /// Publishes one failed task completion event.
@@ -381,14 +381,14 @@ public final class TaskExecutorPresentationModelTest {
         /// @param task task that failed
         /// @param failure failure to publish
         private void fireFailed(Task<?> task, Throwable failure) {
-            taskListeners.forEach(listener -> listener.onFailed(task, failure));
+            notifyTaskListeners(listener -> listener.onFailed(task, failure));
         }
 
         /// Publishes the executor terminal event.
         ///
         /// @param success whether the complete chain succeeded
         private void fireStop(boolean success) {
-            taskListeners.forEach(listener -> listener.onStop(success, this));
+            notifyTaskListeners(listener -> listener.onStop(success, this));
         }
 
         /// Stores the executor-level failure exposed during terminal mapping.

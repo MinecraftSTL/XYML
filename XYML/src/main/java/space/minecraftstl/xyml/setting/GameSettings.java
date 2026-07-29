@@ -153,10 +153,10 @@ public sealed abstract class GameSettings extends ObservableSetting {
 
         /// The icon of the instance.
         @SerializedName("icon")
-        private final SettingProperty<VersionIconType> icon = newSettingProperty("icon", VersionIconType.DEFAULT);
+        private final SettingProperty<InstanceIconType> icon = newSettingProperty("icon", InstanceIconType.DEFAULT);
 
         /// Returns the instance icon property.
-        public SettingProperty<VersionIconType> iconProperty() {
+        public SettingProperty<InstanceIconType> iconProperty() {
             return icon;
         }
 
@@ -257,7 +257,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
         }
     }
 
-    /// Reference to a Java runtime selected from HMCL's detected Java list.
+    /// Reference to a Java runtime selected from XYML's detected Java list.
     ///
     /// @param version the runtime version reported by the detected Java executable
     /// @param pathHash the SHA-256 hash of the normalized Java executable path, or an empty string when unavailable
@@ -285,22 +285,6 @@ public sealed abstract class GameSettings extends ObservableSetting {
         /// Returns a detected Java reference for the given runtime.
         public static DetectedJava of(JavaRuntime java) {
             return new DetectedJava(java.getVersion(), hashExistingPath(java.getBinary()));
-        }
-
-        /// Returns a detected Java reference migrated from legacy persisted fields.
-        public static DetectedJava ofLegacyPath(String version, String javaBinaryPath) {
-            String pathHash = "";
-            if (StringUtils.isNotBlank(javaBinaryPath)) {
-                try {
-                    pathHash = hashExistingPath(Path.of(javaBinaryPath));
-                } catch (InvalidPathException ignored) {
-                }
-
-                if (StringUtils.isBlank(pathHash)) {
-                    pathHash = hashPathText(javaBinaryPath);
-                }
-            }
-            return new DetectedJava(version, pathHash);
         }
 
         /// Returns the path hash for an executable that is expected to exist on this machine.
@@ -410,7 +394,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for disabling generated JVM options.
     public static final String PROPERTY_NO_JVM_OPTIONS = "noJVMOptions";
 
-    /// If `true`, HMCL will not use default JVM arguments.
+    /// If `true`, XYML will not use default JVM arguments.
     @SerializedName(PROPERTY_NO_JVM_OPTIONS)
     private final InheritableProperty<Boolean> noJVMOptions = newInheritableProperty(PROPERTY_NO_JVM_OPTIONS, false);
 
@@ -422,7 +406,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for disabling generated optimizing JVM options.
     public static final String PROPERTY_NO_OPTIMIZING_JVM_OPTIONS = "noOptimizingJVMOptions";
 
-    /// If `true`, HMCL will not use the default optimizing JVM options.
+    /// If `true`, XYML will not use the default optimizing JVM options.
     @SerializedName(PROPERTY_NO_OPTIMIZING_JVM_OPTIONS)
     private final InheritableProperty<Boolean> noOptimizingJVMOptions = newInheritableProperty(PROPERTY_NO_OPTIMIZING_JVM_OPTIONS, false);
 
@@ -434,7 +418,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for disabling JVM validity checks.
     public static final String PROPERTY_NOT_CHECK_JVM = "notCheckJVM";
 
-    /// If `true`, HMCL does not check JVM validity.
+    /// If `true`, XYML does not check JVM validity.
     @SerializedName(PROPERTY_NOT_CHECK_JVM)
     private final InheritableProperty<Boolean> notCheckJVM = newInheritableProperty(PROPERTY_NOT_CHECK_JVM, false);
 
@@ -446,7 +430,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for disabling game completeness checks.
     public static final String PROPERTY_NOT_CHECK_GAME = "notCheckGame";
 
-    /// If `true`, HMCL does not check game completeness.
+    /// If `true`, XYML does not check game completeness.
     @SerializedName(PROPERTY_NOT_CHECK_GAME)
     private final InheritableProperty<Boolean> notCheckGame = newInheritableProperty(PROPERTY_NOT_CHECK_GAME, false);
 
@@ -458,7 +442,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for automatic memory allocation.
     public static final String PROPERTY_AUTO_MEMORY = "autoMemory";
 
-    /// If `true`, HMCL will automatically adjust memory allocation.
+    /// If `true`, XYML will automatically adjust memory allocation.
     @SerializedName(PROPERTY_AUTO_MEMORY)
     private final InheritableProperty<Boolean> autoMemory = newInheritableProperty(PROPERTY_AUTO_MEMORY, true);
 
@@ -575,10 +559,10 @@ public sealed abstract class GameSettings extends ObservableSetting {
         return launcherVisibility;
     }
 
-    /// Property name for allowing HMCL to modify the game with Java agents.
+    /// Property name for allowing XYML to modify the game with Java agents.
     public static final String PROPERTY_ALLOW_AUTO_AGENT = "allowAutoAgent";
 
-    /// If `true`, HMCL may attach Java agents to improve the game experience.
+    /// If `true`, XYML may attach Java agents to improve the game experience.
     @SerializedName(PROPERTY_ALLOW_AUTO_AGENT)
     private final InheritableProperty<Boolean> allowAutoAgent = newInheritableProperty(PROPERTY_ALLOW_AUTO_AGENT, false);
 
@@ -590,7 +574,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for disabling automatic game options generation.
     public static final String PROPERTY_DISABLE_AUTO_GAME_OPTIONS = "disableAutoGameOptions";
 
-    /// If `true`, HMCL will not generate game options automatically.
+    /// If `true`, XYML will not generate game options automatically.
     @SerializedName(PROPERTY_DISABLE_AUTO_GAME_OPTIONS)
     private final InheritableProperty<Boolean> disableAutoGameOptions =
             newInheritableProperty(PROPERTY_DISABLE_AUTO_GAME_OPTIONS, false);
@@ -773,7 +757,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for disabling native library patching.
     public static final String PROPERTY_NOT_PATCH_NATIVES = "notPatchNatives";
 
-    /// If `true`, HMCL does not patch native libraries.
+    /// If `true`, XYML does not patch native libraries.
     @SerializedName(PROPERTY_NOT_PATCH_NATIVES)
     private final InheritableProperty<Boolean> notPatchNatives = newInheritableProperty(PROPERTY_NOT_PATCH_NATIVES, false);
 
@@ -785,7 +769,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for using custom native libraries.
     public static final String PROPERTY_USE_CUSTOM_NATIVES = "useCustomNatives";
 
-    /// If `true`, HMCL leaves native library management to the user.
+    /// If `true`, XYML leaves native library management to the user.
     @SerializedName(PROPERTY_USE_CUSTOM_NATIVES)
     private final InheritableProperty<Boolean> useCustomNatives = newInheritableProperty(PROPERTY_USE_CUSTOM_NATIVES, false);
 
@@ -809,7 +793,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for using native GLFW.
     public static final String PROPERTY_USE_NATIVE_GLFW = "useNativeGLFW";
 
-    /// If `true`, HMCL will use native GLFW.
+    /// If `true`, XYML will use native GLFW.
     @SerializedName(PROPERTY_USE_NATIVE_GLFW)
     private final InheritableProperty<Boolean> useNativeGLFW = newInheritableProperty(PROPERTY_USE_NATIVE_GLFW, false);
 
@@ -821,7 +805,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for using native OpenAL.
     public static final String PROPERTY_USE_NATIVE_OPENAL = "useNativeOpenAL";
 
-    /// If `true`, HMCL will use native OpenAL.
+    /// If `true`, XYML will use native OpenAL.
     @SerializedName(PROPERTY_USE_NATIVE_OPENAL)
     private final InheritableProperty<Boolean> useNativeOpenAL = newInheritableProperty(PROPERTY_USE_NATIVE_OPENAL, false);
 

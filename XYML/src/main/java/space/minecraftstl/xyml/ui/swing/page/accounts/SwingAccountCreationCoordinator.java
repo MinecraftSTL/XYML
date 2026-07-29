@@ -32,7 +32,7 @@ import java.util.regex.Pattern;
 
 /// Runs one native account workflow at a time on a caller-owned executor.
 ///
-/// Network authentication, backup, and legacy commits never run on the Swing EDT. Every listener
+/// Network authentication, backup, and launcher-state commits never run on the Swing EDT. Every listener
 /// callback is dispatched through the injected UI dispatcher, and cancellation interrupts the worker
 /// while also closing any native prompt owned by the interaction boundary.
 @NotNullByDefault

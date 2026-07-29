@@ -81,10 +81,10 @@ public final class RepositoryInstanceJsonImportService implements InstanceJsonIm
     /// @throws InstanceJsonImportException when validation or JSON parsing fails
     private Task<@Nullable Void> prepareImport(Path source, String instanceId)
             throws InstanceJsonImportException {
-        if (!XYMLGameRepository.isValidVersionId(instanceId)) {
+        if (!XYMLGameRepository.isValidInstanceId(instanceId)) {
             throw InstanceJsonImportException.invalidInstanceId(instanceId);
         }
-        if (repository.versionIdConflicts(instanceId)) {
+        if (repository.instanceIdConflicts(instanceId)) {
             throw InstanceJsonImportException.instanceAlreadyExists(instanceId);
         }
 
@@ -105,7 +105,7 @@ public final class RepositoryInstanceJsonImportService implements InstanceJsonIm
                         true),
                 new GameLibrariesTask(dependencyManager, importedVersion, true))
                 .withRunAsync(ioExecutor, () -> {
-                    // Match the legacy import contract: core game download and JSON save remain fatal,
+                    // Match the import contract: core game download and JSON save remain fatal,
                     // while optional asset/library repair can be retried from instance maintenance.
                 });
 
@@ -113,7 +113,7 @@ public final class RepositoryInstanceJsonImportService implements InstanceJsonIm
                         new GameDownloadTask(dependencyManager, null, importedVersion),
                         optionalAssetsAndLibraries)
                 .thenComposeAsync(ioExecutor, ignored -> repository.saveAsync(importedVersion))
-                .thenRunAsync(ioExecutor, repository::refreshVersions)
+                .thenRunAsync(ioExecutor, repository::refreshInstances)
                 .thenRunAsync(ioExecutor, () -> repository.setSelectedInstance(instanceId));
     }
 }

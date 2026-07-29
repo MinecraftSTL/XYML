@@ -76,7 +76,7 @@ class SwingGameLogPanelTest {
         });
     }
 
-    /// Copies selected rows in visual order and preserves the legacy trailing newline.
+    /// Copies selected rows in visual order and preserves the established trailing newline.
     @Test
     void controlCUsesClipboardBoundaryAndNonModalStatus() {
         EdtDispatcher.executeAndWait(() -> {

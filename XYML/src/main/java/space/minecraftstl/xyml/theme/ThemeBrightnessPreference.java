@@ -20,7 +20,6 @@ package space.minecraftstl.xyml.theme;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Locale;
 import java.util.Objects;
 
 /// Describes whether launcher brightness follows its theme, the operating system, or an explicit palette.
@@ -38,13 +37,13 @@ public enum ThemeBrightnessPreference {
     /// Always renders the dark palette.
     DARK;
 
-    /// Reconstructs the four-state preference from the legacy value and override-membership pair.
+    /// Reconstructs the four-state preference from the persisted value and override-membership pair.
     ///
     /// The raw value is intentionally ignored when the appearance key is not overridden, because that value is
     /// retained only so a later explicit selection can restore the previous choice.
     ///
     /// @param overridden whether the brightness appearance key is overridden
-    /// @param settingValue persisted `auto`, `system`, `light`, or `dark` value
+    /// @param settingValue persisted `system`, `light`, or `dark` value
     /// @return reconstructed four-state preference
     public static ThemeBrightnessPreference fromSetting(
             boolean overridden,
@@ -53,13 +52,14 @@ public enum ThemeBrightnessPreference {
             return THEME;
         }
         if (settingValue == null) {
-            return SYSTEM;
+            throw new IllegalArgumentException("Overridden theme brightness requires a value");
         }
-        return switch (settingValue.trim().toLowerCase(Locale.ROOT)) {
+        return switch (settingValue) {
+            case "system" -> SYSTEM;
             case "light" -> LIGHT;
             case "dark" -> DARK;
-            case "auto", "system" -> SYSTEM;
-            default -> SYSTEM;
+            default -> throw new IllegalArgumentException(
+                    "Unsupported theme brightness value: " + settingValue);
         };
     }
 
@@ -81,15 +81,15 @@ public enum ThemeBrightnessPreference {
         };
     }
 
-    /// Returns the legacy value written when this preference is an explicit override.
+    /// Returns the canonical value written when this preference is an explicit override.
     ///
     /// `THEME` has no value because it is represented by removing the brightness key from the override set.
     ///
-    /// @return `auto`, `light`, `dark`, or `null` for theme inheritance
+    /// @return `system`, `light`, `dark`, or `null` for theme inheritance
     public @Nullable String settingValue() {
         return switch (this) {
             case THEME -> null;
-            case SYSTEM -> "auto";
+            case SYSTEM -> "system";
             case LIGHT -> "light";
             case DARK -> "dark";
         };

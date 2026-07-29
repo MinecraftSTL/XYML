@@ -25,7 +25,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Stable localized labels used by the installed add-on update page.
 ///
-/// The existing launcher translation keys cover legacy update terminology; short new action
+/// Existing launcher translation keys cover established update terminology; short new action
 /// labels remain deliberately generic so this page does not add duplicated locale resources.
 ///
 /// @param title page heading

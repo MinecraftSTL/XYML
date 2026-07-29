@@ -159,15 +159,6 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Monotonic identity that prevents stale command completions from mutating a later operation.
     private long quickPlayOperationRevision;
 
-    /// Creates the production panel with the real repository adapter and desktop interactions.
-    ///
-    /// @param repository managed game repository
-    /// @param instanceId stable managed instance identifier
-    /// @param executor caller-owned background executor
-    public WorldCatalogPanel(GameRepository repository, String instanceId, Executor executor) {
-        this(repository, instanceId, executor, WorldQuickPlayActions.unavailable());
-    }
-
     /// Creates the production panel with real repository, desktop, and quick-play boundaries.
     ///
     /// @param repository managed game repository
@@ -188,20 +179,6 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 WorldCatalogStrings.english(),
                 new DefaultWorldCatalogInteractions(WorldCatalogStrings.english(), executor),
                 quickPlayActions);
-    }
-
-    /// Creates a panel with injected filesystem and desktop boundaries for deterministic tests.
-    ///
-    /// The panel owns the supplied model and closes it after detaching every Swing listener.
-    ///
-    /// @param model catalog model
-    /// @param strings stable page text
-    /// @param interactions dialog and desktop interaction boundary
-    public WorldCatalogPanel(
-            WorldCatalogModel model,
-            WorldCatalogStrings strings,
-            WorldCatalogInteractions interactions) {
-        this(model, strings, interactions, WorldQuickPlayActions.unavailable());
     }
 
     /// Creates a panel with injected catalog, interaction, and quick-play boundaries for deterministic tests.

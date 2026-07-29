@@ -18,7 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.setting.VersionIconType;
+import space.minecraftstl.xyml.setting.InstanceIconType;
 
 import java.nio.file.Path;
 import java.util.Objects;
@@ -26,18 +26,18 @@ import java.util.Objects;
 /// Represents one completed selection from the instance icon dialog.
 ///
 /// The two variants keep built-in identity and custom file paths explicit, so callers never infer
-/// custom-image intent from `VersionIconType.DEFAULT`.
+/// custom-image intent from `InstanceIconType.DEFAULT`.
 @NotNullByDefault
 public sealed interface InstanceIconChoice permits InstanceIconChoice.BuiltIn, InstanceIconChoice.Custom {
     /// Selects one of the fourteen user-visible bundled instance icons.
     ///
     /// @param iconType bundled icon type; `DEFAULT` is excluded because it aliases the grass image
     @NotNullByDefault
-    record BuiltIn(VersionIconType iconType) implements InstanceIconChoice {
+    record BuiltIn(InstanceIconType iconType) implements InstanceIconChoice {
         /// Validates that the selected value has an independent user-visible tile.
         public BuiltIn {
             Objects.requireNonNull(iconType, "iconType");
-            if (iconType == VersionIconType.DEFAULT) {
+            if (iconType == InstanceIconType.DEFAULT) {
                 throw new IllegalArgumentException("DEFAULT is not an independently selectable icon");
             }
         }

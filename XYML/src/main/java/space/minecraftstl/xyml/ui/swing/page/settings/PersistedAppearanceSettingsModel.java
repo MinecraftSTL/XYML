@@ -30,7 +30,6 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
-import space.minecraftstl.xyml.ui.swing.ThemeMode;
 
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -115,14 +114,7 @@ public final class PersistedAppearanceSettingsModel
         return changes.subscribe(listener);
     }
 
-    /// Persists a canonical light, dark, or system theme value.
-    @Override
-    public void setThemeMode(ThemeMode themeMode) {
-        requireWritable();
-        store.setThemeModeValue(Objects.requireNonNull(themeMode, "themeMode").settingValue());
-    }
-
-    /// Persists a four-state preference through raw value and override-membership storage.
+    /// Persists a four-state preference through value and override-membership storage.
     ///
     /// @param preference requested theme, system, light, or dark preference
     @Override
@@ -144,11 +136,20 @@ public final class PersistedAppearanceSettingsModel
         store.setCornerRadius(cornerRadius);
     }
 
-    /// Persists the inverse legacy disable flag for the page's enabled toggle.
+    /// Persists the inverse disable flag for the page's enabled toggle.
     @Override
     public void setAnimationsEnabled(boolean enabled) {
         requireWritable();
         store.setAnimationsDisabled(!enabled);
+    }
+
+    /// Persists one validated complete background configuration.
+    ///
+    /// @param background complete replacement background settings
+    @Override
+    public void setBackgroundAppearance(BackgroundAppearanceSettings background) {
+        requireWritable();
+        store.setBackgroundAppearance(Objects.requireNonNull(background, "background"));
     }
 
     /// Releases the raw-store subscription exactly once.
@@ -184,14 +185,14 @@ public final class PersistedAppearanceSettingsModel
     private static AppearanceSettingsSnapshot map(StoredAppearanceSettings raw) {
         ThemeBrightnessPreference preference = raw.brightnessPreference();
         return new AppearanceSettingsSnapshot(
-                AppearanceSettingsSnapshot.compatibilityMode(preference),
+                preference,
                 raw.cornerRadius(),
                 raw.minimumCornerRadius(),
                 raw.maximumCornerRadius(),
                 raw.cornerRadiusStep(),
                 !raw.animationsDisabled(),
-                raw.writable(),
-                preference);
+                raw.background(),
+                raw.writable());
     }
 
     /// Creates a runtime applier that never synchronously waits across launcher state and Swing UI threads.
@@ -208,9 +209,9 @@ public final class PersistedAppearanceSettingsModel
             SwingDesignTokens tokens = new SwingDesignTokens(snapshot.cornerRadius());
             @Nullable ResolvedTheme currentTheme = themeManager.resolvedTheme();
             if (currentTheme == null) {
-                themeManager.update(snapshot.themeMode(), tokens);
+                themeManager.update(snapshot.brightnessPreference(), tokens);
             } else {
-                themeManager.update(currentTheme, tokens);
+                themeManager.update(currentTheme, tokens, snapshot.brightnessPreference());
             }
             animator.setMotionPolicy(snapshot.animationsEnabled()
                     ? MotionPolicy.FULL

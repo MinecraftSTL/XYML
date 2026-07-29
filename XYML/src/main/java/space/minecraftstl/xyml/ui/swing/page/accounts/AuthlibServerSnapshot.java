@@ -27,7 +27,7 @@ import java.util.Set;
 
 /// Immutable, presentation-safe configured authlib-injector server list.
 ///
-/// Server endpoints are unique workflow identifiers. The snapshot deliberately contains no legacy
+/// Server endpoints are unique workflow identifiers. The snapshot deliberately contains no mutable
 /// server objects, mutable metadata, or account credentials.
 ///
 /// @param servers immutable configured servers in persisted order

@@ -41,7 +41,7 @@ public final class ThemeSelectionResolverTest {
         ThemeResolveContext context = new ThemeResolveContext(ThemeBrightness.DARK, "windows", "zh");
         ThemeColor custom = new ThemeColor("custom", "#147D64");
         ThemeResolutionRequest request = new ThemeResolutionRequest(
-                new ThemeReference("hmcl.default", null),
+                new ThemeReference("xyml.default", null),
                 context,
                 new ThemeUserAppearanceOverrides(
                         ThemeBrightnessPreference.LIGHT,
@@ -64,7 +64,7 @@ public final class ThemeSelectionResolverTest {
     @Test
     public void followsSelectedClassicTheme() throws Exception {
         ThemeSelectionResolver resolver = resolver();
-        ThemeReference reference = new ThemeReference("hmcl.classic", "2015-06-22");
+        ThemeReference reference = new ThemeReference("xyml.classic", "2015-06-22");
         ThemeResolutionRequest request = new ThemeResolutionRequest(
                 reference,
                 new ThemeResolveContext(ThemeBrightness.DARK, "windows", "en"),

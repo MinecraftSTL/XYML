@@ -134,7 +134,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
     /// @return configured directory management panel
     public static GameDirectoryManagementPanel createForCurrentDirectories() {
         EdtDispatcher.requireEventDispatchThread();
-        LegacyGameDirectoryManagementService service = new LegacyGameDirectoryManagementService();
+        LauncherGameDirectoryManagementService service = new LauncherGameDirectoryManagementService();
         try {
             return new GameDirectoryManagementPanel(
                     service,

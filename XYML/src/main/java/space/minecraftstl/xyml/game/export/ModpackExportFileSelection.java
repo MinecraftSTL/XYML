@@ -36,7 +36,7 @@ import java.util.Objects;
 ///
 /// A selected file implicitly selects every ancestor directory. A selected directory expands to every
 /// descendant directory and file. Symbolic links are excluded so a local archive never follows an
-/// instance entry outside its run directory. This exact expansion is required because the legacy core
+/// instance entry outside its run directory. This exact expansion is required because the core
 /// exporters match whitelist entries literally and otherwise prune a selected file when its parent is absent.
 @NotNullByDefault
 public final class ModpackExportFileSelection {

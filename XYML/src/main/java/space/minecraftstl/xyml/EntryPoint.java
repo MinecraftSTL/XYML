@@ -51,10 +51,10 @@ public final class EntryPoint {
     /// @param args launcher and updater arguments
     public static void main(String @Unmodifiable [] args) {
         System.getProperties().putIfAbsent("java.net.useSystemProxies", "true");
-        System.getProperties().putIfAbsent("http.agent", "HMCL/" + Metadata.VERSION);
+        System.getProperties().putIfAbsent("http.agent", "XYML/" + Metadata.VERSION);
 
-        createHMCLDirectories();
-        LOG.start(Metadata.HMCL_LOCAL_HOME.resolve("logs"));
+        createXYMLDirectories();
+        LOG.start(Metadata.XYML_LOCAL_HOME.resolve("logs"));
 
         setupAwtVmOptions();
         checkWine();
@@ -81,8 +81,8 @@ public final class EntryPoint {
 
     /// Maps supported launcher environment overrides to the Java 2D and Swing runtime.
     private static void setupAwtVmOptions() {
-        if ("true".equalsIgnoreCase(System.getenv("HMCL_FORCE_GPU"))) {
-            LOG.info("HMCL_FORCE_GPU: true");
+        if ("true".equalsIgnoreCase(System.getenv("XYML_FORCE_GPU"))) {
+            LOG.info("XYML_FORCE_GPU: true");
             if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS) {
                 System.getProperties().putIfAbsent("sun.java2d.metal", "true");
             } else {
@@ -90,9 +90,9 @@ public final class EntryPoint {
             }
         }
 
-        @Nullable String animationFrameRate = System.getenv("HMCL_ANIMATION_FRAME_RATE");
+        @Nullable String animationFrameRate = System.getenv("XYML_ANIMATION_FRAME_RATE");
         if (animationFrameRate != null) {
-            LOG.info("HMCL_ANIMATION_FRAME_RATE: " + animationFrameRate);
+            LOG.info("XYML_ANIMATION_FRAME_RATE: " + animationFrameRate);
 
             try {
                 int framesPerSecond = Integer.parseInt(animationFrameRate);
@@ -107,11 +107,11 @@ public final class EntryPoint {
             }
         }
 
-        @Nullable String uiScale = System.getProperty("hmcl.uiScale", System.getenv("HMCL_UI_SCALE"));
+        @Nullable String uiScale = System.getProperty("xyml.uiScale", System.getenv("XYML_UI_SCALE"));
         if (uiScale != null) {
             uiScale = uiScale.trim();
 
-            LOG.info("HMCL_UI_SCALE: " + uiScale);
+            LOG.info("XYML_UI_SCALE: " + uiScale);
 
             try {
                 float scaleValue;
@@ -138,30 +138,30 @@ public final class EntryPoint {
     }
 
     /// Creates launcher data directories before logging and settings initialization.
-    private static void createHMCLDirectories() {
-        if (!Files.isDirectory(Metadata.HMCL_LOCAL_HOME)) {
+    private static void createXYMLDirectories() {
+        if (!Files.isDirectory(Metadata.XYML_LOCAL_HOME)) {
             try {
-                Files.createDirectories(Metadata.HMCL_LOCAL_HOME);
+                Files.createDirectories(Metadata.XYML_LOCAL_HOME);
                 if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS && !Metadata.PACKAGED) {
                     try {
-                        Files.setAttribute(Metadata.HMCL_LOCAL_HOME, "dos:hidden", true);
+                        Files.setAttribute(Metadata.XYML_LOCAL_HOME, "dos:hidden", true);
                     } catch (IOException e) {
-                        LOG.warning("Failed to set hidden attribute of " + Metadata.HMCL_LOCAL_HOME, e);
+                        LOG.warning("Failed to set hidden attribute of " + Metadata.XYML_LOCAL_HOME, e);
                     }
                 }
             } catch (IOException e) {
                 // Logger has not been started yet, so print directly to System.err
-                System.err.println("Failed to create HMCL directory: " + Metadata.HMCL_LOCAL_HOME);
+                System.err.println("Failed to create XYML directory: " + Metadata.XYML_LOCAL_HOME);
                 e.printStackTrace(System.err);
-                showErrorAndExit(i18n("fatal.create_hmcl_current_directory_failure", Metadata.HMCL_LOCAL_HOME));
+                showErrorAndExit(i18n("fatal.create_xyml_current_directory_failure", Metadata.XYML_LOCAL_HOME));
             }
         }
 
-        if (!Files.isDirectory(Metadata.HMCL_USER_HOME)) {
+        if (!Files.isDirectory(Metadata.XYML_USER_HOME)) {
             try {
-                Files.createDirectories(Metadata.HMCL_USER_HOME);
+                Files.createDirectories(Metadata.XYML_USER_HOME);
             } catch (IOException e) {
-                LOG.warning("Failed to create HMCL user home " + Metadata.HMCL_USER_HOME, e);
+                LOG.warning("Failed to create XYML user home " + Metadata.XYML_USER_HOME, e);
             }
         }
     }
@@ -204,7 +204,7 @@ public final class EntryPoint {
     private static void checkWine() {
         if (OperatingSystem.isRunningUnderWine()) {
             SwingUtils.initLookAndFeel();
-            LOG.warning("HMCL is running under Wine or its distributions!");
+            LOG.warning("XYML is running under Wine or its distributions!");
 
             int result = JOptionPane.showOptionDialog(null, i18n("fatal.wine_warning"), i18n("message.warning"), JOptionPane.OK_CANCEL_OPTION,
                     JOptionPane.WARNING_MESSAGE, null, null, null);

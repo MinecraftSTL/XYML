@@ -115,7 +115,7 @@ public final class LauncherLogPanelTest {
         assertAll(
                 () -> assertEquals(0, interactions.successCalls.get()),
                 () -> assertEquals(0, interactions.failureCalls.get()),
-                () -> assertFalse(Files.exists(outputDirectory.resolve("hmcl-exported-logs-2026-07-25T12-01-00.log"))));
+                () -> assertFalse(Files.exists(outputDirectory.resolve("xyml-exported-logs-2026-07-25T12-01-00.log"))));
     }
 
     /// Runs a value-producing operation synchronously on the event dispatch thread.

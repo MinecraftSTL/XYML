@@ -84,7 +84,7 @@ public final class LauncherAccountsModel implements AccountsModel, AutoCloseable
         reconcileAccountStore();
     }
 
-    /// Creates a model with an unavailable refresh command for focused legacy callers and tests.
+    /// Creates a model with an unavailable refresh command for focused callers and tests.
     ///
     /// @param accountStore immutable account descriptor source and selection sink
     /// @param addAccountCommand add-account workflow command
@@ -356,7 +356,8 @@ public final class LauncherAccountsModel implements AccountsModel, AutoCloseable
                     descriptor.id(),
                     descriptor.title(),
                     descriptor.detail(),
-                    descriptor.profileId()));
+                    descriptor.profileId(),
+                    descriptor.avatarSource()));
         }
         return List.copyOf(items);
     }

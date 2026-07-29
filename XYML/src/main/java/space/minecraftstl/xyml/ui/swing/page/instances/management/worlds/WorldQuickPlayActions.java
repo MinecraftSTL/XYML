@@ -33,7 +33,7 @@ import java.util.function.Function;
 /// Implementations must return promptly: process and script preparation belong to their existing background services.
 @NotNullByDefault
 public final class WorldQuickPlayActions {
-    /// Shared unavailable boundary retained by source-compatible instance-management constructors.
+    /// Shared unavailable boundary for catalog contexts that intentionally omit quick-play controls.
     private static final WorldQuickPlayActions UNAVAILABLE = new WorldQuickPlayActions(
             false,
             worldFolder -> {
@@ -118,7 +118,7 @@ public final class WorldQuickPlayActions {
                 "world quick-play script command returned null stage");
     }
 
-    /// Rejects invocations through the source-compatible unavailable boundary.
+    /// Rejects invocations through the unavailable boundary.
     private void requireAvailable() {
         if (!available) {
             throw new IllegalStateException("World quick play is unavailable");

@@ -125,7 +125,7 @@ public record ThemePackManagementStrings(
                 "Delete theme pack",
                 "Delete the installed package containing \"%s\"?",
                 "Import theme pack",
-                "HMCL theme packs (*.hmcl-theme)");
+                "XYML theme packs (*.xyml-theme)");
     }
 
     /// Returns concise Simplified Chinese text.
@@ -155,7 +155,7 @@ public record ThemePackManagementStrings(
                 "删除主题包",
                 "删除包含“%s”的已安装主题包？",
                 "导入主题包",
-                "HMCL 主题包 (*.hmcl-theme)");
+                "XYML 主题包 (*.xyml-theme)");
     }
 
     /// Requires exactly one standard formatter placeholder.

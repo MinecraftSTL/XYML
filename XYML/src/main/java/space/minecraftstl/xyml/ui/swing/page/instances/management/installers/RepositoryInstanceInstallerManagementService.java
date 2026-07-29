@@ -170,7 +170,7 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
     private Task<InstanceInstallerSnapshot> completeMutation(String instanceId, Task<Version> mutation) {
         Task<@Nullable Void> refreshed = Objects.requireNonNull(mutation, "mutation")
                 .thenComposeAsync(ioExecutor, repository::saveAsync)
-                .whenComplete(ioExecutor, ignoredFailure -> repository.refreshVersions());
+                .whenComplete(ioExecutor, ignoredFailure -> repository.refreshInstances());
         return refreshed.thenComposeAsync(
                 ioExecutor,
                 () -> Task.supplyAsync(ioExecutor, () -> readSnapshot(instanceId)));

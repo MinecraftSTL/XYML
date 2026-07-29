@@ -48,7 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Verifies that the Swing About page restores the legacy bundled acknowledgement resources.
+/// Verifies that the Swing About page renders the bundled acknowledgement resources.
 @NotNullByDefault
 public final class AboutPanelTest {
     /// The acknowledgement list is read in JSON order with localized titles and intentional non-links preserved.
@@ -83,7 +83,7 @@ public final class AboutPanelTest {
                 () -> assertTrue(allConfiguredImagesExist(dependencies)));
     }
 
-    /// The concrete panel exposes all four legacy sections while keeping external opening delegated to settings.
+    /// The concrete panel exposes all four acknowledgement sections while delegating external opening to settings.
     @Test
     public void createsCompleteGroupedPanel() {
         AtomicReference<@Nullable URI> opened = new AtomicReference<>();
@@ -100,7 +100,7 @@ public final class AboutPanelTest {
                 () -> assertNull(opened.get()));
     }
 
-    /// The rendered About page keeps the legacy grouped layout visible.
+    /// The rendered About page keeps the grouped acknowledgement layout visible.
     @Test
     public void rendersLegacyGroupedAboutPage() {
         AtomicReference<@Nullable AboutPanel> panelRef = new AtomicReference<>();

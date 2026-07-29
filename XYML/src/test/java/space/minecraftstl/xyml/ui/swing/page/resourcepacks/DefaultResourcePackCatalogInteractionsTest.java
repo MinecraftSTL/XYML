@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -118,6 +119,7 @@ public final class DefaultResourcePackCatalogInteractionsTest {
                 () -> assertThrows(UnsupportedOperationException.class,
                         () -> selected.add(temporaryDirectory.resolve("third.zip"))),
                 () -> assertSame(owner, call.owner()),
+                () -> assertInstanceOf(EditablePathChooser.class, chooser),
                 () -> assertTrue(call.onEventDispatchThread()),
                 () -> assertEquals(temporaryDirectory.toFile(), chooser.getCurrentDirectory()),
                 () -> assertEquals(STRINGS.importDialogTitle(), chooser.getDialogTitle()),

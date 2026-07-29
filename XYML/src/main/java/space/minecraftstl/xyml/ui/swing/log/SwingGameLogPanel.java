@@ -75,7 +75,7 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// and copies mutable input batches before they cross the thread boundary.
 @NotNullByDefault
 final class SwingGameLogPanel extends JPanel {
-    /// Severity levels exposed as filters, matching the legacy window's five toggle buttons.
+    /// Severity levels exposed by the five log filter buttons.
     private static final @Unmodifiable List<Log4jLevel> FILTER_LEVELS = List.of(
             Log4jLevel.FATAL,
             Log4jLevel.ERROR,
@@ -83,10 +83,10 @@ final class SwingGameLogPanel extends JPanel {
             Log4jLevel.INFO,
             Log4jLevel.DEBUG);
 
-    /// Retention choices exposed by the legacy window.
+    /// Retention choices exposed by the log panel.
     private static final @Unmodifiable List<Integer> STANDARD_LINE_LIMITS = List.of(500, 2000, 5000, 10000);
 
-    /// Stable preferred panel size inherited from the legacy log stage.
+    /// Stable preferred panel size for the log surface.
     private static final Dimension PREFERRED_SIZE = new Dimension(800, 480);
 
     /// Bounded shared history and filter state.
@@ -378,7 +378,7 @@ final class SwingGameLogPanel extends JPanel {
         return toolbar;
     }
 
-    /// Configures selection, rendering, and the legacy Ctrl+C clipboard shortcut.
+    /// Configures selection, rendering, and the Ctrl+C clipboard shortcut.
     private void configureLogList() {
         logList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         logList.setCellRenderer(new LogCellRenderer());
@@ -442,7 +442,7 @@ final class SwingGameLogPanel extends JPanel {
         }
     }
 
-    /// Updates the five legacy severity labels with cumulative session counts.
+    /// Updates the five severity labels with cumulative session counts.
     private void updateLevelLabels() {
         for (Log4jLevel level : FILTER_LEVELS) {
             String suffix = level.name().toLowerCase(Locale.ROOT) + "s";
@@ -470,7 +470,7 @@ final class SwingGameLogPanel extends JPanel {
         }
     }
 
-    /// Copies selected rows in visual order with the legacy trailing newline.
+    /// Copies selected rows in visual order with the established trailing newline.
     private void copySelectedRows() {
         List<Log> selectedLogs = logList.getSelectedValuesList();
         if (selectedLogs.isEmpty()) {
@@ -526,7 +526,7 @@ final class SwingGameLogPanel extends JPanel {
 
     /// Executes one export outside the EDT and reveals a successful result when possible.
     ///
-    /// Reveal failure is logged without changing a successful export into a failed export, matching the legacy flow.
+    /// Reveal failure is logged without changing a successful export into a failed export.
     ///
     /// @param sourceButton button disabled while the operation is pending
     /// @param operationName localized operation name used in failure notifications
@@ -587,7 +587,7 @@ final class SwingGameLogPanel extends JPanel {
         }
     }
 
-    /// Builds a sorted selector model containing the current limit and all legacy standard choices.
+    /// Builds a sorted selector model containing the current limit and all standard choices.
     ///
     /// @param currentLimit current positive retention limit
     /// @return selector model with the current value selected
@@ -631,7 +631,7 @@ final class SwingGameLogPanel extends JPanel {
         Path run() throws Exception;
     }
 
-    /// Swing action backing the legacy Ctrl+C selected-row shortcut.
+    /// Swing action backing the Ctrl+C selected-row shortcut.
     @NotNullByDefault
     private final class CopySelectedLogsAction extends javax.swing.AbstractAction {
         /// Creates the selected-row clipboard action.

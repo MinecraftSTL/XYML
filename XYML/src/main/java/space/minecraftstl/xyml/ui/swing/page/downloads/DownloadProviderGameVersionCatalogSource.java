@@ -615,7 +615,7 @@ public final class DownloadProviderGameVersionCatalogSource
         return List.copyOf(uniqueItems.values());
     }
 
-    /// Classifies a core game version with the same rules as the legacy versions page.
+    /// Classifies a core game version with the launcher's established release rules.
     ///
     /// @param version core game version
     /// @return toolkit-neutral catalog kind

@@ -81,10 +81,10 @@ public final class JavaManager {
     };
 
     /// User-scoped repository for launcher-managed Java runtimes.
-    public static final XYMLJavaRepository REPOSITORY = new XYMLJavaRepository(Metadata.HMCL_USER_HOME.resolve("java"));
+    public static final XYMLJavaRepository REPOSITORY = new XYMLJavaRepository(Metadata.XYML_USER_HOME.resolve("java"));
 
     /// Launcher-local repository for portable managed Java runtimes.
-    public static final XYMLJavaRepository LOCAL_REPOSITORY = new XYMLJavaRepository(Metadata.HMCL_LOCAL_HOME.resolve("java"));
+    public static final XYMLJavaRepository LOCAL_REPOSITORY = new XYMLJavaRepository(Metadata.XYML_LOCAL_HOME.resolve("java"));
 
     /// Maps a supported platform to Mojang's runtime directory identifier.
     ///
@@ -419,7 +419,7 @@ public final class JavaManager {
     /// @param useCache whether valid cached runtime metadata may avoid probing executables
     /// @return runtimes indexed by canonical executable path
     private static Map<Path, JavaRuntime> searchPotentialJavaExecutables(boolean useCache) {
-        Searcher searcher = new Searcher(Metadata.HMCL_USER_HOME.resolve("javaCache.json"));
+        Searcher searcher = new Searcher(Metadata.XYML_USER_HOME.resolve("javaCache.json"));
         if (useCache)
             searcher.loadCache();
 
@@ -510,8 +510,8 @@ public final class JavaManager {
             }
         }
 
-        if (System.getenv("HMCL_JRES") != null) {
-            String @Unmodifiable [] paths = System.getenv("HMCL_JRES").split(File.pathSeparator);
+        if (System.getenv("XYML_JRES") != null) {
+            String @Unmodifiable [] paths = System.getenv("XYML_JRES").split(File.pathSeparator);
             for (String path : paths) {
                 try {
                     searcher.tryAddJavaHome(Path.of(path));

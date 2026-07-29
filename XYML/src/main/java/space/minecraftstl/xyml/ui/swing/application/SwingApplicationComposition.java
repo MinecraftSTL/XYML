@@ -41,12 +41,11 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
-import space.minecraftstl.xyml.ui.swing.ThemeMode;
-import space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsPanel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.LauncherAccountsModel;
-import space.minecraftstl.xyml.ui.swing.page.accounts.LegacyLauncherAccountStore;
+import space.minecraftstl.xyml.ui.swing.page.accounts.LauncherAccountStore;
 import space.minecraftstl.xyml.ui.swing.page.downloads.DefaultGameVersionCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadProviderGameVersionCatalogSource;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogModel;
@@ -54,7 +53,7 @@ import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogSource;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.LauncherHomeModel;
-import space.minecraftstl.xyml.ui.swing.page.home.LegacyLauncherHomeStore;
+import space.minecraftstl.xyml.ui.swing.page.home.LauncherHomeStore;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.SelectedRepositoryInstancesModel;
@@ -73,13 +72,13 @@ import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteract
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
-import space.minecraftstl.xyml.ui.swing.page.settings.LegacyGameDirectoryManagementService;
-import space.minecraftstl.xyml.ui.swing.page.settings.LegacyLauncherAppearanceStore;
+import space.minecraftstl.xyml.ui.swing.page.settings.LauncherGameDirectoryManagementService;
+import space.minecraftstl.xyml.ui.swing.page.settings.LauncherAppearanceStore;
 import space.minecraftstl.xyml.ui.swing.page.settings.PersistedAppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.SettingsCenterPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.StoredAppearanceSettings;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.SwingThemePackManagementInteractions;
-import space.minecraftstl.xyml.ui.swing.page.settings.theme.LegacyThemeRuntimeController;
+import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemeRuntimeController;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementModelFactory;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementPanel;
@@ -111,7 +110,7 @@ import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Owns the Swing window, page models, instance management, installer, legacy stores,
+/// Owns the Swing window, page models, instance management, installer, launcher stores,
 /// and animation lifecycle.
 ///
 /// [space.minecraftstl.xyml.Launcher] creates this composition only after Accounts, game directories, and
@@ -153,15 +152,15 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 "applicationCloseCommand");
     }
 
-    /// Creates the production bridge after legacy state managers are initialized.
+    /// Creates the production bridge after launcher state managers are initialized.
     ///
-    /// Legacy stores and the selected repository are captured on the Swing event dispatch thread. Instance
+    /// Launcher stores and the selected repository are captured on the Swing event dispatch thread. Instance
     /// viewport work uses the process-wide caller-owned [Schedulers#io()] executor, which this composition
-    /// never closes. Legacy account creation and launch commands remain startup-owned. New-instance
+    /// never closes. Launcher account creation and launch commands remain startup-owned. New-instance
     /// commands route to the Swing downloads page, while instance management itself is composed and owned here.
     ///
     /// @param presentation localized text and explicit transition policy
-    /// @param commands startup-owned legacy workflow boundaries
+    /// @param commands startup-owned launcher workflow boundaries
     /// @param systemThemeDetector fast operating-system appearance detector
     /// @param animationFrameDelayMillis positive Swing animation timer delay
     /// @return closed-resource-safe Swing application composition
@@ -181,7 +180,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// Creates the production bridge with a startup-owned final close command.
     ///
     /// @param presentation localized text and explicit transition policy
-    /// @param commands startup-owned legacy workflow boundaries
+    /// @param commands startup-owned launcher workflow boundaries
     /// @param systemThemeDetector fast operating-system appearance detector
     /// @param animationFrameDelayMillis positive Swing animation timer delay
     /// @param applicationCloseCommand command invoked once after composition cleanup is attempted
@@ -200,13 +199,13 @@ public final class SwingApplicationComposition implements AutoCloseable {
             throw new IllegalArgumentException("animationFrameDelayMillis must be positive");
         }
 
-        AtomicReference<@Nullable LegacyBindings> legacyResult = new AtomicReference<>();
-        LegacyStateDispatcher.executeAndWait(() -> legacyResult.set(LegacyBindings.create()));
-        LegacyBindings legacy = Objects.requireNonNull(legacyResult.get(), "legacy bindings were not created");
+        AtomicReference<@Nullable LauncherBindings> bindingsResult = new AtomicReference<>();
+        LauncherStateDispatcher.executeAndWait(() -> bindingsResult.set(LauncherBindings.create()));
+        LauncherBindings bindings = Objects.requireNonNull(bindingsResult.get(), "launcher bindings were not created");
 
-        StoredAppearanceSettings rawAppearance = legacy.appearanceStore().snapshot();
+        StoredAppearanceSettings rawAppearance = bindings.appearanceStore().snapshot();
         SwingThemeManager themeManager = new SwingThemeManager(
-                ThemeMode.fromSettingValue(rawAppearance.themeModeValue()),
+                rawAppearance.brightnessPreference(),
                 new SwingDesignTokens(rawAppearance.cornerRadius()),
                 systemThemeDetector);
         SwingAnimator animator = new SwingAnimator(
@@ -216,7 +215,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         try {
             return createForCollaborators(
                     navigateCommand -> createProductionModels(
-                            legacy,
+                            bindings,
                             commands,
                             presentation,
                             navigateCommand,
@@ -229,7 +228,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     SwingApplicationComposition::createFrameWindow,
                     applicationCloseCommand);
         } catch (RuntimeException | Error failure) {
-            closeAfterFailure(legacy, failure);
+            closeAfterFailure(bindings, failure);
             throw failure;
         }
     }
@@ -475,7 +474,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
 
     /// Creates production collaborators and records service-before-model-before-store cleanup order.
     ///
-    /// @param legacy captured state-store bindings and selected repository
+    /// @param bindings captured state-store bindings and selected repository
     /// @param commands startup-owned workflow boundaries
     /// @param presentation localized model status text
     /// @param navigateCommand shell-backed navigation command
@@ -484,22 +483,22 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @param systemThemeDetector fast operating-system appearance detector
     /// @return owned production page-model bundle
     private static SwingApplicationPageModels createProductionModels(
-            LegacyBindings legacy,
+            LauncherBindings bindings,
             SwingApplicationCommands commands,
             SwingApplicationPresentation presentation,
             Consumer<ShellPageId> navigateCommand,
             SwingThemeManager themeManager,
             SwingAnimator animator,
             SystemThemeDetector systemThemeDetector) {
-        LegacyThemeRuntimeController themeRuntime = new LegacyThemeRuntimeController(
-                legacy.settings(),
+        ThemeRuntimeController themeRuntime = new ThemeRuntimeController(
+                bindings.settings(),
                 new BuiltinThemePackCatalog(),
-                new LocalThemePackRepository(Metadata.HMCL_LOCAL_HOME.resolve("themes")),
+                new LocalThemePackRepository(Metadata.XYML_LOCAL_HOME.resolve("themes")),
                 themeManager,
                 animator,
                 systemThemeDetector,
                 Schedulers.io(),
-                legacy.initialTheme());
+                bindings.initialTheme());
         SchematicBrowserInteractions schematicInteractions = new DefaultSchematicBrowserInteractions(
                 presentation.schematics().actions(),
                 Schedulers.io());
@@ -512,37 +511,37 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 Schedulers.io());
         ProductionPageModelFactories factories = new ProductionPageModelFactories(
                 addInstanceCommand -> new LauncherHomeModel(
-                        legacy.homeStore(),
+                        bindings.homeStore(),
                         presentation.homeStatus(),
                         () -> navigateCommand.accept(ShellPageId.ACCOUNTS),
                         () -> navigateCommand.accept(ShellPageId.INSTANCES),
                         addInstanceCommand,
                         commands.launchCommand(),
                         commands.launchScriptExportCommand()),
-                LegacyGameDirectoryManagementService::new,
+                LauncherGameDirectoryManagementService::new,
                 () -> new InstanceManagementCoordinator((instanceId, returnCommand) -> {
                     WorldQuickPlayActions worldQuickPlayActions = WorldQuickPlayActions.available(
                             worldFolder -> commands.launchCommand().launch(new LaunchRequest(
-                                    legacy.homeStore().snapshot().accountId(),
-                                    legacy.repository().getGameDirectory().getId().toString(),
+                                    bindings.homeStore().snapshot().accountId(),
+                                    bindings.repository().getGameDirectory().getId().toString(),
                                     instanceId,
                                     worldFolder)),
                             (worldFolder, destination) -> commands.launchScriptExportCommand().export(
                                     new LaunchRequest(
-                                            legacy.homeStore().snapshot().accountId(),
-                                            legacy.repository().getGameDirectory().getId().toString(),
+                                            bindings.homeStore().snapshot().accountId(),
+                                            bindings.repository().getGameDirectory().getId().toString(),
                                             instanceId,
                                             worldFolder),
                                     destination));
                     InstanceMaintenanceLaunchActions maintenanceLaunchActions =
                             new CommandInstanceMaintenanceLaunchActions(
-                                    legacy.repository(),
+                                    bindings.repository(),
                                     instanceId,
                                     commands.launchCommand(),
                                     commands.launchScriptExportCommand());
                     return new DefaultInstanceManagementView(
-                                legacy.repository(),
-                                legacy.repository()::getSchematicsDirectory,
+                                bindings.repository(),
+                                bindings.repository()::getSchematicsDirectory,
                                 instanceId,
                                 Schedulers.io(),
                                 presentation.schematicManagement(),
@@ -572,29 +571,29 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 source -> new DefaultGameVersionCatalogModel(source, presentation.gameVersionsStatus()),
                 () -> new DefaultGameInstallService(
                         request -> new RepositoryGameInstallTaskFactory(
-                                        legacy.repository(),
+                                        bindings.repository(),
                                         DownloadProviders.getDownloadProvider(),
                                         Schedulers.io(),
-                                        LegacyStateDispatcher::execute)
+                                        LauncherStateDispatcher::execute)
                                 .create(request),
                         Schedulers.io(),
                         presentation.gameInstall().taskTitle(),
                         presentation.gameInstall().preparingPhase()),
                 () -> new LauncherAccountsModel(
-                        legacy.accountStore(),
+                        bindings.accountStore(),
                         commands.addAccountCommand(),
                         commands.refreshAccountCommand()),
                 () -> new PersistedAppearanceSettingsModel(
-                        legacy.appearanceStore(),
+                        bindings.appearanceStore(),
                         themeRuntime,
                         themeRuntime));
         try {
             return createProductionModels(
                     factories,
-                    legacy.homeStore(),
-                    legacy.accountStore(),
-                    legacy.appearanceStore(),
-                    legacy,
+                    bindings.homeStore(),
+                    bindings.accountStore(),
+                    bindings.appearanceStore(),
+                    bindings,
                     navigateCommand,
                     themeRuntime::createManagementModel);
         } catch (RuntimeException | Error failure) {
@@ -640,13 +639,13 @@ public final class SwingApplicationComposition implements AutoCloseable {
     ///
     /// Every closeable result is registered before the next factory runs, so a later constructor
     /// failure cannot leak an earlier model or source. The returned bundle owns stores individually;
-    /// the aggregate legacy resource is used only to clean up partial construction.
+    /// the aggregate launcher resource is used only to clean up partial construction.
     ///
     /// @param factories ordered page-model and source factories
-    /// @param homeStore legacy home projection
-    /// @param accountStore legacy account projection
-    /// @param appearanceStore legacy appearance persistence adapter
-    /// @param legacyResources aggregate partial-construction cleanup resource
+    /// @param homeStore launcher home projection
+    /// @param accountStore launcher account projection
+    /// @param appearanceStore launcher appearance persistence adapter
+    /// @param stateResources aggregate partial-construction cleanup resource
     /// @param navigateCommand shell navigation command used to create the shared add-instance action
     /// @return fully owned production page models
     static SwingApplicationPageModels createProductionModels(
@@ -654,14 +653,14 @@ public final class SwingApplicationComposition implements AutoCloseable {
             AutoCloseable homeStore,
             AutoCloseable accountStore,
             AutoCloseable appearanceStore,
-            AutoCloseable legacyResources,
+            AutoCloseable stateResources,
             Consumer<ShellPageId> navigateCommand) {
         return createProductionModels(
                 factories,
                 homeStore,
                 accountStore,
                 appearanceStore,
-                legacyResources,
+                stateResources,
                 navigateCommand,
                 null);
     }
@@ -669,10 +668,10 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// Executes the production model transaction with optional local theme-pack page support.
     ///
     /// @param factories ordered page-model and source factories
-    /// @param homeStore legacy home projection
-    /// @param accountStore legacy account projection
-    /// @param appearanceStore legacy appearance persistence adapter
-    /// @param legacyResources aggregate partial-construction cleanup resource
+    /// @param homeStore launcher home projection
+    /// @param accountStore launcher account projection
+    /// @param appearanceStore launcher appearance persistence adapter
+    /// @param stateResources aggregate partial-construction cleanup resource
     /// @param navigateCommand shell navigation command used to create the shared add-instance action
     /// @param themePackManagementModelFactory optional fresh theme-pack model factory
     /// @return fully owned production page models
@@ -681,14 +680,14 @@ public final class SwingApplicationComposition implements AutoCloseable {
             AutoCloseable homeStore,
             AutoCloseable accountStore,
             AutoCloseable appearanceStore,
-            AutoCloseable legacyResources,
+            AutoCloseable stateResources,
             Consumer<ShellPageId> navigateCommand,
             @Nullable ThemePackManagementModelFactory themePackManagementModelFactory) {
         Objects.requireNonNull(factories, "factories");
         Objects.requireNonNull(homeStore, "homeStore");
         Objects.requireNonNull(accountStore, "accountStore");
         Objects.requireNonNull(appearanceStore, "appearanceStore");
-        Objects.requireNonNull(legacyResources, "legacyResources");
+        Objects.requireNonNull(stateResources, "stateResources");
         Objects.requireNonNull(navigateCommand, "navigateCommand");
         Runnable addInstanceCommand = () -> navigateCommand.accept(ShellPageId.DOWNLOADS);
         List<AutoCloseable> services = new ArrayList<>(1);
@@ -752,7 +751,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     services,
                     models,
                     sources,
-                    legacyResources,
+                    stateResources,
                     failure);
             throw failure;
         }
@@ -787,9 +786,9 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @param services active-work services closed before their dependencies
     /// @param models created page models and instance-management coordinator in dependency-safe close order
     /// @param sources lower-level sources owned by those models
-    /// @param homeStore legacy home projection
-    /// @param accountStore legacy account projection
-    /// @param appearanceStore legacy appearance persistence adapter
+    /// @param homeStore launcher home projection
+    /// @param accountStore launcher account projection
+    /// @param appearanceStore launcher appearance persistence adapter
     /// @return immutable complete ownership order
     static @Unmodifiable List<AutoCloseable> productionOwnedResources(
             List<? extends AutoCloseable> services,
@@ -824,23 +823,23 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @param services active-work services created before the failure
     /// @param models page models and instance-management coordinator created before the failure
     /// @param sources lower-level sources created before the failure
-    /// @param legacy legacy stores captured before model construction
+    /// @param stateResources launcher stores captured before model construction
     /// @param constructionFailure original constructor failure
     static void closeProductionModelConstructionAfterFailure(
             List<? extends AutoCloseable> services,
             List<? extends AutoCloseable> models,
             List<? extends AutoCloseable> sources,
-            AutoCloseable legacy,
+            AutoCloseable stateResources,
             Throwable constructionFailure) {
         Objects.requireNonNull(services, "services");
         Objects.requireNonNull(models, "models");
         Objects.requireNonNull(sources, "sources");
-        Objects.requireNonNull(legacy, "legacy");
+        Objects.requireNonNull(stateResources, "stateResources");
         Objects.requireNonNull(constructionFailure, "constructionFailure");
         closeAllAfterFailure(List.copyOf(services), constructionFailure);
         closeAllAfterFailure(List.copyOf(models), constructionFailure);
         closeAllAfterFailure(List.copyOf(sources), constructionFailure);
-        closeAfterFailure(legacy, constructionFailure);
+        closeAfterFailure(stateResources, constructionFailure);
     }
 
     /// Creates the production [AppShellFrame] adapter.
@@ -1008,48 +1007,48 @@ public final class SwingApplicationComposition implements AutoCloseable {
         }
     }
 
-    /// Captures legacy stores and follows the selected repository with idempotent cleanup.
+    /// Captures launcher stores and follows the selected repository with idempotent cleanup.
     @NotNullByDefault
-    private static final class LegacyBindings implements AutoCloseable {
+    private static final class LauncherBindings implements AutoCloseable {
         /// Loaded launcher settings retained only for EDT-confined theme resolution and persistence.
         private final LauncherSettings settings;
 
-        /// Exact selected theme captured on the legacy settings thread.
+        /// Exact selected theme captured on the Swing EDT.
         private final ThemeReference initialTheme;
 
-        /// Current selected game repository, updated on the legacy Swing state thread.
+        /// Current selected game repository, updated on the Swing EDT.
         private volatile XYMLGameRepository repository;
 
         /// Subscription keeping the cross-thread repository snapshot current.
         private final Subscription repositorySubscription;
 
-        /// Legacy account and instance projection for the home model.
-        private final LegacyLauncherHomeStore homeStore;
+        /// Launcher account and instance projection for the home model.
+        private final LauncherHomeStore homeStore;
 
-        /// Legacy account-list projection and selection sink.
-        private final LegacyLauncherAccountStore accountStore;
+        /// Launcher account-list projection and selection sink.
+        private final LauncherAccountStore accountStore;
 
-        /// Legacy appearance persistence adapter.
-        private final LegacyLauncherAppearanceStore appearanceStore;
+        /// Launcher appearance persistence adapter.
+        private final LauncherAppearanceStore appearanceStore;
 
-        /// Prevents repeated legacy-store cleanup.
+        /// Prevents repeated launcher-store cleanup.
         private final AtomicBoolean closed = new AtomicBoolean();
 
-        /// Creates complete captured legacy bindings.
+        /// Creates complete captured launcher bindings.
         ///
         /// @param repository real selected game repository
         /// @param settings loaded launcher settings
-        /// @param initialTheme exact selected theme captured on the legacy settings thread
+        /// @param initialTheme exact selected theme captured on the Swing EDT
         /// @param homeStore home selection store
         /// @param accountStore account selection store
         /// @param appearanceStore appearance persistence store
-        private LegacyBindings(
+        private LauncherBindings(
                 XYMLGameRepository repository,
                 LauncherSettings settings,
                 ThemeReference initialTheme,
-                LegacyLauncherHomeStore homeStore,
-                LegacyLauncherAccountStore accountStore,
-                LegacyLauncherAppearanceStore appearanceStore) {
+                LauncherHomeStore homeStore,
+                LauncherAccountStore accountStore,
+                LauncherAppearanceStore appearanceStore) {
             this.repository = Objects.requireNonNull(repository, "repository");
             this.settings = Objects.requireNonNull(settings, "settings");
             this.initialTheme = Objects.requireNonNull(initialTheme, "initialTheme");
@@ -1066,20 +1065,20 @@ public final class SwingApplicationComposition implements AutoCloseable {
 
         /// Creates all adapters directly on the initialized Swing event dispatch thread.
         ///
-        /// @return complete legacy bindings
-        private static LegacyBindings create() {
-            LegacyStateDispatcher.requireEventThread();
+        /// @return complete launcher bindings
+        private static LauncherBindings create() {
+            LauncherStateDispatcher.requireEventThread();
             XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
             LauncherSettings settings = SettingsManager.settings();
             ThemeReference initialTheme = settings.getSelectedThemeOrDefault();
-            @Nullable LegacyLauncherHomeStore homeStore = null;
-            @Nullable LegacyLauncherAccountStore accountStore = null;
-            @Nullable LegacyLauncherAppearanceStore appearanceStore = null;
+            @Nullable LauncherHomeStore homeStore = null;
+            @Nullable LauncherAccountStore accountStore = null;
+            @Nullable LauncherAppearanceStore appearanceStore = null;
             try {
-                homeStore = new LegacyLauncherHomeStore();
-                accountStore = new LegacyLauncherAccountStore();
-                appearanceStore = LegacyLauncherAppearanceStore.createForCurrentSettings();
-                return new LegacyBindings(
+                homeStore = new LauncherHomeStore();
+                accountStore = new LauncherAccountStore();
+                appearanceStore = LauncherAppearanceStore.createForCurrentSettings();
+                return new LauncherBindings(
                         repository,
                         settings,
                         initialTheme,
@@ -1118,25 +1117,25 @@ public final class SwingApplicationComposition implements AutoCloseable {
         /// Returns the home selection store.
         ///
         /// @return home selection store
-        private LegacyLauncherHomeStore homeStore() {
+        private LauncherHomeStore homeStore() {
             return homeStore;
         }
 
         /// Returns the account selection store.
         ///
         /// @return account selection store
-        private LegacyLauncherAccountStore accountStore() {
+        private LauncherAccountStore accountStore() {
             return accountStore;
         }
 
         /// Returns the appearance persistence store.
         ///
         /// @return appearance persistence store
-        private LegacyLauncherAppearanceStore appearanceStore() {
+        private LauncherAppearanceStore appearanceStore() {
             return appearanceStore;
         }
 
-        /// Closes every legacy adapter at most once without closing process-wide executors.
+        /// Closes every launcher adapter at most once without closing process-wide executors.
         @Override
         public void close() {
             if (!closed.compareAndSet(false, true)) {
@@ -1151,7 +1150,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
             rethrowFailure(failure);
         }
 
-        /// Closes an adapter created before a later legacy adapter failed.
+        /// Closes an adapter created before a later launcher adapter failed.
         ///
         /// @param resource partially created adapter, or null
         /// @param constructionFailure original construction failure

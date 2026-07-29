@@ -19,7 +19,7 @@ package space.minecraftstl.xyml.setting;
 
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.event.EventBus;
-import space.minecraftstl.xyml.event.RefreshedVersionsEvent;
+import space.minecraftstl.xyml.event.RefreshedInstancesEvent;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.collection.ObservableCollections;
@@ -59,11 +59,11 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 @NotNullByDefault
 public final class GameDirectoryManager {
 
-    /// The stable ID shared by newly created and migrated current-workspace game directories.
+    /// The stable ID assigned to the built-in current-workspace game directory.
     static final GameDirectoryID DEFAULT_GAME_DIRECTORY_ID =
             new GameDirectoryID(new UUID(0x7105bc1f490e5e8cL, 0x878cf5844c3d4bc3L));
 
-    /// The stable ID shared by newly created and migrated user-home game directories.
+    /// The stable ID assigned to the built-in user-home game directory.
     static final GameDirectoryID HOME_GAME_DIRECTORY_ID =
             new GameDirectoryID(new UUID(0xf3eafde8506e5a77L, 0xbc88f24b4728dfb2L));
 
@@ -131,8 +131,7 @@ public final class GameDirectoryManager {
     private static final ObservableList<GameDirectory> mergedGameDirectories =
             ObservableCollections.observableList(gameDirectory -> List.of(
                     gameDirectory.nameProperty(),
-                    gameDirectory.pathProperty(),
-                    gameDirectory.legacyGameSettingsProperty()));
+                    gameDirectory.pathProperty()));
 
     /// Read-only view of [#mergedGameDirectories] exposed to callers.
     private static final @UnmodifiableView ObservableList<GameDirectory> mergedGameDirectoriesUnmodifiable =
@@ -217,16 +216,16 @@ public final class GameDirectoryManager {
             selectedInstance.set(repository.getSelectedInstance());
             selectedRepositoryInstanceSubscription = repository.selectedInstanceProperty()
                     .subscribe(instanceChange -> selectedInstance.set(instanceChange.currentValue()));
-            repository.refreshVersionsAsync().start();
+            repository.refreshInstancesAsync().start();
         });
         selectedGameDirectory.set(currentGameDirectory != null ? currentGameDirectory : mergedGameDirectories.get(0));
 
-        EventBus.EVENT_BUS.channel(RefreshedVersionsEvent.class).registerWeak(event -> {
+        EventBus.EVENT_BUS.channel(RefreshedInstancesEvent.class).registerWeak(event -> {
             Schedulers.ui().execute(() -> {
                 @Nullable XYMLGameRepository repository = selectedRepository.get();
                 if (repository != null && repository == event.getSource()) {
                     repository.refreshSelectedInstance();
-                    for (Consumer<XYMLGameRepository> listener : versionsListeners)
+                    for (Consumer<XYMLGameRepository> listener : instancesListeners)
                         listener.accept(repository);
                 }
             });
@@ -525,14 +524,14 @@ public final class GameDirectoryManager {
         getSelectedRepository().setSelectedInstance(instance);
     }
 
-    /// Listeners notified after the selected repository has loaded versions.
-    private static final List<Consumer<XYMLGameRepository>> versionsListeners = new ArrayList<>(4);
+    /// Listeners notified after the selected repository has loaded its installed instances.
+    private static final List<Consumer<XYMLGameRepository>> instancesListeners = new ArrayList<>(4);
 
-    /// Registers a listener that is notified when the selected repository's versions are available.
-    public static void registerVersionsListener(Consumer<XYMLGameRepository> listener) {
+    /// Registers a listener that is notified when the selected repository's instances are available.
+    public static void registerInstancesListener(Consumer<XYMLGameRepository> listener) {
         XYMLGameRepository repository = getSelectedRepository();
         if (repository.isLoaded())
             listener.accept(repository);
-        versionsListeners.add(listener);
+        instancesListeners.add(listener);
     }
 }

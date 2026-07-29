@@ -22,8 +22,12 @@ import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.theme.ResolvedTheme;
 import space.minecraftstl.xyml.theme.ThemeBrightness;
+import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeColor;
 
 import javax.swing.LookAndFeel;
@@ -35,11 +39,18 @@ import java.util.Objects;
 /// Initializes FlatLaf and applies live theme or design-token changes to all Swing windows.
 @NotNullByDefault
 public final class SwingThemeManager {
-    /// Supplies the current operating-system appearance for system mode.
+    /// Serializes complete native-window appearance replacements.
+    private final Object windowAppearanceLock = new Object();
+
+    /// Publishes renderer-ready background and native-transparency requests.
+    private final ValueChangeSupport<SwingWindowAppearanceRequest> windowAppearanceChanges =
+            new ValueChangeSupport<>(this);
+
+    /// Supplies the current operating-system appearance for system-dependent preferences.
     private final SystemThemeDetector systemThemeDetector;
 
-    /// Stores the persisted theme preference.
-    private volatile ThemeMode mode;
+    /// Stores the current four-state brightness preference.
+    private volatile ThemeBrightnessPreference brightnessPreference;
 
     /// Stores the design tokens most recently requested by the application.
     private volatile SwingDesignTokens designTokens;
@@ -56,34 +67,26 @@ public final class SwingThemeManager {
     /// Optional application callback that re-resolves a concrete theme after the system appearance changes.
     private volatile @Nullable Runnable systemThemeRefreshHandler;
 
+    /// Latest renderer-ready window request, available before the first frame is created.
+    private volatile SwingWindowAppearanceRequest windowAppearance = SwingWindowAppearanceRequest.INITIAL;
+
     /// Tracks whether this manager has installed FlatLaf at least once.
     private volatile boolean initialized;
 
     /// Creates a theme manager with explicit initial state and system detection.
     ///
-    /// @param initialMode the persisted light, dark, or system preference
+    /// @param initialBrightnessPreference initial theme, system, light, or dark preference
     /// @param initialDesignTokens the initial visual measurements
     /// @param systemThemeDetector the non-blocking operating-system appearance detector
     public SwingThemeManager(
-            ThemeMode initialMode,
+            ThemeBrightnessPreference initialBrightnessPreference,
             SwingDesignTokens initialDesignTokens,
             SystemThemeDetector systemThemeDetector) {
-        mode = Objects.requireNonNull(initialMode);
+        brightnessPreference = Objects.requireNonNull(
+                initialBrightnessPreference,
+                "initialBrightnessPreference");
         designTokens = Objects.requireNonNull(initialDesignTokens);
         this.systemThemeDetector = Objects.requireNonNull(systemThemeDetector);
-    }
-
-    /// Creates a manager with already resolved theme-domain values.
-    ///
-    /// @param initialTheme concrete selected-theme values
-    /// @param initialDesignTokens initial visual measurements
-    /// @param systemThemeDetector detector retained for later legacy system-mode updates
-    public SwingThemeManager(
-            ResolvedTheme initialTheme,
-            SwingDesignTokens initialDesignTokens,
-            SystemThemeDetector systemThemeDetector) {
-        this(themeMode(initialTheme.brightness()), initialDesignTokens, systemThemeDetector);
-        resolvedTheme = Objects.requireNonNull(initialTheme, "initialTheme");
     }
 
     /// Installs FlatLaf and the current design tokens before the application creates its first window.
@@ -94,7 +97,7 @@ public final class SwingThemeManager {
             @Nullable ResolvedTheme currentTheme = resolvedTheme;
             ThemeVariant variant = currentTheme != null
                     ? themeVariant(currentTheme.brightness())
-                    : mode.resolve(systemThemeDetector);
+                    : bootstrapVariant(brightnessPreference);
             applyResolvedTheme(
                     variant,
                     currentTheme != null ? currentTheme.primaryColorSeed() : null,
@@ -102,48 +105,42 @@ public final class SwingThemeManager {
         });
     }
 
-    /// Applies a new persisted mode and token set to existing and future Swing components.
+    /// Applies a new brightness preference and token set to existing and future Swing components.
     ///
     /// This method may be called from any thread and returns only after any required EDT update has completed.
     ///
-    /// @param newMode the new light, dark, or system preference
+    /// @param newBrightnessPreference the new theme, system, light, or dark preference
     /// @param newDesignTokens the new visual measurements
-    public void update(ThemeMode newMode, SwingDesignTokens newDesignTokens) {
-        Objects.requireNonNull(newMode);
+    public void update(
+            ThemeBrightnessPreference newBrightnessPreference,
+            SwingDesignTokens newDesignTokens) {
+        Objects.requireNonNull(newBrightnessPreference, "newBrightnessPreference");
         Objects.requireNonNull(newDesignTokens);
 
-        EdtDispatcher.executeAndWait(() -> updateOnEventDispatchThread(newMode, newDesignTokens));
+        EdtDispatcher.executeAndWait(() -> updateOnEventDispatchThread(
+                newBrightnessPreference,
+                newDesignTokens));
     }
 
-    /// Applies concrete theme-domain values to existing and future Swing components.
-    ///
-    /// Brightness selects FlatLightLaf or FlatDarkLaf, while the resolved primary color is installed through
-    /// FlatLaf's documented global `@accentColor` extra default before the look and feel is loaded.
-    ///
-    /// @param newTheme concrete selected-theme values after user overrides
-    /// @param newDesignTokens new visual measurements
-    public void update(ResolvedTheme newTheme, SwingDesignTokens newDesignTokens) {
-        update(newTheme, newDesignTokens, false);
-    }
-
-    /// Applies concrete theme values while retaining whether system-appearance polling is required.
+    /// Applies concrete theme values while retaining the preference that produced them.
     ///
     /// Theme and system brightness preferences both need re-resolution when the operating-system appearance
     /// changes because manifest conditions can depend on that context. Explicit light and dark preferences do not.
     ///
     /// @param newTheme concrete selected-theme values after user overrides
     /// @param newDesignTokens new visual measurements
-    /// @param followsSystemAppearance whether foreground system-theme changes require a fresh resolution
+    /// @param newBrightnessPreference preference used to resolve the concrete theme
     public void update(
             ResolvedTheme newTheme,
             SwingDesignTokens newDesignTokens,
-            boolean followsSystemAppearance) {
+            ThemeBrightnessPreference newBrightnessPreference) {
         Objects.requireNonNull(newTheme, "newTheme");
         Objects.requireNonNull(newDesignTokens, "newDesignTokens");
+        Objects.requireNonNull(newBrightnessPreference, "newBrightnessPreference");
         EdtDispatcher.executeAndWait(() -> updateResolvedThemeOnEventDispatchThread(
                 newTheme,
                 newDesignTokens,
-                followsSystemAppearance));
+                newBrightnessPreference));
     }
 
     /// Installs the callback used to rebuild a resolved theme after a system-appearance change.
@@ -153,13 +150,44 @@ public final class SwingThemeManager {
         systemThemeRefreshHandler = handler;
     }
 
-    /// Rechecks the operating-system appearance and updates open windows when system mode is active.
+    /// Replaces the renderer-ready background and transparency request.
+    ///
+    /// Publication is synchronous on the calling thread; native-window listeners must dispatch to the EDT.
+    ///
+    /// @param request complete renderer request
+    public void updateWindowAppearance(SwingWindowAppearanceRequest request) {
+        SwingWindowAppearanceRequest replacement = Objects.requireNonNull(request, "request");
+        SwingWindowAppearanceRequest previous;
+        synchronized (windowAppearanceLock) {
+            previous = windowAppearance;
+            windowAppearance = replacement;
+        }
+        windowAppearanceChanges.fireChange(previous, replacement);
+    }
+
+    /// Returns the latest complete native-window appearance request.
+    ///
+    /// @return current renderer request
+    public SwingWindowAppearanceRequest windowAppearance() {
+        return windowAppearance;
+    }
+
+    /// Registers for future background or native-transparency replacements.
+    ///
+    /// @param listener request transition listener
+    /// @return independently cancellable listener registration
+    public Subscription subscribeWindowAppearance(
+            ValueChangeListener<SwingWindowAppearanceRequest> listener) {
+        return windowAppearanceChanges.subscribe(Objects.requireNonNull(listener, "listener"));
+    }
+
+    /// Rechecks the operating-system appearance when theme or system brightness depends on it.
     ///
     /// Platform integrations should invoke this method after receiving a native appearance-change event. This method may be called from
     /// any thread and returns only after any required EDT update has completed.
     public void refreshSystemTheme() {
-        ThemeMode currentMode = mode;
-        if (currentMode != ThemeMode.SYSTEM) {
+        ThemeBrightnessPreference currentPreference = brightnessPreference;
+        if (!followsSystemAppearance(currentPreference)) {
             return;
         }
         if (resolvedTheme != null) {
@@ -169,9 +197,9 @@ public final class SwingThemeManager {
             }
             return;
         }
-        ThemeVariant resolvedVariant = currentMode.resolve(systemThemeDetector);
+        ThemeVariant resolvedVariant = bootstrapVariant(currentPreference);
         EdtDispatcher.executeAndWait(() -> {
-            if (mode != ThemeMode.SYSTEM) {
+            if (!followsSystemAppearance(brightnessPreference)) {
                 return;
             }
 
@@ -181,11 +209,11 @@ public final class SwingThemeManager {
         });
     }
 
-    /// Returns the persisted theme preference.
+    /// Returns the current four-state brightness preference.
     ///
-    /// @return the selected theme mode
-    public ThemeMode mode() {
-        return mode;
+    /// @return selected theme, system, light, or dark preference
+    public ThemeBrightnessPreference brightnessPreference() {
+        return brightnessPreference;
     }
 
     /// Returns the design tokens currently associated with this manager.
@@ -204,7 +232,7 @@ public final class SwingThemeManager {
 
     /// Returns the concrete theme-domain values most recently requested through the resolved-theme API.
     ///
-    /// @return resolved theme, or `null` while using the compatibility [ThemeMode] API
+    /// @return resolved theme, or `null` before theme-domain resolution completes
     public @Nullable ResolvedTheme resolvedTheme() {
         return resolvedTheme;
     }
@@ -225,17 +253,19 @@ public final class SwingThemeManager {
 
     /// Updates state and refreshes Swing only when the rendered appearance changes.
     ///
-    /// @param newMode the new persisted theme mode
+    /// @param newBrightnessPreference the new brightness preference
     /// @param newDesignTokens the new design tokens
-    private void updateOnEventDispatchThread(ThemeMode newMode, SwingDesignTokens newDesignTokens) {
+    private void updateOnEventDispatchThread(
+            ThemeBrightnessPreference newBrightnessPreference,
+            SwingDesignTokens newDesignTokens) {
         EdtDispatcher.requireEventDispatchThread();
 
-        ThemeVariant resolvedVariant = newMode.resolve(systemThemeDetector);
+        ThemeVariant resolvedVariant = bootstrapVariant(newBrightnessPreference);
         boolean tokensChanged = !newDesignTokens.equals(designTokens);
         boolean variantChanged = resolvedVariant != effectiveVariant;
         boolean accentChanged = effectiveAccentColor != null;
 
-        mode = newMode;
+        brightnessPreference = newBrightnessPreference;
         designTokens = newDesignTokens;
         resolvedTheme = null;
 
@@ -251,7 +281,7 @@ public final class SwingThemeManager {
     private void updateResolvedThemeOnEventDispatchThread(
             ResolvedTheme newTheme,
             SwingDesignTokens newDesignTokens,
-            boolean followsSystemAppearance) {
+            ThemeBrightnessPreference newBrightnessPreference) {
         EdtDispatcher.requireEventDispatchThread();
 
         ThemeVariant resolvedVariant = themeVariant(newTheme.brightness());
@@ -259,7 +289,7 @@ public final class SwingThemeManager {
         boolean variantChanged = resolvedVariant != effectiveVariant;
         boolean accentChanged = !Objects.equals(newTheme.primaryColorSeed(), effectiveAccentColor);
 
-        mode = followsSystemAppearance ? ThemeMode.SYSTEM : themeMode(newTheme.brightness());
+        brightnessPreference = newBrightnessPreference;
         designTokens = newDesignTokens;
         resolvedTheme = newTheme;
 
@@ -329,13 +359,29 @@ public final class SwingThemeManager {
         return brightness == ThemeBrightness.DARK ? ThemeVariant.DARK : ThemeVariant.LIGHT;
     }
 
-    /// Maps toolkit-neutral brightness to the compatible explicit [ThemeMode] representation.
+    /// Resolves an initial concrete palette before a selected theme has been resolved.
     ///
-    /// @param brightness resolved brightness
-    /// @return explicit light or dark mode
-    private static ThemeMode themeMode(ThemeBrightness brightness) {
-        return Objects.requireNonNull(brightness, "brightness") == ThemeBrightness.DARK
-                ? ThemeMode.DARK
-                : ThemeMode.LIGHT;
+    /// Theme inheritance uses the operating-system brightness only as a startup palette until the theme resolver
+    /// supplies the selected theme's concrete brightness.
+    ///
+    /// @param preference current brightness preference
+    /// @return concrete startup palette
+    private ThemeVariant bootstrapVariant(ThemeBrightnessPreference preference) {
+        return switch (Objects.requireNonNull(preference, "preference")) {
+            case THEME, SYSTEM -> systemThemeDetector.isDarkTheme()
+                    ? ThemeVariant.DARK
+                    : ThemeVariant.LIGHT;
+            case LIGHT -> ThemeVariant.LIGHT;
+            case DARK -> ThemeVariant.DARK;
+        };
+    }
+
+    /// Returns whether operating-system appearance changes require theme re-resolution.
+    ///
+    /// @param preference current brightness preference
+    /// @return whether system appearance affects the rendered theme
+    private static boolean followsSystemAppearance(ThemeBrightnessPreference preference) {
+        return preference == ThemeBrightnessPreference.THEME
+                || preference == ThemeBrightnessPreference.SYSTEM;
     }
 }

@@ -62,7 +62,7 @@ public interface AccountReauthenticationGateway {
     /// This method may be called from any thread during cancellation and must be idempotent.
     void cancelActiveAuthentication();
 
-    /// Persists changed private data through the legacy dispatcher.
+    /// Persists changed private data through the launcher-state dispatcher.
     ///
     /// @param prepared successful result created by this gateway
     /// @param allowReadOnlyOverwrite whether the user confirmed backup-and-overwrite

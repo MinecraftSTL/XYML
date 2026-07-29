@@ -22,7 +22,6 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.observable.Subscription;
 
-import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -43,29 +42,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests cancellable and failure-isolated task-listener registrations.
 @NotNullByDefault
 public final class TaskExecutorSubscriptionTest {
-    /// Verifies the protected listener field retains its historical JVM type and mutable-list operations.
+    /// Verifies duplicate listener subscriptions can be cancelled independently.
     @Test
-    public void protectedListenerListRemainsSourceAndBinaryCompatible() throws NoSuchFieldException {
-        assertSame(List.class, TaskExecutor.class.getDeclaredField("taskListeners").getType());
-
-        ProbeTaskExecutor executor = new ProbeTaskExecutor();
-        AtomicInteger deliveries = new AtomicInteger();
-        StopTaskListener listener = new StopTaskListener(deliveries::incrementAndGet);
-
-        executor.addThroughProtectedList(listener);
-        assertEquals(1, executor.protectedListenerCount());
-        executor.fireStop();
-        assertEquals(1, deliveries.get());
-
-        assertTrue(executor.removeThroughProtectedList(listener));
-        assertEquals(0, executor.protectedListenerCount());
-        executor.fireStop();
-        assertEquals(1, deliveries.get());
-    }
-
-    /// Verifies duplicate registrations are independent while the legacy registration API remains permanent.
-    @Test
-    public void duplicateSubscriptionsAreIndependentAndLegacyRegistrationStillWorks() {
+    public void duplicateSubscriptionsAreIndependent() {
         ProbeTaskExecutor executor = new ProbeTaskExecutor();
         AtomicInteger deliveries = new AtomicInteger();
         StopTaskListener listener = new StopTaskListener(deliveries::incrementAndGet);
@@ -79,11 +58,10 @@ public final class TaskExecutorSubscriptionTest {
         assertFalse(first.isSubscribed());
         assertTrue(second.isSubscribed());
 
-        executor.addTaskListener(listener);
         second.unsubscribe();
         executor.fireStop();
 
-        assertEquals(2, deliveries.get());
+        assertEquals(1, deliveries.get());
         assertFalse(second.isSubscribed());
     }
 
@@ -359,22 +337,7 @@ public final class TaskExecutorSubscriptionTest {
 
         /// Publishes a successful terminal event to the current listener snapshot.
         private void fireStop() {
-            taskListeners.forEach(listener -> listener.onStop(true, this));
-        }
-
-        /// Adds a listener through the historical protected list API.
-        private void addThroughProtectedList(TaskListener listener) {
-            taskListeners.add(listener);
-        }
-
-        /// Removes a listener through the historical protected list API.
-        private boolean removeThroughProtectedList(TaskListener listener) {
-            return taskListeners.remove(listener);
-        }
-
-        /// Returns the listener count through the historical protected list API.
-        private int protectedListenerCount() {
-            return taskListeners.size();
+            notifyTaskListeners(listener -> listener.onStop(true, this));
         }
 
         /// Returns this probe without starting asynchronous work.

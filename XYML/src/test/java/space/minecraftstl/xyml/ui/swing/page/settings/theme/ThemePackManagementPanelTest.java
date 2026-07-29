@@ -26,14 +26,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.setting.BackgroundType;
+import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
+import space.minecraftstl.xyml.theme.BuiltinBackground;
+import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeReference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
-import space.minecraftstl.xyml.ui.swing.ThemeMode;
+import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceBackgroundStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
+import space.minecraftstl.xyml.ui.swing.page.settings.BackgroundAppearanceSettings;
 
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
@@ -213,7 +218,8 @@ public final class ThemePackManagementPanelTest {
                         "浅色",
                         "深色",
                         "圆角半径",
-                        "启用动画"),
+                        "启用动画",
+                        AppearanceBackgroundStrings.simplifiedChinese()),
                 themePanel));
         try {
             iconExecutor.runAll();
@@ -258,7 +264,10 @@ public final class ThemePackManagementPanelTest {
         assertTrue(loadedCount(themePanel) > 0);
         assertLongRowIsClipped(themePanel);
 
-        BufferedImage image = new BufferedImage(920, 820, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage image = new BufferedImage(
+                appearancePanel.getWidth(),
+                appearancePanel.getHeight(),
+                BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = image.createGraphics();
         try {
             appearancePanel.printAll(graphics);
@@ -277,7 +286,7 @@ public final class ThemePackManagementPanelTest {
     private static void prepareIntegratedPanel(
             AppearanceSettingsPanel appearancePanel,
             ThemePackManagementPanel themePanel) {
-        appearancePanel.setSize(920, 820);
+        appearancePanel.setSize(920, Math.max(820, appearancePanel.getPreferredSize().height));
         layoutRecursively(appearancePanel);
         themePanel.choiceList().refreshLoadPlan();
     }
@@ -364,7 +373,7 @@ public final class ThemePackManagementPanelTest {
         List<ThemePackItem> result = new ArrayList<>(count);
         for (int index = 0; index < count; index++) {
             boolean builtIn = index == 0;
-            String packageId = builtIn ? "hmcl.default" : "example.pack" + index;
+            String packageId = builtIn ? "xyml.default" : "example.pack" + index;
             String name = index == 1
                     ? "A very long local theme name that must be clipped before it reaches the fixed origin column"
                     : index == count - 1 ? "Needle theme" : "Theme " + index;
@@ -595,14 +604,28 @@ public final class ThemePackManagementPanelTest {
     private static final class StaticAppearanceSettingsModel implements AppearanceSettingsModel {
         /// Stable four-state appearance snapshot rendered by the integrated page.
         private static final AppearanceSettingsSnapshot SNAPSHOT = new AppearanceSettingsSnapshot(
-                ThemeMode.SYSTEM,
+                ThemeBrightnessPreference.THEME,
                 9,
                 0,
                 18,
                 3,
                 true,
-                true,
-                ThemeBrightnessPreference.THEME);
+                new BackgroundAppearanceSettings(
+                        BackgroundType.DEFAULT,
+                        BuiltinBackground.FALLBACK.id(),
+                        "",
+                        "",
+                        null,
+                        1.0,
+                        NetworkBackgroundImageCachePolicy.ENABLED,
+                        BackgroundType.BUILTIN,
+                        "#FFFFFF",
+                        BackgroundLoadPolicy.WAIT_FOR_BACKGROUND,
+                        false,
+                        false,
+                        false,
+                        false),
+                true);
 
         /// Returns the stable visual-test snapshot.
         @Override
@@ -615,12 +638,6 @@ public final class ThemePackManagementPanelTest {
         public Subscription subscribe(ValueChangeListener<AppearanceSettingsSnapshot> listener) {
             Objects.requireNonNull(listener, "listener");
             return Subscription.create(() -> { });
-        }
-
-        /// Rejects unexpected mode writes from the noninteractive visual test.
-        @Override
-        public void setThemeMode(ThemeMode themeMode) {
-            throw new UnsupportedOperationException("Static visual model does not accept writes");
         }
 
         /// Rejects unexpected four-state writes from the noninteractive visual test.
@@ -638,6 +655,13 @@ public final class ThemePackManagementPanelTest {
         /// Rejects unexpected animation writes from the noninteractive visual test.
         @Override
         public void setAnimationsEnabled(boolean enabled) {
+            throw new UnsupportedOperationException("Static visual model does not accept writes");
+        }
+
+        /// Rejects unexpected background writes from the noninteractive visual test.
+        @Override
+        public void setBackgroundAppearance(BackgroundAppearanceSettings background) {
+            Objects.requireNonNull(background, "background");
             throw new UnsupportedOperationException("Static visual model does not accept writes");
         }
     }

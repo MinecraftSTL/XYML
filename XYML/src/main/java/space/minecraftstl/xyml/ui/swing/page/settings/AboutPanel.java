@@ -58,10 +58,10 @@ import java.util.function.Consumer;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Restores the legacy grouped About page inside the Swing settings center.
+/// Renders the grouped About page inside the Swing settings center.
 ///
 /// The acknowledgement and dependency sections are read from the launcher-owned JSON resources so credits, order,
-/// images, links, and localized text stay aligned with the legacy JavaFX page and packaged assets.
+/// images, links, and localized text stay aligned with packaged acknowledgement assets.
 @NotNullByDefault
 final class AboutPanel extends JPanel {
     /// Classpath resource containing ordered acknowledgements.
@@ -70,7 +70,7 @@ final class AboutPanel extends JPanel {
     /// Classpath resource containing ordered third-party dependency notices.
     static final String DEPENDENCIES_RESOURCE = "/assets/about/deps.json";
 
-    /// Exact icon size used by the legacy two-line list.
+    /// Exact icon size used by the two-line list.
     private static final int ENTRY_ICON_SIZE = 32;
 
     /// Small command icon size for rows that open an external page.
@@ -85,7 +85,7 @@ final class AboutPanel extends JPanel {
     /// Ordered dependency entries loaded from the bundled JSON resource.
     private final @Unmodifiable List<AboutEntry> dependencies;
 
-    /// Creates the complete about page with all legacy sections.
+    /// Creates the complete About page with all acknowledgement sections.
     ///
     /// @param linkCommand command used to open trusted external links
     AboutPanel(Consumer<URI> linkCommand) {
@@ -111,7 +111,7 @@ final class AboutPanel extends JPanel {
         return dependencies;
     }
 
-    /// Loads and localizes one legacy About-page JSON list from the classpath.
+    /// Loads and localizes one About-page JSON list from the classpath.
     ///
     /// @param resourcePath absolute classpath resource path
     /// @return immutable ordered entries, or an empty list when the optional resource cannot be loaded
@@ -146,7 +146,7 @@ final class AboutPanel extends JPanel {
         }
     }
 
-    /// Builds every legacy group in the original order.
+    /// Builds every acknowledgement group in resource order.
     private void configureComponents() {
         addSection(i18n("about"), productEntries());
         addSection(i18n("about.thanks_to"), acknowledgements);
@@ -154,7 +154,7 @@ final class AboutPanel extends JPanel {
         addSection(i18n("about.legal"), legalEntries());
     }
 
-    /// Creates the product and author identity rows that headed the legacy About page.
+    /// Creates the product and author identity rows at the start of the About page.
     ///
     /// @return immutable product identity rows
     private static @Unmodifiable List<AboutEntry> productEntries() {
@@ -179,7 +179,7 @@ final class AboutPanel extends JPanel {
                         URI.create("https://space.bilibili.com/1445341")));
     }
 
-    /// Creates the legal acknowledgement rows that closed the legacy About page.
+    /// Creates the legal acknowledgement rows at the end of the About page.
     ///
     /// @return immutable legal rows
     private static @Unmodifiable List<AboutEntry> legalEntries() {
@@ -201,7 +201,7 @@ final class AboutPanel extends JPanel {
                         null,
                         i18n("about.open_source"),
                         i18n("about.open_source.statement"),
-                        URI.create("https://github.com/HMCL-dev/HMCL")));
+                        URI.create("https://github.com/MinecraftSTL/XYML")));
     }
 
     /// Parses one resource object into a localized two-line entry.
@@ -398,7 +398,7 @@ final class AboutPanel extends JPanel {
         }
     }
 
-    /// Scales one source image to the legacy row icon size.
+    /// Scales one source image to the row icon size.
     ///
     /// @param source source image
     /// @return scaled ARGB image

@@ -138,11 +138,6 @@ public final class UserSettings extends ObservableSetting implements JsonSchemaS
         return enableOfflineAccount;
     }
 
-    /// Returns the offline account enablement property under its compatibility alias.
-    public BooleanProperty enableOfflineAccountValueProperty() {
-        return enableOfflineAccount;
-    }
-
     /// The font antialiasing mode override.
     @SerializedName("fontAntiAliasing")
     private final StringProperty fontAntiAliasing = new SimpleStringProperty();
@@ -161,22 +156,12 @@ public final class UserSettings extends ObservableSetting implements JsonSchemaS
         return userJava;
     }
 
-    /// Returns user-added Java executable paths under their compatibility alias.
-    public ObservableSet<String> getUserJavaValues() {
-        return userJava;
-    }
-
     /// Disabled Java executable paths.
     @SerializedName("disabledJava")
     private final ObservableSet<String> disabledJava = ObservableCollections.observableSet();
 
     /// Returns disabled Java executable paths.
     public ObservableSet<String> getDisabledJava() {
-        return disabledJava;
-    }
-
-    /// Returns disabled Java executable paths under their compatibility alias.
-    public ObservableSet<String> getDisabledJavaValues() {
         return disabledJava;
     }
 

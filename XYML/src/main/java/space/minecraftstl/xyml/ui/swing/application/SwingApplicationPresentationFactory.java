@@ -37,6 +37,7 @@ import space.minecraftstl.xyml.ui.swing.page.resourcepacks.ResourcePackCatalogSt
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicMetadataStrings;
+import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceBackgroundStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPagePresentation;
@@ -119,7 +120,7 @@ public final class SwingApplicationPresentationFactory {
     /// @return complete shell navigation presentation
     private static ShellPagePresentations createShellPages() {
         EnumMap<ShellPageId, ShellPagePresentation> pages = new EnumMap<>(ShellPageId.class);
-        pages.put(ShellPageId.INSTANCES, new ShellPagePresentation(i18n("version.manage"), KeyEvent.VK_I));
+        pages.put(ShellPageId.INSTANCES, new ShellPagePresentation(i18n("instance.manage"), KeyEvent.VK_I));
         pages.put(ShellPageId.DOWNLOADS, new ShellPagePresentation(i18n("download"), KeyEvent.VK_D));
         pages.put(ShellPageId.ACCOUNTS, new ShellPagePresentation(i18n("account"), KeyEvent.VK_A));
         pages.put(ShellPageId.SETTINGS, new ShellPagePresentation(i18n("settings"), KeyEvent.VK_S));
@@ -134,11 +135,11 @@ public final class SwingApplicationPresentationFactory {
                 i18n("swing.shell.home"),
                 i18n("account"),
                 i18n("account.missing"),
-                i18n("version"),
-                i18n("version.empty"),
+                i18n("instance"),
+                i18n("instance.empty"),
                 i18n("install"),
-                i18n("version.launch_script"),
-                i18n("version.launch"),
+                i18n("instance.launch_script"),
+                i18n("instance.launch"),
                 i18n("swing.home.launching"),
                 i18n("swing.home.back_to_selections"));
     }
@@ -150,8 +151,8 @@ public final class SwingApplicationPresentationFactory {
         return new HomeStatusStrings(
                 i18n("swing.home.status.ready"),
                 i18n("account.choose"),
-                i18n("version.empty"),
-                i18n("version.launch_script"));
+                i18n("instance.empty"),
+                i18n("instance.launch_script"));
     }
 
     /// Creates localized installed-instance controls.
@@ -159,12 +160,12 @@ public final class SwingApplicationPresentationFactory {
     /// @return instance-page text
     private static InstancesStrings createInstancesStrings() {
         return new InstancesStrings(
-                i18n("version.manage"),
+                i18n("instance.manage"),
                 i18n("button.refresh"),
                 i18n("swing.common.refreshing"),
                 i18n("install"),
-                i18n("version.manage.manage"),
-                i18n("version.empty"));
+                i18n("instance.manage.manage"),
+                i18n("instance.empty"));
     }
 
     /// Creates localized installed-instance repository states.
@@ -184,7 +185,7 @@ public final class SwingApplicationPresentationFactory {
     /// @return instance-management text
     private static SchematicInstanceManagementStrings createManagementStrings() {
         return new SchematicInstanceManagementStrings(
-                i18n("version.manage"),
+                i18n("instance.manage"),
                 i18n("swing.management.return_tooltip"),
                 i18n("swing.management.loading"),
                 i18n("message.failed"),
@@ -435,7 +436,7 @@ public final class SwingApplicationPresentationFactory {
     /// @return game-install text
     private static GameInstallStrings createGameInstallStrings() {
         return new GameInstallStrings(
-                i18n("version.name"),
+                i18n("instance.name"),
                 i18n("button.install"),
                 i18n("swing.install.back_to_versions"),
                 i18n("install.new_game.installation"),
@@ -473,7 +474,44 @@ public final class SwingApplicationPresentationFactory {
                 i18n("settings.launcher.brightness.light"),
                 i18n("settings.launcher.brightness.dark"),
                 i18n("settings.launcher.corner_radius"),
-                i18n("settings.launcher.animation"));
+                i18n("settings.launcher.animation"),
+                createAppearanceBackgroundStrings());
+    }
+
+    /// Creates localized complete launcher-background controls.
+    ///
+    /// @return background settings text and enum labels
+    private static AppearanceBackgroundStrings createAppearanceBackgroundStrings() {
+        return new AppearanceBackgroundStrings(
+                i18n("launcher.background"),
+                i18n("launcher.background"),
+                i18n("swing.appearance.background.override_source"),
+                i18n("launcher.background.default"),
+                i18n("launcher.background.builtin"),
+                i18n("swing.appearance.background.local"),
+                i18n("launcher.background.network"),
+                i18n("launcher.background.paint"),
+                i18n("launcher.background.theme_color"),
+                i18n("launcher.background.builtin"),
+                i18n("swing.appearance.background.local"),
+                i18n("swing.appearance.background.browse"),
+                i18n("swing.appearance.background.network_url"),
+                i18n("launcher.background.paint"),
+                i18n("swing.appearance.background.choose_color"),
+                i18n("settings.launcher.background.settings.opacity"),
+                i18n("swing.appearance.background.override_opacity"),
+                i18n("launcher.background.network.cache"),
+                i18n("launcher.background.network.cache.enabled"),
+                i18n("launcher.background.network.cache.disabled"),
+                i18n("launcher.background.fallback"),
+                i18n("launcher.background.fallback.builtin"),
+                i18n("launcher.background.fallback.paint"),
+                i18n("launcher.background.fallback.theme_color"),
+                i18n("launcher.background.load_policy"),
+                i18n("launcher.background.load_policy.wait_for_background"),
+                i18n("launcher.background.load_policy.show_fallback_while_loading"),
+                i18n("settings.launcher.window_transparent"),
+                i18n("swing.appearance.background.override_transparency"));
     }
 
     /// Creates localized generic task-progress controls and states.

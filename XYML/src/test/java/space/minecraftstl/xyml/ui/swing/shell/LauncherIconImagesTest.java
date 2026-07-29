@@ -34,10 +34,13 @@ public final class LauncherIconImagesTest {
     @Test
     public void loadsBundledIconFamily() {
         Icon headerIcon = Objects.requireNonNull(LauncherIconImages.headerIcon(), "header icon");
+        Icon communityIcon = Objects.requireNonNull(LauncherIconImages.communityIcon(), "community icon");
         assertEquals(4, LauncherIconImages.windowIcons().size());
         assertNotNull(headerIcon);
         assertAll(
                 () -> assertEquals(24, headerIcon.getIconWidth()),
-                () -> assertEquals(24, headerIcon.getIconHeight()));
+                () -> assertEquals(24, headerIcon.getIconHeight()),
+                () -> assertEquals(24, communityIcon.getIconWidth()),
+                () -> assertEquals(24, communityIcon.getIconHeight()));
     }
 }

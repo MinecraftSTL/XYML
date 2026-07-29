@@ -53,7 +53,7 @@ final class AccountPrivateData extends ObservableSetting implements JsonSchemaSe
             new JsonSchema("account-private-data", new JsonSchema.Version(1, 0, 0));
 
     /// JVM system property selecting the account private data protection mode.
-    static final String PROTECTION_PROPERTY = "hmcl.account.privateData.protection";
+    static final String PROTECTION_PROPERTY = "xyml.account.privateData.protection";
 
     /// Creates an empty account private data store.
     AccountPrivateData() {

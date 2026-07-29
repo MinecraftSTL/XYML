@@ -243,7 +243,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
     private void revealCategoryDirectory(DownloadCategory category) {
         @Nullable Path directory = resolveCategoryDirectory(category);
         if (directory == null) {
-            publishStatus(i18n("version.switch"));
+            publishStatus(i18n("instance.switch"));
             return;
         }
 

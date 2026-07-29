@@ -421,7 +421,7 @@ public abstract class Task<T> {
     /// Creates a stopped asynchronous executor and attaches the supplied task listener.
     public final TaskExecutor executor(TaskListener taskListener) {
         TaskExecutor executor = new AsyncTaskExecutor(this);
-        executor.addTaskListener(taskListener);
+        executor.subscribeTaskListener(taskListener);
         return executor;
     }
 

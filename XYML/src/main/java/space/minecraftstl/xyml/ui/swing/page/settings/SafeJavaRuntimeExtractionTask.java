@@ -118,7 +118,7 @@ final class SafeJavaRuntimeExtractionTask extends Task<JavaManifest> {
         setName("Extract managed Java runtime into owned staging");
     }
 
-    /// Revalidates ownership, extracts the single Java Home root, and returns its legacy-compatible manifest.
+    /// Revalidates ownership, extracts the single Java Home root, and returns its managed-runtime manifest.
     @Override
     public void execute() throws Exception {
         requireExtractionOwnership();

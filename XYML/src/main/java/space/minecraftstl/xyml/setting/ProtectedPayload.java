@@ -36,7 +36,7 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.Objects;
 
-/// Stores a JSON payload using HMCL's portable protection envelope.
+/// Stores a JSON payload using XYML's portable protection envelope.
 ///
 /// This class is responsible for wrapping payloads with a protection marker and revealing them according to that
 /// marker. Protection modes define whether and how a payload is stored.
@@ -84,7 +84,7 @@ final class ProtectedPayload {
         /// The payload is encrypted with a built-in application key, Base64-encoded, and split into padded strings. This
         /// avoids storing private data as directly readable JSON, but it should not be treated as device-bound secret
         /// storage. The nonce is stored separately, while the payload lanes store `ciphertext || authentication tag`.
-        OBFUSCATED_V1("hmcl-obfuscated-v1") {
+        OBFUSCATED_V1("xyml-obfuscated-v1") {
             /// The number of lanes used by the obfuscated payload.
             private static final int OBFUSCATED_LANE_COUNT = 4;
 

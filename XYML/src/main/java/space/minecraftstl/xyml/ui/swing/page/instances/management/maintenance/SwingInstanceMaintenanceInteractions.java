@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -58,7 +60,7 @@ public final class SwingInstanceMaintenanceInteractions implements InstanceMaint
     @Override
     public @Nullable Path chooseModpackArchive(Component owner) {
         EdtDispatcher.requireEventDispatchThread();
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setDialogTitle(strings.updateModpackAction());
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setMultiSelectionEnabled(false);
@@ -79,7 +81,7 @@ public final class SwingInstanceMaintenanceInteractions implements InstanceMaint
     @Override
     public @Nullable Path chooseLaunchScript(Component owner, Path initialDirectory) {
         EdtDispatcher.requireEventDispatchThread();
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setDialogTitle(strings.exportScriptAction());
         chooser.setDialogType(JFileChooser.SAVE_DIALOG);
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);

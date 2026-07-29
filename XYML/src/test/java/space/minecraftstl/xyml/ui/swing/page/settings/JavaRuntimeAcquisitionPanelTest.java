@@ -634,7 +634,9 @@ public final class JavaRuntimeAcquisitionPanelTest {
                 archiveFile,
                 suggestedName,
                 suggestedName,
-                new JavaInfo(Platform.WINDOWS_X86_64, "21.0.8", "Eclipse Adoptium"));
+                new JavaInfo(Platform.WINDOWS_X86_64, "21.0.8", "Eclipse Adoptium"),
+                -1L,
+                "");
     }
 
     /// Loads the bounded static Mojang rows through the viewport-list contract.

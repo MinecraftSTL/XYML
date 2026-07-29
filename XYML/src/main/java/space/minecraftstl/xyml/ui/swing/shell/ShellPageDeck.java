@@ -57,7 +57,7 @@ final class ShellPageDeck extends JPanel {
     /// Eased transition progress from zero to one.
     private double transitionProgress = 1.0;
 
-    /// Creates an opaque page deck with caller-defined animation timing.
+    /// Creates a transparent page deck with caller-defined animation timing.
     ///
     /// @param animator the shared Swing animator
     /// @param transitionDuration the non-negative duration of a page change
@@ -68,7 +68,7 @@ final class ShellPageDeck extends JPanel {
             throw new IllegalArgumentException("transitionDuration must not be negative");
         }
         setLayout(null);
-        setOpaque(true);
+        setOpaque(false);
     }
 
     /// Shows a page, optionally animating from the previous page under the current motion policy.
@@ -172,6 +172,7 @@ final class ShellPageDeck extends JPanel {
     ///
     /// @param page the incoming page
     private void attachAtFront(JComponent page) {
+        page.setOpaque(false);
         if (page.getParent() != this) {
             add(page, 0);
         } else {

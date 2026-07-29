@@ -17,9 +17,11 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.setting.VersionIconType;
+import space.minecraftstl.xyml.setting.InstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JFileChooser;
@@ -62,15 +64,14 @@ public final class DefaultInstanceOverviewInteractions implements InstanceOvervi
     /// @param owner chooser parent component
     /// @param initialDirectory initial local directory
     /// @return selected image path, or `null` when cancelled
-    @Override
-    public @Nullable Path chooseIcon(Component owner, Path initialDirectory) {
+    private @Nullable Path chooseIcon(Component owner, Path initialDirectory) {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(owner, "owner");
         Path directory = Objects.requireNonNull(initialDirectory, "initialDirectory")
                 .toAbsolutePath()
                 .normalize();
 
-        JFileChooser chooser = new JFileChooser(directory.toFile());
+        JFileChooser chooser = new EditablePathChooser(directory.toFile());
         chooser.setDialogTitle(strings.iconChooserTitle());
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setMultiSelectionEnabled(false);
@@ -100,7 +101,7 @@ public final class DefaultInstanceOverviewInteractions implements InstanceOvervi
     @Override
     public @Nullable InstanceIconChoice chooseInstanceIcon(
             Component owner,
-            VersionIconType currentIconType,
+            InstanceIconType currentIconType,
             boolean hasCustomIcon,
             Path initialDirectory) {
         EdtDispatcher.requireEventDispatchThread();

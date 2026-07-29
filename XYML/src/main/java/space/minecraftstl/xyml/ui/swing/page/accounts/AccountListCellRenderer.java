@@ -42,7 +42,7 @@ import java.awt.Graphics2D;
 import java.awt.GridLayout;
 import java.awt.RenderingHints;
 
-/// Renders account rows with a lazy bundled avatar, two text lines, and optional explicit selection.
+/// Renders account rows with a lazy real-skin avatar, two text lines, and optional explicit selection.
 @NotNullByDefault
 public final class AccountListCellRenderer extends JPanel
         implements ListCellRenderer<ChoiceListEntry<AccountListItem>> {
@@ -55,7 +55,7 @@ public final class AccountListCellRenderer extends JPanel
     /// Failed-state icon occupying the stable avatar slot.
     private static final Icon ERROR_ICON = new AccountStateIcon(true);
 
-    /// Asynchronous launcher-bundled avatar cache.
+    /// Asynchronous shared account-avatar cache.
     private final AccountAvatarIconCache avatarCache = new AccountAvatarIconCache();
 
     /// Fixed avatar host.

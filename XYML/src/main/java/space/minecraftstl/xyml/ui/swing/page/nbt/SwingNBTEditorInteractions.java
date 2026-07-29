@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -56,7 +58,7 @@ final class SwingNBTEditorInteractions implements NBTEditorInteractions {
     @Override
     public @Nullable Path chooseFile(@Nullable Path currentFile) {
         EdtDispatcher.requireEventDispatchThread();
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setDialogTitle(strings.chooserTitle());
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setAcceptAllFileFilterUsed(false);

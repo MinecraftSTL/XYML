@@ -59,17 +59,17 @@ public final class ThemePackManagementModelTest {
 
         var firstStage = model.refresh();
         var secondStage = model.refresh();
-        ThemePackItem newer = builtin("hmcl.default", null, "Newer");
+        ThemePackItem newer = builtin("xyml.default", null, "Newer");
         second.complete(List.of(newer));
         assertEquals(List.of(newer), secondStage.toCompletableFuture().join().items());
 
-        first.complete(List.of(builtin("hmcl.classic", null, "Stale")));
+        first.complete(List.of(builtin("xyml.classic", null, "Stale")));
         assertEquals(List.of(newer), firstStage.toCompletableFuture().join().items());
         assertEquals(List.of(newer), model.snapshot().items());
 
         var thirdStage = model.refresh();
         model.close();
-        third.complete(List.of(builtin("hmcl.classic", null, "Late")));
+        third.complete(List.of(builtin("xyml.classic", null, "Late")));
         assertEquals(ThemePackManagementStatus.CLOSED, thirdStage.toCompletableFuture().join().status());
         assertTrue(model.snapshot().items().isEmpty());
         assertThrows(IllegalStateException.class, model::refresh);
@@ -82,13 +82,13 @@ public final class ThemePackManagementModelTest {
         CompletableFuture<@Unmodifiable List<ThemePackItem>> load = backend.enqueueLoad();
         CompletableFuture<@Nullable Void> deletion = backend.enqueueDelete();
         RecordingApplication application = new RecordingApplication();
-        ThemeReference builtinReference = new ThemeReference("hmcl.default", null);
+        ThemeReference builtinReference = new ThemeReference("xyml.default", null);
         ThemePackManagementModel model = new ThemePackManagementModel(
                 backend,
                 application,
                 Runnable::run,
                 builtinReference);
-        ThemePackItem builtin = builtin("hmcl.default", null, "Default");
+        ThemePackItem builtin = builtin("xyml.default", null, "Default");
         ThemePackItem installedFirst = installed("example.local", "soft", "Soft");
         ThemePackItem installedSecond = installed("example.local", "sharp", "Sharp");
 
@@ -118,8 +118,8 @@ public final class ThemePackManagementModelTest {
         CompletableFuture<@Unmodifiable List<ThemePackItem>> load = backend.enqueueLoad();
         CompletableFuture<@Unmodifiable List<ThemePackItem>> importFuture = backend.enqueueImport();
         ThemePackManagementModel model = model(backend, new RecordingApplication());
-        ThemePackItem first = builtin("hmcl.default", "bright", "Bright default");
-        ThemePackItem second = builtin("hmcl.classic", "orange", "Classic orange");
+        ThemePackItem first = builtin("xyml.default", "bright", "Bright default");
+        ThemePackItem second = builtin("xyml.classic", "orange", "Classic orange");
 
         model.refresh();
         load.complete(List.of(first, second));
@@ -129,7 +129,7 @@ public final class ThemePackManagementModelTest {
         var page = model.load(new IndexRange(0, 1), new LoadCancellation()).toCompletableFuture().join();
         assertEquals(List.of(second), page.items());
 
-        var importStage = model.importArchive(temporaryDirectory.resolve("duplicate.hmcl-theme"));
+        var importStage = model.importArchive(temporaryDirectory.resolve("duplicate.xyml-theme"));
         importFuture.completeExceptionally(new FileAlreadyExistsException("example.local"));
         ThemePackManagementSnapshot failed = importStage.toCompletableFuture().join();
         assertEquals(ThemePackManagementStatus.FAILED, failed.status());

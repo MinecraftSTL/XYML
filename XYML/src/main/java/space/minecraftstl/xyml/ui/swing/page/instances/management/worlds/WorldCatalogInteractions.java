@@ -22,7 +22,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.awt.Component;
 import java.nio.file.Path;
-import java.util.Objects;
 import java.util.concurrent.CompletionStage;
 
 /// Owns Swing dialogs and desktop integration outside the pure world catalog model.
@@ -51,53 +50,30 @@ public interface WorldCatalogInteractions {
 
     /// Prompts for a sibling name for a copied world.
     ///
-    /// The default preserves source compatibility for non-production test interactions.
-    ///
     /// @param owner dialog owner
     /// @param world selected loaded world
     /// @return trimmed target name, or `null` after cancellation
-    default @Nullable String chooseCopyName(Component owner, WorldCatalogItem world) {
-        Objects.requireNonNull(owner, "owner");
-        Objects.requireNonNull(world, "world");
-        return null;
-    }
+    @Nullable String chooseCopyName(Component owner, WorldCatalogItem world);
 
     /// Chooses a local ZIP destination and confirms replacement when necessary.
-    ///
-    /// The default preserves source compatibility for non-production test interactions.
     ///
     /// @param owner dialog owner
     /// @param world selected loaded world
     /// @return normalized ZIP destination, or `null` after cancellation
-    default @Nullable Path chooseExportArchive(Component owner, WorldCatalogItem world) {
-        Objects.requireNonNull(owner, "owner");
-        Objects.requireNonNull(world, "world");
-        return null;
-    }
+    @Nullable Path chooseExportArchive(Component owner, WorldCatalogItem world);
 
     /// Chooses a local standalone launch-script destination for one world.
-    ///
-    /// The default preserves source compatibility for test and download-page interactions without launch commands.
     ///
     /// @param owner dialog owner
     /// @param world selected loaded world
     /// @return normalized script destination, or `null` after cancellation
-    default @Nullable Path chooseLaunchScriptDestination(Component owner, WorldCatalogItem world) {
-        Objects.requireNonNull(owner, "owner");
-        Objects.requireNonNull(world, "world");
-        return null;
-    }
+    @Nullable Path chooseLaunchScriptDestination(Component owner, WorldCatalogItem world);
 
     /// Reports one successfully generated standalone launch script.
     ///
-    /// The default intentionally does nothing for non-production test interactions.
-    ///
     /// @param owner dialog owner
     /// @param scriptFile exact generated script path
-    default void launchScriptSucceeded(Component owner, Path scriptFile) {
-        Objects.requireNonNull(owner, "owner");
-        Objects.requireNonNull(scriptFile, "scriptFile");
-    }
+    void launchScriptSucceeded(Component owner, Path scriptFile);
 
     /// Schedules creation and opening of one local directory off the EDT.
     ///

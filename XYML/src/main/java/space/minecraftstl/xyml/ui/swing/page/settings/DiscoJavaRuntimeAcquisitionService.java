@@ -59,7 +59,7 @@ public interface DiscoJavaRuntimeAcquisitionService {
             DiscoJavaDistribution distribution,
             JavaPackageType packageType);
 
-    /// Derives the legacy-compatible managed runtime name from an explicit selection.
+    /// Derives the deterministic managed runtime name from an explicit selection.
     ///
     /// @param distribution explicitly selected distribution
     /// @param packageType explicitly selected non-JavaFX package type

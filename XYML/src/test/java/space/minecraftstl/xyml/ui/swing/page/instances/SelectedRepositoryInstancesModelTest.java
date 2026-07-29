@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
@@ -45,6 +46,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies selected-directory repository replacement, cancellation, and command routing.
 @NotNullByDefault
 public final class SelectedRepositoryInstancesModelTest {
+    /// Neutral fixed-size icon used by model-only fixtures.
+    private static final InstanceIconData TEST_ICON = new InstanceIconData(
+            new int[InstanceIconData.PIXEL_COUNT]);
+
     /// A directory switch replaces all visible state and closes the previous repository model.
     @Test
     public void switchesRepositoryStateAndRoutesCommandsToNewDelegate() {
@@ -190,7 +195,7 @@ public final class SelectedRepositoryInstancesModelTest {
         /// @param status stable status text
         /// @param itemId stable item identifier
         private FakeInstancesModel(String status, String itemId) {
-            item = new InstanceListItem(itemId, itemId, "Minecraft test");
+            item = new InstanceListItem(itemId, itemId, "Minecraft test", TEST_ICON);
             snapshot = new InstancesSnapshot(
                     OptionalInt.of(0), 1, 0L, status,
                     false, true, true, true, true);

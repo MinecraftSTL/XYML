@@ -76,12 +76,11 @@ final class JsonSettingFile<T extends ObservableSetting & JsonSchemaSetting> {
         this.createDefault = Objects.requireNonNull(createDefault);
     }
 
-    /// Loads the settings file, falling back to migrated data or a default object when absent.
+    /// Loads the settings file, falling back to a default object when absent.
     ///
-    /// @param migrated migrated settings data used when the file is absent
     /// @return the loaded settings object
     /// @throws IOException if reading the file fails
-    LoadResult<T> load(@Nullable T migrated) throws IOException {
+    LoadResult<T> load() throws IOException {
         if (Files.exists(location)) {
             try {
                 @Nullable JsonObject jsonObject = JsonUtils.fromJsonFile(location, JsonObject.class);
@@ -130,7 +129,7 @@ final class JsonSettingFile<T extends ObservableSetting & JsonSchemaSetting> {
             return result(createDefault.get(), SettingFileAccess.UNREADABLE);
         }
 
-        return result(Objects.requireNonNullElseGet(migrated, createDefault), true);
+        return result(createDefault.get(), true);
     }
 
     /// Creates a load result and stores the saveability metadata on the settings object.

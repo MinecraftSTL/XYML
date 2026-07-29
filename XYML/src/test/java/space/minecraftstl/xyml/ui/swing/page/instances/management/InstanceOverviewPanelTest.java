@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.GameRepository;
+import space.minecraftstl.xyml.setting.InstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JButton;
@@ -141,7 +142,7 @@ final class InstanceOverviewPanelTest {
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "getVersionRoot" -> repositoryRoot.resolve("versions").resolve("instance");
                     case "getRunDirectory" -> repositoryRoot.resolve("game");
-                    case "refreshVersions" -> {
+                    case "refreshInstances" -> {
                         refreshCount.incrementAndGet();
                         yield null;
                     }
@@ -199,10 +200,16 @@ final class InstanceOverviewPanelTest {
         /// Simulates cancellation because generic repositories intentionally expose no icon commands.
         ///
         /// @param owner unused chooser owner
+        /// @param currentIconType unused current icon type
+        /// @param hasCustomIcon unused custom-icon state
         /// @param initialDirectory unused initial directory
         /// @return always `null`
         @Override
-        public @Nullable Path chooseIcon(Component owner, Path initialDirectory) {
+        public @Nullable InstanceIconChoice chooseInstanceIcon(
+                Component owner,
+                InstanceIconType currentIconType,
+                boolean hasCustomIcon,
+                Path initialDirectory) {
             return null;
         }
 

@@ -48,7 +48,7 @@ public final class AprilFools {
         ).contains(LocaleUtils.SYSTEM_DEFAULT.getCountry());
 
         boolean aprilFoolsMode;
-        String value = System.getProperty("hmcl.april_fools", System.getenv("HMCL_APRIL_FOOLS"));
+        String value = System.getProperty("xyml.april_fools", System.getenv("XYML_APRIL_FOOLS"));
         if ("true".equalsIgnoreCase(value))
             aprilFoolsMode = true;
         else if ("false".equalsIgnoreCase(value) || !supportedRegion)

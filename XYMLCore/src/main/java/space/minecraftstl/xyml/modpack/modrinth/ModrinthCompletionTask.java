@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.modpack.modrinth;
 
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.addon.mod.ModManager;
@@ -38,53 +39,52 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Completes missing files for an installed Modrinth modpack instance.
 public class ModrinthCompletionTask extends Task<Void> {
 
     private final DefaultDependencyManager dependency;
     private final DefaultGameRepository repository;
     private final ModManager modManager;
-    private final String version;
-    private ModrinthManifest manifest;
+    /// Target installed instance identifier.
+    private final String instanceId;
+    private @Nullable ModrinthManifest manifest;
     private final List<Task<?>> dependencies = new ArrayList<>();
 
     private final AtomicBoolean allNameKnown = new AtomicBoolean(true);
     private final AtomicInteger finished = new AtomicInteger(0);
     private final AtomicBoolean notFound = new AtomicBoolean(false);
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager.
-     * @param version           the existent and physical version.
-     */
-    public ModrinthCompletionTask(DefaultDependencyManager dependencyManager, String version) {
-        this(dependencyManager, version, null);
+    /// Creates a completion task that loads the instance manifest from disk.
+    ///
+    /// @param dependencyManager dependency manager bound to the target repository
+    /// @param instanceId target installed instance identifier
+    public ModrinthCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+        this(dependencyManager, instanceId, null);
     }
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager.
-     * @param version           the existent and physical version.
-     * @param manifest          the CurseForgeModpack manifest.
-     */
-    public ModrinthCompletionTask(DefaultDependencyManager dependencyManager, String version, ModrinthManifest manifest) {
+    /// Creates a completion task with an optional prefetched Modrinth manifest.
+    ///
+    /// @param dependencyManager dependency manager bound to the target repository
+    /// @param instanceId target installed instance identifier
+    /// @param manifest prefetched Modrinth manifest, or `null` to load it from disk
+    public ModrinthCompletionTask(
+            DefaultDependencyManager dependencyManager, String instanceId, @Nullable ModrinthManifest manifest) {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
-        this.modManager = repository.getModManager(version);
-        this.version = version;
+        this.modManager = repository.getModManager(instanceId);
+        this.instanceId = instanceId;
         this.manifest = manifest;
 
         if (manifest == null)
             try {
-                Path manifestFile = repository.getVersionRoot(version).resolve("modrinth.index.json");
+                Path manifestFile = repository.getVersionRoot(instanceId).resolve("modrinth.index.json");
                 if (Files.exists(manifestFile))
                     this.manifest = JsonUtils.fromJsonFile(manifestFile, ModrinthManifest.class);
             } catch (Exception e) {
                 LOG.warning("Unable to read Modrinth modpack manifest.json", e);
             }
 
-        setStage("hmcl.modpack.download");
+        setStage("xyml.modpack.download");
     }
 
     @Override
@@ -102,7 +102,7 @@ public class ModrinthCompletionTask extends Task<Void> {
         if (manifest == null)
             return;
 
-        Path runDirectory = FileUtils.toAbsolute(repository.getRunDirectory(version));
+        Path runDirectory = FileUtils.toAbsolute(repository.getRunDirectory(instanceId));
         Path modsDirectory = runDirectory.resolve("mods");
 
         for (ModrinthManifest.File file : manifest.getFiles()) {
@@ -125,7 +125,7 @@ public class ModrinthCompletionTask extends Task<Void> {
                     filePath);
             task.setCacheRepository(dependency.getCacheRepository());
             task.setCaching(true);
-            dependencies.add(task.withCounter("hmcl.modpack.download"));
+            dependencies.add(task.withCounter("xyml.modpack.download"));
         }
 
         if (!dependencies.isEmpty()) {

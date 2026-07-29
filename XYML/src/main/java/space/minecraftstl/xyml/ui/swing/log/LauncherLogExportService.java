@@ -55,20 +55,20 @@ import org.tukaani.xz.XZInputStream;
 /// Exports the retained launcher log and up to five historical log files without blocking the event dispatch thread.
 ///
 /// Historical files are admitted only when they are regular non-symbolic-link children of the active log directory.
-/// This keeps the legacy multi-file archive behavior while preventing a forged log listing from exporting unrelated
+/// This keeps the launcher multi-file archive behavior while preventing a forged log listing from exporting unrelated
 /// local files. Closing the service rejects new exports and cancels callback delivery for queued work.
 @NotNullByDefault
 public final class LauncherLogExportService implements AutoCloseable {
     /// Maximum historical log files bundled with the current in-memory log stream.
     private static final int RECENT_LOG_LIMIT = 5;
 
-    /// Historical filename prefix retained for support tooling compatibility.
-    private static final String EXPORT_FILE_PREFIX = "hmcl-exported-logs-";
+    /// Stable filename prefix for exported support archives.
+    private static final String EXPORT_FILE_PREFIX = "xyml-exported-logs-";
 
     /// Stable archive entry name for the currently retained in-memory log events.
-    private static final String CURRENT_LOG_ENTRY_NAME = "hmcl-latest.log";
+    private static final String CURRENT_LOG_ENTRY_NAME = "xyml-latest.log";
 
-    /// Timestamp pattern used by the previous launcher log export action.
+    /// Timestamp pattern used for collision-resistant export names.
     private static final DateTimeFormatter EXPORT_TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH-mm-ss");
 
     /// Production logger and output-directory access.
@@ -88,9 +88,9 @@ public final class LauncherLogExportService implements AutoCloseable {
 
     /// Creates a production service using the shared launcher I/O scheduler.
     ///
-    /// @return service backed by the active legacy launcher logger
+    /// @return service backed by the active launcher launcher logger
     public static LauncherLogExportService createForCurrentLauncher() {
-        return new LauncherLogExportService(LegacyLauncherLogExportAccess.createForCurrentLauncher(), Schedulers.io());
+        return new LauncherLogExportService(LauncherLogExportAccessAdapter.createForCurrentLauncher(), Schedulers.io());
     }
 
     /// Creates a launcher-log exporter with the current wall clock.
@@ -112,7 +112,7 @@ public final class LauncherLogExportService implements AutoCloseable {
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
-    /// Returns the active launcher-log directory when the legacy logger owns an on-disk file.
+    /// Returns the active launcher-log directory when the launcher logger owns an on-disk file.
     ///
     /// @return active log directory, or an empty result for in-memory-only logging
     public Optional<Path> logDirectory() {
@@ -175,7 +175,7 @@ public final class LauncherLogExportService implements AutoCloseable {
         });
     }
 
-    /// Filters legacy historical log paths to direct trusted files beneath the active launcher log directory.
+    /// Filters launcher historical log paths to direct trusted files beneath the active launcher log directory.
     ///
     /// @return immutable safe historical file list
     private @Unmodifiable List<Path> trustedRecentLogFiles() {

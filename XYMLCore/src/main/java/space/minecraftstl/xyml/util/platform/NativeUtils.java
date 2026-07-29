@@ -50,7 +50,7 @@ public final class NativeUtils {
     }
 
     private static boolean useJNA() {
-        String backend = System.getProperty("hmcl.native.backend");
+        String backend = System.getProperty("xyml.native.backend");
         if (backend == null || "auto".equalsIgnoreCase(backend)) {
             try {
                 if (Platform.isWindows()) {

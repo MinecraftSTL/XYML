@@ -1243,7 +1243,7 @@ final class DownloadProviderGameVersionCatalogSourceTest {
         /// @return this executor
         @Override
         public TaskExecutor start() {
-            listenerPresentAtStart = !taskListeners.isEmpty();
+            listenerPresentAtStart = hasTaskListeners();
             if (startGate != null) {
                 startGate.enter();
             }
@@ -1323,7 +1323,7 @@ final class DownloadProviderGameVersionCatalogSourceTest {
                         ? exceptionValue
                         : null;
             }
-            taskListeners.forEach(listener -> listener.onStop(success, this));
+            notifyTaskListeners(listener -> listener.onStop(success, this));
         }
 
         /// Returns whether the source subscribed before invoking start.

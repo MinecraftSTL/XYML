@@ -17,6 +17,10 @@
  */
 package space.minecraftstl.xyml.modpack.modrinth;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -34,22 +38,37 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.Zipper;
-import space.minecraftstl.xyml.addon.mod.LocalModFile;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 
 import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Exports one installed instance as a Modrinth-compatible modpack archive.
+@NotNullByDefault
 public class ModrinthModpackExportTask extends Task<Void> {
+    /// Repository containing the exported instance and its version manifests.
     private final DefaultGameRepository repository;
-    private final String version;
+
+    /// Target installed instance identifier.
+    private final String instanceId;
+
+    /// Validated modpack metadata and export selections.
     private final ModpackExportInfo info;
+
+    /// Destination archive path.
     private final Path modpackFile;
 
-    public ModrinthModpackExportTask(DefaultGameRepository repository, String version, ModpackExportInfo info, Path modpackFile) {
+    /// Creates a Modrinth export task for one installed instance.
+    ///
+    /// @param repository repository containing the target instance
+    /// @param instanceId target installed instance identifier
+    /// @param info modpack metadata and export selections
+    /// @param modpackFile destination archive path
+    public ModrinthModpackExportTask(
+            DefaultGameRepository repository, String instanceId, ModpackExportInfo info, Path modpackFile) {
         this.repository = repository;
-        this.version = version;
+        this.instanceId = instanceId;
         this.info = info.validate();
         this.modpackFile = modpackFile;
 
@@ -64,17 +83,24 @@ public class ModrinthModpackExportTask extends Task<Void> {
         });
     }
 
-    private ModrinthManifest.File tryGetRemoteFile(Path file, String relativePath) throws IOException {
+    /// Resolves one local resource to Modrinth-compatible remote-file metadata when possible.
+    ///
+    /// Disabled mods are represented by their enabled archive path and optional client environment.
+    ///
+    /// @param file local resource file
+    /// @param relativePath normalized path relative to the instance run directory
+    /// @return remote-file metadata, or `null` when remote entries are disabled or no source matches
+    /// @throws IOException if hashing or reading the local file fails
+    private @Nullable ModrinthManifest.File tryGetRemoteFile(Path file, String relativePath) throws IOException {
         if (info.isNoCreateRemoteFiles()) {
             return null;
         }
 
-        boolean isDisabled = repository.getModManager(version).isDisabled(file);
+        boolean isDisabled = repository.getModManager(instanceId).isDisabled(file);
         if (isDisabled) {
-            relativePath = repository.getModManager(version).enableMod(Paths.get(relativePath)).toString();
+            relativePath = repository.getModManager(instanceId).enableMod(Paths.get(relativePath)).toString();
         }
 
-        LocalModFile localModFile = null;
         Optional<RemoteAddon.Version> modrinthVersion = Optional.empty();
         Optional<RemoteAddon.Version> curseForgeVersion = Optional.empty();
 
@@ -100,7 +126,7 @@ public class ModrinthModpackExportTask extends Task<Void> {
         hashes.put("sha1", DigestUtils.digestToString("SHA-1", file));
         hashes.put("sha512", DigestUtils.digestToString("SHA-512", file));
 
-        Map<String, String> env = null;
+        @Nullable Map<String, String> env = null;
         if (isDisabled) {
             env = new HashMap<>();
             env.put("client", "optional");
@@ -125,18 +151,24 @@ public class ModrinthModpackExportTask extends Task<Void> {
         );
     }
 
+    /// Writes selected overrides, remote resource entries, and the Modrinth manifest to the archive.
+    ///
+    /// A failed task removes the partial destination archive through the completion listener installed
+    /// by the constructor.
+    ///
+    /// @throws Exception if instance inspection, hashing, remote lookup, or archive writing fails
     @Override
     public void execute() throws Exception {
         ArrayList<String> blackList = new ArrayList<>(ModAdviser.MODPACK_BLACK_LIST);
-        blackList.add(version + ".jar");
-        blackList.add(version + ".json");
+        blackList.add(instanceId + ".jar");
+        blackList.add(instanceId + ".json");
         LOG.info("Compressing game files without some files in blacklist, including files or directories: usernamecache.json, asm, logs, backups, versions, assets, usercache.json, libraries, crash-reports, launcher_profiles.json, NVIDIA, TCNodeTracker");
         try (var zip = new Zipper(modpackFile)) {
-            Path runDirectory = repository.getRunDirectory(version);
+            Path runDirectory = repository.getRunDirectory(instanceId);
             List<ModrinthManifest.File> files = new ArrayList<>();
             Set<String> filesInManifest = new HashSet<>();
 
-            String[] resourceDirs = {"resourcepacks", "shaderpacks", "mods"};
+            String @Unmodifiable [] resourceDirs = {"resourcepacks", "shaderpacks", "mods"};
             for (String dir : resourceDirs) {
                 Path dirPath = runDirectory.resolve(dir);
                 if (Files.exists(dirPath)) {
@@ -170,9 +202,10 @@ public class ModrinthModpackExportTask extends Task<Void> {
                 return Modpack.acceptFile(path, blackList, info.getWhitelist());
             });
 
-            String gameVersion = repository.getGameVersion(version)
-                    .orElseThrow(() -> new IOException("Cannot parse the version of " + version));
-            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.getResolvedPreservingPatchesVersion(version), gameVersion);
+            String gameVersion = repository.getGameVersion(instanceId)
+                    .orElseThrow(() -> new IOException("Cannot parse the game version of instance " + instanceId));
+            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(
+                    repository.getResolvedPreservingPatchesVersion(instanceId), gameVersion);
 
             Map<String, String> dependencies = new HashMap<>();
             dependencies.put("minecraft", gameVersion);
@@ -200,6 +233,7 @@ public class ModrinthModpackExportTask extends Task<Void> {
         }
     }
 
+    /// Metadata fields and remote-resource switches exposed for the Modrinth format.
     public static final ModpackExportInfo.Options OPTION = new ModpackExportInfo.Options()
             .requireNoCreateRemoteFiles()
             .requireSkipCurseForgeRemoteFiles();

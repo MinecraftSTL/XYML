@@ -354,7 +354,7 @@ public final class TaskExecutorPresentationModel implements TaskPresentationMode
             @Nullable Throwable executorFailure = sourceExecutor.getFailure();
             @Nullable Throwable terminalFailure = executorFailure != null
                     ? executorFailure
-                    : lastFailure != null ? lastFailure : sourceExecutor.getException();
+                    : lastFailure;
             boolean cancelled = !succeeded && (isCancellation(terminalFailure)
                     || sourceExecutor.isCancelled() && terminalFailure == null);
             TaskStatus terminalStatus = succeeded

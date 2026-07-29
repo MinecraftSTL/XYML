@@ -29,9 +29,9 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 
-/// Toolkit-neutral theme color specification retained for legacy configuration compatibility.
+/// Toolkit-neutral theme color specification used by persisted appearance settings and resolved themes.
 ///
-/// The Swing theme manager consumes its own design tokens; this value only preserves the serialized color name or
+/// The Swing theme manager consumes its own design tokens; this value carries the serialized color name or
 /// hexadecimal specification without loading a presentation-toolkit color object.
 ///
 /// @param name canonical serialized name
@@ -43,7 +43,7 @@ public record ThemeColor(String name, String color) {
     /// Default launcher color.
     public static final ThemeColor DEFAULT = new ThemeColor("blue", "#5C6BC0");
 
-    /// Built-in color specifications retained for old settings and migration.
+    /// Built-in named color specifications accepted by current settings.
     public static final @Unmodifiable List<ThemeColor> STANDARD_COLORS = List.of(
             DEFAULT,
             new ThemeColor("darker_blue", "#283593"),
@@ -88,7 +88,7 @@ public record ThemeColor(String name, String color) {
         return color == null ? null : color.color();
     }
 
-    /// Gson adapter retaining the historical string representation.
+    /// Gson adapter using the current compact string representation.
     @NotNullByDefault
     static final class TypeAdapter extends com.google.gson.TypeAdapter<ThemeColor> {
         /// Writes one color value.

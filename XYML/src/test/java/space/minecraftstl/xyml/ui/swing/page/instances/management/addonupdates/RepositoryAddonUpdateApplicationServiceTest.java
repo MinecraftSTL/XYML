@@ -109,7 +109,7 @@ final class RepositoryAddonUpdateApplicationServiceTest {
                 () -> assertTrue(Files.exists(local.getFile())));
     }
 
-    /// Applies active and disabled selections through `.part` staging and legacy old-file retention rules.
+    /// Applies active and disabled selections through `.part` staging and configured old-file retention rules.
     @Test
     void publishesValidatedStagingWithRemoteAndOriginalFileNames() throws IOException {
         FakeLocalAddonFile replaced = localFile("success/original.jar", false, false);

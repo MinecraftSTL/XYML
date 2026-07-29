@@ -24,7 +24,7 @@ import java.util.Objects;
 
 /// Immutable presentation-safe row for one installed resource pack.
 ///
-/// No decoded image or legacy resource-pack object crosses this boundary. The normalized absolute
+/// No decoded image or mutable resource-pack object crosses this boundary. The normalized absolute
 /// path is the stable selection key across manager refreshes.
 ///
 /// @param path normalized absolute resource-pack path

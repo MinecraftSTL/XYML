@@ -17,8 +17,6 @@
  */
 package space.minecraftstl.xyml.upgrade;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonParseException;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -48,18 +46,15 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// legacy interactive updater can reuse the same verified request and process-launch operations.
 @NotNullByDefault
 public final class UpdateApplier {
-    /// Bootstrap entry-point name used to detect invocation nested inside an old launcher.
-    private static final String BOOTSTRAP_MAIN_CLASS = "space.minecraftstl.xyml.Main";
-
-    /// Legacy launcher artifact naming pattern that can be updated to the current version after replacement.
-    private static final Pattern LEGACY_VERSIONED_FILENAME = Pattern.compile(
-            "^(?<prefix>[hH][mM][cC][lL][.-])(?<version>\\d+(?:\\.\\d+)*)(?<suffix>\\.[^.]+)$");
+    /// Launcher artifact naming pattern that can be updated to the current version after replacement.
+    private static final Pattern VERSIONED_FILENAME = Pattern.compile(
+            "^(?<prefix>[xX][yY][mM][lL][.-])(?<version>\\d+(?:\\.\\d+)*)(?<suffix>\\.[^.]+)$");
 
     /// Prevents construction of the update utility.
     private UpdateApplier() {
     }
 
-    /// Processes old-launcher migration, `--apply-to`, and post-upgrade startup conditions.
+    /// Processes `--apply-to` and post-upgrade startup conditions.
     ///
     /// This method performs filesystem and process operations but never creates or accesses desktop UI objects.
     ///
@@ -67,17 +62,6 @@ public final class UpdateApplier {
     /// @return semantic result for the launcher entry point
     public static UpdateStartupResult processArguments(String @Unmodifiable [] args) {
         Objects.requireNonNull(args, "args");
-        breakForceUpdateFeature();
-
-        if (isNestedApplication()) {
-            try {
-                performMigration();
-                return UpdateStartupResult.exit();
-            } catch (IOException exception) {
-                LOG.warning("Failed to perform migration", exception);
-                return UpdateStartupResult.failed(exception);
-            }
-        }
 
         Optional<Path> applyTarget = findApplyTarget(args);
         if (applyTarget.isPresent()) {
@@ -174,7 +158,7 @@ public final class UpdateApplier {
         requirePortableJarMode("current JAR lookup");
         @Nullable Path path = JarUtils.thisJarPath();
         if (path == null) {
-            throw new IOException("Failed to find current HMCL location");
+            throw new IOException("Failed to find current XYML location");
         }
         return path;
     }
@@ -190,7 +174,7 @@ public final class UpdateApplier {
         return Optional.of(Path.of(configuredPath).toAbsolutePath().normalize());
     }
 
-    /// Recognizes the exact legacy update-application argument shape.
+    /// Recognizes the exact update-application argument shape.
     ///
     /// @param args launcher command-line arguments
     /// @return replacement target when the arguments are exactly `--apply-to <path>`
@@ -234,7 +218,7 @@ public final class UpdateApplier {
         return List.copyOf(commandLine);
     }
 
-    /// Determines the legacy versioned filename to use after replacing an artifact.
+    /// Determines the versioned filename to use after replacing an artifact.
     ///
     /// @param path replacement target
     /// @param newVersion current launcher version
@@ -243,7 +227,7 @@ public final class UpdateApplier {
         Objects.requireNonNull(path, "path");
         Objects.requireNonNull(newVersion, "newVersion");
         String filename = path.getFileName().toString();
-        Matcher matcher = LEGACY_VERSIONED_FILENAME.matcher(filename);
+        Matcher matcher = VERSIONED_FILENAME.matcher(filename);
         if (matcher.find()) {
             String newFilename = matcher.group("prefix") + newVersion + matcher.group("suffix");
             if (!newFilename.equals(filename)) {
@@ -282,49 +266,7 @@ public final class UpdateApplier {
         startJava(target);
     }
 
-    /// Starts an update request that replaces the parent legacy launcher artifact.
-    ///
-    /// @throws IOException when the parent location, verification, or process startup fails
-    private static void performMigration() throws IOException {
-        requirePortableJarMode("legacy launcher migration");
-        LOG.info("Migrating from old versions");
-        Path location = getParentApplicationLocation()
-                .orElseThrow(() -> new IOException("Failed to get parent application location"));
-        requestUpdate(currentApplicationLocation(), location);
-    }
-
-    /// Detects whether the bootstrap main method invoked this launcher reflectively from an old artifact.
-    ///
-    /// This method must be called from the main thread before helper threads add unrelated stack frames.
-    ///
-    /// @return `true` when the bootstrap main frame is not the outermost frame
-    private static boolean isNestedApplication() {
-        StackTraceElement @Unmodifiable [] stackTrace = Thread.currentThread().getStackTrace();
-        for (int index = 0; index < stackTrace.length; index++) {
-            StackTraceElement element = stackTrace[index];
-            if (BOOTSTRAP_MAIN_CLASS.equals(element.getClassName())
-                    && "main".equals(element.getMethodName())) {
-                return index + 1 != stackTrace.length;
-            }
-        }
-        return false;
-    }
-
-    /// Resolves the old parent launcher path from the Java command property.
-    ///
-    /// @return absolute regular-file path, or empty when unavailable
-    private static Optional<Path> getParentApplicationLocation() {
-        @Nullable String command = System.getProperty("sun.java.command");
-        if (command != null) {
-            Path path = Paths.get(command);
-            if (Files.isRegularFile(path)) {
-                return Optional.of(path.toAbsolutePath());
-            }
-        }
-        return Optional.empty();
-    }
-
-    /// Detects the legacy fixed update location that requires a manual reboot.
+    /// Detects the fixed update location that requires a manual reboot.
     ///
     /// @return `true` when the current artifact is the fixed versioned update path
     private static boolean isFirstLaunchAfterUpgrade() {
@@ -332,29 +274,8 @@ public final class UpdateApplier {
         if (currentPath == null) {
             return false;
         }
-        Path updated = Metadata.HMCL_USER_HOME.resolve("HMCL-" + Metadata.VERSION + ".jar");
+        Path updated = Metadata.XYML_USER_HOME.resolve("XYML-" + Metadata.VERSION + ".jar");
         return currentPath.equals(updated.toAbsolutePath());
-    }
-
-    /// Removes legacy force-update metadata that would trap migrated installations in an update loop.
-    private static void breakForceUpdateFeature() {
-        Path hmclVersionJson = Metadata.HMCL_USER_HOME.resolve("hmclver.json");
-        if (!Files.isRegularFile(hmclVersionJson)) {
-            return;
-        }
-
-        try {
-            @Nullable Map<?, ?> content = new Gson().fromJson(Files.readString(hmclVersionJson), Map.class);
-            @Nullable Object version = content == null ? null : content.get("ver");
-            if (version instanceof String value && value.startsWith("3.")) {
-                Files.delete(hmclVersionJson);
-                LOG.info("Successfully broke the force update feature");
-            }
-        } catch (IOException exception) {
-            LOG.warning("Failed to break the force update feature", exception);
-        } catch (JsonParseException exception) {
-            hmclVersionJson.toFile().delete();
-        }
     }
 
     /// Captures current VM input arguments with a system-property fallback for restricted runtimes.
@@ -366,7 +287,7 @@ public final class UpdateApplier {
         } catch (Throwable ignored) {
             List<String> arguments = new ArrayList<>();
             for (Map.Entry<Object, Object> entry : System.getProperties().entrySet()) {
-                if (entry.getKey() instanceof String key && key.startsWith("hmcl.")) {
+                if (entry.getKey() instanceof String key && key.startsWith("xyml.")) {
                     arguments.add("-D" + key + "=" + entry.getValue());
                 }
             }

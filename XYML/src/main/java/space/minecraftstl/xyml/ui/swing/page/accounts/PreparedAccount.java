@@ -21,7 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 
 /// Opaque authenticated account waiting for its storage transaction.
 ///
-/// Implementations may retain credential-bearing legacy state. Callers may only use the plain metadata
+/// Implementations may retain credential-bearing launcher state. Callers may only use the plain metadata
 /// exposed here and must return the same object to the gateway that created it.
 @NotNullByDefault
 public interface PreparedAccount {

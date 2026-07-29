@@ -23,7 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.event.Event;
 import space.minecraftstl.xyml.event.EventManager;
-import space.minecraftstl.xyml.event.RefreshedVersionsEvent;
+import space.minecraftstl.xyml.event.RefreshedInstancesEvent;
 import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -61,7 +61,7 @@ public final class RepositoryInstancesModelTest {
     /// A viewport request resolves only its captured range and delegates stable-ID commands.
     @Test
     public void resolvesOnlyRequestedRowsAndDelegatesCommands() {
-        EventManager<RefreshedVersionsEvent> events = new EventManager<>();
+        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
         FakeRepository repository = new FakeRepository(events, List.of("alpha", "beta", "gamma"), "beta");
         repository.setDetail("alpha", "1.20.1");
@@ -103,7 +103,7 @@ public final class RepositoryInstancesModelTest {
     /// An icon event invalidates sparse rows without eagerly resolving icons outside a requested range.
     @Test
     public void iconChangeReloadsOnlyLaterViewportDemand() {
-        EventManager<RefreshedVersionsEvent> events = new EventManager<>();
+        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
         FakeRepository repository = new FakeRepository(events, List.of("alpha", "beta", "gamma"), "alpha");
         RepositoryInstancesModel model = new RepositoryInstancesModel(
@@ -130,7 +130,7 @@ public final class RepositoryInstancesModelTest {
     /// A successful refresh event replaces exact source order and increments one content revision.
     @Test
     public void appliesRefreshEventAndNewSourceBoundary() {
-        EventManager<RefreshedVersionsEvent> events = new EventManager<>();
+        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
         FakeRepository repository = new FakeRepository(events, List.of("alpha", "beta"), "alpha");
         repository.prepareRefresh(List.of("beta", "gamma", "delta"), "gamma", true, false);
@@ -162,7 +162,7 @@ public final class RepositoryInstancesModelTest {
     /// A refresh denied without an event still rebuilds from repository state on successful completion.
     @Test
     public void fallsBackWhenSuccessfulRefreshPublishesNoEvent() {
-        EventManager<RefreshedVersionsEvent> events = new EventManager<>();
+        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
         FakeRepository repository = new FakeRepository(events, List.of("alpha"), "alpha");
         repository.prepareRefresh(List.of("alpha", "beta"), "beta", false, false);
@@ -183,7 +183,7 @@ public final class RepositoryInstancesModelTest {
     /// Refresh failure restores retry controls without mutating indexed content.
     @Test
     public void exposesRefreshFailureWithoutChangingRevision() {
-        EventManager<RefreshedVersionsEvent> events = new EventManager<>();
+        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
         FakeRepository repository = new FakeRepository(events, List.of("alpha", "beta"), "beta");
         repository.prepareRefresh(List.of("ignored"), null, false, true);
@@ -206,7 +206,7 @@ public final class RepositoryInstancesModelTest {
     /// Closing removes the refresh listener, rejects commands, and makes queued range work cancellable.
     @Test
     public void closeStopsEventsAndCancelledLoads() {
-        EventManager<RefreshedVersionsEvent> events = new EventManager<>();
+        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
         FakeRepository repository = new FakeRepository(events, List.of("alpha", "beta"), "alpha");
         RepositoryInstancesModel model = new RepositoryInstancesModel(
@@ -218,7 +218,7 @@ public final class RepositoryInstancesModelTest {
         cancellation.cancel();
         model.close();
         repository.replaceImmediately(List.of("gamma"), "gamma");
-        events.fireEvent(new RefreshedVersionsEvent(repository));
+        events.fireEvent(new RefreshedInstancesEvent(repository));
         repository.fireIconChanged();
         repository.setSelectedInstanceId("beta");
         executor.runNext();
@@ -233,7 +233,7 @@ public final class RepositoryInstancesModelTest {
     /// An unloaded model waits for the existing initial scan instead of starting a competing scan.
     @Test
     public void waitsForExistingInitialScan() {
-        EventManager<RefreshedVersionsEvent> events = new EventManager<>();
+        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
         FakeRepository repository = new FakeRepository(events, List.of(), null);
         repository.setLoaded(false);
@@ -248,7 +248,7 @@ public final class RepositoryInstancesModelTest {
 
         repository.replaceImmediately(List.of("beta", "gamma"), "missing");
         repository.setLoaded(true);
-        events.fireEvent(new RefreshedVersionsEvent(repository));
+        events.fireEvent(new RefreshedInstancesEvent(repository));
 
         assertAll(
                 () -> assertEquals(2, model.snapshot().itemCount()),
@@ -264,7 +264,7 @@ public final class RepositoryInstancesModelTest {
     /// A listener closing the model during the refreshing transition prevents repository I/O submission.
     @Test
     public void listenerClosePreventsRefreshIo() {
-        EventManager<RefreshedVersionsEvent> events = new EventManager<>();
+        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
         FakeRepository repository = new FakeRepository(events, List.of("alpha"), "alpha");
         RepositoryInstancesModel model = new RepositoryInstancesModel(
@@ -286,7 +286,7 @@ public final class RepositoryInstancesModelTest {
     /// An external event updates content but does not release a model-owned refresh slot early.
     @Test
     public void externalEventDoesNotReleaseOwnedRefresh() {
-        EventManager<RefreshedVersionsEvent> events = new EventManager<>();
+        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
         FakeRepository repository = new FakeRepository(events, List.of("alpha"), "alpha");
         repository.prepareRefresh(List.of("gamma"), "gamma", false, false);
@@ -295,7 +295,7 @@ public final class RepositoryInstancesModelTest {
 
         model.refreshInstances();
         repository.replaceImmediately(List.of("beta"), "beta");
-        events.fireEvent(new RefreshedVersionsEvent(repository));
+        events.fireEvent(new RefreshedInstancesEvent(repository));
         model.refreshInstances();
 
         assertAll(
@@ -318,7 +318,7 @@ public final class RepositoryInstancesModelTest {
     /// An old revision load uses its captured detail even after a newer repository event replaces content.
     @Test
     public void oldRevisionLoadUsesCapturedDescriptor() {
-        EventManager<RefreshedVersionsEvent> events = new EventManager<>();
+        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
         FakeRepository repository = new FakeRepository(events, List.of("alpha"), "alpha");
         repository.setDetail("alpha", "1.20.1");
@@ -328,7 +328,7 @@ public final class RepositoryInstancesModelTest {
                 new IndexRange(0, 1), new LoadCancellation());
 
         repository.setDetail("alpha", "1.21.1");
-        events.fireEvent(new RefreshedVersionsEvent(repository));
+        events.fireEvent(new RefreshedInstancesEvent(repository));
         executor.runNext();
 
         assertAll(
@@ -375,7 +375,7 @@ public final class RepositoryInstancesModelTest {
     @NotNullByDefault
     private static final class FakeRepository implements RepositoryInstancesModel.RepositoryAccess {
         /// Event manager used to publish configured successful refreshes.
-        private final EventManager<RefreshedVersionsEvent> events;
+        private final EventManager<RefreshedInstancesEvent> events;
 
         /// Current immutable displayed IDs.
         private volatile @Unmodifiable List<String> displayedIds;
@@ -422,7 +422,7 @@ public final class RepositoryInstancesModelTest {
         /// @param displayedIds initial immutable displayed IDs
         /// @param selectedId initial selected ID, or null for none
         private FakeRepository(
-                EventManager<RefreshedVersionsEvent> events,
+                EventManager<RefreshedInstancesEvent> events,
                 @Unmodifiable List<String> displayedIds,
                 @Nullable String selectedId) {
             this.events = events;
@@ -522,7 +522,7 @@ public final class RepositoryInstancesModelTest {
             replaceImmediately(nextDisplayedIds, nextSelectedId);
             loaded = true;
             if (publishRefreshEvent) {
-                events.fireEvent(new RefreshedVersionsEvent(this));
+                events.fireEvent(new RefreshedInstancesEvent(this));
             }
         }
 

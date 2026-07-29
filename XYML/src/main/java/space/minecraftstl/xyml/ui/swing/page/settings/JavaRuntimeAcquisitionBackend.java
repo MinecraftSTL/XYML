@@ -65,15 +65,6 @@ interface JavaRuntimeAcquisitionBackend {
     /// @return stopped manager download task
     Task<JavaRuntime> downloadMojangRuntime(Platform platform, GameJavaVersion version);
 
-    /// Opens and validates one Java archive.
-    ///
-    /// @param archiveFile local archive path
-    /// @return immutable inspection result
-    /// @throws IOException when the archive cannot be opened or lacks a valid Java layout
-    /// @throws UnsupportedPlatformException when the archive runtime cannot execute on the current system
-    LocalJavaArchiveInspection inspectLocalArchive(Path archiveFile)
-            throws IOException, UnsupportedPlatformException;
-
     /// Opens and validates one Java archive while periodically checking task cancellation.
     ///
     /// @param archiveFile local archive path
@@ -81,19 +72,9 @@ interface JavaRuntimeAcquisitionBackend {
     /// @return immutable inspection result
     /// @throws IOException when the archive cannot be opened or lacks a valid Java layout
     /// @throws UnsupportedPlatformException when the archive runtime cannot execute on the current system
-    default LocalJavaArchiveInspection inspectLocalArchive(
+    LocalJavaArchiveInspection inspectLocalArchive(
             Path archiveFile,
-            CancellationCheck cancellationCheck) throws IOException, UnsupportedPlatformException {
-        cancellationCheck.checkCancelled();
-        return inspectLocalArchive(archiveFile);
-    }
-
-    /// Copies a user-controlled archive to a system-controlled temporary path while preserving its supported suffix.
-    ///
-    /// @param archiveFile user-selected source archive
-    /// @return controlled temporary archive path
-    /// @throws IOException when the source cannot be copied
-    Path copyToManagedTemporaryArchive(Path archiveFile) throws IOException;
+            CancellationCheck cancellationCheck) throws IOException, UnsupportedPlatformException;
 
     /// Copies a user-controlled archive while periodically checking task cancellation.
     ///
@@ -101,21 +82,9 @@ interface JavaRuntimeAcquisitionBackend {
     /// @param cancellationCheck cooperative cancellation callback
     /// @return controlled temporary archive path
     /// @throws IOException when the source cannot be copied
-    default Path copyToManagedTemporaryArchive(
+    Path copyToManagedTemporaryArchive(
             Path archiveFile,
-            CancellationCheck cancellationCheck) throws IOException {
-        cancellationCheck.checkCancelled();
-        return copyToManagedTemporaryArchive(archiveFile);
-    }
-
-    /// Revalidates and rewrites only the inspected Java Home into a normalized controlled ZIP archive.
-    ///
-    /// @param inspection inspection of a controlled source copy
-    /// @return inspection of the normalized install archive
-    /// @throws IOException when revalidation or repacking fails
-    /// @throws UnsupportedPlatformException when the revalidated runtime cannot execute on the current system
-    LocalJavaArchiveInspection prepareInstallArchive(LocalJavaArchiveInspection inspection)
-            throws IOException, UnsupportedPlatformException;
+            CancellationCheck cancellationCheck) throws IOException;
 
     /// Revalidates and rewrites a controlled archive while periodically checking task cancellation.
     ///
@@ -124,12 +93,9 @@ interface JavaRuntimeAcquisitionBackend {
     /// @return inspection of the normalized install archive
     /// @throws IOException when revalidation or repacking fails
     /// @throws UnsupportedPlatformException when the revalidated runtime cannot execute on the current system
-    default LocalJavaArchiveInspection prepareInstallArchive(
+    LocalJavaArchiveInspection prepareInstallArchive(
             LocalJavaArchiveInspection inspection,
-            CancellationCheck cancellationCheck) throws IOException, UnsupportedPlatformException {
-        cancellationCheck.checkCancelled();
-        return prepareInstallArchive(inspection);
-    }
+            CancellationCheck cancellationCheck) throws IOException, UnsupportedPlatformException;
 
     /// Best-effort deletes one acquisition-owned temporary archive.
     ///

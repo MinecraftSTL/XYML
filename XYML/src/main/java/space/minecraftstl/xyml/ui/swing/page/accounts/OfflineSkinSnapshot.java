@@ -37,20 +37,6 @@ public record OfflineSkinSnapshot(
         @Nullable Skin skin,
         boolean writable,
         @Nullable String profileId) {
-    /// Creates a backward-compatible snapshot without exposing a profile UUID.
-    ///
-    /// @param accountId stable launcher account identifier
-    /// @param profileName offline Minecraft profile name
-    /// @param skin configured skin, or null for the launcher default
-    /// @param writable whether replacing the skin can be persisted
-    public OfflineSkinSnapshot(
-            String accountId,
-            String profileName,
-            @Nullable Skin skin,
-            boolean writable) {
-        this(accountId, profileName, skin, writable, null);
-    }
-
     /// Validates one presentation-safe offline skin snapshot.
     public OfflineSkinSnapshot {
         Objects.requireNonNull(accountId, "accountId");

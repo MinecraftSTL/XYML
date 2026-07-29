@@ -188,7 +188,7 @@ public final class GameSettingsPresetsPanelTest {
         return null;
     }
 
-    /// In-memory store that lets the panel test observe submitted command values without legacy global state.
+    /// In-memory store that lets the panel test observe submitted command values without global state.
     @NotNullByDefault
     private static final class FakeGameSettingsPresetsStore implements GameSettingsPresetsStore {
         /// Publishes immutable snapshots to panel listeners.

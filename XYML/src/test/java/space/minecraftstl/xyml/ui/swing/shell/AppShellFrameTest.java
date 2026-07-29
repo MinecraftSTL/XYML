@@ -22,13 +22,13 @@ import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.util.SystemInfo;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
-import space.minecraftstl.xyml.ui.swing.ThemeMode;
 
 import javax.swing.JComponent;
 import javax.swing.JRootPane;
@@ -39,6 +39,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -119,7 +120,7 @@ public final class AppShellFrameTest {
         }
 
         SwingThemeManager themeManager = new SwingThemeManager(
-                ThemeMode.LIGHT,
+                ThemeBrightnessPreference.LIGHT,
                 new SwingDesignTokens(8),
                 SystemThemeDetector.lightFallback());
         AppShellFrame frame = AppShellFrame.create(
@@ -140,10 +141,11 @@ public final class AppShellFrameTest {
                 Duration.ZERO);
         try {
             JRootPane rootPane = frame.getRootPane();
-            boolean clientDecoratedFallback = !SystemInfo.isMacOS
-                    && !FlatLaf.supportsNativeWindowDecorations();
+            boolean clientDecorated = !SystemInfo.isMacOS
+                    && (frame.windowTransparencySupported()
+                    || !FlatLaf.supportsNativeWindowDecorations());
             assertAll(
-                    () -> assertEquals(clientDecoratedFallback, frame.isUndecorated()),
+                    () -> assertEquals(clientDecorated, frame.isUndecorated()),
                     () -> assertEquals(Boolean.TRUE, rootPane.getClientProperty(
                             FlatClientProperties.USE_WINDOW_DECORATIONS)),
                     () -> assertEquals(Boolean.TRUE, rootPane.getClientProperty(
@@ -170,6 +172,18 @@ public final class AppShellFrameTest {
                     () -> assertEquals("win horizontal",
                             frame.shellPanel().toolbar().winWindowButtonsPlaceholder().getClientProperty(
                                     FlatClientProperties.FULL_WINDOW_CONTENT_BUTTONS_PLACEHOLDER)));
+
+            AtomicBoolean transparencyActivated = new AtomicBoolean();
+            EdtDispatcher.executeAndWait(() -> transparencyActivated.set(
+                    frame.applyWindowTransparency(true)));
+            assertAll(
+                    () -> assertEquals(frame.windowTransparencySupported(), transparencyActivated.get()),
+                    () -> assertEquals(transparencyActivated.get(), frame.windowTransparencyActive()),
+                    () -> assertEquals(transparencyActivated.get() ? 0 : 255, frame.getBackground().getAlpha()));
+            EdtDispatcher.executeAndWait(() -> frame.applyWindowTransparency(false));
+            assertAll(
+                    () -> assertFalse(frame.windowTransparencyActive()),
+                    () -> assertEquals(255, frame.getBackground().getAlpha()));
 
             frame.open();
             if (!SystemInfo.isMacOS) {

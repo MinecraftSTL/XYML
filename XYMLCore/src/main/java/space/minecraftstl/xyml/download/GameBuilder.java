@@ -33,7 +33,7 @@ import java.util.Objects;
 /// therefore cannot distinguish different loaders that publish the same version string.
 @NotNullByDefault
 public abstract class GameBuilder {
-    /// Target instance identifier used for the generated version directory.
+    /// Target instance identifier used for the generated instance directory.
     protected String name = "";
 
     /// Selected base Minecraft version identifier.
@@ -54,7 +54,7 @@ public abstract class GameBuilder {
 
     /// Sets the target instance identifier used under `.minecraft/versions`.
     ///
-    /// @param name name of the new game version
+    /// @param name identifier of the new game instance
     /// @return this builder
     public GameBuilder name(String name) {
         this.name = Objects.requireNonNull(name);

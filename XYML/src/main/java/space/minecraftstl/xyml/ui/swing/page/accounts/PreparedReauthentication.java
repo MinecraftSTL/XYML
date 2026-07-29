@@ -20,7 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.accounts;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.auth.AuthInfo;
 
-/// Opaque successfully reauthenticated account awaiting legacy persistence.
+/// Opaque successfully reauthenticated account awaiting launcher-state persistence.
 @NotNullByDefault
 public interface PreparedReauthentication {
     /// Returns the stable account identifier.

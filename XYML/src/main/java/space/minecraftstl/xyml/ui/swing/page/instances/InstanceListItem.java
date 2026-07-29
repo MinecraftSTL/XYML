@@ -34,18 +34,6 @@ public record InstanceListItem(
         String name,
         String detail,
         InstanceIconData icon) {
-    /// Pure in-memory fallback used by source adapters that have not loaded an icon yet.
-    private static final InstanceIconData DEFAULT_ICON = createDefaultIcon();
-
-    /// Creates a compatible row with a neutral non-blocking fallback icon.
-    ///
-    /// @param id stable repository instance identifier used by commands
-    /// @param name user-visible instance name
-    /// @param detail concise game-version or loader detail
-    public InstanceListItem(String id, String name, String detail) {
-        this(id, name, detail, DEFAULT_ICON);
-    }
-
     /// Validates one instance row.
     public InstanceListItem {
         Objects.requireNonNull(id, "id");
@@ -67,22 +55,4 @@ public record InstanceListItem(
         return detail.isBlank() ? name : name + " - " + detail;
     }
 
-    /// Creates a deterministic neutral icon without resource access or image decoding.
-    ///
-    /// @return immutable fixed-size placeholder pixels
-    private static InstanceIconData createDefaultIcon() {
-        int[] pixels = new int[InstanceIconData.PIXEL_COUNT];
-        for (int y = 0; y < InstanceIconData.HEIGHT; y++) {
-            for (int x = 0; x < InstanceIconData.WIDTH; x++) {
-                boolean border = x < 2 || y < 2
-                        || x >= InstanceIconData.WIDTH - 2
-                        || y >= InstanceIconData.HEIGHT - 2;
-                int color = border
-                        ? 0xFF66717A
-                        : ((x / 5 + y / 5) & 1) == 0 ? 0xFF9AA4AC : 0xFF828D96;
-                pixels[y * InstanceIconData.WIDTH + x] = color;
-            }
-        }
-        return new InstanceIconData(pixels);
-    }
 }

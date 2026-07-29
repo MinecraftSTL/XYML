@@ -29,7 +29,7 @@ import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
-import space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
 
 import java.util.Objects;
 import java.util.List;
@@ -103,7 +103,7 @@ public final class SelectedRepositoryInstancesModel implements InstancesModel, A
     ///
     /// @param modelSource current selected model and transition source
     SelectedRepositoryInstancesModel(SelectedModelSource modelSource) {
-        LegacyStateDispatcher.requireEventThread();
+        LauncherStateDispatcher.requireEventThread();
         SelectedModelSource validatedSource = Objects.requireNonNull(modelSource, "modelSource");
         delegate = Objects.requireNonNull(validatedSource.current(), "selected model source returned null");
         delegateSnapshot = delegate.snapshot();
@@ -277,7 +277,7 @@ public final class SelectedRepositoryInstancesModel implements InstancesModel, A
     ///
     /// @param newDelegate newly selected repository model
     private void switchDelegate(InstancesModel newDelegate) {
-        LegacyStateDispatcher.requireEventThread();
+        LauncherStateDispatcher.requireEventThread();
         Objects.requireNonNull(newDelegate, "newDelegate");
         final InstancesModel oldDelegate;
         final Subscription oldSubscription;

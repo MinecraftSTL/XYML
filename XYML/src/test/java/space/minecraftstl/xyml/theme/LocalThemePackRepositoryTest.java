@@ -70,7 +70,7 @@ public final class LocalThemePackRepositoryTest {
     @Test
     public void importsOnlyAfterExecutorRunsAndListsValidatedPack() throws Exception {
         byte[] image = png(8, 6);
-        Path archive = temporaryDirectory.resolve("valid.hmcl-theme");
+        Path archive = temporaryDirectory.resolve("valid.xyml-theme");
         writeZip(archive, Map.of(
                 "manifest.json", manifest("example.valid", "assets/background.png"),
                 "assets/background.png", image));
@@ -102,7 +102,7 @@ public final class LocalThemePackRepositoryTest {
         ThemePackAsset asset = new ThemePackAsset(
                 new ThemePackResource.Bytes(image, "wallpaper.png"),
                 "assets/wallpaper.png");
-        Path output = temporaryDirectory.resolve("export.hmcl-theme");
+        Path output = temporaryDirectory.resolve("export.xyml-theme");
         QueuedExecutor executor = new QueuedExecutor();
 
         var exportStage = ThemePackExporter.export(manifest, List.of(asset), output, executor);
@@ -127,7 +127,7 @@ public final class LocalThemePackRepositoryTest {
     /// Traversal paths and archives exceeding a configured entry count fail before any installation is published.
     @Test
     public void rejectsTraversalAndEntryCountBeforePublication() throws Exception {
-        Path traversal = temporaryDirectory.resolve("traversal.hmcl-theme");
+        Path traversal = temporaryDirectory.resolve("traversal.xyml-theme");
         LinkedHashMap<String, byte[]> traversalEntries = new LinkedHashMap<>();
         traversalEntries.put("manifest.json", manifest("example.traversal", "assets/pixel.png"));
         traversalEntries.put("../escape", new byte[]{1});
@@ -142,7 +142,7 @@ public final class LocalThemePackRepositoryTest {
         assertThrows(CompletionException.class, () -> traversalStage.toCompletableFuture().join());
         assertFalse(Files.exists(repositoryDirectory.resolve("example.traversal")));
 
-        Path tooMany = temporaryDirectory.resolve("too-many.hmcl-theme");
+        Path tooMany = temporaryDirectory.resolve("too-many.xyml-theme");
         writeZip(tooMany, Map.of(
                 "manifest.json", manifest("example.entries", "assets/pixel.png"),
                 "assets/pixel.png", png(1, 1),
@@ -158,7 +158,7 @@ public final class LocalThemePackRepositoryTest {
     /// Unix symbolic-link entries are rejected from central-directory metadata without relying on host link support.
     @Test
     public void rejectsArchiveSymbolicLinkEntry() throws Exception {
-        Path archive = temporaryDirectory.resolve("symlink.hmcl-theme");
+        Path archive = temporaryDirectory.resolve("symlink.xyml-theme");
         try (ZipArchiveOutputStream zip = new ZipArchiveOutputStream(
                 Files.newOutputStream(archive),
                 StandardCharsets.UTF_8)) {
@@ -187,13 +187,13 @@ public final class LocalThemePackRepositoryTest {
         Path repositoryDirectory = temporaryDirectory.resolve("repository");
         QueuedExecutor executor = new QueuedExecutor();
 
-        Path manifestArchive = temporaryDirectory.resolve("manifest-limit.hmcl-theme");
+        Path manifestArchive = temporaryDirectory.resolve("manifest-limit.xyml-theme");
         writeZip(manifestArchive, Map.of("manifest.json", manifest, "assets/pixel.png", pixel));
         ThemePackArchiveLimits manifestLimits = new ThemePackArchiveLimits(
                 8, 1_024, 4_096, 64, 64, 4_096);
         assertImportFails(manifestArchive, repositoryDirectory, manifestLimits, executor);
 
-        Path singleArchive = temporaryDirectory.resolve("single-limit.hmcl-theme");
+        Path singleArchive = temporaryDirectory.resolve("single-limit.xyml-theme");
         writeZip(singleArchive, Map.of(
                 "manifest.json", manifest,
                 "assets/pixel.png", pixel,
@@ -202,7 +202,7 @@ public final class LocalThemePackRepositoryTest {
                 8, 512, 4_096, 512, 64, 4_096);
         assertImportFails(singleArchive, repositoryDirectory, singleLimits, executor);
 
-        Path totalArchive = temporaryDirectory.resolve("total-limit.hmcl-theme");
+        Path totalArchive = temporaryDirectory.resolve("total-limit.xyml-theme");
         writeZip(totalArchive, Map.of(
                 "manifest.json", manifest,
                 "assets/pixel.png", pixel,
@@ -219,7 +219,7 @@ public final class LocalThemePackRepositoryTest {
     @Test
     public void rejectsOversizedReferencedImageDimensions() throws Exception {
         byte[] oversizedHeader = withPngDimensions(png(1, 1), 5_000, 4_000);
-        Path archive = temporaryDirectory.resolve("wide.hmcl-theme");
+        Path archive = temporaryDirectory.resolve("wide.xyml-theme");
         writeZip(archive, Map.of(
                 "manifest.json", manifest("example.wide", "assets/wide.png"),
                 "assets/wide.png", oversizedHeader));
@@ -239,7 +239,7 @@ public final class LocalThemePackRepositoryTest {
     @Test
     public void exportRejectsMissingReferencedAsset() {
         ThemePackManifest manifest = parseManifest(manifest("example.missing", "assets/missing.png"));
-        Path output = temporaryDirectory.resolve("missing.hmcl-theme");
+        Path output = temporaryDirectory.resolve("missing.xyml-theme");
         QueuedExecutor executor = new QueuedExecutor();
 
         var stage = ThemePackExporter.export(manifest, List.of(), output, executor);
@@ -273,7 +273,7 @@ public final class LocalThemePackRepositoryTest {
     public void exportRejectsCaseCollidingAssetNames() throws Exception {
         byte[] image = png(1, 1);
         ThemePackManifest manifest = parseManifest(manifest("example.case", "assets/Tile.png"));
-        Path output = temporaryDirectory.resolve("case-collision.hmcl-theme");
+        Path output = temporaryDirectory.resolve("case-collision.xyml-theme");
         QueuedExecutor executor = new QueuedExecutor();
 
         var stage = ThemePackExporter.export(
@@ -292,7 +292,7 @@ public final class LocalThemePackRepositoryTest {
     /// Exact deletion rejects a stale expected path and then removes only the validated installation.
     @Test
     public void deleteRequiresExactRevalidatedInstallation() throws Exception {
-        Path archive = temporaryDirectory.resolve("delete.hmcl-theme");
+        Path archive = temporaryDirectory.resolve("delete.xyml-theme");
         writeZip(archive, Map.of(
                 "manifest.json", manifest("example.delete", "assets/pixel.png"),
                 "assets/pixel.png", png(1, 1)));
@@ -323,9 +323,9 @@ public final class LocalThemePackRepositoryTest {
     /// Local archives cannot reuse an embedded package ID whose persisted reference resolves to trusted content.
     @Test
     public void importRejectsReservedBuiltinPackageId() throws Exception {
-        Path archive = temporaryDirectory.resolve("reserved.hmcl-theme");
+        Path archive = temporaryDirectory.resolve("reserved.xyml-theme");
         writeZip(archive, Map.of(
-                "manifest.json", manifest("hmcl.default", "assets/pixel.png"),
+                "manifest.json", manifest("xyml.default", "assets/pixel.png"),
                 "assets/pixel.png", png(1, 1)));
         Path repositoryDirectory = temporaryDirectory.resolve("reserved-repository");
         LocalThemePackRepository repository = new LocalThemePackRepository(repositoryDirectory);
@@ -338,7 +338,7 @@ public final class LocalThemePackRepositoryTest {
                 CompletionException.class,
                 () -> importStage.toCompletableFuture().join());
         assertInstanceOf(java.nio.file.FileAlreadyExistsException.class, failure.getCause());
-        assertFalse(Files.exists(repositoryDirectory.resolve("hmcl.default")));
+        assertFalse(Files.exists(repositoryDirectory.resolve("xyml.default")));
     }
 
     /// A direct symbolic-link resource is refused whenever the host permits creation of the test link.
@@ -361,7 +361,7 @@ public final class LocalThemePackRepositoryTest {
     private static byte @Unmodifiable [] manifest(String id, String imagePath) {
         return ("""
                 {
-                  "$schema": "https://schemas.glavo.site/hmcl/theme-pack/1.0.0",
+                  "$schema": "https://raw.githubusercontent.com/MinecraftSTL/XYML/main/docs/schemas/theme-pack/1.0.0.json",
                   "id": "%s",
                   "version": "1.0.0",
                   "name": "Test",

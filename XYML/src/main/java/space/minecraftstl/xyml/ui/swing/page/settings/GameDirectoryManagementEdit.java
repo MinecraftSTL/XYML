@@ -28,7 +28,7 @@ import java.util.Objects;
 /// @param path local or user-level portable path selected by the user
 @NotNullByDefault
 public record GameDirectoryManagementEdit(String displayName, PortablePath path) {
-    /// Validates the editable values before the legacy directory manager is mutated.
+    /// Validates the editable values before the launcher directory manager is mutated.
     public GameDirectoryManagementEdit {
         displayName = Objects.requireNonNull(displayName, "displayName").trim();
         if (displayName.isBlank()) {

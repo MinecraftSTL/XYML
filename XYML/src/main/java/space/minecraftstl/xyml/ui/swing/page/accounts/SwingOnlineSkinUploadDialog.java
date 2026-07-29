@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.accounts;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -220,7 +222,7 @@ final class SwingOnlineSkinUploadDialog extends JDialog implements AutoCloseable
         if (closed || uploading) {
             return;
         }
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setDialogTitle(i18n("account.skin.upload"));
         chooser.setFileFilter(new FileNameExtensionFilter(i18n("account.skin.png_filter"), "png"));
         if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {

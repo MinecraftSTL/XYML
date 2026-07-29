@@ -104,16 +104,16 @@ public record InstanceMaintenanceStrings(
     public static InstanceMaintenanceStrings localized() {
         return new InstanceMaintenanceStrings(
                 i18n("settings.game.management"),
-                i18n("version.launch"),
-                i18n("version.manage.redownload_assets_index"),
-                i18n("version.manage.clean"),
-                i18n("version.launch.test"),
-                i18n("version.launch_script"),
-                i18n("version.update"),
-                i18n("version.manage.redownload_assets_index"),
-                i18n("version.manage.remove_assets"),
-                i18n("version.manage.remove_libraries"),
-                i18n("version.manage.clean"),
+                i18n("instance.launch"),
+                i18n("instance.manage.redownload_assets_index"),
+                i18n("instance.manage.clean"),
+                i18n("instance.launch.test"),
+                i18n("instance.launch_script"),
+                i18n("instance.update"),
+                i18n("instance.manage.redownload_assets_index"),
+                i18n("instance.manage.remove_assets"),
+                i18n("instance.manage.remove_libraries"),
+                i18n("instance.manage.clean"),
                 i18n("message.doing"),
                 i18n("message.success"),
                 i18n("message.doing"),
@@ -124,7 +124,7 @@ public record InstanceMaintenanceStrings(
                 i18n("settings.launcher.common_path.tooltip"),
                 i18n("button.remove.confirm"),
                 i18n("message.doing"),
-                i18n("version.launch_script.success", "%s"));
+                i18n("instance.launch_script.success", "%s"));
     }
 
     /// Returns deterministic English text for component tests.

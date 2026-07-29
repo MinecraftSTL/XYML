@@ -100,19 +100,19 @@ public record InstanceLifecycleStrings(
     /// @return current-locale lifecycle strings
     public static InstanceLifecycleStrings localized() {
         return new InstanceLifecycleStrings(
-                i18n("version.manage.manage"),
-                i18n("version.name"),
-                i18n("version.manage.rename"),
-                i18n("version.manage.duplicate"),
-                i18n("version.manage.remove"),
-                i18n("version.manage.rename.message"),
-                i18n("version.manage.duplicate.prompt"),
-                i18n("version.manage.duplicate.duplicate_save"),
-                i18n("version.manage.duplicate.confirm"),
-                i18n("version.manage.remove.confirm.independent"),
-                i18n("version.manage.rename.fail"),
-                i18n("version.manage.duplicate.confirm"),
-                i18n("version.manage.remove.failed"),
+                i18n("instance.manage.manage"),
+                i18n("instance.name"),
+                i18n("instance.manage.rename"),
+                i18n("instance.manage.duplicate"),
+                i18n("instance.manage.remove"),
+                i18n("instance.manage.rename.message"),
+                i18n("instance.manage.duplicate.prompt"),
+                i18n("instance.manage.duplicate.duplicate_save"),
+                i18n("instance.manage.duplicate.confirm"),
+                i18n("instance.manage.remove.confirm.independent"),
+                i18n("instance.manage.rename.fail"),
+                i18n("instance.manage.duplicate.confirm"),
+                i18n("instance.manage.remove.failed"),
                 i18n("message.doing"),
                 i18n("message.success"));
     }

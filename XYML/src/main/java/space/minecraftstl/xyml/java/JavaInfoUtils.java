@@ -44,7 +44,7 @@ public final class JavaInfoUtils {
 
         Path thisPath = JarUtils.thisJarPath();
         if (thisPath == null) {
-            throw new IOException("Failed to find current HMCL location");
+            throw new IOException("Failed to find current XYML location");
         }
 
         try {

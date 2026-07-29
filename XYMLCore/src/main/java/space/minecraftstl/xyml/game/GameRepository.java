@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.game;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.platform.Platform;
@@ -29,14 +30,13 @@ import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * Supports operations on versioning.
- * <p>
- * Note that game repository will not do any operations which need connection with Internet, if do,
- * see {@link space.minecraftstl.xyml.download.DependencyManager}
- *
- * @author huangyuhui
- */
+/// Provides local operations for installed game instances and their Minecraft version manifests.
+///
+/// Repository operations do not require network access. Network-backed installation and dependency resolution are
+/// owned by [space.minecraftstl.xyml.download.DependencyManager].
+///
+/// @author huangyuhui
+@NotNullByDefault
 public interface GameRepository extends VersionProvider {
 
     /**
@@ -66,29 +66,20 @@ public interface GameRepository extends VersionProvider {
         return getVersion(id).resolvePreservingPatches(this);
     }
 
-    /**
-     * How many version are there?
-     */
-    int getVersionCount();
+    /// Returns the number of installed instances in the current repository snapshot.
+    int getInstanceCount();
 
-    /**
-     * Gets the collection of versions
-     *
-     * @return the collection of versions
-     */
-    Collection<Version> getVersions();
+    /// Returns the version manifests of all installed instances in the current repository snapshot.
+    Collection<Version> getInstances();
 
-    /**
-     * Load version list.
-     * <p>
-     * This method should be called before launching a version.
-     * A time-costly operation.
-     * You'd better execute this method in a new thread.
-     */
-    void refreshVersions();
+    /// Reloads the installed-instance snapshot from disk.
+    ///
+    /// This blocking operation should run outside the UI thread before an instance is launched.
+    void refreshInstances();
 
-    default Task<Void> refreshVersionsAsync() {
-        return Task.runAsync(this::refreshVersions);
+    /// Creates an asynchronous task that reloads the installed-instance snapshot from disk.
+    default Task<Void> refreshInstancesAsync() {
+        return Task.runAsync(this::refreshInstances);
     }
 
     /**
@@ -185,15 +176,13 @@ public interface GameRepository extends VersionProvider {
         return getVersionJar(getVersion(version).resolve(this));
     }
 
-    /**
-     * Rename given version to new name.
-     *
-     * @param from The id of original version
-     * @param to The new id of the version
-     * @throws UnsupportedOperationException if this game repository does not support renaming a version
-     * @return true if the operation is done successfully, false if version `from` not found, version json is malformed or I/O errors occurred.
-     */
-    boolean renameVersion(String from, String to);
+    /// Renames an installed instance and its matching version manifest files.
+    ///
+    /// @param from current instance identifier
+    /// @param to requested destination instance identifier
+    /// @return whether the instance was renamed successfully
+    /// @throws UnsupportedOperationException if this repository does not support instance renaming
+    boolean renameInstance(String from, String to);
 
     /**
      * Get actual asset directory.

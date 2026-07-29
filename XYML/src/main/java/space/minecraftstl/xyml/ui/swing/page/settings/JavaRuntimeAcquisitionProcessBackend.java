@@ -84,12 +84,17 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 ///
 /// Package visibility permits focused archive-security tests without exposing the backend as public API.
 @NotNullByDefault
-class JavaRuntimeAcquisitionProcessBackend implements JavaRuntimeAcquisitionBackend {
+final class JavaRuntimeAcquisitionProcessBackend implements JavaRuntimeAcquisitionBackend {
     /// Maximum decoded archive entry path or symbolic-link target accepted after bounded metadata parsing.
     private static final int MAXIMUM_ARCHIVE_TEXT_CHARACTERS = 4_096;
 
     /// Resource ceilings enforced for every archive operation.
     private final ArchiveLimits archiveLimits;
+
+    /// Creates the production backend with the standard archive resource ceilings.
+    JavaRuntimeAcquisitionProcessBackend() {
+        this(JavaManagerRuntimeAcquisitionService.DEFAULT_ARCHIVE_LIMITS);
+    }
 
     /// Creates a production-equivalent backend with injectable limits for focused tests.
     ///
@@ -141,18 +146,6 @@ class JavaRuntimeAcquisitionProcessBackend implements JavaRuntimeAcquisitionBack
                 version);
     }
 
-    /// Opens an archive, validates every path and link, and locates a direct or macOS-bundle Java Home.
-    ///
-    /// @param archiveFile local archive path
-    /// @return immutable archive inspection
-    /// @throws IOException when the path is missing or the archive layout is unsafe or invalid
-    @Override
-    public LocalJavaArchiveInspection inspectLocalArchive(Path archiveFile)
-            throws IOException, UnsupportedPlatformException {
-        return inspectLocalArchive(archiveFile, () -> {
-        });
-    }
-
     /// Opens and validates an archive with stable hashing and cooperative cancellation.
     ///
     /// @param archiveFile local archive path
@@ -171,25 +164,13 @@ class JavaRuntimeAcquisitionProcessBackend implements JavaRuntimeAcquisitionBack
         return inspection;
     }
 
-    /// Opens and validates an archive layout without applying host compatibility policy.
-    ///
-    /// This package-private entry point lets cross-platform tests verify macOS bundle normalization on any host.
-    ///
-    /// @param archiveFile local archive path
-    /// @return immutable structural archive inspection
-    /// @throws IOException when the path is missing or the archive layout is unsafe or invalid
-    LocalJavaArchiveInspection inspectLocalArchiveLayout(Path archiveFile) throws IOException {
-        return inspectLocalArchiveLayout(archiveFile, () -> {
-        });
-    }
-
     /// Opens and validates an archive layout while proving that source bytes remain stable throughout parsing.
     ///
     /// @param archiveFile local archive path
     /// @param cancellationCheck cooperative cancellation callback
     /// @return immutable structural archive inspection
     /// @throws IOException when the path is missing, unstable, unsafe, or invalid
-    private LocalJavaArchiveInspection inspectLocalArchiveLayout(
+    LocalJavaArchiveInspection inspectLocalArchiveLayout(
             Path archiveFile,
             CancellationCheck cancellationCheck) throws IOException {
         Path normalizedArchive = archiveFile.toAbsolutePath().normalize();
@@ -216,17 +197,6 @@ class JavaRuntimeAcquisitionProcessBackend implements JavaRuntimeAcquisitionBack
                 attributesAfter,
                 fingerprintAfter);
         return inspectionOf(normalizedArchive, javaHome, fingerprintAfter);
-    }
-
-    /// Copies one user archive to a system-created temporary path with the same parser-significant suffix.
-    ///
-    /// @param archiveFile user-selected source archive
-    /// @return controlled temporary copy
-    /// @throws IOException when the source is missing or copying fails
-    @Override
-    public Path copyToManagedTemporaryArchive(Path archiveFile) throws IOException {
-        return copyToManagedTemporaryArchive(archiveFile, () -> {
-        });
     }
 
     /// Copies one source through a bounded loop that observes cooperative cancellation.
@@ -290,18 +260,6 @@ class JavaRuntimeAcquisitionProcessBackend implements JavaRuntimeAcquisitionBack
                 Math.min(
                         archiveLimits.maxArchiveBytes(),
                         archiveLimits.maxTemporaryArchiveBytes()));
-    }
-
-    /// Reopens a controlled source, validates it again, and writes only its Java Home to a normalized ZIP.
-    ///
-    /// @param inspection inspection of a controlled source copy
-    /// @return inspection of the normalized install archive
-    /// @throws IOException when the source changed or repacking fails
-    @Override
-    public LocalJavaArchiveInspection prepareInstallArchive(
-            LocalJavaArchiveInspection inspection) throws IOException, UnsupportedPlatformException {
-        return prepareInstallArchive(inspection, () -> {
-        });
     }
 
     /// Revalidates and repacks one controlled source with stable hashing and cooperative cancellation.

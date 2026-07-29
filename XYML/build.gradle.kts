@@ -39,7 +39,7 @@ val curseForgeApiKey = System.getenv("CURSEFORGE_API_KEY") ?: ""
 
 // The bundled stub preserves the upstream launcher code and copyright metadata;
 // only its Windows icon resources differ for this fork.
-val launcherExe = System.getenv("HMCL_LAUNCHER_EXE")
+val launcherExe = System.getenv("XYML_LAUNCHER_EXE")
     ?.takeIf { it.isNotBlank() }
     ?.let { file(it) }
     ?: layout.projectDirectory.file("image/XYMLLauncher.windows.stub").asFile
@@ -98,7 +98,7 @@ fun createChecksum(file: File) {
 }
 
 fun attachSignature(jar: File) {
-    val keyLocation = System.getenv("HMCL_SIGNATURE_KEY")
+    val keyLocation = System.getenv("XYML_SIGNATURE_KEY")
     if (keyLocation == null) {
         logger.warn("Missing signature key")
         return
@@ -110,7 +110,7 @@ fun attachSignature(jar: File) {
     ZipFile(jar).use { zip ->
         zip.stream()
             .sorted(Comparator.comparing { it.name })
-            .filter { it.name != "META-INF/hmcl_signature" }
+            .filter { it.name != "META-INF/xyml_signature" }
             .forEach {
                 signer.update(digest("SHA-512", it.name.toByteArray()))
                 signer.update(digest("SHA-512", zip.getInputStream(it).readBytes()))
@@ -118,7 +118,7 @@ fun attachSignature(jar: File) {
     }
     val signature = signer.sign()
     FileSystems.newFileSystem(URI.create("jar:" + jar.toURI()), emptyMap<String, Any>()).use { zipfs ->
-        Files.newOutputStream(zipfs.getPath("META-INF/hmcl_signature")).use { it.write(signature) }
+        Files.newOutputStream(zipfs.getPath("META-INF/xyml_signature")).use { it.write(signature) }
     }
 }
 
@@ -145,28 +145,28 @@ tasks.compileJava {
     options.compilerArgs.addAll(compileExports.map { "--add-exports=$it=ALL-UNNAMED" })
 }
 
-val hmclProperties = buildList {
-    add("hmcl.version" to project.version.toString())
+val xymlProperties = buildList {
+    add("xyml.version" to project.version.toString())
     System.getenv("GITHUB_SHA")?.let {
-        add("hmcl.version.hash" to it)
+        add("xyml.version.hash" to it)
     }
-    add("hmcl.version.type" to versionType)
-    add("hmcl.microsoft.auth.id" to microsoftAuthId)
-    add("hmcl.curseforge.apikey" to curseForgeApiKey)
-    add("hmcl.authlib-injector.version" to libs.authlib.injector.get().version!!)
-    add("hmcl.lwjgl-unsafe-agent.version" to libs.lwjgl.unsafe.agent.get().version!!)
+    add("xyml.version.type" to versionType)
+    add("xyml.microsoft.auth.id" to microsoftAuthId)
+    add("xyml.curseforge.apikey" to curseForgeApiKey)
+    add("xyml.authlib-injector.version" to libs.authlib.injector.get().version!!)
+    add("xyml.lwjgl-unsafe-agent.version" to libs.lwjgl.unsafe.agent.get().version!!)
 }
 
-val hmclPropertiesFile = layout.buildDirectory.file("hmcl.properties")
+val xymlPropertiesFile = layout.buildDirectory.file("xyml.properties")
 val createPropertiesFile = tasks.register("createPropertiesFile") {
-    outputs.file(hmclPropertiesFile)
-    hmclProperties.forEach { (k, v) -> inputs.property(k, v) }
+    outputs.file(xymlPropertiesFile)
+    xymlProperties.forEach { (k, v) -> inputs.property(k, v) }
 
     doLast {
-        val targetFile = hmclPropertiesFile.get().asFile
+        val targetFile = xymlPropertiesFile.get().asFile
         targetFile.parentFile.mkdir()
         targetFile.bufferedWriter().use {
-            for ((k, v) in hmclProperties) {
+            for ((k, v) in xymlProperties) {
                 it.write("$k=$v\n")
             }
         }
@@ -216,7 +216,7 @@ tasks.shadowJar {
 
     into("assets") {
         from(launcherExe) {
-            rename { "HMCLauncher.exe" }
+            rename { "XYMLLauncher.exe" }
         }
     }
 
@@ -306,10 +306,22 @@ val requiredOfflineNbtIconEntries = listOf(
 ).map { "assets/img/nbt/$it" }
 
 val requiredOfflineThemeEntries = listOf(
-    "assets/themes/hmcl.classic/manifest.json",
-    "assets/themes/hmcl.default/manifest.json",
-    "assets/themes/hmcl.default/assets/background-dark.png",
-    "assets/themes/hmcl.default/assets/background-light.png",
+    "assets/themes/xyml.classic/manifest.json",
+    "assets/themes/xyml.default/manifest.json",
+    "assets/themes/xyml.default/assets/background-dark.png",
+    "assets/themes/xyml.default/assets/background-light.png",
+    "assets/img/wallpapers/2015-06-22.jpg",
+    "assets/img/wallpapers/2016-02-25.jpg",
+    "assets/img/wallpapers/2021-08-26.jpg",
+)
+
+val requiredOfflineChromeEntries = listOf(
+    "assets/img/icon.png",
+    "assets/img/icon@2x.png",
+    "assets/img/icon@4x.png",
+    "assets/img/icon@8x.png",
+    "assets/img/icon-title.png",
+    "assets/img/team-icon.png",
 )
 
 val requiredOfflineSkinEntries = listOf(
@@ -331,7 +343,12 @@ val requiredOfflineSkinEntries = listOf(
 
 val requiredOfflineSwingFeatureEntries = listOf(
     "space/minecraftstl/xyml/ui/swing/application/SwingApplicationComposition.class",
+    "space/minecraftstl/xyml/ui/swing/dialog/EditablePathChooser.class",
+    "space/minecraftstl/xyml/ui/swing/SwingWindowAppearanceRequest.class",
+    "space/minecraftstl/xyml/ui/swing/page/accounts/AccountAvatarIconCache.class",
+    "space/minecraftstl/xyml/ui/swing/page/accounts/AccountAvatarSource.class",
     "space/minecraftstl/xyml/ui/swing/page/accounts/AccountListCellRenderer.class",
+    "space/minecraftstl/xyml/ui/swing/page/accounts/LauncherAccountStore.class",
     "space/minecraftstl/xyml/ui/swing/page/accounts/OfflineSkinPreviewPanel.class",
     "space/minecraftstl/xyml/ui/swing/page/accounts/SwingOfflineSkinManagementDialog.class",
     "space/minecraftstl/xyml/ui/swing/page/accounts/SwingOnlineSkinUploadDialog.class",
@@ -343,9 +360,16 @@ val requiredOfflineSwingFeatureEntries = listOf(
     "space/minecraftstl/xyml/ui/swing/page/instances/management/maintenance/InstanceMaintenancePanel.class",
     "space/minecraftstl/xyml/ui/swing/page/instances/management/worlds/WorldQuickPlayActions.class",
     "space/minecraftstl/xyml/ui/swing/page/nbt/SwingNBTEditorDialog.class",
+    "space/minecraftstl/xyml/ui/swing/page/settings/AppearanceSettingsPanel.class",
     "space/minecraftstl/xyml/ui/swing/page/settings/JavaRuntimeAcquisitionPanel.class",
-    "space/minecraftstl/xyml/ui/swing/page/settings/theme/LegacyThemeRuntimeController.class",
+    "space/minecraftstl/xyml/ui/swing/page/settings/theme/ThemeRuntimeController.class",
     "space/minecraftstl/xyml/ui/swing/page/settings/theme/ThemePackManagementPanel.class",
+    "space/minecraftstl/xyml/ui/swing/shell/LauncherIconImages.class",
+    "space/minecraftstl/xyml/ui/swing/shell/ShellNavigationRail.class",
+    "space/minecraftstl/xyml/ui/swing/shell/SwingWindowBackgroundController.class",
+    "space/minecraftstl/xyml/ui/swing/shell/WindowBackgroundPaint.class",
+    "space/minecraftstl/xyml/ui/swing/shell/WindowBackgroundPaintParser.class",
+    "space/minecraftstl/xyml/ui/swing/shell/WindowBackgroundVisual.class",
 )
 
 val requiredOfflineUiEntries = buildList {
@@ -354,6 +378,7 @@ val requiredOfflineUiEntries = buildList {
     addAll(requiredOfflineInstanceIconEntries)
     addAll(requiredOfflineNbtIconEntries)
     addAll(requiredOfflineThemeEntries)
+    addAll(requiredOfflineChromeEntries)
     addAll(requiredOfflineSkinEntries)
     addAll(requiredOfflineSwingFeatureEntries)
 }
@@ -369,7 +394,7 @@ val forbiddenRuntimePatcherEntries = listOf(
     "space/minecraftstl/xyml/util/SelfDependencyPatcher.class",
 )
 
-val forbiddenLegacyUiEntryPrefixes = listOf(
+val forbiddenRemovedUiEntryPrefixes = listOf(
     "assets/css/",
     "javafx/",
     "com/sun/javafx/",
@@ -380,11 +405,11 @@ val forbiddenLegacyUiEntryPrefixes = listOf(
     "org/hildan/fxgson/",
 )
 
-fun findForbiddenLegacyUiEntries(jar: ZipFile): List<String> = jar.entries().asSequence()
+fun findForbiddenRemovedUiEntries(jar: ZipFile): List<String> = jar.entries().asSequence()
     .map { it.name }
     .filter { entry ->
         entry in forbiddenRuntimePatcherEntries
-            || forbiddenLegacyUiEntryPrefixes.any(entry::startsWith)
+            || forbiddenRemovedUiEntryPrefixes.any(entry::startsWith)
     }
     .sorted()
     .toList()
@@ -402,9 +427,9 @@ val verifyOfflineUiArtifact = tasks.register("verifyOfflineUiArtifact") {
             if (missingEntries.isNotEmpty()) {
                 throw GradleException("Missing or empty offline runtime entries: ${missingEntries.joinToString()}")
             }
-            val forbiddenEntries = findForbiddenLegacyUiEntries(jar)
+            val forbiddenEntries = findForbiddenRemovedUiEntries(jar)
             if (forbiddenEntries.isNotEmpty()) {
-                throw GradleException("Retained legacy UI entries: ${forbiddenEntries.joinToString()}")
+                throw GradleException("Retained removed UI entries: ${forbiddenEntries.joinToString()}")
             }
             val manifestEntry = jar.getEntry("META-INF/MANIFEST.MF")
                 ?: throw GradleException("Launcher artifact has no manifest")
@@ -716,7 +741,7 @@ val verifyPackagedRuntime = tasks.register("verifyPackagedRuntime") {
                     "Packaged app-image has missing or empty offline runtime entries: ${missingEntries.joinToString()}"
                 )
             }
-            val forbiddenEntries = findForbiddenLegacyUiEntries(jar)
+            val forbiddenEntries = findForbiddenRemovedUiEntries(jar)
             if (forbiddenEntries.isNotEmpty()) {
                 throw GradleException("Packaged app-image retains legacy UI entries: ${forbiddenEntries.joinToString()}")
             }
@@ -811,7 +836,7 @@ tasks.processResources {
     dependsOn(createLanguageList)
 
     into("assets/") {
-        from(hmclPropertiesFile)
+        from(xymlPropertiesFile)
         from(embedResources)
     }
 
@@ -843,8 +868,8 @@ val makeExecutables = tasks.register("makeExecutables") {
         ZipFile(jarPath).use { zipFile ->
             for (extension in extensions) {
                 val output = artifactFile(extension)
-                val entry = zipFile.getEntry("assets/HMCLauncher.$extension")
-                    ?: throw GradleException("HMCLauncher.$extension not found")
+                val entry = zipFile.getEntry("assets/XYMLLauncher.$extension")
+                    ?: throw GradleException("XYMLLauncher.$extension not found")
 
                 output.outputStream().use { outputStream ->
                     zipFile.getInputStream(entry).use { it.copyTo(outputStream) }
@@ -871,7 +896,7 @@ val makeDeb = tasks.register("makeDeb", CreateDeb::class) {
     version.set(project.version.toString())
     releaseType.set(debChannel)
     appShFile.set(layout.file(provider { artifactFile("sh") }))
-    iconFile.set(layout.projectDirectory.file("image/hmcl.png"))
+    iconFile.set(layout.projectDirectory.file("image/xyml.png"))
     outputFile.set(debFile)
 
     doLast {
@@ -952,23 +977,23 @@ tasks.register<JavaExec>("run") {
     classpath = files(jarPath)
     workingDir = rootProject.rootDir
 
-    val vmOptions = parseToolOptions(System.getenv("HMCL_JAVA_OPTS") ?: "-Xmx1g")
-    if (vmOptions.none { it.startsWith("-Dhmcl.offline.auth.restricted=") })
-        vmOptions += "-Dhmcl.offline.auth.restricted=false"
+    val vmOptions = parseToolOptions(System.getenv("XYML_JAVA_OPTS") ?: "-Xmx1g")
+    if (vmOptions.none { it.startsWith("-Dxyml.offline.auth.restricted=") })
+        vmOptions += "-Dxyml.offline.auth.restricted=false"
 
     jvmArgs(vmOptions)
 
-    val hmclJavaHome = System.getenv("HMCL_JAVA_HOME")
-    if (hmclJavaHome != null) {
+    val xymlJavaHome = System.getenv("XYML_JAVA_HOME")
+    if (xymlJavaHome != null) {
         this.executable(
-            file(hmclJavaHome).resolve("bin")
+            file(xymlJavaHome).resolve("bin")
                 .resolve(if (System.getProperty("os.name").lowercase().startsWith("windows")) "java.exe" else "java")
         )
     }
 
     doFirst {
-        logger.quiet("HMCL_JAVA_OPTS: {}", vmOptions)
-        logger.quiet("HMCL_JAVA_HOME: {}", hmclJavaHome ?: System.getProperty("java.home"))
+        logger.quiet("XYML_JAVA_OPTS: {}", vmOptions)
+        logger.quiet("XYML_JAVA_HOME: {}", xymlJavaHome ?: System.getProperty("java.home"))
     }
 }
 

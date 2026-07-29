@@ -217,7 +217,7 @@ public class DataPack {
     private static void copyEmbeddedResources(
             Path resourcesZip,
             FileSystem outputResourcesZipFileSystem) throws IOException {
-        Path temporaryResourcesFile = Files.createTempFile("hmcl", ".zip");
+        Path temporaryResourcesFile = Files.createTempFile("xyml", ".zip");
         try {
             Files.copy(resourcesZip, temporaryResourcesFile, StandardCopyOption.REPLACE_EXISTING);
             try (FileSystem resources =
@@ -242,7 +242,7 @@ public class DataPack {
                 {
                     "pack": {
                         "pack_format": 4,
-                        "description": "Modified by HMCL."
+                        "description": "Modified by XYML."
                     }
                 }
                 """;

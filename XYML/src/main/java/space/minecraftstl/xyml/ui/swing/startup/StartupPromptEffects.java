@@ -21,7 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 
 /// Performs process-level startup effects outside the prompt policy and Swing presenter.
 ///
-/// The coordinator invokes every method on its worker executor. Implementations may bridge to legacy
+/// The coordinator invokes every method on its worker executor. Implementations may bridge to launcher
 /// state or process services, but must not synchronously wait for the Swing event dispatch thread.
 @NotNullByDefault
 public interface StartupPromptEffects {

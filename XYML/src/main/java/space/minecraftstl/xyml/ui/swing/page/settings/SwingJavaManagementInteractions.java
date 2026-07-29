@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -42,7 +44,7 @@ final class SwingJavaManagementInteractions implements JavaManagementInteraction
     /// @return selected path, or null when the chooser is cancelled
     @Override
     public @Nullable Path chooseLocalRuntime(Component parent) {
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setDialogTitle(i18n("java.add"));
         chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
         if (chooser.showOpenDialog(Objects.requireNonNull(parent, "parent")) != JFileChooser.APPROVE_OPTION) {
@@ -58,7 +60,7 @@ final class SwingJavaManagementInteractions implements JavaManagementInteraction
     /// @return selected archive path, or null when the chooser is cancelled
     @Override
     public @Nullable Path chooseLocalJavaArchive(Component parent) {
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setDialogTitle(i18n("java.install"));
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setAcceptAllFileFilterUsed(false);

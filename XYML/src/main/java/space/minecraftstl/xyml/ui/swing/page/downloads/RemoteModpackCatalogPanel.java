@@ -789,7 +789,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         @Nullable RemoteModpackCatalogItem item = selectedItem;
         @Nullable RemoteAddon.Version version = (RemoteAddon.Version) versionBox.getSelectedItem();
         String instanceName = instanceNameField.getText().trim();
-        if (item == null || version == null || !XYMLGameRepository.isValidVersionId(instanceName)) {
+        if (item == null || version == null || !XYMLGameRepository.isValidInstanceId(instanceName)) {
             setStatus(strings.invalidInstanceNameStatus());
             updateControls();
             return;
@@ -987,7 +987,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 && !versionLoading
                 && selectedItem != null
                 && versionBox.getSelectedItem() != null
-                && XYMLGameRepository.isValidVersionId(instanceNameField.getText().trim()));
+                && XYMLGameRepository.isValidInstanceId(instanceNameField.getText().trim()));
     }
 
     /// Updates visible lifecycle feedback and its accessible tooltip on the EDT.

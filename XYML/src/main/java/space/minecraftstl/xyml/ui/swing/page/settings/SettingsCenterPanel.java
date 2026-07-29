@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -70,7 +72,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// center safe to cache as one shell page.
 @NotNullByDefault
 public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
-    /// Add-on catalogue IDs exposed by the legacy launcher setting.
+    /// Add-on catalogue IDs exposed by the launcher setting.
     private static final @Unmodifiable List<String> ADDON_SOURCES = List.of("modrinth", "curseforge");
 
     /// Store supplying and persisting the non-appearance settings.
@@ -179,13 +181,13 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Whether this panel has released its owned store resources.
     private boolean closed;
 
-    /// Creates a settings center backed by the process-wide legacy launcher settings.
+    /// Creates a settings center backed by the process-wide launcher settings.
     ///
     /// @param appearancePanel appearance page to embed and own
     /// @return configured settings center
     public static SettingsCenterPanel createForCurrentSettings(AppearanceSettingsPanel appearancePanel) {
         EdtDispatcher.requireEventDispatchThread();
-        LegacyLauncherSettingsCenterStore settingsStore = LegacyLauncherSettingsCenterStore.createForCurrentSettings();
+        LauncherSettingsCenterStore settingsStore = LauncherSettingsCenterStore.createForCurrentSettings();
         try {
             return new SettingsCenterPanel(settingsStore, appearancePanel);
         } catch (RuntimeException exception) {
@@ -636,7 +638,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Opens a native directory chooser and persists the chosen custom directory.
     private void chooseCommonDirectory() {
         EdtDispatcher.requireEventDispatchThread();
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
         String configuredDirectory = commonDirectoryField.getText().trim();
         if (!configuredDirectory.isEmpty()) {

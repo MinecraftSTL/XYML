@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.accounts;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -466,7 +468,7 @@ final class SwingOfflineSkinManagementDialog extends JDialog implements AutoClos
             return;
         }
 
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setDialogTitle(i18n(cape ? "account.cape.choose" : "account.skin.choose"));
         chooser.setAcceptAllFileFilterUsed(false);
         chooser.setFileFilter(new FileNameExtensionFilter(i18n("account.skin.png_filter"), "png"));

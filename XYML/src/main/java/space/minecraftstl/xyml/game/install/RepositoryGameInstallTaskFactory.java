@@ -93,12 +93,12 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
     private Task<?> createDeferredInstallTask(
             GameInstallRequest request,
             DownloadProvider requestProvider) {
-        if (!XYMLGameRepository.isValidVersionId(request.instanceName())) {
+        if (!XYMLGameRepository.isValidInstanceId(request.instanceName())) {
             throw new GameInstallRequestRejectedException(
                     request,
                     GameInstallRequestRejectedException.Reason.INVALID_INSTANCE_NAME);
         }
-        if (repository.versionIdConflicts(request.instanceName())) {
+        if (repository.instanceIdConflicts(request.instanceName())) {
             throw new GameInstallRequestRejectedException(
                     request,
                     GameInstallRequestRejectedException.Reason.INSTANCE_ALREADY_EXISTS);
@@ -108,7 +108,7 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         configureBuilder(builder, request);
         repository.applyDefaultIsolationSettingForNewInstance(request.instanceName(), isModded(request));
         return builder.buildAsync()
-                .whenComplete(repositoryRefreshExecutor, ignoredFailure -> repository.refreshVersions())
+                .whenComplete(repositoryRefreshExecutor, ignoredFailure -> repository.refreshInstances())
                 .thenRunAsync(
                         instanceSelectionExecutor,
                         () -> repository.setSelectedInstance(request.instanceName()));
@@ -133,7 +133,7 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
 
     /// Determines whether the selected remote installers contain a real mod loader.
     ///
-    /// This preserves the legacy isolation rule: only [LibraryAnalyzer.LibraryType#isModLoader()] is
+    /// The repository isolation rule considers only [LibraryAnalyzer.LibraryType#isModLoader()] as
     /// considered modded, so auxiliary components such as OptiFine alone do not change the default
     /// running-directory policy.
     ///

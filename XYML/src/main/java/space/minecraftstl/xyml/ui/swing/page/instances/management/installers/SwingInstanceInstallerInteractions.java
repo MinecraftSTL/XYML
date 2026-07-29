@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.installers;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -44,7 +46,7 @@ final class SwingInstanceInstallerInteractions implements InstanceInstallerInter
     @Override
     public @Nullable Path chooseOfflineInstaller(Component owner) {
         EdtDispatcher.requireEventDispatchThread();
-        JFileChooser chooser = new JFileChooser();
+        JFileChooser chooser = new EditablePathChooser();
         chooser.setDialogTitle(i18n("install.installer.install_offline"));
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setAcceptAllFileFilterUsed(false);

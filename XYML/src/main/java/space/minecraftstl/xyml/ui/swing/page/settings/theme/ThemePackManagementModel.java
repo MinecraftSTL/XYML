@@ -186,15 +186,15 @@ public final class ThemePackManagementModel
         changes.fireChange(previous, replacement);
     }
 
-    /// Imports one `.hmcl-theme` archive and appends its newly installed manifest index.
+    /// Imports one `.xyml-theme` archive and appends its newly installed manifest index.
     ///
     /// @param archive selected local archive path
     /// @return eventual current snapshot with success or visible failure state
     public CompletionStage<ThemePackManagementSnapshot> importArchive(Path archive) {
         Path source = Objects.requireNonNull(archive, "archive").toAbsolutePath().normalize();
         @Nullable Path fileName = source.getFileName();
-        if (fileName == null || !fileName.toString().toLowerCase(Locale.ROOT).endsWith(".hmcl-theme")) {
-            throw new IllegalArgumentException("Theme pack must use the .hmcl-theme extension");
+        if (fileName == null || !fileName.toString().toLowerCase(Locale.ROOT).endsWith(".xyml-theme")) {
+            throw new IllegalArgumentException("Theme pack must use the .xyml-theme extension");
         }
         long generation = beginOperation(ThemePackManagementOperation.IMPORTING);
         CompletableFuture<ThemePackManagementSnapshot> completion = new CompletableFuture<>();

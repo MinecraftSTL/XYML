@@ -98,8 +98,8 @@ public class YggdrasilServer extends HttpServer {
                         "127.0.0.1",
                         "localhost")),
                 pair("meta", mapOf(
-                        pair("serverName", "HMCL"),
-                        pair("implementationName", "HMCL"),
+                        pair("serverName", "XYML"),
+                        pair("implementationName", "XYML"),
                         pair("implementationVersion", "1.0"),
                         pair("feature.non_email_login", true)))));
     }

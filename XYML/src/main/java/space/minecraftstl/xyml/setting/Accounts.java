@@ -180,28 +180,6 @@ public final class Accounts {
         return new SerializedAccount(metadata, privateData);
     }
 
-    /// Ensures account IDs are unique across local and shared account metadata records before accounts are instantiated.
-    private static AccountIDNormalization ensureUniqueAccountIDs() {
-        Set<String> usedAccountIDs = new HashSet<>();
-        boolean localChanged = LegacyConfigMigrator.assignAccountIDs(
-                SettingsManager.gameAccounts(),
-                usedAccountIDs,
-                false);
-        boolean sharedChanged = LegacyConfigMigrator.assignAccountIDs(
-                SettingsManager.userGameAccounts(),
-                usedAccountIDs,
-                true);
-        return new AccountIDNormalization(localChanged, sharedChanged);
-    }
-
-    /// Result of normalizing account IDs across loaded metadata stores.
-    ///
-    /// @param localChanged whether the per-workspace account metadata changed
-    /// @param sharedChanged whether the shared account metadata changed
-    @NotNullByDefault
-    private record AccountIDNormalization(boolean localChanged, boolean sharedChanged) {
-    }
-
     /// Returns account IDs from metadata records.
     ///
     /// @param first the first metadata record list
@@ -368,31 +346,28 @@ public final class Accounts {
         if (initialized)
             throw new IllegalStateException("Already initialized");
 
-        AccountIDNormalization accountIDNormalization = ensureUniqueAccountIDs();
-        if (accountIDNormalization.localChanged()) {
-            SettingsManager.saveGameAccountMetadataRecords();
-        }
-        if (accountIDNormalization.sharedChanged()) {
-            SettingsManager.saveUserGameAccountMetadataRecords();
-        }
-
         // load accounts
         @Nullable Account selected = null;
+        Set<AccountID> loadedAccountIDs = new HashSet<>();
         for (JsonObject record : getAccountMetadataRecords()) {
             @Nullable Account account = parseAccount(record, true);
-            if (account != null) {
+            if (account != null && loadedAccountIDs.add(account.getAccountID())) {
                 account.setPortable(true);
                 accountValues.add(account);
                 if (JsonUtils.getBoolean(record, "selected", false)) {
                     selected = account;
                 }
+            } else if (account != null) {
+                LOG.warning("Skipping duplicate account ID: " + account.getAccountID());
             }
         }
 
         for (JsonObject record : getUserAccountMetadataRecords()) {
             @Nullable Account account = parseAccount(record, false);
-            if (account != null) {
+            if (account != null && loadedAccountIDs.add(account.getAccountID())) {
                 accountValues.add(account);
+            } else if (account != null) {
+                LOG.warning("Skipping duplicate account ID: " + account.getAccountID());
             }
         }
 
@@ -507,13 +482,6 @@ public final class Accounts {
         return accountValues;
     }
 
-    /// Returns the account list under its compatibility alias.
-    ///
-    /// @return live mutable account list
-    public static ObservableList<Account> getAccountsValue() {
-        return accountValues;
-    }
-
     /// Returns the selected account from the toolkit-neutral state model.
     ///
     /// @return selected account, or `null` when no account is available
@@ -535,24 +503,17 @@ public final class Accounts {
         return selectedAccountValue;
     }
 
-    /// Returns the selected-account property under its compatibility alias.
-    ///
-    /// @return live nullable selected-account property
-    public static ObjectProperty<@Nullable Account> selectedAccountValueProperty() {
-        return selectedAccountValue;
-    }
-
     /// Creates the configured or bundled authlib-injector artifact provider.
     private static AuthlibInjectorArtifactProvider createAuthlibInjectorArtifactProvider() {
-        @Nullable String authlibinjectorLocation = System.getProperty("hmcl.authlibinjector.location");
+        @Nullable String authlibinjectorLocation = System.getProperty("xyml.authlibinjector.location");
         if (authlibinjectorLocation != null) {
             LOG.info("Using specified authlib-injector: " + authlibinjectorLocation);
             return new SimpleAuthlibInjectorArtifactProvider(Paths.get(authlibinjectorLocation));
         }
 
-        @Nullable String authlibInjectorVersion = JarUtils.getAttribute("hmcl.authlib-injector.version", null);
+        @Nullable String authlibInjectorVersion = JarUtils.getAttribute("xyml.authlib-injector.version", null);
         if (authlibInjectorVersion == null)
-            throw new AssertionError("Missing hmcl.authlib-injector.version");
+            throw new AssertionError("Missing xyml.authlib-injector.version");
 
         String authlibInjectorFileName = "authlib-injector-" + authlibInjectorVersion + ".jar";
         @Nullable URL embeddedArtifact = Accounts.class.getResource("/assets/" + authlibInjectorFileName);

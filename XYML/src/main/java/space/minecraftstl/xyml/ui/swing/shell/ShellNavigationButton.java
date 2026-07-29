@@ -59,7 +59,7 @@ final class ShellNavigationButton extends JToggleButton {
         return page;
     }
 
-    /// Creates a theme-aware legacy navigation icon for one destination.
+    /// Creates a theme-aware navigation icon for one destination.
     ///
     /// @param page destination represented by the returned icon
     /// @return configured 20-pixel SVG icon
@@ -80,7 +80,7 @@ final class ShellNavigationButton extends JToggleButton {
         return foreground == null ? fallback : foreground;
     }
 
-    /// Maps one destination to the corresponding bundled legacy Material SVG asset.
+    /// Maps one destination to the corresponding bundled Material SVG asset.
     ///
     /// @param page destination represented by the requested icon
     /// @return classpath-relative SVG resource path

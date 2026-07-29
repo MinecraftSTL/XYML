@@ -53,7 +53,7 @@ import java.util.zip.ZipOutputStream;
 @NotNullByDefault
 public final class ThemePackExporter {
     /// Recommended theme-pack extension.
-    public static final String FILE_EXTENSION = ".hmcl-theme";
+    public static final String FILE_EXTENSION = ".xyml-theme";
 
     /// Root manifest entry name.
     public static final String MANIFEST_ENTRY = LocalThemePackRepository.MANIFEST_ENTRY;

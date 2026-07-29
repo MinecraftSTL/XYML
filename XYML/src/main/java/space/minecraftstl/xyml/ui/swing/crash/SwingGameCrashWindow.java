@@ -79,7 +79,7 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// existing `SwingGameLogWindow`, so this package does not need to own or modify the process-log window.
 @NotNullByDefault
 public final class SwingGameCrashWindow implements AutoCloseable {
-    /// Initial frame size matching the legacy game-crash surface.
+    /// Initial frame size for the game-crash surface.
     private static final Dimension INITIAL_SIZE = new Dimension(800, 480);
 
     /// Minimum size that keeps both diagnostic columns and actions usable.

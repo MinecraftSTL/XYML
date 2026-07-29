@@ -61,7 +61,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public final class LauncherHomeModelTest {
     /// Localized readiness strings used by every focused model test.
     private static final HomeStatusStrings STATUS_STRINGS =
-            new HomeStatusStrings("Ready", "Choose an account", "Choose an instance");
+            new HomeStatusStrings(
+                    "Ready",
+                    "Choose an account",
+                    "Choose an instance",
+                    "Exporting launch script");
 
     /// Missing selections map deterministically, with the account requirement taking precedence.
     @Test
@@ -230,7 +234,8 @@ public final class LauncherHomeModelTest {
                     capturedRequest.set(request);
                     launchCalls.incrementAndGet();
                     return launchService.launch(request);
-                });
+                },
+                HomeLaunchScriptExportCommand.unavailable());
         try {
             model.launch();
             LaunchSession firstSession = model.launchSessionProperty().getValue().orElseThrow();
@@ -287,7 +292,8 @@ public final class LauncherHomeModelTest {
                 () -> { },
                 request -> new ThrowingUnsubscribeLaunchSession(
                         launchService.launch(request),
-                        unsubscribeFailure));
+                        unsubscribeFailure),
+                HomeLaunchScriptExportCommand.unavailable());
         AtomicReference<HomeSnapshot> latestPublished = new AtomicReference<>(model.snapshot());
         Subscription homeSubscription = model.subscribe(
                 change -> latestPublished.set(change.currentValue()));
@@ -331,7 +337,8 @@ public final class LauncherHomeModelTest {
                 () -> { },
                 () -> { },
                 () -> { },
-                launchService::launch);
+                launchService::launch,
+                HomeLaunchScriptExportCommand.unavailable());
         try {
             model.launch();
             LaunchSession session = model.launchSessionProperty().getValue().orElseThrow();
@@ -365,7 +372,8 @@ public final class LauncherHomeModelTest {
                 request -> {
                     launchCalls.incrementAndGet();
                     throw failure;
-                });
+                },
+                HomeLaunchScriptExportCommand.unavailable());
         try {
             assertSame(failure, assertThrows(IllegalStateException.class, model::launch));
             assertAll(
@@ -392,7 +400,8 @@ public final class LauncherHomeModelTest {
                 () -> { },
                 () -> { },
                 () -> { },
-                launchService::launch);
+                launchService::launch,
+                HomeLaunchScriptExportCommand.unavailable());
         AtomicInteger homeDeliveries = new AtomicInteger();
         AtomicReference<@Nullable LaunchSession> observedSession = new AtomicReference<>();
         AtomicInteger reportedFailures = new AtomicInteger();
@@ -447,7 +456,8 @@ public final class LauncherHomeModelTest {
                             ? firstService
                             : secondService;
                     return new EqualLaunchSession(service.launch(request));
-                });
+                },
+                HomeLaunchScriptExportCommand.unavailable());
         List<LaunchSession> observedSessions = new ArrayList<>();
         Subscription subscription = model.launchSessionProperty().subscribe(
                 change -> observedSessions.add(change.currentValue().orElseThrow()));
@@ -550,7 +560,8 @@ public final class LauncherHomeModelTest {
                     request -> {
                         capturedRequest.set(request);
                         return launchService.launch(request);
-                    }));
+                    },
+                    HomeLaunchScriptExportCommand.unavailable()));
             assertTrue(reconciliationRead.await(5, TimeUnit.SECONDS));
             Future<?> publication = publisherExecutor.submit(() -> store.publish(laterSelection));
             assertTrue(laterSelectionStored.await(5, TimeUnit.SECONDS));
@@ -601,7 +612,8 @@ public final class LauncherHomeModelTest {
                 request -> {
                     launches.incrementAndGet();
                     return launchService.launch(request);
-                });
+                },
+                HomeLaunchScriptExportCommand.unavailable());
     }
 
     /// Creates a single-flight launch service whose accepted startup commands remain queued for model tests.

@@ -59,7 +59,7 @@ public class ServerModpackRemoteInstallTask extends Task<Void> {
         dependents.add(builder.buildAsync());
         onDone().register(event -> {
             if (event.isFailed())
-                repository.removeVersionFromDisk(name);
+                repository.removeInstanceFromDisk(name);
         });
 
         ModpackConfiguration<ServerModpackManifest> config;

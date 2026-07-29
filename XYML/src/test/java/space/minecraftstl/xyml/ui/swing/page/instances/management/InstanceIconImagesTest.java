@@ -22,7 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import space.minecraftstl.xyml.setting.VersionIconType;
+import space.minecraftstl.xyml.setting.InstanceIconType;
 
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
@@ -49,10 +49,10 @@ final class InstanceIconImagesTest {
         InstanceIconImages.preloadBuiltIns();
     }
 
-    /// Adapts every legacy bundled choice at the exact 40-pixel overview size.
+    /// Adapts every bundled choice at the exact 40-pixel overview size.
     @Test
     void loadsEveryBundledChoiceAtExactPreviewSize() {
-        for (VersionIconType iconType : InstanceIconChooserDialog.builtInTypes()) {
+        for (InstanceIconType iconType : InstanceIconChooserDialog.builtInTypes()) {
             ImageIcon icon = InstanceIconImages.loadBuiltIn(iconType, 40);
             assertEquals(40, icon.getIconWidth());
             assertEquals(40, icon.getIconHeight());
@@ -74,7 +74,7 @@ final class InstanceIconImagesTest {
         ImageIO.write(source, "PNG", imagePath.toFile());
 
         ImageIcon icon = InstanceIconImages.load(
-                new InstanceIconStore.Snapshot(VersionIconType.FORGE, imagePath),
+                new InstanceIconStore.Snapshot(InstanceIconType.FORGE, imagePath),
                 40);
         BufferedImage rendered = assertInstanceOf(BufferedImage.class, icon.getImage());
         assertEquals(40, rendered.getWidth());
@@ -90,9 +90,9 @@ final class InstanceIconImagesTest {
         Files.writeString(corruptImage, "not an image");
 
         ImageIcon fallback = InstanceIconImages.load(
-                new InstanceIconStore.Snapshot(VersionIconType.FORGE, corruptImage),
+                new InstanceIconStore.Snapshot(InstanceIconType.FORGE, corruptImage),
                 40);
-        ImageIcon expected = InstanceIconImages.loadBuiltIn(VersionIconType.DEFAULT, 40);
+        ImageIcon expected = InstanceIconImages.loadBuiltIn(InstanceIconType.DEFAULT, 40);
         assertSamePixels(expected, fallback);
     }
 

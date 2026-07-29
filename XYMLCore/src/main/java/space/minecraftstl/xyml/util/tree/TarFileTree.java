@@ -37,7 +37,7 @@ public final class TarFileTree extends ArchiveFileTree<TarArchiveReader, TarArch
         String fileName = file.getFileName().toString();
 
         if (fileName.endsWith(".tar.gz") || fileName.endsWith(".tgz")) {
-            Path tempFile = Files.createTempFile("hmcl-", ".tar");
+            Path tempFile = Files.createTempFile("xyml-", ".tar");
             TarArchiveReader tarFile;
             try (GZIPInputStream input = new GZIPInputStream(Files.newInputStream(file));
                  OutputStream output = Files.newOutputStream(tempFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE)

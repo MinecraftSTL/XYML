@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogPanel;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldQuickPlayActions;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -76,7 +77,7 @@ public final class WorldArchiveDownloadPanel extends JPanel implements AutoClose
         heading.add(targetLabel);
         reloadTargetButton.setName("downloadsWorldArchiveReloadTarget");
         reloadTargetButton.setText(i18n("button.refresh"));
-        reloadTargetButton.setToolTipText(i18n("version.switch"));
+        reloadTargetButton.setToolTipText(i18n("instance.switch"));
         reloadTargetButton.addActionListener(event -> reloadTarget());
         heading.add(reloadTargetButton, "h 40!");
         add(heading, "growx");
@@ -147,7 +148,8 @@ public final class WorldArchiveDownloadPanel extends JPanel implements AutoClose
             WorldCatalogPanel createdCatalog = new WorldCatalogPanel(
                     selected.repository(),
                     selected.instanceId(),
-                    Schedulers.io());
+                    Schedulers.io(),
+                    WorldQuickPlayActions.unavailable());
             worldCatalog = createdCatalog;
             content.add(createdCatalog, BorderLayout.CENTER);
             createdCatalog.activate();
@@ -159,7 +161,7 @@ public final class WorldArchiveDownloadPanel extends JPanel implements AutoClose
     /// Shows guidance when the launcher currently has no usable selected instance.
     private void showSelectionRequired() {
         targetLabel.setText("");
-        emptyLabel.setText(i18n("version.switch"));
+        emptyLabel.setText(i18n("instance.switch"));
         content.add(emptyLabel, BorderLayout.CENTER);
     }
 

@@ -27,18 +27,35 @@ import java.util.Objects;
 /// @param displayName primary account text
 /// @param detailText secondary provider and storage text, or an empty string
 /// @param profileId stable game-profile identifier as text
+/// @param avatarSource presentation-safe avatar texture source
 @NotNullByDefault
 public record AccountListItem(
         String accountId,
         String displayName,
         String detailText,
-        String profileId) {
+        String profileId,
+        AccountAvatarSource avatarSource) {
+    /// Creates a row whose avatar uses the UUID-derived launcher-bundled fallback.
+    ///
+    /// @param accountId stable persisted account identifier used by selection commands
+    /// @param displayName primary account text
+    /// @param detailText secondary provider and storage text, or an empty string
+    /// @param profileId stable game-profile identifier as text
+    public AccountListItem(
+            String accountId,
+            String displayName,
+            String detailText,
+            String profileId) {
+        this(accountId, displayName, detailText, profileId, AccountAvatarSource.bundledDefault());
+    }
+
     /// Validates one account row.
     public AccountListItem {
         Objects.requireNonNull(accountId, "accountId");
         Objects.requireNonNull(displayName, "displayName");
         Objects.requireNonNull(detailText, "detailText");
         Objects.requireNonNull(profileId, "profileId");
+        Objects.requireNonNull(avatarSource, "avatarSource");
         if (accountId.isBlank()) {
             throw new IllegalArgumentException("Account id cannot be blank");
         }

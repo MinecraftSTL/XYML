@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
@@ -65,7 +67,7 @@ public final class DefaultDataPackManagementInteractions implements DataPackMana
     @Override
     public @Nullable Path chooseDataPackArchive(Component owner, Path initialDirectory) {
         EdtDispatcher.requireEventDispatchThread();
-        JFileChooser chooser = new JFileChooser(
+        JFileChooser chooser = new EditablePathChooser(
                 Objects.requireNonNull(initialDirectory, "initialDirectory").toFile());
         chooser.setDialogTitle(strings.importDialogTitle());
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);

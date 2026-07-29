@@ -23,12 +23,17 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.setting.BackgroundType;
+import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
+import space.minecraftstl.xyml.theme.BuiltinBackground;
+import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
-import space.minecraftstl.xyml.ui.swing.ThemeMode;
 
 import javax.swing.AbstractButton;
+import javax.swing.JComboBox;
 import javax.swing.JSlider;
+import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -50,13 +55,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public final class AppearanceSettingsPanelTest {
     /// Localized text used by focused panel tests.
     private static final AppearanceSettingsStrings STRINGS = new AppearanceSettingsStrings(
-            "Appearance", "Theme mode", "Theme", "System", "Light", "Dark", "Corner radius", "Animations");
+            "Appearance", "Theme mode", "Theme", "System", "Light", "Dark", "Corner radius", "Animations",
+            AppearanceBackgroundStrings.englishFallback());
 
     /// User controls persist theme, aligned radius, and animation changes through the model.
     @Test
     public void writesUserChangesWithoutInventingRadiusValues() {
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
-                ThemeMode.SYSTEM, 6, true, true));
+                ThemeBrightnessPreference.SYSTEM, 6, true, true));
         AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
 
         onEventDispatchThread(() -> {
@@ -65,10 +71,14 @@ public final class AppearanceSettingsPanelTest {
             findComponent(panel, "appearanceAnimations", AbstractButton.class).doClick();
 
             assertAll(
-                    () -> assertEquals(ThemeMode.DARK, panel.selectedThemeMode()),
+                    () -> assertEquals(
+                            ThemeBrightnessPreference.DARK,
+                            panel.selectedBrightnessPreference()),
                     () -> assertEquals(9, panel.displayedCornerRadius()),
                     () -> assertFalse(panel.areAnimationsEnabled()),
-                    () -> assertEquals(ThemeMode.DARK, model.snapshot().themeMode()),
+                    () -> assertEquals(
+                            ThemeBrightnessPreference.DARK,
+                            model.snapshot().brightnessPreference()),
                     () -> assertEquals(9, model.snapshot().cornerRadius()),
                     () -> assertFalse(model.snapshot().animationsEnabled()));
             panel.close();
@@ -79,7 +89,7 @@ public final class AppearanceSettingsPanelTest {
     @Test
     public void commitsCornerRadiusAfterSliderAdjustmentFinishes() {
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
-                ThemeMode.SYSTEM, 6, true, true));
+                ThemeBrightnessPreference.SYSTEM, 6, true, true));
         AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
 
         onEventDispatchThread(() -> {
@@ -100,7 +110,7 @@ public final class AppearanceSettingsPanelTest {
     @Test
     public void selectsThemeBrightnessInheritance() {
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
-                ThemeMode.SYSTEM, 6, true, true));
+                ThemeBrightnessPreference.SYSTEM, 6, true, true));
         AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
 
         onEventDispatchThread(() -> {
@@ -112,8 +122,7 @@ public final class AppearanceSettingsPanelTest {
                             panel.selectedBrightnessPreference()),
                     () -> assertEquals(
                             ThemeBrightnessPreference.THEME,
-                            model.snapshot().brightnessPreference()),
-                    () -> assertEquals(ThemeMode.SYSTEM, panel.selectedThemeMode()));
+                            model.snapshot().brightnessPreference()));
             panel.close();
         });
     }
@@ -122,9 +131,13 @@ public final class AppearanceSettingsPanelTest {
     @Test
     public void appliesWorkerPublishedSnapshot() throws InterruptedException {
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
-                ThemeMode.LIGHT, 3, true, true));
+                ThemeBrightnessPreference.LIGHT, 3, true, true));
         AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
-        AppearanceSettingsSnapshot replacement = snapshot(ThemeMode.DARK, 15, false, false);
+        AppearanceSettingsSnapshot replacement = snapshot(
+                ThemeBrightnessPreference.DARK,
+                15,
+                false,
+                false);
 
         Thread publisher = new Thread(() -> model.publish(replacement), "appearance-settings-test-publisher");
         publisher.start();
@@ -134,7 +147,9 @@ public final class AppearanceSettingsPanelTest {
         onEventDispatchThread(() -> {
             assertAll(
                     () -> assertEquals(replacement, panel.displayedSnapshot()),
-                    () -> assertEquals(ThemeMode.DARK, panel.selectedThemeMode()),
+                    () -> assertEquals(
+                            ThemeBrightnessPreference.DARK,
+                            panel.selectedBrightnessPreference()),
                     () -> assertEquals(15, panel.displayedCornerRadius()),
                     () -> assertFalse(panel.areAnimationsEnabled()),
                     () -> assertFalse(findComponent(
@@ -143,15 +158,163 @@ public final class AppearanceSettingsPanelTest {
         });
     }
 
+    /// A complete network-background snapshot is reflected exactly without generating persistence echoes.
+    @Test
+    public void reflectsCompleteBackgroundSnapshotAndDependencies() {
+        BackgroundAppearanceSettings background = new BackgroundAppearanceSettings(
+                BackgroundType.NETWORK,
+                BuiltinBackground.WALLPAPER_2016_02_25.id(),
+                "C:/wallpapers",
+                "https://example.invalid/background.png",
+                "#123456",
+                0.72,
+                NetworkBackgroundImageCachePolicy.DISABLED,
+                BackgroundType.PAINT,
+                "#AABBCC",
+                BackgroundLoadPolicy.SHOW_FALLBACK_WHILE_LOADING,
+                true,
+                true,
+                false,
+                false);
+        FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                ThemeBrightnessPreference.SYSTEM,
+                6,
+                true,
+                background,
+                true));
+        AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertEquals(background, panel.displayedBackground()),
+                    () -> assertEquals(
+                            BackgroundType.NETWORK,
+                            findComponent(panel, "appearanceBackgroundType", JComboBox.class).getSelectedItem()),
+                    () -> assertEquals(
+                            background.networkImageUrl(),
+                            findComponent(panel, "appearanceNetworkBackgroundUrl", JTextField.class).getText()),
+                    () -> assertTrue(findComponent(
+                            panel, "appearanceNetworkBackgroundUrl", JTextField.class).isEnabled()),
+                    () -> assertFalse(findComponent(
+                            panel, "appearanceLocalBackgroundPath", JTextField.class).isEnabled()),
+                    () -> assertFalse(findComponent(
+                            panel, "appearanceBackgroundOpacity", JSlider.class).isEnabled()),
+                    () -> assertTrue(findComponent(
+                            panel, "appearanceBackgroundFallbackPaint", JTextField.class).isEnabled()),
+                    () -> assertFalse(findComponent(
+                            panel, "appearanceWindowTransparent", AbstractButton.class).isEnabled()),
+                    () -> assertEquals(0, model.backgroundWriteCount()));
+            panel.close();
+        });
+    }
+
+    /// Direct path input and every background option persist complete replacement objects without losing inactive data.
+    @Test
+    public void commitsCompleteBackgroundControlsAtomically() {
+        BackgroundAppearanceSettings initialBackground = defaultBackground();
+        initialBackground = new BackgroundAppearanceSettings(
+                BackgroundType.BUILTIN,
+                initialBackground.builtinBackgroundId(),
+                initialBackground.customImagePath(),
+                initialBackground.networkImageUrl(),
+                initialBackground.customPaint(),
+                initialBackground.opacity(),
+                initialBackground.networkCachePolicy(),
+                initialBackground.fallbackType(),
+                initialBackground.fallbackPaint(),
+                initialBackground.loadPolicy(),
+                initialBackground.windowTransparent(),
+                true,
+                false,
+                false);
+        FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                ThemeBrightnessPreference.SYSTEM,
+                6,
+                true,
+                initialBackground,
+                true));
+        AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
+
+        onEventDispatchThread(() -> {
+            findComponent(panel, "appearanceBuiltinBackground", JComboBox.class)
+                    .setSelectedItem(BuiltinBackground.WALLPAPER_2015_06_22.id());
+
+            findComponent(panel, "appearanceBackgroundType", JComboBox.class)
+                    .setSelectedItem(BackgroundType.PAINT);
+            JTextField primaryPaint = findComponent(
+                    panel, "appearanceBackgroundPaint", JTextField.class);
+            primaryPaint.setText("#315A77");
+            primaryPaint.postActionEvent();
+
+            findComponent(panel, "appearanceBackgroundType", JComboBox.class)
+                    .setSelectedItem(BackgroundType.CUSTOM);
+            JTextField localPath = findComponent(
+                    panel, "appearanceLocalBackgroundPath", JTextField.class);
+            localPath.setText("D:/Pictures/launcher backgrounds");
+            int writesBeforePathCommit = model.backgroundWriteCount();
+            localPath.postActionEvent();
+            assertEquals(writesBeforePathCommit + 1, model.backgroundWriteCount());
+
+            findComponent(panel, "appearanceBackgroundType", JComboBox.class)
+                    .setSelectedItem(BackgroundType.NETWORK);
+            JTextField networkUrl = findComponent(
+                    panel, "appearanceNetworkBackgroundUrl", JTextField.class);
+            networkUrl.setText("https://cdn.example.invalid/xyml.png");
+            networkUrl.postActionEvent();
+            findComponent(panel, "appearanceNetworkBackgroundCache", JComboBox.class)
+                    .setSelectedItem(NetworkBackgroundImageCachePolicy.DISABLED);
+
+            findComponent(panel, "appearanceBackgroundOpacityOverridden", AbstractButton.class).doClick();
+            findComponent(panel, "appearanceBackgroundOpacity", JSlider.class).setValue(35);
+            findComponent(panel, "appearanceBackgroundFallbackType", JComboBox.class)
+                    .setSelectedItem(BackgroundType.PAINT);
+            JTextField fallbackPaint = findComponent(
+                    panel, "appearanceBackgroundFallbackPaint", JTextField.class);
+            fallbackPaint.setText("rgba(20,40,60,0.8)");
+            fallbackPaint.postActionEvent();
+            findComponent(panel, "appearanceBackgroundLoadPolicy", JComboBox.class)
+                    .setSelectedItem(BackgroundLoadPolicy.SHOW_FALLBACK_WHILE_LOADING);
+            findComponent(panel, "appearanceWindowTransparencyOverridden", AbstractButton.class).doClick();
+            findComponent(panel, "appearanceWindowTransparent", AbstractButton.class).doClick();
+
+            BackgroundAppearanceSettings replacement = model.snapshot().background();
+            assertAll(
+                    () -> assertEquals(BackgroundType.NETWORK, replacement.type()),
+                    () -> assertEquals(
+                            BuiltinBackground.WALLPAPER_2015_06_22.id(),
+                            replacement.builtinBackgroundId()),
+                    () -> assertEquals("D:/Pictures/launcher backgrounds", replacement.customImagePath()),
+                    () -> assertEquals(
+                            "https://cdn.example.invalid/xyml.png",
+                            replacement.networkImageUrl()),
+                    () -> assertEquals("#315A77", replacement.customPaint()),
+                    () -> assertEquals(0.35, replacement.opacity()),
+                    () -> assertEquals(
+                            NetworkBackgroundImageCachePolicy.DISABLED,
+                            replacement.networkCachePolicy()),
+                    () -> assertEquals(BackgroundType.PAINT, replacement.fallbackType()),
+                    () -> assertEquals("rgba(20,40,60,0.8)", replacement.fallbackPaint()),
+                    () -> assertEquals(
+                            BackgroundLoadPolicy.SHOW_FALLBACK_WHILE_LOADING,
+                            replacement.loadPolicy()),
+                    () -> assertTrue(replacement.windowTransparent()),
+                    () -> assertTrue(replacement.sourceOverridden()),
+                    () -> assertTrue(replacement.opacityOverridden()),
+                    () -> assertTrue(replacement.windowTransparencyOverridden()),
+                    () -> assertEquals(replacement, panel.displayedBackground()));
+            panel.close();
+        });
+    }
+
     /// The complete settings surface paints visible structure at a constrained desktop size.
     @Test
     public void paintsNonBlankResponsiveSurface() {
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
-                ThemeMode.SYSTEM, 6, true, true));
+                ThemeBrightnessPreference.SYSTEM, 6, true, true));
         AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
 
         BufferedImage image = onEventDispatchThread(() -> {
-            Dimension size = new Dimension(760, 420);
+            Dimension size = new Dimension(760, 900);
             panel.setSize(size);
             layoutRecursively(panel);
             BufferedImage rendered = new BufferedImage(size.width, size.height, BufferedImage.TYPE_INT_ARGB);
@@ -170,17 +333,63 @@ public final class AppearanceSettingsPanelTest {
 
     /// Creates a snapshot with a test-only radius grid from zero through eighteen in increments of three.
     ///
-    /// @param mode selected theme mode
+    /// @param preference selected brightness preference
     /// @param radius current aligned radius
     /// @param animations whether animations are enabled
     /// @param writable whether controls are writable
     /// @return immutable settings snapshot
     private static AppearanceSettingsSnapshot snapshot(
-            ThemeMode mode,
+            ThemeBrightnessPreference preference,
             int radius,
             boolean animations,
             boolean writable) {
-        return new AppearanceSettingsSnapshot(mode, radius, 0, 18, 3, animations, writable);
+        return snapshot(preference, radius, animations, defaultBackground(), writable);
+    }
+
+    /// Creates a snapshot with an explicit complete background replacement.
+    ///
+    /// @param preference selected brightness preference
+    /// @param radius current aligned radius
+    /// @param animations whether animations are enabled
+    /// @param background complete background settings
+    /// @param writable whether controls are writable
+    /// @return immutable settings snapshot
+    private static AppearanceSettingsSnapshot snapshot(
+            ThemeBrightnessPreference preference,
+            int radius,
+            boolean animations,
+            BackgroundAppearanceSettings background,
+            boolean writable) {
+        return new AppearanceSettingsSnapshot(
+                preference,
+                radius,
+                0,
+                18,
+                3,
+                animations,
+                background,
+                writable);
+    }
+
+    /// Creates explicit test values matching launcher persistence defaults.
+    ///
+    /// @return complete background settings fixture
+    private static BackgroundAppearanceSettings defaultBackground() {
+        return new BackgroundAppearanceSettings(
+                BackgroundType.DEFAULT,
+                BuiltinBackground.FALLBACK.id(),
+                "",
+                "",
+                null,
+                1.0,
+                NetworkBackgroundImageCachePolicy.ENABLED,
+                BackgroundType.BUILTIN,
+                "#FFFFFF",
+                BackgroundLoadPolicy.WAIT_FOR_BACKGROUND,
+                false,
+                false,
+                false,
+                false);
     }
 
     /// Finds a named component with the requested type in a Swing hierarchy.
@@ -283,6 +492,9 @@ public final class AppearanceSettingsPanelTest {
         /// Snapshot transition publisher.
         private final ValueChangeSupport<AppearanceSettingsSnapshot> changes = new ValueChangeSupport<>(this);
 
+        /// Number of complete background replacement calls received from the panel.
+        private int backgroundWrites;
+
         /// Creates a fake model with initial settings.
         ///
         /// @param initialSnapshot initial state
@@ -302,33 +514,19 @@ public final class AppearanceSettingsPanelTest {
             return changes.subscribe(listener);
         }
 
-        /// Replaces the theme mode while preserving all other fields.
-        @Override
-        public void setThemeMode(ThemeMode themeMode) {
-            AppearanceSettingsSnapshot value = snapshot();
-            publish(new AppearanceSettingsSnapshot(
-                    themeMode,
-                    value.cornerRadius(),
-                    value.minimumCornerRadius(),
-                    value.maximumCornerRadius(),
-                    value.cornerRadiusStep(),
-                    value.animationsEnabled(),
-                    value.writable()));
-        }
-
         /// Replaces the four-state preference while preserving all other fields.
         @Override
         public void setThemeBrightnessPreference(ThemeBrightnessPreference preference) {
             AppearanceSettingsSnapshot value = snapshot();
             publish(new AppearanceSettingsSnapshot(
-                    AppearanceSettingsSnapshot.compatibilityMode(preference),
+                    preference,
                     value.cornerRadius(),
                     value.minimumCornerRadius(),
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     value.animationsEnabled(),
-                    value.writable(),
-                    preference));
+                    value.background(),
+                    value.writable()));
         }
 
         /// Replaces the aligned corner radius while preserving all other fields.
@@ -336,12 +534,13 @@ public final class AppearanceSettingsPanelTest {
         public void setCornerRadius(int cornerRadius) {
             AppearanceSettingsSnapshot value = snapshot();
             publish(new AppearanceSettingsSnapshot(
-                    value.themeMode(),
+                    value.brightnessPreference(),
                     cornerRadius,
                     value.minimumCornerRadius(),
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     value.animationsEnabled(),
+                    value.background(),
                     value.writable()));
         }
 
@@ -350,13 +549,39 @@ public final class AppearanceSettingsPanelTest {
         public void setAnimationsEnabled(boolean enabled) {
             AppearanceSettingsSnapshot value = snapshot();
             publish(new AppearanceSettingsSnapshot(
-                    value.themeMode(),
+                    value.brightnessPreference(),
                     value.cornerRadius(),
                     value.minimumCornerRadius(),
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     enabled,
+                    value.background(),
                     value.writable()));
+        }
+
+        /// Replaces the complete background in one published snapshot.
+        ///
+        /// @param background complete replacement background
+        @Override
+        public void setBackgroundAppearance(BackgroundAppearanceSettings background) {
+            AppearanceSettingsSnapshot value = snapshot();
+            backgroundWrites++;
+            publish(new AppearanceSettingsSnapshot(
+                    value.brightnessPreference(),
+                    value.cornerRadius(),
+                    value.minimumCornerRadius(),
+                    value.maximumCornerRadius(),
+                    value.cornerRadiusStep(),
+                    value.animationsEnabled(),
+                    Objects.requireNonNull(background, "background"),
+                    value.writable()));
+        }
+
+        /// Returns the number of complete background writes accepted by this fake.
+        ///
+        /// @return background replacement count
+        private int backgroundWriteCount() {
+            return backgroundWrites;
         }
 
         /// Publishes one replacement snapshot on the calling thread.

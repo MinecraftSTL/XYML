@@ -49,7 +49,7 @@ class SwingCrashReportWindowTest {
         CrashReport report = new CrashReport(Thread.currentThread(), new IllegalStateException("failure"));
 
         assertEquals(
-                i18n("launcher.crash.hmcl_out_dated"),
+                i18n("launcher.crash.xyml_outdated"),
                 SwingCrashReportWindow.headline(report, true));
     }
 
@@ -63,7 +63,7 @@ class SwingCrashReportWindowTest {
                 SwingCrashReportWindow.headline(report, false));
     }
 
-    /// Builds content from an injected native update result without consulting the legacy checker.
+    /// Builds content from an injected native update result without consulting a global checker.
     @Test
     void contentUsesInjectedUpdateAvailability() throws Exception {
         CrashReport report = new CrashReport(Thread.currentThread(), new IllegalStateException("failure"));
@@ -75,6 +75,6 @@ class SwingCrashReportWindowTest {
         JPanel rendered = content.join();
         JTextArea headline = (JTextArea) Objects.requireNonNull(
                 ((BorderLayout) rendered.getLayout()).getLayoutComponent(BorderLayout.NORTH));
-        assertEquals(i18n("launcher.crash.hmcl_out_dated"), headline.getText());
+        assertEquals(i18n("launcher.crash.xyml_outdated"), headline.getText());
     }
 }

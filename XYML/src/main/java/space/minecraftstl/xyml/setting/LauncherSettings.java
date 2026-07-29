@@ -74,7 +74,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     static final String PROPERTY_SELECTED_INSTANCE = "selectedInstance";
 
     /// Default launcher theme used when no stored theme reference is available.
-    public static final ThemeReference DEFAULT_THEME_REFERENCE = new ThemeReference("hmcl.default", null);
+    public static final ThemeReference DEFAULT_THEME_REFERENCE = new ThemeReference("xyml.default", null);
 
     /// Theme appearance override key for theme brightness mode.
     public static final String THEME_APPEARANCE_BRIGHTNESS_MODE = "themeBrightnessMode";
@@ -106,7 +106,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Persisted corner-radius adjustment increment in logical pixels.
     public static final int CORNER_RADIUS_STEP = 1;
 
-    /// Legacy-compatible default derived from the launcher's predominant six-pixel surface radius.
+    /// Default derived from the launcher's predominant six-pixel surface radius.
     public static final int DEFAULT_CORNER_RADIUS = 6;
 
     /// Gson instance used for launcher settings and related toolkit-neutral settings objects.
@@ -304,7 +304,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     /// The configured theme brightness mode identifier.
     @SerializedName("themeBrightnessMode")
-    private final StringProperty themeBrightnessMode = new SimpleStringProperty("auto");
+    private final StringProperty themeBrightnessMode = new SimpleStringProperty("system");
 
     /// Returns the theme brightness mode property.
     public StringProperty themeBrightnessModeProperty() {
@@ -329,7 +329,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         return themeColorType;
     }
 
-    /// The historical color-style identifier retained for configuration compatibility.
+    /// The persisted theme color-style identifier used by the current Swing theme resolver.
     @SerializedName("themeColorStyle")
     private final ObjectProperty<String> themeColorStyle = new RawPreservingObjectProperty<>("fidelity");
 
@@ -506,7 +506,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     // Networks
 
-    /// Whether HMCL automatically selects the number of download threads.
+    /// Whether XYML automatically selects the number of download threads.
     @SerializedName("autoDownloadThreads")
     private final BooleanProperty autoDownloadThreads = new SimpleBooleanProperty(true);
 

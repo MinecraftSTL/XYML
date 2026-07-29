@@ -44,7 +44,7 @@ public final class ThemePackManifestDomainTest {
     public void parsesBundledDefaultThemeAndBrightnessOverride() throws Exception {
         ThemePackManifest manifest;
         try (InputStream input = Objects.requireNonNull(getClass().getResourceAsStream(
-                "/assets/themes/hmcl.default/manifest.json"))) {
+                "/assets/themes/xyml.default/manifest.json"))) {
             manifest = JsonUtils.fromNonNullJsonFully(input, ThemePackManifest.class);
         }
 
@@ -69,7 +69,7 @@ public final class ThemePackManifestDomainTest {
     public void parsesBundledClassicThemePack() throws Exception {
         ThemePackManifest manifest;
         try (InputStream input = Objects.requireNonNull(getClass().getResourceAsStream(
-                "/assets/themes/hmcl.classic/manifest.json"))) {
+                "/assets/themes/xyml.classic/manifest.json"))) {
             manifest = JsonUtils.fromNonNullJsonFully(input, ThemePackManifest.class);
         }
 
@@ -92,7 +92,7 @@ public final class ThemePackManifestDomainTest {
                     .toCompletableFuture()
                     .get(10, TimeUnit.SECONDS);
 
-            assertEquals(List.of("hmcl.default", "hmcl.classic"),
+            assertEquals(List.of("xyml.default", "xyml.classic"),
                     packs.stream().map(pack -> pack.manifest().id()).toList());
             BuiltinThemePack defaultPack = packs.get(0);
             try (InputStream image = defaultPack.asset("assets/background-light.png").openStream()) {
@@ -112,7 +112,7 @@ public final class ThemePackManifestDomainTest {
     public void appliesMatchingOverridesInDeclarationOrder() {
         ThemePackManifest manifest = parse("""
                 {
-                  "$schema": "https://schemas.glavo.site/hmcl/theme-pack/1.0.0",
+                  "$schema": "https://raw.githubusercontent.com/MinecraftSTL/XYML/main/docs/schemas/theme-pack/1.0.0.json",
                   "id": "example.overrides",
                   "version": "1.0",
                   "name": "Overrides",
@@ -155,7 +155,7 @@ public final class ThemePackManifestDomainTest {
     public void preservesHistoricalOptionalRecoveryAndRejectsAmbiguity() {
         ThemePackManifest optionalRecovery = parse("""
                 {
-                  "$schema": "https://schemas.glavo.site/hmcl/theme-pack/1.0.0",
+                  "$schema": "https://raw.githubusercontent.com/MinecraftSTL/XYML/main/docs/schemas/theme-pack/1.0.0.json",
                   "id": "example.optional",
                   "version": "1.0",
                   "name": "Optional",
@@ -174,7 +174,7 @@ public final class ThemePackManifestDomainTest {
 
         assertThrows(RuntimeException.class, () -> parse("""
                 {
-                  "$schema": "https://schemas.glavo.site/hmcl/theme-pack/1.0.0",
+                  "$schema": "https://raw.githubusercontent.com/MinecraftSTL/XYML/main/docs/schemas/theme-pack/1.0.0.json",
                   "id": "example.duplicate",
                   "version": "1.0",
                   "name": "Duplicate",
@@ -191,7 +191,7 @@ public final class ThemePackManifestDomainTest {
     public void roundTripsToolkitNeutralAppearance() {
         ThemePackManifest source = parse("""
                 {
-                  "$schema": "https://schemas.glavo.site/hmcl/theme-pack/1.0.0",
+                  "$schema": "https://raw.githubusercontent.com/MinecraftSTL/XYML/main/docs/schemas/theme-pack/1.0.0.json",
                   "id": "example.roundtrip",
                   "version": "2.0",
                   "name": "Round Trip",

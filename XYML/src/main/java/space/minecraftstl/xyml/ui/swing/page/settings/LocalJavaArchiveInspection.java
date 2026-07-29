@@ -61,22 +61,6 @@ public record LocalJavaArchiveInspection(
         }
     }
 
-    /// Creates inspection data without a verified archive fingerprint for non-installing callers.
-    ///
-    /// Installation rejects instances created through this compatibility constructor.
-    ///
-    /// @param archiveFile normalized absolute path of the inspected archive
-    /// @param suggestedName archive root directory name offered to the user
-    /// @param javaHomeRelativePath slash-separated Java Home path below the archive root
-    /// @param javaInfo Java platform, version, and vendor metadata
-    public LocalJavaArchiveInspection(
-            Path archiveFile,
-            String suggestedName,
-            String javaHomeRelativePath,
-            JavaInfo javaInfo) {
-        this(archiveFile, suggestedName, javaHomeRelativePath, javaInfo, -1L, "");
-    }
-
     /// Returns whether this result carries a complete stable archive fingerprint.
     ///
     /// @return whether byte length and SHA-256 were captured by archive inspection

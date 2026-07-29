@@ -26,13 +26,13 @@ import space.minecraftstl.xyml.game.install.GameInstallService;
 import space.minecraftstl.xyml.game.install.GameInstallSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
-import space.minecraftstl.xyml.ui.swing.ThemeMode;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsStrings;
 import space.minecraftstl.xyml.ui.swing.page.downloads.GameInstallStrings;
@@ -360,7 +360,7 @@ class SwingApplicationCompositionTest {
         CountingCloseable homeStore = new CountingCloseable("home-store", closeOrder);
         CountingCloseable accountStore = new CountingCloseable("accounts-store", closeOrder);
         CountingCloseable appearanceStore = new CountingCloseable("appearance-store", closeOrder);
-        AtomicInteger legacyCloseCount = new AtomicInteger();
+        AtomicInteger stateCloseCount = new AtomicInteger();
         AtomicReference<@Nullable Runnable> homeAddInstanceCommand = new AtomicReference<>();
         AtomicReference<@Nullable Runnable> instancesAddInstanceCommand = new AtomicReference<>();
         List<ShellPageId> navigations = new ArrayList<>();
@@ -391,7 +391,7 @@ class SwingApplicationCompositionTest {
                 homeStore,
                 accountStore,
                 appearanceStore,
-                () -> legacyCloseCount.incrementAndGet(),
+                stateCloseCount::incrementAndGet,
                 navigations::add);
         assertSame(gameVersions, models.gameVersions());
         assertSame(gameInstaller, models.gameInstaller());
@@ -406,7 +406,7 @@ class SwingApplicationCompositionTest {
         models.close();
 
         assertEquals(expectedProductionCloseOrder(), closeOrder);
-        assertEquals(0, legacyCloseCount.get());
+        assertEquals(0, stateCloseCount.get());
         assertEquals(1, homeStore.closeCount());
         assertEquals(1, accountStore.closeCount());
         assertEquals(1, appearanceStore.closeCount());
@@ -431,7 +431,7 @@ class SwingApplicationCompositionTest {
         CountingCloseable homeStore = new CountingCloseable("home-store", closeOrder);
         CountingCloseable accountStore = new CountingCloseable("accounts-store", closeOrder);
         CountingCloseable appearanceStore = new CountingCloseable("appearance-store", closeOrder);
-        AutoCloseable legacyStores = () -> {
+        AutoCloseable stateStores = () -> {
             homeStore.close();
             accountStore.close();
             appearanceStore.close();
@@ -465,7 +465,7 @@ class SwingApplicationCompositionTest {
                         homeStore,
                         accountStore,
                         appearanceStore,
-                        legacyStores,
+                        stateStores,
                         ignoredPage -> {
                         }));
 
@@ -513,7 +513,7 @@ class SwingApplicationCompositionTest {
         CountingCloseable homeStore = new CountingCloseable("home-store", closeOrder);
         CountingCloseable accountStore = new CountingCloseable("accounts-store", closeOrder);
         CountingCloseable appearanceStore = new CountingCloseable("appearance-store", closeOrder);
-        AutoCloseable legacyStores = () -> {
+        AutoCloseable stateStores = () -> {
             homeStore.close();
             accountStore.close();
             appearanceStore.close();
@@ -543,7 +543,7 @@ class SwingApplicationCompositionTest {
                         homeStore,
                         accountStore,
                         appearanceStore,
-                        legacyStores,
+                        stateStores,
                         ignoredPage -> {
                         }));
 
@@ -690,8 +690,8 @@ class SwingApplicationCompositionTest {
                 "XYML test",
                 ShellPagePresentations.englishFallback(),
                 new HomeStrings(
-                        "Home", "Account", "None", "Instance", "None", "Add", "Launch", "Launching", "Back"),
-                new HomeStatusStrings("Ready", "Select account", "Select instance"),
+                        "Home", "Account", "None", "Instance", "None", "Add", "Export", "Launch", "Launching", "Back"),
+                new HomeStatusStrings("Ready", "Select account", "Select instance", "Exporting"),
                 new InstancesStrings("Instances", "Refresh", "Refreshing", "Add", "Manage", "Empty"),
                 new RepositoryInstancesStatusStrings("Loading", "Ready", "Refreshing", "Failed", "Unknown"),
                 new SchematicInstanceManagementStrings(
@@ -789,7 +789,8 @@ class SwingApplicationCompositionTest {
                         "Account error",
                         "Empty"),
                 new AppearanceSettingsStrings(
-                        "Appearance", "Theme", "Follow theme", "System", "Light", "Dark", "Radius", "Animations"),
+                        "Appearance", "Theme", "Follow theme", "System", "Light", "Dark", "Radius", "Animations",
+                        space.minecraftstl.xyml.ui.swing.page.settings.AppearanceBackgroundStrings.englishFallback()),
                 Duration.ZERO,
                 new TaskProgressStrings(
                         "Waiting", "Running", "Completed", "Failed", "Cancelled",
@@ -865,7 +866,7 @@ class SwingApplicationCompositionTest {
     /// @return explicit test theme manager
     private static SwingThemeManager themeManager() {
         return new SwingThemeManager(
-                ThemeMode.SYSTEM,
+                ThemeBrightnessPreference.SYSTEM,
                 new SwingDesignTokens(8),
                 SystemThemeDetector.lightFallback());
     }

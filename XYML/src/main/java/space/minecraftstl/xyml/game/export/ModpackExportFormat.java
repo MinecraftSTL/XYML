@@ -28,7 +28,7 @@ public enum ModpackExportFormat {
     /// Exports a MultiMC-compatible instance ZIP format.
     MULTIMC(".zip"),
 
-    /// Exports the HMCL server-pack ZIP format.
+    /// Exports the XYML server-pack ZIP format.
     SERVER(".zip"),
 
     /// Exports the Modrinth `.mrpack` format without remote-file discovery.

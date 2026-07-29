@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.modpack.multimc;
 
 import kala.compress.archivers.zip.ZipArchiveEntry;
 import kala.compress.archivers.zip.ZipArchiveReader;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.modpack.MismatchedModpackTypeException;
 import space.minecraftstl.xyml.modpack.Modpack;
@@ -41,7 +42,7 @@ public final class MultiMCModpackProvider implements ModpackProvider {
     }
 
     @Override
-    public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String version) {
+    public @Nullable Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
         return null;
     }
 

@@ -45,11 +45,11 @@ import java.util.regex.Pattern;
 ///
 /// Mojang metadata is limited to [Platform#SYSTEM_PLATFORM] because the established Mojang platform mapper uses the
 /// system architecture. Local archives are copied, structurally revalidated, and rewritten into a controlled ZIP
-/// before the legacy installer can observe them. This preserves executable and symbolic-link metadata while removing
+/// before the managed-runtime installer can observe them. This preserves executable and symbolic-link metadata while removing
 /// unchecked archive paths and flattening a macOS `Contents/Home` layout into the repository's Java Home layout.
 @NotNullByDefault
 public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAcquisitionService {
-    /// Exact legacy-compatible character set accepted for launcher-managed runtime names.
+    /// Exact character set accepted for launcher-managed runtime names.
     private static final Pattern INSTALL_NAME_PATTERN = Pattern.compile("[a-zA-Z0-9.\\-_]+");
 
     /// Windows device stems rejected on every platform so managed archives remain portable.
@@ -62,7 +62,7 @@ public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAc
     static final String NORMALIZED_ARCHIVE_ROOT = "java-home";
 
     /// Production bounds chosen well above ordinary JDK distributions while preventing unbounded archive work.
-    private static final ArchiveLimits DEFAULT_ARCHIVE_LIMITS = new ArchiveLimits(
+    static final ArchiveLimits DEFAULT_ARCHIVE_LIMITS = new ArchiveLimits(
             2L * 1024L * 1024L * 1024L,
             200_000,
             1024L * 1024L * 1024L,
@@ -229,7 +229,7 @@ public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAc
 
     /// Creates a production service backed by [JavaManager], [DownloadProviders], and the managed repository.
     public JavaManagerRuntimeAcquisitionService() {
-        this(new ProcessBackend());
+        this(new JavaRuntimeAcquisitionProcessBackend());
     }
 
     /// Creates a service around an injected backend for deterministic tests.
@@ -591,21 +591,4 @@ public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAc
         }
     }
 
-    /// Compatibility entry point preserving the established injected-backend test surface.
-    ///
-    /// The implementation lives in a package-private class so the service remains focused on task orchestration.
-    @NotNullByDefault
-    static final class ProcessBackend extends JavaRuntimeAcquisitionProcessBackend {
-        /// Creates a production backend with the standard archive resource ceilings.
-        ProcessBackend() {
-            super(DEFAULT_ARCHIVE_LIMITS);
-        }
-
-        /// Creates a production-equivalent backend with injectable limits for focused tests.
-        ///
-        /// @param archiveLimits resource ceilings
-        ProcessBackend(ArchiveLimits archiveLimits) {
-            super(archiveLimits);
-        }
-    }
 }

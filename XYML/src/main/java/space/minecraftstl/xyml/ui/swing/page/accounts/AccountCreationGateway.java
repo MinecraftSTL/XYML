@@ -25,7 +25,7 @@ import java.util.function.Consumer;
 
 /// Injectable authentication and persistence boundary for the Swing account workflow.
 ///
-/// Authentication may perform network I/O and is called only on the caller-owned executor. Legacy
+/// Authentication may perform network I/O and is called only on the caller-owned executor. Launcher
 /// implementations must confine observable account-list reads and every storage mutation to their
 /// toolkit dispatcher.
 @NotNullByDefault

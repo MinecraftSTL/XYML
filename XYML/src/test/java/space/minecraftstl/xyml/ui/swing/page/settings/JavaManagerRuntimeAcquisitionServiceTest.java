@@ -76,6 +76,9 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
     /// Canonical deterministic SHA-256 used by fake verified inspections.
     private static final String TEST_SHA256 = "0".repeat(64);
 
+    /// Cancellation callback that permits deterministic archive operations to complete.
+    private static final JavaRuntimeAcquisitionBackend.CancellationCheck NEVER_CANCELLED = () -> { };
+
     /// Per-test directory used for real ZIP inspection and normalization fixtures.
     @TempDir
     private @Nullable Path temporaryDirectory;
@@ -220,11 +223,11 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
                 Platform.SYSTEM_PLATFORM,
                 new LinkSpec("jdk-test/bin/java-link", "../lib/real"),
                 null);
-        JavaManagerRuntimeAcquisitionService.ProcessBackend backend =
-                new JavaManagerRuntimeAcquisitionService.ProcessBackend();
-        LocalJavaArchiveInspection inspection = backend.inspectLocalArchive(archive);
+        JavaRuntimeAcquisitionProcessBackend backend =
+                new JavaRuntimeAcquisitionProcessBackend();
+        LocalJavaArchiveInspection inspection = backend.inspectLocalArchive(archive, NEVER_CANCELLED);
 
-        LocalJavaArchiveInspection prepared = backend.prepareInstallArchive(inspection);
+        LocalJavaArchiveInspection prepared = backend.prepareInstallArchive(inspection, NEVER_CANCELLED);
         try (ArchiveFileTree<?, ?> tree = ArchiveFileTree.open(prepared.archiveFile())) {
             assertAll(
                     () -> assertEquals("jdk-test", inspection.suggestedName()),
@@ -242,11 +245,11 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
     void normalizesMacOsContentsHomeLayoutOnAnyHost() throws Exception {
         Path archive = temporaryDirectory().resolve("mac-java.zip");
         writeMacJavaZip(archive, Platform.MACOS_X86_64);
-        JavaManagerRuntimeAcquisitionService.ProcessBackend backend =
-                new JavaManagerRuntimeAcquisitionService.ProcessBackend();
-        LocalJavaArchiveInspection inspection = backend.inspectLocalArchiveLayout(archive);
+        JavaRuntimeAcquisitionProcessBackend backend =
+                new JavaRuntimeAcquisitionProcessBackend();
+        LocalJavaArchiveInspection inspection = backend.inspectLocalArchiveLayout(archive, NEVER_CANCELLED);
 
-        LocalJavaArchiveInspection prepared = backend.prepareInstallArchive(inspection);
+        LocalJavaArchiveInspection prepared = backend.prepareInstallArchive(inspection, NEVER_CANCELLED);
         try (ArchiveFileTree<?, ?> tree = ArchiveFileTree.open(prepared.archiveFile())) {
             assertAll(
                     () -> assertEquals("jdk-test.jdk", inspection.suggestedName()),
@@ -264,8 +267,8 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
     /// Rejects raw entry traversal, alternate separators, empty segments, drive forms, and absolute paths.
     @Test
     void rejectsUnsafeArchiveEntryPaths() throws IOException {
-        JavaManagerRuntimeAcquisitionService.ProcessBackend backend =
-                new JavaManagerRuntimeAcquisitionService.ProcessBackend();
+        JavaRuntimeAcquisitionProcessBackend backend =
+                new JavaRuntimeAcquisitionProcessBackend();
         List<String> unsafeEntries = List.of(
                 "jdk-test/bin/..\\..\\evil",
                 "jdk-test/bin//evil",
@@ -280,7 +283,7 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
                     Platform.SYSTEM_PLATFORM,
                     null,
                     unsafeEntries.get(index));
-            assertThrows(IOException.class, () -> backend.inspectLocalArchiveLayout(archive));
+            assertThrows(IOException.class, () -> backend.inspectLocalArchiveLayout(archive, NEVER_CANCELLED));
         }
     }
 
@@ -293,25 +296,25 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
                 Platform.SYSTEM_PLATFORM,
                 new LinkSpec("jdk-test/lib/escape", "../../outside"),
                 null);
-        JavaManagerRuntimeAcquisitionService.ProcessBackend backend =
-                new JavaManagerRuntimeAcquisitionService.ProcessBackend();
+        JavaRuntimeAcquisitionProcessBackend backend =
+                new JavaRuntimeAcquisitionProcessBackend();
 
-        assertThrows(IOException.class, () -> backend.inspectLocalArchiveLayout(archive));
+        assertThrows(IOException.class, () -> backend.inspectLocalArchiveLayout(archive, NEVER_CANCELLED));
     }
 
     /// Rejects chained symbolic links whose lexical targets look contained but resolve outside Java Home, and cycles.
     @Test
     void rejectsEscapingAndCyclicJavaHomeSymlinkGraphs() throws IOException {
-        JavaManagerRuntimeAcquisitionService.ProcessBackend backend =
-                new JavaManagerRuntimeAcquisitionService.ProcessBackend();
+        JavaRuntimeAcquisitionProcessBackend backend =
+                new JavaRuntimeAcquisitionProcessBackend();
         Path chainedArchive = temporaryDirectory().resolve("chained-link.zip");
         Path cyclicArchive = temporaryDirectory().resolve("cyclic-link.zip");
         writeChainedSymlinkJavaZip(chainedArchive, false);
         writeChainedSymlinkJavaZip(cyclicArchive, true);
 
         assertAll(
-                () -> assertThrows(IOException.class, () -> backend.inspectLocalArchiveLayout(chainedArchive)),
-                () -> assertThrows(IOException.class, () -> backend.inspectLocalArchiveLayout(cyclicArchive)));
+                () -> assertThrows(IOException.class, () -> backend.inspectLocalArchiveLayout(chainedArchive, NEVER_CANCELLED)),
+                () -> assertThrows(IOException.class, () -> backend.inspectLocalArchiveLayout(cyclicArchive, NEVER_CANCELLED)));
     }
 
     /// Enforces entry-count, compression-ratio, and bounded gzip-expanded TAR limits before in-memory tree creation.
@@ -319,8 +322,8 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
     void rejectsZipAndTarResourceBombsWithInjectableLimits() throws IOException {
         Path ordinaryZip = temporaryDirectory().resolve("entry-limit.zip");
         writeDirectJavaZip(ordinaryZip, Platform.SYSTEM_PLATFORM, null, null);
-        JavaManagerRuntimeAcquisitionService.ProcessBackend entryLimitedBackend =
-                new JavaManagerRuntimeAcquisitionService.ProcessBackend(
+        JavaRuntimeAcquisitionProcessBackend entryLimitedBackend =
+                new JavaRuntimeAcquisitionProcessBackend(
                         new JavaManagerRuntimeAcquisitionService.ArchiveLimits(
                                 1024L * 1024L,
                                 2,
@@ -336,8 +339,8 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
                 null,
                 null,
                 new byte[8192]);
-        JavaManagerRuntimeAcquisitionService.ProcessBackend ratioLimitedBackend =
-                new JavaManagerRuntimeAcquisitionService.ProcessBackend(
+        JavaRuntimeAcquisitionProcessBackend ratioLimitedBackend =
+                new JavaRuntimeAcquisitionProcessBackend(
                         new JavaManagerRuntimeAcquisitionService.ArchiveLimits(
                                 1024L * 1024L,
                                 16,
@@ -348,8 +351,8 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
 
         Path compressedTar = temporaryDirectory().resolve("expanded-limit.tar.gz");
         writeGzipTarPayload(compressedTar, new byte[8192]);
-        JavaManagerRuntimeAcquisitionService.ProcessBackend tarLimitedBackend =
-                new JavaManagerRuntimeAcquisitionService.ProcessBackend(
+        JavaRuntimeAcquisitionProcessBackend tarLimitedBackend =
+                new JavaRuntimeAcquisitionProcessBackend(
                         new JavaManagerRuntimeAcquisitionService.ArchiveLimits(
                                 1024L * 1024L,
                                 16,
@@ -361,13 +364,13 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
         assertAll(
                 () -> assertThrows(
                         IOException.class,
-                        () -> entryLimitedBackend.inspectLocalArchiveLayout(ordinaryZip)),
+                        () -> entryLimitedBackend.inspectLocalArchiveLayout(ordinaryZip, NEVER_CANCELLED)),
                 () -> assertThrows(
                         IOException.class,
-                        () -> ratioLimitedBackend.inspectLocalArchiveLayout(compressedZip)),
+                        () -> ratioLimitedBackend.inspectLocalArchiveLayout(compressedZip, NEVER_CANCELLED)),
                 () -> assertThrows(
                         IOException.class,
-                () -> tarLimitedBackend.inspectLocalArchiveLayout(compressedTar)));
+                () -> tarLimitedBackend.inspectLocalArchiveLayout(compressedTar, NEVER_CANCELLED)));
     }
 
     /// Rejects an expanded TAR entry bomb through streaming preflight before Kala receives the temporary TAR.
@@ -376,8 +379,8 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
         Path compressedTar = temporaryDirectory().resolve("entry-bomb.tar.gz");
         int expandedBytes = writeGzipTarEntries(compressedTar, 4);
         long temporaryByteLimit = expandedBytes + 1024L;
-        JavaManagerRuntimeAcquisitionService.ProcessBackend backend =
-                new JavaManagerRuntimeAcquisitionService.ProcessBackend(
+        JavaRuntimeAcquisitionProcessBackend backend =
+                new JavaRuntimeAcquisitionProcessBackend(
                         new JavaManagerRuntimeAcquisitionService.ArchiveLimits(
                                 1024L * 1024L,
                                 3,
@@ -388,7 +391,7 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
 
         IOException failure = assertThrows(
                 IOException.class,
-                () -> backend.inspectLocalArchiveLayout(compressedTar));
+                () -> backend.inspectLocalArchiveLayout(compressedTar, NEVER_CANCELLED));
 
         assertAll(
                 () -> assertTrue(expandedBytes < temporaryByteLimit),
@@ -400,10 +403,10 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
     void inspectsUppercaseZipSuffixThroughControlledNormalization() throws Exception {
         Path archive = temporaryDirectory().resolve("runtime.ZIP");
         writeDirectJavaZip(archive, Platform.SYSTEM_PLATFORM, null, null);
-        JavaManagerRuntimeAcquisitionService.ProcessBackend backend =
-                new JavaManagerRuntimeAcquisitionService.ProcessBackend();
+        JavaRuntimeAcquisitionProcessBackend backend =
+                new JavaRuntimeAcquisitionProcessBackend();
 
-        LocalJavaArchiveInspection inspection = backend.inspectLocalArchive(archive);
+        LocalJavaArchiveInspection inspection = backend.inspectLocalArchive(archive, NEVER_CANCELLED);
 
         assertEquals("jdk-test", inspection.suggestedName());
     }
@@ -806,15 +809,15 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
     @Test
     void rejectsSameMetadataContentReplacementAndCleansControlledCopy() throws Exception {
         Path archive = temporaryDirectory().resolve("same-metadata.zip");
-        JavaManagerRuntimeAcquisitionService.ProcessBackend processBackend =
-                new JavaManagerRuntimeAcquisitionService.ProcessBackend();
+        JavaRuntimeAcquisitionProcessBackend processBackend =
+                new JavaRuntimeAcquisitionProcessBackend();
         writeDirectJavaZip(
                 archive,
                 Platform.SYSTEM_PLATFORM,
                 null,
                 null,
                 new byte[]{1});
-        LocalJavaArchiveInspection original = processBackend.inspectLocalArchive(archive);
+        LocalJavaArchiveInspection original = processBackend.inspectLocalArchive(archive, NEVER_CANCELLED);
 
         writeDirectJavaZip(
                 archive,
@@ -822,7 +825,7 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
                 null,
                 null,
                 new byte[]{9});
-        LocalJavaArchiveInspection replacement = processBackend.inspectLocalArchive(archive);
+        LocalJavaArchiveInspection replacement = processBackend.inspectLocalArchive(archive, NEVER_CANCELLED);
 
         FakeBackend backend = new FakeBackend();
         backend.copiedInspection = new LocalJavaArchiveInspection(
@@ -1312,10 +1315,14 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
         /// Records archive access and returns the configured direct or controlled-copy inspection.
         ///
         /// @param archiveFile requested archive path
+        /// @param cancellationCheck cooperative cancellation callback
         /// @return configured inspection
         /// @throws IOException when no direct inspection was configured
         @Override
-        public LocalJavaArchiveInspection inspectLocalArchive(Path archiveFile) throws IOException {
+        public LocalJavaArchiveInspection inspectLocalArchive(
+                Path archiveFile,
+                CancellationCheck cancellationCheck) throws IOException {
+            cancellationCheck.checkCancelled();
             archiveInspectionRequests.incrementAndGet();
             if (archiveFile.toAbsolutePath().normalize().equals(controlledCopy)) {
                 return copiedInspection;
@@ -1330,9 +1337,13 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
         /// Records source copying and returns the system-controlled fake path.
         ///
         /// @param ignoredArchive ignored user source
+        /// @param cancellationCheck cooperative cancellation callback
         /// @return controlled fake source path
         @Override
-        public Path copyToManagedTemporaryArchive(Path ignoredArchive) {
+        public Path copyToManagedTemporaryArchive(
+                Path ignoredArchive,
+                CancellationCheck cancellationCheck) {
+            cancellationCheck.checkCancelled();
             copyRequests.incrementAndGet();
             return controlledCopy;
         }
@@ -1340,10 +1351,13 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
         /// Records normalized archive preparation and returns the configured prepared inspection.
         ///
         /// @param ignoredInspection ignored controlled-source inspection
+        /// @param cancellationCheck cooperative cancellation callback
         /// @return prepared fake inspection
         @Override
         public LocalJavaArchiveInspection prepareInstallArchive(
-                LocalJavaArchiveInspection ignoredInspection) {
+                LocalJavaArchiveInspection ignoredInspection,
+                CancellationCheck cancellationCheck) {
+            cancellationCheck.checkCancelled();
             prepareRequests.incrementAndGet();
             return preparedInspection;
         }

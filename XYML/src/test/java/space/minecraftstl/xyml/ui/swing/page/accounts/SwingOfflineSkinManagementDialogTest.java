@@ -185,7 +185,8 @@ public final class SwingOfflineSkinManagementDialogTest {
                     Objects.requireNonNull(accountId, "accountId"),
                     "Player",
                     persisted.get(),
-                    writable));
+                    writable,
+                    null));
         }
 
         /// Stores the selected skin when this fake account is writable.

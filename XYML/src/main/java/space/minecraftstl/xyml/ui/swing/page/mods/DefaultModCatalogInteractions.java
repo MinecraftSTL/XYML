@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.mods;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -68,7 +70,7 @@ public final class DefaultModCatalogInteractions implements ModCatalogInteractio
             Component owner,
             Path currentDirectory) {
         EdtDispatcher.requireEventDispatchThread();
-        JFileChooser chooser = new JFileChooser(
+        JFileChooser chooser = new EditablePathChooser(
                 Objects.requireNonNull(currentDirectory, "currentDirectory").toFile());
         chooser.setDialogTitle(strings.importDialogTitle());
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);

@@ -21,7 +21,6 @@ import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
-import space.minecraftstl.xyml.ui.swing.ThemeMode;
 
 /// Supplies and persists appearance settings without exposing JavaFX or Swing component state.
 @NotNullByDefault
@@ -37,27 +36,10 @@ public interface AppearanceSettingsModel {
     /// @return the independently cancellable registration
     Subscription subscribe(ValueChangeListener<AppearanceSettingsSnapshot> listener);
 
-    /// Persists a new light, dark, or system theme preference.
-    ///
-    /// @param themeMode the requested theme mode
-    void setThemeMode(ThemeMode themeMode);
-
     /// Persists a four-state brightness preference.
     ///
-    /// Compatibility implementations support the three explicit historical modes. Implementations backed by
-    /// appearance override membership should override this method to support theme inheritance.
-    ///
     /// @param preference requested theme, system, light, or dark preference
-    default void setThemeBrightnessPreference(ThemeBrightnessPreference preference) {
-        ThemeMode mode = switch (java.util.Objects.requireNonNull(preference, "preference")) {
-            case THEME -> throw new UnsupportedOperationException(
-                    "This appearance model cannot inherit selected-theme brightness");
-            case SYSTEM -> ThemeMode.SYSTEM;
-            case LIGHT -> ThemeMode.LIGHT;
-            case DARK -> ThemeMode.DARK;
-        };
-        setThemeMode(mode);
-    }
+    void setThemeBrightnessPreference(ThemeBrightnessPreference preference);
 
     /// Persists a supported component corner radius.
     ///
@@ -68,4 +50,9 @@ public interface AppearanceSettingsModel {
     ///
     /// @param enabled whether animation should remain enabled
     void setAnimationsEnabled(boolean enabled);
+
+    /// Persists a complete background configuration in one model transition.
+    ///
+    /// @param background complete replacement background settings
+    void setBackgroundAppearance(BackgroundAppearanceSettings background);
 }

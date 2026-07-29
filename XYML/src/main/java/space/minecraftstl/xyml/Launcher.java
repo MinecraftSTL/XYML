@@ -30,9 +30,9 @@ import space.minecraftstl.xyml.ui.swing.NativeSystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentation;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentationFactory;
-import space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher;
-import space.minecraftstl.xyml.ui.swing.legacy.LegacySwingApplicationRuntime;
-import space.minecraftstl.xyml.ui.swing.legacy.LegacySwingStartupPrompts;
+import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.SwingApplicationRuntime;
+import space.minecraftstl.xyml.ui.swing.runtime.SwingStartupPrompts;
 import space.minecraftstl.xyml.ui.swing.launch.SwingLaunchInteraction;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountReauthentication;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountCreationWorkflowHandle;
@@ -99,11 +99,11 @@ public final class Launcher {
             1,
             Integer.getInteger("xyml.swing.animationFrameDelayMillis", 16));
 
-    /// Process-wide active Swing runtime used by legacy static shutdown entry points.
-    private static final AtomicReference<@Nullable LegacySwingApplicationRuntime> ACTIVE_SWING_RUNTIME =
+    /// Process-wide active Swing runtime used to enforce a single native application owner.
+    private static final AtomicReference<@Nullable SwingApplicationRuntime> ACTIVE_SWING_RUNTIME =
             new AtomicReference<>();
 
-    /// Process-wide launcher owner used by close requests received before runtime publication.
+    /// Process-wide launcher owner used to enforce a single launcher lifecycle.
     private static final AtomicReference<@Nullable Launcher> ACTIVE_LAUNCHER = new AtomicReference<>();
 
     /// Latest successful native update-check result used when selecting the launcher crash headline.
@@ -113,7 +113,7 @@ public final class Launcher {
     private final AtomicBoolean stopped = new AtomicBoolean();
 
     /// Runtime owned by this launcher instance, or null before successful creation.
-    private @Nullable LegacySwingApplicationRuntime swingRuntime;
+    private @Nullable SwingApplicationRuntime swingRuntime;
 
     /// Swing startup prompt sequence, or null before the production window opens.
     private @Nullable StartupPromptCoordinator startupPromptCoordinator;
@@ -200,7 +200,7 @@ public final class Launcher {
                         i18n("fatal.config_unsupported_version"));
             }
 
-            if (Metadata.HMCL_LOCAL_HOME.toString().indexOf('=') >= 0) {
+            if (Metadata.XYML_LOCAL_HOME.toString().indexOf('=') >= 0) {
                 SwingStartupSafetyDialogs.showMessage(WARNING, i18n("fatal.illegal_char"));
             }
 
@@ -229,9 +229,9 @@ public final class Launcher {
             SwingApplicationPresentation presentation = SwingApplicationPresentationFactory.create(
                     SWING_PAGE_TRANSITION_DURATION,
                     SWING_TASK_TRANSITION_DURATION);
-            AtomicReference<@Nullable LegacySwingApplicationRuntime> dialogRuntime = new AtomicReference<>();
+            AtomicReference<@Nullable SwingApplicationRuntime> dialogRuntime = new AtomicReference<>();
             Supplier<@Nullable Component> dialogOwner = () -> {
-                @Nullable LegacySwingApplicationRuntime currentRuntime = dialogRuntime.get();
+                @Nullable SwingApplicationRuntime currentRuntime = dialogRuntime.get();
                 return currentRuntime == null || currentRuntime.isClosed()
                         ? null
                         : currentRuntime.dialogOwner();
@@ -240,9 +240,9 @@ public final class Launcher {
             AccountReauthentication accountReauthentication = SwingAccountReauthentication.create(
                     dialogOwner,
                     Schedulers.io());
-            LegacySwingApplicationRuntime runtime;
+            SwingApplicationRuntime runtime;
             try {
-                runtime = LegacySwingApplicationRuntime.create(
+                runtime = SwingApplicationRuntime.create(
                         presentation,
                         this::openSwingAccountDialog,
                         launchInteraction,
@@ -264,7 +264,7 @@ public final class Launcher {
             try {
                 runtime.setInteractionEnabled(false);
                 runtime.open();
-                StartupPromptCoordinator prompts = LegacySwingStartupPrompts.create(
+                StartupPromptCoordinator prompts = SwingStartupPrompts.create(
                         new SwingStartupPromptPresenter(runtime::dialogOwner),
                         Schedulers.io(),
                         runtime::close);
@@ -331,7 +331,7 @@ public final class Launcher {
     /// Opens at most one native account-creation workflow owned by the active Swing window.
     private void openSwingAccountDialog() {
         synchronized (accountCreationLifecycleLock) {
-            @Nullable LegacySwingApplicationRuntime runtime = swingRuntime;
+            @Nullable SwingApplicationRuntime runtime = swingRuntime;
             if (stopped.get() || runtime == null || runtime.isClosed()) {
                 return;
             }
@@ -356,7 +356,7 @@ public final class Launcher {
     /// @param acceptPreviewUpdate whether preview releases are eligible
     /// @param disableAutomaticPrompt whether successful checks must remain silent
     private void startSwingUpdateCheck(
-            LegacySwingApplicationRuntime runtime,
+            SwingApplicationRuntime runtime,
             boolean acceptPreviewUpdate,
             boolean disableAutomaticPrompt) {
         SwingUpdateCheckService service;
@@ -413,7 +413,6 @@ public final class Launcher {
         ProxyManager.init();
         Accounts.init();
         GameDirectoryManager.init();
-        AuthlibInjectorServers.init();
 
         CacheRepository.setInstance(XYMLCacheRepository.REPOSITORY);
         Runnable refreshCacheDirectory = () -> {
@@ -504,8 +503,8 @@ public final class Launcher {
 
         ArrayList<String> files = new ArrayList<>();
         files.add(configDirectory.toString());
-        if (Files.exists(Metadata.HMCL_USER_HOME))
-            files.add(Metadata.HMCL_USER_HOME.toString());
+        if (Files.exists(Metadata.XYML_USER_HOME))
+            files.add(Metadata.XYML_USER_HOME.toString());
 
         Path mcDir = Paths.get(".minecraft").toAbsolutePath().normalize();
         if (Files.exists(mcDir))
@@ -552,7 +551,7 @@ public final class Launcher {
         if (prompts != null) {
             failure = closeCollecting(prompts, failure);
         }
-        @Nullable LegacySwingApplicationRuntime runtime = swingRuntime;
+        @Nullable SwingApplicationRuntime runtime = swingRuntime;
         swingRuntime = null;
         if (runtime != null) {
             ACTIVE_SWING_RUNTIME.compareAndSet(runtime, null);
@@ -595,10 +594,10 @@ public final class Launcher {
             LOG.info("Java VM Version: " + System.getProperty("java.vm.name") + " (" + System.getProperty("java.vm.info") + "), " + System.getProperty("java.vm.vendor"));
             LOG.info("Java Home: " + System.getProperty("java.home"));
             LOG.info("Current Directory: " + Metadata.CURRENT_DIRECTORY);
-            LOG.info("HMCL User Home: " + Metadata.HMCL_USER_HOME);
-            LOG.info("HMCL Local Home: " + Metadata.HMCL_LOCAL_HOME);
-            LOG.info("HMCL Jar Path: " + Lang.requireNonNullElse(JarUtils.thisJarPath(), "Not Found"));
-            LOG.info("HMCL Log File: " + Lang.requireNonNullElse(LOG.getLogFile(), "In Memory"));
+            LOG.info("XYML User Home: " + Metadata.XYML_USER_HOME);
+            LOG.info("XYML Local Home: " + Metadata.XYML_LOCAL_HOME);
+            LOG.info("XYML Jar Path: " + Lang.requireNonNullElse(JarUtils.thisJarPath(), "Not Found"));
+            LOG.info("XYML Log File: " + Lang.requireNonNullElse(LOG.getLogFile(), "In Memory"));
             LOG.info("JVM Max Memory: " + MEGABYTES.formatBytes(Runtime.getRuntime().maxMemory()));
             try {
                 for (MemoryPoolMXBean bean : ManagementFactory.getMemoryPoolMXBeans()) {
@@ -625,7 +624,7 @@ public final class Launcher {
                 throw new IllegalStateException("Another launcher instance is already active");
             }
             try {
-                LegacyStateDispatcher.execute(launcher::start);
+                LauncherStateDispatcher.execute(launcher::start);
             } catch (RuntimeException | Error dispatchFailure) {
                 launcher.stop();
                 throw dispatchFailure;
@@ -666,29 +665,6 @@ public final class Launcher {
                     i18n("fatal.migration_requires_manual_reboot"));
         }
         return true;
-    }
-
-    /// Requests complete application shutdown from either the Swing or legacy window path.
-    public static void stopApplication() {
-        LOG.info("Stopping application.\n" + StringUtils.getStackTrace(Thread.currentThread().getStackTrace()));
-
-        @Nullable LegacySwingApplicationRuntime runtime = ACTIVE_SWING_RUNTIME.get();
-        if (runtime != null) {
-            runtime.close();
-            return;
-        }
-        @Nullable Launcher launcher = ACTIVE_LAUNCHER.get();
-        if (launcher != null) {
-            launcher.stop();
-            return;
-        }
-        Schedulers.shutdown();
-    }
-
-    /// Closes the active native application runtime without assuming any UI toolkit host.
-    public static void stopWithoutPlatform() {
-        LOG.info("Stopping application runtime.\n" + StringUtils.getStackTrace(Thread.currentThread().getStackTrace()));
-        stopApplication();
     }
 
     /// Adds a cleanup failure to an existing startup or cleanup failure without replacing its identity.

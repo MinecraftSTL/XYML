@@ -123,7 +123,7 @@ public record ThemeAppearance(
                 color != null ? color.resolveFallback() : ResolvedTheme.DEFAULT.primaryColorSeed(),
                 brightness != null ? brightness : context.brightness(),
                 colorStyle != null ? colorStyle : ResolvedTheme.DEFAULT.colorStyle(),
-                contrast != null ? contrast : ThemeContrast.DEFAULT);
+                contrast != null ? contrast : ThemeContrast.STANDARD);
     }
 
     /// Converts this patch to JSON.
@@ -160,7 +160,7 @@ public record ThemeAppearance(
         }
         if (contrast.equals(ThemeContrast.LOW)) {
             object.addProperty(FIELD_CONTRAST, "low");
-        } else if (contrast.equals(ThemeContrast.DEFAULT)) {
+        } else if (contrast.equals(ThemeContrast.STANDARD)) {
             object.addProperty(FIELD_CONTRAST, "standard");
         } else if (contrast.equals(ThemeContrast.MEDIUM)) {
             object.addProperty(FIELD_CONTRAST, "medium");
@@ -226,7 +226,7 @@ public record ThemeAppearance(
             String value = primitive.getAsString().trim().toLowerCase(Locale.ROOT);
             return switch (value) {
                 case "low" -> ThemeContrast.LOW;
-                case "standard" -> ThemeContrast.DEFAULT;
+                case "standard" -> ThemeContrast.STANDARD;
                 case "medium" -> ThemeContrast.MEDIUM;
                 case "high" -> ThemeContrast.HIGH;
                 default -> new ThemeContrast(Double.parseDouble(value));

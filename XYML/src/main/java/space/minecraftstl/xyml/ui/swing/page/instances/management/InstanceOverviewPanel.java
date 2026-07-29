@@ -23,7 +23,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
-import space.minecraftstl.xyml.setting.VersionIconType;
+import space.minecraftstl.xyml.setting.InstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.ImageIcon;
@@ -373,7 +373,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         try {
             requireBackgroundThread();
             if (refreshRepository) {
-                repository.refreshVersions();
+                repository.refreshInstances();
                 @Nullable XYMLGameRepository localXymlRepository = xymlRepository;
                 if (localXymlRepository != null) {
                     localXymlRepository.refreshSelectedInstance();
@@ -399,7 +399,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         @Nullable InstanceIconStore localIconStore = iconStore;
         InstanceIconStore.Snapshot iconState = localIconStore != null
                 ? localIconStore.load()
-                : new InstanceIconStore.Snapshot(VersionIconType.DEFAULT, null);
+                : new InstanceIconStore.Snapshot(InstanceIconType.DEFAULT, null);
         if (localIconStore != null) {
             InstanceIconImages.preloadBuiltIns();
         }

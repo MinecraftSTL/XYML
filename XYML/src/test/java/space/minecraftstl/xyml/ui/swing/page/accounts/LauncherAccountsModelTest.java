@@ -134,6 +134,46 @@ public final class LauncherAccountsModelTest {
         model.close();
     }
 
+    /// Avatar-source transitions propagate to viewport rows and advance the content revision.
+    @Test
+    public void propagatesAvatarSourceUpdates() {
+        AccountAvatarSource firstSource = AccountAvatarSource.remoteOrDefault(
+                "https://textures.example.invalid/first.png");
+        AccountAvatarSource replacementSource = AccountAvatarSource.remoteOrDefault(
+                "https://textures.example.invalid/replacement.png");
+        AccountDescriptor first = new AccountDescriptor(
+                "alpha",
+                "Alex",
+                "Microsoft",
+                "profile-alpha",
+                firstSource);
+        FakeAccountStore store = new FakeAccountStore(state(List.of(first), "alpha"));
+        LauncherAccountsModel model = new LauncherAccountsModel(store, () -> { });
+
+        AccountListItem initial = model.load(new IndexRange(0, 1), new LoadCancellation())
+                .toCompletableFuture()
+                .join()
+                .items()
+                .get(0);
+        store.publish(state(List.of(new AccountDescriptor(
+                first.id(),
+                first.title(),
+                first.detail(),
+                first.profileId(),
+                replacementSource)), "alpha"));
+        AccountListItem replacement = model.load(new IndexRange(0, 1), new LoadCancellation())
+                .toCompletableFuture()
+                .join()
+                .items()
+                .get(0);
+
+        assertAll(
+                () -> assertSame(firstSource, initial.avatarSource()),
+                () -> assertSame(replacementSource, replacement.avatarSource()),
+                () -> assertEquals(1L, model.snapshot().contentRevision()));
+        model.close();
+    }
+
     /// Known IDs delegate and update through the store, while an ID removed by a newer revision is rejected.
     @Test
     public void delegatesKnownSelectionAndRejectsStaleIdentifier() {

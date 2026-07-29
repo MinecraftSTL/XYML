@@ -39,6 +39,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /// Verifies bounded physical metadata checks run before TAR and ZIP object-model construction.
 @NotNullByDefault
 final class JavaRuntimeContainerPreflightTest {
+    /// Cancellation callback that permits deterministic preflight operations to complete.
+    private static final JavaRuntimeAcquisitionBackend.CancellationCheck NEVER_CANCELLED = () -> { };
+
     /// Per-test directory used for hostile physical archive fixtures.
     @TempDir
     private @Nullable Path temporaryDirectory;
@@ -48,11 +51,11 @@ final class JavaRuntimeContainerPreflightTest {
     void rejectsOversizedGnuLongNameBeforeTarParser() throws IOException {
         Path archive = temporaryDirectory().resolve("long-name.tar.gz");
         writeSingleMetadataTar(archive, 'L', new byte[2_048]);
-        JavaManagerRuntimeAcquisitionService.ProcessBackend backend = backendWithMetadataLimits(1_024L);
+        JavaRuntimeAcquisitionProcessBackend backend = backendWithMetadataLimits(1_024L);
 
         IOException failure = assertThrows(
                 IOException.class,
-                () -> backend.inspectLocalArchiveLayout(archive));
+                () -> backend.inspectLocalArchiveLayout(archive, NEVER_CANCELLED));
 
         assertEquals("Java TAR metadata exceeds its byte limit", failure.getMessage());
     }
@@ -64,11 +67,11 @@ final class JavaRuntimeContainerPreflightTest {
         byte @Unmodifiable [] payload =
                 "24 GNU.sparse.map=0,1\n".getBytes(StandardCharsets.US_ASCII);
         writeSingleMetadataTar(archive, 'x', payload);
-        JavaManagerRuntimeAcquisitionService.ProcessBackend backend = backendWithMetadataLimits(4_096L);
+        JavaRuntimeAcquisitionProcessBackend backend = backendWithMetadataLimits(4_096L);
 
         IOException failure = assertThrows(
                 IOException.class,
-                () -> backend.inspectLocalArchiveLayout(archive));
+                () -> backend.inspectLocalArchiveLayout(archive, NEVER_CANCELLED));
 
         assertEquals("GNU sparse Java TAR metadata is unsupported", failure.getMessage());
     }
@@ -78,7 +81,7 @@ final class JavaRuntimeContainerPreflightTest {
     void rejectsOversizedCentralDirectoryBeforeZipFileConstruction() throws IOException {
         Path archive = temporaryDirectory().resolve("central-directory.zip");
         writeZipWithLongCentralMetadata(archive);
-        JavaManagerRuntimeAcquisitionService.ProcessBackend backend = new JavaManagerRuntimeAcquisitionService.ProcessBackend(
+        JavaRuntimeAcquisitionProcessBackend backend = new JavaRuntimeAcquisitionProcessBackend(
                 new JavaManagerRuntimeAcquisitionService.ArchiveLimits(
                         1024L * 1024L,
                         32,
@@ -89,7 +92,7 @@ final class JavaRuntimeContainerPreflightTest {
 
         IOException failure = assertThrows(
                 IOException.class,
-                () -> backend.inspectLocalArchiveLayout(archive));
+                () -> backend.inspectLocalArchiveLayout(archive, NEVER_CANCELLED));
 
         assertEquals(
                 "Java ZIP central directory exceeds its resource or offset limit",
@@ -100,9 +103,9 @@ final class JavaRuntimeContainerPreflightTest {
     ///
     /// @param maximumMetadataEntryBytes maximum bytes accepted from one metadata pseudo-entry
     /// @return acquisition backend using the requested ceiling
-    private static JavaManagerRuntimeAcquisitionService.ProcessBackend backendWithMetadataLimits(
+    private static JavaRuntimeAcquisitionProcessBackend backendWithMetadataLimits(
             long maximumMetadataEntryBytes) {
-        return new JavaManagerRuntimeAcquisitionService.ProcessBackend(
+        return new JavaRuntimeAcquisitionProcessBackend(
                 new JavaManagerRuntimeAcquisitionService.ArchiveLimits(
                         1024L * 1024L,
                         16,

@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies the headless argument, naming, command, and result policies used by [UpdateApplier].
 @NotNullByDefault
 class UpdateApplierTest {
-    /// Recognizes only the exact two-element legacy apply instruction.
+    /// Recognizes only the exact two-element apply instruction.
     @Test
     void recognizesExactApplyInstruction() {
         assertEquals(
@@ -51,27 +51,27 @@ class UpdateApplierTest {
                 new String[]{"--different", "target.jar"}).isEmpty());
     }
 
-    /// Updates matching legacy HMCL filenames while preserving their prefix style and suffix.
+    /// Updates matching XYML filenames while preserving their prefix style and suffix.
     @Test
-    void derivesLegacyVersionedTargetName() {
+    void derivesVersionedTargetName() {
         assertEquals(
-                Path.of("downloads", "HMCL-4.2.0.jar"),
+                Path.of("downloads", "XYML-4.2.0.jar"),
                 UpdateApplier.tryRename(
-                                Path.of("downloads", "HMCL-3.5.0.jar"),
+                                Path.of("downloads", "XYML-3.5.0.jar"),
                                 "4.2.0")
                         .orElseThrow());
         assertEquals(
-                Path.of("hmcl.4.2.0.exe"),
-                UpdateApplier.tryRename(Path.of("hmcl.3.5.0.exe"), "4.2.0")
+                Path.of("xyml.4.2.0.exe"),
+                UpdateApplier.tryRename(Path.of("xyml.3.5.0.exe"), "4.2.0")
                         .orElseThrow());
     }
 
     /// Leaves current-version and unrelated artifact names untouched.
     @Test
     void skipsUnnecessaryOrUnsupportedRename() {
-        assertTrue(UpdateApplier.tryRename(Path.of("HMCL-4.2.0.jar"), "4.2.0").isEmpty());
-        assertTrue(UpdateApplier.tryRename(Path.of("XYML-3.5.0.jar"), "4.2.0").isEmpty());
-        assertTrue(UpdateApplier.tryRename(Path.of("HMCL-latest.jar"), "4.2.0").isEmpty());
+        assertTrue(UpdateApplier.tryRename(Path.of("XYML-4.2.0.jar"), "4.2.0").isEmpty());
+        assertTrue(UpdateApplier.tryRename(Path.of("HMCL-3.5.0.jar"), "4.2.0").isEmpty());
+        assertTrue(UpdateApplier.tryRename(Path.of("XYML-latest.jar"), "4.2.0").isEmpty());
     }
 
     /// Preserves only established VM argument families and appends immutable application arguments.
@@ -83,7 +83,7 @@ class UpdateApplierTest {
                 javaBinary,
                 List.of(
                         "-Xmx2G",
-                        "-Dhmcl.test=true",
+                        "-Dxyml.test=true",
                         "--add-opens=java.base/java.lang=ALL-UNNAMED",
                         "-ea"),
                 launcher,
@@ -93,7 +93,7 @@ class UpdateApplierTest {
                 List.of(
                         javaBinary.toString(),
                         "-Xmx2G",
-                        "-Dhmcl.test=true",
+                        "-Dxyml.test=true",
                         "-jar",
                         launcher.toAbsolutePath().toString(),
                         "--apply-to",

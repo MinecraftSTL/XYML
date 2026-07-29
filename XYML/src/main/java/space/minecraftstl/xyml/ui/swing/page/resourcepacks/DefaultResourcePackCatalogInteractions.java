@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -103,7 +105,7 @@ public final class DefaultResourcePackCatalogInteractions implements ResourcePac
         Objects.requireNonNull(owner, "owner");
         Objects.requireNonNull(currentDirectory, "currentDirectory");
 
-        JFileChooser chooser = new JFileChooser(currentDirectory.toFile());
+        JFileChooser chooser = new EditablePathChooser(currentDirectory.toFile());
         chooser.setDialogTitle(strings.importDialogTitle());
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setMultiSelectionEnabled(true);

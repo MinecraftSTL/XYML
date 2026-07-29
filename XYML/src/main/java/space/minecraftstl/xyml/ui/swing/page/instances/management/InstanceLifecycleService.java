@@ -25,7 +25,7 @@ import java.io.IOException;
 /// Executes instance lifecycle mutations without exposing a repository implementation to Swing controls.
 ///
 /// Rename, duplication, deletion, and the implicit repository refresh are blocking filesystem operations
-/// and must be called from a background executor. `reconcileSelection` only updates legacy observable
+/// and must be called from a background executor. `reconcileSelection` only updates launcher observable
 /// state and must be called on the Swing event-dispatch thread after a successful mutation.
 @NotNullByDefault
 public interface InstanceLifecycleService {

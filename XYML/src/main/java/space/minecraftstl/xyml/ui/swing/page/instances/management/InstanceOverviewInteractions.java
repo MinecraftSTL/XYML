@@ -19,7 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.setting.VersionIconType;
+import space.minecraftstl.xyml.setting.InstanceIconType;
 
 import java.awt.Component;
 import java.nio.file.Path;
@@ -31,34 +31,18 @@ import java.util.concurrent.CompletionStage;
 /// testable while the production implementation still uses `JFileChooser` and `Desktop` directly.
 @NotNullByDefault
 public interface InstanceOverviewInteractions {
-    /// Displays the supported-image chooser for one instance.
-    ///
-    /// This method must be invoked on the Swing event-dispatch thread.
-    ///
-    /// @param owner parent component for the native chooser
-    /// @param initialDirectory directory shown when the chooser opens
-    /// @return selected image path, or `null` when the user cancels
-    @Nullable Path chooseIcon(Component owner, Path initialDirectory);
-
     /// Displays the complete built-in and custom instance icon selector.
-    ///
-    /// The default implementation preserves existing interaction substitutes by delegating directly
-    /// to their custom file chooser. Production interactions override this method with the bundled
-    /// fourteen-item selector.
     ///
     /// @param owner parent component for the native dialogs
     /// @param currentIconType persisted built-in fallback type
     /// @param hasCustomIcon whether a custom image currently overrides the fallback
     /// @param initialDirectory directory shown when custom image selection opens
     /// @return completed icon choice, or `null` when selection is cancelled
-    default @Nullable InstanceIconChoice chooseInstanceIcon(
+    @Nullable InstanceIconChoice chooseInstanceIcon(
             Component owner,
-            VersionIconType currentIconType,
+            InstanceIconType currentIconType,
             boolean hasCustomIcon,
-            Path initialDirectory) {
-        @Nullable Path selectedFile = chooseIcon(owner, initialDirectory);
-        return selectedFile != null ? new InstanceIconChoice.Custom(selectedFile) : null;
-    }
+            Path initialDirectory);
 
     /// Requests confirmation before a custom icon is deleted.
     ///

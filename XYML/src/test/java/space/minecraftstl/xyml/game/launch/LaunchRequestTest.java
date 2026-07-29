@@ -26,12 +26,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies source-compatible ordinary requests and immutable quick-play world capture.
+/// Verifies ordinary, quick-play, and test-mode launch requests.
 @NotNullByDefault
 final class LaunchRequestTest {
-    /// The existing three-identifier constructor continues to describe an ordinary launch.
+    /// The three-identifier constructor describes an ordinary launch with no optional mode.
     @Test
-    void legacyConstructorLeavesQuickPlayTargetAbsent() {
+    void ordinaryConstructorLeavesOptionalModesDisabled() {
         LaunchRequest request = new LaunchRequest("account", "directory", "instance");
 
         assertNull(request.quickPlaySingleplayer());

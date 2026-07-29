@@ -19,7 +19,7 @@ package space.minecraftstl.xyml.image;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.setting.VersionIconType;
+import space.minecraftstl.xyml.setting.InstanceIconType;
 
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
@@ -64,8 +64,8 @@ public final class InstanceIconLoader {
     private static final Object BUILT_IN_CACHE_LOCK = new Object();
 
     /// Successfully decoded immutable bundled icons indexed by requested icon type.
-    private static final EnumMap<VersionIconType, InstanceIconData> BUILT_IN_CACHE =
-            new EnumMap<>(VersionIconType.class);
+    private static final EnumMap<InstanceIconType, InstanceIconData> BUILT_IN_CACHE =
+            new EnumMap<>(InstanceIconType.class);
 
     /// Prevents utility-class construction.
     private InstanceIconLoader() {
@@ -74,7 +74,7 @@ public final class InstanceIconLoader {
     /// Loads a custom icon when supplied, otherwise loads the selected bundled icon.
     ///
     /// A missing, linked, non-regular, oversized, malformed, unsupported, or over-dimensioned custom file returns
-    /// the bundled [VersionIconType#DEFAULT] icon. A missing or invalid non-default bundled resource also falls back
+    /// the bundled [InstanceIconType#DEFAULT] icon. A missing or invalid non-default bundled resource also falls back
     /// to that default. This blocking operation throws when called from the AWT event-dispatch thread.
     ///
     /// @param builtInIcon bundled icon used when no custom file is supplied
@@ -82,10 +82,10 @@ public final class InstanceIconLoader {
     /// @return immutable normalized icon data
     /// @throws IllegalStateException when called on the event-dispatch thread or the mandatory default is unavailable
     public static InstanceIconData load(
-            VersionIconType builtInIcon,
+            InstanceIconType builtInIcon,
             @Nullable Path customIconFile) {
         requireBackgroundThread();
-        VersionIconType selectedBuiltIn = Objects.requireNonNull(builtInIcon, "builtInIcon");
+        InstanceIconType selectedBuiltIn = Objects.requireNonNull(builtInIcon, "builtInIcon");
         if (customIconFile == null) {
             return loadBuiltInUnchecked(selectedBuiltIn);
         }
@@ -98,13 +98,13 @@ public final class InstanceIconLoader {
 
     /// Loads one selected bundled icon using its higher-resolution `@2x` raster.
     ///
-    /// An absent or invalid non-default resource falls back to [VersionIconType#DEFAULT]. This blocking operation
+    /// An absent or invalid non-default resource falls back to [InstanceIconType#DEFAULT]. This blocking operation
     /// throws when called from the AWT event-dispatch thread.
     ///
     /// @param iconType selected bundled icon type
     /// @return immutable normalized icon data
     /// @throws IllegalStateException when called on the event-dispatch thread or the mandatory default is unavailable
-    public static InstanceIconData loadBuiltIn(VersionIconType iconType) {
+    public static InstanceIconData loadBuiltIn(InstanceIconType iconType) {
         requireBackgroundThread();
         return loadBuiltInUnchecked(Objects.requireNonNull(iconType, "iconType"));
     }
@@ -115,7 +115,7 @@ public final class InstanceIconLoader {
     ///
     /// @param iconType configured icon type
     /// @return matching `@2x` classpath resource path
-    static String bundledResourcePath(VersionIconType iconType) {
+    static String bundledResourcePath(InstanceIconType iconType) {
         String resourcePath = Objects.requireNonNull(iconType, "iconType").resourcePath();
         int extensionOffset = resourcePath.lastIndexOf('.');
         if (extensionOffset <= 0 || extensionOffset == resourcePath.length() - 1) {
@@ -130,7 +130,7 @@ public final class InstanceIconLoader {
     ///
     /// @param iconType selected bundled icon type
     /// @return immutable normalized icon data
-    private static InstanceIconData loadBuiltInUnchecked(VersionIconType iconType) {
+    private static InstanceIconData loadBuiltInUnchecked(InstanceIconType iconType) {
         synchronized (BUILT_IN_CACHE_LOCK) {
             @Nullable InstanceIconData cached = BUILT_IN_CACHE.get(iconType);
             if (cached != null) {
@@ -141,7 +141,7 @@ public final class InstanceIconLoader {
             try {
                 loaded = decode(readBundledIcon(iconType));
             } catch (IOException | RuntimeException failure) {
-                if (iconType == VersionIconType.DEFAULT) {
+                if (iconType == InstanceIconType.DEFAULT) {
                     throw new IllegalStateException("Bundled default instance icon is unavailable", failure);
                 }
                 loaded = loadRequiredDefault();
@@ -157,13 +157,13 @@ public final class InstanceIconLoader {
     /// @throws IllegalStateException when the mandatory resource is missing or invalid
     private static InstanceIconData loadRequiredDefault() {
         synchronized (BUILT_IN_CACHE_LOCK) {
-            @Nullable InstanceIconData cached = BUILT_IN_CACHE.get(VersionIconType.DEFAULT);
+            @Nullable InstanceIconData cached = BUILT_IN_CACHE.get(InstanceIconType.DEFAULT);
             if (cached != null) {
                 return cached;
             }
             try {
-                InstanceIconData loaded = decode(readBundledIcon(VersionIconType.DEFAULT));
-                BUILT_IN_CACHE.put(VersionIconType.DEFAULT, loaded);
+                InstanceIconData loaded = decode(readBundledIcon(InstanceIconType.DEFAULT));
+                BUILT_IN_CACHE.put(InstanceIconType.DEFAULT, loaded);
                 return loaded;
             } catch (IOException | RuntimeException failure) {
                 throw new IllegalStateException("Bundled default instance icon is unavailable", failure);
@@ -176,7 +176,7 @@ public final class InstanceIconLoader {
     /// @param iconType selected bundled icon type
     /// @return bounded encoded image
     /// @throws IOException when the resource is missing, empty, oversized, or unreadable
-    private static EncodedImage readBundledIcon(VersionIconType iconType) throws IOException {
+    private static EncodedImage readBundledIcon(InstanceIconType iconType) throws IOException {
         String resourcePath = bundledResourcePath(iconType);
         try (@Nullable InputStream input = InstanceIconLoader.class.getResourceAsStream(resourcePath)) {
             if (input == null) {

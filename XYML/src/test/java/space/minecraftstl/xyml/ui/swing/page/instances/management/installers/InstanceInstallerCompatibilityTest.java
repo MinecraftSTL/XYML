@@ -137,7 +137,7 @@ final class InstanceInstallerCompatibilityTest {
                 exception.reason());
     }
 
-    /// Preserves legacy third-party removal data without treating it as a managed loader kind.
+    /// Preserves unrecognized third-party removal data without treating it as a managed loader kind.
     @Test
     void modelsOtherRemovableLibrariesWithExplicitStructuralCertainty() {
         InstanceOtherLibraryEntry clear = new InstanceOtherLibraryEntry(
@@ -213,7 +213,8 @@ final class InstanceInstallerCompatibilityTest {
     /// @param entries recognized installed loaders
     /// @return immutable snapshot for Minecraft 1.21.1
     private static InstanceInstallerSnapshot snapshot(InstanceInstallerEntry... entries) {
-        return new InstanceInstallerSnapshot("existing-instance", Optional.of("1.21.1"), List.of(entries));
+        return new InstanceInstallerSnapshot(
+                "existing-instance", Optional.of("1.21.1"), List.of(entries), List.of());
     }
 
     /// Creates an empty snapshot for one specific Minecraft version.
@@ -221,7 +222,8 @@ final class InstanceInstallerCompatibilityTest {
     /// @param gameVersion target Minecraft version
     /// @return immutable empty loader snapshot
     private static InstanceInstallerSnapshot snapshotForGameVersion(String gameVersion) {
-        return new InstanceInstallerSnapshot("existing-instance", Optional.of(gameVersion), List.of());
+        return new InstanceInstallerSnapshot(
+                "existing-instance", Optional.of(gameVersion), List.of(), List.of());
     }
 
     /// Creates a snapshot containing one prospective third-party library for boundary tests.

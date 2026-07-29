@@ -142,32 +142,4 @@ public final class GameSettingsPresetsTest {
         assertEquals("Custom", Objects.requireNonNull(custom.nameProperty().getValue()).getText(List.of(Locale.ENGLISH)));
     }
 
-    /// Tests that legacy profile-level game settings migrate to IDs separate from profile IDs.
-    @Test
-    public void migratesLegacyProfileGlobalSettingsToSeparatePresetId() {
-        JsonObject settings = JsonParser.parseString("""
-                {
-                  "configurations": {
-                    "Dev": {
-                      "gameDir": ".minecraft",
-                      "global": {
-                        "maxMemory": 2048
-                      }
-                    }
-                  }
-                }
-                """).getAsJsonObject();
-        JsonObject configurations = settings.getAsJsonObject("configurations").deepCopy();
-        GameDirectories gameDirectories = Objects.requireNonNull(LegacyConfigMigrator.extractGameDirectoriesFromConfigJson(settings));
-        GameSettingsPresets presets = new GameSettingsPresets();
-
-        LegacyConfigMigrator.migrateLegacyPresetSettings(gameDirectories, presets, configurations);
-
-        assertEquals(1, presets.getPresets().size());
-        GameDirectory gameDirectory = gameDirectories.getGameDirectories().get(0);
-        GameSettings.Preset preset = presets.getPresets().get(0);
-        assertEquals(gameDirectory.getLegacyGameSettings(), preset.idProperty().getValue());
-        assertNotEquals(gameDirectory.getId(), preset.idProperty().getValue());
-        assertEquals(2048, preset.maxMemoryProperty().getValue());
-    }
 }

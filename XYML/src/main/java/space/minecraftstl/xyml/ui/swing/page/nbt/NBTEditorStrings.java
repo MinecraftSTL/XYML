@@ -24,7 +24,7 @@ import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Objects;
 
-/// Stable localized labels for the NBT editor without extending the legacy JavaFX catalog.
+/// Stable localized labels for the NBT editor without extending the shared localization catalog.
 @NotNullByDefault
 final class NBTEditorStrings {
     /// Shared English bundle for non-Chinese locales.

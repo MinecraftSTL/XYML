@@ -34,7 +34,7 @@ import java.util.Objects;
 /// Stores per-workspace authlib-injector authentication servers.
 ///
 /// The JSON representation is saved as `config/authlib-injector-servers.json`
-/// under the current HMCL directory.
+/// under the current XYML directory.
 ///
 /// @author Glavo
 @JsonAdapter(AuthlibInjectorServerList.Adapter.class)

@@ -57,7 +57,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// Native Swing workflow for reviewing, adding, selecting, and removing authlib-injector servers.
 ///
 /// Endpoint discovery and persistence run on a caller-owned executor. All Swing state and confirmation
-/// prompts remain on the EDT, while the supplied [AuthlibServerStore] keeps legacy configuration objects
+/// prompts remain on the EDT, while the supplied [AuthlibServerStore] keeps launcher configuration objects
 /// out of the dialog.
 @NotNullByDefault
 final class SwingAuthlibServerManagementDialog extends JDialog implements AutoCloseable {

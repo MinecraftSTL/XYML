@@ -220,7 +220,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     private static RemoteAddonInstallTargetResolver defaultTargetResolver(RemoteAddonCatalogKind kind) {
         return Objects.requireNonNull(kind, "kind") == RemoteAddonCatalogKind.WORLD
                 ? new SwingRemoteWorldSaveTargetResolver()
-                : new LegacyRemoteAddonInstallTargetResolver();
+                : new LauncherRemoteAddonInstallTargetResolver();
     }
 
     /// Creates a production catalog with an explicit destination policy.

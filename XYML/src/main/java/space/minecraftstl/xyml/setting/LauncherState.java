@@ -37,7 +37,7 @@ import java.util.Objects;
 
 /// Stores per-workspace launcher runtime state independently from the main settings file.
 ///
-/// The JSON representation is saved as `state/launcher-state.json` under the current HMCL directory.
+/// The JSON representation is saved as `state/launcher-state.json` under the current XYML directory.
 ///
 /// @author Glavo
 @JsonAdapter(LauncherState.Adapter.class)

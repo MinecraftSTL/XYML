@@ -127,7 +127,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
                 homeStrings.instanceLabel(),
                 homeStrings.missingInstanceLabel(),
                 homeStrings.addInstanceAction(),
-                i18n("version.manage"),
+                i18n("instance.manage"),
                 navigation);
         accountSelector = new LazyAccountSelector(
                 Objects.requireNonNull(accountsModel, "accountsModel"),
@@ -231,7 +231,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     /// Configures title-bar identity, workflow order, and native-control placeholders.
     private void configureComponents(String windowTitle) {
         setName("shellToolbar");
-        setOpaque(true);
+        setOpaque(false);
         setBorder(ShellSeparatorBorder.bottom());
         putClientProperty(FlatClientProperties.COMPONENT_TITLE_BAR_CAPTION, true);
 

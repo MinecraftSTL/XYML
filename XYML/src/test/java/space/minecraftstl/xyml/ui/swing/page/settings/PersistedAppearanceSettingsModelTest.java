@@ -23,13 +23,16 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.setting.BackgroundType;
+import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
+import space.minecraftstl.xyml.theme.BuiltinBackground;
+import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
-import space.minecraftstl.xyml.ui.swing.ThemeMode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -50,15 +53,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests persisted appearance mapping, command validation, runtime application, and cleanup.
 @NotNullByDefault
 public final class PersistedAppearanceSettingsModelTest {
-    /// Raw automatic dark settings map to system mode and apply immediately to the runtime.
+    /// Raw system settings map to the four-state model and apply immediately to the runtime.
     @Test
     public void mapsAndAppliesInitialStoreState() {
-        FakeStore store = new FakeStore(raw("auto", 6, true, true));
+        FakeStore store = new FakeStore(raw("system", 6, true, true));
         List<AppearanceSettingsSnapshot> applied = new ArrayList<>();
         PersistedAppearanceSettingsModel model = new PersistedAppearanceSettingsModel(store, applied::add);
 
         assertAll(
-                () -> assertEquals(ThemeMode.SYSTEM, model.snapshot().themeMode()),
                 () -> assertEquals(ThemeBrightnessPreference.SYSTEM,
                         model.snapshot().brightnessPreference()),
                 () -> assertEquals(6, model.snapshot().cornerRadius()),
@@ -68,7 +70,7 @@ public final class PersistedAppearanceSettingsModelTest {
         model.close();
     }
 
-    /// Theme inheritance remains distinct from system mode while retaining the compatible three-state view.
+    /// Theme inheritance remains distinct from system mode while retaining the previous raw value.
     @Test
     public void persistsThemeBrightnessInheritance() {
         FakeStore store = new FakeStore(new StoredAppearanceSettings(
@@ -78,6 +80,7 @@ public final class PersistedAppearanceSettingsModelTest {
                 20,
                 1,
                 false,
+                background(),
                 true,
                 true));
         PersistedAppearanceSettingsModel model = new PersistedAppearanceSettingsModel(store, ignored -> { });
@@ -87,8 +90,7 @@ public final class PersistedAppearanceSettingsModelTest {
         assertAll(
                 () -> assertEquals(ThemeBrightnessPreference.THEME,
                         model.snapshot().brightnessPreference()),
-                () -> assertEquals(ThemeMode.SYSTEM, model.snapshot().themeMode()),
-                () -> assertEquals("dark", store.snapshot().themeModeValue()),
+                () -> assertEquals("dark", store.snapshot().themeBrightnessValue()),
                 () -> assertFalse(store.snapshot().themeBrightnessOverridden()));
         model.close();
     }
@@ -96,25 +98,44 @@ public final class PersistedAppearanceSettingsModelTest {
     /// Page commands persist canonical values and every store transition reapplies the complete runtime state.
     @Test
     public void persistsCommandsAndReappliesRuntime() {
-        FakeStore store = new FakeStore(raw("auto", 6, true, true));
+        FakeStore store = new FakeStore(raw("system", 6, true, true));
         List<AppearanceSettingsSnapshot> applied = new ArrayList<>();
         List<AppearanceSettingsSnapshot> published = new ArrayList<>();
         PersistedAppearanceSettingsModel model = new PersistedAppearanceSettingsModel(store, applied::add);
         Subscription listener = model.subscribe(change -> published.add(change.currentValue()));
 
-        model.setThemeMode(ThemeMode.DARK);
+        model.setThemeBrightnessPreference(ThemeBrightnessPreference.DARK);
         model.setCornerRadius(14);
         model.setAnimationsEnabled(true);
+        BackgroundAppearanceSettings replacementBackground = new BackgroundAppearanceSettings(
+                BackgroundType.PAINT,
+                BuiltinBackground.FALLBACK.id(),
+                "",
+                "",
+                "#123456",
+                0.7,
+                NetworkBackgroundImageCachePolicy.DISABLED,
+                BackgroundType.THEME_COLOR,
+                "#FFFFFF",
+                BackgroundLoadPolicy.SHOW_FALLBACK_WHILE_LOADING,
+                true,
+                true,
+                true,
+                true);
+        model.setBackgroundAppearance(replacementBackground);
 
         assertAll(
-                () -> assertEquals("dark", store.snapshot().themeModeValue()),
+                () -> assertEquals("dark", store.snapshot().themeBrightnessValue()),
                 () -> assertEquals(14, store.snapshot().cornerRadius()),
                 () -> assertFalse(store.snapshot().animationsDisabled()),
-                () -> assertEquals(ThemeMode.DARK, model.snapshot().themeMode()),
+                () -> assertEquals(
+                        ThemeBrightnessPreference.DARK,
+                        model.snapshot().brightnessPreference()),
                 () -> assertEquals(14, model.snapshot().cornerRadius()),
                 () -> assertTrue(model.snapshot().animationsEnabled()),
-                () -> assertEquals(4, applied.size()),
-                () -> assertEquals(3, published.size()));
+                () -> assertEquals(replacementBackground, model.snapshot().background()),
+                () -> assertEquals(5, applied.size()),
+                () -> assertEquals(4, published.size()));
         listener.unsubscribe();
         model.close();
     }
@@ -134,11 +155,13 @@ public final class PersistedAppearanceSettingsModelTest {
                 new PersistedAppearanceSettingsModel(readOnlyStore, ignored -> { });
         assertAll(
                 () -> assertThrows(IllegalStateException.class,
-                        () -> readOnly.setThemeMode(ThemeMode.DARK)),
+                        () -> readOnly.setThemeBrightnessPreference(ThemeBrightnessPreference.DARK)),
                 () -> assertThrows(IllegalStateException.class,
                         () -> readOnly.setCornerRadius(8)),
                 () -> assertThrows(IllegalStateException.class,
-                        () -> readOnly.setAnimationsEnabled(false)));
+                        () -> readOnly.setAnimationsEnabled(false)),
+                () -> assertThrows(IllegalStateException.class,
+                        () -> readOnly.setBackgroundAppearance(background())));
         readOnly.close();
     }
 
@@ -151,13 +174,13 @@ public final class PersistedAppearanceSettingsModelTest {
         AppearanceSettingsSnapshot beforeClose = model.snapshot();
 
         model.close();
-        store.setThemeModeValue("dark");
+        store.setThemeBrightnessPreference(ThemeBrightnessPreference.DARK);
 
         assertAll(
                 () -> assertEquals(beforeClose, model.snapshot()),
                 () -> assertFalse(store.hasSubscribers()),
                 () -> assertThrows(IllegalStateException.class,
-                        () -> model.setThemeMode(ThemeMode.SYSTEM)));
+                        () -> model.setThemeBrightnessPreference(ThemeBrightnessPreference.SYSTEM)));
     }
 
     /// Closing the appearance model releases an injected application runtime exactly once.
@@ -181,7 +204,7 @@ public final class PersistedAppearanceSettingsModelTest {
     public void appliesCrossThreadStoreChangesWithoutEdtDeadlock() {
         CrossThreadStore store = new CrossThreadStore(raw("light", 6, false, true));
         SwingThemeManager themeManager = new SwingThemeManager(
-                ThemeMode.LIGHT,
+                ThemeBrightnessPreference.LIGHT,
                 new SwingDesignTokens(6),
                 () -> false);
         SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 16);
@@ -202,17 +225,47 @@ public final class PersistedAppearanceSettingsModelTest {
 
     /// Creates raw test settings with the production radius bounds and step.
     ///
-    /// @param mode persisted mode value
+    /// @param brightnessValue persisted brightness value
     /// @param radius current corner radius
-    /// @param animationsDisabled legacy disable flag
+    /// @param animationsDisabled persisted disable flag
     /// @param writable whether writes are accepted
     /// @return raw store snapshot
     private static StoredAppearanceSettings raw(
-            String mode,
+            String brightnessValue,
             int radius,
             boolean animationsDisabled,
             boolean writable) {
-        return new StoredAppearanceSettings(mode, radius, 0, 20, 1, animationsDisabled, writable);
+        return new StoredAppearanceSettings(
+                brightnessValue,
+                radius,
+                0,
+                20,
+                1,
+                animationsDisabled,
+                background(),
+                writable,
+                true);
+    }
+
+    /// Creates one renderer-safe background setting shared by model tests.
+    ///
+    /// @return complete default background state
+    private static BackgroundAppearanceSettings background() {
+        return new BackgroundAppearanceSettings(
+                BackgroundType.DEFAULT,
+                BuiltinBackground.FALLBACK.id(),
+                "",
+                "",
+                null,
+                1.0,
+                NetworkBackgroundImageCachePolicy.ENABLED,
+                BackgroundType.BUILTIN,
+                "#FFFFFF",
+                BackgroundLoadPolicy.WAIT_FOR_BACKGROUND,
+                false,
+                false,
+                false,
+                false);
     }
 
     /// Synchronous toolkit-neutral persistence fake.
@@ -243,31 +296,18 @@ public final class PersistedAppearanceSettingsModelTest {
             return changes.subscribe(listener);
         }
 
-        /// Replaces the persisted theme value.
-        @Override
-        public void setThemeModeValue(String themeModeValue) {
-            publish(new StoredAppearanceSettings(
-                    themeModeValue,
-                    current.cornerRadius(),
-                    current.minimumCornerRadius(),
-                    current.maximumCornerRadius(),
-                    current.cornerRadiusStep(),
-                    current.animationsDisabled(),
-                    current.writable(),
-                    true));
-        }
-
         /// Replaces the four-state brightness preference while retaining an inherited raw value.
         @Override
         public void setThemeBrightnessPreference(ThemeBrightnessPreference preference) {
             @Nullable String value = preference.settingValue();
             publish(new StoredAppearanceSettings(
-                    value != null ? value : current.themeModeValue(),
+                    value != null ? value : current.themeBrightnessValue(),
                     current.cornerRadius(),
                     current.minimumCornerRadius(),
                     current.maximumCornerRadius(),
                     current.cornerRadiusStep(),
                     current.animationsDisabled(),
+                    current.background(),
                     current.writable(),
                     value != null));
         }
@@ -276,26 +316,43 @@ public final class PersistedAppearanceSettingsModelTest {
         @Override
         public void setCornerRadius(int cornerRadius) {
             publish(new StoredAppearanceSettings(
-                    current.themeModeValue(),
+                    current.themeBrightnessValue(),
                     cornerRadius,
                     current.minimumCornerRadius(),
                     current.maximumCornerRadius(),
                     current.cornerRadiusStep(),
                     current.animationsDisabled(),
+                    current.background(),
                     current.writable(),
                     current.themeBrightnessOverridden()));
         }
 
-        /// Replaces the legacy animation-disable flag.
+        /// Replaces the persisted animation-disable flag.
         @Override
         public void setAnimationsDisabled(boolean disabled) {
             publish(new StoredAppearanceSettings(
-                    current.themeModeValue(),
+                    current.themeBrightnessValue(),
                     current.cornerRadius(),
                     current.minimumCornerRadius(),
                     current.maximumCornerRadius(),
                     current.cornerRadiusStep(),
                     disabled,
+                    current.background(),
+                    current.writable(),
+                    current.themeBrightnessOverridden()));
+        }
+
+        /// Replaces the complete persisted background state.
+        @Override
+        public void setBackgroundAppearance(BackgroundAppearanceSettings background) {
+            publish(new StoredAppearanceSettings(
+                    current.themeBrightnessValue(),
+                    current.cornerRadius(),
+                    current.minimumCornerRadius(),
+                    current.maximumCornerRadius(),
+                    current.cornerRadiusStep(),
+                    current.animationsDisabled(),
+                    Objects.requireNonNull(background, "background"),
                     current.writable(),
                     current.themeBrightnessOverridden()));
         }
@@ -317,7 +374,7 @@ public final class PersistedAppearanceSettingsModelTest {
         }
     }
 
-    /// Simulates a legacy store that synchronously waits while another toolkit thread publishes its change.
+    /// Simulates a store that synchronously waits while another toolkit thread publishes its change.
     @NotNullByDefault
     private static final class CrossThreadStore extends FakeStore {
         /// Creates a cross-thread fake with initial values.

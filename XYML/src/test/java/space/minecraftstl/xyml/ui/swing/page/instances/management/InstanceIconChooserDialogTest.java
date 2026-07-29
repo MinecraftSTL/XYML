@@ -22,7 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import space.minecraftstl.xyml.setting.VersionIconType;
+import space.minecraftstl.xyml.setting.InstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JToggleButton;
@@ -49,13 +49,13 @@ final class InstanceIconChooserDialogTest {
     @TempDir
     private @Nullable Path temporaryDirectory;
 
-    /// Restores the exact fourteen legacy built-in choices plus the custom-image entry.
+    /// Exposes the exact fourteen built-in choices plus the custom-image entry.
     @Test
     void containsCustomEntryAndFourteenLegacyBuiltIns() {
         InstanceIconImages.preloadBuiltIns();
         AtomicReference<InstanceIconChooserDialog> dialogReference = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> dialogReference.set(new InstanceIconChooserDialog(
-                VersionIconType.FORGE,
+                InstanceIconType.FORGE,
                 false,
                 InstanceOverviewStrings.english())));
 
@@ -65,7 +65,7 @@ final class InstanceIconChooserDialogTest {
             assertEquals(15, buttons.size());
             assertEquals(14, InstanceIconChooserDialog.builtInTypes().size());
             assertEquals(14, InstanceIconChooserDialog.builtInTypes().stream().distinct().count());
-            assertFalse(InstanceIconChooserDialog.builtInTypes().contains(VersionIconType.DEFAULT));
+            assertFalse(InstanceIconChooserDialog.builtInTypes().contains(InstanceIconType.DEFAULT));
 
             for (JToggleButton button : buttons) {
                 assertEquals(new Dimension(64, 64), button.getPreferredSize());
@@ -86,7 +86,7 @@ final class InstanceIconChooserDialogTest {
         AtomicInteger customChooserCount = new AtomicInteger();
         EdtDispatcher.executeAndWait(() -> {
             InstanceIconChooserDialog dialog = new InstanceIconChooserDialog(
-                    VersionIconType.NEO_FORGE,
+                    InstanceIconType.NEO_FORGE,
                     false,
                     InstanceOverviewStrings.english());
             choiceReference.set(dialog.selectedChoice(() -> {
@@ -99,7 +99,7 @@ final class InstanceIconChooserDialogTest {
         InstanceIconChoice.BuiltIn choice = assertInstanceOf(
                 InstanceIconChoice.BuiltIn.class,
                 choiceReference.get());
-        assertEquals(VersionIconType.NEO_FORGE, choice.iconType());
+        assertEquals(InstanceIconType.NEO_FORGE, choice.iconType());
         assertEquals(0, customChooserCount.get());
     }
 
@@ -114,7 +114,7 @@ final class InstanceIconChooserDialogTest {
                 .resolve("icon.png");
         EdtDispatcher.executeAndWait(() -> {
             InstanceIconChooserDialog dialog = new InstanceIconChooserDialog(
-                    VersionIconType.DEFAULT,
+                    InstanceIconType.DEFAULT,
                     true,
                     InstanceOverviewStrings.english());
             List<JToggleButton> buttons = descendants(dialog.content(), JToggleButton.class);

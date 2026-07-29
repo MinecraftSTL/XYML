@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies secure historical-log filtering, legacy-compatible archive entries, and collision-free output creation.
+/// Verifies secure historical-log filtering, stable archive entries, and collision-free output creation.
 @NotNullByDefault
 public final class LauncherLogExportServiceTest {
     /// Isolated output and logger roots for each export test.
@@ -62,14 +62,14 @@ public final class LauncherLogExportServiceTest {
         Path output = service.export().toCompletableFuture().join();
 
         assertAll(
-                () -> assertEquals("hmcl-exported-logs-2026-07-25T11-30-45.zip", output.getFileName().toString()),
+                () -> assertEquals("xyml-exported-logs-2026-07-25T11-30-45.zip", output.getFileName().toString()),
                 () -> assertEquals(5, access.requestedHistoryCount.get()),
                 () -> assertTrue(Files.isRegularFile(output)));
         try (ZipFile archive = new ZipFile(output.toFile())) {
             assertAll(
                     () -> assertEquals("older", readEntry(archive, "older.log")),
                     () -> assertEquals("older-two", readEntry(archive, "older-two.log")),
-                    () -> assertEquals("current-stream", readEntry(archive, "hmcl-latest.log")),
+                    () -> assertEquals("current-stream", readEntry(archive, "xyml-latest.log")),
                     () -> assertFalse(archive.stream().anyMatch(entry -> entry.getName().contains("private"))));
         }
     }
@@ -87,7 +87,7 @@ public final class LauncherLogExportServiceTest {
         Path output = service.export().toCompletableFuture().join();
 
         assertAll(
-                () -> assertEquals("hmcl-exported-logs-2026-07-25T11-31-00.log", output.getFileName().toString()),
+                () -> assertEquals("xyml-exported-logs-2026-07-25T11-31-00.log", output.getFileName().toString()),
                 () -> assertEquals("current-stream", Files.readString(output)),
                 () -> assertEquals(5, access.requestedHistoryCount.get()));
     }
@@ -98,7 +98,7 @@ public final class LauncherLogExportServiceTest {
         Path logDirectory = Files.createDirectories(temporaryDirectory.resolve("logs"));
         Path outputDirectory = Files.createDirectories(temporaryDirectory.resolve("exports"));
         Path current = Files.writeString(logDirectory.resolve("current.log"), "current-file");
-        Path existing = outputDirectory.resolve("hmcl-exported-logs-2026-07-25T11-32-00.log");
+        Path existing = outputDirectory.resolve("xyml-exported-logs-2026-07-25T11-32-00.log");
         Files.writeString(existing, "existing-export");
         RecordingAccess access = new RecordingAccess(current, List.of(), outputDirectory);
         LauncherLogExportService service = service(access, LocalDateTime.of(2026, 7, 25, 11, 32, 0));
@@ -107,7 +107,7 @@ public final class LauncherLogExportServiceTest {
 
         assertAll(
                 () -> assertEquals("existing-export", Files.readString(existing)),
-                () -> assertEquals("hmcl-exported-logs-2026-07-25T11-32-00-1.log", output.getFileName().toString()),
+                () -> assertEquals("xyml-exported-logs-2026-07-25T11-32-00-1.log", output.getFileName().toString()),
                 () -> assertEquals("current-stream", Files.readString(output)));
     }
 

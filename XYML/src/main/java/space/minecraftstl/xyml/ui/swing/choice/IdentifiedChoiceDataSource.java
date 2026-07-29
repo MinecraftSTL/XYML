@@ -63,7 +63,7 @@ public interface IdentifiedChoiceDataSource<T extends Object> extends ViewportCh
         });
     }
 
-    /// Creates a collision-resistant synthetic identifier for a legacy exact indexed source.
+    /// Creates a collision-resistant synthetic identifier for an exact indexed source.
     private static String syntheticStableId(int index) {
         return "@source-index:" + index;
     }

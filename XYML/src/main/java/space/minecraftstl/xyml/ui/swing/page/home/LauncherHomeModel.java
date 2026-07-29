@@ -135,34 +135,6 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
         reconcileSelectionStore();
     }
 
-    /// Creates a launcher home model without a script-export workflow.
-    ///
-    /// Production composition supplies the explicit export command. This compatibility overload keeps focused callers
-    /// source-compatible while reporting a deterministic unavailable result if they invoke the new action.
-    ///
-    /// @param selectionStore account and instance state store
-    /// @param statusStrings localized readiness text
-    /// @param selectAccountCommand account navigation command
-    /// @param selectInstanceCommand instance navigation command
-    /// @param addInstanceCommand add-instance workflow command
-    /// @param launchCommand command creating a session from captured stable identifiers
-    public LauncherHomeModel(
-            HomeSelectionStore selectionStore,
-            HomeStatusStrings statusStrings,
-            Runnable selectAccountCommand,
-            Runnable selectInstanceCommand,
-            Runnable addInstanceCommand,
-            HomeLaunchCommand launchCommand) {
-        this(
-                selectionStore,
-                statusStrings,
-                selectAccountCommand,
-                selectInstanceCommand,
-                addInstanceCommand,
-                launchCommand,
-                HomeLaunchScriptExportCommand.unavailable());
-    }
-
     /// Returns the latest mapped home state.
     @Override
     public HomeSnapshot snapshot() {

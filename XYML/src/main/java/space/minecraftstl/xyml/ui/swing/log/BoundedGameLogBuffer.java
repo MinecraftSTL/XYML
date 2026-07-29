@@ -178,7 +178,7 @@ final class BoundedGameLogBuffer {
 
     /// Returns the number of entries observed at one severity during this session.
     ///
-    /// Counts intentionally survive head trimming and manual clearing, matching the legacy counter semantics.
+    /// Counts intentionally survive head trimming and manual clearing for stable session totals.
     ///
     /// @param level severity to query
     /// @return observed entry count

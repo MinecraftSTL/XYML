@@ -336,7 +336,7 @@ public class DefaultLauncher extends Launcher {
         if ((OperatingSystem.CURRENT_OS == OperatingSystem.LINUX || OperatingSystem.CURRENT_OS == OperatingSystem.MACOS)
                 && !StringUtils.isASCII(nativeFolderPath)
                 && gameVersion.isPresent() && GameVersionNumber.compare(gameVersion.get(), "1.19") < 0) {
-            tempNativeFolder = Paths.get("/", "tmp", "hmcl-natives-" + UUID.randomUUID());
+            tempNativeFolder = Paths.get("/", "tmp", "xyml-natives-" + UUID.randomUUID());
             nativeFolderPath = tempNativeFolder + File.pathSeparator + nativeFolderPath;
         }
         configuration.put("${natives_directory}", nativeFolderPath);
@@ -598,7 +598,7 @@ public class DefaultLauncher extends Launcher {
                 pair("${primary_jar}", FileUtils.getAbsolutePath(repository.getVersionJar(version))),
                 pair("${language}", Locale.getDefault().toLanguageTag()),
 
-                // defined by HMCL
+                // Defined by XYML.
                 // libraries_directory stands for historical reasons here. We don't know the official launcher
                 // had already defined "library_directory" as the placeholder for path to ".minecraft/libraries"
                 // when we propose this placeholder.

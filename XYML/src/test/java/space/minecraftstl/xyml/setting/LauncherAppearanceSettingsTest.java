@@ -25,12 +25,12 @@ import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/// Tests persistence and legacy-compatible defaults for Swing appearance settings.
+/// Tests persistence and defaults for Swing appearance settings.
 @NotNullByDefault
 public final class LauncherAppearanceSettingsTest {
-    /// A new settings object uses the documented legacy surface radius.
+    /// A new settings object uses the documented default surface radius.
     @Test
-    public void usesLegacyCompatibleCornerRadiusByDefault() {
+    public void usesDefaultCornerRadius() {
         LauncherSettings settings = new LauncherSettings();
 
         assertEquals(LauncherSettings.DEFAULT_CORNER_RADIUS, settings.cornerRadiusProperty().get());

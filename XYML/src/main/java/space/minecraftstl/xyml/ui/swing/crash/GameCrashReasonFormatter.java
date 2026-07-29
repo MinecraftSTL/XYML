@@ -29,7 +29,7 @@ import java.util.regex.Pattern;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Converts analyzer rules into the same localized explanations used by the legacy crash window.
+/// Converts analyzer rules into localized explanations used by the Swing crash window.
 @NotNullByDefault
 final class GameCrashReasonFormatter {
     /// Fabric dependency notation used inside resolution error groups.
@@ -64,7 +64,7 @@ final class GameCrashReasonFormatter {
         return reasons.toString().stripTrailing();
     }
 
-    /// Formats one matched rule, including the legacy special cases for Java, Fabric, and OptiFine.
+    /// Formats one matched rule, including the established cases for Java, Fabric, and OptiFine.
     ///
     /// @param result analyzer result whose matcher contains named groups
     /// @return localized reason for that rule

@@ -65,12 +65,12 @@ public final class DefaultRemoteModpackInstallLauncher implements RemoteModpackI
     @Override
     public Task<?> createInstallTask(RemoteModpackInstallRequest request) throws IOException {
         RemoteModpackInstallRequest installRequest = Objects.requireNonNull(request, "request");
-        if (!XYMLGameRepository.isValidVersionId(installRequest.instanceName())) {
+        if (!XYMLGameRepository.isValidInstanceId(installRequest.instanceName())) {
             throw new IllegalArgumentException("Invalid remote modpack instance name");
         }
 
         XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
-        if (repository.versionIdConflicts(installRequest.instanceName())) {
+        if (repository.instanceIdConflicts(installRequest.instanceName())) {
             throw new IllegalArgumentException("Remote modpack instance name already exists");
         }
 

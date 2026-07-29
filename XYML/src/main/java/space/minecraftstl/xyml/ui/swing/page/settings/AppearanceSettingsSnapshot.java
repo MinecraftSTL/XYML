@@ -19,7 +19,6 @@ package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
-import space.minecraftstl.xyml.ui.swing.ThemeMode;
 
 import java.util.Objects;
 
@@ -27,59 +26,29 @@ import java.util.Objects;
 ///
 /// The model supplies the complete radius range and step so the view never invents a default control budget.
 ///
-/// @param themeMode persisted light, dark, or system preference
+/// @param brightnessPreference theme, system, light, or dark preference
 /// @param cornerRadius current component corner radius in logical pixels
 /// @param minimumCornerRadius smallest supported corner radius
 /// @param maximumCornerRadius largest supported corner radius
 /// @param cornerRadiusStep supported radius increment
 /// @param animationsEnabled whether non-essential launcher animation is enabled
+/// @param background complete effective launcher-background setting controls
 /// @param writable whether the current settings store accepts changes
-/// @param brightnessPreference four-state theme, system, light, or dark preference
 @NotNullByDefault
 public record AppearanceSettingsSnapshot(
-        ThemeMode themeMode,
+        ThemeBrightnessPreference brightnessPreference,
         int cornerRadius,
         int minimumCornerRadius,
         int maximumCornerRadius,
         int cornerRadiusStep,
         boolean animationsEnabled,
-        boolean writable,
-        ThemeBrightnessPreference brightnessPreference) {
-    /// Creates a compatibility snapshot from the historical three-state model.
-    ///
-    /// @param themeMode persisted light, dark, or system preference
-    /// @param cornerRadius current component corner radius in logical pixels
-    /// @param minimumCornerRadius smallest supported corner radius
-    /// @param maximumCornerRadius largest supported corner radius
-    /// @param cornerRadiusStep supported radius increment
-    /// @param animationsEnabled whether non-essential launcher animation is enabled
-    /// @param writable whether the current settings store accepts changes
-    public AppearanceSettingsSnapshot(
-            ThemeMode themeMode,
-            int cornerRadius,
-            int minimumCornerRadius,
-            int maximumCornerRadius,
-            int cornerRadiusStep,
-            boolean animationsEnabled,
-            boolean writable) {
-        this(
-                themeMode,
-                cornerRadius,
-                minimumCornerRadius,
-                maximumCornerRadius,
-                cornerRadiusStep,
-                animationsEnabled,
-                writable,
-                explicitPreference(themeMode));
-    }
+        BackgroundAppearanceSettings background,
+        boolean writable) {
 
     /// Validates one appearance settings snapshot.
     public AppearanceSettingsSnapshot {
-        Objects.requireNonNull(themeMode, "themeMode");
         Objects.requireNonNull(brightnessPreference, "brightnessPreference");
-        if (compatibilityMode(brightnessPreference) != themeMode) {
-            throw new IllegalArgumentException("Theme mode does not match four-state brightness preference");
-        }
+        Objects.requireNonNull(background, "background");
         if (minimumCornerRadius < 0) {
             throw new IllegalArgumentException("minimumCornerRadius must not be negative");
         }
@@ -95,29 +64,5 @@ public record AppearanceSettingsSnapshot(
         if ((cornerRadius - minimumCornerRadius) % cornerRadiusStep != 0) {
             throw new IllegalArgumentException("cornerRadius must align to cornerRadiusStep");
         }
-    }
-
-    /// Maps one historical explicit mode into its four-state counterpart.
-    ///
-    /// @param themeMode historical mode
-    /// @return explicit four-state preference
-    private static ThemeBrightnessPreference explicitPreference(ThemeMode themeMode) {
-        return switch (Objects.requireNonNull(themeMode, "themeMode")) {
-            case SYSTEM -> ThemeBrightnessPreference.SYSTEM;
-            case LIGHT -> ThemeBrightnessPreference.LIGHT;
-            case DARK -> ThemeBrightnessPreference.DARK;
-        };
-    }
-
-    /// Maps theme inheritance to the compatible system segment while preserving it in [brightnessPreference].
-    ///
-    /// @param preference four-state preference
-    /// @return historical view of the preference
-    static ThemeMode compatibilityMode(ThemeBrightnessPreference preference) {
-        return switch (Objects.requireNonNull(preference, "preference")) {
-            case THEME, SYSTEM -> ThemeMode.SYSTEM;
-            case LIGHT -> ThemeMode.LIGHT;
-            case DARK -> ThemeMode.DARK;
-        };
     }
 }

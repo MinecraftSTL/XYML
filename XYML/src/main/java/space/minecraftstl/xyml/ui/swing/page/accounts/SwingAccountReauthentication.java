@@ -61,7 +61,7 @@ public final class SwingAccountReauthentication implements AccountReauthenticati
         return new SwingAccountReauthentication(ownerSupplier, executor);
     }
 
-    /// Wires native prompts, legacy account access, caller execution, and Swing dispatch.
+    /// Wires native prompts, launcher account access, caller execution, and Swing dispatch.
     ///
     /// @param ownerSupplier current owner component supplier
     /// @param executor caller-owned authentication executor
@@ -74,7 +74,7 @@ public final class SwingAccountReauthentication implements AccountReauthenticati
                 ownerSupplier,
                 this::cancelActive);
         delegate = new DefaultAccountReauthentication(
-                new LegacyAccountReauthenticationGateway(),
+                new LauncherAccountReauthenticationGateway(),
                 interaction,
                 executor,
                 SwingUiDispatcher.INSTANCE);

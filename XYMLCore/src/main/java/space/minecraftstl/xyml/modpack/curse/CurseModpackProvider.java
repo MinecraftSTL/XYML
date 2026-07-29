@@ -43,8 +43,8 @@ public final class CurseModpackProvider implements ModpackProvider {
     }
 
     @Override
-    public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String version) {
-        return new CurseCompletionTask(dependencyManager, version);
+    public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+        return new CurseCompletionTask(dependencyManager, instanceId);
     }
 
     @Override

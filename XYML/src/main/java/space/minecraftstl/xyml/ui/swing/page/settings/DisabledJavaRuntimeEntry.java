@@ -55,17 +55,6 @@ public record DisabledJavaRuntimeEntry(
         }
     }
 
-    /// Creates a previously inspected entry for compatibility with existing presentation fixtures.
-    ///
-    /// @param configuredPath original path text
-    /// @param resolvedBinary canonical valid executable, or `null` for an invalid path
-    public DisabledJavaRuntimeEntry(String configuredPath, @Nullable Path resolvedBinary) {
-        this(
-                configuredPath,
-                resolvedBinary == null ? Status.INVALID : Status.AVAILABLE,
-                resolvedBinary);
-    }
-
     /// Creates a disabled entry without touching its configured path.
     ///
     /// @param configuredPath original path text

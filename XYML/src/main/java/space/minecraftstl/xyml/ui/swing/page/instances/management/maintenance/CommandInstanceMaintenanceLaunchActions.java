@@ -108,7 +108,7 @@ public final class CommandInstanceMaintenanceLaunchActions implements InstanceMa
                 "exportCommand returned null");
     }
 
-    /// Captures the selected account and fixed repository identities while legacy stores remain EDT-confined.
+    /// Captures the selected account and fixed repository identities while launcher stores remain EDT-confined.
     ///
     /// @param repository repository containing the fixed instance
     /// @param instanceId fixed instance identifier

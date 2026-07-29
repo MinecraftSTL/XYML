@@ -41,8 +41,8 @@ public final class ModrinthModpackProvider implements ModpackProvider {
     }
 
     @Override
-    public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String version) {
-        return new ModrinthCompletionTask(dependencyManager, version);
+    public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+        return new ModrinthCompletionTask(dependencyManager, instanceId);
     }
 
     @Override

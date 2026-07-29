@@ -1,4 +1,3 @@
-import space.minecraftstl.xyml.gradle.ci.CheckUpdate
 import space.minecraftstl.xyml.gradle.docs.UpdateDocuments
 import space.minecraftstl.xyml.gradle.l10n.ParseLanguageSubtagRegistry
 
@@ -86,12 +85,4 @@ tasks.register<ParseLanguageSubtagRegistry>("parseLanguageSubtagRegistry") {
 
 tasks.register<UpdateDocuments>("updateDocuments") {
     documentsDir.set(layout.projectDirectory.dir("docs"))
-}
-
-tasks.register<CheckUpdate>("checkUpdateDev") {
-    uri.set("https://ci.huangyuhui.net/job/HMCL-nightly")
-}
-
-tasks.register<CheckUpdate>("checkUpdateStable") {
-    uri.set("https://ci.huangyuhui.net/job/HMCL-stable")
 }

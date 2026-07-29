@@ -60,7 +60,7 @@ public final class DownloadProviders {
     private static final DownloadProvider DEFAULT_PROVIDER;
 
     static {
-        String bmclapiRoot = System.getProperty("hmcl.bmclapi.override", "https://bmclapi2.bangbang93.com");
+        String bmclapiRoot = System.getProperty("xyml.bmclapi.override", "https://bmclapi2.bangbang93.com");
         BMCLAPI_PROVIDER = new BMCLAPIDownloadProvider(bmclapiRoot);
         MOJANG_PROVIDER = new MojangDownloadProvider();
         DEFAULT_PROVIDER = createDownloadProvider(DownloadSource.DEFAULT, DownloadSource.DEFAULT);

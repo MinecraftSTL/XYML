@@ -20,7 +20,7 @@ package space.minecraftstl.xyml;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -37,7 +37,7 @@ final class SwingEntrypointToolkitDependencyTest {
     private static final @Unmodifiable List<Class<?>> STARTUP_TYPES = List.of(
             EntryPoint.class,
             Launcher.class,
-            LegacyStateDispatcher.class);
+            LauncherStateDispatcher.class);
 
     /// Compiled entrypoint constant pools contain no removed JavaFX host or dependency patcher symbols.
     @Test

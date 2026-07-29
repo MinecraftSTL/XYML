@@ -45,43 +45,6 @@ public record HomeStrings(
         String launchAction,
         String launchingAction,
         String backToSelectionsAction) {
-    /// Creates home text without a distinct script-export label for source-compatible test fixtures.
-    ///
-    /// Production presentation always supplies a dedicated localized script-export action. This compatibility
-    /// constructor reuses the normal launch label only for callers that have not yet customized that command.
-    ///
-    /// @param pageTitle page heading
-    /// @param accountLabel account-selection field label
-    /// @param missingAccountLabel value displayed when no account exists
-    /// @param instanceLabel instance-selection field label
-    /// @param missingInstanceLabel value displayed when no instance exists
-    /// @param addInstanceAction new-instance command label
-    /// @param launchAction normal launch command label
-    /// @param launchingAction in-progress launch command label
-    /// @param backToSelectionsAction command label for returning from task progress to launch selections
-    public HomeStrings(
-            String pageTitle,
-            String accountLabel,
-            String missingAccountLabel,
-            String instanceLabel,
-            String missingInstanceLabel,
-            String addInstanceAction,
-            String launchAction,
-            String launchingAction,
-            String backToSelectionsAction) {
-        this(
-                pageTitle,
-                accountLabel,
-                missingAccountLabel,
-                instanceLabel,
-                missingInstanceLabel,
-                addInstanceAction,
-                launchAction,
-                launchAction,
-                launchingAction,
-                backToSelectionsAction);
-    }
-
     /// Validates localized home-page text.
     public HomeStrings {
         Objects.requireNonNull(pageTitle, "pageTitle");

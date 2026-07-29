@@ -40,13 +40,8 @@ public abstract class TaskExecutor {
     /// First task in the execution chain.
     protected final Task<?> firstTask;
 
-    /// Internal thread-safe listener registry backing the source-compatible protected list view.
+    /// Internal thread-safe listener registry.
     private final TaskListenerRegistry taskListenerRegistry = new TaskListenerRegistry();
-
-    /// Thread-safe listener registrations shared with concrete executor implementations.
-    ///
-    /// The declared [List] type is retained for source and binary compatibility with existing subclasses.
-    protected final List<TaskListener> taskListeners = taskListenerRegistry;
 
     /// Whether cancellation has been requested for this execution chain.
     protected volatile boolean cancelled = false;
@@ -68,14 +63,6 @@ public abstract class TaskExecutor {
                 : List.of();
     }
 
-    /// Registers a listener without exposing a cancellation handle.
-    ///
-    /// This method is retained for source compatibility. Call [#subscribeTaskListener(TaskListener)] when the
-    /// registration must be removed independently.
-    public void addTaskListener(TaskListener taskListener) {
-        taskListenerRegistry.add(Objects.requireNonNull(taskListener, "taskListener"));
-    }
-
     /// Registers a listener and returns a handle that removes only this registration.
     ///
     /// The same listener object may be registered repeatedly. Every returned [Subscription] controls one registration
@@ -84,6 +71,22 @@ public abstract class TaskExecutor {
         ListenerRegistration registration = new ListenerRegistration(taskListener);
         taskListenerRegistry.add(registration);
         return Subscription.create(() -> taskListenerRegistry.remove(registration));
+    }
+
+    /// Delivers one lifecycle action to the current listener snapshot.
+    ///
+    /// Runtime failures from one listener are reported and isolated by the registry; [Error] values are rethrown.
+    ///
+    /// @param action lifecycle action to invoke for each listener
+    protected final void notifyTaskListeners(Consumer<? super TaskListener> action) {
+        taskListenerRegistry.forEach(Objects.requireNonNull(action, "action"));
+    }
+
+    /// Returns whether this executor currently has at least one listener registration.
+    ///
+    /// @return true when a listener is registered
+    protected final boolean hasTaskListeners() {
+        return !taskListenerRegistry.isEmpty();
     }
 
     /// Returns the reason why task execution failed, or `null` if no failure has been recorded.
@@ -120,7 +123,7 @@ public abstract class TaskExecutor {
     /// Stores independently cancellable listener registrations and isolates notification failures.
     @NotNullByDefault
     private static final class TaskListenerRegistry extends CopyOnWriteArrayList<TaskListener> {
-        /// Serialization version for the compatibility list implementation.
+        /// Serialization version for the listener registry.
         private static final long serialVersionUID = 1L;
 
         /// Invokes an action for every listener in the current notification snapshot.
@@ -149,7 +152,7 @@ public abstract class TaskExecutor {
         }
     }
 
-    /// Delegates one independently removable subscription without changing the legacy list field contract.
+    /// Delegates one independently removable listener registration.
     @NotNullByDefault
     private static final class ListenerRegistration extends TaskListener {
         /// Listener owned by this exact registration.

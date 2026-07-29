@@ -49,7 +49,7 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
     /// Resolves the effective run directory captured by the production repository.
     private final RunDirectoryResolver runDirectoryResolver;
 
-    /// Creates the format-specific legacy core task after request validation.
+    /// Creates the format-specific core task after request validation.
     private final CoreExportTaskCreator coreTaskCreator;
 
     /// Creates a factory backed by one game repository.
@@ -124,14 +124,14 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
         };
     }
 
-    /// Copies immutable request metadata into the mutable legacy exporter DTO.
+    /// Copies immutable request metadata into the mutable core exporter DTO.
     ///
     /// Modrinth remote-file discovery is unconditionally disabled so normal export never performs
     /// network lookups. Launcher bundling is also unconditionally disabled because jpackage output
     /// cannot be represented by the removed single-JAR wrapper format.
     ///
     /// @param metadata immutable export metadata
-    /// @param whitelist expanded exact legacy whitelist
+    /// @param whitelist expanded exact exporter whitelist
     /// @param format destination archive format
     /// @return isolated mutable DTO used by one core task only
     static ModpackExportInfo toCoreExportInfo(
@@ -195,7 +195,7 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
         Path resolve(String instanceId);
     }
 
-    /// Creates one stopped legacy core export task.
+    /// Creates one stopped core export task.
     @FunctionalInterface
     @NotNullByDefault
     interface CoreExportTaskCreator {
@@ -203,7 +203,7 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
         ///
         /// @param format destination archive format
         /// @param instanceId selected repository instance
-        /// @param exportInfo isolated mutable legacy metadata
+        /// @param exportInfo isolated mutable export metadata
         /// @param whitelist immutable expanded exact whitelist
         /// @param temporaryOutput sibling temporary archive
         /// @return stopped format-specific core task
@@ -232,7 +232,7 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
         ///
         /// @param format destination archive format
         /// @param instanceId selected repository instance
-        /// @param exportInfo isolated mutable legacy metadata
+        /// @param exportInfo isolated mutable export metadata
         /// @param whitelist immutable expanded exact whitelist
         /// @param temporaryOutput sibling temporary archive
         /// @return stopped format-specific core task
@@ -268,10 +268,10 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
             };
         }
 
-        /// Recreates the legacy MultiMC instance configuration from effective instance settings.
+        /// Creates the MultiMC instance configuration from effective instance settings.
         ///
         /// @param instanceId exported repository instance
-        /// @param exportInfo isolated mutable legacy metadata
+        /// @param exportInfo isolated mutable export metadata
         /// @return MultiMC configuration written beside the manifest
         private MultiMCInstanceConfiguration createMultiMCConfiguration(
                 String instanceId,

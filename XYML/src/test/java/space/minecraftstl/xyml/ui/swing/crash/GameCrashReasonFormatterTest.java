@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Verifies the legacy rule-specific localization switch and unknown-crash fallback messages.
+/// Verifies rule-specific localization and unknown-crash fallback messages.
 @NotNullByDefault
 class GameCrashReasonFormatterTest {
     /// Formats the special Java class-major-version group with the analyzer's user-facing Java version.

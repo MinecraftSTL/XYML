@@ -138,10 +138,10 @@ public final class JavaManagementPanelTest {
     public void appliesReadOnlyRulesToActiveAndDisabledRuntimeActions() {
         JavaRuntime unmanaged = runtime("C:/java/local/bin/java.exe", "17", "Local", false);
         JavaRuntime managed = runtime("C:/java/managed/bin/java.exe", "21", "Managed", true);
-        DisabledJavaRuntimeEntry valid = new DisabledJavaRuntimeEntry(
+        DisabledJavaRuntimeEntry valid = DisabledJavaRuntimeEntry.available(
                 "C:/java/disabled/bin/java.exe",
                 Path.of("C:/java/disabled/bin/java.exe"));
-        DisabledJavaRuntimeEntry invalid = new DisabledJavaRuntimeEntry("C:/missing/java.exe", null);
+        DisabledJavaRuntimeEntry invalid = DisabledJavaRuntimeEntry.invalid("C:/missing/java.exe");
         FakeJavaRuntimeManagementService service = new FakeJavaRuntimeManagementService(
                 snapshot(false, List.of(unmanaged, managed), List.of(valid, invalid)));
         JavaManagementPanel panel = onEventDispatchThread(() ->
@@ -215,10 +215,10 @@ public final class JavaManagementPanelTest {
     @Test
     public void managesDisabledRuntimeRestoreAndInvalidRecordRemoval() throws InterruptedException {
         JavaRuntime restoredRuntime = runtime("C:/java/restored/bin/java.exe", "17", "Restored", false);
-        DisabledJavaRuntimeEntry valid = new DisabledJavaRuntimeEntry(
+        DisabledJavaRuntimeEntry valid = DisabledJavaRuntimeEntry.available(
                 restoredRuntime.getBinary().toString(),
                 restoredRuntime.getBinary());
-        DisabledJavaRuntimeEntry invalid = new DisabledJavaRuntimeEntry("C:/missing/java.exe", null);
+        DisabledJavaRuntimeEntry invalid = DisabledJavaRuntimeEntry.invalid("C:/missing/java.exe");
         FakeJavaRuntimeManagementService service = new FakeJavaRuntimeManagementService(
                 snapshot(true, List.of(), List.of(valid, invalid)));
         service.restoreTask = Task.completed(restoredRuntime);
@@ -979,7 +979,9 @@ public final class JavaManagementPanelTest {
                         Path.of("runtime.zip"),
                         "runtime",
                         "runtime",
-                        new JavaInfo(Platform.WINDOWS_X86_64, "21", "Test")));
+                        new JavaInfo(Platform.WINDOWS_X86_64, "21", "Test"),
+                        -1L,
+                        ""));
 
         /// Runtime returned by the next Mojang download.
         private final AtomicReference<JavaRuntime> downloadedRuntime = new AtomicReference<>(runtime(

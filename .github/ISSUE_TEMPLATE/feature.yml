@@ -1,5 +1,5 @@
 name: 新功能 | Feature Request
-description: 为 HMCL 提出新功能。| Suggest a new feature or enhancement for HMCL.
+description: 为 XYML 提出新功能。| Suggest a new feature or enhancement for XYML.
 title: "[Feature] "
 labels: enhancement
 body:
@@ -23,7 +23,7 @@ body:
     label: 原因 | Reason
     description: |
       请描述该功能带来的好处及原因。
-      Please describe why you want to add the feature or enhancement to HMCL.
+      Please describe why you want to add the feature or enhancement to XYML.
   validations:
     required: true
 - type: textarea

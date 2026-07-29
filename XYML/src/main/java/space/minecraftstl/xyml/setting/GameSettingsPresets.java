@@ -34,7 +34,7 @@ import java.util.Objects;
 
 /// Stores reusable game settings presets independently from the main config file.
 ///
-/// The JSON representation is saved as `config/game-settings.json` under the current HMCL
+/// The JSON representation is saved as `config/game-settings.json` under the current XYML
 /// directory.
 ///
 /// @author Glavo

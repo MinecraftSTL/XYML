@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.export;
 
+import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -1109,7 +1111,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         @Override
         public @Nullable Path chooseOutput(Component owner, ModpackExportFormat format, Path suggestedFile) {
             ModpackExportFormat selectedFormat = Objects.requireNonNull(format, "format");
-            JFileChooser chooser = new JFileChooser();
+            JFileChooser chooser = new EditablePathChooser();
             chooser.setDialogTitle(i18n("modpack.wizard.step.initialization.save"));
             chooser.setDialogType(JFileChooser.SAVE_DIALOG);
             chooser.setAcceptAllFileFilterUsed(false);

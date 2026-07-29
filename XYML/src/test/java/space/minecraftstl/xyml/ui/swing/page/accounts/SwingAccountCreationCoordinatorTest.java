@@ -241,7 +241,7 @@ public final class SwingAccountCreationCoordinatorTest {
         coordinator.close();
     }
 
-    /// Invalid-name recognition and typed acknowledgement match legacy Unicode behavior.
+    /// Invalid-name recognition and typed acknowledgement preserve Unicode behavior.
     @Test
     public void validatesOfflineNamesAndConfirmationText() {
         String expected = SwingAccountCreationDialog.replacePunctuationWithSpaces(

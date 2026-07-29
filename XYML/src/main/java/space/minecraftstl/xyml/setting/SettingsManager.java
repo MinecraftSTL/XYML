@@ -17,7 +17,6 @@
  */
 package space.minecraftstl.xyml.setting;
 
-import com.google.gson.JsonParseException;
 import com.google.gson.JsonObject;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.auth.Account;
@@ -30,7 +29,6 @@ import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.i18n.I18n;
-import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -57,28 +55,25 @@ public final class SettingsManager {
     }
 
     /// The local directory storing per-workspace configuration files.
-    private static final Path LOCAL_CONFIG_FILES_DIRECTORY = Metadata.HMCL_LOCAL_HOME.resolve("config");
+    private static final Path LOCAL_CONFIG_FILES_DIRECTORY = Metadata.XYML_LOCAL_HOME.resolve("config");
 
     /// The local directory storing per-workspace state files.
-    private static final Path LOCAL_STATE_DIRECTORY = Metadata.HMCL_LOCAL_HOME.resolve("state");
+    private static final Path LOCAL_STATE_DIRECTORY = Metadata.XYML_LOCAL_HOME.resolve("state");
 
     /// The local directory storing per-workspace cache files.
-    private static final Path LOCAL_CACHE_DIRECTORY = Metadata.HMCL_LOCAL_HOME.resolve("cache");
+    private static final Path LOCAL_CACHE_DIRECTORY = Metadata.XYML_LOCAL_HOME.resolve("cache");
 
     /// The local directory storing per-workspace private data files.
-    private static final Path LOCAL_PRIVATE_DIRECTORY = Metadata.HMCL_LOCAL_HOME.resolve("private");
+    private static final Path LOCAL_PRIVATE_DIRECTORY = Metadata.XYML_LOCAL_HOME.resolve("private");
 
     /// The user directory storing shared configuration files.
-    private static final Path USER_CONFIG_FILES_DIRECTORY = Metadata.HMCL_USER_HOME.resolve("config");
+    private static final Path USER_CONFIG_FILES_DIRECTORY = Metadata.XYML_USER_HOME.resolve("config");
 
     /// The user directory storing shared state files.
-    private static final Path USER_STATE_DIRECTORY = Metadata.HMCL_USER_HOME.resolve("state");
+    private static final Path USER_STATE_DIRECTORY = Metadata.XYML_USER_HOME.resolve("state");
 
     /// The user directory storing shared private data files.
-    private static final Path USER_PRIVATE_DIRECTORY = Metadata.HMCL_USER_HOME.resolve("private");
-
-    /// The legacy settings path used as a migration input.
-    private static final Path LEGACY_SETTINGS_LOCATION = Metadata.HMCL_LOCAL_HOME.resolve("settings.json");
+    private static final Path USER_PRIVATE_DIRECTORY = Metadata.XYML_USER_HOME.resolve("private");
 
     /// The user settings path shared by all workspaces.
     public static final Path USER_SETTINGS_LOCATION =
@@ -332,8 +327,7 @@ public final class SettingsManager {
 
     /// Returns an immutable snapshot of executable paths explicitly registered by the user.
     ///
-    /// This narrow JDK collection boundary keeps runtime discovery independent of the observable collection used by
-    /// the legacy settings implementation.
+    /// This narrow JDK collection boundary keeps runtime discovery independent of the observable settings collection.
     ///
     /// @return immutable user Java path snapshot
     public static @Unmodifiable Set<String> getUserJavaPathsSnapshot() {
@@ -351,7 +345,7 @@ public final class SettingsManager {
     /// Enables and registers one executable path when user settings are writable.
     ///
     /// The disabled entry is removed before registration. The return value reports only a new user-path insertion,
-    /// matching the legacy Java manager's decision to add the corresponding runtime to its in-memory registry.
+    /// which determines whether the corresponding runtime must be added to the in-memory registry.
     ///
     /// @param path executable path text
     /// @return true when the user-path set changed
@@ -397,7 +391,7 @@ public final class SettingsManager {
 
     /// Returns the current per-workspace config directory path.
     public static Path localConfigDirectory() {
-        return Metadata.HMCL_LOCAL_HOME;
+        return Metadata.XYML_LOCAL_HOME;
     }
 
     /// Returns the current per-workspace settings path.
@@ -733,16 +727,6 @@ public final class SettingsManager {
         return accountIDs;
     }
 
-    /// Creates a private data update from migrated account stores.
-    private static AccountPrivateDataUpdate createAccountPrivateDataUpdate(
-            LegacyConfigMigrator.AccountMigrationResult accounts) {
-        List<AccountID> accountIDs = getAccountIDs(accounts.metadata().getAccounts());
-        return new AccountPrivateDataUpdate(
-                accountIDs,
-                accountIDs,
-                accounts.privateData().getPrivateData());
-    }
-
     /// Returns whether private data needed by an account metadata update can be persisted.
     ///
     /// The check is performed before metadata is saved so credentials are not removed from account metadata unless
@@ -911,14 +895,6 @@ public final class SettingsManager {
     /// @param privateData the account private data store
     @NotNullByDefault
     private record AccountMetadataSnapshot(AccountMetadataStore metadata, AccountPrivateData privateData) {
-    }
-
-    /// Account metadata load result.
-    ///
-    /// @param access account metadata file access status
-    /// @param migratedAccountsSaved whether migrated account metadata and private data were saved
-    @NotNullByDefault
-    private record AccountMetadataLoadResult(SettingFileAccess access, boolean migratedAccountsSaved) {
     }
 
     /// Account private data update ready to be distributed among private data stores.
@@ -1118,48 +1094,24 @@ public final class SettingsManager {
         launcherSettings = loadedLauncherSettings.settings();
         launcherSettingsAccess = loadedLauncherSettings.access();
 
-        @Nullable LegacyConfigMigrator.LegacyConfigMigration legacyConfigMigration =
-                loadedLauncherSettings.pendingMigration();
-        LegacyConfigMigrator.DetachedSettings migratedDetachedSettings = legacyConfigMigration == null
-                ? LegacyConfigMigrator.DetachedSettings.empty()
-                : legacyConfigMigration.detachedSettings();
-
-        boolean currentUserSettingsExist = Files.exists(USER_SETTINGS_LOCATION) && Files.exists(USER_STATE_LOCATION);
-        @Nullable LegacyConfigMigrator.UserSettingsMigrationResult userSettingsMigrationResult = currentUserSettingsExist
-                ? null
-                : LegacyConfigMigrator.migrateLegacyUserSettings();
-        userSettingsAccess = loadUserSettings(userSettingsMigrationResult);
-        userStateAccess = loadUserState(userSettingsMigrationResult);
-        if (userSettingsMigrationResult != null) {
-            LegacyConfigMigrator.completeLegacyUserSettingsMigration(userSettingsMigrationResult);
-        }
+        userSettingsAccess = loadUserSettings();
+        userStateAccess = loadUserState();
 
         Locale.setDefault(settings().languageProperty().get().getLocale());
         I18n.setLocale(launcherSettings.languageProperty().get());
         LOG.setLogRetention(userSettings().logRetentionProperty().get());
-        loadGameDirectories(migratedDetachedSettings.gameDirectories());
-        gameSettingsAccess = loadGameSettingsPresets(migratedDetachedSettings.gameSettingsPresets());
-        launcherStateAccess = loadLauncherState(migratedDetachedSettings.launcherState());
-        authlibInjectorServersAccess =
-                loadAuthlibInjectorServers(migratedDetachedSettings.authlibInjectorServers());
+        loadGameDirectories();
+        gameSettingsAccess = loadGameSettingsPresets();
+        launcherStateAccess = loadLauncherState();
+        authlibInjectorServersAccess = loadAuthlibInjectorServers();
         loadAuthlibInjectorServerMetadataCache();
         userGameAccountPrivateDataAccess = loadUserGameAccountPrivateData();
         gameAccountPrivateDataAccess = loadGameAccountPrivateData();
         userGameAccountsAccess = loadUserGameAccounts();
-        AccountMetadataLoadResult loadedGameAccounts =
-                loadGameAccountsWithResult(migratedDetachedSettings.accountMigration());
-        gameAccountsAccess = loadedGameAccounts.access();
+        gameAccountsAccess = loadGameAccounts();
 
-        if (Files.exists(Metadata.HMCL_LOCAL_HOME)) {
-            checkWritable(Metadata.HMCL_LOCAL_HOME);
-        }
-
-        if (legacyConfigMigration != null && loadedGameAccounts.migratedAccountsSaved()) {
-            LOG.info("Migrating settings from " + legacyConfigMigration.path() + " to " + SETTINGS_LOCATION);
-            FileUtils.saveSafely(SETTINGS_LOCATION, legacyConfigMigration.launcherSettings().toJson());
-            LegacyConfigMigrator.completeLegacyConfigMigration(legacyConfigMigration);
-        } else if (legacyConfigMigration != null) {
-            LOG.warning("Skipped legacy config migration because migrated account private data was not saved");
+        if (Files.exists(Metadata.XYML_LOCAL_HOME)) {
+            checkWritable(Metadata.XYML_LOCAL_HOME);
         }
 
         if (launcherSettings.isSavable()) {
@@ -1173,7 +1125,7 @@ public final class SettingsManager {
         }
     }
 
-    /// Loads the current per-workspace settings or migrates a legacy config when needed.
+    /// Loads the current per-workspace launcher settings.
     private static LoadedLauncherSettings loadLauncherSettings() throws IOException {
         if (Files.exists(SETTINGS_LOCATION)) {
             @Nullable JsonObject jsonObject;
@@ -1184,13 +1136,13 @@ public final class SettingsManager {
 
                 LauncherSettings settings = new LauncherSettings();
                 settings.setBackupOnNextSave(true);
-                return new LoadedLauncherSettings(settings, null, SettingFileAccess.READ_WRITE);
+                return new LoadedLauncherSettings(settings, SettingFileAccess.READ_WRITE);
             }
 
             if (jsonObject == null) {
                 LOG.warning("Launcher settings file is empty: " + SETTINGS_LOCATION);
 
-                return new LoadedLauncherSettings(new LauncherSettings(), null, SettingFileAccess.READ_WRITE);
+                return new LoadedLauncherSettings(new LauncherSettings(), SettingFileAccess.READ_WRITE);
             }
 
             JsonSchema.CompatibilityResult schemaResult =
@@ -1211,7 +1163,7 @@ public final class SettingsManager {
             if (!schemaResult.readable()) {
                 LauncherSettings settings = new LauncherSettings();
                 settings.setSavable(false);
-                return new LoadedLauncherSettings(settings, null, SettingFileAccess.UNREADABLE);
+                return new LoadedLauncherSettings(settings, SettingFileAccess.UNREADABLE);
             }
 
             try {
@@ -1219,7 +1171,7 @@ public final class SettingsManager {
                 if (settings == null) {
                     settings = new LauncherSettings();
                     settings.setSavable(false);
-                    return new LoadedLauncherSettings(settings, null, SettingFileAccess.UNREADABLE);
+                    return new LoadedLauncherSettings(settings, SettingFileAccess.UNREADABLE);
                 }
 
                 if (!schemaResult.preserveSchema() && !LauncherSettings.CURRENT_SCHEMA.equals(settings.schemaProperty().get())) {
@@ -1227,55 +1179,18 @@ public final class SettingsManager {
                 }
 
                 settings.setSavable(schemaResult.allowSave());
-                return new LoadedLauncherSettings(settings, null, schemaResult.allowSave()
+                return new LoadedLauncherSettings(settings, schemaResult.allowSave()
                         ? SettingFileAccess.READ_WRITE
                         : SettingFileAccess.READ_ONLY);
             } catch (Exception e) {
                 LOG.warning("Failed to parse launcher settings file: " + SETTINGS_LOCATION, e);
                 LauncherSettings settings = new LauncherSettings();
                 settings.setBackupOnNextSave(true);
-                return new LoadedLauncherSettings(settings, null, SettingFileAccess.READ_WRITE);
-            }
-        } else {
-            LegacyConfigMigrator.@Nullable LegacyConfigMigration migration = migrateLegacySettings();
-            if (migration != null) {
-                return new LoadedLauncherSettings(migration.launcherSettings(), migration, SettingFileAccess.READ_WRITE);
-            }
-
-            migration = LegacyConfigMigrator.migrateLegacyConfig();
-            if (migration != null) {
-                return new LoadedLauncherSettings(migration.launcherSettings(), migration, SettingFileAccess.READ_WRITE);
+                return new LoadedLauncherSettings(settings, SettingFileAccess.READ_WRITE);
             }
         }
 
-        return new LoadedLauncherSettings(new LauncherSettings(), null, SettingFileAccess.READ_WRITE);
-    }
-
-    /// Migrates the legacy `settings.json` file when it is present.
-    private static LegacyConfigMigrator.@Nullable LegacyConfigMigration migrateLegacySettings() throws IOException {
-        if (!Files.isRegularFile(LEGACY_SETTINGS_LOCATION)) {
-            return null;
-        }
-
-        @Nullable JsonObject jsonObject;
-        try {
-            jsonObject = JsonUtils.fromJsonFile(LEGACY_SETTINGS_LOCATION, JsonObject.class);
-        } catch (JsonParseException e) {
-            LOG.warning("Malformed legacy settings file: " + LEGACY_SETTINGS_LOCATION, e);
-            return null;
-        }
-
-        if (jsonObject == null) {
-            LOG.info("Legacy settings file is empty: " + LEGACY_SETTINGS_LOCATION);
-            return null;
-        }
-
-        if (jsonObject.has(JsonSchema.PROPERTY_SCHEMA)) {
-            LOG.info("Ignoring schematized legacy settings file: " + LEGACY_SETTINGS_LOCATION);
-            return null;
-        }
-
-        return LegacyConfigMigrator.migrateLegacyConfigIfNeeded(LEGACY_SETTINGS_LOCATION);
+        return new LoadedLauncherSettings(new LauncherSettings(), SettingFileAccess.READ_WRITE);
     }
 
     /// Returns whether the current workspace already has any local configuration footprint.
@@ -1286,24 +1201,19 @@ public final class SettingsManager {
                 || Files.exists(LOCAL_GAME_DIRECTORIES_LOCATION)
                 || Files.exists(GAME_SETTINGS_LOCATION)
                 || Files.exists(GAME_ACCOUNTS_LOCATION)
-                || Files.exists(GAME_ACCOUNT_PRIVATE_DATA_LOCATION)
-                || Files.exists(LEGACY_SETTINGS_LOCATION)
-                || LegacyConfigMigrator.hasLegacyConfig());
+                || Files.exists(GAME_ACCOUNT_PRIVATE_DATA_LOCATION));
     }
 
     /// Loads game directories and installs the save listener.
-    ///
-    /// @param fallbackGameDirectories the fallback store used when the local game directory file does not exist
-    private static void loadGameDirectories(
-            @Nullable GameDirectories fallbackGameDirectories) throws IOException {
+    private static void loadGameDirectories() throws IOException {
         if (localGameDirectories != null || userGameDirectories != null) {
             throw new IllegalStateException("Game directories are already loaded");
         }
 
         boolean newlyCreatedLocal = !Files.exists(LOCAL_GAME_DIRECTORIES_LOCATION);
         boolean newlyCreatedUser = !Files.exists(USER_GAME_DIRECTORIES_LOCATION);
-        JsonSettingFile.LoadResult<GameDirectories> userResult = USER_GAME_DIRECTORIES_FILE.load(null);
-        JsonSettingFile.LoadResult<GameDirectories> localResult = LOCAL_GAME_DIRECTORIES_FILE.load(fallbackGameDirectories);
+        JsonSettingFile.LoadResult<GameDirectories> userResult = USER_GAME_DIRECTORIES_FILE.load();
+        JsonSettingFile.LoadResult<GameDirectories> localResult = LOCAL_GAME_DIRECTORIES_FILE.load();
 
         localGameDirectories = localResult.value();
         localGameDirectories.setUserFile(false);
@@ -1333,17 +1243,14 @@ public final class SettingsManager {
 
     /// Loads game settings presets and installs the save listener.
     ///
-    /// @param fallbackGameSettingsPresets the fallback store used when the preset file does not exist
     /// @return the preset file access status
-    private static SettingFileAccess loadGameSettingsPresets(
-            @Nullable GameSettingsPresets fallbackGameSettingsPresets) throws IOException {
+    private static SettingFileAccess loadGameSettingsPresets() throws IOException {
         if (gameSettingsPresets != null) {
             throw new IllegalStateException("Game settings presets are already loaded");
         }
 
         boolean newlyCreated = !Files.exists(GAME_SETTINGS_LOCATION);
-        JsonSettingFile.LoadResult<GameSettingsPresets> result =
-                GAME_SETTINGS_FILE.load(fallbackGameSettingsPresets);
+        JsonSettingFile.LoadResult<GameSettingsPresets> result = GAME_SETTINGS_FILE.load();
         gameSettingsPresets = result.value();
         if (gameSettingsPresets.isSavable()) {
             GAME_SETTINGS_FILE.installAutoSave(gameSettingsPresets);
@@ -1368,17 +1275,14 @@ public final class SettingsManager {
 
     /// Loads launcher state and installs the save listener.
     ///
-    /// @param fallbackLauncherState the fallback state used when the launcher state file does not exist
     /// @return the launcher state file access status
-    private static SettingFileAccess loadLauncherState(
-            @Nullable LauncherState fallbackLauncherState) throws IOException {
+    private static SettingFileAccess loadLauncherState() throws IOException {
         if (launcherState != null) {
             throw new IllegalStateException("Launcher state is already loaded");
         }
 
         boolean newlyCreated = !Files.exists(STATE_LOCATION);
-        JsonSettingFile.LoadResult<LauncherState> result =
-                STATE_FILE.load(fallbackLauncherState);
+        JsonSettingFile.LoadResult<LauncherState> result = STATE_FILE.load();
         launcherState = result.value();
         if (launcherState.isSavable()) {
             STATE_FILE.installAutoSave(launcherState);
@@ -1393,17 +1297,15 @@ public final class SettingsManager {
 
     /// Loads authlib-injector servers and installs the save listener.
     ///
-    /// @param fallbackAuthlibInjectorServers the fallback list used when the server list file does not exist
     /// @return the server list file access status
-    private static SettingFileAccess loadAuthlibInjectorServers(
-            @Nullable AuthlibInjectorServerList fallbackAuthlibInjectorServers) throws IOException {
+    private static SettingFileAccess loadAuthlibInjectorServers() throws IOException {
         if (authlibInjectorServers != null) {
             throw new IllegalStateException("Authlib-injector servers are already loaded");
         }
 
         boolean newlyCreated = !Files.exists(AUTHLIB_INJECTOR_SERVERS_LOCATION);
         JsonSettingFile.LoadResult<AuthlibInjectorServerList> result =
-                AUTHLIB_INJECTOR_SERVERS_FILE.load(fallbackAuthlibInjectorServers);
+                AUTHLIB_INJECTOR_SERVERS_FILE.load();
         authlibInjectorServers = result.value();
         if (authlibInjectorServers.isSavable()) {
             AUTHLIB_INJECTOR_SERVERS_FILE.installAutoSave(authlibInjectorServers);
@@ -1424,7 +1326,7 @@ public final class SettingsManager {
 
         try {
             JsonSettingFile.LoadResult<AuthlibInjectorServerMetadataCache> result =
-                    AUTHLIB_INJECTOR_SERVER_METADATA_CACHE_FILE.load(null);
+                    AUTHLIB_INJECTOR_SERVER_METADATA_CACHE_FILE.load();
             authlibInjectorServerMetadataCache = result.value();
         } catch (IOException e) {
             LOG.warning("Failed to load authlib-injector server metadata cache", e);
@@ -1522,7 +1424,7 @@ public final class SettingsManager {
 
         try {
             JsonSettingFile.LoadResult<AccountPrivateData> result =
-                    USER_GAME_ACCOUNT_PRIVATE_DATA_FILE.load(null);
+                    USER_GAME_ACCOUNT_PRIVATE_DATA_FILE.load();
             userGameAccountPrivateData = result.value();
             return result.access();
         } catch (IOException e) {
@@ -1543,7 +1445,7 @@ public final class SettingsManager {
 
         try {
             JsonSettingFile.LoadResult<AccountPrivateData> result =
-                    GAME_ACCOUNT_PRIVATE_DATA_FILE.load(null);
+                    GAME_ACCOUNT_PRIVATE_DATA_FILE.load();
             gameAccountPrivateData = result.value();
             return result.access();
         } catch (IOException e) {
@@ -1563,109 +1465,57 @@ public final class SettingsManager {
         }
 
         boolean newlyCreated = !Files.exists(USER_GAME_ACCOUNTS_LOCATION);
-        @Nullable LegacyConfigMigrator.UserAccountsMigrationResult migrationResult =
-                newlyCreated ? LegacyConfigMigrator.migrateLegacyUserAccounts() : null;
-        @Nullable LegacyConfigMigrator.AccountMigrationResult migrated =
-                migrationResult != null ? migrationResult.accounts() : null;
         try {
-            JsonSettingFile.LoadResult<AccountMetadataStore> result = USER_GAME_ACCOUNTS_FILE.load(
-                    migrated != null ? migrated.metadata() : null);
+            JsonSettingFile.LoadResult<AccountMetadataStore> result = USER_GAME_ACCOUNTS_FILE.load();
             userGameAccounts = result.value();
 
-            AccountPrivateDataStore defaultPrivateData =
-                    new AccountPrivateDataStore(userGameAccountPrivateData(), USER_GAME_ACCOUNT_PRIVATE_DATA_FILE);
-            @Unmodifiable List<AccountPrivateDataStore> privateDataStores = List.of(
-                    new AccountPrivateDataStore(userGameAccountPrivateData(), USER_GAME_ACCOUNT_PRIVATE_DATA_FILE),
-                    new AccountPrivateDataStore(gameAccountPrivateData(), GAME_ACCOUNT_PRIVATE_DATA_FILE));
-            @Nullable AccountPrivateDataUpdate privateDataUpdate = migrated != null && newlyCreated
-                    ? createAccountPrivateDataUpdate(migrated)
-                    : null;
-            boolean canSavePrivateData = privateDataUpdate == null
-                    || canSaveAccountPrivateDataUpdate(privateDataUpdate, defaultPrivateData, privateDataStores, false);
-            List<AccountPrivateDataStore> changedPrivateDataStores = privateDataUpdate != null && canSavePrivateData
-                    ? distributeAccountPrivateData(privateDataUpdate, defaultPrivateData, privateDataStores, false, false)
-                    : List.of();
-            if ((newlyCreated || !changedPrivateDataStores.isEmpty() || userGameAccounts.isBackupOnNextSave())
-                    && userGameAccounts.isSavable()
-                    && canSavePrivateData) {
+            if ((newlyCreated || userGameAccounts.isBackupOnNextSave()) && userGameAccounts.isSavable()) {
                 saveAccountMetadataStore(
                         userGameAccounts,
                         USER_GAME_ACCOUNTS_FILE,
-                        changedPrivateDataStores,
+                        List.of(),
                         true,
                         true);
-                if (migrationResult != null) {
-                    LegacyConfigMigrator.completeLegacyUserAccountsMigration(migrationResult);
-                }
             }
 
             return result.access();
         } catch (IOException e) {
             LOG.warning("Failed to load user game accounts", e);
-            userGameAccounts = migrated != null ? migrated.metadata() : new AccountMetadataStore();
-            if (migrated != null) {
-                distributeAccountPrivateData(
-                        createAccountPrivateDataUpdate(migrated),
-                        new AccountPrivateDataStore(userGameAccountPrivateData(), USER_GAME_ACCOUNT_PRIVATE_DATA_FILE),
-                        List.of(
-                                new AccountPrivateDataStore(userGameAccountPrivateData(),
-                                        USER_GAME_ACCOUNT_PRIVATE_DATA_FILE),
-                                new AccountPrivateDataStore(gameAccountPrivateData(), GAME_ACCOUNT_PRIVATE_DATA_FILE)),
-                        false,
-                        false);
-            }
+            userGameAccounts = new AccountMetadataStore();
             userGameAccounts.setSavable(false);
             return SettingFileAccess.UNREADABLE;
         }
     }
 
-    /// Loads account metadata and reports whether migrated account data was persisted.
+    /// Loads per-workspace account metadata.
     ///
-    /// @param fallbackGameAccounts the fallback stores used when the account metadata file does not exist
-    /// @return the account metadata file access status and migration persistence result
-    private static AccountMetadataLoadResult loadGameAccountsWithResult(
-            @Nullable LegacyConfigMigrator.AccountMigrationResult fallbackGameAccounts) throws IOException {
+    /// @return the account metadata file access status
+    private static SettingFileAccess loadGameAccounts() throws IOException {
         if (gameAccounts != null) {
             throw new IllegalStateException("Game accounts are already loaded");
         }
 
         boolean newlyCreated = !Files.exists(GAME_ACCOUNTS_LOCATION);
         JsonSettingFile.LoadResult<AccountMetadataStore> result =
-                GAME_ACCOUNTS_FILE.load(fallbackGameAccounts != null ? fallbackGameAccounts.metadata() : null);
+                GAME_ACCOUNTS_FILE.load();
         gameAccounts = result.value();
 
-        AccountPrivateDataStore defaultPrivateData =
-                new AccountPrivateDataStore(gameAccountPrivateData(), GAME_ACCOUNT_PRIVATE_DATA_FILE);
-        @Unmodifiable List<AccountPrivateDataStore> privateDataStores = List.of(
-                new AccountPrivateDataStore(gameAccountPrivateData(), GAME_ACCOUNT_PRIVATE_DATA_FILE),
-                new AccountPrivateDataStore(userGameAccountPrivateData(), USER_GAME_ACCOUNT_PRIVATE_DATA_FILE));
-        @Nullable AccountPrivateDataUpdate privateDataUpdate = fallbackGameAccounts != null && newlyCreated
-                ? createAccountPrivateDataUpdate(fallbackGameAccounts)
-                : null;
-        boolean canSavePrivateData = privateDataUpdate == null
-                || canSaveAccountPrivateDataUpdate(privateDataUpdate, defaultPrivateData, privateDataStores, false);
-        List<AccountPrivateDataStore> changedPrivateDataStores = privateDataUpdate != null && canSavePrivateData
-                ? distributeAccountPrivateData(privateDataUpdate, defaultPrivateData, privateDataStores, false, false)
-                : List.of();
-        if ((newlyCreated || !changedPrivateDataStores.isEmpty() || gameAccounts.isBackupOnNextSave())
-                && gameAccounts.isSavable()
-                && canSavePrivateData) {
+        if ((newlyCreated || gameAccounts.isBackupOnNextSave()) && gameAccounts.isSavable()) {
             saveAccountMetadataStore(
                     gameAccounts,
                     GAME_ACCOUNTS_FILE,
-                    changedPrivateDataStores,
+                    List.of(),
                     true,
                     true);
         }
 
-        return new AccountMetadataLoadResult(result.access(), canSavePrivateData);
+        return result.access();
     }
 
     /// Checks whether root is reading per-workspace config data owned by another user.
     private static void checkLocalConfigOwner() {
-        checkOwner(Metadata.HMCL_LOCAL_HOME);
+        checkOwner(Metadata.XYML_LOCAL_HOME);
         checkOwner(SETTINGS_LOCATION);
-        checkOwner(LEGACY_SETTINGS_LOCATION);
         checkOwner(STATE_LOCATION);
         checkOwner(AUTHLIB_INJECTOR_SERVERS_LOCATION);
         checkOwner(LOCAL_GAME_DIRECTORIES_LOCATION);
@@ -1711,23 +1561,19 @@ public final class SettingsManager {
     /// Loads user settings and installs the save listener.
     ///
     /// @return the user settings file access status
-    private static SettingFileAccess loadUserSettings(
-            @Nullable LegacyConfigMigrator.UserSettingsMigrationResult migrationResult) throws IOException {
+    private static SettingFileAccess loadUserSettings() throws IOException {
         if (userSettingsInstance != null) {
             throw new IllegalStateException("User settings are already loaded");
         }
 
         boolean newlyCreated = !Files.exists(USER_SETTINGS_LOCATION);
-        @Nullable UserSettings migratedUserSettings = newlyCreated && migrationResult != null
-                ? migrationResult.userSettings()
-                : null;
-        JsonSettingFile.LoadResult<UserSettings> result = USER_SETTINGS_FILE.load(migratedUserSettings);
+        JsonSettingFile.LoadResult<UserSettings> result = USER_SETTINGS_FILE.load();
         userSettingsInstance = result.value();
         if (userSettingsInstance.isSavable()) {
             USER_SETTINGS_FILE.installAutoSave(userSettingsInstance);
         }
 
-        if (newlyCreated && migratedUserSettings != null && userSettingsInstance.isSavable()) {
+        if (newlyCreated && userSettingsInstance.isSavable()) {
             USER_SETTINGS_FILE.saveSync(userSettingsInstance);
         }
 
@@ -1737,17 +1583,13 @@ public final class SettingsManager {
     /// Loads user state and installs the save listener.
     ///
     /// @return the user state file access status
-    private static SettingFileAccess loadUserState(
-            @Nullable LegacyConfigMigrator.UserSettingsMigrationResult migrationResult) throws IOException {
+    private static SettingFileAccess loadUserState() throws IOException {
         if (userStateInstance != null) {
             throw new IllegalStateException("User state is already loaded");
         }
 
         boolean newlyCreated = !Files.exists(USER_STATE_LOCATION);
-        @Nullable UserState migratedUserState = newlyCreated && migrationResult != null
-                ? migrationResult.userState()
-                : null;
-        JsonSettingFile.LoadResult<UserState> result = USER_STATE_FILE.load(migratedUserState);
+        JsonSettingFile.LoadResult<UserState> result = USER_STATE_FILE.load();
         userStateInstance = result.value();
         if (userStateInstance.isSavable()) {
             USER_STATE_FILE.installAutoSave(userStateInstance);
@@ -1763,11 +1605,10 @@ public final class SettingsManager {
     /// Result of loading per-workspace launcher settings.
     ///
     /// @param settings the loaded launcher settings
-    /// @param pendingMigration the pending legacy config migration, or `null` when no legacy config was migrated
+    /// @param access launcher settings file access status
     @NotNullByDefault
     private record LoadedLauncherSettings(
             LauncherSettings settings,
-            @Nullable LegacyConfigMigrator.LegacyConfigMigration pendingMigration,
             SettingFileAccess access) {
     }
 

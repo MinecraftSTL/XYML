@@ -38,17 +38,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
-/// Verifies the toolkit-neutral account state boundary and compatibility method aliases.
+/// Verifies the toolkit-neutral account state boundary.
 @NotNullByDefault
 public final class AccountsNeutralStateTest {
     /// Keeps the authlib provider construction in [Accounts] independent of packaged resources.
-    private static final String AUTHLIB_LOCATION_PROPERTY = "hmcl.authlibinjector.location";
+    private static final String AUTHLIB_LOCATION_PROPERTY = "xyml.authlibinjector.location";
 
     /// Verifies that account field changes are exposed as neutral list updates without JavaFX adapters.
     @Test
     public void accountChangesPublishNeutralUpdateEvents() {
         withAccounts(() -> {
-            ObservableList<Account> accounts = Accounts.getAccountsValue();
+            ObservableList<Account> accounts = Accounts.getAccounts();
             TestAccount account = new TestAccount("neutral-update");
             List<ListChange.Kind> changes = new ArrayList<>();
             Subscription subscription = accounts.subscribe(change -> changes.add(change.kind()));
@@ -66,16 +66,14 @@ public final class AccountsNeutralStateTest {
 
     /// Verifies that selected-account accessors share one neutral property.
     @Test
-    public void selectedAccountKeepsCompatibilityViewSynchronized() {
+    public void selectedAccountAccessorsStaySynchronized() {
         withAccounts(() -> {
             TestAccount account = new TestAccount("neutral-selection");
             try {
                 Accounts.setSelectedAccount(account);
-                assertSame(account, Accounts.selectedAccountValueProperty().getValue());
                 assertSame(account, Accounts.selectedAccountProperty().get());
 
                 Accounts.selectedAccountProperty().set(null);
-                assertNull(Accounts.selectedAccountValueProperty().getValue());
                 assertNull(Accounts.getSelectedAccount());
             } finally {
                 Accounts.setSelectedAccount(null);

@@ -79,7 +79,7 @@ public final class SwingGameLogWindow implements AutoCloseable {
 
     /// Creates a window using the current launcher log limit without a persistence callback.
     ///
-    /// This constructor matches the legacy window's process-and-history call shape. Integrations that persist a changed
+    /// This constructor accepts the process-and-history call shape. Integrations that persist a changed
     /// line limit should use {@link #SwingGameLogWindow(ManagedProcess, CircularArrayList, int, IntConsumer)}.
     ///
     /// @param process managed game process

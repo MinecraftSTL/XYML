@@ -113,7 +113,7 @@ public final class SwingCrashReportWindow {
             return i18n("launcher.crash.java_internal_error");
         }
         if (outdated) {
-            return i18n("launcher.crash.hmcl_out_dated");
+            return i18n("launcher.crash.xyml_outdated");
         }
         return i18n("launcher.crash");
     }

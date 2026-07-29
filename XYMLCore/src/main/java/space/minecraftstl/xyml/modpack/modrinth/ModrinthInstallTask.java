@@ -96,7 +96,7 @@ public class ModrinthInstallTask extends Task<Void> {
             Exception ex = event.getTask().getException();
             if (event.isFailed()) {
                 if (!(ex instanceof ModpackCompletionException)) {
-                    repository.removeVersionFromDisk(name);
+                    repository.removeInstanceFromDisk(name);
                 }
             }
         });
@@ -114,8 +114,8 @@ public class ModrinthInstallTask extends Task<Void> {
 
         this.config = config;
         List<String> subDirectories = Arrays.asList("/client-overrides", "/overrides");
-        dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), subDirectories, any -> true, config).withStage("hmcl.modpack"));
-        dependents.add(new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), subDirectories, manifest, ModrinthModpackProvider.INSTANCE, manifest.getName(), manifest.getVersionId(), repository.getModpackConfiguration(name)).withStage("hmcl.modpack"));
+        dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), subDirectories, any -> true, config).withStage("xyml.modpack"));
+        dependents.add(new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), subDirectories, manifest, ModrinthModpackProvider.INSTANCE, manifest.getName(), manifest.getVersionId(), repository.getModpackConfiguration(name)).withStage("xyml.modpack"));
 
         URI iconUri = NetworkUtils.toURIOrNull(iconUrl);
         if (iconUri != null) {

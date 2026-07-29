@@ -54,7 +54,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         exception = null;
         failure = null;
         started = true;
-        taskListeners.forEach(TaskListener::onStart);
+        notifyTaskListeners(TaskListener::onStart);
         future = executeTasks(null, Collections.singleton(firstTask))
                 .handleAsync((@Nullable Exception exception, @Nullable Throwable throwable) -> {
                     boolean success = exception == null && throwable == null;
@@ -83,7 +83,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                             }
                         }
                     } finally {
-                        taskListeners.forEach(it -> it.onStop(success, this));
+                        notifyTaskListeners(it -> it.onStop(success, this));
                     }
 
                     return success;
@@ -174,7 +174,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     if (task.getSignificance().shouldLog())
                         LOG.trace("Executing task: " + task.getName());
 
-                    taskListeners.forEach(it -> it.onReady(task));
+                    notifyTaskListeners(it -> it.onReady(task));
 
                     return task.getFuture(new TaskCompletableFuture() {
                         /// Executes one nested task with the current task as its parent.
@@ -199,7 +199,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
                     task.setResult(result);
                     task.fireDoneEvent(this, false);
-                    taskListeners.forEach(it -> it.onFinished(task));
+                    notifyTaskListeners(it -> it.onFinished(task));
 
                     task.setState(Task.TaskState.SUCCEEDED);
 
@@ -214,7 +214,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                                 LOG.trace("Task aborted: " + task.getName());
                             }
                             task.fireDoneEvent(this, true);
-                            taskListeners.forEach(it -> it.onFailed(task, e));
+                            notifyTaskListeners(it -> it.onFailed(task, e));
                         } else {
                             task.setException(e);
                             exception = e;
@@ -222,7 +222,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                                 LOG.trace("Task failed: " + task.getName(), e);
                             }
                             task.fireDoneEvent(this, true);
-                            taskListeners.forEach(it -> it.onFailed(task, e));
+                            notifyTaskListeners(it -> it.onFailed(task, e));
                         }
 
                         task.setState(Task.TaskState.FAILED);
@@ -245,12 +245,13 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     } else if (parentTask != null) {
                         task.setInheritedStage(parentTask.getInheritedStage());
                     }
-                    task.setNotifyPropertiesChanged(() -> taskListeners.forEach(it -> it.onPropertiesUpdate(task)));
+                    task.setNotifyPropertiesChanged(() ->
+                            notifyTaskListeners(it -> it.onPropertiesUpdate(task)));
 
                     if (task.getSignificance().shouldLog())
                         LOG.trace("Executing task: " + task.getName());
 
-                    taskListeners.forEach(it -> it.onReady(task));
+                    notifyTaskListeners(it -> it.onReady(task));
 
                     if (task.doPreExecute()) {
                         return CompletableFuture.runAsync(wrap(task::preExecute), task.getExecutor());
@@ -274,7 +275,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
                     return CompletableFuture.runAsync(wrap(() -> {
                         task.setState(Task.TaskState.RUNNING);
-                        taskListeners.forEach(it -> it.onRunning(task));
+                        notifyTaskListeners(it -> it.onRunning(task));
                         task.execute();
                     }), task.getExecutor()).whenComplete(
                             (@Nullable Void unused, @Nullable Throwable throwable) -> {
@@ -314,7 +315,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     }
 
                     task.fireDoneEvent(this, false);
-                    taskListeners.forEach(it -> it.onFinished(task));
+                    notifyTaskListeners(it -> it.onFinished(task));
 
                     task.setState(Task.TaskState.SUCCEEDED);
 
@@ -336,7 +337,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                             }
                         }
                         task.fireDoneEvent(this, true);
-                        taskListeners.forEach(it -> it.onFailed(task, e));
+                        notifyTaskListeners(it -> it.onFailed(task, e));
 
                         task.setState(Task.TaskState.FAILED);
                     }

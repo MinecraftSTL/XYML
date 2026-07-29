@@ -48,7 +48,7 @@ public final class DiscoFetchJavaListTask extends Task<EnumMap<JavaPackageType, 
     private static final long MAXIMUM_DIRECTORY_RESPONSE_BYTES = 16L * 1024L * 1024L;
 
     /// Configurable Disco API root used by launcher and focused integration tests.
-    public static final String API_ROOT = System.getProperty("hmcl.discoapi.override", "https://api.foojay.io/disco/v3.0");
+    public static final String API_ROOT = System.getProperty("xyml.discoapi.override", "https://api.foojay.io/disco/v3.0");
 
     /// Explicitly selected distribution used to reject inconsistent response entries.
     private final DiscoJavaDistribution distribution;

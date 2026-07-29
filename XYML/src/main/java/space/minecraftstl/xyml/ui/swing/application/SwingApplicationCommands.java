@@ -28,7 +28,7 @@ import java.util.Objects;
 ///
 /// The startup layer decides how account creation and launch workflows are implemented. Instance
 /// creation and management are owned by the Swing composition and are intentionally absent from
-/// this legacy workflow boundary.
+/// this workflow boundary.
 ///
 /// @param addAccountCommand command that opens the supported add-account workflow
 /// @param refreshAccountCommand command that refreshes one account without transferring authentication data to UI
@@ -40,22 +40,6 @@ public record SwingApplicationCommands(
         AccountRefreshCommand refreshAccountCommand,
         HomeLaunchCommand launchCommand,
         HomeLaunchScriptExportCommand launchScriptExportCommand) {
-    /// Creates commands without a script-export workflow for source-compatible lifecycle fixtures.
-    ///
-    /// @param addAccountCommand command that opens the supported add-account workflow
-    /// @param refreshAccountCommand command that refreshes one account without transferring authentication data to UI
-    /// @param launchCommand command that starts a session from captured stable selection identifiers
-    public SwingApplicationCommands(
-            Runnable addAccountCommand,
-            AccountRefreshCommand refreshAccountCommand,
-            HomeLaunchCommand launchCommand) {
-        this(
-                addAccountCommand,
-                refreshAccountCommand,
-                launchCommand,
-                HomeLaunchScriptExportCommand.unavailable());
-    }
-
     /// Validates every startup-owned workflow boundary.
     public SwingApplicationCommands {
         Objects.requireNonNull(addAccountCommand, "addAccountCommand");

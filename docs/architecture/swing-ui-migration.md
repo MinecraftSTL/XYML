@@ -2,25 +2,25 @@
 
 ## Status
 
-Accepted for implementation on branch `uniether/swing-ui-rewrite`.
+Implemented on branch `uniether/swing-ui-rewrite`.
 
-This document is the implementation contract for replacing the JavaFX user
-interface. Each migration commit must keep the project buildable and must not
-weaken the final acceptance gates described below.
+This document records the completed desktop UI architecture and the invariants
+that subsequent changes must preserve. The application UI is Swing-only; no
+JavaFX implementation, bridge, adapter, dependency, or runtime downloader is
+part of the current design.
 
 ## Decision
 
-XYML will replace JavaFX with a desktop interface built on Java 17, Swing, and
-Java2D. The visual foundation will use a pinned pure-Java look and feel and a
-pure-Java layout manager. UI libraries, fonts, icons, and application assets
-will be bundled into the launcher artifact; the launcher must never download
-UI runtime components on startup.
+XYML uses a desktop interface built on Java 17, Swing, and Java2D. The visual
+foundation uses a pinned pure-Java look and feel and a pure-Java layout
+manager. UI libraries, fonts, icons, and application assets are bundled into
+the launcher artifact; startup does not download UI runtime components.
 
 The migration deliberately does not use JCEF, Chromium, React, Compose, SWT,
 or another platform-native UI runtime. Those options introduce a narrower
 native platform matrix than the launcher currently supports.
 
-`XYMLCore` must remain UI-toolkit-neutral. It may not expose or depend on
+`XYMLCore` remains UI-toolkit-neutral. It does not expose or depend on
 `javafx.*` or `javax.swing.*` types. The Swing implementation belongs in the
 `XYML` application module. `XYMLBoot` keeps its small Swing-based error path
 and Java 8 bytecode target so an unsupported JVM can still display a useful
@@ -28,15 +28,24 @@ upgrade message.
 
 ## Product surface
 
-The replacement retains the existing information architecture and workflows:
+The Swing application retains the operational workflows:
 
-- Home and game launch
 - Downloads and remote search
-- Game instances, mods, resource packs, worlds, and schematics
+- Game instances, versions, mods, resource packs, worlds, and schematics
 - Accounts and authentication
 - Launcher and per-instance settings
 - Personalization, themes, backgrounds, and accessibility settings
 - Tasks, logs, crash handling, dialogs, and multi-step wizards
+
+There is no independent home page, announcement page, or announcement prompt
+system. The instance list is the default main surface. Downloads, settings,
+accounts, and other full-content pages are displayed over that surface; closing
+the active page reveals the instance list again.
+
+The persistent application toolbar exposes the current account selector, the
+current game-instance selector, and the launch action. Account and instance
+selection are therefore available without routing through a home page, while
+their management pages remain reachable from navigation and selector actions.
 
 The interface is an operational desktop tool. It uses stable navigation,
 compact controls, list- and table-oriented content, and restrained framing.
@@ -72,10 +81,13 @@ managers, and accessibility tools.
 
 ### Theme mode
 
-Theme mode has three values: follow system, light, and dark. Changing the mode
-updates all open windows on the Swing event-dispatch thread while preserving
-focus, selection, scroll position, and in-progress form values. Existing theme
-pack and background settings remain the source of user intent.
+Brightness preference has four values: `THEME`, `SYSTEM`, `LIGHT`, and `DARK`.
+`THEME` follows the selected theme pack, `SYSTEM` follows the operating-system
+appearance, and the other two values force the corresponding brightness.
+Changing the preference updates all open windows on the Swing event-dispatch
+thread while preserving focus, selection, scroll position, and in-progress
+form values. Theme-pack and background settings remain the source of the rest
+of the user's appearance intent.
 
 ### Motion
 
@@ -138,17 +150,17 @@ are converted to `java.awt.Color` only inside the Swing module.
 
 ## Offline artifact
 
-The universal fat JAR remains the compatibility artifact for the existing OS
-and CPU matrix. Pure-Java UI dependencies are merged by Shadow and may not use
-a first-run downloader. Platform runtime images can be published in addition
-to the universal JAR where a matching Java 17 distribution and build runner
-exist.
+The universal fat JAR is the dependency-complete launcher artifact. Pure-Java
+UI dependencies and resources are merged by Shadow and do not use a first-run
+downloader. Platform runtime images can be produced with `jlink` and
+`jpackage` in addition to the universal JAR where a matching Java 17
+distribution and packaging toolchain exist.
 
-The migration removes the OpenJFX dependency manifest, JavaFX downloader and
-module patcher, JFoenix, MonetFX, `fx-gson`, `simple-png-javafx`, and JavaFX SVG
-integration after the last legacy screen has been replaced.
+The current application contains no OpenJFX dependency manifest, JavaFX
+downloader or module patcher, JFoenix, MonetFX, `fx-gson`,
+`simple-png-javafx`, or JavaFX SVG integration.
 
-An artifact verification task must prove that the final launcher:
+The offline-artifact verification task checks that the launcher:
 
 - Contains all required UI classes, fonts, icons, and theme resources
 - Starts with an empty external dependency directory and unavailable network
@@ -156,32 +168,29 @@ An artifact verification task must prove that the final launcher:
 - Contains no UI-runtime download endpoints
 - Produces deterministic dependency and license inventories
 
-## Migration sequence
+## Implemented architecture
 
-1. Pin and bundle the pure-Java UI dependencies.
-2. Introduce UI-neutral state, task, scheduler, color, and image contracts.
-3. Move `XYMLCore` consumers to the neutral contracts while JavaFX adapters
-   temporarily preserve the legacy interface.
-4. Implement the Swing application shell, navigation, dialogs, theme tokens,
-   motion engine, and viewport-driven choice list.
-5. Migrate the home, account summary, instance selection, launch command, and
-   task progress as the first complete vertical workflow.
-6. Migrate downloads and long instance-content lists.
-7. Migrate settings, personalization, accounts, file operations, and wizards.
-8. Migrate logs, crash windows, image handling, and skin preview.
-9. Remove all JavaFX sources, adapters, dependencies, runtime patching, and JVM
-   module-opening flags.
-10. Add offline artifact verification and the cross-platform smoke-test matrix.
+The completed implementation has these boundaries:
 
-After the Swing downloads page gained vanilla installation, both Home and
-Instances route their new-instance action internally to `DOWNLOADS`. Startup no
-longer supplies a legacy add-instance workflow command; only account creation
-and launch remain transitional command boundaries.
+1. Pure-Java UI dependencies and resources are pinned and bundled with the
+   application.
+2. UI-neutral state, task, scheduler, color, and image contracts keep
+   `XYMLCore` independent of Swing.
+3. The Swing application shell owns navigation, dialogs, theme tokens, motion,
+   viewport-driven lists, task presentation, logs, and crash windows.
+4. Account, instance, download, settings, personalization, file-operation, and
+   wizard workflows use the Swing presentation directly.
+5. New-instance actions route to the downloads workflow; the instance list is
+   the default surface before and after an overlaid page is closed.
+6. JavaFX sources, dependencies, runtime patching, module-opening flags, and
+   UI-runtime downloads are absent.
+7. Current presentation and application contracts are direct Swing contracts.
+   There is no transitional or legacy UI adapter layer.
 
-## Commit and verification policy
+## Verification policy
 
-Each commit must compile independently and have a single migration purpose.
-Before a commit is accepted, run the strongest applicable subset of:
+UI changes must preserve the offline and toolkit boundaries above. Run the
+strongest applicable subset of:
 
 - `gradlew.bat test checkstyle checkTranslations --no-daemon`
 - UI unit tests on the event-dispatch thread
@@ -189,9 +198,12 @@ Before a commit is accepted, run the strongest applicable subset of:
 - Keyboard, focus, high-DPI, and reduced-motion checks
 - Offline fat-JAR assembly and startup smoke tests
 
-The final migration is not complete until repository search and `jdeps` both
-show no JavaFX dependency, all existing workflows have a Swing implementation,
-and the offline artifact starts without downloading UI components.
+Repository search, dependency inspection, and offline-artifact verification
+guard against JavaFX or downloadable UI-runtime regressions. Screenshot checks
+and platform-specific `jpackage` installer runs are release-validation evidence
+and must be reported only for the environments in which they were actually
+executed; this architecture record does not imply unrecorded cross-platform
+installer or screenshot results.
 
 ## Java source policy
 

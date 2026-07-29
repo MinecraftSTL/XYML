@@ -154,7 +154,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
         return versionList.loadAsync(gameVersion)
                 .thenComposeAsync(() -> installLibraryAsync(baseVersion, versionList.getVersion(gameVersion, libraryVersion)
                         .orElseThrow(() -> new IOException("Remote library " + libraryId + " has no version " + libraryVersion))))
-                .withStage(String.format("hmcl.install.%s:%s", libraryId, libraryVersion));
+                .withStage(String.format("xyml.install.%s:%s", libraryId, libraryVersion));
     }
 
     @Override
@@ -175,7 +175,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                         return removedLibraryVersion.get().addPatch(patch);
                     }
                 })
-                .withStage(String.format("hmcl.install.%s:%s", libraryVersion.getLibraryId(), libraryVersion.getSelfVersion()));
+                .withStage(String.format("xyml.install.%s:%s", libraryVersion.getLibraryId(), libraryVersion.getSelfVersion()));
     }
 
     public Task<Version> installLibraryAsync(Version oldVersion, Path installer) {

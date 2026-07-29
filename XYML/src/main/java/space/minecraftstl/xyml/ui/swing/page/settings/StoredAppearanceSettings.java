@@ -24,55 +24,30 @@ import java.util.Objects;
 
 /// Immutable raw appearance values supplied by a persistence adapter.
 ///
-/// @param themeModeValue persisted brightness identifier
+/// @param themeBrightnessValue persisted brightness identifier
 /// @param cornerRadius current component radius
 /// @param minimumCornerRadius minimum supported radius
 /// @param maximumCornerRadius maximum supported radius
 /// @param cornerRadiusStep supported radius increment
 /// @param animationsDisabled whether non-essential motion is disabled
+/// @param background complete persisted launcher-background values
 /// @param writable whether this store accepts changes
 /// @param themeBrightnessOverridden whether brightness overrides the selected theme
 @NotNullByDefault
 public record StoredAppearanceSettings(
-        String themeModeValue,
+        String themeBrightnessValue,
         int cornerRadius,
         int minimumCornerRadius,
         int maximumCornerRadius,
         int cornerRadiusStep,
         boolean animationsDisabled,
+        BackgroundAppearanceSettings background,
         boolean writable,
         boolean themeBrightnessOverridden) {
-    /// Creates a compatibility snapshot whose legacy brightness value is explicitly overridden.
-    ///
-    /// @param themeModeValue persisted brightness identifier
-    /// @param cornerRadius current component radius
-    /// @param minimumCornerRadius minimum supported radius
-    /// @param maximumCornerRadius maximum supported radius
-    /// @param cornerRadiusStep supported radius increment
-    /// @param animationsDisabled whether non-essential motion is disabled
-    /// @param writable whether this store accepts changes
-    public StoredAppearanceSettings(
-            String themeModeValue,
-            int cornerRadius,
-            int minimumCornerRadius,
-            int maximumCornerRadius,
-            int cornerRadiusStep,
-            boolean animationsDisabled,
-            boolean writable) {
-        this(
-                themeModeValue,
-                cornerRadius,
-                minimumCornerRadius,
-                maximumCornerRadius,
-                cornerRadiusStep,
-                animationsDisabled,
-                writable,
-                true);
-    }
-
     /// Validates one raw settings snapshot.
     public StoredAppearanceSettings {
-        Objects.requireNonNull(themeModeValue, "themeModeValue");
+        Objects.requireNonNull(themeBrightnessValue, "themeBrightnessValue");
+        Objects.requireNonNull(background, "background");
         if (minimumCornerRadius < 0) {
             throw new IllegalArgumentException("Minimum corner radius cannot be negative");
         }
@@ -92,6 +67,6 @@ public record StoredAppearanceSettings(
     ///
     /// @return theme, system, light, or dark preference
     public ThemeBrightnessPreference brightnessPreference() {
-        return ThemeBrightnessPreference.fromSetting(themeBrightnessOverridden, themeModeValue);
+        return ThemeBrightnessPreference.fromSetting(themeBrightnessOverridden, themeBrightnessValue);
     }
 }

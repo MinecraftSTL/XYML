@@ -302,8 +302,8 @@ public final class OAuthServer extends NanoHTTPD implements OAuth.Session {
         /// @return configured client ID, or an empty string when unavailable
         @Override
         public String getClientId() {
-            return System.getProperty("hmcl.microsoft.auth.id",
-                    JarUtils.getAttribute("hmcl.microsoft.auth.id", ""));
+            return System.getProperty("xyml.microsoft.auth.id",
+                    JarUtils.getAttribute("xyml.microsoft.auth.id", ""));
         }
     }
 

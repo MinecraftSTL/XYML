@@ -22,7 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.event.Event;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameSettings;
-import space.minecraftstl.xyml.setting.VersionIconType;
+import space.minecraftstl.xyml.setting.InstanceIconType;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -52,9 +52,9 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
     @Override
     public Snapshot load() {
         @Nullable GameSettings.Instance settings = repository.getInstanceGameSettings(instanceId);
-        @Nullable VersionIconType storedType = settings != null ? settings.iconProperty().getValue() : null;
-        VersionIconType builtInType = storedType != null ? storedType : VersionIconType.DEFAULT;
-        @Nullable Path customImage = repository.getVersionIconFile(instanceId).orElse(null);
+        @Nullable InstanceIconType storedType = settings != null ? settings.iconProperty().getValue() : null;
+        InstanceIconType builtInType = storedType != null ? storedType : InstanceIconType.DEFAULT;
+        @Nullable Path customImage = repository.getInstanceIconFile(instanceId).orElse(null);
         return new Snapshot(builtInType, customImage);
     }
 
@@ -63,7 +63,7 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
     /// @param iconType independently selectable bundled icon type
     /// @throws IOException when an existing custom image cannot be removed
     @Override
-    public void selectBuiltIn(VersionIconType iconType) throws IOException {
+    public void selectBuiltIn(InstanceIconType iconType) throws IOException {
         InstanceIconChoice.BuiltIn selection = new InstanceIconChoice.BuiltIn(iconType);
         @Nullable GameSettings.Instance settings = repository.getInstanceGameSettingsOrCreate(instanceId);
         if (settings == null) {
@@ -71,22 +71,22 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
         }
 
         repository.deleteIconFile(instanceId);
-        if (repository.getVersionIconFile(instanceId).isPresent()) {
+        if (repository.getInstanceIconFile(instanceId).isPresent()) {
             throw new IOException("The custom instance icon could not be removed");
         }
         settings.iconProperty().setValue(selection.iconType());
     }
 
-    /// Copies one supported image and makes grass the bundled fallback, matching legacy behavior.
+    /// Copies one supported image and makes grass the bundled fallback.
     ///
     /// @param sourceImage local supported image
     /// @throws IOException when copying the image fails
     @Override
     public void selectCustom(Path sourceImage) throws IOException {
-        repository.setVersionIconFile(instanceId, Objects.requireNonNull(sourceImage, "sourceImage"));
+        repository.setInstanceIconFile(instanceId, Objects.requireNonNull(sourceImage, "sourceImage"));
         @Nullable GameSettings.Instance settings = repository.getInstanceGameSettingsOrCreate(instanceId);
         if (settings != null) {
-            settings.iconProperty().setValue(VersionIconType.DEFAULT);
+            settings.iconProperty().setValue(InstanceIconType.DEFAULT);
         }
     }
 
@@ -96,7 +96,7 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
     @Override
     public void deleteCustom() throws IOException {
         repository.deleteIconFile(instanceId);
-        if (repository.getVersionIconFile(instanceId).isPresent()) {
+        if (repository.getInstanceIconFile(instanceId).isPresent()) {
             throw new IOException("The custom instance icon could not be removed");
         }
     }
@@ -106,7 +106,7 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
     /// @param source object responsible for the transition
     @Override
     public void publishChanged(Object source) {
-        repository.onVersionIconChanged.fireEvent(new Event(Objects.requireNonNull(source, "source")));
+        repository.onInstanceIconChanged.fireEvent(new Event(Objects.requireNonNull(source, "source")));
     }
 
     /// Validates one required non-blank identifier.

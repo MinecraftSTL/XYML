@@ -30,8 +30,15 @@ import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
+import javax.swing.UIManager;
+import java.awt.AlphaComposite;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
@@ -77,6 +84,9 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
     /// Layered workspace retaining the base, page overlay, and launch-task overlay.
     private final ShellWorkspace workspace;
+
+    /// Current decoded background and native-transparency paint state.
+    private WindowBackgroundVisual windowBackground = initialWindowBackground();
 
     /// Whether this shell has released all cached page resources.
     private boolean closed;
@@ -138,13 +148,104 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 "insets 0, fill",
                 "[52!][grow,fill]",
                 "[" + HEADER_HEIGHT + "!][grow,fill]"));
+        setOpaque(true);
         setMinimumSize(new Dimension(MINIMUM_WIDTH, MINIMUM_HEIGHT));
         setPreferredSize(new Dimension(PREFERRED_WIDTH, PREFERRED_HEIGHT));
+
+        instancesPage.setOpaque(false);
 
         add(toolbar, "cell 0 0 2 1, grow");
         add(navigationRail, "cell 0 1, grow");
         add(workspace, "cell 1 1, grow, gap 18 20 18 18");
         updateSelection(ShellPageId.INSTANCES);
+    }
+
+    /// Replaces the renderer-ready background and schedules repainting.
+    ///
+    /// @param background newest decoded background
+    void setWindowBackground(WindowBackgroundVisual background) {
+        EdtDispatcher.requireEventDispatchThread();
+        windowBackground = Objects.requireNonNull(background, "background");
+        setOpaque(!background.windowTransparent());
+        repaint();
+    }
+
+    /// Synchronizes the shell's clearing behavior with the native window's actual transparency state.
+    ///
+    /// @param transparent whether the native window currently supports and uses transparency
+    void setWindowTransparency(boolean transparent) {
+        EdtDispatcher.requireEventDispatchThread();
+        windowBackground = windowBackground.withWindowTransparency(transparent);
+        setOpaque(!transparent);
+        repaint();
+    }
+
+    /// Paints a cover-cropped image or bounds-aware paint beneath all shell controls.
+    ///
+    /// @param graphics target Swing graphics
+    @Override
+    protected void paintComponent(Graphics graphics) {
+        WindowBackgroundVisual visual = windowBackground;
+        if (visual.windowTransparent()) {
+            Graphics2D clearing = (Graphics2D) graphics.create();
+            try {
+                clearing.setComposite(AlphaComposite.Clear);
+                clearing.fillRect(0, 0, getWidth(), getHeight());
+            } finally {
+                clearing.dispose();
+            }
+        } else {
+            super.paintComponent(graphics);
+        }
+
+        if (visual.opacity() <= 0.0 || getWidth() <= 0 || getHeight() <= 0) {
+            return;
+        }
+        Graphics2D backgroundGraphics = (Graphics2D) graphics.create();
+        try {
+            backgroundGraphics.setComposite(AlphaComposite.SrcOver.derive((float) visual.opacity()));
+            @Nullable BufferedImage image = visual.image();
+            if (image == null) {
+                backgroundGraphics.setPaint(visual.fill().awtPaint(getWidth(), getHeight()));
+                backgroundGraphics.fillRect(0, 0, getWidth(), getHeight());
+            } else {
+                paintCoverImage(backgroundGraphics, image, getWidth(), getHeight());
+            }
+        } finally {
+            backgroundGraphics.dispose();
+        }
+    }
+
+    /// Scales one image to cover the shell while preserving its aspect ratio.
+    ///
+    /// @param graphics target graphics
+    /// @param image decoded source image
+    /// @param targetWidth shell width
+    /// @param targetHeight shell height
+    private static void paintCoverImage(
+            Graphics2D graphics,
+            BufferedImage image,
+            int targetWidth,
+            int targetHeight) {
+        double scale = Math.max(
+                (double) targetWidth / image.getWidth(),
+                (double) targetHeight / image.getHeight());
+        int width = Math.max(1, (int) Math.ceil(image.getWidth() * scale));
+        int height = Math.max(1, (int) Math.ceil(image.getHeight() * scale));
+        int x = (targetWidth - width) / 2;
+        int y = (targetHeight - height) / 2;
+        graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        graphics.drawImage(image, x, y, width, height, null);
+    }
+
+    /// Creates the stable pre-resolution surface used during application startup.
+    ///
+    /// @return opaque theme-surface background
+    private static WindowBackgroundVisual initialWindowBackground() {
+        @Nullable Color panelColor = UIManager.getColor("Panel.background");
+        Color fill = panelColor != null ? panelColor : new Color(0xF4F4F6);
+        return new WindowBackgroundVisual(null, WindowBackgroundPaint.solid(fill), 1.0, false);
     }
 
     /// Selects a destination, creating its page only on first access.
@@ -337,7 +438,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 ShellPageDeck pageOverlay,
                 LaunchTaskOverlayPanel launchOverlay) {
             super(null);
-            setOpaque(true);
+            setOpaque(false);
             pageOverlay.setVisible(false);
             add(Objects.requireNonNull(base, "base"));
             add(Objects.requireNonNull(pageOverlay, "pageOverlay"), 0);

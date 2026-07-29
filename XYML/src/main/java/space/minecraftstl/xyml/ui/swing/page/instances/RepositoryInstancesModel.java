@@ -22,7 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.event.EventBus;
 import space.minecraftstl.xyml.event.EventManager;
-import space.minecraftstl.xyml.event.RefreshedVersionsEvent;
+import space.minecraftstl.xyml.event.RefreshedInstancesEvent;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.image.InstanceIconLoader;
@@ -31,11 +31,11 @@ import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.GameSettings;
-import space.minecraftstl.xyml.setting.VersionIconType;
+import space.minecraftstl.xyml.setting.InstanceIconType;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
-import space.minecraftstl.xyml.ui.swing.legacy.LegacyStateDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -100,7 +100,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// Creates a production model for one repository and one caller-owned I/O executor.
     ///
     /// An unloaded repository remains in its loading state until an already-running initial scan emits
-    /// [RefreshedVersionsEvent], or the composition root explicitly calls [#refreshInstances()].
+    /// [RefreshedInstancesEvent], or the composition root explicitly calls [#refreshInstances()].
     ///
     /// @param repository real installed-game repository
     /// @param backgroundExecutor caller-owned executor suitable for blocking disk and JAR access
@@ -115,7 +115,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             RepositoryInstancesStatusStrings statusStrings) {
         this(
                 new XYMLRepositoryAccess(repository),
-                EventBus.EVENT_BUS.channel(RefreshedVersionsEvent.class),
+                EventBus.EVENT_BUS.channel(RefreshedInstancesEvent.class),
                 backgroundExecutor,
                 addCommand,
                 manageCommand,
@@ -127,20 +127,20 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// This constructor is package-visible for deterministic repository adapter tests.
     ///
     /// @param repository repository operations
-    /// @param refreshedVersionsEvents completed-refresh event manager
+    /// @param refreshedInstancesEvents completed-refresh event manager
     /// @param backgroundExecutor non-UI I/O executor
     /// @param addCommand new-instance workflow command
     /// @param manageCommand selected-instance management command
     /// @param statusStrings localized repository text
     RepositoryInstancesModel(
             RepositoryAccess repository,
-            EventManager<RefreshedVersionsEvent> refreshedVersionsEvents,
+            EventManager<RefreshedInstancesEvent> refreshedInstancesEvents,
             Executor backgroundExecutor,
             Runnable addCommand,
             Consumer<String> manageCommand,
             RepositoryInstancesStatusStrings statusStrings) {
         this.repository = Objects.requireNonNull(repository, "repository");
-        Objects.requireNonNull(refreshedVersionsEvents, "refreshedVersionsEvents");
+        Objects.requireNonNull(refreshedInstancesEvents, "refreshedInstancesEvents");
         this.backgroundExecutor = Objects.requireNonNull(backgroundExecutor, "backgroundExecutor");
         this.addCommand = Objects.requireNonNull(addCommand, "addCommand");
         this.manageCommand = Objects.requireNonNull(manageCommand, "manageCommand");
@@ -157,7 +157,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
                 false,
                 true,
                 false));
-        refreshEventSubscription = refreshedVersionsEvents.subscribe(this::repositoryRefreshed);
+        refreshEventSubscription = refreshedInstancesEvents.subscribe(this::repositoryRefreshed);
         selectionSubscription = repository.subscribeSelectedInstance(this::selectionChanged);
         iconEventSubscription = repository.subscribeIconChanges(this::iconsChanged);
 
@@ -426,7 +426,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// Applies a matching real-repository refresh event without releasing model-owned refresh ownership.
     ///
     /// @param event completed refresh event
-    private void repositoryRefreshed(RefreshedVersionsEvent event) {
+    private void repositoryRefreshed(RefreshedInstancesEvent event) {
         if (event.getSource() != repository.eventSource()) {
             return;
         }
@@ -943,7 +943,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         /// Captures each displayed version object inside its lazy game-version resolver.
         @Override
         public @Unmodifiable List<RepositoryEntry> displayedInstances() {
-            return repository.getDisplayVersions()
+            return repository.getDisplayInstances()
                     .map(version -> {
                         java.nio.file.Path primaryJar = repository.getVersionJar(version);
                         return new RepositoryEntry(
@@ -972,7 +972,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         /// @return independently cancellable listener registration
         @Override
         public Subscription subscribeIconChanges(Runnable listener) {
-            return repository.onVersionIconChanged.subscribe(listener);
+            return repository.onInstanceIconChanged.subscribe(listener);
         }
 
         /// Resolves custom or configured bundled icon pixels for one demanded row.
@@ -982,13 +982,13 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         @Override
         public InstanceIconData resolveIcon(String instanceId) {
             @Nullable GameSettings.Instance settings = repository.getInstanceGameSettings(instanceId);
-            @Nullable VersionIconType configuredType = settings == null
+            @Nullable InstanceIconType configuredType = settings == null
                     ? null
                     : settings.iconProperty().getValue();
-            VersionIconType builtInType = configuredType == null
-                    ? VersionIconType.DEFAULT
+            InstanceIconType builtInType = configuredType == null
+                    ? InstanceIconType.DEFAULT
                     : configuredType;
-            @Nullable java.nio.file.Path customIcon = repository.getVersionIconFile(instanceId)
+            @Nullable java.nio.file.Path customIcon = repository.getInstanceIconFile(instanceId)
                     .orElse(null);
             return InstanceIconLoader.load(builtInType, customIcon);
         }
@@ -996,13 +996,13 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         /// Queues one selected repository instance ID on the Swing event thread.
         @Override
         public void setSelectedInstanceId(String instanceId) {
-            LegacyStateDispatcher.execute(() -> repository.setSelectedInstance(instanceId));
+            LauncherStateDispatcher.execute(() -> repository.setSelectedInstance(instanceId));
         }
 
         /// Performs one blocking repository refresh.
         @Override
         public void refresh() {
-            repository.refreshVersions();
+            repository.refreshInstances();
         }
     }
 }

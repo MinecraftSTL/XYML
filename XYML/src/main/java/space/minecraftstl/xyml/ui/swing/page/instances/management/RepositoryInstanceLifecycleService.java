@@ -30,7 +30,7 @@ import java.util.Objects;
 /// Disk mutations deliberately delegate to the existing repository implementation: rename uses the
 /// `GameRepository` contract, while duplicate and removal use XYML's instance-aware methods. Each
 /// successful mutation synchronously refreshes the repository on the caller's background thread so the
-/// instance-list model receives an authoritative `RefreshedVersionsEvent` before the management page exits.
+/// instance-list model receives an authoritative `RefreshedInstancesEvent` before the management page exits.
 @NotNullByDefault
 public final class RepositoryInstanceLifecycleService implements InstanceLifecycleService {
     /// Repository owning the instance files and persistent selection state.
@@ -43,16 +43,16 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
         this.repository = Objects.requireNonNull(repository, "repository");
     }
 
-    /// Returns whether a candidate satisfies XYML's existing portable version-ID rule.
+    /// Returns whether a candidate satisfies XYML's existing portable instance-ID rule.
     ///
     /// @param destinationId candidate destination identifier
     /// @return whether the identifier is safe for an instance directory
     @Override
     public boolean isValidDestinationId(String destinationId) {
-        return XYMLGameRepository.isValidVersionId(Objects.requireNonNull(destinationId, "destinationId"));
+        return XYMLGameRepository.isValidInstanceId(Objects.requireNonNull(destinationId, "destinationId"));
     }
 
-    /// Renames an existing instance through `GameRepository.renameVersion` and refreshes the index.
+    /// Renames an existing instance through `GameRepository.renameInstance` and refreshes the index.
     ///
     /// @param sourceId stable existing source identifier
     /// @param destinationId validated target identifier
@@ -66,10 +66,10 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
         }
         requireDestinationAvailable(source, destination);
         GameRepository gameRepository = repository;
-        if (!gameRepository.renameVersion(source, destination)) {
+        if (!gameRepository.renameInstance(source, destination)) {
             throw new IOException("The instance could not be renamed");
         }
-        repository.refreshVersions();
+        repository.refreshInstances();
     }
 
     /// Copies an instance through the repository's established copy routine and refreshes the index.
@@ -86,8 +86,8 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
             throw new IOException("The duplicate instance name must differ from the source name");
         }
         requireDestinationAvailable(source, destination);
-        repository.duplicateVersion(source, destination, copySaves);
-        repository.refreshVersions();
+        repository.duplicateInstance(source, destination, copySaves);
+        repository.refreshInstances();
     }
 
     /// Removes an instance through XYML's recycle-bin-aware removal routine and refreshes the index.
@@ -97,13 +97,13 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
     @Override
     public void delete(String sourceId) throws IOException {
         String source = requireNonBlank(sourceId, "sourceId");
-        if (!repository.removeVersionFromDisk(source)) {
+        if (!repository.removeInstanceFromDisk(source)) {
             throw new IOException("The instance could not be deleted");
         }
-        repository.refreshVersions();
+        repository.refreshInstances();
     }
 
-    /// Reconciles the repository's persisted selection on its legacy event-dispatch thread.
+    /// Reconciles the repository's persisted selection on the Swing event dispatch thread.
     ///
     /// @param preferredId renamed or duplicated instance ID, or `null` after deletion
     @Override
@@ -134,7 +134,7 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
     /// @param destination requested destination identifier
     /// @throws IOException when another instance already owns the destination ID
     private void requireDestinationAvailable(String source, String destination) throws IOException {
-        if (!source.equals(destination) && repository.versionIdConflicts(destination)) {
+        if (!source.equals(destination) && repository.instanceIdConflicts(destination)) {
             throw new IOException("An instance with that name already exists");
         }
     }

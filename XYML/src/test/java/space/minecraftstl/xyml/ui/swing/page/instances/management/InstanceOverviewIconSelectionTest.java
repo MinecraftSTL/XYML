@@ -22,7 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.GameRepository;
-import space.minecraftstl.xyml.setting.VersionIconType;
+import space.minecraftstl.xyml.setting.InstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.imageio.ImageIO;
@@ -70,7 +70,7 @@ final class InstanceOverviewIconSelectionTest {
     void selectsBuiltInIconAndRefreshesPreview() throws Exception {
         Path customImage = createSolidImage(repositoryRoot().resolve("custom.png"), Color.RED);
         RecordingIconStore iconStore = new RecordingIconStore(customImage);
-        ChoiceInteractions interactions = new ChoiceInteractions(new InstanceIconChoice.BuiltIn(VersionIconType.FORGE));
+        ChoiceInteractions interactions = new ChoiceInteractions(new InstanceIconChoice.BuiltIn(InstanceIconType.FORGE));
         ExecutorService executor = Executors.newSingleThreadExecutor();
         AtomicReference<@Nullable InstanceOverviewPanel> panelReference = new AtomicReference<>();
         try {
@@ -103,12 +103,12 @@ final class InstanceOverviewIconSelectionTest {
             awaitBackgroundWork(executor);
             awaitBackgroundWork(executor);
 
-            assertEquals(VersionIconType.FORGE, iconStore.selectedBuiltIn.get());
+            assertEquals(InstanceIconType.FORGE, iconStore.selectedBuiltIn.get());
             assertNull(iconStore.state.get().customImage());
             assertEquals(1, iconStore.publishCount.get());
             assertFalse(iconStore.mutationOnEdt.get());
             assertTrue(iconStore.publishOnEdt.get());
-            assertEquals(VersionIconType.DEFAULT, interactions.currentType.get());
+            assertEquals(InstanceIconType.DEFAULT, interactions.currentType.get());
             assertTrue(interactions.sawCustomImage.get());
             assertNull(interactions.failureDetail.get());
 
@@ -129,24 +129,6 @@ final class InstanceOverviewIconSelectionTest {
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
         }
-    }
-
-    /// Keeps pre-existing interaction implementations source-compatible through the new default method.
-    @Test
-    void legacyInteractionDefaultsToCustomFileChoice() {
-        Path selectedFile = repositoryRoot().resolve("legacy.png");
-        LegacyInteractions interactions = new LegacyInteractions(selectedFile);
-        AtomicReference<@Nullable InstanceIconChoice> choiceReference = new AtomicReference<>();
-        EdtDispatcher.executeAndWait(() -> choiceReference.set(interactions.chooseInstanceIcon(
-                new JPanel(),
-                VersionIconType.GRASS,
-                false,
-                repositoryRoot())));
-
-        InstanceIconChoice.Custom choice = assertInstanceOf(
-                InstanceIconChoice.Custom.class,
-                choiceReference.get());
-        assertEquals(selectedFile.toAbsolutePath().normalize(), choice.file());
     }
 
     /// Creates one solid PNG for deterministic custom preview checks.
@@ -182,7 +164,7 @@ final class InstanceOverviewIconSelectionTest {
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "getVersionRoot" -> repositoryRoot().resolve("versions").resolve("instance");
                     case "getRunDirectory" -> repositoryRoot().resolve("game");
-                    case "refreshVersions" -> null;
+                    case "refreshInstances" -> null;
                     case "toString" -> "IconSelectionGameRepository";
                     case "hashCode" -> System.identityHashCode(proxy);
                     case "equals" -> proxy == Objects.requireNonNull(arguments)[0];
@@ -239,7 +221,7 @@ final class InstanceOverviewIconSelectionTest {
         private final AtomicReference<Snapshot> state;
 
         /// Last bundled type selected through the overview, or `null` before selection.
-        private final AtomicReference<@Nullable VersionIconType> selectedBuiltIn = new AtomicReference<>();
+        private final AtomicReference<@Nullable InstanceIconType> selectedBuiltIn = new AtomicReference<>();
 
         /// Number of successful change publications.
         private final AtomicInteger publishCount = new AtomicInteger();
@@ -254,7 +236,7 @@ final class InstanceOverviewIconSelectionTest {
         ///
         /// @param customImage initial custom image
         private RecordingIconStore(Path customImage) {
-            state = new AtomicReference<>(new Snapshot(VersionIconType.DEFAULT, customImage));
+            state = new AtomicReference<>(new Snapshot(InstanceIconType.DEFAULT, customImage));
         }
 
         /// Returns the latest recorded icon state.
@@ -269,7 +251,7 @@ final class InstanceOverviewIconSelectionTest {
         ///
         /// @param iconType selected bundled type
         @Override
-        public void selectBuiltIn(VersionIconType iconType) {
+        public void selectBuiltIn(InstanceIconType iconType) {
             mutationOnEdt.set(javax.swing.SwingUtilities.isEventDispatchThread());
             selectedBuiltIn.set(iconType);
             state.set(new Snapshot(iconType, null));
@@ -281,7 +263,7 @@ final class InstanceOverviewIconSelectionTest {
         @Override
         public void selectCustom(Path sourceImage) {
             mutationOnEdt.set(javax.swing.SwingUtilities.isEventDispatchThread());
-            state.set(new Snapshot(VersionIconType.DEFAULT, sourceImage));
+            state.set(new Snapshot(InstanceIconType.DEFAULT, sourceImage));
         }
 
         /// Removes the current custom override.
@@ -310,7 +292,7 @@ final class InstanceOverviewIconSelectionTest {
         private final InstanceIconChoice choice;
 
         /// Current built-in type observed by the selector.
-        private final AtomicReference<@Nullable VersionIconType> currentType = new AtomicReference<>();
+        private final AtomicReference<@Nullable InstanceIconType> currentType = new AtomicReference<>();
 
         /// Whether the selector observed a custom image override.
         private final AtomicBoolean sawCustomImage = new AtomicBoolean();
@@ -325,16 +307,6 @@ final class InstanceOverviewIconSelectionTest {
             this.choice = Objects.requireNonNull(choice, "choice");
         }
 
-        /// Leaves the legacy custom chooser unused.
-        ///
-        /// @param owner unused owner
-        /// @param initialDirectory unused directory
-        /// @return always `null`
-        @Override
-        public @Nullable Path chooseIcon(Component owner, Path initialDirectory) {
-            return null;
-        }
-
         /// Records current state and returns the configured complete choice.
         ///
         /// @param owner unused owner
@@ -345,7 +317,7 @@ final class InstanceOverviewIconSelectionTest {
         @Override
         public InstanceIconChoice chooseInstanceIcon(
                 Component owner,
-                VersionIconType currentIconType,
+                InstanceIconType currentIconType,
                 boolean hasCustomIcon,
                 Path initialDirectory) {
             currentType.set(currentIconType);
@@ -383,55 +355,4 @@ final class InstanceOverviewIconSelectionTest {
         }
     }
 
-    /// Pre-extension interactions implementing only the original custom-file method.
-    @NotNullByDefault
-    private static final class LegacyInteractions implements InstanceOverviewInteractions {
-        /// File returned by the legacy chooser.
-        private final Path selectedFile;
-
-        /// Creates a legacy substitute returning one custom file.
-        ///
-        /// @param selectedFile selected custom image
-        private LegacyInteractions(Path selectedFile) {
-            this.selectedFile = Objects.requireNonNull(selectedFile, "selectedFile");
-        }
-
-        /// Returns the configured custom file.
-        ///
-        /// @param owner unused owner
-        /// @param initialDirectory unused initial directory
-        /// @return configured path
-        @Override
-        public Path chooseIcon(Component owner, Path initialDirectory) {
-            return selectedFile;
-        }
-
-        /// Declines custom deletion.
-        ///
-        /// @param owner unused owner
-        /// @param instanceId unused instance identifier
-        /// @return always `false`
-        @Override
-        public boolean confirmDeleteIcon(Component owner, String instanceId) {
-            return false;
-        }
-
-        /// Completes directory opening immediately.
-        ///
-        /// @param directory unused directory
-        /// @return completed successful stage
-        @Override
-        public CompletionStage<@Nullable Void> openDirectory(Path directory) {
-            return CompletableFuture.completedFuture(null);
-        }
-
-        /// Ignores failures because no overview operation runs in the compatibility test.
-        ///
-        /// @param owner unused owner
-        /// @param title unused title
-        /// @param detail unused detail
-        @Override
-        public void showFailure(Component owner, String title, String detail) {
-        }
-    }
 }
