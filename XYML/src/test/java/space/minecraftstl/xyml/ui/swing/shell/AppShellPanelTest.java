@@ -304,6 +304,14 @@ public final class AppShellPanelTest {
                                 2,
                                 toolbar.gameDirectorySelector().manageButton().getParent().getComponentCount()),
                         () -> assertEquals(
+                                Boolean.TRUE,
+                                toolbar.gameDirectorySelector().directoryScrollPane().getClientProperty(
+                                        FlatClientProperties.SCROLL_PANE_SMOOTH_SCROLLING)),
+                        () -> assertEquals(
+                                toolbar.gameDirectorySelector().directoryList().getFixedCellHeight(),
+                                toolbar.gameDirectorySelector().directoryScrollPane()
+                                        .getVerticalScrollBar().getUnitIncrement()),
+                        () -> assertEquals(
                                 ShellPageId.INSTANCES,
                                 panel.navigationButton(ShellPageId.INSTANCES).page()));
 

@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -82,6 +83,9 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
 
     /// Single-selection directory list without a redundant radio indicator.
     private final JList<GameDirectoryManagementEntry> list = new JList<>(listModel);
+
+    /// Smooth-wheel scroll container for the bounded MRU directory list.
+    private final JScrollPane directoryScrollPane = new JScrollPane(list);
 
     /// Bottom command opening the complete directory list.
     private final JButton manageButton = new JButton();
@@ -193,6 +197,13 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         return list;
     }
 
+    /// Returns the popup list scroll container for focused behavior tests.
+    ///
+    /// @return stable smooth-scrolling popup container
+    JScrollPane directoryScrollPane() {
+        return directoryScrollPane;
+    }
+
     /// Releases popup interaction.
     @Override
     public void close() {
@@ -231,7 +242,12 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
                 submitSelection();
             }
         });
-        popup.add(new JScrollPane(list), BorderLayout.CENTER);
+        directoryScrollPane.setName("shellGameDirectoryPopupScroll");
+        directoryScrollPane.putClientProperty(
+                FlatClientProperties.SCROLL_PANE_SMOOTH_SCROLLING,
+                Boolean.TRUE);
+        directoryScrollPane.getVerticalScrollBar().setUnitIncrement(ROW_HEIGHT);
+        popup.add(directoryScrollPane, BorderLayout.CENTER);
 
         manageButton.setName("shellGameDirectoryManagement");
         manageButton.setText(manageLabel);
