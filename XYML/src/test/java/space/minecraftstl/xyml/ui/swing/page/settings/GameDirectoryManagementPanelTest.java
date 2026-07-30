@@ -46,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Tests Swing game-directory selection and protected local management actions through the toolkit-neutral service.
 @NotNullByDefault
@@ -65,7 +66,9 @@ public final class GameDirectoryManagementPanelTest {
         onEventDispatchThread(() -> {
             JList<?> list = findDirectoryList(panel);
             list.setSelectedValue(home, true);
-            findComponent(panel, "gameDirectoryManagementAdd", AbstractButton.class).doClick();
+            AbstractButton addButton = findComponent(panel, "gameDirectoryManagementAdd", AbstractButton.class);
+            assertEquals(i18n("game_directory.new"), addButton.getText());
+            addButton.doClick();
             findComponent(panel, "gameDirectoryManagementName", JTextField.class).setText("Development");
             findComponent(panel, "gameDirectoryManagementPath", JTextField.class).setText("instances/development");
             findComponent(panel, "gameDirectoryManagementRelativePath", JCheckBox.class).setSelected(true);

@@ -68,7 +68,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
     private final JList<GameDirectoryManagementEntry> directoryList = new JList<>(directoryListModel);
 
     /// Starts creation of a new local or user-level directory entry.
-    private final JButton addButton = new JButton(i18n("button.add"));
+    private final JButton addButton = new JButton(i18n("game_directory.new"));
 
     /// Starts editing the selected directory entry.
     private final JButton editButton = new JButton(i18n("button.edit"));
