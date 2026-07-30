@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.accounts;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.auth.offline.OfflineAccountFactory;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.Action;
@@ -70,6 +71,38 @@ public final class SwingAccountCreationDialogStyleTest {
             assertAll(
                     () -> assertFalse(browser.isSelected()),
                     () -> assertTrue(device.isSelected()));
+        });
+    }
+
+    /// The empty UUID field presents and updates the same derived value used by the offline factory.
+    @Test
+    public void updatesDerivedOfflineUuidPlaceholderWithoutSettingAnOverride() {
+        EdtDispatcher.executeAndWait(() -> {
+            JTextField username = new JTextField();
+            JTextField uuid = new JTextField();
+            SwingAccountCreationDialog.bindOfflineUuidPlaceholder(username, uuid);
+
+            assertAll(
+                    () -> assertEquals("", uuid.getText()),
+                    () -> assertEquals(
+                            OfflineAccountFactory.getUUIDFromUserName("").toString(),
+                            uuid.getClientProperty("JTextField.placeholderText")));
+
+            username.setText("Steve");
+            assertAll(
+                    () -> assertEquals("", uuid.getText()),
+                    () -> assertEquals(
+                            OfflineAccountFactory.getUUIDFromUserName("Steve").toString(),
+                            uuid.getClientProperty("JTextField.placeholderText")));
+
+            String explicitUuid = "12345678-1234-1234-1234-123456789abc";
+            uuid.setText(explicitUuid);
+            username.setText("Alex");
+            assertAll(
+                    () -> assertEquals(explicitUuid, uuid.getText()),
+                    () -> assertEquals(
+                            OfflineAccountFactory.getUUIDFromUserName("Alex").toString(),
+                            uuid.getClientProperty("JTextField.placeholderText")));
         });
     }
 

@@ -23,6 +23,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.auth.offline.OfflineAccountFactory;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
@@ -438,8 +439,26 @@ public final class SwingAccountCreationDialog extends JDialog
         panel.add(offlineUsername, "growx, wrap");
         panel.add(new JLabel(i18n("account.methods.offline.uuid")));
         offlineUuid.setToolTipText(i18n("account.methods.offline.uuid.hint"));
+        bindOfflineUuidPlaceholder(offlineUsername, offlineUuid);
         panel.add(offlineUuid, "growx, wrap");
         return panel;
+    }
+
+    /// Keeps the optional UUID field's placeholder synchronized with the derived offline UUID.
+    ///
+    /// The UUID field remains empty until the user explicitly overrides it. This preserves the
+    /// request's `null` value while showing the exact UUID that the account factory will derive.
+    ///
+    /// @param username offline username field
+    /// @param uuid optional explicit UUID field
+    static void bindOfflineUuidPlaceholder(JTextField username, JTextField uuid) {
+        Objects.requireNonNull(username, "username");
+        Objects.requireNonNull(uuid, "uuid");
+        Runnable update = () -> uuid.putClientProperty(
+                "JTextField.placeholderText",
+                OfflineAccountFactory.getUUIDFromUserName(username.getText()).toString());
+        username.getDocument().addDocumentListener(new DocumentChangeListener(update));
+        update.run();
     }
 
     /// Creates Microsoft grant-mode controls with an explicit established browser default.
@@ -738,7 +757,7 @@ public final class SwingAccountCreationDialog extends JDialog
         Objects.requireNonNull(expected, "expected");
         Runnable update = () -> confirmButton.setEnabled(
                 matchesConfirmation(confirmation.getText(), expected));
-        confirmation.getDocument().addDocumentListener(new ConfirmationDocumentListener(update));
+        confirmation.getDocument().addDocumentListener(new DocumentChangeListener(update));
         update.run();
     }
 
@@ -996,20 +1015,20 @@ public final class SwingAccountCreationDialog extends JDialog
         };
     }
 
-    /// Runs one validation callback after every acknowledgement-document mutation.
+    /// Runs one callback after every text-document mutation.
     @NotNullByDefault
-    private static final class ConfirmationDocumentListener implements DocumentListener {
-        /// Callback that recalculates confirmation availability.
+    private static final class DocumentChangeListener implements DocumentListener {
+        /// Callback that reconciles state derived from the document.
         private final Runnable update;
 
-        /// Creates a listener for one acknowledgement field.
+        /// Creates a listener for one text document.
         ///
-        /// @param update confirmation-availability callback
-        private ConfirmationDocumentListener(Runnable update) {
+        /// @param update document-derived state callback
+        private DocumentChangeListener(Runnable update) {
             this.update = Objects.requireNonNull(update, "update");
         }
 
-        /// Recalculates availability after inserted text.
+        /// Reconciles derived state after inserted text.
         ///
         /// @param event document mutation event
         @Override
@@ -1018,7 +1037,7 @@ public final class SwingAccountCreationDialog extends JDialog
             update.run();
         }
 
-        /// Recalculates availability after removed text.
+        /// Reconciles derived state after removed text.
         ///
         /// @param event document mutation event
         @Override
@@ -1027,7 +1046,7 @@ public final class SwingAccountCreationDialog extends JDialog
             update.run();
         }
 
-        /// Recalculates availability after an attribute-only mutation.
+        /// Reconciles derived state after an attribute-only mutation.
         ///
         /// @param event document mutation event
         @Override
