@@ -174,19 +174,51 @@ public final class EditablePathChooser extends JFileChooser {
             return path.normalize();
         }
         @Nullable File currentDirectory = getCurrentDirectory();
-        Path base = currentDirectory == null
-                ? Path.of("").toAbsolutePath()
-                : currentDirectory.toPath().toAbsolutePath();
+        @Nullable Path fileSystemDirectory = fileSystemPath(currentDirectory);
+        if (currentDirectory != null && fileSystemDirectory == null) {
+            throw new InvalidPathException(
+                    path.toString(),
+                    "The current chooser location has no file-system path");
+        }
+        Path base = fileSystemDirectory == null ? Path.of("").toAbsolutePath() : fileSystemDirectory;
         return base.resolve(path).normalize();
     }
 
     /// Mirrors the chooser's displayed directory into the top field.
     private void synchronizeDirectoryInput() {
-        @Nullable File currentDirectory = getCurrentDirectory();
-        currentDirectoryInput.setText(currentDirectory == null
-                ? ""
-                : currentDirectory.toPath().toAbsolutePath().normalize().toString());
+        synchronizeDirectoryInput(getCurrentDirectory());
+    }
+
+    /// Mirrors one displayed directory into the top field when it has a real file-system path.
+    ///
+    /// Windows exposes locations such as "This PC" as virtual Shell folders whose `File` path cannot be converted to
+    /// an NIO `Path`. Those locations remain browsable through the native chooser, while the editable path field stays
+    /// empty until the user selects or enters a real directory.
+    ///
+    /// @param currentDirectory displayed browser directory, or `null` when no directory is available
+    void synchronizeDirectoryInput(@Nullable File currentDirectory) {
+        @Nullable Path fileSystemDirectory = fileSystemPath(currentDirectory);
+        currentDirectoryInput.setText(fileSystemDirectory == null ? "" : fileSystemDirectory.toString());
         clearDirectoryValidation();
+    }
+
+    /// Resolves a chooser directory only when the platform reports a real file-system location.
+    ///
+    /// @param directory chooser directory, including a possible native virtual location
+    /// @return normalized absolute path, or `null` when no real file-system path is available
+    private @Nullable Path fileSystemPath(@Nullable File directory) {
+        if (directory == null) {
+            return null;
+        }
+        try {
+            if (!getFileSystemView().isFileSystem(directory)) {
+                return null;
+            }
+            return directory.toPath().toAbsolutePath().normalize();
+        } catch (InvalidPathException | SecurityException ignored) {
+            // Some native folders expose a legacy File facade even though no NIO path exists.
+            return null;
+        }
     }
 
     /// Shows directory validation through the field outline and tooltip without closing the dialog.

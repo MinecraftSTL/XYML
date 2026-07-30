@@ -29,8 +29,10 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.GraphicsEnvironment;
 import java.awt.event.ActionEvent;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -156,6 +158,22 @@ final class EditablePathChooserTest {
         assertEquals(normalize(targetDirectory), chooser.currentDirectoryInput().getText());
     }
 
+    /// Leaves the path field empty when Windows reports a virtual Shell location without an NIO path.
+    @Test
+    void toleratesVirtualShellDirectoryChanges() {
+        EditablePathChooser chooser = valueOnEventDispatchThread(
+                () -> new EditablePathChooser(temporaryDirectory.toFile()));
+
+        onEventDispatchThread(() -> {
+            chooser.currentDirectoryInput().setText("stale-directory");
+            chooser.synchronizeDirectoryInput(new VirtualShellFolder());
+        });
+
+        assertAll(
+                () -> assertTrue(chooser.currentDirectoryInput().getText().isEmpty()),
+                () -> assertTrue(chooser.validationText().isEmpty()));
+    }
+
     /// Keeps the top field on the current folder when a file is selected in the native browser.
     ///
     /// @throws IOException when the fixture file cannot be created
@@ -276,5 +294,26 @@ final class EditablePathChooserTest {
         AtomicReference<T> reference = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> reference.set(supplier.get()));
         return reference.get();
+    }
+
+    /// Synthetic Windows Shell folder whose legacy `File` path has no NIO representation.
+    @NotNullByDefault
+    private static final class VirtualShellFolder extends File {
+        /// Serialization identifier retained for the `File` contract.
+        private static final long serialVersionUID = 1L;
+
+        /// Creates a virtual-folder fixture matching the path shape from the Windows chooser.
+        private VirtualShellFolder() {
+            super("ShellFolder: 0x11");
+        }
+
+        /// Reproduces the conversion failure raised by the JDK's Windows Shell folder implementation.
+        ///
+        /// @return never returns because the virtual folder has no NIO path
+        /// @throws InvalidPathException always, matching the Windows provider behavior
+        @Override
+        public Path toPath() {
+            throw new InvalidPathException(getPath(), "Synthetic virtual Shell location");
+        }
     }
 }
