@@ -49,7 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/// Compact game-directory selector with explicit add and management commands around an MRU-ordered list.
+/// Compact game-directory selector with an MRU-ordered list and one command opening the complete list page.
 @NotNullByDefault
 final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     /// Stable list row height used to derive visible rows from actual popup space.
@@ -67,7 +67,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     /// Current selected directory display and popup command.
     private final ShellDropdownButton valueButton = new ShellDropdownButton();
 
-    /// Reusable popup hosting add, MRU entries, and management.
+    /// Reusable popup hosting MRU entries and the complete-list command.
     private final JPopupMenu popup = new JPopupMenu();
 
     /// Exact in-memory directory rows in selector order.
@@ -76,10 +76,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     /// Single-selection directory list without a redundant radio indicator.
     private final JList<GameDirectoryManagementEntry> list = new JList<>(listModel);
 
-    /// Top command opening the add-directory editor.
-    private final JButton addButton = new JButton();
-
-    /// Bottom command opening directory management.
+    /// Bottom command opening the complete directory list.
     private final JButton manageButton = new JButton();
 
     /// Directory selection service.
@@ -102,18 +99,14 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     /// @param service directory source and selection sink
     /// @param recentSelections persistent compact-selector history
     /// @param selectorLabel accessible selector label
-    /// @param addLabel localized add-directory action
-    /// @param manageLabel localized directory-management action
-    /// @param addCommand command opening the add-directory editor
-    /// @param manageCommand command opening directory management
+    /// @param manageLabel localized complete-list action
+    /// @param manageCommand command opening the complete directory list
     /// @param revealInstancesCommand command revealing the persistent instances page after selection
     LazyGameDirectorySelector(
             GameDirectoryManagementService service,
             ShellRecentSelections recentSelections,
             String selectorLabel,
-            String addLabel,
             String manageLabel,
-            Runnable addCommand,
             Runnable manageCommand,
             Runnable revealInstancesCommand) {
         super(new BorderLayout());
@@ -123,9 +116,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         this.revealInstancesCommand = Objects.requireNonNull(revealInstancesCommand, "revealInstancesCommand");
         configureComponents(
                 Objects.requireNonNull(selectorLabel, "selectorLabel"),
-                Objects.requireNonNull(addLabel, "addLabel"),
                 Objects.requireNonNull(manageLabel, "manageLabel"),
-                Objects.requireNonNull(addCommand, "addCommand"),
                 Objects.requireNonNull(manageCommand, "manageCommand"));
     }
 
@@ -169,7 +160,6 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         valueButton.setEnabled(!closed && !state.entries().isEmpty());
         list.setEnabled(!closed && !state.entries().isEmpty());
         manageButton.setEnabled(!closed);
-        addButton.setEnabled(!closed);
         valueButton.getAccessibleContext().setAccessibleDescription(
                 available ? valueButton.getToolTipText() : null);
         popup.setVisible(false);
@@ -182,14 +172,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         return valueButton;
     }
 
-    /// Returns the explicit add command for focused popup tests.
-    ///
-    /// @return stable add button
-    JButton addButton() {
-        return addButton;
-    }
-
-    /// Returns the explicit management command for focused popup tests.
+    /// Returns the complete-list command for focused popup tests.
     ///
     /// @return stable management button
     JButton manageButton() {
@@ -211,18 +194,15 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
             closed = true;
             popup.setVisible(false);
             valueButton.setEnabled(false);
-            addButton.setEnabled(false);
             list.setEnabled(false);
             manageButton.setEnabled(false);
         }
     }
 
-    /// Builds the single-button selector and three-part popup.
+    /// Builds the single-button selector and two-part popup.
     private void configureComponents(
             String selectorLabel,
-            String addLabel,
             String manageLabel,
-            Runnable addCommand,
             Runnable manageCommand) {
         setName("shellGameDirectorySelector");
         setOpaque(false);
@@ -235,19 +215,6 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
 
         popup.setName("shellGameDirectoryPopup");
         popup.setLayout(new BorderLayout());
-        addButton.setName("shellGameDirectoryAdd");
-        addButton.setText(addLabel);
-        addButton.setIcon(new FlatSVGIcon("assets/swing/icons/create-new-folder.svg", 18, 18));
-        addButton.setHorizontalAlignment(SwingConstants.LEFT);
-        addButton.putClientProperty("JButton.buttonType", "toolBarButton");
-        addButton.addActionListener(event -> {
-            if (!closed) {
-                popup.setVisible(false);
-                addCommand.run();
-            }
-        });
-        popup.add(addButton, BorderLayout.NORTH);
-
         list.setName("shellGameDirectoryPopupList");
         list.setFixedCellHeight(ROW_HEIGHT);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -279,10 +246,10 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         if (closed) {
             return;
         }
-        int listBudget = Math.max(ROW_HEIGHT, availablePopupHeight() - COMMAND_HEIGHT * 2);
+        int listBudget = Math.max(ROW_HEIGHT, availablePopupHeight() - COMMAND_HEIGHT);
         int visibleRows = Math.min(Math.max(1, listModel.size()), Math.max(1, listBudget / ROW_HEIGHT));
         int width = Math.max(MINIMUM_POPUP_WIDTH, getWidth());
-        popup.setPopupSize(new Dimension(width, visibleRows * ROW_HEIGHT + COMMAND_HEIGHT * 2));
+        popup.setPopupSize(new Dimension(width, visibleRows * ROW_HEIGHT + COMMAND_HEIGHT));
         popup.show(this, 0, getHeight());
     }
 
@@ -291,14 +258,14 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         @Nullable GraphicsConfiguration configuration = getGraphicsConfiguration();
         if (configuration == null || !isShowing()) {
             int localHeight = getRootPane() == null ? 0 : getRootPane().getHeight() - getHeight();
-            return Math.max(COMMAND_HEIGHT * 2 + ROW_HEIGHT, localHeight);
+            return Math.max(COMMAND_HEIGHT + ROW_HEIGHT, localHeight);
         }
         Rectangle screen = configuration.getBounds();
         Insets insets = Toolkit.getDefaultToolkit().getScreenInsets(configuration);
         int workBottom = screen.y + screen.height - insets.bottom;
         int anchorBottom = getLocationOnScreen().y + getHeight();
         return Math.max(
-                COMMAND_HEIGHT * 2 + ROW_HEIGHT,
+                COMMAND_HEIGHT + ROW_HEIGHT,
                 workBottom - anchorBottom - POPUP_SCREEN_MARGIN);
     }
 

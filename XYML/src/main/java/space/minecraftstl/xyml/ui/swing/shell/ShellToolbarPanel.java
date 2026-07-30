@@ -51,7 +51,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     /// Self-drawn launcher icon and native-window title replacement.
     private final JLabel brandLabel = new JLabel();
 
-    /// Compact current-directory selector with explicit add and management routes.
+    /// Compact current-directory selector with an explicit complete-list route.
     private final LazyGameDirectorySelector gameDirectorySelector;
 
     /// Lazy current-account selector.
@@ -97,8 +97,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     /// @param recentSelections persistent compact-selector histories
     /// @param homeStrings localized launcher control text
     /// @param navigateCommand shell navigation callback
-    /// @param addDirectoryCommand command opening the directory add editor
-    /// @param manageDirectoriesCommand command opening directory management
+    /// @param manageDirectoriesCommand command opening the complete directory list
     ShellToolbarPanel(
             String windowTitle,
             HomeModel homeModel,
@@ -108,7 +107,6 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
             ShellRecentSelections recentSelections,
             HomeStrings homeStrings,
             Consumer<ShellPageId> navigateCommand,
-            Runnable addDirectoryCommand,
             Runnable manageDirectoriesCommand) {
         super(new MigLayout(
                 "insets 0, fillx",
@@ -141,9 +139,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
                 gameDirectories,
                 histories,
                 i18n("game_directory.title"),
-                i18n("game_directory.new"),
                 i18n("game_directory.manage"),
-                Objects.requireNonNull(addDirectoryCommand, "addDirectoryCommand"),
                 Objects.requireNonNull(manageDirectoriesCommand, "manageDirectoriesCommand"),
                 () -> navigation.accept(ShellPageId.INSTANCES));
 

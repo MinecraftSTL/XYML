@@ -238,8 +238,11 @@ public final class AppShellPanelTest {
                                 space.minecraftstl.xyml.util.i18n.I18n.i18n("account.create"),
                                 toolbar.accountSelector().addButton().getText()),
                         () -> assertEquals(
-                                space.minecraftstl.xyml.util.i18n.I18n.i18n("game_directory.new"),
-                                toolbar.gameDirectorySelector().addButton().getText()),
+                                space.minecraftstl.xyml.util.i18n.I18n.i18n("game_directory.manage"),
+                                toolbar.gameDirectorySelector().manageButton().getText()),
+                        () -> assertEquals(
+                                2,
+                                toolbar.gameDirectorySelector().manageButton().getParent().getComponentCount()),
                         () -> assertEquals(
                                 ShellPageId.INSTANCES,
                                 panel.navigationButton(ShellPageId.INSTANCES).page()));
@@ -253,6 +256,8 @@ public final class AppShellPanelTest {
                         () -> assertTrue(launchIcon.hasFound()));
 
                 toolbar.launchButton().doClick();
+                toolbar.gameDirectorySelector().manageButton().doClick();
+                assertEquals(ShellPageId.SETTINGS, panel.selectedPage());
                 toolbar.accountSelector().manageButton().doClick();
                 assertAll(
                         () -> assertEquals(1, homeModel.launchCount()),

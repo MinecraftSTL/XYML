@@ -134,8 +134,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 toolbarModels.recentSelections(),
                 homeStrings,
                 this::navigateTo,
-                () -> openGameDirectoryManagement(true),
-                () -> openGameDirectoryManagement(false));
+                this::openGameDirectoryManagement);
         launchTaskOverlay = new LaunchTaskOverlayPanel(
                 toolbarModels.home(),
                 homeStrings,
@@ -304,19 +303,13 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Opens the settings directory tab and optionally starts its add workflow.
-    ///
-    /// @param beginAdd whether to enter the add editor after revealing the page
-    private void openGameDirectoryManagement(boolean beginAdd) {
+    /// Opens the complete game-directory list in settings.
+    private void openGameDirectoryManagement() {
         EdtDispatcher.requireEventDispatchThread();
         navigateTo(ShellPageId.SETTINGS);
         JComponent settingsPage = pageCache.getOrCreate(ShellPageId.SETTINGS);
         if (settingsPage instanceof SettingsCenterPanel settings) {
-            if (beginAdd) {
-                settings.beginAddingGameDirectory();
-            } else {
-                settings.showGameDirectories();
-            }
+            settings.showGameDirectories();
         }
     }
 
