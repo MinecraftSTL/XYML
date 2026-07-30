@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.download.java.JavaPackageType;
 import space.minecraftstl.xyml.download.java.disco.DiscoJavaDistribution;
 import space.minecraftstl.xyml.download.java.disco.DiscoJavaRemoteVersion;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -437,6 +438,7 @@ final class DiscoJavaAcquisitionPanel extends JPanel implements AutoCloseable {
         label.setLabelFor(installNameField);
         row.add(label);
         installNameField.setName("javaManagementAcquireDiscoInstallName");
+        SwingTextFields.showClearButton(installNameField);
         row.add(installNameField, "growx");
         installNameArea.add(row, "growx");
         installNameStatusLabel.setName("javaManagementAcquireDiscoInstallNameStatus");

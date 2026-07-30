@@ -171,6 +171,8 @@ public final class InstancesPanelTest {
             assertAll(
                     () -> assertEquals("Search", search.getAccessibleContext().getAccessibleName()),
                     () -> assertEquals("Search", search.getClientProperty("JTextField.placeholderText")),
+                    () -> assertEquals(Boolean.TRUE,
+                            search.getClientProperty("JTextField.showClearButton")),
                     () -> assertTrue(search.isVisible()),
                     () -> assertTrue(search.getWidth() >= 160));
             search.setText("instance 37");

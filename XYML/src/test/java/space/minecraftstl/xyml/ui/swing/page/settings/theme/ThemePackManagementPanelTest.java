@@ -110,6 +110,7 @@ public final class ThemePackManagementPanelTest {
             assertEquals(items.size(), panel.choiceList().getChoiceModel().getSize());
 
             JTextField search = findNamed(panel, "themePacksSearch", JTextField.class);
+            assertEquals(Boolean.TRUE, search.getClientProperty("JTextField.showClearButton"));
             search.setText("needle");
             assertEquals(1, panel.displayedSnapshot().items().size());
             assertEquals(items.size(), panel.displayedSnapshot().totalItemCount());

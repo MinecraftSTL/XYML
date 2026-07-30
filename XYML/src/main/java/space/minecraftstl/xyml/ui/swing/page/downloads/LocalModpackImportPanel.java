@@ -36,6 +36,7 @@ import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
@@ -142,6 +143,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
         instanceNameLabel.setLabelFor(instanceNameField);
         add(instanceNameLabel);
         instanceNameField.setName("localModpackInstanceName");
+        SwingTextFields.showClearButton(instanceNameField);
         instanceNameField.getDocument().addDocumentListener(inputListener);
         add(instanceNameField, "growx, h 40!");
         importButton.setName("localModpackImport");

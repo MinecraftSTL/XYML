@@ -21,6 +21,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 
 import javax.swing.JCheckBox;
 import javax.swing.JLabel;
@@ -77,6 +78,7 @@ final class SwingInstanceLifecycleInteractions implements InstanceLifecycleInter
         String source = Objects.requireNonNull(sourceId, "sourceId");
         JTextField destinationField = new JTextField(source + "-copy", 24);
         destinationField.setName("instanceLifecycleDuplicateDestination");
+        SwingTextFields.showClearButton(destinationField);
         JCheckBox copySaves = new JCheckBox(strings.duplicateSavesLabel());
         copySaves.setName("instanceLifecycleDuplicateSaves");
 

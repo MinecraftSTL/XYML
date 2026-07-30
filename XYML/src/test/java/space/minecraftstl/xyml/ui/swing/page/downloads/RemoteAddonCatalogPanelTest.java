@@ -53,6 +53,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -136,6 +137,15 @@ final class RemoteAddonCatalogPanelTest {
                 prepareViewport(panel.choiceList(), 160);
                 assertEquals(0, backend.searchRequests.get());
                 assertEquals(0, backend.versionRequests.get());
+                assertAll(
+                        () -> assertEquals(Boolean.TRUE, findNamed(
+                                panel,
+                                "remoteAddonSearch",
+                                JComponent.class).getClientProperty("JTextField.showClearButton")),
+                        () -> assertEquals(Boolean.TRUE, findNamed(
+                                panel,
+                                "remoteAddonGameVersion",
+                                JComponent.class).getClientProperty("JTextField.showClearButton")));
                 JButton search = findNamed(panel, "remoteAddonSearchAction", JButton.class);
                 assertNotNull(search);
                 search.doClick();

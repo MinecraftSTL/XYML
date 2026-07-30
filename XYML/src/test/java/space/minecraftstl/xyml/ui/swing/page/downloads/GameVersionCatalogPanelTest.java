@@ -209,7 +209,14 @@ public final class GameVersionCatalogPanelTest {
             int rowHeight = list.getFixedCellHeight();
             int visibleRows = (viewportHeight + rowHeight - 1) / rowHeight;
 
-            findTextField(panel, "gameVersionsSearch").setText("version-9");
+            JTextField search = findTextField(panel, "gameVersionsSearch");
+            JTextField instanceName = findTextField(panel, "gameVersionsInstanceName");
+            assertAll(
+                    () -> assertEquals(Boolean.TRUE,
+                            search.getClientProperty("JTextField.showClearButton")),
+                    () -> assertEquals(Boolean.TRUE,
+                            instanceName.getClientProperty("JTextField.showClearButton")));
+            search.setText("version-9");
             findFilterButton(panel, GameVersionFilter.SNAPSHOT).doClick();
             findButton(panel, "gameVersionsRefresh").doClick();
             list.setSelectedIndex(1);

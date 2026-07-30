@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
@@ -336,6 +337,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         searchLabel.setLabelFor(searchField);
         searchBand.add(searchLabel);
         searchField.setName("remoteModpackSearch");
+        SwingTextFields.showClearButton(searchField);
         searchField.getDocument().addDocumentListener(criteriaListener);
         searchBand.add(searchField, "growx, h 40!");
 
@@ -356,6 +358,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         gameVersionLabel.setLabelFor(gameVersionField);
         criteriaBand.add(gameVersionLabel);
         gameVersionField.setName("remoteModpackGameVersion");
+        SwingTextFields.showClearButton(gameVersionField);
         gameVersionField.getDocument().addDocumentListener(criteriaListener);
         criteriaBand.add(gameVersionField, "growx, h 40!");
 
@@ -432,6 +435,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         instanceNameLabel.setLabelFor(instanceNameField);
         installBand.add(instanceNameLabel);
         instanceNameField.setName("remoteModpackInstanceName");
+        SwingTextFields.showClearButton(instanceNameField);
         instanceNameField.getDocument().addDocumentListener(instanceNameListener);
         installBand.add(instanceNameField, "growx, h 40!");
         installButton.setName("remoteModpackInstall");

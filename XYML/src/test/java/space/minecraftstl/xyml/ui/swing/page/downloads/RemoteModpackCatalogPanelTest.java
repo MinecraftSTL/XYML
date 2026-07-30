@@ -52,6 +52,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -130,6 +131,19 @@ final class RemoteModpackCatalogPanelTest {
                 prepareViewport(panel.choiceList());
                 assertEquals(0, backend.searchRequests.get());
                 assertEquals(0, backend.versionRequests.get());
+                assertAll(
+                        () -> assertEquals(Boolean.TRUE, findNamed(
+                                panel,
+                                "remoteModpackSearch",
+                                JComponent.class).getClientProperty("JTextField.showClearButton")),
+                        () -> assertEquals(Boolean.TRUE, findNamed(
+                                panel,
+                                "remoteModpackGameVersion",
+                                JComponent.class).getClientProperty("JTextField.showClearButton")),
+                        () -> assertEquals(Boolean.TRUE, findNamed(
+                                panel,
+                                "remoteModpackInstanceName",
+                                JComponent.class).getClientProperty("JTextField.showClearButton")));
                 JButton search = findNamed(panel, "remoteModpackSearchAction", JButton.class);
                 assertNotNull(search);
                 search.doClick();

@@ -143,7 +143,9 @@ public final class ModCatalogPanelTest {
             findButton(panel, "modsDelete").doClick();
             assertEquals(List.of("mod-1"), model.deletedKeys());
 
-            findTextField(panel, "modsSearch").setText("shader");
+            JTextField search = findTextField(panel, "modsSearch");
+            assertEquals(Boolean.TRUE, search.getClientProperty("JTextField.showClearButton"));
+            search.setText("shader");
             assertEquals("shader", model.queries().get(model.queries().size() - 1));
             findComboBox(panel, "modsFilter").setSelectedItem(ModCatalogFilter.DISABLED);
             assertEquals(ModCatalogFilter.DISABLED,

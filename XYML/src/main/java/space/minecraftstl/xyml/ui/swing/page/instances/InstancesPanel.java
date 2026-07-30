@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceManagementCoordinator;
@@ -350,6 +351,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         toolbar.add(heading);
 
         searchField.setName("instancesSearch");
+        SwingTextFields.showClearButton(searchField);
         searchField.putClientProperty("JTextField.placeholderText", strings.searchText());
         searchField.getAccessibleContext().setAccessibleName(strings.searchText());
         searchField.getDocument().addDocumentListener(searchListener);

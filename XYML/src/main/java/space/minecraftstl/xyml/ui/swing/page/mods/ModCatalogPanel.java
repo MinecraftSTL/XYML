@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 
@@ -304,6 +305,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         JLabel searchLabel = new JLabel(strings.searchLabel());
         filters.add(searchLabel);
         searchField.setName("modsSearch");
+        SwingTextFields.showClearButton(searchField);
         searchField.getAccessibleContext().setAccessibleName(strings.searchLabel());
         filters.add(searchField, "growx");
         JLabel filterLabel = new JLabel(strings.filterLabel());

@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
@@ -514,6 +515,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         searchLabel.setLabelFor(searchField);
         searchBand.add(searchLabel);
         searchField.setName("gameVersionsSearch");
+        SwingTextFields.showClearButton(searchField);
         searchField.getDocument().addDocumentListener(searchListener);
         searchBand.add(searchField, "growx, h 40!");
         catalogWorkspace.add(searchBand, "growx");
@@ -608,6 +610,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         instanceNameLabel.setLabelFor(instanceNameField);
         installConfigurationPanel.add(instanceNameLabel);
         instanceNameField.setName("gameVersionsInstanceName");
+        SwingTextFields.showClearButton(instanceNameField);
         instanceNameField.getDocument().addDocumentListener(instanceNameListener);
         installConfigurationPanel.add(instanceNameField, "growx, h 40!");
 

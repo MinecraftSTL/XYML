@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.download.java.disco.DiscoJavaDistribution;
 import space.minecraftstl.xyml.download.java.disco.DiscoJavaRemoteVersion;
 import space.minecraftstl.xyml.game.GameJavaVersion;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
@@ -718,6 +719,7 @@ public final class JavaRuntimeAcquisitionPanel extends JPanel implements AutoClo
     /// Configures archive field identity and live name validation requests.
     private void configureArchiveForm() {
         installNameField.setName("javaManagementAcquireInstallName");
+        SwingTextFields.showClearButton(installNameField);
         installNameField.getDocument().addDocumentListener(installNameListener);
     }
 

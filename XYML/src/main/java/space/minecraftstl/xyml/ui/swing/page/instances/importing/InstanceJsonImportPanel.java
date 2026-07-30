@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
@@ -127,6 +128,7 @@ public final class InstanceJsonImportPanel extends JPanel implements AutoCloseab
         instanceIdLabel.setLabelFor(instanceIdField);
         add(instanceIdLabel);
         instanceIdField.setName("instanceJsonInstanceId");
+        SwingTextFields.showClearButton(instanceIdField);
         instanceIdField.getDocument().addDocumentListener(nameListener);
         add(instanceIdField, "growx, h 40!");
 

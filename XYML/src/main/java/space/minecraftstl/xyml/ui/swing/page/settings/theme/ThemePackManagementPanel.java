@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.theme.ThemeReference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
@@ -228,6 +229,7 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
         header.add(title, "span 2, growx");
 
         searchField.setName("themePacksSearch");
+        SwingTextFields.showClearButton(searchField);
         searchField.putClientProperty("JTextField.placeholderText", strings.searchLabel());
         searchField.getAccessibleContext().setAccessibleName(strings.searchLabel());
         header.add(searchField, "growx, h 36!");

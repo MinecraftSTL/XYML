@@ -84,6 +84,7 @@ final class InstanceJsonImportPanelTest {
                 assertEquals(Path.of("Example.JSON").toAbsolutePath().normalize().toString(),
                         sourceField.getText());
                 assertEquals("Example", nameField.getText());
+                assertEquals(Boolean.TRUE, nameField.getClientProperty("JTextField.showClearButton"));
                 nameField.setText("Imported Example");
                 assertTrue(importButton.isEnabled());
                 importButton.doClick();

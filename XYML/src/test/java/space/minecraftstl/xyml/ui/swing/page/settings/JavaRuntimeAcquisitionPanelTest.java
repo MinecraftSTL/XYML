@@ -156,6 +156,7 @@ public final class JavaRuntimeAcquisitionPanelTest {
 
             JTextField name = findComponent(panel, "javaManagementAcquireInstallName", JTextField.class);
             assertEquals("suggested-jdk", name.getText());
+            assertEquals(Boolean.TRUE, name.getClientProperty("JTextField.showClearButton"));
             name.setText("custom-jdk");
             assertEquals("custom-jdk", listener.validationCandidate);
             panel.applyInstallNameStatus(
@@ -442,6 +443,7 @@ public final class JavaRuntimeAcquisitionPanelTest {
                     "javaManagementAcquireDiscoInstallName",
                     JTextField.class);
             assertEquals("temurin-21-jdk", installName.getText());
+            assertEquals(Boolean.TRUE, installName.getClientProperty("JTextField.showClearButton"));
             AbstractButton install = findComponent(
                     panel,
                     "javaManagementAcquireDiscoInstall",

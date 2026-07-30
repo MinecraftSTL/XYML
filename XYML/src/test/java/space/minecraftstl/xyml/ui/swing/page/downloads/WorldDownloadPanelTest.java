@@ -79,6 +79,10 @@ final class WorldDownloadPanelTest {
                         panel,
                         "localModpackImportProgress",
                         JComponent.class).isOpaque());
+                assertEquals(Boolean.TRUE, findNamed(
+                        panel,
+                        "localModpackInstanceName",
+                        JComponent.class).getClientProperty("JTextField.showClearButton"));
                 categories.setSelectedIndex(categories.getTabCount() - 1);
                 layoutRecursively(panel);
 
