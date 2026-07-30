@@ -41,19 +41,26 @@ import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
+import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
+import javax.swing.KeyStroke;
 import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import javax.swing.WindowConstants;
+import javax.swing.text.DefaultEditorKit;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.datatransfer.StringSelection;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.IOException;
@@ -86,6 +93,9 @@ public final class SwingAccountCreationDialog extends JDialog
 
     /// Card identifier for authlib-injector fields.
     private static final String AUTHLIB_CARD = AccountCreationMethod.AUTHLIB_INJECTOR.name();
+
+    /// Preferred width of the selectable invalid-username guidance.
+    private static final int INVALID_USERNAME_PROMPT_WIDTH = 560;
 
     /// Authentication and storage gateway.
     private final AccountCreationGateway gateway;
@@ -653,12 +663,13 @@ public final class SwingAccountCreationDialog extends JDialog
         String expected = replacePunctuationWithSpaces(
                 i18n("account.methods.offline.name.invalid.confirmation"));
         JTextField confirmation = new JTextField();
-        JPanel content = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[][]10[]"));
-        content.add(new JLabel("<html>" + i18n("account.methods.offline.name.invalid")
-                .replace("\n", "<br>") + "</html>"), "wrap");
-        content.add(new JLabel("<html>" + i18n(
+        String guidance = i18n("account.methods.offline.name.invalid")
+                + "\n\n"
+                + i18n(
                 "account.methods.offline.name.invalid.confirmation.prompt",
-                expected) + "</html>"), "wrap");
+                expected);
+        JPanel content = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[]10[]"));
+        content.add(createSelectablePromptText(guidance), "growx, wrap");
         confirmation.setToolTipText(username);
         content.add(confirmation, "growx");
 
@@ -680,6 +691,38 @@ public final class SwingAccountCreationDialog extends JDialog
             confirmation.requestFocusInWindow();
         }
         return false;
+    }
+
+    /// Creates label-styled prompt guidance that supports partial selection and keyboard copying.
+    ///
+    /// The component deliberately keeps the ordinary pointer cursor and does not inherit or expose
+    /// a component popup menu. Selection remains available through the standard Swing caret so users
+    /// can drag across any required fragment instead of relying on selecting the complete message.
+    ///
+    /// @param text complete localized prompt guidance
+    /// @return configured read-only prompt text
+    static JTextArea createSelectablePromptText(String text) {
+        JTextArea promptText = new JTextArea(Objects.requireNonNull(text, "text"));
+        promptText.setName("accountInvalidUsernamePromptText");
+        promptText.setEditable(false);
+        promptText.setFocusable(true);
+        promptText.setLineWrap(true);
+        promptText.setWrapStyleWord(true);
+        promptText.setOpaque(false);
+        promptText.setBorder(BorderFactory.createEmptyBorder());
+        promptText.setFont(UIManager.getFont("Label.font"));
+        promptText.setForeground(UIManager.getColor("Label.foreground"));
+        promptText.setCursor(Cursor.getDefaultCursor());
+        promptText.setComponentPopupMenu(null);
+        promptText.setInheritsPopupMenu(false);
+        promptText.getInputMap().put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK),
+                DefaultEditorKit.copyAction);
+        promptText.setSize(new Dimension(INVALID_USERNAME_PROMPT_WIDTH, Short.MAX_VALUE));
+        Dimension preferredSize = promptText.getPreferredSize();
+        promptText.setPreferredSize(new Dimension(INVALID_USERNAME_PROMPT_WIDTH, preferredSize.height));
+        promptText.setCaretPosition(0);
+        return promptText;
     }
 
     /// Shows a no-default native role chooser until the user selects one or cancels.
