@@ -120,10 +120,13 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         Objects.requireNonNull(animator, "animator");
         Objects.requireNonNull(pageTransitionDuration, "pageTransitionDuration");
         Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration");
-        navigationState = new ShellNavigationState(ShellPageId.INSTANCES);
+        navigationState = new ShellNavigationState();
         pageCache = new ShellPageCache<>(Objects.requireNonNull(pageFactories));
         overlayDeck = new ShellPageDeck(animator, pageTransitionDuration);
         instancesPage = pageCache.getOrCreate(ShellPageId.INSTANCES);
+        if (instancesPage instanceof InstancesPanel panel) {
+            panel.setRevealDefaultPageCommand(this::revealDefaultPage);
+        }
         navigationRail = new ShellNavigationRail(pagePresentations, this::togglePage);
         toolbar = new ShellToolbarPanel(
                 Objects.requireNonNull(windowTitle, "windowTitle"),
@@ -134,7 +137,8 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 toolbarModels.recentSelections(),
                 homeStrings,
                 this::navigateTo,
-                this::openGameDirectoryManagement);
+                this::openGameDirectoryManagement,
+                this::showDefaultPage);
         launchTaskOverlay = new LaunchTaskOverlayPanel(
                 toolbarModels.home(),
                 homeStrings,
@@ -156,7 +160,8 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         add(toolbar, "cell 0 0 2 1, grow");
         add(navigationRail, "cell 0 1, grow");
         add(workspace, "cell 1 1, grow, gap 18 20 18 18");
-        updateSelection(ShellPageId.INSTANCES);
+        showInstanceManagement();
+        updateSelection(null);
     }
 
     /// Replaces the renderer-ready background and schedules repainting.
@@ -257,49 +262,71 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
         Objects.requireNonNull(page);
         if (!navigationState.select(page)) {
-            if (page == ShellPageId.INSTANCES) {
-                showInstanceList();
-            }
             return;
         }
 
-        updateSelection(page);
         if (page == ShellPageId.INSTANCES) {
-            showInstanceList();
+            showInstanceListPage();
             overlayDeck.setVisible(false);
             instancesPage.setVisible(true);
             workspace.revalidate();
             workspace.repaint();
+            updateSelection(page);
             return;
         }
+        showInstanceManagement();
         JComponent overlayPage = pageCache.getOrCreate(page);
         instancesPage.setVisible(false);
         overlayDeck.setVisible(true);
         overlayDeck.showPage(overlayPage, true);
+        updateSelection(page);
     }
 
-    /// Opens the instance list or toggles one transient destination from the left navigation rail.
+    /// Opens or toggles one side destination from the left navigation rail.
     ///
-    /// Repeating an active rail destination closes its overlay and exposes persistent instance management. Other
-    /// programmatic navigation, including popup management footers, continues to keep an already-open page visible.
+    /// Repeating an active rail destination closes it and exposes persistent instance management. Other programmatic
+    /// navigation, including popup management footers, continues to keep an already-open side page visible.
     ///
     /// @param page destination selected by the user
     private void togglePage(ShellPageId page) {
         EdtDispatcher.requireEventDispatchThread();
         ShellPageId destination = Objects.requireNonNull(page, "page");
-        if (destination == ShellPageId.INSTANCES) {
-            navigateTo(ShellPageId.INSTANCES);
+        if (navigationState.selectedPage() == destination) {
+            showDefaultPage();
             return;
         }
-        navigateTo(navigationState.selectedPage() == destination
-                ? ShellPageId.INSTANCES
-                : destination);
+        navigateTo(destination);
     }
 
-    /// Restores the persistent page's list card when its production component supports management views.
-    private void showInstanceList() {
+    /// Reveals the persistent main page and clears every side-navigation selection.
+    private void showDefaultPage() {
+        EdtDispatcher.requireEventDispatchThread();
+        showInstanceManagement();
+        revealDefaultPage();
+    }
+
+    /// Exposes the already-mounted persistent page without starting another management transition.
+    private void revealDefaultPage() {
+        EdtDispatcher.requireEventDispatchThread();
+        navigationState.clear();
+        overlayDeck.setVisible(false);
+        instancesPage.setVisible(true);
+        updateSelection(null);
+        workspace.revalidate();
+        workspace.repaint();
+    }
+
+    /// Reveals the persistent page's list card without disposing its management view.
+    private void showInstanceListPage() {
         if (instancesPage instanceof InstancesPanel panel) {
-            panel.showInstanceList().toCompletableFuture().join();
+            panel.showInstanceListPage();
+        }
+    }
+
+    /// Restores management for the selected instance when the persistent page supports it.
+    private void showInstanceManagement() {
+        if (instancesPage instanceof InstancesPanel panel) {
+            panel.showSelectedInstanceManagement().toCompletableFuture().join();
         }
     }
 
@@ -313,10 +340,10 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Returns the currently selected destination.
+    /// Returns the currently selected side destination.
     ///
-    /// @return the selected page identifier
-    public ShellPageId selectedPage() {
+    /// @return selected side page, or `null` while instance management is exposed
+    public @Nullable ShellPageId selectedPage() {
         return navigationState.selectedPage();
     }
 
@@ -364,7 +391,8 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     ///
     /// @return the active page component
     @Nullable JComponent activePage() {
-        return navigationState.selectedPage() == ShellPageId.INSTANCES
+        @Nullable ShellPageId selectedPage = navigationState.selectedPage();
+        return selectedPage == null || selectedPage == ShellPageId.INSTANCES
                 ? instancesPage
                 : overlayDeck.currentPage();
     }
@@ -393,8 +421,8 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
     /// Synchronizes title-bar navigation state after a base or overlay change.
     ///
-    /// @param page the newly selected destination
-    private void updateSelection(ShellPageId page) {
+    /// @param page the newly selected side destination, or `null` for persistent instance management
+    private void updateSelection(@Nullable ShellPageId page) {
         toolbar.setSelectedPage(page);
         navigationRail.setSelectedPage(page);
     }

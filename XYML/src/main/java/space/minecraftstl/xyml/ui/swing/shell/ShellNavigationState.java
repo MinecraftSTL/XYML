@@ -18,26 +18,32 @@
 package space.minecraftstl.xyml.ui.swing.shell;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
 /// Stores top-level navigation state independently from Swing components.
 @NotNullByDefault
 public final class ShellNavigationState {
-    /// The currently selected destination.
-    private ShellPageId selectedPage;
+    /// The currently selected side destination, or `null` while the persistent main page is exposed.
+    private @Nullable ShellPageId selectedPage;
 
-    /// Creates navigation state at a caller-selected destination.
+    /// Creates navigation state with the persistent main page exposed.
+    public ShellNavigationState() {
+        selectedPage = null;
+    }
+
+    /// Creates navigation state at a caller-selected side destination.
     ///
     /// @param initialPage the initial destination
     public ShellNavigationState(ShellPageId initialPage) {
         selectedPage = Objects.requireNonNull(initialPage);
     }
 
-    /// Returns the currently selected destination.
+    /// Returns the currently selected side destination.
     ///
-    /// @return the selected destination
-    public ShellPageId selectedPage() {
+    /// @return selected side destination, or `null` while the persistent main page is exposed
+    public @Nullable ShellPageId selectedPage() {
         return selectedPage;
     }
 
@@ -51,6 +57,17 @@ public final class ShellNavigationState {
             return false;
         }
         selectedPage = page;
+        return true;
+    }
+
+    /// Clears the selected side destination and exposes the persistent main page.
+    ///
+    /// @return `true` only when a side destination had been selected
+    public boolean clear() {
+        if (selectedPage == null) {
+            return false;
+        }
+        selectedPage = null;
         return true;
     }
 }

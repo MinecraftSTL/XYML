@@ -248,13 +248,12 @@ final class ShellNavigationRail extends JPanel {
         group.add(button, "w 42!, h 42!");
     }
 
-    /// Synchronizes visual selection with the active list or overlay page.
+    /// Synchronizes visual selection with the active side page.
     ///
-    /// @param selectedPage active shell destination
-    void setSelectedPage(ShellPageId selectedPage) {
-        ShellPageId page = Objects.requireNonNull(selectedPage, "selectedPage");
+    /// @param selectedPage active side destination, or `null` for persistent instance management
+    void setSelectedPage(@Nullable ShellPageId selectedPage) {
         buttonGroup.clearSelection();
-        @Nullable ShellNavigationButton selected = buttons.get(page);
+        @Nullable ShellNavigationButton selected = selectedPage == null ? null : buttons.get(selectedPage);
         if (selected != null) {
             selected.setSelected(true);
         }

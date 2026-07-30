@@ -19,10 +19,12 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Stable English text used by the instance overview until it is connected to the presentation catalog.
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
+/// Localizable text used by the instance overview and its desktop interactions.
 ///
-/// Keeping the text in one immutable value object prevents operational controls from scattering fallback
-/// strings through the panel and interaction implementation.
+/// Keeping the text in one immutable value object prevents operational controls from scattering resource
+/// lookups through the panel and interaction implementation.
 @NotNullByDefault
 final class InstanceOverviewStrings {
     /// Shared English fallback used by the production overview.
@@ -158,7 +160,31 @@ final class InstanceOverviewStrings {
         this.operationFailedTitle = requireNonBlank(operationFailedTitle, "operationFailedTitle");
     }
 
-    /// Returns the production fallback text bundle.
+    /// Returns production text resolved from the current launcher locale.
+    ///
+    /// @return current-locale overview text
+    static InstanceOverviewStrings localized() {
+        return new InstanceOverviewStrings(
+                i18n("swing.instance_overview.title"),
+                i18n("instance.name"),
+                i18n("swing.instance_overview.instance_folder"),
+                i18n("folder.game"),
+                i18n("swing.instance_overview.icon_preview"),
+                i18n("swing.instance_overview.loading"),
+                i18n("swing.instance_overview.open_instance_folder"),
+                i18n("swing.instance_overview.open_game_folder"),
+                i18n("swing.instance_overview.refresh"),
+                i18n("swing.instance_overview.choose_icon"),
+                i18n("swing.instance_overview.remove_icon"),
+                i18n("swing.instance_overview.choose_icon"),
+                i18n("swing.instance_overview.custom_icon"),
+                i18n("swing.instance_overview.image_files"),
+                i18n("swing.instance_overview.remove_icon_confirm"),
+                i18n("swing.instance_overview.remove_icon"),
+                i18n("swing.instance_overview.operation_failed"));
+    }
+
+    /// Returns stable English text for deterministic component tests.
     ///
     /// @return shared immutable English text
     static InstanceOverviewStrings english() {

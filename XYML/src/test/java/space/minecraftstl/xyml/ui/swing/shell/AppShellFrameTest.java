@@ -45,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -164,7 +165,7 @@ public final class AppShellFrameTest {
                             FlatClientProperties.TITLE_BAR_HEIGHT)),
                     () -> assertEquals(SystemInfo.isMacOS ? JRootPane.NONE : JRootPane.FRAME,
                             rootPane.getWindowDecorationStyle()),
-                    () -> assertEquals(ShellPageId.INSTANCES, frame.shellPanel().selectedPage()),
+                    () -> assertNull(frame.shellPanel().selectedPage()),
                     () -> assertTrue(frame.shellPanel().isPageCached(ShellPageId.INSTANCES)),
                     () -> assertEquals("mac horizontal zeroInFullScreen",
                             frame.shellPanel().toolbar().macWindowButtonsPlaceholder().getClientProperty(

@@ -143,7 +143,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     /// @param resourcePackStatusStrings localized resource-pack lifecycle text
     /// @param resourcePackActionStrings localized resource-pack action text
     /// @param resourcePackInteractions resource-pack dialog and desktop interactions
-    /// @param returnCommand coordinator command returning to the instance list
+    /// @param returnCommand shell command opening the instance-list side page
     /// @param taskProgressStrings localized task-progress labels for long-running instance operations
     /// @param animator optional shared motion-aware progress animator
     /// @param progressAnimationDuration non-negative progress animation duration for instance operations
@@ -427,7 +427,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     /// @param modStrings localized installed-Mod content text
     /// @param resourcePackStrings localized resource-pack content text
     /// @param schematicStrings localized schematic-browser text
-    /// @param returnCommand coordinator command returning to the instance list
+    /// @param returnCommand shell command opening the instance-list side page
     private void configureComponents(
             SchematicInstanceManagementStrings managementStrings,
             ModCatalogStrings modStrings,

@@ -500,6 +500,67 @@ public final class InstancesPanelTest {
         coordinator.close();
     }
 
+    /// The shell can expose the list temporarily without discarding the selected instance's main management view.
+    @Test
+    public void preservesDefaultManagementBehindTheInstanceListSidePage() {
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(2), snapshot(0, 2, 0L));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(
+                () -> new InstancesPanel(model, STRINGS, coordinator));
+        AtomicInteger defaultPageReveals = new AtomicInteger();
+        onEventDispatchThread(() -> panel.setRevealDefaultPageCommand(defaultPageReveals::incrementAndGet));
+
+        onEventDispatchThread(() -> {
+            panel.showSelectedInstanceManagement().toCompletableFuture().join();
+        });
+        FakeManagementView firstView = factory.latestView();
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertEquals("instance-0", coordinator.currentInstanceId()),
+                    () -> assertTrue(findComponent(panel, "instancesManagementHost").isVisible()),
+                    () -> assertEquals(1, factory.creationCount()));
+
+            panel.showInstanceListPage();
+            assertAll(
+                    () -> assertTrue(findComponent(panel, "instancesListWorkspace").isVisible()),
+                    () -> assertSame(
+                            findComponent(panel, "instancesManagementHost"),
+                            firstView.component().getParent()),
+                    () -> assertEquals(0, firstView.closeCount()));
+
+            panel.showSelectedInstanceManagement().toCompletableFuture().join();
+            assertAll(
+                    () -> assertTrue(findComponent(panel, "instancesManagementHost").isVisible()),
+                    () -> assertEquals(1, factory.creationCount()),
+                    () -> assertEquals(0, firstView.closeCount()));
+
+            panel.showInstanceListPage();
+            coordinator.open("instance-0").toCompletableFuture().join();
+            assertAll(
+                    () -> assertTrue(findComponent(panel, "instancesManagementHost").isVisible()),
+                    () -> assertEquals(2, factory.creationCount()),
+                    () -> assertEquals(1, firstView.closeCount()),
+                    () -> assertEquals(1, defaultPageReveals.get()));
+
+            model.selectInstance("instance-1");
+            assertAll(
+                    () -> assertEquals("instance-1", coordinator.currentInstanceId()),
+                    () -> assertEquals(3, factory.creationCount()),
+                    () -> assertEquals(1, firstView.closeCount()));
+
+            FakeManagementView secondView = factory.latestView();
+            model.selectionContextRevision++;
+            model.replaceItemsAndPublish(items(2), snapshot(1, 2, 1L));
+            assertAll(
+                    () -> assertEquals("instance-1", coordinator.currentInstanceId()),
+                    () -> assertEquals(4, factory.creationCount()),
+                    () -> assertEquals(1, secondView.closeCount()));
+            panel.close();
+            coordinator.close();
+        });
+    }
+
     /// A worker close synchronously detaches the host, closes its active view once, and is idempotent.
     @Test
     public void closesActiveManagementViewSynchronouslyFromWorker() throws InterruptedException {

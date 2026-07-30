@@ -48,6 +48,7 @@ import java.awt.Font;
 import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 /// Presents an installed-instance list whose source demand follows measured viewport geometry.
@@ -179,6 +180,18 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
     /// Whether one coalesced search update is already queued behind the current document mutation.
     private boolean searchUpdateQueued;
 
+    /// Whether repository selection changes should keep the persistent management surface synchronized.
+    private boolean persistentManagementRequested;
+
+    /// Whether the instance-list side page is currently exposed by the shell.
+    private boolean instanceListPageVisible;
+
+    /// Shell callback clearing side-page selection when a list command opens instance management.
+    private Runnable revealDefaultPageCommand = () -> { };
+
+    /// Repository-selection context represented by the mounted management view.
+    private long managementContextRevision = Long.MIN_VALUE;
+
     /// Cross-thread gate preventing queued model updates after close begins.
     private volatile boolean closed;
 
@@ -257,6 +270,57 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
     /// @return asynchronous coordinator completion
     public CompletionStage<@Nullable Void> showInstanceList() {
         return managementCoordinator.returnToInstanceList();
+    }
+
+    /// Installs the shell callback used when a list action reveals the persistent management page.
+    ///
+    /// @param command non-owning shell navigation callback
+    public void setRevealDefaultPageCommand(Runnable command) {
+        EdtDispatcher.requireEventDispatchThread();
+        revealDefaultPageCommand = Objects.requireNonNull(command, "command");
+    }
+
+    /// Reveals the installed-instance list as a side page without disposing persistent management state.
+    public void showInstanceListPage() {
+        EdtDispatcher.requireEventDispatchThread();
+        persistentManagementRequested = false;
+        instanceListPageVisible = true;
+        ((CardLayout) getLayout()).show(this, INSTANCES_VIEW_CARD);
+        refreshRootCards();
+    }
+
+    /// Reveals management for the model-selected instance, creating or replacing it only when necessary.
+    ///
+    /// @return completion of any required coordinator transition
+    public CompletionStage<@Nullable Void> showSelectedInstanceManagement() {
+        EdtDispatcher.requireEventDispatchThread();
+        persistentManagementRequested = true;
+        instanceListPageVisible = false;
+        @Nullable String selectedId = selectedInstanceId(displayedSnapshot());
+        if (selectedId == null) {
+            managementContextRevision = Long.MIN_VALUE;
+            CompletionStage<@Nullable Void> completion = managementCoordinator.returnToInstanceList();
+            persistentManagementRequested = true;
+            return completion;
+        }
+        long requestedContextRevision = model.selectionContextRevision();
+        if (selectedId.equals(managementCoordinator.currentInstanceId())
+                && managementContextRevision == requestedContextRevision
+                && managementWorkspace.getComponentCount() > 0) {
+            ((CardLayout) getLayout()).show(this, MANAGEMENT_VIEW_CARD);
+            refreshRootCards();
+            return CompletableFuture.completedFuture(null);
+        }
+        CompletionStage<@Nullable Void> completion = managementCoordinator.open(selectedId);
+        completion.whenComplete((@Nullable Void ignored, @Nullable Throwable failure) -> EdtDispatcher.execute(() -> {
+            if (!closed
+                    && failure == null
+                    && selectedId.equals(managementCoordinator.currentInstanceId())
+                    && requestedContextRevision == model.selectionContextRevision()) {
+                managementContextRevision = requestedContextRevision;
+            }
+        }));
+        return completion;
     }
 
     /// Releases the model subscription and viewport requests from any caller thread.
@@ -426,6 +490,11 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
                 && pendingModelSelectionId == null);
         statusLabel.setText(snapshot.statusText());
         statusLabel.setToolTipText(snapshot.statusText());
+        if (persistentManagementRequested
+                && (!Objects.equals(selectedInstanceId, managementCoordinator.currentInstanceId())
+                        || managementContextRevision != model.selectionContextRevision())) {
+            showSelectedInstanceManagement().toCompletableFuture().join();
+        }
     }
 
     /// Restores the model-selected row without delegating it back as a user command.
@@ -516,6 +585,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
             return;
         }
         resourcesClosed = true;
+        revealDefaultPageCommand = () -> { };
         pendingUserSelectionIndex = -1;
         pendingModelSelectionId = null;
         choiceList.setEnabled(false);
@@ -584,6 +654,14 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         throw new IllegalStateException("Unexpected checked panel lifecycle failure", failure);
     }
 
+    /// Revalidates and repaints both root cards after a direct shell-level page switch.
+    private void refreshRootCards() {
+        managementWorkspace.revalidate();
+        managementWorkspace.repaint();
+        revalidate();
+        repaint();
+    }
+
     /// Card host implementation that never assumes ownership of a management view.
     @NotNullByDefault
     private final class PanelManagementHost implements InstanceManagementHost {
@@ -594,18 +672,29 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         public void showManagementView(JComponent component) {
             EdtDispatcher.requireEventDispatchThread();
             Objects.requireNonNull(component, "component");
+            boolean revealDefaultPage = instanceListPageVisible;
+            persistentManagementRequested = true;
+            instanceListPageVisible = false;
+            managementContextRevision = model.selectionContextRevision();
             managementWorkspace.removeAll();
             managementWorkspace.add(component, BorderLayout.CENTER);
             ((CardLayout) InstancesPanel.this.getLayout()).show(
                     InstancesPanel.this,
                     MANAGEMENT_VIEW_CARD);
             refreshManagementCards();
+            if (revealDefaultPage) {
+                revealDefaultPageCommand.run();
+            }
         }
 
         /// Removes the dynamic component and reveals the stable instances-list card.
         @Override
         public void showInstanceList() {
             EdtDispatcher.requireEventDispatchThread();
+            if (!persistentManagementRequested) {
+                instanceListPageVisible = true;
+            }
+            managementContextRevision = Long.MIN_VALUE;
             managementWorkspace.removeAll();
             ((CardLayout) InstancesPanel.this.getLayout()).show(
                     InstancesPanel.this,
@@ -615,10 +704,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
 
         /// Revalidates and repaints the dynamic mount and root card container.
         private void refreshManagementCards() {
-            managementWorkspace.revalidate();
-            managementWorkspace.repaint();
-            InstancesPanel.this.revalidate();
-            InstancesPanel.this.repaint();
+            refreshRootCards();
         }
     }
 }

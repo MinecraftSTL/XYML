@@ -98,6 +98,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
     /// @param homeStrings localized launcher control text
     /// @param navigateCommand shell navigation callback
     /// @param manageDirectoriesCommand command opening the complete directory list
+    /// @param revealDefaultPageCommand command exposing persistent instance management after directory selection
     ShellToolbarPanel(
             String windowTitle,
             HomeModel homeModel,
@@ -107,7 +108,8 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
             ShellRecentSelections recentSelections,
             HomeStrings homeStrings,
             Consumer<ShellPageId> navigateCommand,
-            Runnable manageDirectoriesCommand) {
+            Runnable manageDirectoriesCommand,
+            Runnable revealDefaultPageCommand) {
         super(new MigLayout(
                 "insets 0, fillx",
                 "[]12[168!,shrink 80]12[190!,shrink 90]8[168!,shrink 80]push"
@@ -141,7 +143,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
                 i18n("game_directory.title"),
                 i18n("game_directory.manage"),
                 Objects.requireNonNull(manageDirectoriesCommand, "manageDirectoriesCommand"),
-                () -> navigation.accept(ShellPageId.INSTANCES));
+                Objects.requireNonNull(revealDefaultPageCommand, "revealDefaultPageCommand"));
 
         configureComponents(Objects.requireNonNull(windowTitle, "windowTitle"));
         homeSubscription = homeModel.subscribe(this::homeChanged);
@@ -150,12 +152,12 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         applyGameDirectories(gameDirectories.snapshot());
     }
 
-    /// Marks the account-management footer while its page is active.
+    /// Marks the account-management footer while its side page is active.
     ///
-    /// @param selectedPage selected shell page
-    void setSelectedPage(ShellPageId selectedPage) {
+    /// @param selectedPage selected side page, or `null` for persistent instance management
+    void setSelectedPage(@Nullable ShellPageId selectedPage) {
         accountSelector.setManagementSelected(
-                Objects.requireNonNull(selectedPage, "selectedPage") == ShellPageId.ACCOUNTS);
+                selectedPage == ShellPageId.ACCOUNTS);
     }
 
     /// Returns the visible brand label for focused icon and title tests.

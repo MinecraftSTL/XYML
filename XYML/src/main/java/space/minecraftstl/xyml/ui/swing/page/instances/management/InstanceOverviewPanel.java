@@ -120,12 +120,26 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @param instanceId stable non-blank instance identifier
     /// @param executor caller-owned executor for repository and desktop operations
     public InstanceOverviewPanel(GameRepository repository, String instanceId, Executor executor) {
+        this(repository, instanceId, executor, InstanceOverviewStrings.localized());
+    }
+
+    /// Creates a production overview whose panel and interaction boundary share one text snapshot.
+    ///
+    /// @param repository repository containing the managed instance
+    /// @param instanceId stable non-blank instance identifier
+    /// @param executor caller-owned executor for repository and desktop operations
+    /// @param strings current-locale visible text
+    private InstanceOverviewPanel(
+            GameRepository repository,
+            String instanceId,
+            Executor executor,
+            InstanceOverviewStrings strings) {
         this(
                 repository,
                 instanceId,
                 executor,
-                InstanceOverviewStrings.english(),
-                new DefaultInstanceOverviewInteractions(InstanceOverviewStrings.english(), executor));
+                strings,
+                new DefaultInstanceOverviewInteractions(strings, executor));
     }
 
     /// Creates an overview with explicit interaction boundaries for deterministic UI testing.

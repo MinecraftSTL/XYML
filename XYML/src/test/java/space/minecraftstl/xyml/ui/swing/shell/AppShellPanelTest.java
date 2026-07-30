@@ -138,6 +138,64 @@ public final class AppShellPanelTest {
         }
     }
 
+    /// Every active side button closes its page on a second click and exposes persistent instance management.
+    @Test
+    public void togglesEverySidePageBackToPersistentInstanceManagement() {
+        AppShellPanel panel = createPanel(creationCounts());
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                @Nullable JComponent persistentPage = panel.activePage();
+                assertNull(panel.selectedPage());
+                for (ShellPageId page : ShellPageId.values()) {
+                    ShellNavigationButton button = panel.navigationButton(page);
+                    button.doClick();
+                    assertAll(
+                            () -> assertEquals(page, panel.selectedPage()),
+                            () -> assertTrue(button.isSelected()));
+
+                    button.doClick();
+                    assertAll(
+                            () -> assertNull(panel.selectedPage()),
+                            () -> assertSame(persistentPage, panel.activePage()),
+                            () -> assertFalse(button.isSelected()));
+                }
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
+    /// Programmatic navigation is idempotent while direct side-button changes select only the destination page.
+    @Test
+    public void keepsProgrammaticNavigationOpenAndSwitchesSidePagesDirectly() {
+        EnumMap<ShellPageId, AtomicInteger> creationCounts = creationCounts();
+        AppShellPanel panel = createPanel(creationCounts);
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                panel.navigateTo(ShellPageId.DOWNLOADS);
+                @Nullable JComponent downloadsPage = panel.activePage();
+                panel.navigateTo(ShellPageId.DOWNLOADS);
+                assertAll(
+                        () -> assertEquals(ShellPageId.DOWNLOADS, panel.selectedPage()),
+                        () -> assertSame(downloadsPage, panel.activePage()),
+                        () -> assertEquals(1, creationCounts.get(ShellPageId.DOWNLOADS).get()));
+
+                panel.navigationButton(ShellPageId.ACCOUNTS).doClick();
+                panel.navigationButton(ShellPageId.DOWNLOADS).doClick();
+                assertAll(
+                        () -> assertEquals(ShellPageId.DOWNLOADS, panel.selectedPage()),
+                        () -> assertFalse(panel.navigationButton(ShellPageId.ACCOUNTS).isSelected()),
+                        () -> assertTrue(panel.navigationButton(ShellPageId.DOWNLOADS).isSelected()),
+                        () -> assertEquals(1, creationCounts.get(ShellPageId.ACCOUNTS).get()),
+                        () -> assertEquals(1, creationCounts.get(ShellPageId.DOWNLOADS).get()));
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
     /// Transient pages hide the persistent instance surface so transparent headings cannot paint together.
     @Test
     public void hidesPersistentInstancesPageBehindEveryTransientPage() {
@@ -265,8 +323,8 @@ public final class AppShellPanelTest {
                         () -> assertEquals(ShellPageId.ACCOUNTS, panel.selectedPage()));
                 panel.navigationButton(ShellPageId.ACCOUNTS).doClick();
                 assertAll(
-                        () -> assertEquals(ShellPageId.INSTANCES, panel.selectedPage()),
-                        () -> assertTrue(panel.navigationButton(ShellPageId.INSTANCES).isSelected()));
+                        () -> assertNull(panel.selectedPage()),
+                        () -> assertFalse(panel.navigationButton(ShellPageId.INSTANCES).isSelected()));
             });
         } finally {
             panel.close();
@@ -345,7 +403,7 @@ public final class AppShellPanelTest {
             assertAll(
                     () -> assertEquals(RENDER_WIDTH, panel.getWidth()),
                     () -> assertEquals(RENDER_HEIGHT, panel.getHeight()),
-                    () -> assertEquals(ShellPageId.INSTANCES, panel.selectedPage()),
+                    () -> assertNull(panel.selectedPage()),
                     () -> assertTrue(countOpaquePixels(image) > (long) RENDER_WIDTH * RENDER_HEIGHT * 9 / 10),
                     () -> assertTrue(sampledColors.size() >= 8));
 

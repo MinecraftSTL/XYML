@@ -519,7 +519,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         commands.launchCommand(),
                         commands.launchScriptExportCommand()),
                 LauncherGameDirectoryManagementService::new,
-                () -> new InstanceManagementCoordinator((instanceId, returnCommand) -> {
+                () -> new InstanceManagementCoordinator((instanceId, ignoredReturnCommand) -> {
                     WorldQuickPlayActions worldQuickPlayActions = WorldQuickPlayActions.available(
                             worldFolder -> commands.launchCommand().launch(new LaunchRequest(
                                     bindings.homeStore().snapshot().accountId(),
@@ -555,7 +555,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                 presentation.resourcePacksStatus(),
                                 presentation.resourcePacksActions(),
                                 resourcePackInteractions,
-                                returnCommand,
+                                () -> navigateCommand.accept(ShellPageId.INSTANCES),
                                 presentation.taskProgress(),
                                 animator,
                                 presentation.taskProgressAnimationDuration(),

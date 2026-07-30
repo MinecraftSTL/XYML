@@ -128,7 +128,7 @@ final class DefaultInstanceManagementViewTest {
                 for (int index = 0; index < tabs.getTabCount(); index++) {
                     assertFalse(((JComponent) tabs.getComponentAt(index)).isOpaque());
                 }
-                assertEquals(InstanceOverviewStrings.english().title(), tabs.getTitleAt(0));
+                assertEquals(InstanceOverviewStrings.localized().title(), tabs.getTitleAt(0));
                 assertEquals(presentation.mods().title(), tabs.getTitleAt(1));
                 assertEquals(presentation.resourcePacks().pageTitle(), tabs.getTitleAt(2));
                 assertEquals(WorldCatalogStrings.english().title(), tabs.getTitleAt(3));

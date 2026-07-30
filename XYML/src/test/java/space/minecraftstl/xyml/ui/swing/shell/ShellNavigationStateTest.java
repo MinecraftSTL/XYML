@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests toolkit-neutral destination selection behavior.
@@ -37,5 +38,18 @@ public final class ShellNavigationStateTest {
         assertEquals(ShellPageId.DOWNLOADS, state.selectedPage());
         assertTrue(state.select(ShellPageId.INSTANCES));
         assertEquals(ShellPageId.INSTANCES, state.selectedPage());
+    }
+
+    /// Clearing a side destination exposes the persistent main page and is idempotent.
+    @Test
+    public void representsPersistentMainPageWithoutSelectingASideDestination() {
+        ShellNavigationState state = new ShellNavigationState();
+
+        assertNull(state.selectedPage());
+        assertFalse(state.clear());
+        assertTrue(state.select(ShellPageId.ACCOUNTS));
+        assertTrue(state.clear());
+        assertNull(state.selectedPage());
+        assertFalse(state.clear());
     }
 }
