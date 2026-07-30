@@ -34,6 +34,9 @@ import javax.imageio.ImageIO;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
@@ -184,6 +187,53 @@ final class WorldCatalogPanelQuickPlayTest {
             assertEquals("", findNamed(panel, "worldsOperationStatus", JLabel.class).getText());
             panel.close();
         });
+    }
+
+    /// Keeps every world detail and action reachable when the management host has little vertical space.
+    @Test
+    void constrainedHeightScrollsTheCompleteWorldDetailsSurface() {
+        Path worldPath = Path.of("build", "test-worlds", "compact-world").toAbsolutePath().normalize();
+        WorldCatalogItem world = new WorldCatalogItem(
+                worldPath,
+                "compact-world",
+                "Compact World",
+                1L,
+                "1.21.1",
+                false,
+                null);
+        AtomicReference<@Nullable WorldCatalogPanel> panelReference = new AtomicReference<>();
+
+        EdtDispatcher.executeAndWait(() -> {
+            WorldCatalogPanel panel = new WorldCatalogPanel(
+                    new ImmediateWorldCatalogModel(world),
+                    WorldCatalogStrings.english(),
+                    new RecordingInteractions(Path.of("build", "compact-world.bat")),
+                    WorldQuickPlayActions.unavailable());
+            panelReference.set(panel);
+            panel.setSize(720, 280);
+            layoutRecursively(panel);
+
+            JScrollPane scroll = findNamed(panel, "worldsDetailsScroll", JScrollPane.class);
+            JPanel details = findNamed(panel, "worldsDetails", JPanel.class);
+            JButton delete = findNamed(panel, "worldsDelete", JButton.class);
+            assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER, scroll.getHorizontalScrollBarPolicy());
+            assertFalse(scroll.isOpaque());
+            assertFalse(scroll.getViewport().isOpaque());
+            assertTrue(
+                    scroll.getVerticalScrollBar().getMaximum()
+                            > scroll.getVerticalScrollBar().getVisibleAmount());
+
+            int bottom = scroll.getVerticalScrollBar().getMaximum()
+                    - scroll.getVerticalScrollBar().getVisibleAmount();
+            scroll.getVerticalScrollBar().setValue(bottom);
+            Rectangle deleteBounds = SwingUtilities.convertRectangle(
+                    delete.getParent(),
+                    delete.getBounds(),
+                    details);
+            assertTrue(scroll.getViewport().getViewRect().intersects(deleteBounds));
+            panel.close();
+        });
+        assertNotNull(panelReference.get());
     }
 
     /// Creates the minimal launch session proxy used by the panel's completion observer.

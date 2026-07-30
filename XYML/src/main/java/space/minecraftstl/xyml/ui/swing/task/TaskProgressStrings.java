@@ -22,6 +22,8 @@ import space.minecraftstl.xyml.task.presentation.TaskStatus;
 
 import java.util.Objects;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Localizable text used by [TaskProgressPanel] controls and lifecycle labels.
 ///
 /// @param waitingStatus label for a queued or waiting task
@@ -71,6 +73,22 @@ public record TaskProgressStrings(
                 "Cancel",
                 "Show details",
                 "Hide details");
+    }
+
+    /// Resolves generic task controls and lifecycle labels from the current launcher locale.
+    ///
+    /// @return immutable localized task-progress text
+    public static TaskProgressStrings localized() {
+        return new TaskProgressStrings(
+                i18n("swing.task.status.waiting"),
+                i18n("swing.task.status.running"),
+                i18n("message.success"),
+                i18n("message.failed"),
+                i18n("message.cancelled"),
+                i18n("swing.task.progress_name"),
+                i18n("button.cancel"),
+                i18n("swing.task.show_details"),
+                i18n("swing.task.hide_details"));
     }
 
     /// Resolves the label corresponding to a lifecycle state.

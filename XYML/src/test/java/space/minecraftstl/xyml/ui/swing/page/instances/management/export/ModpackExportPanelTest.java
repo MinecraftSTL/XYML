@@ -27,6 +27,10 @@ import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
 import javax.swing.JTree;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -34,6 +38,7 @@ import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Rectangle;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -165,6 +170,62 @@ final class ModpackExportPanelTest {
         assertEquals(0, resolverCalls.get());
         assertEquals(0, executor.pendingCount());
         assertNotNull(panelReference.get());
+    }
+
+    /// Keeps output selection reachable when the host leaves only a short export content area.
+    @Test
+    void constrainedHeightScrollsTheCompleteMetadataForm() {
+        QueuedExecutor executor = new QueuedExecutor();
+        AtomicReference<@Nullable ModpackExportPanel> panelReference = new AtomicReference<>();
+
+        EdtDispatcher.executeAndWait(() -> {
+            ModpackExportPanel panel = new ModpackExportPanel(
+                    ignored -> runDirectory,
+                    "instance",
+                    unusedTaskFactory(),
+                    fixedOutputChooser(runDirectory.resolve("bundle")),
+                    executor,
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO);
+            panelReference.set(panel);
+            panel.setSize(800, 300);
+            layoutRecursively(panel);
+
+            JScrollPane scroll = findNamed(panel, "modpackExportMetadataScroll", JScrollPane.class);
+            JPanel metadata = findNamed(panel, "modpackExportMetadata", JPanel.class);
+            JButton chooseOutput = findNamed(panel, "modpackExportChooseOutput", JButton.class);
+            assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER, scroll.getHorizontalScrollBarPolicy());
+            assertFalse(scroll.isOpaque());
+            assertFalse(scroll.getViewport().isOpaque());
+            assertTrue(
+                    scroll.getVerticalScrollBar().getMaximum()
+                            > scroll.getVerticalScrollBar().getVisibleAmount());
+
+            int bottom = scroll.getVerticalScrollBar().getMaximum()
+                    - scroll.getVerticalScrollBar().getVisibleAmount();
+            scroll.getVerticalScrollBar().setValue(bottom);
+            Rectangle outputBounds = SwingUtilities.convertRectangle(
+                    chooseOutput.getParent(),
+                    chooseOutput.getBounds(),
+                    metadata);
+            assertTrue(scroll.getViewport().getViewRect().intersects(outputBounds));
+            panel.close();
+        });
+        assertNotNull(panelReference.get());
+        assertEquals(0, executor.pendingCount());
+    }
+
+    /// Recursively lays out one detached Swing component tree for geometry assertions.
+    ///
+    /// @param container root or nested component container
+    private static void layoutRecursively(Container container) {
+        container.doLayout();
+        for (Component component : container.getComponents()) {
+            if (component instanceof Container child) {
+                layoutRecursively(child);
+            }
+        }
     }
 
     /// Creates a task factory that must not be called by this lazy-tree test.

@@ -23,10 +23,12 @@ import org.jetbrains.annotations.Unmodifiable;
 import java.util.List;
 import java.util.Objects;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Immutable visible text for the independent per-world data-pack manager.
 ///
-/// The current Swing migration has not yet moved this page into the presentation catalog. Keeping
-/// its fallback text together prevents action labels and native-dialog text from drifting apart.
+/// Keeping production localization and deterministic English fallback text together prevents action
+/// labels, statuses, and native-dialog text from drifting apart.
 ///
 /// @param title page title
 /// @param worldsLabel heading for the lazy world selector
@@ -131,6 +133,34 @@ public record DataPackManagementStrings(
     /// @return immutable fallback text bundle
     public static DataPackManagementStrings english() {
         return ENGLISH;
+    }
+
+    /// Returns production text resolved from the launcher's current locale.
+    ///
+    /// @return current-locale data-pack management text
+    public static DataPackManagementStrings localized() {
+        return new DataPackManagementStrings(
+                i18n("swing.datapack_management.title"),
+                i18n("swing.datapack_management.worlds"),
+                i18n("swing.datapack_management.data_packs"),
+                i18n("swing.datapack_management.select_world"),
+                i18n("swing.datapack_management.loading"),
+                i18n("swing.datapack_management.unsupported"),
+                i18n("swing.datapack_management.unreadable"),
+                i18n("swing.datapack_management.empty"),
+                i18n("swing.datapack_management.ready"),
+                i18n("swing.datapack_management.active"),
+                i18n("swing.datapack_management.inactive"),
+                i18n("swing.datapack_management.refresh"),
+                i18n("swing.datapack_management.open_saves"),
+                i18n("swing.datapack_management.import"),
+                i18n("swing.datapack_management.open_folder"),
+                i18n("swing.datapack_management.delete"),
+                i18n("swing.datapack_management.import_title"),
+                i18n("swing.datapack_management.archive_description"),
+                i18n("swing.datapack_management.delete_confirmation"),
+                i18n("swing.datapack_management.delete_title"),
+                i18n("swing.datapack_management.failure_title"));
     }
 
     /// Formats the selected world's exact discovered data-pack count.

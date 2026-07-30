@@ -17,7 +17,6 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
-import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -51,7 +50,6 @@ import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteract
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
-import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -69,7 +67,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// Hosts one instance overview alongside lifecycle, settings, loader, add-on, world, backup, and schematic tools.
 ///
 /// All tabs are constructed on the EDT, while their filesystem work remains lazy and uses the supplied
-/// executor. The view owns all child lifecycles and returns to the instance list through one shared toolbar.
+/// executor. The view owns all child lifecycles and acts as the shell's persistent instance-management surface.
 @NotNullByDefault
 public final class DefaultInstanceManagementView extends JPanel implements InstanceManagementView {
     /// Stable repository instance identifier represented by this view.
@@ -113,9 +111,6 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
 
     /// Schematic browser host owned by the schematic tab.
     private final SchematicInstanceManagementView schematics;
-
-    /// Shared return command disabled after close begins.
-    private final JButton returnButton = new JButton();
 
     /// Stable tab container retaining each tool's independent lazy state.
     private final JTabbedPane tabs = new JTabbedPane();
@@ -301,11 +296,9 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             addonUpdates = createdAddonUpdates;
             schematics = createdSchematics;
             configureComponents(
-                    managementStrings,
                     modStrings,
                     resourcePackStrings,
-                    schematicStrings,
-                    returnCommand);
+                    schematicStrings);
         } catch (RuntimeException | Error constructionFailure) {
             @Nullable Throwable cleanupFailure = null;
             if (createdSchematics != null) {
@@ -409,7 +402,6 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
                     failure = attemptCleanup(failure, currentLifecycle::close);
                 }
                 failure = attemptCleanup(failure, overview::close);
-                returnButton.setEnabled(false);
                 tabs.removeChangeListener(lazyTabListener);
                 tabs.removeAll();
                 removeAll();
@@ -421,34 +413,20 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         rethrowFailure(cleanupFailure.get());
     }
 
-    /// Builds the top-level return toolbar and named tool tabs.
+    /// Builds the persistent instance-management heading and named tool tabs.
     ///
-    /// @param managementStrings localized outer management text
     /// @param modStrings localized installed-Mod content text
     /// @param resourcePackStrings localized resource-pack content text
     /// @param schematicStrings localized schematic-browser text
-    /// @param returnCommand shell command opening the instance-list side page
     private void configureComponents(
-            SchematicInstanceManagementStrings managementStrings,
             ModCatalogStrings modStrings,
             ResourcePackCatalogStrings resourcePackStrings,
-            SchematicBrowserStrings schematicStrings,
-            Runnable returnCommand) {
-        JPanel toolbar = new JPanel(new MigLayout("insets 0, fillx", "[][grow,fill]", "[40!]"));
+            SchematicBrowserStrings schematicStrings) {
+        JPanel toolbar = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[40!]"));
         toolbar.setOpaque(false);
-        returnButton.setName("instanceManagementReturn");
-        returnButton.setText(null);
-        returnButton.setToolTipText(managementStrings.returnTooltip());
-        returnButton.setIcon(new FlatSVGIcon("assets/swing/icons/arrow-back.svg", 18, 18));
-        returnButton.getAccessibleContext().setAccessibleName(managementStrings.returnTooltip());
-        returnButton.addActionListener(event -> {
-            if (!closed.get()) {
-                returnCommand.run();
-            }
-        });
-        toolbar.add(returnButton, "h 40!");
 
-        JLabel title = new JLabel(managementStrings.returnAction());
+        String managementTitle = i18n("instance.manage.manage.title", instanceId);
+        JLabel title = new JLabel(managementTitle);
         title.setName("instanceManagementTitle");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 22.0F));
         toolbar.add(title, "growx");
@@ -487,7 +465,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         addTransparentTab(schematicStrings.pageTitle(), schematics);
         tabs.addChangeListener(lazyTabListener);
         activateSelectedLazyTab();
-        tabs.getAccessibleContext().setAccessibleName(managementStrings.returnAction());
+        tabs.getAccessibleContext().setAccessibleName(managementTitle);
         add(tabs, "grow");
     }
 

@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchCommand;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeLaunchScriptExportCommand;
@@ -41,6 +42,10 @@ import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
+import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.Font;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -213,10 +218,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
-        super(new MigLayout(
-                "insets 20, fillx, wrap 1",
-                "[grow,fill]",
-                "[]16[]12[]16[]12[]16[]12[]"));
+        super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.instanceId = requireNonBlank(instanceId, "instanceId");
         this.runDirectory = Objects.requireNonNull(runDirectory, "runDirectory").toAbsolutePath().normalize();
@@ -294,12 +296,19 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder());
 
+        JPanel content = new JPanel(new MigLayout(
+                "insets 20, fillx, wrap 1",
+                "[grow,fill]",
+                "[]16[]12[]16[]12[]16[]12[]"));
+        content.setName("instanceMaintenanceContent");
+        content.setOpaque(false);
+
         JLabel title = new JLabel(strings.title());
         title.setName("instanceMaintenanceTitle");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 20.0F));
-        add(title, "growx");
+        content.add(title, "growx");
 
-        add(createSection(
+        content.add(createSection(
                 strings.launchSection(),
                 configureAction(
                         testLaunchButton,
@@ -315,7 +324,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         this::exportLaunchScript)),
                 "growx");
 
-        add(createSection(
+        content.add(createSection(
                 strings.repairSection(),
                 configureAction(
                         updateModpackButton,
@@ -331,7 +340,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         () -> startTask(service::redownloadAssets, strings.redownloadAssetsAction()))),
                 "growx");
 
-        add(createSection(
+        content.add(createSection(
                 strings.cleanupSection(),
                 configureAction(
                         removeAssetsButton,
@@ -355,10 +364,19 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
 
         statusLabel.setName("instanceMaintenanceStatus");
         statusLabel.setText(strings.loadingStatus());
-        add(statusLabel, "growx");
+        content.add(statusLabel, "growx");
 
         progressHost.setName("instanceMaintenanceProgress");
-        add(progressHost, "growx, hmin 116");
+        content.add(progressHost, "growx, hmin 116");
+
+        JScrollPane scroll = new JScrollPane(content);
+        scroll.setName("instanceMaintenanceScroll");
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.setMinimumSize(new Dimension(0, 0));
+        SwingTransparency.revealBackgroundThroughScrollPane(scroll);
+        add(scroll, BorderLayout.CENTER);
         updateControls();
     }
 

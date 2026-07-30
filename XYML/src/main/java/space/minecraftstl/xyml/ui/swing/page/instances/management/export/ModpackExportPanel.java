@@ -59,6 +59,7 @@ import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JTree;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -396,7 +397,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
 
     /// Creates the format, common metadata, and output-file fields.
     ///
-    /// @return configured metadata surface
+    /// @return configured vertically scrollable metadata surface
     private JComponent createMetadataSurface() {
         JPanel metadata = new JPanel(new MigLayout(
                 "insets 8 16 12 12, fill, wrap 2",
@@ -416,6 +417,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         metadata.add(new JLabel(i18n("modpack.description")));
         JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
         descriptionScroll.setName("modpackExportDescriptionScroll");
+        SwingTransparency.revealBackgroundThroughScrollPane(descriptionScroll);
         metadata.add(descriptionScroll, "grow, h 84!");
         metadata.add(new JLabel(""));
         metadata.add(forceUpdateCheck, "growx");
@@ -425,7 +427,15 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         outputRow.add(outputField, "growx, h 40!");
         outputRow.add(chooseOutputButton, "w 40!, h 40!");
         metadata.add(outputRow, "growx");
-        return metadata;
+
+        JScrollPane scroll = new JScrollPane(metadata);
+        scroll.setName("modpackExportMetadataScroll");
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.setMinimumSize(new Dimension(0, 0));
+        SwingTransparency.revealBackgroundThroughScrollPane(scroll);
+        return scroll;
     }
 
     /// Adds one label and reusable form control row to the metadata grid.

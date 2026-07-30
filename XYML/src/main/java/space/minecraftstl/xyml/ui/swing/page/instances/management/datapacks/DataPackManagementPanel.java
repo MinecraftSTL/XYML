@@ -55,6 +55,8 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Lazy Swing manager for data packs installed in worlds belonging to one game instance.
 ///
 /// The page starts no I/O during construction. Its owner calls [#activate()] when the tab becomes
@@ -191,9 +193,9 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
                         Objects.requireNonNull(repository, "repository"),
                         requireNonBlank(instanceId, "instanceId"),
                         Objects.requireNonNull(executor, "executor"),
-                        WorldCatalogStrings.english()),
-                DataPackManagementStrings.english(),
-                new DefaultDataPackManagementInteractions(DataPackManagementStrings.english(), executor),
+                        WorldCatalogStrings.localized()),
+                DataPackManagementStrings.localized(),
+                new DefaultDataPackManagementInteractions(DataPackManagementStrings.localized(), executor),
                 executor);
     }
 
@@ -583,7 +585,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             requireBackgroundThread();
             Path normalizedArchive = Objects.requireNonNull(archive, "archive").toAbsolutePath().normalize();
             if (!Files.isRegularFile(normalizedArchive)) {
-                throw new IOException("Selected data-pack archive does not exist: " + normalizedArchive);
+                throw new IOException(i18n("swing.datapack_management.archive_missing", normalizedArchive));
             }
             Files.createDirectories(context.dataPackDirectory());
             context.dataPack().installPack(normalizedArchive, context.world().getGameVersion());

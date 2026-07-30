@@ -46,8 +46,8 @@ import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserI
 import space.minecraftstl.xyml.util.PortablePath;
 import space.minecraftstl.xyml.util.i18n.LocalizedText;
 
-import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JTabbedPane;
 import java.awt.Component;
 import java.awt.Container;
@@ -78,9 +78,9 @@ final class DefaultInstanceManagementViewTest {
     @TempDir
     private Path repositoryRoot;
 
-    /// All named tabs are reachable and the shared return command remains singular.
+    /// All named tabs are reachable while the persistent management root exposes no list-return control.
     @Test
-    void exposesEveryRecoveredManagementTabWithOneReturnCommand() throws InterruptedException {
+    void exposesEveryRecoveredManagementTabAsPersistentMainPage() throws InterruptedException {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         AtomicBoolean returned = new AtomicBoolean();
         AtomicReference<@Nullable DefaultInstanceManagementView> viewReference = new AtomicReference<>();
@@ -131,16 +131,17 @@ final class DefaultInstanceManagementViewTest {
                 assertEquals(InstanceOverviewStrings.localized().title(), tabs.getTitleAt(0));
                 assertEquals(presentation.mods().title(), tabs.getTitleAt(1));
                 assertEquals(presentation.resourcePacks().pageTitle(), tabs.getTitleAt(2));
-                assertEquals(WorldCatalogStrings.english().title(), tabs.getTitleAt(3));
-                assertEquals(DataPackManagementStrings.english().title(), tabs.getTitleAt(4));
+                assertEquals(WorldCatalogStrings.localized().title(), tabs.getTitleAt(3));
+                assertEquals(DataPackManagementStrings.localized().title(), tabs.getTitleAt(4));
                 assertEquals(i18n("world.backup"), tabs.getTitleAt(5));
                 assertEquals(i18n("addon.check_update"), tabs.getTitleAt(6));
                 assertEquals(presentation.schematics().pageTitle(), tabs.getTitleAt(7));
                 assertFalse(returned.get());
-                JButton returnButton = findNamed(view, "instanceManagementReturn", JButton.class);
-                assertNotNull(returnButton);
-                returnButton.doClick();
-                assertTrue(returned.get());
+                assertNull(findNamed(view, "instanceManagementReturn", JComponent.class));
+                JLabel title = findNamed(view, "instanceManagementTitle", JLabel.class);
+                assertNotNull(title);
+                assertEquals(i18n("instance.manage.manage.title", "instance"), title.getText());
+                assertFalse(returned.get());
             });
 
             view.close();

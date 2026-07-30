@@ -37,6 +37,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Presents the fourteen bundled instance icons and one custom-image entry as a Swing dialog.
 ///
 /// The fixed five-column grid is keyboard navigable through a native `ButtonGroup`, keeps exactly one
@@ -224,18 +226,18 @@ final class InstanceIconChooserDialog {
     /// @return non-blank assistive display name
     private static String displayName(InstanceIconType iconType) {
         return switch (Objects.requireNonNull(iconType, "iconType")) {
-            case DEFAULT, GRASS -> "Grass";
-            case CHEST -> "Chest";
-            case CHICKEN -> "Chicken";
-            case COMMAND -> "Command block";
+            case DEFAULT, GRASS -> i18n("swing.instance_icon.grass");
+            case CHEST -> i18n("swing.instance_icon.chest");
+            case CHICKEN -> i18n("swing.instance_icon.chicken");
+            case COMMAND -> i18n("swing.instance_icon.command_block");
             case OPTIFINE -> "OptiFine";
-            case CRAFT_TABLE -> "Crafting table";
+            case CRAFT_TABLE -> i18n("swing.instance_icon.crafting_table");
             case FABRIC -> "Fabric";
             case FORGE -> "Forge";
             case NEO_FORGE -> "NeoForge";
-            case FURNACE -> "Furnace";
+            case FURNACE -> i18n("swing.instance_icon.furnace");
             case QUILT -> "Quilt";
-            case APRIL_FOOLS -> "April Fools";
+            case APRIL_FOOLS -> i18n("swing.instance_icon.april_fools");
             case CLEANROOM -> "Cleanroom";
             case LEGACY_FABRIC -> "Legacy Fabric";
         };

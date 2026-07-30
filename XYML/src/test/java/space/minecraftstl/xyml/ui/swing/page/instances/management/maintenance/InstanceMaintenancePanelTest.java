@@ -27,6 +27,8 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JButton;
+import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
@@ -267,6 +269,33 @@ final class InstanceMaintenancePanelTest {
             }
         }
         assertTrue(distinctPixels > 100, "offscreen maintenance rendering is blank");
+    }
+
+    /// Keeps the task-progress footer reachable inside the management host's constrained content height.
+    @Test
+    void constrainedHeightScrollsTheCompleteMaintenancePage() {
+        RecordingService service = new RecordingService();
+        InstanceMaintenancePanel panel = createPanel(service, new RecordingInteractions(), new RecordingLaunchActions());
+
+        EdtDispatcher.executeAndWait(() -> {
+            panel.setSize(720, 340);
+            layoutTree(panel);
+            JScrollPane scroll = Objects.requireNonNull(
+                    findNamed(panel, "instanceMaintenanceScroll", JScrollPane.class),
+                    "maintenance scroll");
+            assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER, scroll.getHorizontalScrollBarPolicy());
+            assertFalse(scroll.isOpaque());
+            assertFalse(scroll.getViewport().isOpaque());
+            assertTrue(
+                    scroll.getVerticalScrollBar().getMaximum()
+                            > scroll.getVerticalScrollBar().getVisibleAmount());
+
+            int bottom = scroll.getVerticalScrollBar().getMaximum()
+                    - scroll.getVerticalScrollBar().getVisibleAmount();
+            scroll.getVerticalScrollBar().setValue(bottom);
+            assertEquals(bottom, scroll.getVerticalScrollBar().getValue());
+            panel.close();
+        });
     }
 
     /// Creates an inactive page with deterministic test collaborators.

@@ -33,6 +33,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Production confirmation dialogs and file-manager actions for world backups.
 ///
 /// Native prompts execute on the EDT, while directory creation and AWT desktop integration are
@@ -76,8 +78,8 @@ public final class DefaultWorldBackupInteractions implements WorldBackupInteract
         WorldBackupArchive selectedArchive = Objects.requireNonNull(archive, "archive");
         return JOptionPane.showConfirmDialog(
                 Objects.requireNonNull(owner, "owner"),
-                "Delete the local backup '" + selectedArchive.fileName() + "' permanently?",
-                "Delete backup",
+                i18n("swing.world_backup.delete_confirmation", selectedArchive.fileName()),
+                i18n("swing.world_backup.delete_title"),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
     }
@@ -93,8 +95,8 @@ public final class DefaultWorldBackupInteractions implements WorldBackupInteract
         WorldBackupArchive selectedArchive = Objects.requireNonNull(archive, "archive");
         @Nullable Object input = JOptionPane.showInputDialog(
                 Objects.requireNonNull(owner, "owner"),
-                "Restore as a new save directory:",
-                "Restore backup",
+                i18n("swing.world_backup.restore_prompt"),
+                i18n("swing.world_backup.restore_title"),
                 JOptionPane.QUESTION_MESSAGE,
                 null,
                 null,
@@ -119,9 +121,11 @@ public final class DefaultWorldBackupInteractions implements WorldBackupInteract
         String selectedDestinationName = Objects.requireNonNull(destinationName, "destinationName");
         return JOptionPane.showConfirmDialog(
                 Objects.requireNonNull(owner, "owner"),
-                "Restore '" + selectedArchive.fileName() + "' as new save '" + selectedDestinationName
-                        + "'? Existing saves will not be overwritten.",
-                "Restore backup",
+                i18n(
+                        "swing.world_backup.restore_confirmation",
+                        selectedArchive.fileName(),
+                        selectedDestinationName),
+                i18n("swing.world_backup.restore_title"),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
     }
@@ -150,11 +154,11 @@ public final class DefaultWorldBackupInteractions implements WorldBackupInteract
             requireBackgroundThread();
             Files.createDirectories(directory);
             if (!Desktop.isDesktopSupported()) {
-                throw new UnsupportedOperationException("Desktop integration is unavailable");
+                throw new UnsupportedOperationException(i18n("swing.world_backup.desktop_unavailable"));
             }
             Desktop desktop = Desktop.getDesktop();
             if (!desktop.isSupported(Desktop.Action.OPEN)) {
-                throw new UnsupportedOperationException("Desktop cannot open directories");
+                throw new UnsupportedOperationException(i18n("swing.world_backup.desktop_open_unsupported"));
             }
             desktop.open(directory.toFile());
             result.complete(null);

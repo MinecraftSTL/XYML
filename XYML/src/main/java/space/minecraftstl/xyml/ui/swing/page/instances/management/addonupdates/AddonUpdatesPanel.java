@@ -152,7 +152,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
                 repository,
                 instanceId,
                 executor,
-                TaskProgressStrings.english(),
+                TaskProgressStrings.localized(),
                 null,
                 Duration.ZERO);
     }

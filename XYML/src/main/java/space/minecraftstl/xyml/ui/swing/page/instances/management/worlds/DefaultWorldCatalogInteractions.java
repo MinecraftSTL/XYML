@@ -40,6 +40,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Production native-dialog and AWT desktop implementation for instance-world actions.
 ///
 /// Swing chooser and confirmation calls remain on the EDT. Filesystem creation and `Desktop` calls
@@ -139,7 +141,7 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
                 JOptionPane.QUESTION_MESSAGE,
                 null,
                 null,
-                selectedWorld.directoryName() + " - Copy");
+                strings.copyName(selectedWorld.directoryName()));
         if (!(input instanceof String text)) {
             return null;
         }
@@ -273,11 +275,11 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
             requireBackgroundThread();
             Files.createDirectories(directory);
             if (!Desktop.isDesktopSupported()) {
-                throw new UnsupportedOperationException("Desktop integration is unavailable");
+                throw new UnsupportedOperationException(i18n("swing.world_catalog.desktop_unavailable"));
             }
             Desktop desktop = Desktop.getDesktop();
             if (!desktop.isSupported(Desktop.Action.OPEN)) {
-                throw new UnsupportedOperationException("Desktop cannot open directories");
+                throw new UnsupportedOperationException(i18n("swing.world_catalog.desktop_open_unsupported"));
             }
             desktop.open(directory.toFile());
             result.complete(null);
@@ -299,14 +301,14 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
     private static void configureScriptFilters(JFileChooser chooser) {
         JFileChooser target = Objects.requireNonNull(chooser, "chooser");
         if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS) {
-            target.addChoosableFileFilter(new FileNameExtensionFilter("macOS command scripts", "command"));
+            target.addChoosableFileFilter(new FileNameExtensionFilter(i18n("extension.command"), "command"));
         }
         if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
-            target.addChoosableFileFilter(new FileNameExtensionFilter("Windows batch scripts", "bat"));
+            target.addChoosableFileFilter(new FileNameExtensionFilter(i18n("extension.bat"), "bat"));
         } else {
-            target.addChoosableFileFilter(new FileNameExtensionFilter("Shell scripts", "sh"));
+            target.addChoosableFileFilter(new FileNameExtensionFilter(i18n("extension.sh"), "sh"));
         }
-        target.addChoosableFileFilter(new FileNameExtensionFilter("PowerShell scripts", "ps1"));
+        target.addChoosableFileFilter(new FileNameExtensionFilter(i18n("extension.ps1"), "ps1"));
     }
 
     /// Appends the platform-default extension when the selected filename has no supported script suffix.

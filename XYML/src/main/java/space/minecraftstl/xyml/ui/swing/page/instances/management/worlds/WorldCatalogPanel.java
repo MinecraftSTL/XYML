@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 
 import javax.swing.BorderFactory;
@@ -32,7 +33,9 @@ import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import javax.swing.event.ListSelectionEvent;
@@ -51,6 +54,8 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Lazy Swing management page for one instance's single-player worlds.
 ///
@@ -175,9 +180,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                         Objects.requireNonNull(repository, "repository"),
                         Objects.requireNonNull(instanceId, "instanceId"),
                         Objects.requireNonNull(executor, "executor"),
-                        WorldCatalogStrings.english()),
-                WorldCatalogStrings.english(),
-                new DefaultWorldCatalogInteractions(WorldCatalogStrings.english(), executor),
+                        WorldCatalogStrings.localized()),
+                WorldCatalogStrings.localized(),
+                new DefaultWorldCatalogInteractions(WorldCatalogStrings.localized(), executor),
                 quickPlayActions);
     }
 
@@ -333,7 +338,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Creates selected-world metadata and icon-only row actions.
     ///
-    /// @return unframed detail surface
+    /// @return transparent vertically scrollable detail surface
     private JComponent createDetailsSurface() {
         JPanel details = new JPanel(new MigLayout(
                 "insets 12 16 12 12, fill, wrap 2",
@@ -399,7 +404,15 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         actions.add(exportButton, "w 40!, h 40!");
         actions.add(deleteButton, "w 40!, h 40!");
         details.add(actions, "span 2, right");
-        return details;
+
+        JScrollPane scroll = new JScrollPane(details);
+        scroll.setName("worldsDetailsScroll");
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.setMinimumSize(new Dimension(0, 0));
+        SwingTransparency.revealBackgroundThroughScrollPane(scroll);
+        return scroll;
     }
 
     /// Creates the compact index and mutation status footer.
@@ -587,7 +600,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 return;
             }
             if (candidate == null) {
-                showFailure(new IllegalStateException("World import inspection completed without a candidate"));
+                showFailure(new IllegalStateException(i18n("swing.world_catalog.import_missing_candidate")));
                 return;
             }
             @Nullable String targetName = interactions.chooseWorldName(this, candidate);
@@ -629,7 +642,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         try {
-            Objects.requireNonNull(session.completion(), "world quick-play session returned null completion")
+            Objects.requireNonNull(
+                            session.completion(),
+                            i18n("swing.world_catalog.launch_missing_completion"))
                     .whenComplete((process, failure) -> EdtDispatcher.execute(
                             () -> completeQuickPlayLaunch(revision, failure)));
         } catch (RuntimeException | Error failure) {
@@ -734,7 +749,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         if (failure != null) {
             showFailure(failure);
         } else if (scriptFile == null) {
-            showFailure(new IllegalStateException("Quick-play script generation returned no path"));
+            showFailure(new IllegalStateException(i18n("swing.world_catalog.launch_script_missing_path")));
         } else {
             interactions.launchScriptSucceeded(this, scriptFile);
         }

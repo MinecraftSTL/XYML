@@ -221,7 +221,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
                 openDirectoryButton,
                 "worldBackupsOpenDirectory",
                 "assets/swing/icons/folder-open.svg",
-                "Open backup directory",
+                i18n("swing.world_backup.open_directory"),
                 this::openBackupDirectory);
         configureIconButton(
                 deleteButton,
@@ -403,7 +403,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
                     if (failure != null) {
                         completeFailure(request, failure);
                     } else if (snapshot == null) {
-                        completeFailure(request, new IllegalStateException("World backup operation completed without an index"));
+                        completeFailure(request, new IllegalStateException(i18n("swing.world_backup.missing_index")));
                     } else {
                         operationPending = false;
                         applySnapshot(snapshot);
@@ -489,7 +489,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable WorldBackupArchive archive = selectedArchive();
         archiveDetailLabel.setText(archive == null
-                ? "Select a backup to restore or delete."
+                ? i18n("swing.world_backup.select_archive")
                 : formatArchiveDetail(archive));
     }
 
@@ -566,7 +566,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
     private void showFailureIfOpen(Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
         if (!closed.get()) {
-            interactions.showFailure(this, "World backup", failureDetail(failure));
+            interactions.showFailure(this, i18n("world.backup"), failureDetail(failure));
         }
     }
 

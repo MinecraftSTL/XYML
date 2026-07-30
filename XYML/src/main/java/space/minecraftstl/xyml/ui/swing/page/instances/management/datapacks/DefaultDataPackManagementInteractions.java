@@ -38,6 +38,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Native Swing and AWT implementation for per-world data-pack page interactions.
 ///
 /// File chooser and confirmation calls stay on the EDT. Directory creation and `Desktop` calls
@@ -139,11 +141,11 @@ public final class DefaultDataPackManagementInteractions implements DataPackMana
             requireBackgroundThread();
             Files.createDirectories(directory);
             if (!Desktop.isDesktopSupported()) {
-                throw new UnsupportedOperationException("Desktop integration is unavailable");
+                throw new UnsupportedOperationException(i18n("swing.datapack_management.desktop_unavailable"));
             }
             Desktop desktop = Desktop.getDesktop();
             if (!desktop.isSupported(Desktop.Action.OPEN)) {
-                throw new UnsupportedOperationException("Desktop cannot open directories");
+                throw new UnsupportedOperationException(i18n("swing.datapack_management.desktop_open_unsupported"));
             }
             desktop.open(directory.toFile());
             result.complete(null);

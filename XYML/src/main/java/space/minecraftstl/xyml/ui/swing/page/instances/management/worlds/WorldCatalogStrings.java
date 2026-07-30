@@ -24,10 +24,12 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 
-/// Stable English fallback text for the independent instance-world management page.
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
+/// Localizable text for the independent instance-world management page.
 ///
-/// The existing Swing composition has no world text bundle yet. Keeping the temporary fallback in
-/// this immutable object avoids scattering literals through filesystem, dialog, and rendering code.
+/// Keeping page, action, status, and native-dialog text in one immutable object prevents production
+/// localization from diverging from deterministic English component tests.
 ///
 /// @param title page and tab title
 /// @param emptySelectionText details placeholder without a loaded row
@@ -58,6 +60,21 @@ import java.util.Objects;
 /// @param deleteConfirmationFormat delete confirmation containing one display-name placeholder
 /// @param deleteDialogTitle delete confirmation title
 /// @param failureTitle failure dialog title
+/// @param copyingText active copy operation text
+/// @param exportingText active export operation text
+/// @param copyTooltip selected-world copy tooltip
+/// @param exportTooltip selected-world export tooltip
+/// @param copyNamePrompt copy destination-name prompt
+/// @param copyDialogTitle copy dialog title
+/// @param copyNameFormat suggested copy-name format containing one directory-name placeholder
+/// @param exportDialogTitle export chooser title
+/// @param overwriteConfirmationFormat replacement confirmation containing one file-name placeholder
+/// @param quickPlayTooltip selected-world quick-play tooltip
+/// @param launchScriptTooltip selected-world script-generation tooltip
+/// @param launchingText active quick-play preparation text
+/// @param generatingLaunchScriptText active launch-script generation text
+/// @param launchScriptDialogTitle launch-script chooser and success-dialog title
+/// @param launchScriptSuccessFormat generated-script success text containing one path placeholder
 @NotNullByDefault
 public record WorldCatalogStrings(
         String title,
@@ -88,8 +105,23 @@ public record WorldCatalogStrings(
         String worldNamePrompt,
         String deleteConfirmationFormat,
         String deleteDialogTitle,
-        String failureTitle) {
-    /// Shared production fallback until the presentation catalog owns world-management text.
+        String failureTitle,
+        String copyingText,
+        String exportingText,
+        String copyTooltip,
+        String exportTooltip,
+        String copyNamePrompt,
+        String copyDialogTitle,
+        String copyNameFormat,
+        String exportDialogTitle,
+        String overwriteConfirmationFormat,
+        String quickPlayTooltip,
+        String launchScriptTooltip,
+        String launchingText,
+        String generatingLaunchScriptText,
+        String launchScriptDialogTitle,
+        String launchScriptSuccessFormat) {
+    /// Shared deterministic English text for tests and explicit fallback use.
     private static final WorldCatalogStrings ENGLISH = new WorldCatalogStrings(
             "Worlds",
             "Select a world",
@@ -119,7 +151,22 @@ public record WorldCatalogStrings(
             "World name:",
             "Permanently delete world \"%s\"?",
             "Delete world",
-            "World operation failed");
+            "World operation failed",
+            "Copying world...",
+            "Exporting world...",
+            "Copy selected world",
+            "Export selected world",
+            "New world name:",
+            "Copy world",
+            "%s - Copy",
+            "Export world",
+            "Replace existing archive \"%s\"?",
+            "Launch and enter selected world",
+            "Generate quick-play launch script",
+            "Preparing quick play...",
+            "Generating quick-play script...",
+            "Launch script",
+            "Launch script saved to %s");
 
     /// Validates all visible and dialog text at construction time.
     public WorldCatalogStrings {
@@ -152,14 +199,80 @@ public record WorldCatalogStrings(
                 worldNamePrompt,
                 deleteConfirmationFormat,
                 deleteDialogTitle,
-                failureTitle);
+                failureTitle,
+                copyingText,
+                exportingText,
+                copyTooltip,
+                exportTooltip,
+                copyNamePrompt,
+                copyDialogTitle,
+                copyNameFormat,
+                exportDialogTitle,
+                overwriteConfirmationFormat,
+                quickPlayTooltip,
+                launchScriptTooltip,
+                launchingText,
+                generatingLaunchScriptText,
+                launchScriptDialogTitle,
+                launchScriptSuccessFormat);
         if (values.stream().map(value -> Objects.requireNonNull(value, "world catalog string"))
                 .anyMatch(String::isBlank)) {
             throw new IllegalArgumentException("World catalog strings must not be blank");
         }
     }
 
-    /// Returns the fallback text bundle used by the current production page.
+    /// Returns production text resolved from the launcher's current locale.
+    ///
+    /// @return current-locale world-management text
+    public static WorldCatalogStrings localized() {
+        return new WorldCatalogStrings(
+                i18n("swing.world_catalog.title"),
+                i18n("swing.world_catalog.empty_selection"),
+                i18n("swing.world_catalog.directory"),
+                i18n("swing.world_catalog.path"),
+                i18n("swing.world_catalog.game_version"),
+                i18n("swing.world_catalog.last_played"),
+                i18n("swing.world_catalog.locked"),
+                i18n("swing.world_catalog.metadata"),
+                i18n("swing.world_catalog.unavailable"),
+                i18n("swing.world_catalog.readable"),
+                i18n("swing.world_catalog.unreadable"),
+                i18n("swing.world_catalog.locked_yes"),
+                i18n("swing.world_catalog.locked_no"),
+                i18n("swing.world_catalog.loading"),
+                i18n("swing.world_catalog.ready"),
+                i18n("swing.world_catalog.load_failed"),
+                i18n("swing.world_catalog.importing"),
+                i18n("swing.world_catalog.deleting"),
+                i18n("swing.world_catalog.refresh"),
+                i18n("swing.world_catalog.import"),
+                i18n("swing.world_catalog.open_saves"),
+                i18n("swing.world_catalog.open_world"),
+                i18n("swing.world_catalog.delete"),
+                i18n("swing.world_catalog.import_title"),
+                i18n("swing.world_catalog.archive_description"),
+                i18n("swing.world_catalog.world_name_prompt"),
+                i18n("swing.world_catalog.delete_confirmation"),
+                i18n("swing.world_catalog.delete_title"),
+                i18n("swing.world_catalog.failure_title"),
+                i18n("swing.world_catalog.copying"),
+                i18n("swing.world_catalog.exporting"),
+                i18n("swing.world_catalog.copy"),
+                i18n("swing.world_catalog.export"),
+                i18n("swing.world_catalog.copy_name_prompt"),
+                i18n("swing.world_catalog.copy_title"),
+                i18n("swing.world_catalog.copy_name_format"),
+                i18n("swing.world_catalog.export_title"),
+                i18n("swing.world_catalog.overwrite_confirmation"),
+                i18n("swing.world_catalog.quick_play"),
+                i18n("swing.world_catalog.launch_script"),
+                i18n("swing.world_catalog.launching"),
+                i18n("swing.world_catalog.generating_launch_script"),
+                i18n("swing.world_catalog.launch_script_title"),
+                i18n("swing.world_catalog.launch_script_success"));
+    }
+
+    /// Returns the stable English text bundle for deterministic tests.
     ///
     /// @return shared immutable English text
     public static WorldCatalogStrings english() {
@@ -189,55 +302,6 @@ public record WorldCatalogStrings(
         return loadFailureTextFormat.formatted(checkedDetail);
     }
 
-    /// Returns the active copy operation text.
-    ///
-    /// @return non-blank copy status
-    public String copyingText() {
-        return "Copying world...";
-    }
-
-    /// Returns the active export operation text.
-    ///
-    /// @return non-blank export status
-    public String exportingText() {
-        return "Exporting world...";
-    }
-
-    /// Returns the selected-world copy tooltip.
-    ///
-    /// @return non-blank copy tooltip
-    public String copyTooltip() {
-        return "Copy selected world";
-    }
-
-    /// Returns the selected-world export tooltip.
-    ///
-    /// @return non-blank export tooltip
-    public String exportTooltip() {
-        return "Export selected world";
-    }
-
-    /// Returns the copy-name prompt.
-    ///
-    /// @return non-blank copy-name prompt
-    public String copyNamePrompt() {
-        return "New world name:";
-    }
-
-    /// Returns the copy dialog title.
-    ///
-    /// @return non-blank copy dialog title
-    public String copyDialogTitle() {
-        return "Copy world";
-    }
-
-    /// Returns the export chooser title.
-    ///
-    /// @return non-blank export chooser title
-    public String exportDialogTitle() {
-        return "Export world";
-    }
-
     /// Returns the overwrite confirmation message.
     ///
     /// @param fileName selected existing archive file name
@@ -247,42 +311,19 @@ public record WorldCatalogStrings(
         if (checkedName.isBlank()) {
             throw new IllegalArgumentException("fileName must not be blank");
         }
-        return "Replace existing archive \"" + checkedName + "\"?";
+        return overwriteConfirmationFormat.formatted(checkedName);
     }
 
-    /// Returns the selected-world quick-play tooltip.
+    /// Formats a localized default sibling name for a copied world.
     ///
-    /// @return non-blank quick-play tooltip
-    public String quickPlayTooltip() {
-        return "Launch and enter selected world";
-    }
-
-    /// Returns the selected-world standalone script tooltip.
-    ///
-    /// @return non-blank quick-play script tooltip
-    public String launchScriptTooltip() {
-        return "Generate quick-play launch script";
-    }
-
-    /// Returns the status shown while quick-play process preparation owns this page.
-    ///
-    /// @return non-blank launch preparation status
-    public String launchingText() {
-        return "Preparing quick play...";
-    }
-
-    /// Returns the status shown while quick-play script generation owns this page.
-    ///
-    /// @return non-blank script preparation status
-    public String generatingLaunchScriptText() {
-        return "Generating quick-play script...";
-    }
-
-    /// Returns the standalone quick-play script chooser and success-dialog title.
-    ///
-    /// @return non-blank dialog title
-    public String launchScriptDialogTitle() {
-        return "Launch script";
+    /// @param directoryName selected world's directory name
+    /// @return non-blank suggested copy name
+    public String copyName(String directoryName) {
+        String checkedName = Objects.requireNonNull(directoryName, "directoryName");
+        if (checkedName.isBlank()) {
+            throw new IllegalArgumentException("directoryName must not be blank");
+        }
+        return copyNameFormat.formatted(checkedName);
     }
 
     /// Formats one successfully generated script path for native feedback.
@@ -291,6 +332,6 @@ public record WorldCatalogStrings(
     /// @return non-blank success message
     public String launchScriptSuccess(Path scriptFile) {
         Path destination = Objects.requireNonNull(scriptFile, "scriptFile").toAbsolutePath().normalize();
-        return "Launch script saved to " + destination;
+        return launchScriptSuccessFormat.formatted(destination);
     }
 }
