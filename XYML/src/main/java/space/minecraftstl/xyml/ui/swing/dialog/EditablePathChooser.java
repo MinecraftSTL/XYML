@@ -17,70 +17,65 @@
  */
 package space.minecraftstl.xyml.ui.swing.dialog;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
-import javax.swing.UIManager;
-import javax.swing.filechooser.FileFilter;
-import javax.swing.filechooser.FileNameExtensionFilter;
-import javax.swing.text.JTextComponent;
+import javax.swing.JTextField;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Dimension;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Insets;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// A file chooser that keeps native directory browsing while exposing an always-editable path input.
+/// A native file chooser with an editable current-folder bar above its dialog content.
 ///
-/// Single-selection and save modes accept one path. Multi-selection open mode accepts one path per line. Typed relative
-/// paths are resolved against the chooser's current directory. Validation runs only when the user approves the dialog,
-/// avoiding file-system access for every document edit while still rejecting missing or mode-incompatible open targets
-/// and invalid save parents.
+/// The top field changes only the directory displayed by the chooser. File paths and save names remain the
+/// responsibility of the Look & Feel's native filename field, so navigating to a typed folder never approves or closes
+/// the dialog and users can continue browsing from that location.
 @NotNullByDefault
 public final class EditablePathChooser extends JFileChooser {
     /// Serialization identifier retained for the Swing component contract.
     private static final long serialVersionUID = 1L;
 
-    /// Preferred width of the editable accessory without constraining the native browser area.
-    private static final int ACCESSORY_WIDTH = 320;
+    /// Icon size used by the compact directory navigation action.
+    private static final int NAVIGATE_ICON_SIZE = 18;
 
-    /// Preferred height that keeps wrapped guidance, input, and inline validation from overlapping.
-    private static final int ACCESSORY_HEIGHT = 210;
+    /// FlatLaf client property used to mark an input with validation feedback.
+    private static final String OUTLINE_PROPERTY = "JComponent.outline";
 
-    /// Editable single- or multi-line path source presented beside the browser.
-    private final JTextArea pathInput = new JTextArea(3, 32);
+    /// FlatLaf outline value used for an invalid directory path.
+    private static final String ERROR_OUTLINE = "error";
 
-    /// Contextual input guidance updated with the chooser's selection mode.
-    private final JTextArea inputHint = new JTextArea(2, 28);
+    /// Top-level panel inserted above the native chooser when its dialog is created.
+    private final JPanel directoryBar = new JPanel(new BorderLayout(8, 0));
 
-    /// Inline validation feedback retained until the next edit or successful approval.
-    private final JTextArea validationMessage = new JTextArea(2, 28);
+    /// Editable path of the directory currently displayed by the chooser.
+    private final JTextField currentDirectoryInput = new JTextField();
 
-    /// Explicit accessory action that commits typed input independently of Look & Feel internals.
-    private final JButton applyPathButton = new JButton();
+    /// Icon action that applies the typed directory without approving the chooser.
+    private final JButton navigateDirectoryButton = new JButton();
 
-    /// Prevents a programmatic browser-selection update from recursively overwriting the input.
-    private boolean synchronizingSelection;
+    /// Current directory-input validation detail, or `null` when the field is valid.
+    private @Nullable String directoryValidation;
 
     /// Creates a chooser rooted at the platform-default directory.
     public EditablePathChooser() {
         super();
-        initializeEditableAccessory();
+        initializeDirectoryBar();
     }
 
     /// Creates a chooser rooted at an explicit current directory.
@@ -88,176 +83,91 @@ public final class EditablePathChooser extends JFileChooser {
     /// @param currentDirectory initial browser directory
     public EditablePathChooser(File currentDirectory) {
         super(Objects.requireNonNull(currentDirectory, "currentDirectory"));
-        initializeEditableAccessory();
+        initializeDirectoryBar();
     }
 
-    /// Validates and commits the editable input before allowing the native chooser to approve.
+    /// Creates the native chooser dialog and places the editable current-folder bar above it.
+    ///
+    /// @param parent parent component used for ownership and positioning, or `null` for no parent
+    /// @return packed chooser dialog containing the directory bar
     @Override
-    public void approveSelection() {
-        SelectionResolution resolution = resolveSelection();
-        @Nullable String error = resolution.error();
-        if (error != null) {
-            validationMessage.setText(error);
-            validationMessage.setToolTipText(error);
-            pathInput.requestFocusInWindow();
+    protected JDialog createDialog(@Nullable Component parent) {
+        JDialog dialog = super.createDialog(parent);
+        Container contentPane = dialog.getContentPane();
+        contentPane.add(directoryBar, BorderLayout.NORTH);
+        dialog.pack();
+        dialog.setLocationRelativeTo(parent);
+        return dialog;
+    }
+
+    /// Configures the current-folder field, navigation action, and directory synchronization.
+    private void initializeDirectoryBar() {
+        String fieldDescription = i18n("swing.path_chooser.current_directory");
+        currentDirectoryInput.setName("editablePathChooser.currentDirectory");
+        currentDirectoryInput.setColumns(48);
+        currentDirectoryInput.putClientProperty("JTextField.placeholderText", fieldDescription);
+        currentDirectoryInput.setToolTipText(fieldDescription);
+        currentDirectoryInput.getAccessibleContext().setAccessibleName(fieldDescription);
+        currentDirectoryInput.getDocument().addDocumentListener(
+                new DirectoryInputDocumentListener(this::clearDirectoryValidation));
+        currentDirectoryInput.addActionListener(event -> navigateToTypedDirectory());
+
+        String navigateDescription = i18n("swing.path_chooser.navigate");
+        navigateDirectoryButton.setName("editablePathChooser.navigateDirectory");
+        navigateDirectoryButton.setIcon(new FlatSVGIcon(
+                "assets/swing/icons/arrow-forward.svg",
+                NAVIGATE_ICON_SIZE,
+                NAVIGATE_ICON_SIZE));
+        navigateDirectoryButton.setToolTipText(navigateDescription);
+        navigateDirectoryButton.getAccessibleContext().setAccessibleName(navigateDescription);
+        navigateDirectoryButton.setMargin(new Insets(4, 8, 4, 8));
+        navigateDirectoryButton.addActionListener(event -> navigateToTypedDirectory());
+
+        directoryBar.setName("editablePathChooser.directoryBar");
+        directoryBar.setBorder(BorderFactory.createEmptyBorder(8, 8, 0, 8));
+        directoryBar.add(currentDirectoryInput, BorderLayout.CENTER);
+        directoryBar.add(navigateDirectoryButton, BorderLayout.EAST);
+
+        addPropertyChangeListener(DIRECTORY_CHANGED_PROPERTY, event -> synchronizeDirectoryInput());
+        synchronizeDirectoryInput();
+    }
+
+    /// Resolves the typed directory and updates the browser without firing an approval event.
+    private void navigateToTypedDirectory() {
+        String input = removeMatchingQuotes(currentDirectoryInput.getText().strip());
+        if (input.isEmpty()) {
+            showDirectoryValidation(i18n("swing.path_chooser.error.directory_required"));
             return;
         }
 
-        @Unmodifiable List<Path> paths = resolution.paths();
-        synchronizingSelection = true;
+        final Path candidate;
         try {
-            if (isMultiSelectionEnabled() && getDialogType() != SAVE_DIALOG) {
-                setSelectedFiles(paths.stream().map(Path::toFile).toArray(File[]::new));
-            } else {
-                setSelectedFile(paths.get(0).toFile());
-            }
-        } finally {
-            synchronizingSelection = false;
-        }
-        validationMessage.setText(" ");
-        validationMessage.setToolTipText(null);
-        super.approveSelection();
-    }
-
-    /// Initializes the accessory components and browser-to-input synchronization without file-system access.
-    private void initializeEditableAccessory() {
-        pathInput.setName("editablePathChooser.pathInput");
-        pathInput.setLineWrap(false);
-        pathInput.getAccessibleContext().setAccessibleName(i18n("swing.path_chooser.path"));
-        pathInput.getDocument().addDocumentListener(new PathInputDocumentListener(validationMessage));
-
-        inputHint.setName("editablePathChooser.pathHint");
-        configureReadOnlyText(inputHint);
-        validationMessage.setName("editablePathChooser.validationMessage");
-        configureReadOnlyText(validationMessage);
-        @Nullable Color errorColor = UIManager.getColor("Component.error.focusedBorderColor");
-        validationMessage.setForeground(errorColor == null ? Color.RED.darker() : errorColor);
-
-        applyPathButton.setName("editablePathChooser.applyPath");
-        applyPathButton.setText(i18n("swing.path_chooser.apply"));
-        applyPathButton.addActionListener(event -> approveSelection());
-
-        JScrollPane inputScrollPane = new JScrollPane(pathInput);
-        inputScrollPane.setBorder(BorderFactory.createEmptyBorder());
-
-        JPanel accessory = new JPanel(new BorderLayout(0, 8));
-        accessory.setName("editablePathChooser.accessory");
-        accessory.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder(i18n("swing.path_chooser.path")),
-                BorderFactory.createEmptyBorder(4, 8, 8, 8)));
-        accessory.setPreferredSize(new Dimension(ACCESSORY_WIDTH, ACCESSORY_HEIGHT));
-        accessory.add(inputHint, BorderLayout.NORTH);
-        accessory.add(inputScrollPane, BorderLayout.CENTER);
-        JPanel feedback = new JPanel(new BorderLayout(8, 0));
-        feedback.add(validationMessage, BorderLayout.CENTER);
-        feedback.add(applyPathButton, BorderLayout.EAST);
-        accessory.add(feedback, BorderLayout.SOUTH);
-        setAccessory(accessory);
-
-        addPropertyChangeListener(SELECTED_FILE_CHANGED_PROPERTY, event -> synchronizeFromBrowser());
-        addPropertyChangeListener(SELECTED_FILES_CHANGED_PROPERTY, event -> synchronizeFromBrowser());
-        addPropertyChangeListener(MULTI_SELECTION_ENABLED_CHANGED_PROPERTY, event -> updateInputPresentation());
-        addPropertyChangeListener(DIALOG_TYPE_CHANGED_PROPERTY, event -> updateInputPresentation());
-        updateInputPresentation();
-        synchronizeFromBrowser();
-    }
-
-    /// Configures one label-like text area to wrap without accepting focus or edits.
-    ///
-    /// @param textArea label-like text area
-    private static void configureReadOnlyText(JTextArea textArea) {
-        JTextArea target = Objects.requireNonNull(textArea, "textArea");
-        target.setEditable(false);
-        target.setFocusable(false);
-        target.setOpaque(false);
-        target.setLineWrap(true);
-        target.setWrapStyleWord(true);
-        target.setBorder(null);
-        target.setFont(UIManager.getFont("Label.font"));
-        target.setForeground(UIManager.getColor("Label.foreground"));
-    }
-
-    /// Updates path guidance and the visible row count for the current selection cardinality.
-    private void updateInputPresentation() {
-        boolean multiple = isMultiSelectionEnabled() && getDialogType() != SAVE_DIALOG;
-        pathInput.setRows(multiple ? 5 : 3);
-        inputHint.setText(i18n(multiple
-                ? "swing.path_chooser.hint.multiple"
-                : "swing.path_chooser.hint.single"));
-        pathInput.getAccessibleContext().setAccessibleDescription(inputHint.getText());
-    }
-
-    /// Copies a native browser selection into the editable input without touching the file system.
-    private void synchronizeFromBrowser() {
-        if (synchronizingSelection || pathInput.hasFocus()) {
+            candidate = resolveAgainstCurrentDirectory(Path.of(input));
+        } catch (InvalidPathException | SecurityException failure) {
+            showDirectoryValidation(i18n("swing.path_chooser.error.invalid", input));
             return;
         }
-        File @Unmodifiable [] selectedFiles = getSelectedFiles();
-        if (isMultiSelectionEnabled() && getDialogType() != SAVE_DIALOG && selectedFiles.length > 0) {
-            setPathInputText(List.of(selectedFiles).stream()
-                    .map(File::toPath)
-                    .map(Path::toString)
-                    .toList());
-            return;
-        }
-        @Nullable File selectedFile = getSelectedFile();
-        if (selectedFile != null) {
-            setPathInputText(List.of(selectedFile.toPath().toString()));
-        }
-    }
 
-    /// Writes normalized browser paths to the input while suppressing edit-side validation noise.
-    ///
-    /// @param paths browser-selected path strings
-    private void setPathInputText(@Unmodifiable List<String> paths) {
-        synchronizingSelection = true;
         try {
-            pathInput.setText(String.join(System.lineSeparator(), List.copyOf(paths)));
-        } finally {
-            synchronizingSelection = false;
+            if (!Files.isDirectory(candidate)) {
+                showDirectoryValidation(i18n("swing.path_chooser.error.directory_unavailable", candidate));
+                return;
+            }
+
+            setSelectedFile(null);
+            setSelectedFiles(new File[0]);
+            setCurrentDirectory(candidate.toFile());
+            rescanCurrentDirectory();
+            synchronizeDirectoryInput();
+        } catch (SecurityException failure) {
+            showDirectoryValidation(i18n("swing.path_chooser.error.directory_unavailable", candidate));
         }
-        validationMessage.setText(" ");
-        validationMessage.setToolTipText(null);
     }
 
-    /// Resolves, normalizes, and validates the current editable input.
+    /// Resolves a relative directory against the browser's current directory.
     ///
-    /// @return immutable approved paths or one localized validation error
-    private SelectionResolution resolveSelection() {
-        @Unmodifiable List<String> entries = pathInput.getText().lines()
-                .map(String::strip)
-                .map(EditablePathChooser::removeMatchingQuotes)
-                .filter(entry -> !entry.isEmpty())
-                .toList();
-        if (entries.isEmpty()) {
-            return SelectionResolution.failure(i18n("swing.path_chooser.error.required"));
-        }
-        if ((!isMultiSelectionEnabled() || getDialogType() == SAVE_DIALOG) && entries.size() != 1) {
-            return SelectionResolution.failure(i18n("swing.path_chooser.error.single"));
-        }
-
-        List<Path> paths = new ArrayList<>(entries.size());
-        for (String entry : entries) {
-            final Path normalized;
-            try {
-                normalized = resolveAgainstCurrentDirectory(Path.of(entry));
-            } catch (InvalidPathException | SecurityException failure) {
-                return SelectionResolution.failure(i18n("swing.path_chooser.error.invalid", entry));
-            }
-            SelectionResolution validation = validatePath(normalizeSaveExtension(normalized));
-            @Nullable String error = validation.error();
-            if (error != null) {
-                return validation;
-            }
-            paths.add(validation.paths().get(0));
-        }
-        return SelectionResolution.success(paths);
-    }
-
-    /// Resolves a relative input against the visible browser directory and returns a normalized absolute path.
-    ///
-    /// @param input parsed typed input
-    /// @return normalized absolute path
+    /// @param input parsed typed path
+    /// @return normalized absolute directory candidate
     private Path resolveAgainstCurrentDirectory(Path input) {
         Path path = Objects.requireNonNull(input, "input");
         if (path.isAbsolute()) {
@@ -270,142 +180,36 @@ public final class EditablePathChooser extends JFileChooser {
         return base.resolve(path).normalize();
     }
 
-    /// Appends the active filter's first extension to an extensionless save filename.
-    ///
-    /// @param input normalized candidate
-    /// @return candidate with a default extension when the active save filter requires one
-    private Path normalizeSaveExtension(Path input) {
-        if (getDialogType() != SAVE_DIALOG || getFileSelectionMode() == DIRECTORIES_ONLY) {
-            return input;
-        }
-        @Nullable FileFilter filter = getFileFilter();
-        if (!(filter instanceof FileNameExtensionFilter extensionFilter)
-                || acceptsExtension(input, extensionFilter)) {
-            return input;
-        }
-        @Nullable Path fileName = input.getFileName();
-        if (fileName == null || hasFileNameExtension(fileName.toString())) {
-            return input;
-        }
-        String @Unmodifiable [] extensions = extensionFilter.getExtensions();
-        if (extensions.length == 0) {
-            return input;
-        }
-        String separator = fileName.toString().endsWith(".") ? "" : ".";
-        return input.resolveSibling(fileName + separator + extensions[0]);
+    /// Mirrors the chooser's displayed directory into the top field.
+    private void synchronizeDirectoryInput() {
+        @Nullable File currentDirectory = getCurrentDirectory();
+        currentDirectoryInput.setText(currentDirectory == null
+                ? ""
+                : currentDirectory.toPath().toAbsolutePath().normalize().toString());
+        clearDirectoryValidation();
     }
 
-    /// Validates one resolved path against open/save semantics, selection type, and active filter.
+    /// Shows directory validation through the field outline and tooltip without closing the dialog.
     ///
-    /// @param candidate normalized absolute candidate
-    /// @return one-path success or localized validation failure
-    private SelectionResolution validatePath(Path candidate) {
-        try {
-            if (getDialogType() == SAVE_DIALOG) {
-                return validateSavePath(candidate);
-            }
-            if (!Files.exists(candidate)) {
-                return SelectionResolution.failure(i18n("swing.path_chooser.error.missing", candidate));
-            }
-            @Nullable String typeError = validateExistingType(candidate);
-            if (typeError != null) {
-                return SelectionResolution.failure(typeError);
-            }
-            if (Files.isRegularFile(candidate) && !activeFilterAccepts(candidate)) {
-                return SelectionResolution.failure(i18n("swing.path_chooser.error.filter", candidate));
-            }
-            return SelectionResolution.success(List.of(candidate));
-        } catch (SecurityException failure) {
-            return SelectionResolution.failure(i18n("swing.path_chooser.error.invalid", candidate));
-        }
+    /// @param message localized validation detail
+    private void showDirectoryValidation(String message) {
+        directoryValidation = Objects.requireNonNull(message, "message");
+        currentDirectoryInput.putClientProperty(OUTLINE_PROPERTY, ERROR_OUTLINE);
+        currentDirectoryInput.setToolTipText(message);
+        currentDirectoryInput.requestFocusInWindow();
+        currentDirectoryInput.selectAll();
     }
 
-    /// Validates an existing or new save target and its writable containing directory.
-    ///
-    /// @param candidate normalized save candidate
-    /// @return one-path success or localized validation failure
-    private SelectionResolution validateSavePath(Path candidate) {
-        if (Files.exists(candidate)) {
-            @Nullable String typeError = validateExistingType(candidate);
-            if (typeError != null) {
-                return SelectionResolution.failure(typeError);
-            }
-        }
-        if (getFileSelectionMode() != DIRECTORIES_ONLY && !activeFilterAccepts(candidate)) {
-            return SelectionResolution.failure(i18n("swing.path_chooser.error.filter", candidate));
-        }
-        @Nullable Path parent = candidate.getParent();
-        if (parent == null || !Files.isDirectory(parent) || !Files.isWritable(parent)) {
-            return SelectionResolution.failure(i18n("swing.path_chooser.error.save_parent", candidate));
-        }
-        return SelectionResolution.success(List.of(candidate));
-    }
-
-    /// Checks an existing candidate against the configured file-selection mode.
-    ///
-    /// @param candidate existing normalized candidate
-    /// @return localized mismatch text, or null when the type is accepted
-    private @Nullable String validateExistingType(Path candidate) {
-        return switch (getFileSelectionMode()) {
-            case FILES_ONLY -> Files.isRegularFile(candidate)
-                    ? null
-                    : i18n("swing.path_chooser.error.expected_file", candidate);
-            case DIRECTORIES_ONLY -> Files.isDirectory(candidate)
-                    ? null
-                    : i18n("swing.path_chooser.error.expected_directory", candidate);
-            case FILES_AND_DIRECTORIES -> Files.isRegularFile(candidate) || Files.isDirectory(candidate)
-                    ? null
-                    : i18n("swing.path_chooser.error.unsupported_type", candidate);
-            default -> i18n("swing.path_chooser.error.unsupported_type", candidate);
-        };
-    }
-
-    /// Applies the active filter, including compound extensions such as `tar.gz`.
-    ///
-    /// @param candidate normalized candidate
-    /// @return whether the active filter accepts the candidate
-    private boolean activeFilterAccepts(Path candidate) {
-        @Nullable FileFilter filter = getFileFilter();
-        if (filter == null) {
-            return true;
-        }
-        if (filter instanceof FileNameExtensionFilter extensionFilter) {
-            return acceptsExtension(candidate, extensionFilter);
-        }
-        return filter.accept(candidate.toFile());
-    }
-
-    /// Checks a filename against every case-insensitive suffix in one extension filter.
-    ///
-    /// @param candidate normalized candidate
-    /// @param filter active extension filter
-    /// @return whether one configured extension matches
-    private static boolean acceptsExtension(Path candidate, FileNameExtensionFilter filter) {
-        @Nullable Path fileName = candidate.getFileName();
-        if (fileName == null) {
-            return false;
-        }
-        String lowerName = fileName.toString().toLowerCase(Locale.ROOT);
-        for (String extension : filter.getExtensions()) {
-            if (lowerName.endsWith("." + extension.toLowerCase(Locale.ROOT))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /// Reports whether the final filename segment already contains a non-leading extension separator.
-    ///
-    /// @param fileName final filename segment
-    /// @return whether an explicit extension is present
-    private static boolean hasFileNameExtension(String fileName) {
-        int separator = Objects.requireNonNull(fileName, "fileName").lastIndexOf('.');
-        return separator > 0 && separator < fileName.length() - 1;
+    /// Clears stale directory validation after editing or successful navigation.
+    private void clearDirectoryValidation() {
+        directoryValidation = null;
+        currentDirectoryInput.putClientProperty(OUTLINE_PROPERTY, null);
+        currentDirectoryInput.setToolTipText(i18n("swing.path_chooser.current_directory"));
     }
 
     /// Removes matching single or double quotes commonly produced by platform copy-as-path actions.
     ///
-    /// @param input stripped input line
+    /// @param input stripped input text
     /// @return unquoted path text when both delimiters match
     private static String removeMatchingQuotes(String input) {
         String value = Objects.requireNonNull(input, "input");
@@ -419,104 +223,65 @@ public final class EditablePathChooser extends JFileChooser {
                 : value;
     }
 
-    /// Returns the editable path component for package-local focused tests.
+    /// Returns the editable current-directory field for package-local focused tests.
     ///
-    /// @return editable path component
-    JTextComponent pathInput() {
-        return pathInput;
+    /// @return current-directory field
+    JTextField currentDirectoryInput() {
+        return currentDirectoryInput;
     }
 
-    /// Returns the typed-path approval button for package-local focused tests.
+    /// Returns the directory navigation action for package-local focused tests.
     ///
-    /// @return typed-path approval button
-    JButton applyPathButton() {
-        return applyPathButton;
+    /// @return navigation button
+    JButton navigateDirectoryButton() {
+        return navigateDirectoryButton;
     }
 
-    /// Returns the current inline validation text for package-local focused tests.
+    /// Returns the current directory-input validation detail for package-local focused tests.
     ///
-    /// @return validation text, blank when no error is shown
+    /// @return validation detail, or an empty string when no error is shown
     String validationText() {
-        return validationMessage.getText().strip();
+        return directoryValidation == null ? "" : directoryValidation;
     }
 
-    /// Immutable typed-input resolution with either approved paths or one error.
-    ///
-    /// @param paths immutable approved paths, empty after failure
-    /// @param error localized validation error, or null after success
+    /// Clears directory validation whenever the user edits the top field.
     @NotNullByDefault
-    private record SelectionResolution(
-            @Unmodifiable List<Path> paths,
-            @Nullable String error) {
-        /// Copies the successful paths and verifies the success invariant.
-        private SelectionResolution {
-            paths = List.copyOf(paths);
-            if ((error == null) == paths.isEmpty()) {
-                throw new IllegalArgumentException("Exactly one of paths or error must be present");
-            }
-        }
+    private static final class DirectoryInputDocumentListener implements DocumentListener {
+        /// Callback that clears validation after a document mutation.
+        private final Runnable clearValidation;
 
-        /// Creates an immutable successful resolution.
+        /// Creates a listener for one directory field.
         ///
-        /// @param paths one or more validated paths
-        /// @return successful resolution
-        private static SelectionResolution success(List<Path> paths) {
-            return new SelectionResolution(paths, null);
+        /// @param clearValidation callback that clears its validation state
+        private DirectoryInputDocumentListener(Runnable clearValidation) {
+            this.clearValidation = Objects.requireNonNull(clearValidation, "clearValidation");
         }
 
-        /// Creates a failed resolution without approved paths.
-        ///
-        /// @param error localized failure detail
-        /// @return failed resolution
-        private static SelectionResolution failure(String error) {
-            return new SelectionResolution(List.of(), Objects.requireNonNull(error, "error"));
-        }
-    }
-
-    /// Clears stale validation whenever the user edits the path text.
-    @NotNullByDefault
-    private static final class PathInputDocumentListener implements javax.swing.event.DocumentListener {
-        /// Validation label cleared after every document mutation.
-        private final JTextArea validationMessage;
-
-        /// Creates a listener for one chooser validation label.
-        ///
-        /// @param validationMessage validation label to clear
-        private PathInputDocumentListener(JTextArea validationMessage) {
-            this.validationMessage = Objects.requireNonNull(validationMessage, "validationMessage");
-        }
-
-        /// Clears feedback after inserted text.
+        /// Clears validation after inserted text.
         ///
         /// @param event document mutation event
         @Override
-        public void insertUpdate(javax.swing.event.DocumentEvent event) {
+        public void insertUpdate(DocumentEvent event) {
             Objects.requireNonNull(event, "event");
-            clearValidation();
+            clearValidation.run();
         }
 
-        /// Clears feedback after removed text.
+        /// Clears validation after removed text.
         ///
         /// @param event document mutation event
         @Override
-        public void removeUpdate(javax.swing.event.DocumentEvent event) {
+        public void removeUpdate(DocumentEvent event) {
             Objects.requireNonNull(event, "event");
-            clearValidation();
+            clearValidation.run();
         }
 
-        /// Clears feedback after an attribute-only mutation.
+        /// Clears validation after an attribute-only mutation.
         ///
         /// @param event document mutation event
         @Override
-        public void changedUpdate(javax.swing.event.DocumentEvent event) {
+        public void changedUpdate(DocumentEvent event) {
             Objects.requireNonNull(event, "event");
-            clearValidation();
-        }
-
-        /// Restores the validation row's stable blank height.
-        private void clearValidation() {
-            validationMessage.setText(" ");
-            validationMessage.setToolTipText(null);
+            clearValidation.run();
         }
     }
 }
