@@ -76,7 +76,7 @@ public final class InstanceManagementNavigationPanel extends JPanel {
 
     /// Transparent layout surface hosted by the vertical scroll pane.
     private final JPanel navigationContent = new JPanel(new MigLayout(
-            "insets 8, fillx, wrap 1, gapy 4",
+            "insets 6 8, fillx, wrap 1, gapy 2",
             "[grow,fill]",
             "[]"));
 
@@ -182,7 +182,7 @@ public final class InstanceManagementNavigationPanel extends JPanel {
             heading = new JLabel(section.localizedLabel());
             heading.setName("instanceManagementNavigationGroup_" + section.name());
             heading.setFont(heading.getFont().deriveFont(Font.BOLD));
-            navigationContent.add(heading, "growx, gaptop 10");
+            navigationContent.add(heading, "growx, gaptop 6");
         }
 
         for (InstanceManagementPageId page : visiblePages) {
@@ -192,7 +192,7 @@ public final class InstanceManagementNavigationPanel extends JPanel {
             }
             buttonGroup.add(button);
             buttons.put(page, button);
-            navigationContent.add(button, "growx, h 40!");
+            navigationContent.add(button, "growx, h 30!");
         }
     }
 
@@ -207,7 +207,7 @@ public final class InstanceManagementNavigationPanel extends JPanel {
         button.setName("instanceManagementNavigationButton_" + destination.name());
         button.setHorizontalAlignment(SwingConstants.LEFT);
         button.setIconTextGap(10);
-        button.setMargin(new Insets(8, 10, 8, 10));
+        button.setMargin(new Insets(3, 10, 3, 10));
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         button.setFocusable(true);
         button.setFocusPainted(true);

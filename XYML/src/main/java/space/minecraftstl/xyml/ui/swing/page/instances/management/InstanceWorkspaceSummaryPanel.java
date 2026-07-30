@@ -96,7 +96,7 @@ final class InstanceWorkspaceSummaryPanel extends JPanel implements AutoCloseabl
             Consumer<Component> moreCommand) {
         super(new MigLayout(
                 "insets 4 4 12 4, fillx",
-                "[56!]12[grow,fill]16[shrink 120]push[40!]6[40!]6[40!]",
+                "[56!]12[grow,fill]16[40!]6[40!]6[40!]",
                 "[30!]2[24!]"));
         EdtDispatcher.requireEventDispatchThread();
         this.homeModel = Objects.requireNonNull(homeModel, "homeModel");
@@ -177,12 +177,20 @@ final class InstanceWorkspaceSummaryPanel extends JPanel implements AutoCloseabl
 
         versionLabel.setName("instanceWorkspaceVersion");
         versionLabel.setText(i18n("swing.instance_overview.loading"));
-        add(versionLabel, "cell 1 1, growx");
 
         statusLabel.setName("instanceWorkspaceStatus");
-        statusLabel.setHorizontalAlignment(SwingConstants.RIGHT);
+        statusLabel.setHorizontalAlignment(SwingConstants.LEFT);
         statusLabel.setFont(statusLabel.getFont().deriveFont(12.0F));
-        add(statusLabel, "cell 2 1, alignx right");
+
+        JPanel detailLine = new JPanel(new MigLayout(
+                "insets 0, fillx, gap 12",
+                "[][grow,fill]",
+                "[24!]"));
+        detailLine.setName("instanceWorkspaceDetails");
+        detailLine.setOpaque(false);
+        detailLine.add(versionLabel, "aligny center");
+        detailLine.add(statusLabel, "aligny center");
+        add(detailLine, "cell 1 1, growx");
 
         configureCommand(
                 refreshButton,
@@ -190,7 +198,7 @@ final class InstanceWorkspaceSummaryPanel extends JPanel implements AutoCloseabl
                 i18n("swing.instance_overview.refresh"),
                 "assets/swing/icons/refresh.svg",
                 refreshCommand);
-        add(refreshButton, "cell 3 0 1 2, w 40!, h 40!");
+        add(refreshButton, "cell 2 0 1 2, w 40!, h 40!");
 
         configureCommand(
                 openFolderButton,
@@ -199,7 +207,7 @@ final class InstanceWorkspaceSummaryPanel extends JPanel implements AutoCloseabl
                 "assets/swing/icons/folder-open.svg",
                 openFolderCommand);
         openFolderButton.setEnabled(false);
-        add(openFolderButton, "cell 4 0 1 2, w 40!, h 40!");
+        add(openFolderButton, "cell 3 0 1 2, w 40!, h 40!");
 
         configureCommand(
                 moreButton,
@@ -208,7 +216,7 @@ final class InstanceWorkspaceSummaryPanel extends JPanel implements AutoCloseabl
                 "assets/swing/icons/format-list-bulleted.svg",
                 () -> moreCommand.accept(moreButton));
         moreButton.setEnabled(false);
-        add(moreButton, "cell 5 0 1 2, w 40!, h 40!");
+        add(moreButton, "cell 4 0 1 2, w 40!, h 40!");
     }
 
     /// Coalesces one home-model invalidation onto the Swing event-dispatch thread.
@@ -256,7 +264,6 @@ final class InstanceWorkspaceSummaryPanel extends JPanel implements AutoCloseabl
         target.getAccessibleContext().setAccessibleName(description);
         target.setMargin(new Insets(8, 8, 8, 8));
         target.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        target.putClientProperty("JButton.buttonType", "toolBarButton");
         target.addActionListener(event -> command.run());
     }
 
