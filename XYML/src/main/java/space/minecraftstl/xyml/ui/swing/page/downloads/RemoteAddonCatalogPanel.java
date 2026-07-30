@@ -352,6 +352,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Builds the static Swing shell and listener wiring without querying any source.
     private void configureComponents() {
         setName("remoteAddonCatalog" + kind.name());
+        setOpaque(false);
 
         sourceBox.removeAllItems();
         for (RemoteAddonCatalogSource source : RemoteAddonCatalogSource.values()) {
@@ -460,8 +461,11 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         add(filterBand, "growx");
 
         choiceList.setName("remoteAddonResults");
+        choiceList.setOpaque(false);
+        choiceList.getViewport().setOpaque(false);
         JList<ChoiceListEntry<RemoteAddonCatalogItem>> resultList = choiceList.getList();
         resultList.setName("remoteAddonResultsView");
+        resultList.setOpaque(false);
         resultList.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting()) {
                 selectedRowChanged();

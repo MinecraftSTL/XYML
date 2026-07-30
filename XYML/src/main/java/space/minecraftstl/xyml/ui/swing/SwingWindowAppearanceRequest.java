@@ -19,13 +19,14 @@ package space.minecraftstl.xyml.ui.swing;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ResolvedThemeSelection;
 import space.minecraftstl.xyml.theme.ThemeBackground;
 import space.minecraftstl.xyml.theme.ThemeBackgroundSettings;
+import space.minecraftstl.xyml.theme.ThemeBrightness;
+import space.minecraftstl.xyml.theme.ThemePackResource;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.settings.BackgroundAppearanceSettings;
 
@@ -47,15 +48,6 @@ public record SwingWindowAppearanceRequest(
         BackgroundLoadPolicy loadPolicy,
         NetworkBackgroundImageCachePolicy networkCachePolicy,
         boolean windowTransparent) {
-    /// Initial request used before the selected theme package finishes its offline resolution.
-    public static final SwingWindowAppearanceRequest INITIAL = new SwingWindowAppearanceRequest(
-            new SwingBackgroundSource.DefaultLocal(),
-            new SwingBackgroundSource.Builtin(BuiltinBackground.FALLBACK),
-            1.0,
-            BackgroundLoadPolicy.WAIT_FOR_BACKGROUND,
-            NetworkBackgroundImageCachePolicy.ENABLED,
-            false);
-
     /// Validates one complete request.
     public SwingWindowAppearanceRequest {
         Objects.requireNonNull(source, "source");
@@ -65,6 +57,28 @@ public record SwingWindowAppearanceRequest(
         }
         Objects.requireNonNull(loadPolicy, "loadPolicy");
         Objects.requireNonNull(networkCachePolicy, "networkCachePolicy");
+    }
+
+    /// Creates the bundled XYML request used before the selected theme package finishes offline resolution.
+    ///
+    /// @param brightness concrete startup brightness
+    /// @return complete renderer request backed only by the matching bundled XYML image
+    public static SwingWindowAppearanceRequest initial(ThemeBrightness brightness) {
+        ThemeBrightness concreteBrightness = Objects.requireNonNull(brightness, "brightness");
+        String assetName = concreteBrightness == ThemeBrightness.DARK
+                ? "assets/background-dark.png"
+                : "assets/background-light.png";
+        SwingBackgroundSource source = new SwingBackgroundSource.ThemePackImage(
+                new ThemePackResource.Builtin(
+                        "/assets/themes/xyml.default/" + assetName,
+                        assetName));
+        return new SwingWindowAppearanceRequest(
+                source,
+                source,
+                1.0,
+                BackgroundLoadPolicy.WAIT_FOR_BACKGROUND,
+                NetworkBackgroundImageCachePolicy.DISABLED,
+                false);
     }
 
     /// Resolves theme inheritance and launcher overrides into one renderer-ready request.

@@ -85,6 +85,7 @@ public final class WorldDownloadPanel extends JPanel implements AutoCloseable {
         setName("downloadsWorldWorkflows");
         setOpaque(false);
         workflowTabs.setName("downloadsWorldWorkflowTabs");
+        workflowTabs.setOpaque(false);
         workflowTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         workflowTabs.addTab(i18n("swing.remote_world.tab.remote"), remoteCatalog);
         workflowTabs.addTab(i18n("swing.remote_world.tab.local"), localArchivePanel);

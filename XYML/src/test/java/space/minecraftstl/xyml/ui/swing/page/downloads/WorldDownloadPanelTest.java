@@ -66,13 +66,35 @@ final class WorldDownloadPanelTest {
             BufferedImage image = onEdt(() -> {
                 panel.setSize(1024, 720);
                 JTabbedPane categories = panel.categoryTabs();
+                assertFalse(panel.isOpaque());
+                assertFalse(categories.isOpaque());
+                for (int index = 0; index < categories.getTabCount(); index++) {
+                    assertFalse(((JComponent) categories.getComponentAt(index)).isOpaque());
+                }
+                assertFalse(findNamed(
+                        panel,
+                        "downloadsLocalModpackImporter",
+                        JComponent.class).isOpaque());
+                assertFalse(findNamed(
+                        panel,
+                        "localModpackImportProgress",
+                        JComponent.class).isOpaque());
                 categories.setSelectedIndex(categories.getTabCount() - 1);
                 layoutRecursively(panel);
 
+                JComponent worldPage = findNamed(
+                        panel,
+                        "downloadsWorldWorkflows",
+                        JComponent.class);
                 JTabbedPane workflows = findNamed(
                         panel,
                         "downloadsWorldWorkflowTabs",
                         JTabbedPane.class);
+                assertFalse(worldPage.isOpaque());
+                assertFalse(workflows.isOpaque());
+                for (int index = 0; index < workflows.getTabCount(); index++) {
+                    assertFalse(((JComponent) workflows.getComponentAt(index)).isOpaque());
+                }
                 assertEquals(2, workflows.getTabCount());
                 assertEquals(0, workflows.getSelectedIndex());
                 Container remoteWorkflow = (Container) Objects.requireNonNull(
@@ -122,7 +144,10 @@ final class WorldDownloadPanelTest {
                 } finally {
                     graphics.dispose();
                 }
-                assertTrue(countOpaquePixels(rendered) > 500_000L);
+                long paintedPixels = countOpaquePixels(rendered);
+                long totalPixels = (long) rendered.getWidth() * rendered.getHeight();
+                assertTrue(paintedPixels > 0L, "interactive content must remain visible");
+                assertTrue(paintedPixels < totalPixels, "layout canvases must preserve background transparency");
                 assertTrue(distinctColors(rendered).size() > 12);
                 return rendered;
             });

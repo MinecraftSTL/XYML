@@ -46,6 +46,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests FlatLaf initialization and hot updates without creating a displayable window.
 @NotNullByDefault
 public final class SwingThemeManagerTest {
+    /// The manager exposes a brightness-matched bundled XYML background before the first frame is created.
+    @Test
+    public void preparesBrightnessSpecificInitialWindowAppearance() {
+        SwingThemeManager light = new SwingThemeManager(
+                ThemeBrightnessPreference.LIGHT,
+                new SwingDesignTokens(4),
+                () -> true);
+        SwingThemeManager dark = new SwingThemeManager(
+                ThemeBrightnessPreference.SYSTEM,
+                new SwingDesignTokens(4),
+                () -> true);
+
+        SwingBackgroundSource.ThemePackImage lightSource = assertInstanceOf(
+                SwingBackgroundSource.ThemePackImage.class,
+                light.windowAppearance().source());
+        SwingBackgroundSource.ThemePackImage darkSource = assertInstanceOf(
+                SwingBackgroundSource.ThemePackImage.class,
+                dark.windowAppearance().source());
+        assertAll(
+                () -> assertEquals("assets/background-light.png", lightSource.resource().name()),
+                () -> assertEquals("assets/background-dark.png", darkSource.resource().name()));
+    }
+
     /// Initialization and explicit updates replace the palette and radius defaults on the EDT.
     @Test
     public void initializesAndUpdatesFlatLaf() {

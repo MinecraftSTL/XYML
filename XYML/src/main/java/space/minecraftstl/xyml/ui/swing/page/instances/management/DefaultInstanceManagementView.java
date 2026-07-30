@@ -197,6 +197,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         if (progressAnimationDuration.isNegative()) {
             throw new IllegalArgumentException("progressAnimationDuration must not be negative");
         }
+        setOpaque(false);
 
         @Nullable InstanceOverviewPanel createdOverview = null;
         @Nullable InstanceLifecyclePanel createdLifecycle = null;
@@ -453,39 +454,50 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         add(toolbar, "growx");
 
         tabs.setName("instanceManagementTabs");
+        tabs.setOpaque(false);
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
-        tabs.addTab(overview.title(), overview);
+        addTransparentTab(overview.title(), overview);
         @Nullable InstanceLifecyclePanel currentLifecycle = lifecycle;
         if (currentLifecycle != null) {
-            tabs.addTab(currentLifecycle.title(), currentLifecycle);
+            addTransparentTab(currentLifecycle.title(), currentLifecycle);
         }
         @Nullable InstanceGameSettingsPanel currentGameSettings = gameSettings;
         if (currentGameSettings != null) {
-            tabs.addTab(i18n("settings.game"), currentGameSettings);
+            addTransparentTab(i18n("settings.game"), currentGameSettings);
         }
         @Nullable InstanceInstallerPanel currentInstallers = installers;
         if (currentInstallers != null) {
-            tabs.addTab(i18n("settings.tabs.installers"), currentInstallers);
+            addTransparentTab(i18n("settings.tabs.installers"), currentInstallers);
         }
         @Nullable InstanceMaintenancePanel currentMaintenance = maintenance;
         if (currentMaintenance != null) {
-            tabs.addTab(currentMaintenance.title(), currentMaintenance);
+            addTransparentTab(currentMaintenance.title(), currentMaintenance);
         }
-        tabs.addTab(modStrings.title(), mods);
-        tabs.addTab(resourcePackStrings.pageTitle(), resourcePacks);
-        tabs.addTab(worlds.title(), worlds);
-        tabs.addTab(dataPacks.title(), dataPacks);
-        tabs.addTab(backups.title(), backups);
+        addTransparentTab(modStrings.title(), mods);
+        addTransparentTab(resourcePackStrings.pageTitle(), resourcePacks);
+        addTransparentTab(worlds.title(), worlds);
+        addTransparentTab(dataPacks.title(), dataPacks);
+        addTransparentTab(backups.title(), backups);
         @Nullable ModpackExportPanel currentModpackExport = modpackExport;
         if (currentModpackExport != null) {
-            tabs.addTab(currentModpackExport.title(), currentModpackExport);
+            addTransparentTab(currentModpackExport.title(), currentModpackExport);
         }
-        tabs.addTab(addonUpdates.title(), addonUpdates);
-        tabs.addTab(schematicStrings.pageTitle(), schematics);
+        addTransparentTab(addonUpdates.title(), addonUpdates);
+        addTransparentTab(schematicStrings.pageTitle(), schematics);
         tabs.addChangeListener(lazyTabListener);
         activateSelectedLazyTab();
         tabs.getAccessibleContext().setAccessibleName(managementStrings.returnAction());
         add(tabs, "grow");
+    }
+
+    /// Adds one management page without allowing its root surface to cover the window background.
+    ///
+    /// @param title localized tab title
+    /// @param component management page root
+    private void addTransparentTab(String title, JComponent component) {
+        JComponent transparentComponent = Objects.requireNonNull(component, "component");
+        transparentComponent.setOpaque(false);
+        tabs.addTab(Objects.requireNonNull(title, "title"), transparentComponent);
     }
 
     /// Starts selected local-catalog work only after the corresponding tab becomes visible.

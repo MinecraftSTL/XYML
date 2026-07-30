@@ -268,12 +268,15 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         if (page == ShellPageId.INSTANCES) {
             showInstanceList();
             overlayDeck.setVisible(false);
+            instancesPage.setVisible(true);
             workspace.revalidate();
             workspace.repaint();
             return;
         }
+        JComponent overlayPage = pageCache.getOrCreate(page);
+        instancesPage.setVisible(false);
         overlayDeck.setVisible(true);
-        overlayDeck.showPage(pageCache.getOrCreate(page), true);
+        overlayDeck.showPage(overlayPage, true);
     }
 
     /// Opens the instance list or toggles one transient destination from the left navigation rail.

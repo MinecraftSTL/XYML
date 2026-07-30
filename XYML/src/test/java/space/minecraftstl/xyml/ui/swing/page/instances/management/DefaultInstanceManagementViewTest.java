@@ -122,7 +122,12 @@ final class DefaultInstanceManagementViewTest {
             EdtDispatcher.executeAndWait(() -> {
                 JTabbedPane tabs = findNamed(view, "instanceManagementTabs", JTabbedPane.class);
                 assertNotNull(tabs);
+                assertFalse(view.isOpaque());
+                assertFalse(tabs.isOpaque());
                 assertEquals(8, tabs.getTabCount());
+                for (int index = 0; index < tabs.getTabCount(); index++) {
+                    assertFalse(((JComponent) tabs.getComponentAt(index)).isOpaque());
+                }
                 assertEquals(InstanceOverviewStrings.english().title(), tabs.getTitleAt(0));
                 assertEquals(presentation.mods().title(), tabs.getTitleAt(1));
                 assertEquals(presentation.resourcePacks().pageTitle(), tabs.getTitleAt(2));

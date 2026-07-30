@@ -205,6 +205,10 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
     ///
     /// @param strings localized page text
     private void configureComponents(AccountsStrings strings) {
+        setOpaque(false);
+        listCards.setName("accountsListCards");
+        listCards.setOpaque(false);
+
         JPanel toolbar = new JPanel(new MigLayout(
                 "insets 0, fillx",
                 "[grow,fill][][]",
@@ -288,8 +292,11 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
         add(actions, "growx");
 
         choiceList.setName("accountsList");
+        choiceList.setOpaque(false);
+        choiceList.getViewport().setOpaque(false);
         JList<ChoiceListEntry<AccountListItem>> list = choiceList.getList();
         list.setName("accountsListView");
+        list.setOpaque(false);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting() && !applyingSnapshot) {

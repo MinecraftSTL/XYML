@@ -86,6 +86,7 @@ public final class TaskProgressHostPanel extends JPanel implements AutoCloseable
             Duration progressAnimationDuration) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
+        setOpaque(false);
 
         this.strings = Objects.requireNonNull(strings, "strings");
         this.animator = animator;

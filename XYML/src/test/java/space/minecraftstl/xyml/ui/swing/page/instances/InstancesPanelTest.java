@@ -101,6 +101,49 @@ public final class InstancesPanelTest {
         });
     }
 
+    /// Instance list containers and unselected rows leave the window background visible.
+    @Test
+    public void keepsInstanceContentBackgroundTransparent() {
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(2), snapshot(0, 2, 0L));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS, coordinator));
+
+        onEventDispatchThread(() -> {
+            JList<ChoiceListEntry<InstanceListItem>> list = panel.choiceList().getList();
+            ListCellRenderer<? super ChoiceListEntry<InstanceListItem>> renderer = list.getCellRenderer();
+            JComponent unselectedRow = (JComponent) renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loading(0),
+                    0,
+                    false,
+                    false);
+            boolean unselectedOpaque = unselectedRow.isOpaque();
+            JComponent selectedRow = (JComponent) renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loading(0),
+                    0,
+                    true,
+                    false);
+
+            assertAll(
+                    () -> assertFalse(panel.isOpaque()),
+                    () -> assertFalse(((JComponent) findComponent(
+                            panel, "instancesListWorkspace")).isOpaque()),
+                    () -> assertFalse(((JComponent) findComponent(
+                            panel, "instancesManagementHost")).isOpaque()),
+                    () -> assertFalse(((JComponent) findComponent(
+                            panel, "instancesListCards")).isOpaque()),
+                    () -> assertFalse(panel.choiceList().isOpaque()),
+                    () -> assertFalse(panel.choiceList().getViewport().isOpaque()),
+                    () -> assertFalse(list.isOpaque()),
+                    () -> assertFalse(unselectedOpaque),
+                    () -> assertTrue(selectedRow.isOpaque()));
+            panel.close();
+            coordinator.close();
+        });
+    }
+
     /// Loaded rows delegate commands once and warm one measured viewport beyond first display.
     @Test
     public void delegatesCommandsAndUsesMeasuredVisibleRange() {

@@ -120,6 +120,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
                 "[][grow,fill][180!]",
                 "[40!]8[40!]8[]8[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
+        setOpaque(false);
 
         progressHost = new TaskProgressHostPanel(
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),

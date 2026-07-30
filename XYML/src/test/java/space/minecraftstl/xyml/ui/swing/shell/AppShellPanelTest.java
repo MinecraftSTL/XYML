@@ -137,6 +137,31 @@ public final class AppShellPanelTest {
         }
     }
 
+    /// Transient pages hide the persistent instance surface so transparent headings cannot paint together.
+    @Test
+    public void hidesPersistentInstancesPageBehindEveryTransientPage() {
+        AppShellPanel panel = createPanel(creationCounts());
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                JComponent instancesPage = Objects.requireNonNull(panel.activePage(), "instances page");
+                for (ShellPageId overlay : List.of(
+                        ShellPageId.ACCOUNTS,
+                        ShellPageId.DOWNLOADS,
+                        ShellPageId.SETTINGS)) {
+                    panel.navigateTo(overlay);
+                    assertAll(
+                            () -> assertFalse(instancesPage.isVisible()),
+                            () -> assertTrue(Objects.requireNonNull(panel.activePage()).isVisible()));
+                    panel.navigateTo(ShellPageId.INSTANCES);
+                    assertTrue(instancesPage.isVisible());
+                }
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
     /// The title bar restores brand identity before directory, account, instance, launch, and native controls.
     @Test
     public void laysOutTitleBarWorkflowInStableOrder() {

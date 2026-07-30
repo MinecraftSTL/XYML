@@ -27,12 +27,14 @@ import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JList;
 import javax.swing.JPanel;
 import java.awt.Component;
 import java.awt.Container;
@@ -51,6 +53,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -58,6 +61,51 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies explicit remote discovery, viewport-derived pagination, selected-version loading, and task handoff.
 @NotNullByDefault
 final class RemoteModpackCatalogPanelTest {
+    /// Keeps the remote-modpack result surface transparent except for the selected row highlight.
+    @Test
+    void leavesBackgroundVisibleThroughResultListAndRows() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteModpackCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new RemoteModpackCatalogPanel(
+                    new RecordingBackend(fixtureAddon(), fixtureVersion()),
+                    request -> Task.completed(null),
+                    executor,
+                    RemoteModpackCatalogStrings.english(),
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO)));
+            RemoteModpackCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                JList<ChoiceListEntry<RemoteModpackCatalogItem>> list = panel.choiceList().getList();
+                ChoiceListEntry<RemoteModpackCatalogItem> entry = ChoiceListEntry.loaded(
+                        0,
+                        new RemoteModpackCatalogItem(
+                                fixtureAddon(),
+                                RemoteModpackCatalogSource.CURSEFORGE));
+                boolean unselectedOpaque = ((JComponent) list.getCellRenderer()
+                        .getListCellRendererComponent(list, entry, 0, false, false)).isOpaque();
+                boolean selectedOpaque = ((JComponent) list.getCellRenderer()
+                        .getListCellRendererComponent(list, entry, 0, true, false)).isOpaque();
+
+                assertFalse(panel.isOpaque());
+                assertFalse(panel.choiceList().isOpaque());
+                assertFalse(panel.choiceList().getViewport().isOpaque());
+                assertFalse(list.isOpaque());
+                assertFalse(unselectedOpaque);
+                assertTrue(selectedOpaque);
+            });
+        } finally {
+            @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Does not query sources at first paint, then searches, resolves a selected version, and creates a task request.
     @Test
     void waitsForExplicitSearchAndHandsSelectedVersionToTaskLauncher() throws Exception {

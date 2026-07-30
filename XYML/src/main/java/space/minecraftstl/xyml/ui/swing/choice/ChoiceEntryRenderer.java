@@ -40,7 +40,7 @@ public final class ChoiceEntryRenderer<T extends Object>
     /// @param textProvider the provider of labels for loaded values
     public ChoiceEntryRenderer(ChoiceTextProvider<T> textProvider) {
         this.textProvider = textProvider;
-        setOpaque(true);
+        setOpaque(false);
         setBorder(UIManager.getBorder("List.cellNoFocusBorder"));
     }
 
@@ -61,6 +61,7 @@ public final class ChoiceEntryRenderer<T extends Object>
             boolean cellHasFocus) {
         setComponentOrientation(list.getComponentOrientation());
         setFont(list.getFont());
+        setOpaque(isSelected);
         setBackground(isSelected ? list.getSelectionBackground() : list.getBackground());
         setForeground(isSelected ? list.getSelectionForeground() : list.getForeground());
         setBorder(UIManager.getBorder(cellHasFocus

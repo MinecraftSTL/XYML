@@ -206,6 +206,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         selectionListener = this::selectionChanged;
 
         setName("worldsCatalogPage");
+        setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder());
         add(createHeadingBand(), BorderLayout.NORTH);
         add(createCatalogSplit(), BorderLayout.CENTER);
@@ -307,9 +308,13 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// @return unframed catalog split component
     private JComponent createCatalogSplit() {
         JPanel listSurface = new JPanel(new BorderLayout());
+        listSurface.setOpaque(false);
         listSurface.setBorder(BorderFactory.createEmptyBorder(8, 16, 12, 8));
         choiceList.setName("worldsChoiceList");
+        choiceList.setOpaque(false);
+        choiceList.getViewport().setOpaque(false);
         choiceList.getList().setName("worldsList");
+        choiceList.getList().setOpaque(false);
         choiceList.getList().getAccessibleContext().setAccessibleName(strings.title());
         listSurface.add(choiceList, BorderLayout.CENTER);
 
@@ -318,6 +323,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 listSurface,
                 createDetailsSurface());
         split.setName("worldsCatalogSplit");
+        split.setOpaque(false);
         split.setBorder(BorderFactory.createEmptyBorder());
         split.setContinuousLayout(true);
         split.setResizeWeight(0.46D);
@@ -334,6 +340,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 "[110!][grow,fill]",
                 "[]10[][][][][][]12[]"));
         details.setName("worldsDetails");
+        details.setOpaque(false);
         detailTitle.setName("worldsDetailTitle");
         detailTitle.setFont(detailTitle.getFont().deriveFont(Font.BOLD, 20.0F));
         details.add(detailTitle, "span 2, growx");

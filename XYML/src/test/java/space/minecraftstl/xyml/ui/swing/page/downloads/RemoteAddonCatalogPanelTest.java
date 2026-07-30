@@ -27,12 +27,14 @@ import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JList;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -59,6 +61,54 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies explicit direct-install remote catalog search, viewport sizing, cache reuse, and task handoff.
 @NotNullByDefault
 final class RemoteAddonCatalogPanelTest {
+    /// Keeps the remote-content result surface transparent except for the selected row highlight.
+    @Test
+    void leavesBackgroundVisibleThroughResultListAndRows() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new RemoteAddonCatalogPanel(
+                    RemoteAddonCatalogKind.MOD,
+                    new RecordingBackend(fixtureAddon(), fixtureVersion()),
+                    request -> Task.completed(null),
+                    kind -> Optional.of(fixtureTarget()),
+                    executor,
+                    RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO)));
+            RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                JList<ChoiceListEntry<RemoteAddonCatalogItem>> list = panel.choiceList().getList();
+                ChoiceListEntry<RemoteAddonCatalogItem> entry = ChoiceListEntry.loaded(
+                        0,
+                        new RemoteAddonCatalogItem(
+                                fixtureAddon(),
+                                RemoteAddonCatalogKind.MOD,
+                                RemoteAddonCatalogSource.CURSEFORGE));
+                boolean unselectedOpaque = ((JComponent) list.getCellRenderer()
+                        .getListCellRendererComponent(list, entry, 0, false, false)).isOpaque();
+                boolean selectedOpaque = ((JComponent) list.getCellRenderer()
+                        .getListCellRendererComponent(list, entry, 0, true, false)).isOpaque();
+
+                assertFalse(panel.isOpaque());
+                assertFalse(panel.choiceList().isOpaque());
+                assertFalse(panel.choiceList().getViewport().isOpaque());
+                assertFalse(list.isOpaque());
+                assertFalse(unselectedOpaque);
+                assertTrue(selectedOpaque);
+            });
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Searches only after an explicit command, resolves the selected project's versions, and captures its install target.
     @Test
     void waitsForExplicitSearchAndHandsSelectedVersionToSelectedInstanceTask() throws Exception {

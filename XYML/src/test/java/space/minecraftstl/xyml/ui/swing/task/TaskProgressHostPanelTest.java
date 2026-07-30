@@ -62,6 +62,7 @@ public final class TaskProgressHostPanelTest {
         onEventDispatchThread(() -> {
             TaskProgressPanel panel = installedPanel(host);
             assertAll(
+                    () -> assertFalse(host.isOpaque()),
                     () -> assertSame(model.snapshot(), panel.getDisplayedSnapshot()),
                     () -> assertEquals(1, model.activeSubscriptionCount()),
                     () -> assertEquals(1, model.subscriptionInvocationCount()));

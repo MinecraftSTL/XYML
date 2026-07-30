@@ -307,6 +307,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
     /// Builds static Swing controls and listeners without accessing the catalog source.
     private void configureComponents() {
         setName("loaderSelectionWizard");
+        setOpaque(false);
 
         JPanel headingBand = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[]"));
         headingBand.setOpaque(false);
@@ -363,8 +364,11 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         versionsLabel.setLabelFor(versionChoiceList.getList());
         add(versionsLabel, "growx");
         versionChoiceList.setName("loaderVersionList");
+        versionChoiceList.setOpaque(false);
+        versionChoiceList.getViewport().setOpaque(false);
         JList<ChoiceListEntry<GameLoaderCatalogItem>> versionList = versionChoiceList.getList();
         versionList.setName("loaderVersionListView");
+        versionList.setOpaque(false);
         versionList.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting()) {
                 selectedCatalogRowChanged();
@@ -391,6 +395,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
         selectedLoadersLabel.setLabelFor(selectedLoaderList);
         add(selectedLoadersLabel, "growx");
         selectedLoaderList.setName("loaderSelectedList");
+        selectedLoaderList.setOpaque(false);
         selectedLoaderList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         selectedLoaderList.setCellRenderer(new SelectedLoaderRenderer(strings));
         selectedLoaderList.addListSelectionListener(event -> {
@@ -836,7 +841,14 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
             String text = item == null
                     ? ""
                     : strings.loaderName(item.kind()) + " " + item.remoteVersion().getSelfVersion();
-            return super.getListCellRendererComponent(list, text, index, isSelected, cellHasFocus);
+            Component component = super.getListCellRendererComponent(
+                    list,
+                    text,
+                    index,
+                    isSelected,
+                    cellHasFocus);
+            setOpaque(isSelected);
+            return component;
         }
     }
 }

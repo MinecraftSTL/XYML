@@ -186,6 +186,7 @@ public final class AccountListCellRenderer extends JPanel
             JList<? extends ChoiceListEntry<AccountListItem>> list,
             boolean selected,
             boolean focused) {
+        setOpaque(selected);
         Color background = selected ? list.getSelectionBackground() : list.getBackground();
         Color foreground = selected ? list.getSelectionForeground() : list.getForeground();
         setBackground(background);

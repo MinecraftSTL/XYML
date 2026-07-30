@@ -68,7 +68,7 @@ public final class SwingThemeManager {
     private volatile @Nullable Runnable systemThemeRefreshHandler;
 
     /// Latest renderer-ready window request, available before the first frame is created.
-    private volatile SwingWindowAppearanceRequest windowAppearance = SwingWindowAppearanceRequest.INITIAL;
+    private volatile SwingWindowAppearanceRequest windowAppearance;
 
     /// Tracks whether this manager has installed FlatLaf at least once.
     private volatile boolean initialized;
@@ -87,6 +87,11 @@ public final class SwingThemeManager {
                 "initialBrightnessPreference");
         designTokens = Objects.requireNonNull(initialDesignTokens);
         this.systemThemeDetector = Objects.requireNonNull(systemThemeDetector);
+        ThemeVariant initialVariant = bootstrapVariant(brightnessPreference);
+        windowAppearance = SwingWindowAppearanceRequest.initial(
+                initialVariant == ThemeVariant.DARK
+                        ? ThemeBrightness.DARK
+                        : ThemeBrightness.LIGHT);
     }
 
     /// Installs FlatLaf and the current design tokens before the application creates its first window.

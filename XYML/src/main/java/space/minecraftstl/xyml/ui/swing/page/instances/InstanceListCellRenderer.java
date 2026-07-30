@@ -184,6 +184,7 @@ public final class InstanceListCellRenderer extends JPanel
             boolean focused) {
         Color background = selected ? list.getSelectionBackground() : list.getBackground();
         Color foreground = selected ? list.getSelectionForeground() : list.getForeground();
+        setOpaque(selected);
         setBackground(background);
         setForeground(foreground);
         nameLabel.setForeground(foreground);

@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 
 import javax.swing.JButton;
@@ -56,6 +57,41 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies the lazy Swing loader selection control without creating a native window or a network request.
 @NotNullByDefault
 final class LoaderSelectionWizardPanelTest {
+    /// Keeps the loader page and lazy list transparent except for its selected-row highlight.
+    @Test
+    void leavesBackgroundVisibleThroughVersionListAndRows() throws Exception {
+        RecordingSource source = new RecordingSource();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable LoaderSelectionWizardPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new LoaderSelectionWizardPanel(
+                    new DefaultGameLoaderCatalogModel(source),
+                    executor,
+                    LoaderSelectionWizardStrings.english())));
+            LoaderSelectionWizardPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                JList<ChoiceListEntry<GameLoaderCatalogItem>> list = panel.versionChoiceList().getList();
+                ChoiceListEntry<GameLoaderCatalogItem> entry = ChoiceListEntry.loading(0);
+                boolean unselectedOpaque = ((JComponent) list.getCellRenderer()
+                        .getListCellRendererComponent(list, entry, 0, false, false)).isOpaque();
+                boolean selectedOpaque = ((JComponent) list.getCellRenderer()
+                        .getListCellRendererComponent(list, entry, 0, true, false)).isOpaque();
+
+                assertFalse(panel.isOpaque());
+                assertFalse(panel.versionChoiceList().isOpaque());
+                assertFalse(panel.versionChoiceList().getViewport().isOpaque());
+                assertFalse(list.isOpaque());
+                assertFalse(unselectedOpaque);
+                assertTrue(selectedOpaque);
+            });
+        } finally {
+            closePanel(panelReference.get());
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Confirms construction, base-version selection, and loader-card selection never refresh a source.
     @Test
     void constructionAndLocalChoicesDoNotRefreshLoaderCatalogs() throws Exception {

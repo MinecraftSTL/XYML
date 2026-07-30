@@ -35,8 +35,10 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.ImageIcon;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 import java.awt.Component;
 import java.awt.Container;
@@ -77,6 +79,42 @@ public final class AccountsPanelTest {
             "Remove permanently?",
             "Account error",
             "No accounts");
+
+    /// Account list containers and unselected rows leave the window background visible.
+    @Test
+    public void keepsAccountContentBackgroundTransparent() {
+        FakeAccountsModel model = FakeAccountsModel.immediate(items(2), snapshot(0, 2, 0L));
+        AccountsPanel panel = onEventDispatchThread(() -> new AccountsPanel(model, STRINGS));
+
+        onEventDispatchThread(() -> {
+            JList<ChoiceListEntry<AccountListItem>> list = panel.choiceList().getList();
+            ListCellRenderer<? super ChoiceListEntry<AccountListItem>> renderer = list.getCellRenderer();
+            JComponent unselectedRow = (JComponent) renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loading(0),
+                    0,
+                    false,
+                    false);
+            boolean unselectedOpaque = unselectedRow.isOpaque();
+            JComponent selectedRow = (JComponent) renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loading(0),
+                    0,
+                    true,
+                    false);
+
+            assertAll(
+                    () -> assertFalse(panel.isOpaque()),
+                    () -> assertFalse(((JComponent) findComponent(
+                            panel, "accountsListCards")).isOpaque()),
+                    () -> assertFalse(panel.choiceList().isOpaque()),
+                    () -> assertFalse(panel.choiceList().getViewport().isOpaque()),
+                    () -> assertFalse(list.isOpaque()),
+                    () -> assertFalse(unselectedOpaque),
+                    () -> assertTrue(selectedRow.isOpaque()));
+            panel.close();
+        });
+    }
 
     /// Loaded rows delegate commands once and warm one measured viewport beyond first display.
     @Test

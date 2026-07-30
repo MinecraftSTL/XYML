@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ResolvedThemeSelection;
 import space.minecraftstl.xyml.theme.ThemeBrightness;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
+import space.minecraftstl.xyml.theme.ThemePackResource;
 import space.minecraftstl.xyml.theme.ThemeReference;
 import space.minecraftstl.xyml.theme.ThemeResolutionRequest;
 import space.minecraftstl.xyml.theme.ThemeResolveContext;
@@ -48,6 +49,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies theme-owned backgrounds and explicit launcher overrides produce complete renderer requests.
 @NotNullByDefault
 public final class SwingWindowAppearanceRequestTest {
+    /// Startup requests use the matching bundled XYML image without a historical wallpaper fallback.
+    @Test
+    public void createsBrightnessSpecificBundledInitialRequests() {
+        SwingWindowAppearanceRequest light = SwingWindowAppearanceRequest.initial(ThemeBrightness.LIGHT);
+        SwingWindowAppearanceRequest dark = SwingWindowAppearanceRequest.initial(ThemeBrightness.DARK);
+
+        assertAll(
+                () -> assertInitialResource(light, "assets/background-light.png"),
+                () -> assertInitialResource(dark, "assets/background-dark.png"));
+    }
+
     /// Theme inheritance retains the validated package resource that owns the selected image.
     @Test
     public void resolvesThemeOwnedImageResource() {
@@ -165,5 +177,33 @@ public final class SwingWindowAppearanceRequestTest {
                 sourceOverridden,
                 opacityOverridden,
                 transparencyOverridden);
+    }
+
+    /// Verifies one initial request remains entirely within the bundled XYML theme package.
+    ///
+    /// @param request initial request under test
+    /// @param expectedAssetName expected package-relative asset name
+    private static void assertInitialResource(
+            SwingWindowAppearanceRequest request,
+            String expectedAssetName) {
+        SwingBackgroundSource.ThemePackImage source = assertInstanceOf(
+                SwingBackgroundSource.ThemePackImage.class,
+                request.source());
+        SwingBackgroundSource.ThemePackImage fallback = assertInstanceOf(
+                SwingBackgroundSource.ThemePackImage.class,
+                request.fallback());
+        ThemePackResource.Builtin resource = assertInstanceOf(
+                ThemePackResource.Builtin.class,
+                source.resource());
+        assertAll(
+                () -> assertEquals(expectedAssetName, resource.name()),
+                () -> assertEquals(
+                        "/assets/themes/xyml.default/" + expectedAssetName,
+                        resource.resourcePath()),
+                () -> assertEquals(source, fallback),
+                () -> assertEquals(1.0, request.opacity()),
+                () -> assertEquals(BackgroundLoadPolicy.WAIT_FOR_BACKGROUND, request.loadPolicy()),
+                () -> assertEquals(NetworkBackgroundImageCachePolicy.DISABLED, request.networkCachePolicy()),
+                () -> assertFalse(request.windowTransparent()));
     }
 }

@@ -301,6 +301,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Configures the static shell and listener wiring without issuing any remote request.
     private void configureComponents() {
         setName("remoteModpackCatalog");
+        setOpaque(false);
 
         JPanel headingBand = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[]"));
         headingBand.setOpaque(false);
@@ -400,8 +401,11 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         add(filterBand, "growx");
 
         choiceList.setName("remoteModpackResults");
+        choiceList.setOpaque(false);
+        choiceList.getViewport().setOpaque(false);
         JList<ChoiceListEntry<RemoteModpackCatalogItem>> resultList = choiceList.getList();
         resultList.setName("remoteModpackResultsView");
+        resultList.setOpaque(false);
         resultList.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting()) {
                 selectedRowChanged();

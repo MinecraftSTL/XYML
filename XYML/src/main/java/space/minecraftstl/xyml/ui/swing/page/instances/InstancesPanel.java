@@ -225,6 +225,12 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
 
     /// Builds the stable title, command, list, and status layout.
     private void configureComponents() {
+        setOpaque(false);
+        instancesWorkspace.setOpaque(false);
+        managementWorkspace.setOpaque(false);
+        listCards.setName("instancesListCards");
+        listCards.setOpaque(false);
+
         JPanel toolbar = new JPanel(new MigLayout(
                 "insets 0, fillx",
                 "[grow,fill][]12[]",
@@ -258,8 +264,11 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         instancesWorkspace.add(toolbar, "growx");
 
         choiceList.setName("instancesList");
+        choiceList.setOpaque(false);
+        choiceList.getViewport().setOpaque(false);
         JList<ChoiceListEntry<InstanceListItem>> list = choiceList.getList();
         list.setName("instancesListView");
+        list.setOpaque(false);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.addListSelectionListener(event -> {
             if (!closed && !event.getValueIsAdjusting() && !applyingSnapshot) {

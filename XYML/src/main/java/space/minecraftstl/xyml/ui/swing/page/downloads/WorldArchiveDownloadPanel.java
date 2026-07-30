@@ -66,6 +66,7 @@ public final class WorldArchiveDownloadPanel extends JPanel implements AutoClose
     public WorldArchiveDownloadPanel() {
         super(new MigLayout("insets 0, fill, wrap 1", "[grow,fill]", "[]8[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
+        setOpaque(false);
 
         JPanel heading = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][]8[]", "[40!]"));
         heading.setOpaque(false);
@@ -150,6 +151,7 @@ public final class WorldArchiveDownloadPanel extends JPanel implements AutoClose
                     selected.instanceId(),
                     Schedulers.io(),
                     WorldQuickPlayActions.unavailable());
+            createdCatalog.setOpaque(false);
             worldCatalog = createdCatalog;
             content.add(createdCatalog, BorderLayout.CENTER);
             createdCatalog.activate();

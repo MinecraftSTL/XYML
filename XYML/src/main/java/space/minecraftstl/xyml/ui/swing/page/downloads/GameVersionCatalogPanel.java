@@ -471,6 +471,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
     /// Builds the stable title, catalog workspace, and installation-task workspace.
     private void configureComponents() {
+        setOpaque(false);
         JPanel gameVersionsPanel = new JPanel(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
@@ -559,8 +560,11 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
         choiceList.setName("gameVersionsList");
         choiceList.setMinimumSize(new java.awt.Dimension(0, 0));
+        choiceList.setOpaque(false);
+        choiceList.getViewport().setOpaque(false);
         JList<ChoiceListEntry<GameVersionCatalogItem>> list = choiceList.getList();
         list.setName("gameVersionsListView");
+        list.setOpaque(false);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting() && !applyingSnapshot && isOpen()) {
@@ -582,6 +586,8 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         contentCards.add(failedLabel, FAILED_CARD);
         contentCards.add(emptyLabel, EMPTY_CARD);
         contentCards.add(choiceList, LIST_CARD);
+        contentCards.setName("gameVersionsContentCards");
+        contentCards.setOpaque(false);
         contentCards.setMinimumSize(new java.awt.Dimension(0, 0));
         versionListPanel.add(contentCards, "grow");
 
@@ -634,6 +640,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 "[grow,fill]12[]"));
         loaderWorkspace.setOpaque(false);
         loaderWorkspace.setName("gameVersionsLoaderWorkspace");
+        loaderSelectionPanel.setOpaque(false);
         loaderWorkspace.add(loaderSelectionPanel, "grow");
 
         JPanel loaderActions = new JPanel(new MigLayout(
@@ -680,6 +687,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         gameVersionsPanel.add(workflowCards, "grow");
 
         downloadCenterTabs.setName("downloadCenterTabs");
+        downloadCenterTabs.setOpaque(false);
         downloadCenterTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         downloadCenterTabs.setMinimumSize(new java.awt.Dimension(0, 0));
         downloadCenterTabs.addTab(strings.pageTitle(), gameVersionsPanel);
@@ -1529,6 +1537,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                 boolean selected,
                 boolean focused) {
             setComponentOrientation(list.getComponentOrientation());
+            setOpaque(selected);
             applyPalette(list, selected, focused);
             setToolTipText(null);
 

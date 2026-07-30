@@ -54,6 +54,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.JTabbedPane;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.KeyStroke;
@@ -145,6 +146,46 @@ public final class GameVersionCatalogPanelTest {
             assertEquals(1, model.lazyLoads.get());
             panel.close();
             panel.removeNotify();
+        });
+    }
+
+    /// Keeps the download-center background visible through every catalog canvas and unselected row.
+    @Test
+    public void leavesBackgroundVisibleThroughCatalogHierarchyAndRows() {
+        GameVersionCatalogItem item = new GameVersionCatalogItem(
+                "1.21.4",
+                GameVersionKind.RELEASE,
+                Optional.of(Instant.parse("2024-12-03T10:00:00Z")));
+        FakeCatalogModel model = FakeCatalogModel.immediate(
+                List.of(item),
+                snapshot(0, 1, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model));
+
+        onEventDispatchThread(() -> {
+            JTabbedPane tabs = findComponent(panel, "downloadCenterTabs", JTabbedPane.class);
+            JList<ChoiceListEntry<GameVersionCatalogItem>> list = panel.choiceList().getList();
+            ChoiceListEntry<GameVersionCatalogItem> entry = ChoiceListEntry.loaded(0, item);
+            boolean unselectedOpaque = ((JComponent) list.getCellRenderer()
+                    .getListCellRendererComponent(list, entry, 0, false, false)).isOpaque();
+            boolean selectedOpaque = ((JComponent) list.getCellRenderer()
+                    .getListCellRendererComponent(list, entry, 0, true, false)).isOpaque();
+
+            assertAll(
+                    () -> assertFalse(panel.isOpaque()),
+                    () -> assertFalse(tabs.isOpaque()),
+                    () -> assertFalse(findComponent(
+                            panel,
+                            "gameVersionsContentCards",
+                            JComponent.class).isOpaque()),
+                    () -> assertFalse(panel.choiceList().isOpaque()),
+                    () -> assertFalse(panel.choiceList().getViewport().isOpaque()),
+                    () -> assertFalse(list.isOpaque()),
+                    () -> assertFalse(unselectedOpaque),
+                    () -> assertTrue(selectedOpaque));
+            for (int index = 0; index < tabs.getTabCount(); index++) {
+                assertFalse(((JComponent) tabs.getComponentAt(index)).isOpaque());
+            }
+            panel.close();
         });
     }
 

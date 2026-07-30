@@ -87,9 +87,11 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
             Duration progressAnimationDuration) {
         super(new MigLayout("insets 0, fill, wrap 1", "[grow,fill]", "[grow,fill]8[]"));
         EdtDispatcher.requireEventDispatchThread();
+        setOpaque(false);
 
         categoryTabs = new JTabbedPane();
         categoryTabs.setName("downloadsCategoryTabs");
+        categoryTabs.setOpaque(false);
         categoryTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         localModpackImporter = new LocalModpackImportPanel(
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),
