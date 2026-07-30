@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -42,7 +43,7 @@ import java.util.function.Consumer;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Renders icon-only primary navigation with Settings and the official-community action anchored at the bottom.
+/// Renders icon-only primary navigation with Settings, community, and help actions anchored at the bottom.
 @NotNullByDefault
 final class ShellNavigationRail extends JPanel {
     /// Stable icon button width and height.
@@ -50,6 +51,12 @@ final class ShellNavigationRail extends JPanel {
 
     /// Stable official-community destination resolved from launcher metadata.
     private static final URI OFFICIAL_GROUP_URI = URI.create(Metadata.GROUPS_URL);
+
+    /// Stable help destination matching the legacy title-bar question-mark action.
+    private static final URI HELP_URI = URI.create(Metadata.CONTACT_URL);
+
+    /// Bundled outline question-mark icon inherited from the legacy title-bar action.
+    private static final String HELP_ICON_RESOURCE = "assets/swing/icons/help.svg";
 
     /// Buttons keyed by the page or persistent list they open.
     private final EnumMap<ShellPageId, ShellNavigationButton> buttons = new EnumMap<>(ShellPageId.class);
@@ -59,6 +66,9 @@ final class ShellNavigationRail extends JPanel {
 
     /// Independent bottom action opening the official XYML user group.
     private final JButton officialGroupButton;
+
+    /// Independent bottom action opening the XYML help destination.
+    private final JButton helpButton;
 
     /// Creates the compact left-side navigation rail.
     ///
@@ -74,7 +84,7 @@ final class ShellNavigationRail extends JPanel {
     ///
     /// @param presentations localized page labels and mnemonics
     /// @param toggleCommand callback opening or toggling one destination
-    /// @param externalLinkCommand callback opening the official community destination
+    /// @param externalLinkCommand callback opening trusted community and help destinations
     ShellNavigationRail(
             ShellPagePresentations presentations,
             Consumer<ShellPageId> toggleCommand,
@@ -105,6 +115,8 @@ final class ShellNavigationRail extends JPanel {
                 toggle);
         officialGroupButton = createOfficialGroupButton(openExternalLink);
         auxiliaryGroup.add(officialGroupButton, "w 42!, h 42!");
+        helpButton = createHelpButton(openExternalLink);
+        auxiliaryGroup.add(helpButton, "w 42!, h 42!");
         add(primaryGroup, BorderLayout.NORTH);
         add(auxiliaryGroup, BorderLayout.SOUTH);
     }
@@ -116,19 +128,64 @@ final class ShellNavigationRail extends JPanel {
     private static JButton createOfficialGroupButton(Consumer<URI> externalLinkCommand) {
         String accessibleName = i18n("contact.chat.qq_group");
         @Nullable Icon icon = LauncherIconImages.communityIcon();
+        return createExternalActionButton(
+                "officialGroupButton",
+                accessibleName,
+                icon,
+                icon == null ? "QQ" : null,
+                OFFICIAL_GROUP_URI,
+                externalLinkCommand);
+    }
+
+    /// Creates the icon-only help action anchored directly below the official-community action.
+    ///
+    /// @param externalLinkCommand callback opening trusted launcher metadata URLs
+    /// @return configured independent help button
+    private static JButton createHelpButton(Consumer<URI> externalLinkCommand) {
+        FlatSVGIcon loadedIcon = new FlatSVGIcon(HELP_ICON_RESOURCE, 24, 24);
+        @Nullable Icon icon = loadedIcon.hasFound() ? loadedIcon : null;
+        return createExternalActionButton(
+                "helpButton",
+                i18n("help"),
+                icon,
+                icon == null ? "?" : null,
+                HELP_URI,
+                externalLinkCommand);
+    }
+
+    /// Creates one accessible icon-only action that opens a trusted external destination.
+    ///
+    /// @param componentName stable Swing component name
+    /// @param accessibleName localized tooltip and accessible name
+    /// @param icon bundled action icon, or `null` when its resource is unavailable
+    /// @param fallbackText compact fallback text, or `null` when the icon is available
+    /// @param destination trusted metadata destination
+    /// @param externalLinkCommand callback opening trusted launcher metadata URLs
+    /// @return configured independent external action button
+    private static JButton createExternalActionButton(
+            String componentName,
+            String accessibleName,
+            @Nullable Icon icon,
+            @Nullable String fallbackText,
+            URI destination,
+            Consumer<URI> externalLinkCommand) {
+        String name = Objects.requireNonNull(componentName, "componentName");
+        String label = Objects.requireNonNull(accessibleName, "accessibleName");
+        URI target = Objects.requireNonNull(destination, "destination");
+        Consumer<URI> openExternalLink = Objects.requireNonNull(externalLinkCommand, "externalLinkCommand");
         JButton button = new JButton(icon);
-        button.setName("officialGroupButton");
-        button.setText(icon == null ? "QQ" : null);
+        button.setName(name);
+        button.setText(fallbackText);
         button.setHorizontalAlignment(SwingConstants.CENTER);
         button.setMargin(new Insets(8, 8, 8, 8));
         button.setPreferredSize(new Dimension(BUTTON_SIZE, BUTTON_SIZE));
-        button.setToolTipText(accessibleName);
+        button.setToolTipText(label);
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         button.setFocusable(true);
         button.setFocusPainted(true);
         button.putClientProperty("JButton.buttonType", "toolBarButton");
-        button.getAccessibleContext().setAccessibleName(accessibleName);
-        button.addActionListener(event -> externalLinkCommand.accept(OFFICIAL_GROUP_URI));
+        button.getAccessibleContext().setAccessibleName(label);
+        button.addActionListener(event -> openExternalLink.accept(target));
         return button;
     }
 
@@ -222,11 +279,19 @@ final class ShellNavigationRail extends JPanel {
         return officialGroupButton;
     }
 
+    /// Returns the help action button for focused layout and accessibility tests.
+    ///
+    /// @return stable independent help action button
+    JButton helpButton() {
+        return helpButton;
+    }
+
     /// Disables every navigation target during shell cleanup.
     void disableNavigation() {
         for (ShellNavigationButton button : buttons.values()) {
             button.setEnabled(false);
         }
         officialGroupButton.setEnabled(false);
+        helpButton.setEnabled(false);
     }
 }

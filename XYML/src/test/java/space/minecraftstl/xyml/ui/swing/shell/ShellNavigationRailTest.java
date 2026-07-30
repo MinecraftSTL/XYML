@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -36,15 +37,16 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies the shell's bottom navigation hierarchy and bundled official-community action.
+/// Verifies the shell's bottom navigation hierarchy and independent external actions.
 @NotNullByDefault
 public final class ShellNavigationRailTest {
-    /// Settings remains bottom-anchored while the independent official-group action follows it.
+    /// Settings remains bottom-anchored while community and help actions follow it in order.
     @Test
-    public void anchorsOfficialGroupActionBelowSettings() {
+    public void anchorsExternalActionsBelowSettings() {
         AtomicReference<@Nullable URI> openedDestination = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> {
             ShellNavigationRail rail = new ShellNavigationRail(
@@ -56,36 +58,56 @@ public final class ShellNavigationRailTest {
 
             ShellNavigationButton settings = rail.button(ShellPageId.SETTINGS);
             JButton officialGroup = rail.officialGroupButton();
+            JButton help = rail.helpButton();
             javax.swing.Icon officialGroupIcon = Objects.requireNonNull(
                     officialGroup.getIcon(),
                     "official group icon");
-            String tooltip = Objects.requireNonNull(
+            FlatSVGIcon helpIcon = assertInstanceOf(
+                    FlatSVGIcon.class,
+                    help.getIcon());
+            String officialGroupTooltip = Objects.requireNonNull(
                     officialGroup.getToolTipText(),
                     "official group tooltip");
+            String helpTooltip = Objects.requireNonNull(
+                    help.getToolTipText(),
+                    "help tooltip");
             int settingsY = SwingUtilities.convertPoint(settings, 0, 0, rail).y;
             int officialGroupY = SwingUtilities.convertPoint(officialGroup, 0, 0, rail).y;
+            int helpY = SwingUtilities.convertPoint(help, 0, 0, rail).y;
 
             assertAll(
                     () -> assertTrue(settingsY > rail.getHeight() / 2),
                     () -> assertTrue(officialGroupY > settingsY),
+                    () -> assertTrue(helpY > officialGroupY),
                     () -> assertTrue(
-                            rail.getHeight() - officialGroupY - officialGroup.getHeight() <= 10),
+                            rail.getHeight() - helpY - help.getHeight() <= 10),
                     () -> assertEquals("officialGroupButton", officialGroup.getName()),
+                    () -> assertEquals("helpButton", help.getName()),
                     () -> assertNotNull(officialGroupIcon),
                     () -> assertEquals(24, officialGroupIcon.getIconWidth()),
                     () -> assertEquals(24, officialGroupIcon.getIconHeight()),
-                    () -> assertFalse(tooltip.isBlank()),
+                    () -> assertTrue(helpIcon.hasFound()),
+                    () -> assertEquals(24, helpIcon.getIconWidth()),
+                    () -> assertEquals(24, helpIcon.getIconHeight()),
+                    () -> assertFalse(officialGroupTooltip.isBlank()),
+                    () -> assertFalse(helpTooltip.isBlank()),
                     () -> assertEquals(
-                            tooltip,
-                            officialGroup.getAccessibleContext().getAccessibleName()));
+                            officialGroupTooltip,
+                            officialGroup.getAccessibleContext().getAccessibleName()),
+                    () -> assertEquals(
+                            helpTooltip,
+                            help.getAccessibleContext().getAccessibleName()));
 
             officialGroup.doClick();
             assertEquals(URI.create(Metadata.GROUPS_URL), openedDestination.get());
+            help.doClick();
+            assertEquals(URI.create(Metadata.CONTACT_URL), openedDestination.get());
 
             rail.disableNavigation();
             assertAll(
                     () -> assertFalse(settings.isEnabled()),
-                    () -> assertFalse(officialGroup.isEnabled()));
+                    () -> assertFalse(officialGroup.isEnabled()),
+                    () -> assertFalse(help.isEnabled()));
         });
     }
 
@@ -99,6 +121,16 @@ public final class ShellNavigationRailTest {
                 () -> assertEquals("qm.qq.com", destination.getHost()),
                 () -> assertEquals("/cgi-bin/qm/qr", destination.getPath()),
                 () -> assertTrue(query.contains("authKey=")));
+    }
+
+    /// The help action retains the migrated equivalent of the legacy title-bar contact destination.
+    @Test
+    public void usesProjectHelpEndpoint() {
+        URI destination = URI.create(Metadata.CONTACT_URL);
+        assertAll(
+                () -> assertEquals("https", destination.getScheme()),
+                () -> assertEquals("github.com", destination.getHost()),
+                () -> assertEquals("/MinecraftSTL/XYML/issues/new/choose", destination.getPath()));
     }
 
     /// Recursively lays out a test component tree without opening a native window.

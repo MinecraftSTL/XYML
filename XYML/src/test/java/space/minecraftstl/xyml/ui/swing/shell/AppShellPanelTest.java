@@ -356,6 +356,7 @@ public final class AppShellPanelTest {
                     ShellNavigationRail.class,
                     accountButton.getParent().getParent());
             JButton officialGroupButton = navigationRail.officialGroupButton();
+            JButton helpButton = navigationRail.helpButton();
             int accountY = SwingUtilities.convertPoint(accountButton, 0, 0, navigationRail).y;
             int instancesY = SwingUtilities.convertPoint(instancesButton, 0, 0, navigationRail).y;
             int downloadsY = SwingUtilities.convertPoint(downloadsButton, 0, 0, navigationRail).y;
@@ -365,15 +366,21 @@ public final class AppShellPanelTest {
                     0,
                     0,
                     navigationRail).y;
+            int helpY = SwingUtilities.convertPoint(
+                    helpButton,
+                    0,
+                    0,
+                    navigationRail).y;
             assertAll(
                     () -> assertTrue(accountY < instancesY),
                     () -> assertTrue(instancesY < downloadsY),
                     () -> assertTrue(settingsY > navigationRail.getHeight() / 2),
                     () -> assertTrue(officialGroupY > settingsY),
+                    () -> assertTrue(helpY > officialGroupY),
                     () -> assertTrue(
                             navigationRail.getHeight()
-                                    - officialGroupY
-                                    - officialGroupButton.getHeight() <= 10));
+                                    - helpY
+                                    - helpButton.getHeight() <= 10));
 
             for (ShellPageId page : List.of(
                     ShellPageId.ACCOUNTS,
