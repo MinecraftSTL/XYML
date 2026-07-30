@@ -55,6 +55,7 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import javax.swing.event.ChangeListener;
+import java.awt.Dimension;
 import java.awt.Font;
 import java.time.Duration;
 import java.util.Objects;
@@ -435,6 +436,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         tabs.setName("instanceManagementTabs");
         SwingTransparency.revealBackgroundThroughTabs(tabs);
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+        tabs.setMinimumSize(new Dimension(0, 0));
         addTransparentTab(overview.title(), overview);
         @Nullable InstanceLifecyclePanel currentLifecycle = lifecycle;
         if (currentLifecycle != null) {

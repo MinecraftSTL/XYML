@@ -19,8 +19,10 @@ package space.minecraftstl.xyml.ui.swing.shell;
 
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.ui.FlatNativeWindowBorder;
 import com.formdev.flatlaf.util.SystemInfo;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -33,12 +35,20 @@ import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import javax.swing.JComponent;
 import javax.swing.JRootPane;
 import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Dimension;
 import java.awt.GraphicsEnvironment;
+import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.event.InputEvent;
+import java.awt.event.MouseEvent;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -205,16 +215,140 @@ public final class AppShellFrameTest {
             }
             assertAll(
                     () -> assertTrue(frame.isResizable()),
+                    () -> assertEquals(
+                            frame.isUndecorated() && FlatNativeWindowBorder.isSupported(),
+                            frame.undecoratedWindowResizerInstalled()),
                     () -> assertEquals(AppShellPanel.MINIMUM_WIDTH, frame.getMinimumSize().width),
                     () -> assertEquals(AppShellPanel.MINIMUM_HEIGHT, frame.getMinimumSize().height),
                     () -> assertTrue(frame.getWidth() >= AppShellPanel.PREFERRED_WIDTH),
                     () -> assertTrue(frame.getHeight() >= AppShellPanel.PREFERRED_HEIGHT),
                     () -> assertEquals(4, frame.getIconImages().size()),
                     () -> assertTrue(frame.isVisible()));
+            if (frame.undecoratedWindowResizerInstalled()) {
+                Dimension sizeBeforeDrag = frame.getSize();
+                dragRightWindowEdge(frame, 32);
+                assertAll(
+                        () -> assertEquals(sizeBeforeDrag.width + 32, frame.getWidth()),
+                        () -> assertEquals(sizeBeforeDrag.height, frame.getHeight()));
+            }
             frame.hideWindow();
             assertFalse(frame.isVisible());
         } finally {
             EdtDispatcher.executeAndWait(frame::dispose);
+            assertFalse(frame.undecoratedWindowResizerInstalled());
+        }
+    }
+
+    /// Synthesizes one real FlatLaf right-edge drag against a visible fallback resize hit target.
+    ///
+    /// @param frame visible shell frame
+    /// @param horizontalDelta positive width change requested by the drag
+    private static void dragRightWindowEdge(AppShellFrame frame, int horizontalDelta) {
+        if (horizontalDelta <= 0) {
+            throw new IllegalArgumentException("horizontalDelta must be positive");
+        }
+        EdtDispatcher.executeAndWait(() -> {
+            JRootPane rootPane = frame.getRootPane();
+            layoutRecursively(rootPane);
+            Component edge = Objects.requireNonNull(
+                    findRightResizeEdge(rootPane, rootPane),
+                    "right resize edge");
+            Point screenLocation = edge.getLocationOnScreen();
+            int localX = Math.max(0, edge.getWidth() / 2);
+            int localY = Math.max(0, edge.getHeight() / 2);
+            int screenX = screenLocation.x + localX;
+            int screenY = screenLocation.y + localY;
+            long now = System.currentTimeMillis();
+
+            edge.dispatchEvent(new MouseEvent(
+                    edge,
+                    MouseEvent.MOUSE_MOVED,
+                    now,
+                    0,
+                    localX,
+                    localY,
+                    screenX,
+                    screenY,
+                    0,
+                    false,
+                    MouseEvent.NOBUTTON));
+            edge.dispatchEvent(new MouseEvent(
+                    edge,
+                    MouseEvent.MOUSE_PRESSED,
+                    now,
+                    InputEvent.BUTTON1_DOWN_MASK,
+                    localX,
+                    localY,
+                    screenX,
+                    screenY,
+                    1,
+                    false,
+                    MouseEvent.BUTTON1));
+            edge.dispatchEvent(new MouseEvent(
+                    edge,
+                    MouseEvent.MOUSE_DRAGGED,
+                    now,
+                    InputEvent.BUTTON1_DOWN_MASK,
+                    localX + horizontalDelta,
+                    localY,
+                    screenX + horizontalDelta,
+                    screenY,
+                    0,
+                    false,
+                    MouseEvent.NOBUTTON));
+            edge.dispatchEvent(new MouseEvent(
+                    edge,
+                    MouseEvent.MOUSE_RELEASED,
+                    now,
+                    0,
+                    localX + horizontalDelta,
+                    localY,
+                    screenX + horizontalDelta,
+                    screenY,
+                    1,
+                    false,
+                    MouseEvent.BUTTON1));
+        });
+    }
+
+    /// Locates the vertical drag border occupying the right half of the root pane.
+    ///
+    /// @param component current component subtree
+    /// @param rootPane coordinate target used to distinguish the right edge
+    /// @return matching edge, or `null` when this subtree contains none
+    private static @Nullable Component findRightResizeEdge(
+            Component component,
+            JRootPane rootPane) {
+        if (component.getClass().getName().equals(
+                "com.formdev.flatlaf.ui.FlatWindowResizer$DragBorderComponent")) {
+            Rectangle bounds = SwingUtilities.convertRectangle(
+                    component.getParent(),
+                    component.getBounds(),
+                    rootPane);
+            if (bounds.height > bounds.width && bounds.getCenterX() > rootPane.getWidth() / 2.0) {
+                return component;
+            }
+        }
+        if (component instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                @Nullable Component edge = findRightResizeEdge(child, rootPane);
+                if (edge != null) {
+                    return edge;
+                }
+            }
+        }
+        return null;
+    }
+
+    /// Recursively applies the current real layout managers without replacing zero allocations by preferred sizes.
+    ///
+    /// @param container root or nested native-window container
+    private static void layoutRecursively(Container container) {
+        container.doLayout();
+        for (Component child : container.getComponents()) {
+            if (child instanceof Container nested) {
+                layoutRecursively(nested);
+            }
         }
     }
 }

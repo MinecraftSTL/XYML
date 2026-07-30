@@ -374,6 +374,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         split.setContinuousLayout(true);
         split.setResizeWeight(0.52D);
         split.setDividerLocation(0.52D);
+        split.setMinimumSize(new Dimension(0, 0));
         return split;
     }
 
@@ -384,12 +385,16 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         JPanel files = new JPanel(new BorderLayout(0, 8));
         files.setBorder(BorderFactory.createEmptyBorder(8, 16, 12, 8));
         files.setOpaque(false);
+        files.setMinimumSize(new Dimension(0, 0));
         JLabel heading = new JLabel(i18n("modpack.wizard.step.2"));
         heading.setName("modpackExportFilesTitle");
         files.add(heading, BorderLayout.NORTH);
         JScrollPane scroll = new JScrollPane(fileTree);
         scroll.setName("modpackExportFilesScroll");
         scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.setMinimumSize(new Dimension(0, 0));
         SwingTransparency.revealBackgroundThroughScrollPane(scroll);
         files.add(scroll, BorderLayout.CENTER);
         return files;
@@ -400,9 +405,8 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
     /// @return configured vertically scrollable metadata surface
     private JComponent createMetadataSurface() {
         JPanel metadata = new JPanel(new MigLayout(
-                "insets 8 16 12 12, fill, wrap 2",
-                "[120!][grow,fill]",
-                "[][][][][80!][][][][]"));
+                "insets 8 16 8 12, fillx, wrap 2",
+                "[120!][grow,fill]"));
         metadata.setName("modpackExportMetadata");
         metadata.setOpaque(false);
         addLabeledField(metadata, i18n("modpack.wizard.step.3"), formatBox, "h 40!");
@@ -432,6 +436,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         scroll.setName("modpackExportMetadataScroll");
         scroll.setBorder(BorderFactory.createEmptyBorder());
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
         scroll.getVerticalScrollBar().setUnitIncrement(16);
         scroll.setMinimumSize(new Dimension(0, 0));
         SwingTransparency.revealBackgroundThroughScrollPane(scroll);

@@ -342,12 +342,14 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         JPanel worldsPanel = new JPanel(new BorderLayout(0, 6));
         worldsPanel.setOpaque(false);
         worldsPanel.setBorder(BorderFactory.createEmptyBorder(0, 12, 0, 4));
+        worldsPanel.setMinimumSize(new Dimension(0, 0));
         worldsPanel.add(sectionHeading(strings.worldsLabel(), "dataPackWorldsLabel"), BorderLayout.NORTH);
         worldsPanel.add(worldChoiceList, BorderLayout.CENTER);
 
         JPanel packsPanel = new JPanel(new BorderLayout(0, 6));
         packsPanel.setOpaque(false);
         packsPanel.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 12));
+        packsPanel.setMinimumSize(new Dimension(0, 0));
         packsPanel.add(sectionHeading(strings.dataPacksLabel(), "dataPackListLabel"), BorderLayout.NORTH);
         packsPanel.add(dataPackChoiceList, BorderLayout.CENTER);
 
@@ -356,6 +358,8 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         splitPane.setOpaque(false);
         splitPane.setResizeWeight(0.42D);
         splitPane.setBorder(BorderFactory.createEmptyBorder());
+        splitPane.setContinuousLayout(true);
+        splitPane.setMinimumSize(new Dimension(0, 0));
         add(splitPane, "grow, push");
 
         JPanel status = new JPanel(new MigLayout(

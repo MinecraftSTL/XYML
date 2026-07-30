@@ -315,6 +315,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         JPanel listSurface = new JPanel(new BorderLayout());
         listSurface.setOpaque(false);
         listSurface.setBorder(BorderFactory.createEmptyBorder(8, 16, 12, 8));
+        listSurface.setMinimumSize(new Dimension(0, 0));
         choiceList.setName("worldsChoiceList");
         choiceList.setOpaque(false);
         choiceList.getViewport().setOpaque(false);
@@ -333,6 +334,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         split.setContinuousLayout(true);
         split.setResizeWeight(0.46D);
         split.setDividerLocation(0.46D);
+        split.setMinimumSize(new Dimension(0, 0));
         return split;
     }
 
@@ -341,9 +343,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// @return transparent vertically scrollable detail surface
     private JComponent createDetailsSurface() {
         JPanel details = new JPanel(new MigLayout(
-                "insets 12 16 12 12, fill, wrap 2",
+                "insets 8 16 8 12, fillx, wrap 2",
                 "[110!][grow,fill]",
-                "[]10[][][][][][]12[]"));
+                "[]8[][][][][][]8[]"));
         details.setName("worldsDetails");
         details.setOpaque(false);
         detailTitle.setName("worldsDetailTitle");
@@ -409,6 +411,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         scroll.setName("worldsDetailsScroll");
         scroll.setBorder(BorderFactory.createEmptyBorder());
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
         scroll.getVerticalScrollBar().setUnitIncrement(16);
         scroll.setMinimumSize(new Dimension(0, 0));
         SwingTransparency.revealBackgroundThroughScrollPane(scroll);

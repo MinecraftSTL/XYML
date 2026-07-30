@@ -189,12 +189,20 @@ final class ModpackExportPanelTest {
                     null,
                     Duration.ZERO);
             panelReference.set(panel);
+            panel.setSize(800, 600);
+            layoutRecursively(panel);
+            JScrollPane scroll = findNamed(panel, "modpackExportMetadataScroll", JScrollPane.class);
+            assertTrue(
+                    scroll.getVerticalScrollBar().getMaximum()
+                            <= scroll.getVerticalScrollBar().getVisibleAmount());
+
             panel.setSize(800, 300);
+            panel.invalidate();
             layoutRecursively(panel);
 
-            JScrollPane scroll = findNamed(panel, "modpackExportMetadataScroll", JScrollPane.class);
             JPanel metadata = findNamed(panel, "modpackExportMetadata", JPanel.class);
             JButton chooseOutput = findNamed(panel, "modpackExportChooseOutput", JButton.class);
+            JScrollPane files = findNamed(panel, "modpackExportFilesScroll", JScrollPane.class);
             assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER, scroll.getHorizontalScrollBarPolicy());
             assertFalse(scroll.isOpaque());
             assertFalse(scroll.getViewport().isOpaque());
@@ -210,6 +218,14 @@ final class ModpackExportPanelTest {
                     chooseOutput.getBounds(),
                     metadata);
             assertTrue(scroll.getViewport().getViewRect().intersects(outputBounds));
+            assertTrue(files.getViewport().getExtentSize().height > 0);
+
+            panel.setSize(800, 600);
+            panel.invalidate();
+            layoutRecursively(panel);
+            assertTrue(
+                    scroll.getVerticalScrollBar().getMaximum()
+                            <= scroll.getVerticalScrollBar().getVisibleAmount());
             panel.close();
         });
         assertNotNull(panelReference.get());

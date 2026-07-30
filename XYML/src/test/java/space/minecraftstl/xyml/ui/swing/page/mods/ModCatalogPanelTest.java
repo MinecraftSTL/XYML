@@ -34,12 +34,15 @@ import javax.swing.AbstractButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.Rectangle;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -180,6 +183,58 @@ public final class ModCatalogPanelTest {
         assertEquals(1, executor.pendingCount());
     }
 
+    /// Constrained and restored page heights hand overflow to the existing list and complete details scroll panes.
+    @Test
+    public void dynamicallyScrollsListAndCompleteDetailsAtConstrainedHeight() throws Exception {
+        RecordingModel model = new RecordingModel(items(100));
+        RecordingInteractions interactions = new RecordingInteractions();
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            JScrollPane detailsScroll = findComponent(panel, "modsDetailsScroll", JScrollPane.class);
+            JPanel details = findComponent(panel, "modsDetails", JPanel.class);
+            AbstractButton deleteButton = findButton(panel, "modsDelete");
+
+            panel.setSize(new Dimension(900, 620));
+            layoutRecursively(panel);
+            assertTrue(
+                    detailsScroll.getVerticalScrollBar().getMaximum()
+                            <= detailsScroll.getVerticalScrollBar().getVisibleAmount());
+            assertTrue(
+                    panel.choiceList().getVerticalScrollBar().getMaximum()
+                            > panel.choiceList().getVerticalScrollBar().getVisibleAmount());
+            panel.choiceList().getVerticalScrollBar().setValue(
+                    panel.choiceList().getVerticalScrollBar().getUnitIncrement() * 2);
+            assertTrue(panel.choiceList().getVerticalScrollBar().getValue() > 0);
+
+            panel.setSize(new Dimension(900, 280));
+            panel.invalidate();
+            layoutRecursively(panel);
+            assertTrue(panel.choiceList().getViewport().getExtentSize().height > 0);
+            assertTrue(
+                    detailsScroll.getVerticalScrollBar().getMaximum()
+                            > detailsScroll.getVerticalScrollBar().getVisibleAmount());
+            int detailsBottom = detailsScroll.getVerticalScrollBar().getMaximum()
+                    - detailsScroll.getVerticalScrollBar().getVisibleAmount();
+            detailsScroll.getVerticalScrollBar().setValue(detailsBottom);
+            Rectangle deleteBounds = SwingUtilities.convertRectangle(
+                    deleteButton.getParent(),
+                    deleteButton.getBounds(),
+                    details);
+            assertTrue(detailsScroll.getViewport().getViewRect().intersects(deleteBounds));
+
+            panel.setSize(new Dimension(900, 620));
+            panel.invalidate();
+            layoutRecursively(panel);
+            assertTrue(
+                    detailsScroll.getVerticalScrollBar().getMaximum()
+                            <= detailsScroll.getVerticalScrollBar().getVisibleAmount());
+            panel.close();
+        });
+
+        assertTrue(model.closed());
+    }
+
     /// Creates immutable deterministic public rows.
     ///
     /// @param count row count
@@ -236,10 +291,6 @@ public final class ModCatalogPanelTest {
         if (component instanceof Container container) {
             container.doLayout();
             for (Component child : container.getComponents()) {
-                if (child.getWidth() == 0 || child.getHeight() == 0) {
-                    Dimension preferred = child.getPreferredSize();
-                    child.setSize(Math.max(1, preferred.width), Math.max(1, preferred.height));
-                }
                 layoutRecursively(child);
             }
         }

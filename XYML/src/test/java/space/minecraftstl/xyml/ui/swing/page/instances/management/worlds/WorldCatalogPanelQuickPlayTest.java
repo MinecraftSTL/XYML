@@ -210,10 +210,17 @@ final class WorldCatalogPanelQuickPlayTest {
                     new RecordingInteractions(Path.of("build", "compact-world.bat")),
                     WorldQuickPlayActions.unavailable());
             panelReference.set(panel);
+            panel.setSize(720, 520);
+            layoutRecursively(panel);
+            JScrollPane scroll = findNamed(panel, "worldsDetailsScroll", JScrollPane.class);
+            assertTrue(
+                    scroll.getVerticalScrollBar().getMaximum()
+                            <= scroll.getVerticalScrollBar().getVisibleAmount());
+
             panel.setSize(720, 280);
+            panel.invalidate();
             layoutRecursively(panel);
 
-            JScrollPane scroll = findNamed(panel, "worldsDetailsScroll", JScrollPane.class);
             JPanel details = findNamed(panel, "worldsDetails", JPanel.class);
             JButton delete = findNamed(panel, "worldsDelete", JButton.class);
             assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER, scroll.getHorizontalScrollBarPolicy());
@@ -231,6 +238,14 @@ final class WorldCatalogPanelQuickPlayTest {
                     delete.getBounds(),
                     details);
             assertTrue(scroll.getViewport().getViewRect().intersects(deleteBounds));
+            assertTrue(panel.choiceList().getViewport().getExtentSize().height > 0);
+
+            panel.setSize(720, 520);
+            panel.invalidate();
+            layoutRecursively(panel);
+            assertTrue(
+                    scroll.getVerticalScrollBar().getMaximum()
+                            <= scroll.getVerticalScrollBar().getVisibleAmount());
             panel.close();
         });
         assertNotNull(panelReference.get());

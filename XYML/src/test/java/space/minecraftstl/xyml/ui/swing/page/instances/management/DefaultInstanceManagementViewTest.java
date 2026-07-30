@@ -51,6 +51,7 @@ import javax.swing.JLabel;
 import javax.swing.JTabbedPane;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Dimension;
 import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
@@ -124,6 +125,7 @@ final class DefaultInstanceManagementViewTest {
                 assertNotNull(tabs);
                 assertFalse(view.isOpaque());
                 assertFalse(tabs.isOpaque());
+                assertEquals(new Dimension(0, 0), tabs.getMinimumSize());
                 assertEquals(8, tabs.getTabCount());
                 for (int index = 0; index < tabs.getTabCount(); index++) {
                     assertFalse(((JComponent) tabs.getComponentAt(index)).isOpaque());

@@ -457,6 +457,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
 
         contentCards.setName("resourcePacksContent");
         contentCards.setOpaque(false);
+        contentCards.setMinimumSize(new Dimension(0, 0));
         contentCards.add(createStateCard(idleText), IDLE_CARD);
         contentCards.add(createStateCard(loadingText), LOADING_CARD);
         contentCards.add(failedPanel, FAILED_CARD);
@@ -504,9 +505,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// @return configured details panel
     private JComponent createDetailsPanel() {
         JPanel details = new JPanel(new MigLayout(
-                "insets 16, fill, wrap 2",
+                "insets 12 16, fillx, wrap 2",
                 "[][grow,fill]",
-                "[]12[]8[]8[]8[]12[]8[grow,fill]12[]"));
+                "[]8[]6[]6[]8[]4[]8[]4[]8[]"));
         details.setName("resourcePacksDetails");
         details.setOpaque(false);
 
@@ -547,10 +548,11 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         descriptionLabel.setLabelFor(descriptionArea);
         details.add(descriptionLabel, "span 2, growx");
         configureReadOnlyArea(descriptionArea, "resourcePacksDescription");
+        descriptionArea.setRows(4);
         JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
         descriptionScroll.setName("resourcePacksDescriptionScroll");
         SwingTransparency.revealBackgroundThroughScrollPane(descriptionScroll);
-        details.add(descriptionScroll, "span 2, grow");
+        details.add(descriptionScroll, "span 2, growx");
 
         JPanel actions = new JPanel(new MigLayout(
                 "insets 0, fillx",
@@ -587,6 +589,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
 
         JScrollPane detailsScroll = createTransparentScrollPane(details, "resourcePacksDetailsScroll");
         detailsScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        detailsScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         detailsScroll.getVerticalScrollBar().setUnitIncrement(16);
         detailsScroll.setMinimumSize(new Dimension(0, 0));
         return detailsScroll;
@@ -1467,10 +1470,10 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
 
         /// Allows the shell to allocate widths below the side-by-side breakpoint.
         ///
-        /// @return zero-width minimum retaining the normal split height
+        /// @return zero minimum so the existing child scroll panes receive every constrained dimension
         @Override
         public Dimension getMinimumSize() {
-            return new Dimension(0, super.getMinimumSize().height);
+            return new Dimension(0, 0);
         }
     }
 }

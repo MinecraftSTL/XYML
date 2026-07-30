@@ -25,9 +25,12 @@ import javax.swing.JList;
 import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 import javax.swing.JPanel;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalInt;
@@ -64,6 +67,14 @@ public final class ViewportChoiceListTest {
             assertFalse(choiceList.getViewport().isOpaque());
             assertFalse(list.isOpaque());
             assertTrue(list.getFixedCellHeight() > 0);
+            assertEquals(
+                    ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                    choiceList.getVerticalScrollBarPolicy());
+            assertEquals(
+                    ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
+                    choiceList.getHorizontalScrollBarPolicy());
+            assertEquals(new Dimension(0, 0), choiceList.getMinimumSize());
+            assertEquals(list.getFixedCellHeight(), choiceList.getVerticalScrollBar().getUnitIncrement());
             assertSame(firstComponent, secondComponent);
             choiceList.close();
         });
@@ -91,6 +102,38 @@ public final class ViewportChoiceListTest {
             assertSame(renderer, choiceList.getList().getCellRenderer());
             assertEquals(73, choiceList.getList().getFixedCellHeight());
             assertEquals(expectedVisibleRows * 2, dataSource.lastRequestedRange().length());
+            choiceList.close();
+        });
+    }
+
+    /// Mouse-wheel input moves a constrained list instead of leaving an oversized view clipped by its parent.
+    @Test
+    public void mouseWheelMovesConstrainedViewport() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            RecordingDataSource dataSource = new RecordingDataSource(200);
+            ViewportChoiceList<String> choiceList = new ViewportChoiceList<>(dataSource, value -> value);
+            choiceList.setSize(new Dimension(320, 150));
+            choiceList.doLayout();
+            choiceList.getViewport().doLayout();
+
+            assertTrue(
+                    choiceList.getVerticalScrollBar().getMaximum()
+                            > choiceList.getVerticalScrollBar().getVisibleAmount());
+            int initialValue = choiceList.getVerticalScrollBar().getValue();
+            choiceList.dispatchEvent(new MouseWheelEvent(
+                    choiceList,
+                    MouseEvent.MOUSE_WHEEL,
+                    System.currentTimeMillis(),
+                    0,
+                    20,
+                    20,
+                    0,
+                    false,
+                    MouseWheelEvent.WHEEL_UNIT_SCROLL,
+                    3,
+                    3));
+
+            assertTrue(choiceList.getVerticalScrollBar().getValue() > initialValue);
             choiceList.close();
         });
     }

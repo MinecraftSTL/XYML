@@ -19,6 +19,8 @@ package space.minecraftstl.xyml.ui.swing.shell;
 
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.ui.FlatNativeWindowBorder;
+import com.formdev.flatlaf.ui.FlatWindowResizer;
 import com.formdev.flatlaf.util.SystemInfo;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -71,6 +73,9 @@ public final class AppShellFrame extends JFrame {
     /// Background decoder and theme-window appearance subscription.
     private final SwingWindowBackgroundController backgroundController;
 
+    /// Java edge resizer required when an undecorated transparent frame cannot use FlatLaf's native border.
+    private @Nullable FlatWindowResizer undecoratedWindowResizer;
+
     /// Whether this platform and selected graphics device support per-pixel window transparency.
     private final boolean windowTransparencySupported;
 
@@ -106,6 +111,7 @@ public final class AppShellFrame extends JFrame {
         windowTransparencySupported = detectWindowTransparencySupport();
         configureWindowChrome();
         setResizable(true);
+        undecoratedWindowResizer = installUndecoratedWindowResizerIfNeeded();
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         setIconImages(LauncherIconImages.windowIcons());
         shellPanel = new AppShellPanel(
@@ -213,7 +219,7 @@ public final class AppShellFrame extends JFrame {
         systemThemeRefreshTimer.stop();
         disposeInOrder(
                 () -> disposeInOrder(backgroundController::close, shellPanel::close),
-                super::dispose);
+                () -> disposeInOrder(this::uninstallUndecoratedWindowResizer, super::dispose));
     }
 
     /// Applies native transparency when supported and always synchronizes the shell paint mode.
@@ -247,6 +253,13 @@ public final class AppShellFrame extends JFrame {
     /// @return active transparency state
     boolean windowTransparencyActive() {
         return windowTransparencyActive;
+    }
+
+    /// Returns whether this frame installed the Java edge resizer needed by its undecorated native-border path.
+    ///
+    /// @return whether a fallback edge resizer is active
+    boolean undecoratedWindowResizerInstalled() {
+        return undecoratedWindowResizer != null;
     }
 
     /// Mutates root-pane opacity and native background as one EDT-confined operation.
@@ -290,6 +303,25 @@ public final class AppShellFrame extends JFrame {
         } catch (RuntimeException | Error failure) {
             LOG.warning("Failed to detect native window transparency support", failure);
             return false;
+        }
+    }
+
+    /// Installs Java resize hit targets when FlatLaf's native-border detection skips both available resize paths.
+    ///
+    /// @return installed resizer, or `null` when native or regular FlatLaf resizing already applies
+    private @Nullable FlatWindowResizer installUndecoratedWindowResizerIfNeeded() {
+        if (!isUndecorated() || !FlatNativeWindowBorder.isSupported()) {
+            return null;
+        }
+        return new FlatWindowResizer.WindowResizer(getRootPane());
+    }
+
+    /// Releases an explicitly installed Java edge resizer before the native peer is disposed.
+    private void uninstallUndecoratedWindowResizer() {
+        @Nullable FlatWindowResizer currentResizer = undecoratedWindowResizer;
+        undecoratedWindowResizer = null;
+        if (currentResizer != null) {
+            currentResizer.uninstall();
         }
     }
 

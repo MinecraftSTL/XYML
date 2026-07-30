@@ -390,17 +390,37 @@ public final class ResourcePackCatalogPanelTest {
 
         onEventDispatchThread(() -> {
             JSplitPane split = findComponent(panel, "resourcePacksCatalogSplit", JSplitPane.class);
-            panel.setSize(new Dimension(980, 520));
-            layoutRecursively(panel);
-            assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
-
-            panel.setSize(new Dimension(600, 420));
-            panel.invalidate();
-            layoutRecursively(panel);
             JScrollPane detailsScroll = findComponent(
                     panel,
                     "resourcePacksDetailsScroll",
                     JScrollPane.class);
+            panel.setSize(new Dimension(980, 620));
+            layoutRecursively(panel);
+            assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
+            assertEquals(new Dimension(0, 0), split.getMinimumSize());
+            assertTrue(
+                    detailsScroll.getVerticalScrollBar().getMaximum()
+                            <= detailsScroll.getVerticalScrollBar().getVisibleAmount());
+
+            panel.setSize(new Dimension(980, 260));
+            panel.invalidate();
+            layoutRecursively(panel);
+            assertAll(
+                    () -> assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation()),
+                    () -> assertTrue(panel.choiceList().getViewport().getExtentSize().height > 0),
+                    () -> assertTrue(detailsScroll.getVerticalScrollBar().getMaximum()
+                            > detailsScroll.getVerticalScrollBar().getVisibleAmount()));
+
+            panel.setSize(new Dimension(980, 620));
+            panel.invalidate();
+            layoutRecursively(panel);
+            assertTrue(
+                    detailsScroll.getVerticalScrollBar().getMaximum()
+                            <= detailsScroll.getVerticalScrollBar().getVisibleAmount());
+
+            panel.setSize(new Dimension(600, 420));
+            panel.invalidate();
+            layoutRecursively(panel);
             assertAll(
                     () -> assertEquals(
                             JSplitPane.VERTICAL_SPLIT,

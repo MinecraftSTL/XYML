@@ -39,6 +39,7 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.event.DocumentEvent;
@@ -297,6 +298,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         JPanel listSurface = new JPanel(new BorderLayout(0, 8));
         listSurface.setOpaque(false);
         listSurface.setBorder(BorderFactory.createEmptyBorder(8, 16, 12, 8));
+        listSurface.setMinimumSize(new Dimension(0, 0));
         JPanel filters = new JPanel(new MigLayout(
                 "insets 0, fillx",
                 "[][grow,fill]8[][140!]",
@@ -331,17 +333,19 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         split.setContinuousLayout(true);
         split.setResizeWeight(0.44D);
         split.setDividerLocation(0.44D);
+        split.setMinimumSize(new Dimension(0, 0));
         return split;
     }
 
     /// Creates the unframed selected-Mod details surface.
     ///
-    /// @return details panel
+    /// @return compact details panel with an as-needed transparent vertical scrollbar
     private JComponent createDetailsSurface() {
         JPanel details = new JPanel(new MigLayout(
-                "insets 12 16 12 12, fill, wrap 2",
+                "insets 8 16 8 12, fillx, wrap 2",
                 "[110!][grow,fill]",
-                "[]10[][][][][][]10[grow,fill]12[]"));
+                "[]8[][][][][][]8[]8[]"));
+        details.setName("modsDetails");
         details.setOpaque(false);
         detailTitle.setName("modsDetailTitle");
         detailTitle.setFont(detailTitle.getFont().deriveFont(Font.BOLD, 20.0F));
@@ -359,12 +363,13 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         descriptionArea.setEditable(false);
         descriptionArea.setLineWrap(true);
         descriptionArea.setWrapStyleWord(true);
-        descriptionArea.setRows(6);
+        descriptionArea.setRows(4);
         descriptionArea.setOpaque(false);
         JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
+        descriptionScroll.setName("modsDescriptionScroll");
         descriptionScroll.setBorder(BorderFactory.createEmptyBorder());
         SwingTransparency.revealBackgroundThroughScrollPane(descriptionScroll);
-        details.add(descriptionScroll, "grow, push");
+        details.add(descriptionScroll, "growx");
 
         JPanel actions = new JPanel(new MigLayout(
                 "insets 0, fillx",
@@ -390,7 +395,16 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 this::deleteSelected);
         actions.add(deleteButton, "w 40!, h 40!");
         details.add(actions, "span 2, growx");
-        return details;
+
+        JScrollPane scroll = new JScrollPane(details);
+        scroll.setName("modsDetailsScroll");
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.setMinimumSize(new Dimension(0, 0));
+        SwingTransparency.revealBackgroundThroughScrollPane(scroll);
+        return scroll;
     }
 
     /// Creates compact index and mutation status text.

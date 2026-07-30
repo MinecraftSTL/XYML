@@ -39,6 +39,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCa
 
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JSplitPane;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -157,6 +158,39 @@ final class DataPackManagementPanelTest {
         }
     }
 
+    /// A constrained real page host gives both existing list scroll panes a positive viewport instead of clipping.
+    @Test
+    void constrainedHeightShrinksTheSplitIntoBothChoiceListViewports() {
+        Path savesDirectory = temporaryDirectory.resolve("compact-saves");
+        WorldCatalogItem world = new WorldCatalogItem(
+                savesDirectory.resolve("compact-world"),
+                "compact-world",
+                "Compact World",
+                1L,
+                "1.21.1",
+                false,
+                null);
+        SingleWorldCatalogModel model = new SingleWorldCatalogModel(savesDirectory, world);
+        RecordingInteractions interactions = new RecordingInteractions(temporaryDirectory.resolve("unused.zip"));
+
+        EdtDispatcher.executeAndWait(() -> {
+            DataPackManagementPanel panel = new DataPackManagementPanel(
+                    model,
+                    DataPackManagementStrings.english(),
+                    interactions,
+                    Runnable::run);
+            panel.setSize(new Dimension(800, 220));
+            layoutRecursively(panel);
+
+            JSplitPane split = Objects.requireNonNull(
+                    findNamed(panel, "dataPackManagementSplit", JSplitPane.class));
+            assertEquals(new Dimension(0, 0), split.getMinimumSize());
+            assertTrue(panel.worldChoiceList().getViewport().getExtentSize().height > 0);
+            assertTrue(panel.dataPackChoiceList().getViewport().getExtentSize().height > 0);
+            panel.close();
+        });
+    }
+
     /// Gives a detached viewport list deterministic geometry and requests its visible rows.
     ///
     /// @param choiceList detached list whose source should receive a viewport demand
@@ -165,6 +199,18 @@ final class DataPackManagementPanelTest {
         choiceList.getViewport().setExtentSize(new Dimension(320, 160));
         choiceList.getList().setSize(320, 160);
         choiceList.refreshLoadPlan();
+    }
+
+    /// Recursively lays out only the dimensions allocated by the real parent hierarchy.
+    ///
+    /// @param container root or nested container
+    private static void layoutRecursively(Container container) {
+        container.doLayout();
+        for (Component child : container.getComponents()) {
+            if (child instanceof Container nested) {
+                layoutRecursively(nested);
+            }
+        }
     }
 
     /// Runs a FIFO executor barrier and all EDT callbacks queued before it.
