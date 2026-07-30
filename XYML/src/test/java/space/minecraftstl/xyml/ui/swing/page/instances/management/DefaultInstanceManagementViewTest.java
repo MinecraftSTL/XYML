@@ -24,6 +24,10 @@ import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.setting.GameDirectory;
 import space.minecraftstl.xyml.setting.GameDirectoryID;
 import space.minecraftstl.xyml.setting.GameSettings;
@@ -35,10 +39,9 @@ import space.minecraftstl.xyml.setting.UserSettings;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentation;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentationFactory;
-import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementStrings;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenanceLaunchActions;
-import space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance.InstanceMaintenancePanel;
-import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldQuickPlayActions;
 import space.minecraftstl.xyml.ui.swing.page.mods.DefaultModCatalogInteractions;
 import space.minecraftstl.xyml.ui.swing.page.resourcepacks.DefaultResourcePackCatalogInteractions;
@@ -48,7 +51,7 @@ import space.minecraftstl.xyml.util.i18n.LocalizedText;
 
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JTabbedPane;
+import javax.swing.JPanel;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -56,15 +59,15 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-
-import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -79,7 +82,7 @@ final class DefaultInstanceManagementViewTest {
     @TempDir
     private Path repositoryRoot;
 
-    /// All named tabs are reachable while the persistent management root exposes no list-return control.
+    /// Every supported destination is directly reachable while only the default overview is constructed initially.
     @Test
     void exposesEveryRecoveredManagementTabAsPersistentMainPage() throws InterruptedException {
         ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -91,6 +94,7 @@ final class DefaultInstanceManagementViewTest {
                     Duration.ZERO,
                     Duration.ZERO);
             EdtDispatcher.executeAndWait(() -> viewReference.set(new DefaultInstanceManagementView(
+                    homeModel(),
                     repository(),
                     ignored -> repositoryRoot.resolve("schematics"),
                     "instance",
@@ -121,28 +125,45 @@ final class DefaultInstanceManagementViewTest {
             DefaultInstanceManagementView view = Objects.requireNonNull(viewReference.get());
 
             EdtDispatcher.executeAndWait(() -> {
-                JTabbedPane tabs = findNamed(view, "instanceManagementTabs", JTabbedPane.class);
-                assertNotNull(tabs);
+                InstanceManagementNavigationPanel navigation = findNamed(
+                        view,
+                        "instanceManagementNavigation",
+                        InstanceManagementNavigationPanel.class);
+                InstanceManagementPageDeck deck = findNamed(
+                        view,
+                        "instanceManagementPageDeck",
+                        InstanceManagementPageDeck.class);
+                JPanel summary = findNamed(view, "instanceWorkspaceSummary", JPanel.class);
+                assertNotNull(navigation);
+                assertNotNull(deck);
+                assertNotNull(summary);
                 assertFalse(view.isOpaque());
-                assertFalse(tabs.isOpaque());
-                assertEquals(new Dimension(0, 0), tabs.getMinimumSize());
-                assertEquals(8, tabs.getTabCount());
-                for (int index = 0; index < tabs.getTabCount(); index++) {
-                    assertFalse(((JComponent) tabs.getComponentAt(index)).isOpaque());
-                }
-                assertEquals(InstanceOverviewStrings.localized().title(), tabs.getTitleAt(0));
-                assertEquals(presentation.mods().title(), tabs.getTitleAt(1));
-                assertEquals(presentation.resourcePacks().pageTitle(), tabs.getTitleAt(2));
-                assertEquals(WorldCatalogStrings.localized().title(), tabs.getTitleAt(3));
-                assertEquals(DataPackManagementStrings.localized().title(), tabs.getTitleAt(4));
-                assertEquals(i18n("world.backup"), tabs.getTitleAt(5));
-                assertEquals(i18n("addon.check_update"), tabs.getTitleAt(6));
-                assertEquals(presentation.schematics().pageTitle(), tabs.getTitleAt(7));
+                assertFalse(summary.isOpaque());
+                assertFalse(deck.isOpaque());
+                assertEquals(new Dimension(0, 0), deck.getMinimumSize());
+                assertEquals(List.of(
+                        InstanceManagementPageId.OVERVIEW,
+                        InstanceManagementPageId.MODS,
+                        InstanceManagementPageId.RESOURCE_PACKS,
+                        InstanceManagementPageId.WORLDS,
+                        InstanceManagementPageId.DATA_PACKS,
+                        InstanceManagementPageId.SCHEMATICS,
+                        InstanceManagementPageId.BACKUPS,
+                        InstanceManagementPageId.FILE_UPDATE_CHECK), navigation.availablePages());
+                assertEquals(InstanceManagementPageId.OVERVIEW, navigation.selectedPage());
+                assertEquals(InstanceManagementPageId.OVERVIEW, deck.selectedPage());
+                assertEquals(1, deck.loadedPageCount());
+                assertTrue(deck.isLoaded(InstanceManagementPageId.OVERVIEW));
+                assertFalse(deck.isLoaded(InstanceManagementPageId.MODS));
                 assertFalse(returned.get());
                 assertNull(findNamed(view, "instanceManagementReturn", JComponent.class));
-                JLabel title = findNamed(view, "instanceManagementTitle", JLabel.class);
-                assertNotNull(title);
-                assertEquals(i18n("instance.manage.manage.title", "instance"), title.getText());
+                assertNull(findNamed(view, "instanceManagementTitle", JLabel.class));
+                JLabel name = findNamed(view, "instanceWorkspaceName", JLabel.class);
+                JLabel status = findNamed(view, "instanceWorkspaceStatus", JLabel.class);
+                assertNotNull(name);
+                assertNotNull(status);
+                assertEquals("Test instance", name.getText());
+                assertEquals("Ready", status.getText());
                 assertFalse(returned.get());
             });
 
@@ -159,7 +180,7 @@ final class DefaultInstanceManagementViewTest {
         }
     }
 
-    /// A real XYML repository receives the maintenance tab without starting its lazy filesystem snapshot.
+    /// A real XYML repository exposes all destinations without eagerly constructing maintenance.
     @Test
     void exposesProductionMaintenanceTabWithoutEagerLoading()
             throws InterruptedException, ReflectiveOperationException {
@@ -192,6 +213,7 @@ final class DefaultInstanceManagementViewTest {
                     LocalizedText.plain("Maintenance test"),
                     PortablePath.of(repositoryRoot.toString())));
             EdtDispatcher.executeAndWait(() -> viewReference.set(new DefaultInstanceManagementView(
+                    homeModel(),
                     repository,
                     ignored -> repositoryRoot.resolve("schematics"),
                     "instance",
@@ -222,14 +244,18 @@ final class DefaultInstanceManagementViewTest {
             DefaultInstanceManagementView view = Objects.requireNonNull(viewReference.get());
 
             EdtDispatcher.executeAndWait(() -> {
-                JTabbedPane tabs = findNamed(view, "instanceManagementTabs", JTabbedPane.class);
-                InstanceMaintenancePanel maintenance =
-                        findNamed(view, "instanceMaintenancePage", InstanceMaintenancePanel.class);
-                assertNotNull(tabs);
-                assertNotNull(maintenance);
-                assertTrue(tabs.indexOfComponent(maintenance) >= 0);
-                assertEquals(maintenance.title(), tabs.getTitleAt(tabs.indexOfComponent(maintenance)));
-                assertNull(maintenance.displayedSnapshot());
+                InstanceManagementNavigationPanel navigation = Objects.requireNonNull(findNamed(
+                        view,
+                        "instanceManagementNavigation",
+                        InstanceManagementNavigationPanel.class));
+                InstanceManagementPageDeck deck = Objects.requireNonNull(findNamed(
+                        view,
+                        "instanceManagementPageDeck",
+                        InstanceManagementPageDeck.class));
+                assertEquals(InstanceManagementPageId.orderedValues(), navigation.availablePages());
+                assertFalse(deck.isLoaded(InstanceManagementPageId.MAINTENANCE_TOOLS));
+                assertNull(findNamed(view, "instanceMaintenancePage", JComponent.class));
+                assertEquals(1, deck.loadedPageCount());
             });
         } finally {
             try {
@@ -259,6 +285,7 @@ final class DefaultInstanceManagementViewTest {
                     case "getModsDirectory" -> repositoryRoot.resolve("mods");
                     case "getVersionRoot" -> repositoryRoot.resolve("versions").resolve("instance");
                     case "getRunDirectory" -> repositoryRoot;
+                    case "getGameVersion" -> Optional.of("1.21.1");
                     case "getResolvedPreservingPatchesVersion" -> throw new IllegalStateException(
                             "The test repository intentionally has no Mod metadata");
                     case "toString" -> "TestGameRepository";
@@ -267,6 +294,13 @@ final class DefaultInstanceManagementViewTest {
                     default -> throw new AssertionError(
                             "Instance-management construction used repository eagerly: " + method.getName());
                 }));
+    }
+
+    /// Creates a stable launch-ready home model for the persistent instance summary.
+    ///
+    /// @return borrowed test home model
+    private static HomeModel homeModel() {
+        return new TestHomeModel();
     }
 
     /// Creates quick-play callbacks that fail if view construction invokes them eagerly.
@@ -284,6 +318,68 @@ final class DefaultInstanceManagementViewTest {
                                     + " -> "
                                     + destination);
                 });
+    }
+
+    /// Stable launch-ready model used only by the instance workspace summary.
+    @NotNullByDefault
+    private static final class TestHomeModel implements HomeModel {
+        /// Stable empty launch-session property required by the model contract.
+        private final SimpleObjectProperty<Optional<LaunchSession>> launchSession =
+                new SimpleObjectProperty<>(this, "launchSession", Optional.empty());
+
+        /// Returns one selected instance and ready launch state.
+        ///
+        /// @return stable home snapshot
+        @Override
+        public HomeSnapshot snapshot() {
+            return new HomeSnapshot(
+                    "Player",
+                    "Offline",
+                    "Test instance",
+                    "Test directory",
+                    "Ready",
+                    true,
+                    false,
+                    true);
+        }
+
+        /// Registers a no-op invalidation listener.
+        ///
+        /// @param listener required listener
+        /// @return independently cancellable no-op subscription
+        @Override
+        public Subscription subscribe(ValueChangeListener<HomeSnapshot> listener) {
+            Objects.requireNonNull(listener, "listener");
+            return Subscription.create(() -> { });
+        }
+
+        /// Returns the stable empty launch-session property.
+        ///
+        /// @return empty launch session
+        @Override
+        public ReadOnlyProperty<Optional<LaunchSession>> launchSessionProperty() {
+            return launchSession;
+        }
+
+        /// Ignores unused account selection.
+        @Override
+        public void selectAccount() {
+        }
+
+        /// Ignores unused instance selection.
+        @Override
+        public void selectInstance() {
+        }
+
+        /// Ignores unused instance creation.
+        @Override
+        public void addInstance() {
+        }
+
+        /// Ignores unused launch commands.
+        @Override
+        public void launch() {
+        }
     }
 
     /// Launch boundary that fails immediately if lazy construction invokes an operation.

@@ -371,7 +371,10 @@ class SwingApplicationCompositionTest {
                             return home;
                         },
                         () -> gameDirectories,
-                        () -> instanceManagement,
+                        createdHome -> {
+                            assertSame(home, createdHome);
+                            return instanceManagement;
+                        },
                         (createdManagement, addInstanceCommand) -> {
                             assertSame(instanceManagement, createdManagement);
                             instancesAddInstanceCommand.set(addInstanceCommand);
@@ -441,7 +444,10 @@ class SwingApplicationCompositionTest {
                 new SwingApplicationComposition.ProductionPageModelFactories(
                         ignoredAddInstanceCommand -> home,
                         () -> gameDirectories,
-                        () -> instanceManagement,
+                        createdHome -> {
+                            assertSame(home, createdHome);
+                            return instanceManagement;
+                        },
                         (ignoredManagement, ignoredAddInstanceCommand) -> instances,
                         () -> source,
                         createdSource -> {
@@ -523,7 +529,10 @@ class SwingApplicationCompositionTest {
                 new SwingApplicationComposition.ProductionPageModelFactories(
                         ignoredAddInstanceCommand -> home,
                         () -> gameDirectories,
-                        () -> instanceManagement,
+                        createdHome -> {
+                            assertSame(home, createdHome);
+                            return instanceManagement;
+                        },
                         (ignoredManagement, ignoredAddInstanceCommand) -> instances,
                         () -> source,
                         createdSource -> {

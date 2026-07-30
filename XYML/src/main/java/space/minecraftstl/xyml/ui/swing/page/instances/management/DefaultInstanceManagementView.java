@@ -24,7 +24,7 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
-import space.minecraftstl.xyml.ui.swing.SwingTransparency;
+import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.addonupdates.AddonUpdatesPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.backups.WorldBackupsPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementPanel;
@@ -51,13 +51,10 @@ import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserStrings;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JComponent;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JTabbedPane;
-import javax.swing.event.ChangeListener;
 import java.awt.Dimension;
-import java.awt.Font;
 import java.time.Duration;
+import java.util.EnumMap;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -65,65 +62,31 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Hosts one instance overview alongside lifecycle, settings, loader, add-on, world, backup, and schematic tools.
+/// Hosts the launcher's persistent instance workspace with a compact summary and grouped direct navigation.
 ///
-/// All tabs are constructed on the EDT, while their filesystem work remains lazy and uses the supplied
-/// executor. The view owns all child lifecycles and acts as the shell's persistent instance-management surface.
+/// The overview is created for the initial page. Every other management surface is constructed only on first visit,
+/// while repository and filesystem work continues to use the supplied executor. The view owns every created child
+/// lifecycle and borrows the application-owned home model only for its summary subscription.
 @NotNullByDefault
 public final class DefaultInstanceManagementView extends JPanel implements InstanceManagementView {
     /// Stable repository instance identifier represented by this view.
     private final String instanceId;
 
-    /// Overview and local file operations owned by the first management tab.
-    private final InstanceOverviewPanel overview;
+    /// Persistent identity, version, icon, launch-state, and common-actions header.
+    private final InstanceWorkspaceSummaryPanel summary;
 
-    /// Rename, duplicate, and delete controls when the repository exposes XYML lifecycle APIs, or null otherwise.
-    private final @Nullable InstanceLifecyclePanel lifecycle;
+    /// Scrollable whole-row navigation containing only pages supported by the repository.
+    private final InstanceManagementNavigationPanel navigation;
 
-    /// Instance-specific launch settings when the repository exposes XYML settings persistence, or null otherwise.
-    private final @Nullable InstanceGameSettingsPanel gameSettings;
-
-    /// Lazy existing-instance loader and installer management when XYML dependency APIs are available.
-    private final @Nullable InstanceInstallerPanel installers;
-
-    /// Lazy launch, repair, and cleanup tools backed by application-owned commands, or null when unavailable.
-    private final @Nullable InstanceMaintenancePanel maintenance;
-
-    /// Installed-Mod catalog owned by the Mods tab.
-    private final ModCatalogPanel mods;
-
-    /// Resource-pack catalog owned by the resource-pack tab.
-    private final ResourcePackCatalogPanel resourcePacks;
-
-    /// Lazy world catalog owned by the Worlds tab.
-    private final WorldCatalogPanel worlds;
-
-    /// Lazy selected-world data-pack catalog.
-    private final DataPackManagementPanel dataPacks;
-
-    /// Lazy local world-backup management surface.
-    private final WorldBackupsPanel backups;
-
-    /// Lazy offline modpack archive exporter for repositories exposing XYML export APIs, or null otherwise.
-    private final @Nullable ModpackExportPanel modpackExport;
-
-    /// Explicit scan-and-apply page for installed Mod and resource-pack updates.
-    private final AddonUpdatesPanel addonUpdates;
-
-    /// Schematic browser host owned by the schematic tab.
-    private final SchematicInstanceManagementView schematics;
-
-    /// Stable tab container retaining each tool's independent lazy state.
-    private final JTabbedPane tabs = new JTabbedPane();
-
-    /// Activates local-catalog sources only after users select their corresponding tab.
-    private final ChangeListener lazyTabListener = event -> activateSelectedLazyTab();
+    /// Transparent card deck constructing management pages on their first visit.
+    private final InstanceManagementPageDeck pageDeck;
 
     /// Prevents repeated child and component cleanup.
     private final AtomicBoolean closed = new AtomicBoolean();
 
-    /// Creates the complete production tabs with world quick play and instance maintenance commands.
+    /// Creates the complete production workspace with world quick play and instance maintenance commands.
     ///
+    /// @param homeModel borrowed launcher selection and launch-state model
     /// @param repository repository containing the managed instance
     /// @param schematicDirectoryResolver resolver for the managed instance's schematic root
     /// @param instanceId stable non-blank repository instance identifier
@@ -146,6 +109,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
     /// @param worldQuickPlayActions non-blocking launch and script commands bound to this instance's worlds
     /// @param maintenanceLaunchActions test-launch and script commands, or null when the caller cannot provide them
     public DefaultInstanceManagementView(
+            HomeModel homeModel,
             GameRepository repository,
             SchematicDirectoryResolver schematicDirectoryResolver,
             String instanceId,
@@ -170,176 +134,111 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
-                "[]12[grow,fill]"));
+                "[]10[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
-        Objects.requireNonNull(repository, "repository");
-        Objects.requireNonNull(schematicDirectoryResolver, "schematicDirectoryResolver");
+        HomeModel requiredHomeModel = Objects.requireNonNull(homeModel, "homeModel");
+        GameRepository requiredRepository = Objects.requireNonNull(repository, "repository");
+        SchematicDirectoryResolver requiredSchematicResolver =
+                Objects.requireNonNull(schematicDirectoryResolver, "schematicDirectoryResolver");
         this.instanceId = requireNonBlank(instanceId, "instanceId");
-        Objects.requireNonNull(executor, "executor");
-        Objects.requireNonNull(managementStrings, "managementStrings");
-        Objects.requireNonNull(schematicStrings, "schematicStrings");
-        Objects.requireNonNull(schematicInteractions, "schematicInteractions");
-        Objects.requireNonNull(modStrings, "modStrings");
-        Objects.requireNonNull(modStatusStrings, "modStatusStrings");
-        Objects.requireNonNull(modActionStrings, "modActionStrings");
-        Objects.requireNonNull(modInteractions, "modInteractions");
-        Objects.requireNonNull(resourcePackStrings, "resourcePackStrings");
-        Objects.requireNonNull(resourcePackStatusStrings, "resourcePackStatusStrings");
-        Objects.requireNonNull(resourcePackActionStrings, "resourcePackActionStrings");
-        Objects.requireNonNull(resourcePackInteractions, "resourcePackInteractions");
-        Objects.requireNonNull(returnCommand, "returnCommand");
-        Objects.requireNonNull(taskProgressStrings, "taskProgressStrings");
-        Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration");
-        Objects.requireNonNull(worldQuickPlayActions, "worldQuickPlayActions");
-        if (progressAnimationDuration.isNegative()) {
+        Executor requiredExecutor = Objects.requireNonNull(executor, "executor");
+        SchematicInstanceManagementStrings requiredManagementStrings =
+                Objects.requireNonNull(managementStrings, "managementStrings");
+        SchematicBrowserStrings requiredSchematicStrings =
+                Objects.requireNonNull(schematicStrings, "schematicStrings");
+        SchematicBrowserInteractions requiredSchematicInteractions =
+                Objects.requireNonNull(schematicInteractions, "schematicInteractions");
+        ModCatalogStrings requiredModStrings = Objects.requireNonNull(modStrings, "modStrings");
+        ModCatalogStatusStrings requiredModStatusStrings =
+                Objects.requireNonNull(modStatusStrings, "modStatusStrings");
+        ModCatalogActionStrings requiredModActionStrings =
+                Objects.requireNonNull(modActionStrings, "modActionStrings");
+        ModCatalogInteractions requiredModInteractions =
+                Objects.requireNonNull(modInteractions, "modInteractions");
+        ResourcePackCatalogStrings requiredResourcePackStrings =
+                Objects.requireNonNull(resourcePackStrings, "resourcePackStrings");
+        ResourcePackCatalogStatusStrings requiredResourcePackStatusStrings =
+                Objects.requireNonNull(resourcePackStatusStrings, "resourcePackStatusStrings");
+        ResourcePackCatalogActionStrings requiredResourcePackActionStrings =
+                Objects.requireNonNull(resourcePackActionStrings, "resourcePackActionStrings");
+        ResourcePackCatalogInteractions requiredResourcePackInteractions =
+                Objects.requireNonNull(resourcePackInteractions, "resourcePackInteractions");
+        Runnable requiredReturnCommand = Objects.requireNonNull(returnCommand, "returnCommand");
+        TaskProgressStrings requiredTaskProgressStrings =
+                Objects.requireNonNull(taskProgressStrings, "taskProgressStrings");
+        Duration requiredAnimationDuration =
+                Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration");
+        WorldQuickPlayActions requiredWorldQuickPlayActions =
+                Objects.requireNonNull(worldQuickPlayActions, "worldQuickPlayActions");
+        if (requiredAnimationDuration.isNegative()) {
             throw new IllegalArgumentException("progressAnimationDuration must not be negative");
         }
         setOpaque(false);
 
+        AtomicReference<@Nullable InstanceOverviewPanel> overviewReference = new AtomicReference<>();
+        @Nullable InstanceWorkspaceSummaryPanel createdSummary = null;
         @Nullable InstanceOverviewPanel createdOverview = null;
-        @Nullable InstanceLifecyclePanel createdLifecycle = null;
-        @Nullable InstanceGameSettingsPanel createdGameSettings = null;
-        @Nullable InstanceInstallerPanel createdInstallers = null;
-        @Nullable InstanceMaintenancePanel createdMaintenance = null;
-        @Nullable ModCatalogPanel createdMods = null;
-        @Nullable ResourcePackCatalogPanel createdResourcePacks = null;
-        @Nullable WorldCatalogPanel createdWorlds = null;
-        @Nullable DataPackManagementPanel createdDataPacks = null;
-        @Nullable WorldBackupsPanel createdBackups = null;
-        @Nullable ModpackExportPanel createdModpackExport = null;
-        @Nullable AddonUpdatesPanel createdAddonUpdates = null;
-        @Nullable SchematicInstanceManagementView createdSchematics = null;
+        @Nullable InstanceManagementPageDeck createdPageDeck = null;
         try {
-            createdOverview = new InstanceOverviewPanel(repository, this.instanceId, executor);
-            if (repository instanceof XYMLGameRepository xymlRepository) {
-                createdLifecycle = new InstanceLifecyclePanel(
-                        xymlRepository,
-                        this.instanceId,
-                        executor,
-                        returnCommand);
-                createdGameSettings = new InstanceGameSettingsPanel(xymlRepository, this.instanceId, executor);
-                createdInstallers = new InstanceInstallerPanel(
-                        xymlRepository,
-                        this.instanceId,
-                        taskProgressStrings,
-                        animator,
-                        progressAnimationDuration);
-                if (maintenanceLaunchActions != null) {
-                    createdMaintenance = new InstanceMaintenancePanel(
-                            xymlRepository,
-                            this.instanceId,
-                            maintenanceLaunchActions,
-                            taskProgressStrings,
+            createdSummary = new InstanceWorkspaceSummaryPanel(
+                    requiredHomeModel,
+                    this.instanceId,
+                    () -> requireOverview(overviewReference).refresh(),
+                    () -> requireOverview(overviewReference).openInstanceDirectory(),
+                    invoker -> requireOverview(overviewReference).showDirectoryMenuAt(invoker));
+            InstanceWorkspaceSummaryPanel summarySink = createdSummary;
+            createdOverview = new InstanceOverviewPanel(
+                    requiredRepository,
+                    this.instanceId,
+                    requiredExecutor,
+                    summarySink::applyOverviewSummary);
+            overviewReference.set(createdOverview);
+            createdPageDeck = new InstanceManagementPageDeck(createPageFactories(
+                    requiredRepository,
+                    this.instanceId,
+                    requiredExecutor,
+                    new SchematicPageDependencies(
+                            requiredSchematicResolver,
+                            requiredManagementStrings,
+                            requiredSchematicStrings,
+                            requiredSchematicInteractions),
+                    new ModPageDependencies(
+                            requiredModStrings,
+                            requiredModStatusStrings,
+                            requiredModActionStrings,
+                            requiredModInteractions),
+                    new ResourcePackPageDependencies(
+                            requiredResourcePackStrings,
+                            requiredResourcePackStatusStrings,
+                            requiredResourcePackActionStrings,
+                            requiredResourcePackInteractions),
+                    new OperationPageDependencies(
+                            requiredReturnCommand,
+                            requiredTaskProgressStrings,
                             animator,
-                            progressAnimationDuration);
-                }
-                createdModpackExport = new ModpackExportPanel(
-                        xymlRepository,
-                        this.instanceId,
-                        executor,
-                        taskProgressStrings,
-                        animator,
-                        progressAnimationDuration);
-            }
-            createdMods = new ModCatalogPanel(
-                    new DefaultModCatalogModel(
-                            repository,
-                            this.instanceId,
-                            executor,
-                            modStatusStrings),
-                    modStrings,
-                    modActionStrings,
-                    modInteractions);
-            createdResourcePacks = new ResourcePackCatalogPanel(
-                    new DefaultResourcePackCatalogModel(
-                            repository,
-                            this.instanceId,
-                            executor,
-                            resourcePackStatusStrings),
-                    resourcePackStrings,
-                    resourcePackActionStrings,
-                    resourcePackInteractions,
-                    repository.getResourcePackDirectory(this.instanceId));
-            createdWorlds = new WorldCatalogPanel(
-                    repository,
-                    this.instanceId,
-                    executor,
-                    worldQuickPlayActions);
-            createdDataPacks = new DataPackManagementPanel(repository, this.instanceId, executor);
-            createdBackups = new WorldBackupsPanel(repository, this.instanceId, executor);
-            createdAddonUpdates = new AddonUpdatesPanel(
-                    repository,
-                    this.instanceId,
-                    executor,
-                    taskProgressStrings,
-                    animator,
-                    progressAnimationDuration);
-            createdSchematics = new SchematicInstanceManagementView(
-                    this.instanceId,
-                    schematicDirectoryResolver,
-                    executor,
-                    managementStrings,
-                    schematicStrings,
-                    schematicInteractions,
-                    () -> { },
-                    false);
-            overview = createdOverview;
-            lifecycle = createdLifecycle;
-            gameSettings = createdGameSettings;
-            installers = createdInstallers;
-            maintenance = createdMaintenance;
-            mods = createdMods;
-            resourcePacks = createdResourcePacks;
-            worlds = createdWorlds;
-            dataPacks = createdDataPacks;
-            backups = createdBackups;
-            modpackExport = createdModpackExport;
-            addonUpdates = createdAddonUpdates;
-            schematics = createdSchematics;
-            configureComponents(
-                    modStrings,
-                    resourcePackStrings,
-                    schematicStrings);
+                            requiredAnimationDuration,
+                            requiredWorldQuickPlayActions,
+                            maintenanceLaunchActions),
+                    createdOverview));
+            InstanceManagementNavigationPanel createdNavigation = new InstanceManagementNavigationPanel(
+                    createdPageDeck.availablePages(),
+                    InstanceManagementPageId.OVERVIEW,
+                    this::selectPage);
+            summary = createdSummary;
+            pageDeck = createdPageDeck;
+            navigation = createdNavigation;
+            configureComponents();
+            pageDeck.showPage(InstanceManagementPageId.OVERVIEW);
         } catch (RuntimeException | Error constructionFailure) {
             @Nullable Throwable cleanupFailure = null;
-            if (createdSchematics != null) {
-                cleanupFailure = attemptCleanup(cleanupFailure, createdSchematics::close);
-            }
-            if (createdWorlds != null) {
-                cleanupFailure = attemptCleanup(cleanupFailure, createdWorlds::close);
-            }
-            if (createdAddonUpdates != null) {
-                cleanupFailure = attemptCleanup(cleanupFailure, createdAddonUpdates::close);
-            }
-            if (createdModpackExport != null) {
-                cleanupFailure = attemptCleanup(cleanupFailure, createdModpackExport::close);
-            }
-            if (createdBackups != null) {
-                cleanupFailure = attemptCleanup(cleanupFailure, createdBackups::close);
-            }
-            if (createdDataPacks != null) {
-                cleanupFailure = attemptCleanup(cleanupFailure, createdDataPacks::close);
-            }
-            if (createdResourcePacks != null) {
-                cleanupFailure = attemptCleanup(cleanupFailure, createdResourcePacks::close);
-            }
-            if (createdMods != null) {
-                cleanupFailure = attemptCleanup(cleanupFailure, createdMods::close);
-            }
-            if (createdMaintenance != null) {
-                cleanupFailure = attemptCleanup(cleanupFailure, createdMaintenance::close);
-            }
-            if (createdInstallers != null) {
-                cleanupFailure = attemptCleanup(cleanupFailure, createdInstallers::close);
-            }
-            if (createdGameSettings != null) {
-                cleanupFailure = attemptCleanup(cleanupFailure, createdGameSettings::close);
-            }
-            if (createdLifecycle != null) {
-                cleanupFailure = attemptCleanup(cleanupFailure, createdLifecycle::close);
+            if (createdPageDeck != null) {
+                cleanupFailure = attemptCleanup(cleanupFailure, createdPageDeck::close);
             }
             if (createdOverview != null) {
                 cleanupFailure = attemptCleanup(cleanupFailure, createdOverview::close);
+            }
+            if (createdSummary != null) {
+                cleanupFailure = attemptCleanup(cleanupFailure, createdSummary::close);
             }
             if (cleanupFailure != null && cleanupFailure != constructionFailure) {
                 constructionFailure.addSuppressed(cleanupFailure);
@@ -365,7 +264,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         return this;
     }
 
-    /// Closes all tabs and releases their Swing component trees exactly once.
+    /// Closes the summary subscription and every lazily created page exactly once.
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) {
@@ -375,36 +274,8 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         try {
             EdtDispatcher.executeAndWait(() -> {
                 @Nullable Throwable failure = null;
-                failure = attemptCleanup(failure, schematics::close);
-                failure = attemptCleanup(failure, addonUpdates::close);
-                @Nullable ModpackExportPanel currentModpackExport = modpackExport;
-                if (currentModpackExport != null) {
-                    failure = attemptCleanup(failure, currentModpackExport::close);
-                }
-                failure = attemptCleanup(failure, backups::close);
-                failure = attemptCleanup(failure, dataPacks::close);
-                failure = attemptCleanup(failure, worlds::close);
-                failure = attemptCleanup(failure, resourcePacks::close);
-                failure = attemptCleanup(failure, mods::close);
-                @Nullable InstanceInstallerPanel currentInstallers = installers;
-                if (currentInstallers != null) {
-                    failure = attemptCleanup(failure, currentInstallers::close);
-                }
-                @Nullable InstanceMaintenancePanel currentMaintenance = maintenance;
-                if (currentMaintenance != null) {
-                    failure = attemptCleanup(failure, currentMaintenance::close);
-                }
-                @Nullable InstanceGameSettingsPanel currentGameSettings = gameSettings;
-                if (currentGameSettings != null) {
-                    failure = attemptCleanup(failure, currentGameSettings::close);
-                }
-                @Nullable InstanceLifecyclePanel currentLifecycle = lifecycle;
-                if (currentLifecycle != null) {
-                    failure = attemptCleanup(failure, currentLifecycle::close);
-                }
-                failure = attemptCleanup(failure, overview::close);
-                tabs.removeChangeListener(lazyTabListener);
-                tabs.removeAll();
+                failure = attemptCleanup(failure, pageDeck::close);
+                failure = attemptCleanup(failure, summary::close);
                 removeAll();
                 cleanupFailure.set(failure);
             });
@@ -414,103 +285,288 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         rethrowFailure(cleanupFailure.get());
     }
 
-    /// Builds the persistent instance-management heading and named tool tabs.
-    ///
-    /// @param modStrings localized installed-Mod content text
-    /// @param resourcePackStrings localized resource-pack content text
-    /// @param schematicStrings localized schematic-browser text
-    private void configureComponents(
-            ModCatalogStrings modStrings,
-            ResourcePackCatalogStrings resourcePackStrings,
-            SchematicBrowserStrings schematicStrings) {
-        JPanel toolbar = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[40!]"));
-        toolbar.setOpaque(false);
+    /// Builds the persistent summary above grouped instance navigation and its transparent page deck.
+    private void configureComponents() {
+        setName("instanceManagementWorkspace");
+        setMinimumSize(new Dimension(0, 0));
+        getAccessibleContext().setAccessibleName(i18n("instance.manage.manage.title", instanceId));
+        add(summary, "growx");
 
-        String managementTitle = i18n("instance.manage.manage.title", instanceId);
-        JLabel title = new JLabel(managementTitle);
-        title.setName("instanceManagementTitle");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 22.0F));
-        toolbar.add(title, "growx");
-        add(toolbar, "growx");
-
-        tabs.setName("instanceManagementTabs");
-        SwingTransparency.revealBackgroundThroughTabs(tabs);
-        tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
-        tabs.setMinimumSize(new Dimension(0, 0));
-        addTransparentTab(overview.title(), overview);
-        @Nullable InstanceLifecyclePanel currentLifecycle = lifecycle;
-        if (currentLifecycle != null) {
-            addTransparentTab(currentLifecycle.title(), currentLifecycle);
-        }
-        @Nullable InstanceGameSettingsPanel currentGameSettings = gameSettings;
-        if (currentGameSettings != null) {
-            addTransparentTab(i18n("settings.game"), currentGameSettings);
-        }
-        @Nullable InstanceInstallerPanel currentInstallers = installers;
-        if (currentInstallers != null) {
-            addTransparentTab(i18n("settings.tabs.installers"), currentInstallers);
-        }
-        @Nullable InstanceMaintenancePanel currentMaintenance = maintenance;
-        if (currentMaintenance != null) {
-            addTransparentTab(currentMaintenance.title(), currentMaintenance);
-        }
-        addTransparentTab(modStrings.title(), mods);
-        addTransparentTab(resourcePackStrings.pageTitle(), resourcePacks);
-        addTransparentTab(worlds.title(), worlds);
-        addTransparentTab(dataPacks.title(), dataPacks);
-        addTransparentTab(backups.title(), backups);
-        @Nullable ModpackExportPanel currentModpackExport = modpackExport;
-        if (currentModpackExport != null) {
-            addTransparentTab(currentModpackExport.title(), currentModpackExport);
-        }
-        addTransparentTab(addonUpdates.title(), addonUpdates);
-        addTransparentTab(schematicStrings.pageTitle(), schematics);
-        tabs.addChangeListener(lazyTabListener);
-        activateSelectedLazyTab();
-        tabs.getAccessibleContext().setAccessibleName(managementTitle);
-        add(tabs, "grow");
+        JPanel workspaceBody = new JPanel(new MigLayout(
+                "insets 0, fill",
+                "[190!,shrink 150]12[grow,fill]",
+                "[grow,fill]"));
+        workspaceBody.setName("instanceManagementWorkspaceBody");
+        workspaceBody.setOpaque(false);
+        workspaceBody.setMinimumSize(new Dimension(0, 0));
+        workspaceBody.add(navigation, "grow, wmin 0, hmin 0");
+        workspaceBody.add(pageDeck, "grow, wmin 0, hmin 0");
+        add(workspaceBody, "grow, wmin 0, hmin 0");
     }
 
-    /// Adds one management page without allowing its root surface to cover the window background.
+    /// Displays one user-selected page and restores navigation selection if activation fails.
     ///
-    /// @param title localized tab title
-    /// @param component management page root
-    private void addTransparentTab(String title, JComponent component) {
-        JComponent transparentComponent = Objects.requireNonNull(component, "component");
-        transparentComponent.setOpaque(false);
-        tabs.addTab(Objects.requireNonNull(title, "title"), transparentComponent);
-    }
-
-    /// Starts selected local-catalog work only after the corresponding tab becomes visible.
-    ///
-    /// The installed add-on update page intentionally is excluded because its explicit button is the
-    /// only operation allowed to contact a remote catalogue.
-    private void activateSelectedLazyTab() {
+    /// @param page requested supported destination
+    private void selectPage(InstanceManagementPageId page) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed.get()) {
             return;
         }
-        if (tabs.getSelectedComponent() == worlds) {
-            worlds.activate();
+        @Nullable InstanceManagementPageId previousPage = pageDeck.selectedPage();
+        try {
+            pageDeck.showPage(Objects.requireNonNull(page, "page"));
+        } catch (RuntimeException | Error failure) {
+            if (previousPage != null) {
+                navigation.setSelectedPage(previousPage);
+            }
+            throw failure;
         }
-        if (tabs.getSelectedComponent() == dataPacks) {
-            dataPacks.activate();
+    }
+
+    /// Creates lazy factories for every management feature supported by the current repository.
+    ///
+    /// @param repository repository containing the managed instance
+    /// @param instanceId stable repository instance identifier
+    /// @param executor caller-owned executor for filesystem and metadata work
+    /// @param schematicDependencies schematic resolver, strings, and interactions
+    /// @param modDependencies installed-Mod strings and interactions
+    /// @param resourcePackDependencies resource-pack strings and interactions
+    /// @param operationDependencies lifecycle, progress, animation, world, and maintenance actions
+    /// @param overview eagerly created default overview page
+    /// @return destination factories without eagerly constructing optional pages
+    private static EnumMap<InstanceManagementPageId, InstanceManagementPageDeck.PageFactory> createPageFactories(
+            GameRepository repository,
+            String instanceId,
+            Executor executor,
+            SchematicPageDependencies schematicDependencies,
+            ModPageDependencies modDependencies,
+            ResourcePackPageDependencies resourcePackDependencies,
+            OperationPageDependencies operationDependencies,
+            InstanceOverviewPanel overview) {
+        EnumMap<InstanceManagementPageId, InstanceManagementPageDeck.PageFactory> factories =
+                new EnumMap<>(InstanceManagementPageId.class);
+        factories.put(
+                InstanceManagementPageId.OVERVIEW,
+                () -> InstanceManagementPage.passive(overview, overview::close));
+        factories.put(InstanceManagementPageId.MODS, () -> {
+            ModCatalogPanel panel = new ModCatalogPanel(
+                    new DefaultModCatalogModel(
+                            repository,
+                            instanceId,
+                            executor,
+                            modDependencies.statusStrings()),
+                    modDependencies.strings(),
+                    modDependencies.actionStrings(),
+                    modDependencies.interactions());
+            return InstanceManagementPage.passive(panel, panel::close);
+        });
+        factories.put(InstanceManagementPageId.RESOURCE_PACKS, () -> {
+            ResourcePackCatalogPanel panel = new ResourcePackCatalogPanel(
+                    new DefaultResourcePackCatalogModel(
+                            repository,
+                            instanceId,
+                            executor,
+                            resourcePackDependencies.statusStrings()),
+                    resourcePackDependencies.strings(),
+                    resourcePackDependencies.actionStrings(),
+                    resourcePackDependencies.interactions(),
+                    repository.getResourcePackDirectory(instanceId));
+            return InstanceManagementPage.passive(panel, panel::close);
+        });
+        factories.put(InstanceManagementPageId.WORLDS, () -> {
+            WorldCatalogPanel panel = new WorldCatalogPanel(
+                    repository,
+                    instanceId,
+                    executor,
+                    operationDependencies.worldQuickPlayActions());
+            return new InstanceManagementPage(panel, panel::activate, panel::close);
+        });
+        factories.put(InstanceManagementPageId.DATA_PACKS, () -> {
+            DataPackManagementPanel panel = new DataPackManagementPanel(repository, instanceId, executor);
+            return new InstanceManagementPage(panel, panel::activate, panel::close);
+        });
+        factories.put(InstanceManagementPageId.SCHEMATICS, () -> {
+            SchematicInstanceManagementView panel = new SchematicInstanceManagementView(
+                    instanceId,
+                    schematicDependencies.directoryResolver(),
+                    executor,
+                    schematicDependencies.managementStrings(),
+                    schematicDependencies.browserStrings(),
+                    schematicDependencies.interactions(),
+                    () -> { },
+                    false);
+            return InstanceManagementPage.passive(panel, panel::close);
+        });
+        factories.put(InstanceManagementPageId.BACKUPS, () -> {
+            WorldBackupsPanel panel = new WorldBackupsPanel(repository, instanceId, executor);
+            return new InstanceManagementPage(panel, panel::activate, panel::close);
+        });
+        factories.put(InstanceManagementPageId.FILE_UPDATE_CHECK, () -> {
+            AddonUpdatesPanel panel = new AddonUpdatesPanel(
+                    repository,
+                    instanceId,
+                    executor,
+                    operationDependencies.taskProgressStrings(),
+                    operationDependencies.animator(),
+                    operationDependencies.progressAnimationDuration());
+            return InstanceManagementPage.passive(panel, panel::close);
+        });
+
+        if (repository instanceof XYMLGameRepository xymlRepository) {
+            factories.put(InstanceManagementPageId.GAME_SETTINGS, () -> {
+                InstanceGameSettingsPanel panel = new InstanceGameSettingsPanel(
+                        xymlRepository,
+                        instanceId,
+                        executor);
+                return InstanceManagementPage.passive(panel, panel::close);
+            });
+            factories.put(InstanceManagementPageId.AUTOMATIC_INSTALL, () -> {
+                InstanceInstallerPanel panel = new InstanceInstallerPanel(
+                        xymlRepository,
+                        instanceId,
+                        operationDependencies.taskProgressStrings(),
+                        operationDependencies.animator(),
+                        operationDependencies.progressAnimationDuration());
+                return new InstanceManagementPage(panel, panel::activate, panel::close);
+            });
+            factories.put(InstanceManagementPageId.MODPACK_EXPORT, () -> {
+                ModpackExportPanel panel = new ModpackExportPanel(
+                        xymlRepository,
+                        instanceId,
+                        executor,
+                        operationDependencies.taskProgressStrings(),
+                        operationDependencies.animator(),
+                        operationDependencies.progressAnimationDuration());
+                return new InstanceManagementPage(panel, panel::activate, panel::close);
+            });
+            factories.put(InstanceManagementPageId.INSTANCE_OPERATIONS, () -> {
+                InstanceLifecyclePanel panel = new InstanceLifecyclePanel(
+                        xymlRepository,
+                        instanceId,
+                        executor,
+                        operationDependencies.returnCommand());
+                return InstanceManagementPage.passive(panel, panel::close);
+            });
+            @Nullable InstanceMaintenanceLaunchActions availableMaintenanceActions =
+                    operationDependencies.maintenanceLaunchActions();
+            if (availableMaintenanceActions != null) {
+                factories.put(InstanceManagementPageId.MAINTENANCE_TOOLS, () -> {
+                    InstanceMaintenancePanel panel = new InstanceMaintenancePanel(
+                            xymlRepository,
+                            instanceId,
+                            availableMaintenanceActions,
+                            operationDependencies.taskProgressStrings(),
+                            operationDependencies.animator(),
+                            operationDependencies.progressAnimationDuration());
+                    return new InstanceManagementPage(panel, panel::activate, panel::close);
+                });
+            }
         }
-        if (tabs.getSelectedComponent() == backups) {
-            backups.activate();
+        return factories;
+    }
+
+    /// Immutable schematic-page construction dependencies.
+    ///
+    /// @param directoryResolver managed-instance schematic root resolver
+    /// @param managementStrings localized host text
+    /// @param browserStrings localized schematic-browser text
+    /// @param interactions schematic dialogs and desktop interactions
+    @NotNullByDefault
+    private record SchematicPageDependencies(
+            SchematicDirectoryResolver directoryResolver,
+            SchematicInstanceManagementStrings managementStrings,
+            SchematicBrowserStrings browserStrings,
+            SchematicBrowserInteractions interactions) {
+        /// Validates schematic-page dependencies.
+        private SchematicPageDependencies {
+            Objects.requireNonNull(directoryResolver, "directoryResolver");
+            Objects.requireNonNull(managementStrings, "managementStrings");
+            Objects.requireNonNull(browserStrings, "browserStrings");
+            Objects.requireNonNull(interactions, "interactions");
         }
-        @Nullable InstanceInstallerPanel currentInstallers = installers;
-        if (tabs.getSelectedComponent() == currentInstallers && currentInstallers != null) {
-            currentInstallers.activate();
+    }
+
+    /// Immutable installed-Mod page construction dependencies.
+    ///
+    /// @param strings localized content text
+    /// @param statusStrings localized lifecycle text
+    /// @param actionStrings localized action text
+    /// @param interactions installed-Mod dialogs and desktop interactions
+    @NotNullByDefault
+    private record ModPageDependencies(
+            ModCatalogStrings strings,
+            ModCatalogStatusStrings statusStrings,
+            ModCatalogActionStrings actionStrings,
+            ModCatalogInteractions interactions) {
+        /// Validates installed-Mod page dependencies.
+        private ModPageDependencies {
+            Objects.requireNonNull(strings, "strings");
+            Objects.requireNonNull(statusStrings, "statusStrings");
+            Objects.requireNonNull(actionStrings, "actionStrings");
+            Objects.requireNonNull(interactions, "interactions");
         }
-        @Nullable InstanceMaintenancePanel currentMaintenance = maintenance;
-        if (tabs.getSelectedComponent() == currentMaintenance && currentMaintenance != null) {
-            currentMaintenance.activate();
+    }
+
+    /// Immutable resource-pack page construction dependencies.
+    ///
+    /// @param strings localized content text
+    /// @param statusStrings localized lifecycle text
+    /// @param actionStrings localized action text
+    /// @param interactions resource-pack dialogs and desktop interactions
+    @NotNullByDefault
+    private record ResourcePackPageDependencies(
+            ResourcePackCatalogStrings strings,
+            ResourcePackCatalogStatusStrings statusStrings,
+            ResourcePackCatalogActionStrings actionStrings,
+            ResourcePackCatalogInteractions interactions) {
+        /// Validates resource-pack page dependencies.
+        private ResourcePackPageDependencies {
+            Objects.requireNonNull(strings, "strings");
+            Objects.requireNonNull(statusStrings, "statusStrings");
+            Objects.requireNonNull(actionStrings, "actionStrings");
+            Objects.requireNonNull(interactions, "interactions");
         }
-        @Nullable ModpackExportPanel currentModpackExport = modpackExport;
-        if (tabs.getSelectedComponent() == currentModpackExport && currentModpackExport != null) {
-            currentModpackExport.activate();
+    }
+
+    /// Immutable lifecycle, progress, animation, world, and maintenance construction dependencies.
+    ///
+    /// @param returnCommand command opening the instance list after destructive lifecycle work
+    /// @param taskProgressStrings localized long-running task labels
+    /// @param animator optional shared motion-aware animator
+    /// @param progressAnimationDuration non-negative task animation duration
+    /// @param worldQuickPlayActions world launch and script commands
+    /// @param maintenanceLaunchActions optional maintenance launch and script commands
+    @NotNullByDefault
+    private record OperationPageDependencies(
+            Runnable returnCommand,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            WorldQuickPlayActions worldQuickPlayActions,
+            @Nullable InstanceMaintenanceLaunchActions maintenanceLaunchActions) {
+        /// Validates required operation-page dependencies.
+        private OperationPageDependencies {
+            Objects.requireNonNull(returnCommand, "returnCommand");
+            Objects.requireNonNull(taskProgressStrings, "taskProgressStrings");
+            Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration");
+            Objects.requireNonNull(worldQuickPlayActions, "worldQuickPlayActions");
+            if (progressAnimationDuration.isNegative()) {
+                throw new IllegalArgumentException("progressAnimationDuration must not be negative");
+            }
         }
+    }
+
+    /// Returns the overview after construction has installed it for shared summary commands.
+    ///
+    /// @param reference construction-safe overview reference
+    /// @return initialized overview
+    private static InstanceOverviewPanel requireOverview(
+            AtomicReference<@Nullable InstanceOverviewPanel> reference) {
+        @Nullable InstanceOverviewPanel current = Objects.requireNonNull(reference, "reference").get();
+        if (current == null) {
+            throw new IllegalStateException("Instance overview is not initialized");
+        }
+        return current;
     }
 
     /// Attempts one cleanup action and retains the first failure identity.

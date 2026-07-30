@@ -35,6 +35,7 @@ import java.awt.Container;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
@@ -142,6 +143,7 @@ final class InstanceOverviewPanelTest {
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "getVersionRoot" -> repositoryRoot.resolve("versions").resolve("instance");
                     case "getRunDirectory" -> repositoryRoot.resolve("game");
+                    case "getGameVersion" -> Optional.empty();
                     case "refreshInstances" -> {
                         refreshCount.incrementAndGet();
                         yield null;

@@ -30,7 +30,6 @@ import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JPanel;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
@@ -41,6 +40,7 @@ import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
@@ -164,6 +164,7 @@ final class InstanceOverviewIconSelectionTest {
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "getVersionRoot" -> repositoryRoot().resolve("versions").resolve("instance");
                     case "getRunDirectory" -> repositoryRoot().resolve("game");
+                    case "getGameVersion" -> Optional.empty();
                     case "refreshInstances" -> null;
                     case "toString" -> "IconSelectionGameRepository";
                     case "hashCode" -> System.identityHashCode(proxy);

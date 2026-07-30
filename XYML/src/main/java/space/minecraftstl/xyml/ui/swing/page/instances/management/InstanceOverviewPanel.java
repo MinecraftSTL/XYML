@@ -36,9 +36,11 @@ import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Font;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.function.Consumer;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -72,8 +74,8 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// Swing and desktop integration boundary.
     private final InstanceOverviewInteractions interactions;
 
-    /// Visible immutable instance identifier.
-    private final JLabel instanceNameValue = new JLabel();
+    /// Borrowed EDT sink receiving successfully applied overview snapshots.
+    private final Consumer<InstanceOverviewSummary> summarySink;
 
     /// Fixed-size preview of the active custom or bundled instance icon.
     private final JLabel iconPreview = new IconPreviewLabel();
@@ -120,7 +122,21 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @param instanceId stable non-blank instance identifier
     /// @param executor caller-owned executor for repository and desktop operations
     public InstanceOverviewPanel(GameRepository repository, String instanceId, Executor executor) {
-        this(repository, instanceId, executor, InstanceOverviewStrings.localized());
+        this(repository, instanceId, executor, ignored -> { });
+    }
+
+    /// Creates a production overview that publishes its already-loaded state to a shared summary.
+    ///
+    /// @param repository repository containing the managed instance
+    /// @param instanceId stable non-blank instance identifier
+    /// @param executor caller-owned executor for repository and desktop operations
+    /// @param summarySink borrowed EDT sink for successfully applied overview state
+    InstanceOverviewPanel(
+            GameRepository repository,
+            String instanceId,
+            Executor executor,
+            Consumer<InstanceOverviewSummary> summarySink) {
+        this(repository, instanceId, executor, InstanceOverviewStrings.localized(), summarySink);
     }
 
     /// Creates a production overview whose panel and interaction boundary share one text snapshot.
@@ -133,13 +149,15 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
             GameRepository repository,
             String instanceId,
             Executor executor,
-            InstanceOverviewStrings strings) {
+            InstanceOverviewStrings strings,
+            Consumer<InstanceOverviewSummary> summarySink) {
         this(
                 repository,
                 instanceId,
                 executor,
                 strings,
-                new DefaultInstanceOverviewInteractions(strings, executor));
+                new DefaultInstanceOverviewInteractions(strings, executor),
+                summarySink);
     }
 
     /// Creates an overview with explicit interaction boundaries for deterministic UI testing.
@@ -155,13 +173,32 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
             Executor executor,
             InstanceOverviewStrings strings,
             InstanceOverviewInteractions interactions) {
+        this(repository, instanceId, executor, strings, interactions, ignored -> { });
+    }
+
+    /// Creates an overview with explicit interactions and a shared-summary sink.
+    ///
+    /// @param repository repository containing the managed instance
+    /// @param instanceId stable non-blank instance identifier
+    /// @param executor caller-owned executor for repository operations
+    /// @param strings stable visible text
+    /// @param interactions Swing and desktop interaction boundary
+    /// @param summarySink borrowed EDT sink for successfully applied overview state
+    private InstanceOverviewPanel(
+            GameRepository repository,
+            String instanceId,
+            Executor executor,
+            InstanceOverviewStrings strings,
+            InstanceOverviewInteractions interactions,
+            Consumer<InstanceOverviewSummary> summarySink) {
         this(
                 repository,
                 instanceId,
                 executor,
                 strings,
                 interactions,
-                createIconStore(repository, instanceId));
+                createIconStore(repository, instanceId),
+                summarySink);
     }
 
     /// Creates an overview with an explicit icon store for focused persistence and preview testing.
@@ -179,10 +216,30 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
             InstanceOverviewStrings strings,
             InstanceOverviewInteractions interactions,
             @Nullable InstanceIconStore iconStore) {
+        this(repository, instanceId, executor, strings, interactions, iconStore, ignored -> { });
+    }
+
+    /// Creates an overview with explicit icon storage and shared-summary publication.
+    ///
+    /// @param repository repository containing the managed instance
+    /// @param instanceId stable non-blank instance identifier
+    /// @param executor caller-owned executor for repository operations
+    /// @param strings stable visible text
+    /// @param interactions Swing and desktop interaction boundary
+    /// @param iconStore persistent icon boundary, or `null` when unsupported
+    /// @param summarySink borrowed EDT sink for successfully applied overview state
+    private InstanceOverviewPanel(
+            GameRepository repository,
+            String instanceId,
+            Executor executor,
+            InstanceOverviewStrings strings,
+            InstanceOverviewInteractions interactions,
+            @Nullable InstanceIconStore iconStore,
+            Consumer<InstanceOverviewSummary> summarySink) {
         super(new MigLayout(
-                "insets 16, fillx, wrap 3",
-                "[][grow,fill][40!]",
-                "[]12[]10[]10[]16[]"));
+                "insets 8, fillx, wrap 3",
+                "[140!][grow,fill][40!]",
+                "[]10[]8[]16[]"));
         EdtDispatcher.requireEventDispatchThread();
         this.repository = Objects.requireNonNull(repository, "repository");
         this.xymlRepository = this.repository instanceof XYMLGameRepository candidate ? candidate : null;
@@ -191,6 +248,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         this.executor = Objects.requireNonNull(executor, "executor");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
+        this.summarySink = Objects.requireNonNull(summarySink, "summarySink");
         configureComponents();
         requestSnapshot(false);
     }
@@ -218,7 +276,6 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         }
         EdtDispatcher.executeAndWait(() -> {
             snapshot = null;
-            instanceNameValue.setText("");
             iconPreview.setIcon(null);
             instanceRootValue.setText("");
             gameDirectoryValue.setText("");
@@ -227,26 +284,15 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         });
     }
 
-    /// Creates the information rows and fixed-size icon controls.
+    /// Creates compact instance-file rows followed by common icon and refresh actions.
     private void configureComponents() {
         setName("instanceOverview");
         setOpaque(false);
 
-        JLabel title = new JLabel(strings.title());
+        JLabel title = new JLabel(i18n("swing.instance_overview.files_title"));
         title.setName("instanceOverviewTitle");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 18.0F));
-        add(title, "span 2, growx");
-
-        iconPreview.setName("instanceOverviewIconPreview");
-        iconPreview.setHorizontalAlignment(JLabel.CENTER);
-        iconPreview.setVerticalAlignment(JLabel.CENTER);
-        iconPreview.getAccessibleContext().setAccessibleName(strings.iconPreviewAccessibleName());
-        add(iconPreview, "w 40!, h 40!, spany 2");
-
-        instanceNameValue.setName("instanceOverviewName");
-        instanceNameValue.setText(instanceId);
-        add(createLabel(strings.instanceNameLabel()), "aligny center");
-        add(instanceNameValue, "growx");
+        add(title, "span 3, growx");
 
         configureReadOnlyPathField(instanceRootValue, "instanceOverviewRootDirectory");
         configureCommand(
@@ -270,9 +316,21 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         add(gameDirectoryValue, "growx");
         add(openGameDirectoryButton, "w 40!, h 40!");
 
-        JPanel actions = new JPanel(new MigLayout("insets 0, gap 8", "[40!][40!][40!][40!]", "[40!]"));
+        JLabel actionsTitle = new JLabel(i18n("swing.instance_overview.quick_actions"));
+        actionsTitle.setName("instanceOverviewActionsTitle");
+        actionsTitle.setFont(actionsTitle.getFont().deriveFont(Font.BOLD, 18.0F));
+        add(actionsTitle, "span 3, growx, gaptop 8");
+
+        JPanel actions = new JPanel(new MigLayout(
+                "insets 0, gap 8",
+                "[40!][40!][40!][40!][40!]",
+                "[40!]"));
         actions.setName("instanceOverviewActions");
         actions.setOpaque(false);
+        iconPreview.setName("instanceOverviewIconPreview");
+        iconPreview.setHorizontalAlignment(JLabel.CENTER);
+        iconPreview.setVerticalAlignment(JLabel.CENTER);
+        iconPreview.getAccessibleContext().setAccessibleName(strings.iconPreviewAccessibleName());
         configureCommand(
                 refreshButton,
                 "instanceOverviewRefresh",
@@ -297,11 +355,12 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
                 i18n("settings.game.exploration"),
                 "assets/swing/icons/folder-open.svg",
                 this::showDirectoryMenu);
+        actions.add(iconPreview, "w 40!, h 40!");
         actions.add(refreshButton, "w 40!, h 40!");
         actions.add(chooseIconButton, "w 40!, h 40!");
         actions.add(deleteIconButton, "w 40!, h 40!");
         actions.add(exploreDirectoriesButton, "w 40!, h 40!");
-        add(actions, "span 3, right");
+        add(actions, "span 3, left");
 
         configureDirectoryMenu();
 
@@ -410,6 +469,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         Path gameDirectory = Objects.requireNonNull(repository.getRunDirectory(instanceId), "game directory")
                 .toAbsolutePath()
                 .normalize();
+        String versionDetail = readVersionDetail();
         @Nullable InstanceIconStore localIconStore = iconStore;
         InstanceIconStore.Snapshot iconState = localIconStore != null
                 ? localIconStore.load()
@@ -418,7 +478,18 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
             InstanceIconImages.preloadBuiltIns();
         }
         ImageIcon preview = InstanceIconImages.load(iconState, 40);
-        return new InstanceSnapshot(instanceRoot, gameDirectory, iconState, preview);
+        return new InstanceSnapshot(instanceRoot, gameDirectory, versionDetail, iconState, preview);
+    }
+
+    /// Resolves optional Minecraft version text without blocking paths and icons for a damaged partial instance.
+    ///
+    /// @return resolved Minecraft version, or an empty value when version metadata is unavailable
+    private String readVersionDetail() {
+        try {
+            return repository.getGameVersion(instanceId).orElse("");
+        } catch (RuntimeException unavailableVersion) {
+            return "";
+        }
     }
 
     /// Applies a completed metadata load on the EDT.
@@ -449,11 +520,17 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         gameDirectoryValue.setText(loadedSnapshot.gameDirectory().toString());
         gameDirectoryValue.setToolTipText(loadedSnapshot.gameDirectory().toString());
         iconPreview.setIcon(loadedSnapshot.iconPreview());
+        summarySink.accept(new InstanceOverviewSummary(
+                instanceId,
+                loadedSnapshot.versionDetail(),
+                loadedSnapshot.instanceRoot(),
+                loadedSnapshot.gameDirectory(),
+                loadedSnapshot.iconPreview()));
         updateActionState();
     }
 
     /// Opens the current version-root directory with the platform desktop handler.
-    private void openInstanceDirectory() {
+    void openInstanceDirectory() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable InstanceSnapshot currentSnapshot = snapshot;
         if (currentSnapshot != null) {
@@ -501,11 +578,19 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
 
     /// Shows the directory popup only after the effective game directory has been resolved.
     private void showDirectoryMenu() {
+        showDirectoryMenuAt(exploreDirectoriesButton);
+    }
+
+    /// Shows the directory popup below a visible overview or summary command.
+    ///
+    /// @param invoker visible component anchoring the popup
+    void showDirectoryMenuAt(Component invoker) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed.get() || operationPending.get() || snapshot == null) {
             return;
         }
-        directoryMenu.show(exploreDirectoriesButton, 0, exploreDirectoriesButton.getHeight());
+        Component anchor = Objects.requireNonNull(invoker, "invoker");
+        directoryMenu.show(anchor, 0, anchor.getHeight());
     }
 
     /// Opens the effective game directory or one known direct child through the existing asynchronous desktop boundary.
@@ -546,7 +631,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     }
 
     /// Rescans the repository and refreshes the effective directory values.
-    private void refresh() {
+    void refresh() {
         EdtDispatcher.requireEventDispatchThread();
         requestSnapshot(true);
     }
@@ -740,12 +825,14 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     ///
     /// @param instanceRoot resolved version-root directory
     /// @param gameDirectory resolved effective game running directory
+    /// @param versionDetail resolved Minecraft version text, or an empty string when unavailable
     /// @param iconState persisted custom and bundled icon identity
     /// @param iconPreview exact-size decoded Swing preview
     @NotNullByDefault
     private record InstanceSnapshot(
             Path instanceRoot,
             Path gameDirectory,
+            String versionDetail,
             InstanceIconStore.Snapshot iconState,
             ImageIcon iconPreview) {
     }
