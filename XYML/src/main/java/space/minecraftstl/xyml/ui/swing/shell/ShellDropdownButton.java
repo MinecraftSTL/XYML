@@ -21,6 +21,7 @@ import com.formdev.flatlaf.FlatClientProperties;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import javax.swing.JButton;
+import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Insets;
@@ -38,9 +39,12 @@ final class ShellDropdownButton extends JButton {
     /// Creates one left-aligned popup button.
     ShellDropdownButton() {
         setOpaque(false);
+        setBackground(new Color(0, 0, 0, 0));
         putClientProperty(
-                FlatClientProperties.BUTTON_TYPE,
-                FlatClientProperties.BUTTON_TYPE_BORDERLESS);
+                FlatClientProperties.STYLE,
+                "disabledBackground: #00000000; "
+                        + "hoverBackground: fade($Button.hoverBackground,20%); "
+                        + "pressedBackground: fade($Button.pressedBackground,28%)");
         setHorizontalAlignment(LEFT);
         setMargin(new Insets(4, 10, 4, 8 + DISCLOSURE_WIDTH));
     }

@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.shell;
 
 import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -26,11 +27,12 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies that collapsed shell selectors reveal the wallpaper without losing interaction feedback.
@@ -39,35 +41,48 @@ public final class ShellDropdownButtonTest {
     /// Distinct background pixel used for exact off-screen paint comparison.
     private static final int BACKDROP_ARGB = new Color(0x31, 0xA9, 0xE1).getRGB();
 
-    /// The collapsed state stays transparent while FlatLaf still paints its rollover surface.
+    /// The collapsed state keeps a visible outline while rollover and pressed feedback remain visible.
     @Test
-    public void keepsRestingSurfaceTransparentAndRolloverVisible() {
+    public void keepsTransparentSurfaceOutlinedAcrossInteractionStates() {
         EdtDispatcher.executeAndWait(() -> {
-            assertTrue(FlatLightLaf.setup());
-            ShellDropdownButton button = new ShellDropdownButton();
-            button.setText("Account");
-            button.setSize(220, 36);
+            for (boolean dark : List.of(false, true)) {
+                assertTrue(dark ? FlatDarkLaf.setup() : FlatLightLaf.setup());
+                ShellDropdownButton button = new ShellDropdownButton();
+                button.setText("Account");
+                button.setSize(220, 36);
 
-            int restingPixel = centerPixel(button);
-            button.getModel().setRollover(true);
-            int rolloverPixel = centerPixel(button);
+                BufferedImage resting = render(button);
+                button.getModel().setRollover(true);
+                BufferedImage rollover = render(button);
+                button.getModel().setRollover(false);
+                button.getModel().setArmed(true);
+                button.getModel().setPressed(true);
+                BufferedImage pressed = render(button);
+                button.getModel().setPressed(false);
+                button.getModel().setArmed(false);
+                button.setEnabled(false);
+                BufferedImage disabled = render(button);
 
-            assertAll(
-                    () -> assertFalse(button.isOpaque()),
-                    () -> assertTrue(button.isContentAreaFilled()),
-                    () -> assertEquals(
-                            FlatClientProperties.BUTTON_TYPE_BORDERLESS,
-                            button.getClientProperty(FlatClientProperties.BUTTON_TYPE)),
-                    () -> assertEquals(BACKDROP_ARGB, restingPixel),
-                    () -> assertNotEquals(BACKDROP_ARGB, rolloverPixel));
+                assertAll(
+                        () -> assertFalse(button.isOpaque()),
+                        () -> assertTrue(button.isContentAreaFilled()),
+                        () -> assertEquals(0, button.getBackground().getAlpha()),
+                        () -> assertNull(button.getClientProperty(FlatClientProperties.BUTTON_TYPE)),
+                        () -> assertEquals(BACKDROP_ARGB, centerPixel(resting)),
+                        () -> assertTrue(hasVisibleHorizontalOutline(resting)),
+                        () -> assertTrue(differingPixelCount(resting, rollover) > 0),
+                        () -> assertTrue(differingPixelCount(resting, pressed) > 0),
+                        () -> assertEquals(BACKDROP_ARGB, centerPixel(disabled)));
+            }
+            FlatLightLaf.setup();
         });
     }
 
-    /// Paints the center of one selector over a known opaque background.
+    /// Paints one selector over a known opaque background.
     ///
     /// @param button configured selector button
-    /// @return center ARGB pixel after painting
-    private static int centerPixel(ShellDropdownButton button) {
+    /// @return rendered selector pixels
+    private static BufferedImage render(ShellDropdownButton button) {
         BufferedImage image = new BufferedImage(
                 button.getWidth(),
                 button.getHeight(),
@@ -80,6 +95,48 @@ public final class ShellDropdownButtonTest {
         } finally {
             graphics.dispose();
         }
+        return image;
+    }
+
+    /// Returns the exact center pixel from a rendered selector.
+    ///
+    /// @param image rendered selector pixels
+    /// @return center ARGB pixel
+    private static int centerPixel(BufferedImage image) {
         return image.getRGB(image.getWidth() / 2, image.getHeight() / 2);
+    }
+
+    /// Counts pixels changed by one interaction-state transition.
+    ///
+    /// @param first first rendered state
+    /// @param second second rendered state
+    /// @return number of pixels whose ARGB values differ
+    private static int differingPixelCount(BufferedImage first, BufferedImage second) {
+        int differences = 0;
+        for (int y = 0; y < first.getHeight(); ++y) {
+            for (int x = 0; x < first.getWidth(); ++x) {
+                if (first.getRGB(x, y) != second.getRGB(x, y)) {
+                    ++differences;
+                }
+            }
+        }
+        return differences;
+    }
+
+    /// Detects theme-border pixels in the horizontal edge bands away from rounded corners.
+    ///
+    /// @param image rendered selector pixels
+    /// @return whether the resting selector has a visible outline
+    private static boolean hasVisibleHorizontalOutline(BufferedImage image) {
+        int bandHeight = Math.min(6, image.getHeight() / 2);
+        for (int y = 0; y < bandHeight; ++y) {
+            for (int x = 8; x < image.getWidth() - 8; ++x) {
+                if (image.getRGB(x, y) != BACKDROP_ARGB
+                        || image.getRGB(x, image.getHeight() - 1 - y) != BACKDROP_ARGB) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

@@ -208,18 +208,21 @@ public final class AppShellPanelTest {
                         () -> assertNotNull(toolbar.brandLabel().getIcon()),
                         () -> assertEquals(testHomeStrings().launchAction(),
                                 toolbar.launchButton().getAccessibleContext().getAccessibleName()),
-                        () -> assertEquals(
-                                FlatClientProperties.BUTTON_TYPE_BORDERLESS,
+                        () -> assertNull(
                                 toolbar.gameDirectorySelector().valueButton()
                                         .getClientProperty(FlatClientProperties.BUTTON_TYPE)),
-                        () -> assertEquals(
-                                FlatClientProperties.BUTTON_TYPE_BORDERLESS,
+                        () -> assertNull(
                                 toolbar.accountSelector().valueButton()
                                         .getClientProperty(FlatClientProperties.BUTTON_TYPE)),
-                        () -> assertEquals(
-                                FlatClientProperties.BUTTON_TYPE_BORDERLESS,
+                        () -> assertNull(
                                 toolbar.instanceSelector().valueButton()
                                         .getClientProperty(FlatClientProperties.BUTTON_TYPE)),
+                        () -> assertEquals(0,
+                                toolbar.gameDirectorySelector().valueButton().getBackground().getAlpha()),
+                        () -> assertEquals(0,
+                                toolbar.accountSelector().valueButton().getBackground().getAlpha()),
+                        () -> assertEquals(0,
+                                toolbar.instanceSelector().valueButton().getBackground().getAlpha()),
                         () -> assertFalse(toolbar.gameDirectorySelector().valueButton().isOpaque()),
                         () -> assertFalse(toolbar.accountSelector().valueButton().isOpaque()),
                         () -> assertFalse(toolbar.instanceSelector().valueButton().isOpaque()),
