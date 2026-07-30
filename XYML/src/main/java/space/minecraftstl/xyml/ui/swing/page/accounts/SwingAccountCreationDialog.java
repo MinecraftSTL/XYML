@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
+import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
 import javax.swing.DefaultComboBoxModel;
@@ -51,6 +52,8 @@ import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.text.DefaultEditorKit;
 import java.awt.Component;
 import java.awt.Cursor;
@@ -672,32 +675,28 @@ public final class SwingAccountCreationDialog extends JDialog
         content.add(createSelectablePromptText(guidance), "growx, wrap");
         confirmation.setToolTipText(username);
         content.add(confirmation, "growx");
-
-        while (!closed.get()) {
-            @Nullable Object value = showPrompt(
-                    content,
-                    i18n("message.warning"),
-                    JOptionPane.WARNING_MESSAGE,
-                    new Object[]{i18n("button.ok"), i18n("button.cancel")},
-                    i18n("button.cancel"));
-            if (!Integer.valueOf(0).equals(value)) {
-                return false;
-            }
-            if (matchesConfirmation(confirmation.getText(), expected)) {
-                return true;
-            }
-            Toolkit.getDefaultToolkit().beep();
-            confirmation.selectAll();
-            confirmation.requestFocusInWindow();
+        JButton confirmButton = new JButton(i18n("button.ok"));
+        JButton cancelButton = new JButton(i18n("button.cancel"));
+        bindConfirmationButton(confirmation, confirmButton, expected);
+        if (closed.get()) {
+            return false;
         }
-        return false;
+
+        SwingUtilities.invokeLater(confirmation::requestFocusInWindow);
+        @Nullable Object value = showPrompt(
+                content,
+                i18n("message.warning"),
+                JOptionPane.WARNING_MESSAGE,
+                new Object[]{confirmButton, cancelButton},
+                confirmButton);
+        return Integer.valueOf(0).equals(value);
     }
 
     /// Creates label-styled prompt guidance that supports partial selection and keyboard copying.
     ///
     /// The component deliberately keeps the ordinary pointer cursor and does not inherit or expose
     /// a component popup menu. Selection remains available through the standard Swing caret so users
-    /// can drag across any required fragment instead of relying on selecting the complete message.
+    /// can drag across any required fragment while the standard keyboard selection actions remain intact.
     ///
     /// @param text complete localized prompt guidance
     /// @return configured read-only prompt text
@@ -723,6 +722,24 @@ public final class SwingAccountCreationDialog extends JDialog
         promptText.setPreferredSize(new Dimension(INVALID_USERNAME_PROMPT_WIDTH, preferredSize.height));
         promptText.setCaretPosition(0);
         return promptText;
+    }
+
+    /// Keeps an invalid-username confirmation button synchronized with the acknowledgement field.
+    ///
+    /// @param confirmation acknowledgement input field
+    /// @param confirmButton button that accepts the warning
+    /// @param expected normalized localized acknowledgement
+    static void bindConfirmationButton(
+            JTextField confirmation,
+            JButton confirmButton,
+            String expected) {
+        Objects.requireNonNull(confirmation, "confirmation");
+        Objects.requireNonNull(confirmButton, "confirmButton");
+        Objects.requireNonNull(expected, "expected");
+        Runnable update = () -> confirmButton.setEnabled(
+                matchesConfirmation(confirmation.getText(), expected));
+        confirmation.getDocument().addDocumentListener(new ConfirmationDocumentListener(update));
+        update.run();
     }
 
     /// Shows a no-default native role chooser until the user selects one or cancels.
@@ -777,6 +794,7 @@ public final class SwingAccountCreationDialog extends JDialog
                 null,
                 options,
                 initialValue);
+        wireButtonOptions(pane, options);
         JDialog prompt = pane.createDialog(this, title);
         if (!pendingPrompt.compareAndSet(null, prompt)) {
             prompt.dispose();
@@ -797,6 +815,24 @@ public final class SwingAccountCreationDialog extends JDialog
         } finally {
             pendingPrompt.compareAndSet(prompt, null);
             prompt.dispose();
+        }
+    }
+
+    /// Wires explicit button options to the value contract used by `JOptionPane` dialogs.
+    ///
+    /// Swing automatically wires string options but inserts component options unchanged. Explicit
+    /// buttons therefore set their own option value so the dialog closes and the selected index can
+    /// be resolved without rebuilding the prompt.
+    ///
+    /// @param pane target option pane
+    /// @param options explicit ordered options
+    static void wireButtonOptions(JOptionPane pane, Object @Unmodifiable [] options) {
+        Objects.requireNonNull(pane, "pane");
+        Objects.requireNonNull(options, "options");
+        for (Object option : options) {
+            if (option instanceof AbstractButton button) {
+                button.addActionListener(event -> pane.setValue(option));
+            }
         }
     }
 
@@ -958,6 +994,47 @@ public final class SwingAccountCreationDialog extends JDialog
                  Character.OTHER_PUNCTUATION -> true;
             default -> false;
         };
+    }
+
+    /// Runs one validation callback after every acknowledgement-document mutation.
+    @NotNullByDefault
+    private static final class ConfirmationDocumentListener implements DocumentListener {
+        /// Callback that recalculates confirmation availability.
+        private final Runnable update;
+
+        /// Creates a listener for one acknowledgement field.
+        ///
+        /// @param update confirmation-availability callback
+        private ConfirmationDocumentListener(Runnable update) {
+            this.update = Objects.requireNonNull(update, "update");
+        }
+
+        /// Recalculates availability after inserted text.
+        ///
+        /// @param event document mutation event
+        @Override
+        public void insertUpdate(DocumentEvent event) {
+            Objects.requireNonNull(event, "event");
+            update.run();
+        }
+
+        /// Recalculates availability after removed text.
+        ///
+        /// @param event document mutation event
+        @Override
+        public void removeUpdate(DocumentEvent event) {
+            Objects.requireNonNull(event, "event");
+            update.run();
+        }
+
+        /// Recalculates availability after an attribute-only mutation.
+        ///
+        /// @param event document mutation event
+        @Override
+        public void changedUpdate(DocumentEvent event) {
+            Objects.requireNonNull(event, "event");
+            update.run();
+        }
     }
 
     /// Returns the localized title for one displayed authentication method.

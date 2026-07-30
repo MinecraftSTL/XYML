@@ -18,12 +18,16 @@
 package space.minecraftstl.xyml.ui.swing.page.accounts;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.Action;
+import javax.swing.JButton;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.KeyStroke;
 import javax.swing.text.DefaultEditorKit;
@@ -36,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies headless-safe account-dialog control styling and interaction contracts.
@@ -81,7 +86,11 @@ public final class SwingAccountCreationDialogStyleTest {
             KeyStroke copyShortcut = KeyStroke.getKeyStroke(
                     KeyEvent.VK_C,
                     InputEvent.CTRL_DOWN_MASK);
+            KeyStroke selectAllShortcut = KeyStroke.getKeyStroke(
+                    KeyEvent.VK_A,
+                    InputEvent.CTRL_DOWN_MASK);
             Object copyBinding = promptText.getInputMap().get(copyShortcut);
+            Object selectAllBinding = promptText.getInputMap().get(selectAllShortcut);
             Action copyAction = promptText.getActionMap().get(DefaultEditorKit.copyAction);
 
             assertAll(
@@ -92,7 +101,40 @@ public final class SwingAccountCreationDialogStyleTest {
                     () -> assertNull(promptText.getComponentPopupMenu()),
                     () -> assertFalse(promptText.getInheritsPopupMenu()),
                     () -> assertEquals(DefaultEditorKit.copyAction, copyBinding),
+                    () -> assertEquals(DefaultEditorKit.selectAllAction, selectAllBinding),
                     () -> assertNotNull(copyAction));
+        });
+    }
+
+    /// The invalid-name confirm option stays disabled until the acknowledgement satisfies normalization.
+    @Test
+    public void enablesInvalidUsernameConfirmationOnlyForMatchingText() {
+        EdtDispatcher.executeAndWait(() -> {
+            JTextField confirmation = new JTextField();
+            JButton confirmButton = new JButton("Confirm");
+            JButton cancelButton = new JButton("Cancel");
+            JOptionPane pane = new JOptionPane();
+            Object @Unmodifiable [] options = {confirmButton, cancelButton};
+            SwingAccountCreationDialog.bindConfirmationButton(
+                    confirmation,
+                    confirmButton,
+                    "I accept");
+            SwingAccountCreationDialog.wireButtonOptions(pane, options);
+
+            assertFalse(confirmButton.isEnabled());
+            confirmButton.doClick();
+            assertSame(JOptionPane.UNINITIALIZED_VALUE, pane.getValue());
+
+            confirmation.setText("wrong");
+            assertFalse(confirmButton.isEnabled());
+            confirmation.setText("I   accept");
+            assertTrue(confirmButton.isEnabled());
+            confirmation.setText("wrong again");
+            assertFalse(confirmButton.isEnabled());
+
+            confirmation.setText("I accept");
+            confirmButton.doClick();
+            assertSame(confirmButton, pane.getValue());
         });
     }
 }
