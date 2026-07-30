@@ -17,14 +17,23 @@
  */
 package space.minecraftstl.xyml.ui.swing;
 
+import com.formdev.flatlaf.FlatLightLaf;
+import com.formdev.flatlaf.icons.FlatCheckBoxIcon;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.setting.LauncherSettings;
 
+import javax.swing.JCheckBox;
 import javax.swing.UIDefaults;
+import javax.swing.UIManager;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests validation and FlatLaf mapping for adjustable Swing design tokens.
 @NotNullByDefault
@@ -44,10 +53,43 @@ public final class SwingDesignTokensTest {
         assertAll(
                 () -> assertEquals(11, defaults.getInt("Component.arc")),
                 () -> assertEquals(11, defaults.getInt("Button.arc")),
+                () -> assertEquals(11, defaults.getInt("CheckBox.arc")),
                 () -> assertEquals(11, defaults.getInt("TextComponent.arc")),
                 () -> assertEquals(11, defaults.getInt("ProgressBar.arc")),
                 () -> assertEquals(11, defaults.getInt("ScrollBar.thumbArc")),
                 () -> assertEquals(11, defaults.getInt("ScrollBar.trackArc")));
+    }
+
+    /// FlatLaf's default checkbox icon reads the dedicated arc value installed by the design tokens.
+    @Test
+    public void appliesCornerRadiusToFlatLafCheckBoxIcon() {
+        UIDefaults defaults = UIManager.getDefaults();
+        @Nullable Object previousArc = defaults.get("CheckBox.arc");
+        try {
+            new SwingDesignTokens(9).applyTo(defaults);
+
+            assertEquals(9, new FlatCheckBoxIcon().getStyleableValue("arc"));
+        } finally {
+            if (previousArc == null) {
+                defaults.remove("CheckBox.arc");
+            } else {
+                defaults.put("CheckBox.arc", previousArc);
+            }
+        }
+    }
+
+    /// Checkbox painting stays visible and contained when the configured arc exceeds half or all of its side length.
+    @Test
+    public void largeCornerRadiusRendersWithinCheckBoxBounds() {
+        assertTrue(FlatLightLaf.setup());
+        FlatCheckBoxIcon dimensionProbe = new FlatCheckBoxIcon();
+        int sideLength = Math.min(dimensionProbe.getIconWidth(), dimensionProbe.getIconHeight());
+        int greaterThanHalfSide = sideLength / 2 + 1;
+
+        assertTrue(greaterThanHalfSide > sideLength / 2.0);
+        assertCheckBoxStatesRenderWithinBounds(greaterThanHalfSide);
+        assertTrue(LauncherSettings.MAXIMUM_CORNER_RADIUS > sideLength);
+        assertCheckBoxStatesRenderWithinBounds(LauncherSettings.MAXIMUM_CORNER_RADIUS);
     }
 
     /// Radius changes create a new immutable token value without changing the original.
@@ -58,4 +100,70 @@ public final class SwingDesignTokensTest {
         assertEquals(3, original.cornerRadius());
         assertEquals(9, original.withCornerRadius(9).cornerRadius());
     }
+
+    /// Paints representative checkbox states and checks that the requested arc remains effective.
+    private static void assertCheckBoxStatesRenderWithinBounds(int configuredArc) {
+        UIDefaults defaults = UIManager.getDefaults();
+        @Nullable Object previousArc = defaults.get("CheckBox.arc");
+        try {
+            new SwingDesignTokens(configuredArc).applyTo(defaults);
+            FlatCheckBoxIcon icon = new FlatCheckBoxIcon();
+
+            assertEquals(configuredArc, icon.getStyleableValue("arc"));
+            assertRenderedWithinBounds(renderCheckBoxIcon(icon, false, true), icon);
+            assertRenderedWithinBounds(renderCheckBoxIcon(icon, true, true), icon);
+            assertRenderedWithinBounds(renderCheckBoxIcon(icon, true, false), icon);
+        } finally {
+            if (previousArc == null) {
+                defaults.remove("CheckBox.arc");
+            } else {
+                defaults.put("CheckBox.arc", previousArc);
+            }
+        }
+    }
+
+    /// Renders one checkbox icon with transparent padding so out-of-bounds painting remains observable.
+    private static BufferedImage renderCheckBoxIcon(FlatCheckBoxIcon icon, boolean selected, boolean enabled) {
+        int padding = 4;
+        BufferedImage image = new BufferedImage(
+                icon.getIconWidth() + padding * 2,
+                icon.getIconHeight() + padding * 2,
+                BufferedImage.TYPE_INT_ARGB);
+        JCheckBox checkBox = new JCheckBox();
+        checkBox.setSelected(selected);
+        checkBox.setEnabled(enabled);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            icon.paintIcon(checkBox, graphics, padding, padding);
+        } finally {
+            graphics.dispose();
+        }
+        return image;
+    }
+
+    /// Verifies that rendering is nonempty and does not touch pixels outside the icon's declared bounds.
+    private static void assertRenderedWithinBounds(BufferedImage image, FlatCheckBoxIcon icon) {
+        int padding = 4;
+        int visiblePixels = 0;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int alpha = image.getRGB(x, y) >>> 24;
+                boolean insideIcon = x >= padding
+                        && x < padding + icon.getIconWidth()
+                        && y >= padding
+                        && y < padding + icon.getIconHeight();
+                if (insideIcon && alpha > 0) {
+                    visiblePixels++;
+                } else if (!insideIcon) {
+                    assertEquals(0, alpha, "Checkbox icon painted outside its declared bounds at " + x + "," + y);
+                }
+            }
+        }
+
+        assertTrue(visiblePixels > 0, "Checkbox icon must remain visible");
+        assertTrue(
+                visiblePixels < icon.getIconWidth() * icon.getIconHeight(),
+                "Rounded checkbox icon must retain transparent pixels");
+    }
+
 }

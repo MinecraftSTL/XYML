@@ -52,6 +52,7 @@ public record SwingDesignTokens(int cornerRadius) {
 
         defaults.put("Component.arc", cornerRadius);
         defaults.put("Button.arc", cornerRadius);
+        defaults.put("CheckBox.arc", cornerRadius);
         defaults.put("TextComponent.arc", cornerRadius);
         defaults.put("ProgressBar.arc", cornerRadius);
         defaults.put("ScrollBar.thumbArc", cornerRadius);

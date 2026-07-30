@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing;
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
+import com.formdev.flatlaf.icons.FlatCheckBoxIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -79,19 +81,38 @@ public final class SwingThemeManagerTest {
 
         assertNull(manager.effectiveVariant());
         manager.initialize();
+        FlatCheckBoxIcon initialCheckBoxIcon = assertInstanceOf(
+                FlatCheckBoxIcon.class,
+                UIManager.getIcon("CheckBox.icon"));
 
         assertAll(
                 () -> assertTrue(manager.isInitialized()),
                 () -> assertEquals(ThemeVariant.LIGHT, manager.effectiveVariant()),
                 () -> assertInstanceOf(FlatLightLaf.class, UIManager.getLookAndFeel()),
-                () -> assertEquals(4, UIManager.getInt("Component.arc")));
+                () -> assertEquals(4, UIManager.getInt("Component.arc")),
+                () -> assertEquals(4, UIManager.getInt("CheckBox.arc")),
+                () -> assertEquals(4, initialCheckBoxIcon.getStyleableValue("arc")));
+
+        manager.update(ThemeBrightnessPreference.LIGHT, new SwingDesignTokens(13));
+        FlatCheckBoxIcon updatedCheckBoxIcon = assertInstanceOf(
+                FlatCheckBoxIcon.class,
+                UIManager.getIcon("CheckBox.icon"));
+
+        assertAll(
+                () -> assertEquals(ThemeVariant.LIGHT, manager.effectiveVariant()),
+                () -> assertInstanceOf(FlatLightLaf.class, UIManager.getLookAndFeel()),
+                () -> assertEquals(13, UIManager.getInt("Component.arc")),
+                () -> assertEquals(13, UIManager.getInt("CheckBox.arc")),
+                () -> assertNotSame(initialCheckBoxIcon, updatedCheckBoxIcon),
+                () -> assertEquals(13, updatedCheckBoxIcon.getStyleableValue("arc")));
 
         manager.update(ThemeBrightnessPreference.DARK, new SwingDesignTokens(13));
 
         assertAll(
                 () -> assertEquals(ThemeVariant.DARK, manager.effectiveVariant()),
                 () -> assertInstanceOf(FlatDarkLaf.class, UIManager.getLookAndFeel()),
-                () -> assertEquals(13, UIManager.getInt("Component.arc")));
+                () -> assertEquals(13, UIManager.getInt("Component.arc")),
+                () -> assertEquals(13, UIManager.getInt("CheckBox.arc")));
     }
 
     /// Refreshing system mode responds to a changed platform appearance signal.

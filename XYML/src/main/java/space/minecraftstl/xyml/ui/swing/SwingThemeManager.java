@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing;
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
+import com.formdev.flatlaf.icons.FlatCheckBoxIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -30,6 +31,7 @@ import space.minecraftstl.xyml.theme.ThemeBrightness;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeColor;
 
+import javax.swing.Icon;
 import javax.swing.LookAndFeel;
 import javax.swing.UIManager;
 import java.util.HashMap;
@@ -332,6 +334,11 @@ public final class SwingThemeManager {
         }
 
         designTokens.applyTo(UIManager.getDefaults());
+        // FlatLaf caches the checkbox icon after first resolution, including the arc read at construction time.
+        @Nullable Icon currentCheckBoxIcon = UIManager.getIcon("CheckBox.icon");
+        if (currentCheckBoxIcon != null && currentCheckBoxIcon.getClass() == FlatCheckBoxIcon.class) {
+            UIManager.put("CheckBox.icon", new FlatCheckBoxIcon());
+        }
         effectiveVariant = resolvedVariant;
         effectiveAccentColor = accentColor;
         initialized = true;
