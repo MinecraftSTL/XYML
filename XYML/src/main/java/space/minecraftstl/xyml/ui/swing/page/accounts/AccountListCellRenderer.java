@@ -27,7 +27,6 @@ import javax.swing.Icon;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
-import javax.swing.JRadioButton;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingConstants;
 import javax.swing.UIManager;
@@ -42,7 +41,7 @@ import java.awt.Graphics2D;
 import java.awt.GridLayout;
 import java.awt.RenderingHints;
 
-/// Renders account rows with a lazy real-skin avatar, two text lines, and optional explicit selection.
+/// Renders account rows with a lazy real-skin avatar, two text lines, and full-row selection highlight.
 @NotNullByDefault
 public final class AccountListCellRenderer extends JPanel
         implements ListCellRenderer<ChoiceListEntry<AccountListItem>> {
@@ -70,25 +69,9 @@ public final class AccountListCellRenderer extends JPanel
     /// Secondary account-provider and storage label.
     private final JLabel detailLabel = new JLabel();
 
-    /// Explicit selected-account indicator.
-    private final JRadioButton selectionIndicator = new JRadioButton();
-
-    /// Whether this renderer exposes a radio indicator in addition to list selection highlighting.
-    private final boolean showSelectionIndicator;
-
     /// Creates one reusable stable renderer hierarchy.
     public AccountListCellRenderer() {
-        this(true);
-    }
-
-    /// Creates one reusable renderer with caller-selected selection-indicator visibility.
-    ///
-    /// Compact dropdowns should pass `false` because their collapsed button already identifies the active value.
-    ///
-    /// @param showSelectionIndicator whether to render a trailing radio indicator
-    public AccountListCellRenderer(boolean showSelectionIndicator) {
         super(new BorderLayout(12, 0));
-        this.showSelectionIndicator = showSelectionIndicator;
         setOpaque(false);
         setPreferredSize(new Dimension(280, ROW_HEIGHT));
 
@@ -108,13 +91,8 @@ public final class AccountListCellRenderer extends JPanel
         labels.add(nameLabel);
         labels.add(detailLabel);
 
-        selectionIndicator.setName("accountListSelection");
-        selectionIndicator.setOpaque(false);
-        selectionIndicator.setFocusable(false);
-        selectionIndicator.setVisible(showSelectionIndicator);
         add(avatarLabel, BorderLayout.LINE_START);
         add(labels, BorderLayout.CENTER);
-        add(selectionIndicator, BorderLayout.LINE_END);
     }
 
     /// Configures the reusable renderer for one sparse account row.
@@ -137,7 +115,6 @@ public final class AccountListCellRenderer extends JPanel
         Font font = list.getFont();
         nameLabel.setFont(font.deriveFont(Font.BOLD));
         detailLabel.setFont(font.deriveFont(Math.max(9.0F, font.getSize2D() - 1.0F)));
-        selectionIndicator.setSelected(showSelectionIndicator && selected);
         setToolTipText(null);
 
         @Nullable AccountListItem item = entry.value();
@@ -146,19 +123,16 @@ public final class AccountListCellRenderer extends JPanel
             detailLabel.setText(item.detailText().isBlank() ? " " : item.detailText());
             @Nullable Icon avatar = avatarCache.iconFor(item, list);
             avatarLabel.setIcon(avatar == null ? LOADING_ICON : avatar);
-            selectionIndicator.setEnabled(list.isEnabled());
         } else if (entry.status() == ChoiceLoadStatus.ERROR) {
             nameLabel.setText("!");
             detailLabel.setText(" ");
             avatarLabel.setIcon(ERROR_ICON);
-            selectionIndicator.setEnabled(false);
             @Nullable Throwable failure = entry.failure();
             setToolTipText(failure == null ? null : failure.getMessage());
         } else {
             nameLabel.setText("...");
             detailLabel.setText(" ");
             avatarLabel.setIcon(LOADING_ICON);
-            selectionIndicator.setEnabled(false);
         }
         prepareRendererLayout(list);
         return this;
@@ -193,7 +167,6 @@ public final class AccountListCellRenderer extends JPanel
         setForeground(foreground);
         nameLabel.setForeground(foreground);
         detailLabel.setForeground(foreground);
-        selectionIndicator.setForeground(foreground);
         @Nullable Border lafBorder = UIManager.getBorder(focused
                 ? "List.focusCellHighlightBorder"
                 : "List.cellNoFocusBorder");

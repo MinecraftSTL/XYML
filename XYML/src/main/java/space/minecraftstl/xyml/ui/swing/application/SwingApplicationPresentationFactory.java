@@ -161,11 +161,13 @@ public final class SwingApplicationPresentationFactory {
     private static InstancesStrings createInstancesStrings() {
         return new InstancesStrings(
                 i18n("instance.manage"),
+                i18n("search"),
                 i18n("button.refresh"),
                 i18n("swing.common.refreshing"),
                 i18n("install"),
                 i18n("instance.manage.manage"),
-                i18n("instance.empty"));
+                i18n("instance.empty"),
+                i18n("swing.instances.search.no_results"));
     }
 
     /// Creates localized installed-instance repository states.

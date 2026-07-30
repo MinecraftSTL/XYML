@@ -564,8 +564,8 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
         /// Localized origin and applied labels.
         private final ThemePackManagementStrings strings;
 
-        /// Radio marker and clipped primary theme name.
-        private final javax.swing.JRadioButton primary = new javax.swing.JRadioButton();
+        /// Clipped primary theme name; the containing row paints the selected state.
+        private final JLabel primary = new JLabel();
 
         /// Clipped package, version, and author metadata.
         private final JLabel secondary = new JLabel();
@@ -588,7 +588,6 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
             badge.setName("themePackRowBadge");
             primary.setOpaque(false);
             primary.setFont(primary.getFont().deriveFont(Font.BOLD));
-            primary.setBorder(BorderFactory.createEmptyBorder());
             secondary.setFont(secondary.getFont().deriveFont(secondary.getFont().getSize2D() - 1.0F));
             badge.setHorizontalAlignment(SwingConstants.TRAILING);
             badge.setPreferredSize(new Dimension(90, ROW_HEIGHT - 14));
@@ -621,7 +620,6 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
             primary.setForeground(foreground);
             secondary.setForeground(foreground);
             badge.setForeground(foreground);
-            primary.setSelected(isSelected);
             setBorder(cellHasFocus
                     ? UIManager.getBorder("List.focusCellHighlightBorder")
                     : UIManager.getBorder("List.cellNoFocusBorder"));

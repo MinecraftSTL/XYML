@@ -171,7 +171,7 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
         this.recentSelections = Objects.requireNonNull(recentSelections, "recentSelections");
         this.navigateCommand = Objects.requireNonNull(navigateCommand, "navigateCommand");
         orderedSource = new OrderedChoiceDataSource<>(model);
-        choiceList = new ViewportChoiceList<>(orderedSource, new InstanceListCellRenderer(false));
+        choiceList = new ViewportChoiceList<>(orderedSource, new InstanceListCellRenderer());
         displayedSnapshot = model.snapshot();
         configureComponents(
                 Objects.requireNonNull(selectorLabel, "selectorLabel"),

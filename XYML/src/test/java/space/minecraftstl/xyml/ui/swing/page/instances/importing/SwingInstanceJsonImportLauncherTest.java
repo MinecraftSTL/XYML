@@ -200,6 +200,7 @@ final class SwingInstanceJsonImportLauncherTest {
                     case "sourceRevision" -> OptionalLong.of(0L);
                     case "selectionContextRevision" -> 0L;
                     case "stableItemIds" -> List.of();
+                    case "searchEntries" -> List.of();
                     default -> throw new AssertionError("Unexpected instances-model call: " + method.getName());
                 });
         return InstancesModel.class.cast(proxy);

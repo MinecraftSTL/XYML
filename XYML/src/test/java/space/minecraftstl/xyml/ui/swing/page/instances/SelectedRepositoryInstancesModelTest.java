@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -220,6 +221,18 @@ public final class SelectedRepositoryInstancesModelTest {
         @Override
         public OptionalInt exactItemCount() {
             return OptionalInt.of(1);
+        }
+
+        /// Returns the single stable instance identifier.
+        @Override
+        public @Unmodifiable List<String> stableItemIds() {
+            return List.of(item.id());
+        }
+
+        /// Returns the single stable ID and visible name without loading the row.
+        @Override
+        public @Unmodifiable List<InstanceSearchEntry> searchEntries() {
+            return List.of(new InstanceSearchEntry(item.id(), item.name()));
         }
 
         /// Returns or defers the only row while retaining the linked cancellation.

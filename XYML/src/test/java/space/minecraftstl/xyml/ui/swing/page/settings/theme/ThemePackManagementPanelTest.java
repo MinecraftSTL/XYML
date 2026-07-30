@@ -43,8 +43,8 @@ import space.minecraftstl.xyml.ui.swing.page.settings.BackgroundAppearanceSettin
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JList;
-import javax.swing.JRadioButton;
 import javax.swing.JTextField;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
@@ -344,14 +344,22 @@ public final class ThemePackManagementPanelTest {
         component.setSize(list.getWidth(), list.getFixedCellHeight());
         if (component instanceof Container container) {
             layoutRecursively(container);
-            JRadioButton primary = findComponent(container, JRadioButton.class);
+            JLabel primary = findNamed(container, "themePackRowPrimary", JLabel.class);
             JComponent secondary = findNamed(container, "themePackRowSecondary", JComponent.class);
             JComponent badge = findNamed(container, "themePackRowBadge", JComponent.class);
             assertTrue(primary.getFontMetrics(primary.getFont()).stringWidth(primary.getText())
-                    <= Math.max(1, primary.getWidth() - 20));
+                    <= Math.max(1, primary.getWidth()));
             assertTrue(primary.getWidth() < list.getWidth());
             assertTrue(secondary.getWidth() > 0 && secondary.getHeight() > 0);
             assertTrue(badge.getWidth() > 0 && badge.getHeight() > 0);
+            JComponent selected = (JComponent) renderer.getListCellRendererComponent(
+                    list,
+                    space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry.loaded(1, item),
+                    1,
+                    true,
+                    false);
+            assertTrue(selected.isOpaque());
+            assertEquals(list.getSelectionBackground(), selected.getBackground());
         } else {
             throw new AssertionError("Theme renderer did not return a container");
         }
@@ -436,38 +444,6 @@ public final class ThemePackManagementPanelTest {
             }
             if (component instanceof Container child) {
                 @Nullable T nested = findNamedOrNull(child, name, type);
-                if (nested != null) {
-                    return nested;
-                }
-            }
-        }
-        return null;
-    }
-
-    /// Finds the first descendant of a requested component type.
-    private static <T extends Component> T findComponent(Container root, Class<T> type) {
-        for (Component component : root.getComponents()) {
-            if (type.isInstance(component)) {
-                return type.cast(component);
-            }
-            if (component instanceof Container child) {
-                @Nullable T nested = findComponentOrNull(child, type);
-                if (nested != null) {
-                    return nested;
-                }
-            }
-        }
-        throw new AssertionError("Missing component type: " + type.getSimpleName());
-    }
-
-    /// Finds an optional descendant of a requested component type.
-    private static <T extends Component> @Nullable T findComponentOrNull(Container root, Class<T> type) {
-        for (Component component : root.getComponents()) {
-            if (type.isInstance(component)) {
-                return type.cast(component);
-            }
-            if (component instanceof Container child) {
-                @Nullable T nested = findComponentOrNull(child, type);
                 if (nested != null) {
                     return nested;
                 }

@@ -157,6 +157,12 @@ public final class SelectedRepositoryInstancesModel implements InstancesModel, A
         return currentDelegate().stableItemIds();
     }
 
+    /// Returns the current selected repository's cheap user-visible search index.
+    @Override
+    public @Unmodifiable List<InstanceSearchEntry> searchEntries() {
+        return currentDelegate().searchEntries();
+    }
+
     /// Loads one identified row while rejecting a completion from a replaced repository.
     @Override
     public CompletionStage<InstanceListItem> loadItem(

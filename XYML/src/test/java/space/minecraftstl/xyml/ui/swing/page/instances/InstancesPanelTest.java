@@ -41,6 +41,8 @@ import javax.swing.AbstractButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JRadioButton;
+import javax.swing.JTextField;
 import javax.swing.ListCellRenderer;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
@@ -79,7 +81,14 @@ public final class InstancesPanelTest {
 
     /// Localized strings used by the focused page tests.
     private static final InstancesStrings STRINGS = new InstancesStrings(
-            "Instances", "Refresh", "Refreshing", "Add", "Manage", "No installed instances");
+            "Instances",
+            "Search",
+            "Refresh",
+            "Refreshing",
+            "Add",
+            "Manage",
+            "No installed instances",
+            "No matching instances");
 
     /// A selected-directory context keeps version management visible until the user opens one instance.
     @Test
@@ -138,7 +147,65 @@ public final class InstancesPanelTest {
                     () -> assertFalse(panel.choiceList().getViewport().isOpaque()),
                     () -> assertFalse(list.isOpaque()),
                     () -> assertFalse(unselectedOpaque),
-                    () -> assertTrue(selectedRow.isOpaque()));
+                    () -> assertTrue(selectedRow.isOpaque()),
+                    () -> assertFalse(containsComponentType(
+                            (Container) selectedRow,
+                            JRadioButton.class)));
+            panel.close();
+            coordinator.close();
+        });
+    }
+
+    /// The restored search matches a visible name distinct from its ID and loads only that stable row.
+    @Test
+    public void filtersInstancesWithoutEagerlyLoadingHiddenRows() {
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(80), snapshot(37, 80, 0L));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS, coordinator));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 520));
+            layoutRecursively(panel);
+            JTextField search = (JTextField) findComponent(panel, "instancesSearch");
+            assertAll(
+                    () -> assertEquals("Search", search.getAccessibleContext().getAccessibleName()),
+                    () -> assertEquals("Search", search.getClientProperty("JTextField.placeholderText")),
+                    () -> assertTrue(search.isVisible()),
+                    () -> assertTrue(search.getWidth() >= 160));
+            search.setText("instance 37");
+        });
+        flushEventDispatchThread();
+        onEventDispatchThread(panel.choiceList()::refreshLoadPlan);
+        flushEventDispatchThread();
+
+        onEventDispatchThread(() -> {
+            @Nullable InstanceListItem visible = panel.choiceList().getChoiceModel().loadedValueAt(0);
+            assertAll(
+                    () -> assertEquals(1, panel.choiceList().getChoiceModel().getSize()),
+                    () -> assertEquals("instance-37", Objects.requireNonNull(visible).id()),
+                    () -> assertEquals(0, panel.choiceList().getList().getSelectedIndex()),
+                    () -> assertEquals(Set.of("instance-37"), Set.copyOf(model.requestedStableIds())),
+                    () -> assertTrue(findButton(panel, "instancesManage").isEnabled()));
+
+            JTextField search = (JTextField) findComponent(panel, "instancesSearch");
+            search.setText("does-not-exist");
+        });
+        flushEventDispatchThread();
+        onEventDispatchThread(() -> assertAll(
+                () -> assertEquals(0, panel.choiceList().getChoiceModel().getSize()),
+                () -> assertTrue(findComponent(panel, "instancesNoSearchResults").isVisible()),
+                () -> assertFalse(findButton(panel, "instancesManage").isEnabled())));
+
+        onEventDispatchThread(() -> ((JTextField) findComponent(panel, "instancesSearch")).setText(""));
+        flushEventDispatchThread();
+        onEventDispatchThread(panel.choiceList()::refreshLoadPlan);
+        flushEventDispatchThread();
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertEquals(80, panel.choiceList().getChoiceModel().getSize()),
+                    () -> assertEquals(37, panel.choiceList().getList().getSelectedIndex()),
+                    () -> assertFalse(findComponent(panel, "instancesNoSearchResults").isVisible()));
             panel.close();
             coordinator.close();
         });
@@ -700,6 +767,29 @@ public final class InstancesPanelTest {
         EdtDispatcher.executeAndWait(operation);
     }
 
+    /// Drains coalesced document updates and viewport completions queued on the EDT.
+    private static void flushEventDispatchThread() {
+        EdtDispatcher.executeAndWait(() -> { });
+        EdtDispatcher.executeAndWait(() -> { });
+    }
+
+    /// Returns whether a component hierarchy contains one Swing component type.
+    ///
+    /// @param root hierarchy root
+    /// @param type component type to locate
+    /// @return whether a matching descendant exists
+    private static boolean containsComponentType(Container root, Class<? extends Component> type) {
+        for (Component child : root.getComponents()) {
+            if (type.isInstance(child)) {
+                return true;
+            }
+            if (child instanceof Container nested && containsComponentType(nested, type)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// Recursively lays out a component hierarchy before measurement or off-screen painting.
     ///
     /// @param container hierarchy root
@@ -928,6 +1018,9 @@ public final class InstancesPanelTest {
         /// Controlled requests awaiting explicit completion.
         private final List<PendingLoad> pendingLoads = new ArrayList<>();
 
+        /// Stable identifiers requested by a filtered projection.
+        private final List<String> requestedStableIds = new ArrayList<>();
+
         /// Selected stable instance identifiers.
         private final List<String> selectedIds = new ArrayList<>();
 
@@ -1017,6 +1110,43 @@ public final class InstancesPanelTest {
             return OptionalInt.of(items.size());
         }
 
+        /// Returns exact stable instance identifiers without loading row details.
+        @Override
+        public synchronized @Unmodifiable List<String> stableItemIds() {
+            List<String> identifiers = new ArrayList<>(items.size());
+            for (InstanceListItem item : items) {
+                identifiers.add(item.id());
+            }
+            return List.copyOf(identifiers);
+        }
+
+        /// Returns stable IDs paired with their independently searchable visible names.
+        @Override
+        public synchronized @Unmodifiable List<InstanceSearchEntry> searchEntries() {
+            List<InstanceSearchEntry> entries = new ArrayList<>(items.size());
+            for (InstanceListItem item : items) {
+                entries.add(new InstanceSearchEntry(item.id(), item.name()));
+            }
+            return List.copyOf(entries);
+        }
+
+        /// Loads one exact fake row by stable instance identifier.
+        @Override
+        public synchronized CompletionStage<InstanceListItem> loadItem(
+                String stableId,
+                LoadCancellation cancellation) {
+            Objects.requireNonNull(stableId, "stableId");
+            Objects.requireNonNull(cancellation, "cancellation").throwIfCancelled();
+            requestedStableIds.add(stableId);
+            for (InstanceListItem item : items) {
+                if (item.id().equals(stableId)) {
+                    return CompletableFuture.completedFuture(item);
+                }
+            }
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("Unknown fake instance: " + stableId));
+        }
+
         /// Captures and optionally completes a viewport request.
         @Override
         public synchronized CompletionStage<ChoicePage<InstanceListItem>> load(
@@ -1102,6 +1232,13 @@ public final class InstancesPanelTest {
         /// @return immutable ranges in invocation order
         private synchronized @Unmodifiable List<IndexRange> requestedRanges() {
             return List.copyOf(requestedRanges);
+        }
+
+        /// Returns stable identifiers requested through filtered single-row loading.
+        ///
+        /// @return immutable requested identifiers in invocation order
+        private synchronized @Unmodifiable List<String> requestedStableIds() {
+            return List.copyOf(requestedStableIds);
         }
 
         /// Returns a snapshot of selected instance identifiers.

@@ -199,6 +199,17 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         return List.copyOf(identifiers);
     }
 
+    /// Returns cheap stable IDs and their repository display names without resolving row details.
+    @Override
+    public @Unmodifiable List<InstanceSearchEntry> searchEntries() {
+        SourceSnapshot source = state.source();
+        List<InstanceSearchEntry> entries = new ArrayList<>(source.entries().size());
+        for (RepositoryEntry entry : source.entries()) {
+            entries.add(new InstanceSearchEntry(entry.id(), entry.id()));
+        }
+        return List.copyOf(entries);
+    }
+
     /// Resolves one requested instance row away from the event dispatch thread.
     @Override
     public CompletionStage<InstanceListItem> loadItem(

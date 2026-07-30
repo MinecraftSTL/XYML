@@ -33,6 +33,7 @@ import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JRadioButton;
 import java.awt.Component;
 import java.awt.Color;
 import java.awt.Container;
@@ -133,6 +134,34 @@ public final class AccountListCellRendererTest {
                 () -> assertTrue(countOpaquePixels(rendered) > 10_000),
                 () -> assertTrue(distinctColors(rendered) > 8),
                 () -> assertTrue(countPixelsDifferentFrom(rendered, avatarBounds, background) > 300));
+    }
+
+    /// Selection uses the complete row highlight without a redundant traditional radio marker.
+    @Test
+    public void highlightsSelectedAccountWithoutRadioMarker() {
+        AccountListCellRenderer renderer = onEdt(AccountListCellRenderer::new);
+        JList<ChoiceListEntry<AccountListItem>> list = onEdt(JList::new);
+
+        runOnEdt(() -> {
+            Component selected = renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loading(0),
+                    0,
+                    true,
+                    false);
+            assertAll(
+                    () -> assertTrue(((javax.swing.JComponent) selected).isOpaque()),
+                    () -> assertEquals(list.getSelectionBackground(), selected.getBackground()),
+                    () -> assertFalse(containsComponentType(renderer, JRadioButton.class)));
+
+            Component unselected = renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loading(0),
+                    0,
+                    false,
+                    false);
+            assertFalse(((javax.swing.JComponent) unselected).isOpaque());
+        });
     }
 
     /// A blocked remote texture request never blocks the EDT and eventually paints the downloaded head.
@@ -305,6 +334,23 @@ public final class AccountListCellRendererTest {
                 layoutRecursively(nested);
             }
         }
+    }
+
+    /// Returns whether a hierarchy contains one Swing component type.
+    ///
+    /// @param root hierarchy root
+    /// @param type component type to locate
+    /// @return whether a matching descendant exists
+    private static boolean containsComponentType(Container root, Class<? extends Component> type) {
+        for (Component child : root.getComponents()) {
+            if (type.isInstance(child)) {
+                return true;
+            }
+            if (child instanceof Container nested && containsComponentType(nested, type)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// Finds one named label without reflecting into renderer fields.

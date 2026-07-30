@@ -692,7 +692,8 @@ class SwingApplicationCompositionTest {
                 new HomeStrings(
                         "Home", "Account", "None", "Instance", "None", "Add", "Export", "Launch", "Launching", "Back"),
                 new HomeStatusStrings("Ready", "Select account", "Select instance", "Exporting"),
-                new InstancesStrings("Instances", "Refresh", "Refreshing", "Add", "Manage", "Empty"),
+                new InstancesStrings(
+                        "Instances", "Search", "Refresh", "Refreshing", "Add", "Manage", "Empty", "No matches"),
                 new RepositoryInstancesStatusStrings("Loading", "Ready", "Refreshing", "Failed", "Unknown"),
                 new SchematicInstanceManagementStrings(
                         "Instances", "Return to instances", "Resolving schematics", "Resolution failed", "Retry"),

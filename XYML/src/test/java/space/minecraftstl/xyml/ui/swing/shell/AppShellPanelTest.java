@@ -48,6 +48,7 @@ import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstanceListItem;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstanceSearchEntry;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementEdit;
@@ -790,6 +791,12 @@ public final class AppShellPanelTest {
         @Override
         public OptionalInt exactItemCount() {
             return OptionalInt.of(0);
+        }
+
+        /// Returns the exact empty instance search index.
+        @Override
+        public @Unmodifiable List<InstanceSearchEntry> searchEntries() {
+            return List.of();
         }
 
         /// Completes an empty clamped range immediately.

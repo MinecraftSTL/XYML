@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -35,11 +36,16 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
+import javax.swing.JTextField;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Font;
+import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletionStage;
@@ -62,8 +68,14 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
     /// Card name used for an empty exact source.
     private static final String EMPTY_CARD = "empty";
 
+    /// Card name used when the current search hides every installed instance.
+    private static final String NO_SEARCH_RESULTS_CARD = "no-search-results";
+
     /// Toolkit-neutral instance source and command model.
     private final InstancesModel model;
+
+    /// View-local name-and-ID projection that preserves viewport-driven row loading.
+    private final FilteredInstancesDataSource filteredSource;
 
     /// Localized page text.
     private final InstancesStrings strings;
@@ -73,6 +85,9 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
 
     /// Viewport-measured single-choice list.
     private final ViewportChoiceList<InstanceListItem> choiceList;
+
+    /// Visible instance-name search field.
+    private final JTextField searchField = new JTextField();
 
     /// Stable workspace containing the list toolbar, lazy list, and status controls.
     private final JPanel instancesWorkspace = new JPanel(new MigLayout(
@@ -128,17 +143,41 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         }
     };
 
+    /// Listener that updates only the cheap search-index projection for any text edit.
+    private final DocumentListener searchListener = new DocumentListener() {
+        /// Applies an inserted query fragment.
+        @Override
+        public void insertUpdate(DocumentEvent event) {
+            scheduleSearchChanged();
+        }
+
+        /// Applies a removed query fragment.
+        @Override
+        public void removeUpdate(DocumentEvent event) {
+            scheduleSearchChanged();
+        }
+
+        /// Applies an attribute change for document implementations that publish one.
+        @Override
+        public void changedUpdate(DocumentEvent event) {
+            scheduleSearchChanged();
+        }
+    };
+
     /// Snapshot currently represented by controls, or null before initialization.
     private @Nullable InstancesSnapshot displayedSnapshot;
 
     /// User-selected logical row waiting for its loaded value, or -1 when none is pending.
     private int pendingUserSelectionIndex = -1;
 
-    /// Loaded user selection awaiting a matching model snapshot, or -1 when none is pending.
-    private int pendingModelSelectionIndex = -1;
+    /// Loaded user selection awaiting a matching model snapshot, or null when none is pending.
+    private @Nullable String pendingModelSelectionId;
 
     /// Whether programmatic selection restoration is suppressing command delegation.
     private boolean applyingSnapshot;
+
+    /// Whether one coalesced search update is already queued behind the current document mutation.
+    private boolean searchUpdateQueued;
 
     /// Cross-thread gate preventing queued model updates after close begins.
     private volatile boolean closed;
@@ -160,7 +199,8 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.managementCoordinator = Objects.requireNonNull(managementCoordinator, "managementCoordinator");
-        choiceList = new ViewportChoiceList<>(model, new InstanceListCellRenderer());
+        filteredSource = new FilteredInstancesDataSource(model);
+        choiceList = new ViewportChoiceList<>(filteredSource, new InstanceListCellRenderer());
 
         @Nullable Subscription createdModelSubscription = null;
         @Nullable Subscription createdManagementHostLease = null;
@@ -182,6 +222,9 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
             cleanupFailure = attempt(
                     cleanupFailure,
                     () -> choiceList.getChoiceModel().removeListDataListener(listDataListener));
+            cleanupFailure = attempt(
+                    cleanupFailure,
+                    () -> searchField.getDocument().removeDocumentListener(searchListener));
             cleanupFailure = attempt(cleanupFailure, choiceList::close);
             rethrowUnchecked(Objects.requireNonNull(cleanupFailure));
             throw new AssertionError("Unchecked construction failure was not rethrown");
@@ -233,7 +276,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
 
         JPanel toolbar = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[grow,fill][]12[]",
+                "[grow,fill][160:280:360,fill]12[]12[]",
                 "[]"));
         toolbar.setOpaque(false);
 
@@ -241,6 +284,12 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         heading.setName("instancesPageTitle");
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 28.0F));
         toolbar.add(heading);
+
+        searchField.setName("instancesSearch");
+        searchField.putClientProperty("JTextField.placeholderText", strings.searchText());
+        searchField.getAccessibleContext().setAccessibleName(strings.searchText());
+        searchField.getDocument().addDocumentListener(searchListener);
+        toolbar.add(searchField, "h 40!");
 
         refreshButton.setName("instancesRefresh");
         refreshButton.setText(strings.refreshAction());
@@ -273,7 +322,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         list.addListSelectionListener(event -> {
             if (!closed && !event.getValueIsAdjusting() && !applyingSnapshot) {
                 pendingUserSelectionIndex = list.getSelectedIndex();
-                pendingModelSelectionIndex = -1;
+                pendingModelSelectionId = null;
                 manageButton.setEnabled(false);
                 submitPendingUserSelection();
             }
@@ -282,8 +331,11 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
 
         JLabel emptyLabel = new JLabel(strings.emptyText(), SwingConstants.CENTER);
         emptyLabel.setName("instancesEmpty");
+        JLabel noSearchResultsLabel = new JLabel(strings.noSearchResultsText(), SwingConstants.CENTER);
+        noSearchResultsLabel.setName("instancesNoSearchResults");
         listCards.add(choiceList, LIST_CARD);
         listCards.add(emptyLabel, EMPTY_CARD);
+        listCards.add(noSearchResultsLabel, NO_SEARCH_RESULTS_CARD);
         instancesWorkspace.add(listCards, "grow");
 
         JPanel statusBand = new JPanel(new MigLayout(
@@ -334,32 +386,44 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
 
         if (contentChanged) {
             pendingUserSelectionIndex = -1;
-            pendingModelSelectionIndex = -1;
+            pendingModelSelectionId = null;
+            filteredSource.refreshSource();
             choiceList.reloadData();
         }
 
-        if (pendingModelSelectionIndex >= 0
-                && snapshot.selectedIndex().orElse(-1) == pendingModelSelectionIndex) {
-            pendingModelSelectionIndex = -1;
+        @Nullable String selectedInstanceId = selectedInstanceId(snapshot);
+        if (pendingModelSelectionId != null
+                && pendingModelSelectionId.equals(selectedInstanceId)) {
+            pendingModelSelectionId = null;
         }
+
+        OptionalInt visibleSelectedIndex = selectedInstanceId == null
+                ? OptionalInt.empty()
+                : filteredSource.displayIndexOf(selectedInstanceId);
 
         ((CardLayout) listCards.getLayout()).show(
                 listCards,
-                snapshot.itemCount() == 0 ? EMPTY_CARD : LIST_CARD);
-        if (pendingUserSelectionIndex < 0 && pendingModelSelectionIndex < 0) {
-            restoreSelection(snapshot.selectedIndex());
+                snapshot.itemCount() == 0
+                        ? EMPTY_CARD
+                        : filteredSource.exactItemCount().orElseThrow() == 0
+                                ? NO_SEARCH_RESULTS_CARD
+                                : LIST_CARD);
+        if (pendingUserSelectionIndex < 0 && pendingModelSelectionId == null) {
+            restoreSelection(visibleSelectedIndex);
         }
 
         choiceList.setEnabled(snapshot.listEnabled());
         choiceList.getList().setEnabled(snapshot.listEnabled());
+        searchField.setEnabled(snapshot.listEnabled());
         refreshButton.setText(snapshot.refreshing()
                 ? strings.refreshingAction()
                 : strings.refreshAction());
         refreshButton.setEnabled(snapshot.refreshEnabled());
         addButton.setEnabled(snapshot.addEnabled());
         manageButton.setEnabled(snapshot.manageEnabled()
+                && visibleSelectedIndex.isPresent()
                 && pendingUserSelectionIndex < 0
-                && pendingModelSelectionIndex < 0);
+                && pendingModelSelectionId == null);
         statusLabel.setText(snapshot.statusText());
         statusLabel.setToolTipText(snapshot.statusText());
     }
@@ -399,10 +463,50 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
 
         @Nullable InstanceListItem selected = choiceList.getSelectedValue();
         if (selected != null) {
-            pendingModelSelectionIndex = pendingUserSelectionIndex;
+            pendingModelSelectionId = selected.id();
             pendingUserSelectionIndex = -1;
             model.selectInstance(selected.id());
         }
+    }
+
+    /// Coalesces compound document mutations such as `setText` into one filtered-list reload.
+    private void scheduleSearchChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || searchUpdateQueued) {
+            return;
+        }
+        searchUpdateQueued = true;
+        SwingUtilities.invokeLater(this::applySearchQuery);
+    }
+
+    /// Applies the latest user query to the cheap search index without resolving hidden row details.
+    private void applySearchQuery() {
+        EdtDispatcher.requireEventDispatchThread();
+        searchUpdateQueued = false;
+        if (closed || !filteredSource.setQuery(searchField.getText())) {
+            return;
+        }
+        pendingUserSelectionIndex = -1;
+        pendingModelSelectionId = null;
+        choiceList.reloadData();
+        @Nullable InstancesSnapshot snapshot = displayedSnapshot;
+        if (snapshot != null) {
+            applySnapshot(snapshot);
+        }
+    }
+
+    /// Resolves the model's selected source index to its stable repository identifier.
+    ///
+    /// @param snapshot current model snapshot
+    /// @return selected stable identifier, or null when selection is absent or inconsistent
+    private @Nullable String selectedInstanceId(InstancesSnapshot snapshot) {
+        OptionalInt selectedIndex = snapshot.selectedIndex();
+        if (selectedIndex.isEmpty()) {
+            return null;
+        }
+        @Unmodifiable List<String> stableIds = model.stableItemIds();
+        int index = selectedIndex.getAsInt();
+        return index < stableIds.size() ? stableIds.get(index) : null;
     }
 
     /// Attempts all owned cleanup in deterministic order on the EDT.
@@ -413,9 +517,10 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         }
         resourcesClosed = true;
         pendingUserSelectionIndex = -1;
-        pendingModelSelectionIndex = -1;
+        pendingModelSelectionId = null;
         choiceList.setEnabled(false);
         choiceList.getList().setEnabled(false);
+        searchField.setEnabled(false);
         refreshButton.setEnabled(false);
         addButton.setEnabled(false);
         manageButton.setEnabled(false);
@@ -426,6 +531,9 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         failure = attempt(
                 failure,
                 () -> choiceList.getChoiceModel().removeListDataListener(listDataListener));
+        failure = attempt(
+                failure,
+                () -> searchField.getDocument().removeDocumentListener(searchListener));
         failure = attempt(failure, choiceList::close);
         if (failure != null) {
             rethrowUnchecked(failure);

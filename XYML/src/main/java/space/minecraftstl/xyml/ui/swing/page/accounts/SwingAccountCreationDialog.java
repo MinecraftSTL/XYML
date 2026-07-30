@@ -39,10 +39,10 @@ import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
-import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextField;
+import javax.swing.JToggleButton;
 import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
@@ -109,12 +109,12 @@ public final class SwingAccountCreationDialog extends JDialog
     private final JTextField offlineUuid = new JTextField();
 
     /// Microsoft browser-flow selector.
-    private final JRadioButton microsoftBrowser = new JRadioButton(
+    private final JToggleButton microsoftBrowser = new JToggleButton(
             i18n("account.methods.microsoft.methods.browser"),
             true);
 
     /// Microsoft device-code selector.
-    private final JRadioButton microsoftDevice = new JRadioButton(
+    private final JToggleButton microsoftDevice = new JToggleButton(
             i18n("account.methods.microsoft.methods.device"));
 
     /// Authlib-injector server choices loaded away from the EDT.
@@ -434,17 +434,39 @@ public final class SwingAccountCreationDialog extends JDialog
     /// @return Microsoft form panel
     private JPanel createMicrosoftPanel() {
         JPanel panel = formPanel();
-        ButtonGroup group = new ButtonGroup();
-        group.add(microsoftBrowser);
-        group.add(microsoftDevice);
         panel.add(new JLabel(i18n("account.methods")));
-        JPanel choices = new JPanel(new MigLayout("insets 0", "[]16[]", "[]"));
-        choices.add(microsoftBrowser);
-        choices.add(microsoftDevice);
+        JPanel choices = createMicrosoftModeChoices(microsoftBrowser, microsoftDevice);
         panel.add(choices, "growx, wrap");
         JLabel hint = new JLabel("<html>" + i18n("account.methods.microsoft.hint") + "</html>");
         panel.add(hint, "span 2, growx, wrap");
         return panel;
+    }
+
+    /// Creates a mutually exclusive FlatLaf segmented control for Microsoft grant modes.
+    ///
+    /// This package-visible helper keeps the non-window control testable in headless builds.
+    ///
+    /// @param browser browser-based OAuth mode button
+    /// @param device device-code mode button
+    /// @return transparent two-segment control host
+    static JPanel createMicrosoftModeChoices(JToggleButton browser, JToggleButton device) {
+        JToggleButton validatedBrowser = Objects.requireNonNull(browser, "browser");
+        JToggleButton validatedDevice = Objects.requireNonNull(device, "device");
+        validatedBrowser.setName("accountMicrosoftBrowserMode");
+        validatedDevice.setName("accountMicrosoftDeviceMode");
+        validatedBrowser.putClientProperty("JButton.buttonType", "segmented");
+        validatedDevice.putClientProperty("JButton.buttonType", "segmented");
+        validatedBrowser.putClientProperty("JButton.segmentPosition", "first");
+        validatedDevice.putClientProperty("JButton.segmentPosition", "last");
+
+        ButtonGroup group = new ButtonGroup();
+        group.add(validatedBrowser);
+        group.add(validatedDevice);
+        JPanel choices = new JPanel(new MigLayout("insets 0, gap 0", "[][]", "[]"));
+        choices.setOpaque(false);
+        choices.add(validatedBrowser);
+        choices.add(validatedDevice);
+        return choices;
     }
 
     /// Creates authlib-injector server and credential fields.

@@ -29,7 +29,6 @@ import javax.swing.ImageIcon;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
-import javax.swing.JRadioButton;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingConstants;
 import javax.swing.UIManager;
@@ -48,7 +47,7 @@ import java.awt.image.BufferedImage;
 import java.util.Map;
 import java.util.WeakHashMap;
 
-/// Renders one installed-instance row with a stable icon, name, detail, and optional selection indicator.
+/// Renders one installed-instance row with a stable icon, name, detail, and full-row selection highlight.
 ///
 /// The same 64-pixel row geometry is used for loaded, loading, and failed sparse entries. Icon
 /// conversion is EDT-confined and weakly cached so scrolling does not repeatedly copy pixel data
@@ -74,28 +73,12 @@ public final class InstanceListCellRenderer extends JPanel
     /// Secondary version or loader label.
     private final JLabel detailLabel = new JLabel();
 
-    /// Explicit single-choice state indicator.
-    private final JRadioButton selectionIndicator = new JRadioButton();
-
-    /// Whether this renderer exposes a radio indicator in addition to list selection highlighting.
-    private final boolean showSelectionIndicator;
-
     /// Weak EDT-confined cache of immutable pixels converted to Swing icons.
     private final Map<InstanceIconData, Icon> iconCache = new WeakHashMap<>();
 
     /// Creates the stable reusable instance renderer hierarchy.
     public InstanceListCellRenderer() {
-        this(true);
-    }
-
-    /// Creates a stable renderer with caller-selected selection-indicator visibility.
-    ///
-    /// Compact dropdowns should pass `false` because the collapsed button already displays the selected instance.
-    ///
-    /// @param showSelectionIndicator whether to render a trailing radio indicator
-    public InstanceListCellRenderer(boolean showSelectionIndicator) {
         super(new BorderLayout(12, 0));
-        this.showSelectionIndicator = showSelectionIndicator;
         setOpaque(false);
         setPreferredSize(new Dimension(280, ROW_HEIGHT));
 
@@ -116,15 +99,8 @@ public final class InstanceListCellRenderer extends JPanel
         labels.add(nameLabel);
         labels.add(detailLabel);
 
-        selectionIndicator.setName("instanceListSelection");
-        selectionIndicator.setOpaque(false);
-        selectionIndicator.setFocusable(false);
-        selectionIndicator.setHorizontalAlignment(SwingConstants.CENTER);
-        selectionIndicator.setVisible(showSelectionIndicator);
-
         add(iconLabel, BorderLayout.LINE_START);
         add(labels, BorderLayout.CENTER);
-        add(selectionIndicator, BorderLayout.LINE_END);
     }
 
     /// Configures the reusable hierarchy for one sparse instance row.
@@ -148,7 +124,6 @@ public final class InstanceListCellRenderer extends JPanel
         Font baseFont = list.getFont();
         nameLabel.setFont(baseFont.deriveFont(Font.BOLD));
         detailLabel.setFont(baseFont.deriveFont(Math.max(9.0F, baseFont.getSize2D() - 1.0F)));
-        selectionIndicator.setSelected(showSelectionIndicator && isSelected);
         setToolTipText(null);
 
         @Nullable InstanceListItem item = entry.value();
@@ -156,19 +131,16 @@ public final class InstanceListCellRenderer extends JPanel
             nameLabel.setText(item.name());
             detailLabel.setText(item.detail().isBlank() ? " " : item.detail());
             iconLabel.setIcon(iconFor(item.icon()));
-            selectionIndicator.setEnabled(list.isEnabled());
         } else if (entry.status() == ChoiceLoadStatus.ERROR) {
             nameLabel.setText("!");
             detailLabel.setText(" ");
             iconLabel.setIcon(ERROR_ICON);
-            selectionIndicator.setEnabled(false);
             @Nullable Throwable failure = entry.failure();
             setToolTipText(failure == null ? null : failure.getMessage());
         } else {
             nameLabel.setText("...");
             detailLabel.setText(" ");
             iconLabel.setIcon(LOADING_ICON);
-            selectionIndicator.setEnabled(false);
         }
         return this;
     }
@@ -189,8 +161,6 @@ public final class InstanceListCellRenderer extends JPanel
         setForeground(foreground);
         nameLabel.setForeground(foreground);
         detailLabel.setForeground(foreground);
-        selectionIndicator.setForeground(foreground);
-
         @Nullable Border lafBorder = UIManager.getBorder(focused
                 ? "List.focusCellHighlightBorder"
                 : "List.cellNoFocusBorder");

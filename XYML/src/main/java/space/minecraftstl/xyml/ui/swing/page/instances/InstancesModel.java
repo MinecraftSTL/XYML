@@ -18,9 +18,12 @@
 package space.minecraftstl.xyml.ui.swing.page.instances;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.IdentifiedChoiceDataSource;
+
+import java.util.List;
 
 /// Supplies installed-instance state, viewport data, and commands without exposing JavaFX or Swing types.
 ///
@@ -39,6 +42,15 @@ public interface InstancesModel extends IdentifiedChoiceDataSource<InstanceListI
     /// @param listener snapshot transition listener
     /// @return independently cancellable listener registration
     Subscription subscribe(ValueChangeListener<InstancesSnapshot> listener);
+
+    /// Returns cheap searchable identities in the exact current source order.
+    ///
+    /// Entries must align one-for-one with [#stableItemIds()] and must not resolve icons, inspect archives, or
+    /// perform other row-detail I/O. This separate index lets a view search user-visible names without loading
+    /// every installed instance.
+    ///
+    /// @return immutable current search index
+    @Unmodifiable List<InstanceSearchEntry> searchEntries();
 
     /// Selects a loaded instance by its stable repository identifier.
     ///
