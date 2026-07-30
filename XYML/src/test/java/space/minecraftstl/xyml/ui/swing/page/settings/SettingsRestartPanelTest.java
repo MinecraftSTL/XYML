@@ -87,6 +87,34 @@ public final class SettingsRestartPanelTest {
         });
     }
 
+    /// Corner-radius rows use the same baseline and enabled-state contract as the general restart row.
+    @Test
+    public void tracksCornerRadiusBaseline() {
+        RecordingRestartCommand command = new RecordingRestartCommand();
+        SettingsRestartPanel panel = onEventDispatchThread(
+                () -> new SettingsRestartPanel(STRINGS, command, active -> { }));
+
+        onEventDispatchThread(() -> {
+            JButton restart = findComponent(panel, "settingsRestartAction", JButton.class);
+            JLabel status = findComponent(panel, "settingsRestartStatus", JLabel.class);
+            panel.updateCornerRadius(6);
+            assertAll(
+                    () -> assertFalse(panel.isRestartRequired()),
+                    () -> assertFalse(restart.isEnabled()),
+                    () -> assertEquals(STRINGS.promptText(), status.getText()));
+
+            panel.updateCornerRadius(9);
+            assertAll(
+                    () -> assertTrue(panel.isRestartRequired()),
+                    () -> assertTrue(restart.isEnabled()),
+                    () -> assertEquals(STRINGS.requiredText(), status.getText()));
+
+            panel.updateCornerRadius(6);
+            assertFalse(restart.isEnabled());
+            panel.close();
+        });
+    }
+
     /// A failed injected command restores the restart action and never invokes a real process launcher.
     @Test
     public void exposesProgressAndAllowsRetryAfterFailure() {

@@ -31,17 +31,22 @@ import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.AbstractButton;
+import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JLabel;
 import javax.swing.JSlider;
+import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.image.BufferedImage;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -102,6 +107,70 @@ public final class AppearanceSettingsPanelTest {
 
             slider.setValueIsAdjusting(false);
             assertEquals(9, model.snapshot().cornerRadius());
+            panel.close();
+        });
+    }
+
+    /// The appearance restart row sits below the slider and activates only after the radius leaves its baseline.
+    @Test
+    public void showsCornerRadiusRestartActionBelowSlider() {
+        FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                ThemeBrightnessPreference.SYSTEM, 6, true, true));
+        AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
+        SettingsRestartStrings restartStrings = new SettingsRestartStrings(
+                "Applies After Restart",
+                "Changes saved. Restart to apply them.",
+                "Restart Now",
+                "Restarting",
+                "Restart failed");
+        CompletableFuture<@Nullable Void> restartCompletion = new CompletableFuture<>();
+
+        onEventDispatchThread(() -> {
+            panel.attachCornerRadiusRestartPanel(
+                    restartStrings,
+                    owner -> restartCompletion,
+                    active -> { });
+            panel.setSize(new Dimension(760, 900));
+            layoutRecursively(panel);
+
+            SettingsRestartPanel restartPanel = findComponent(
+                    panel,
+                    "appearanceCornerRadiusRestart",
+                    SettingsRestartPanel.class);
+            JSlider slider = findComponent(panel, "appearanceCornerRadius", JSlider.class);
+            JButton restart = findComponent(restartPanel, "settingsRestartAction", JButton.class);
+            JLabel status = findComponent(restartPanel, "settingsRestartStatus", JLabel.class);
+            Point restartLocation = SwingUtilities.convertPoint(
+                    restartPanel.getParent(),
+                    restartPanel.getLocation(),
+                    panel);
+            Point sliderLocation = SwingUtilities.convertPoint(
+                    slider.getParent(),
+                    slider.getLocation(),
+                    panel);
+            assertAll(
+                    () -> assertTrue(
+                            restartLocation.y >= sliderLocation.y + slider.getHeight(),
+                            () -> "restart=" + restartLocation + ", slider=" + sliderLocation),
+                    () -> assertEquals(sliderLocation.x, restartLocation.x),
+                    () -> assertFalse(restart.isEnabled()),
+                    () -> assertEquals(restartStrings.promptText(), status.getText()));
+
+            slider.setValue(9);
+            assertAll(
+                    () -> assertTrue(restart.isEnabled()),
+                    () -> assertEquals(restartStrings.requiredText(), status.getText()));
+
+            restart.doClick();
+            assertAll(
+                    () -> assertFalse(slider.isEnabled()),
+                    () -> assertFalse(restart.isEnabled()),
+                    () -> assertEquals(restartStrings.inProgressText(), status.getText()));
+            restartCompletion.completeExceptionally(new IllegalStateException("expected restart failure"));
+            assertAll(
+                    () -> assertTrue(slider.isEnabled()),
+                    () -> assertTrue(restart.isEnabled()),
+                    () -> assertEquals(restartStrings.failedText(), status.getText()));
             panel.close();
         });
     }

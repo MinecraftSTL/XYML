@@ -31,7 +31,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Consumer;
 
-/// Presents one shared restart action for launcher language and April Fools settings.
+/// Presents one shared restart action for settings whose persisted value is initialized at launcher startup.
 @NotNullByDefault
 final class SettingsRestartPanel extends JPanel implements AutoCloseable {
     /// Localized text for every restart state.
@@ -54,6 +54,18 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
 
     /// April Fools suppression active when this settings surface first observed process state.
     private @Nullable Boolean baselineAprilFoolsDisabled;
+
+    /// Corner radius active when this settings surface first observed process state.
+    private @Nullable Integer baselineCornerRadius;
+
+    /// Latest launcher language supplied to the general restart tracker.
+    private @Nullable SupportedLocale currentLanguage;
+
+    /// Latest April Fools value supplied to the general restart tracker.
+    private @Nullable Boolean currentAprilFoolsDisabled;
+
+    /// Latest corner radius supplied to the appearance restart tracker.
+    private @Nullable Integer currentCornerRadius;
 
     /// Whether settings persistence currently permits restart-sensitive edits.
     private boolean available = true;
@@ -104,9 +116,21 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
             baselineLanguage = validatedLanguage;
             baselineAprilFoolsDisabled = aprilFoolsDisabled;
         }
-        restartRequired = !Objects.equals(baselineLanguage, validatedLanguage)
-                || !Objects.equals(baselineAprilFoolsDisabled, aprilFoolsDisabled);
-        updatePresentation();
+        currentLanguage = validatedLanguage;
+        currentAprilFoolsDisabled = aprilFoolsDisabled;
+        updateRestartRequired();
+    }
+
+    /// Tracks the corner radius against the process baseline for an appearance-specific restart row.
+    ///
+    /// @param cornerRadius current persisted corner radius
+    void updateCornerRadius(int cornerRadius) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (baselineCornerRadius == null) {
+            baselineCornerRadius = cornerRadius;
+        }
+        currentCornerRadius = cornerRadius;
+        updateRestartRequired();
     }
 
     /// Enables or disables the restart action according to persistent-settings availability.
@@ -184,5 +208,23 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
             statusLabel.setText(restartRequired ? strings.requiredText() : strings.promptText());
         }
         restartButton.setEnabled(!closed && available && restartRequired && !restarting);
+    }
+
+    /// Recomputes whether any baseline value tracked by this row requires a restart.
+    ///
+    /// A row normally tracks either the general language pair or the appearance radius. Keeping the checks in one
+    /// place lets both rows share identical button and progress behavior without resetting the other row's baseline.
+    private void updateRestartRequired() {
+        boolean generalChanged = currentLanguage != null
+                && baselineLanguage != null
+                && baselineAprilFoolsDisabled != null
+                && currentAprilFoolsDisabled != null
+                && (!Objects.equals(baselineLanguage, currentLanguage)
+                || !Objects.equals(baselineAprilFoolsDisabled, currentAprilFoolsDisabled));
+        boolean radiusChanged = currentCornerRadius != null
+                && baselineCornerRadius != null
+                && !Objects.equals(baselineCornerRadius, currentCornerRadius);
+        restartRequired = generalChanged || radiusChanged;
+        updatePresentation();
     }
 }

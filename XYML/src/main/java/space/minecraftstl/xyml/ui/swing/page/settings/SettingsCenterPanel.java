@@ -222,6 +222,10 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 localizedRestartStrings(),
                 restartCommand,
                 this::restartActivityChanged);
+        appearancePanel.attachCornerRadiusRestartPanel(
+                localizedCornerRadiusRestartStrings(),
+                restartCommand,
+                this::restartActivityChanged);
         languageBox = new JComboBox<>(new DefaultComboBoxModel<>(
                 SupportedLocale.getSupportedLocales().toArray(SupportedLocale[]::new)));
         javaManagementPanel = new JavaManagementPanel(new JavaManagerRuntimeManagementService());
@@ -832,7 +836,8 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         previewUpdatesBox.setEnabled(interactive);
         disableUpdatePromptBox.setEnabled(interactive);
         disableAprilFoolsBox.setEnabled(interactive);
-        restartPanel.setAvailable(enabled);
+        restartPanel.setAvailable(interactive);
+        appearancePanel.setRestartInProgress(restartInProgress);
         commonDirectoryTypeBox.setEnabled(interactive);
         chooseDirectoryButton.setEnabled(interactive);
         automaticThreadsBox.setEnabled(interactive);
@@ -887,8 +892,23 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     ///
     /// @return localized shared restart presentation
     private static SettingsRestartStrings localizedRestartStrings() {
+        return localizedRestartStrings("settings.restart.prompt");
+    }
+
+    /// Creates localized restart copy for appearance changes whose status text is shared by all locales.
+    ///
+    /// @return localized corner-radius restart presentation
+    private static SettingsRestartStrings localizedCornerRadiusRestartStrings() {
+        return localizedRestartStrings("settings.take_effect_after_restart");
+    }
+
+    /// Creates localized restart copy from one prompt key and the shared restart action keys.
+    ///
+    /// @param promptKey localized text shown before a restart-sensitive change
+    /// @return localized restart presentation
+    private static SettingsRestartStrings localizedRestartStrings(String promptKey) {
         return new SettingsRestartStrings(
-                i18n("settings.restart.prompt"),
+                i18n(Objects.requireNonNull(promptKey, "promptKey")),
                 i18n("settings.restart.required"),
                 i18n("settings.restart.action"),
                 i18n("settings.restart.in_progress"),
