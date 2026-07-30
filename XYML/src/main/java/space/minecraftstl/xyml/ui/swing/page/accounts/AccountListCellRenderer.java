@@ -89,7 +89,7 @@ public final class AccountListCellRenderer extends JPanel
     public AccountListCellRenderer(boolean showSelectionIndicator) {
         super(new BorderLayout(12, 0));
         this.showSelectionIndicator = showSelectionIndicator;
-        setOpaque(true);
+        setOpaque(false);
         setPreferredSize(new Dimension(280, ROW_HEIGHT));
 
         Dimension avatarSize = new Dimension(

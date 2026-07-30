@@ -208,10 +208,24 @@ public final class AppShellPanelTest {
                         () -> assertNotNull(toolbar.brandLabel().getIcon()),
                         () -> assertEquals(testHomeStrings().launchAction(),
                                 toolbar.launchButton().getAccessibleContext().getAccessibleName()),
-                        () -> assertNull(toolbar.accountSelector().valueButton()
-                                .getClientProperty("JButton.buttonType")),
-                        () -> assertNull(toolbar.instanceSelector().valueButton()
-                                .getClientProperty("JButton.buttonType")),
+                        () -> assertEquals(
+                                FlatClientProperties.BUTTON_TYPE_BORDERLESS,
+                                toolbar.gameDirectorySelector().valueButton()
+                                        .getClientProperty(FlatClientProperties.BUTTON_TYPE)),
+                        () -> assertEquals(
+                                FlatClientProperties.BUTTON_TYPE_BORDERLESS,
+                                toolbar.accountSelector().valueButton()
+                                        .getClientProperty(FlatClientProperties.BUTTON_TYPE)),
+                        () -> assertEquals(
+                                FlatClientProperties.BUTTON_TYPE_BORDERLESS,
+                                toolbar.instanceSelector().valueButton()
+                                        .getClientProperty(FlatClientProperties.BUTTON_TYPE)),
+                        () -> assertFalse(toolbar.gameDirectorySelector().valueButton().isOpaque()),
+                        () -> assertFalse(toolbar.accountSelector().valueButton().isOpaque()),
+                        () -> assertFalse(toolbar.instanceSelector().valueButton().isOpaque()),
+                        () -> assertTrue(toolbar.gameDirectorySelector().valueButton().isContentAreaFilled()),
+                        () -> assertTrue(toolbar.accountSelector().valueButton().isContentAreaFilled()),
+                        () -> assertTrue(toolbar.instanceSelector().valueButton().isContentAreaFilled()),
                         () -> assertNull(toolbar.launchButton().getClientProperty("JButton.buttonType")),
                         () -> assertEquals(1, toolbar.accountSelector().getComponentCount()),
                         () -> assertEquals(1, toolbar.instanceSelector().getComponentCount()),

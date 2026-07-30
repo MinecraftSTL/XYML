@@ -38,6 +38,7 @@ import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
@@ -332,6 +333,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
                 this::chooseOutput);
 
         fileTree.setName("modpackExportFiles");
+        fileTree.setOpaque(false);
         fileTree.setRootVisible(false);
         fileTree.setShowsRootHandles(true);
         fileTree.getSelectionModel().setSelectionMode(
@@ -366,6 +368,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
                 createFileSelectionSurface(),
                 createMetadataSurface());
         split.setName("modpackExportSplit");
+        split.setOpaque(false);
         split.setBorder(BorderFactory.createEmptyBorder());
         split.setContinuousLayout(true);
         split.setResizeWeight(0.52D);
@@ -386,6 +389,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         JScrollPane scroll = new JScrollPane(fileTree);
         scroll.setName("modpackExportFilesScroll");
         scroll.setBorder(BorderFactory.createEmptyBorder());
+        SwingTransparency.revealBackgroundThroughScrollPane(scroll);
         files.add(scroll, BorderLayout.CENTER);
         return files;
     }

@@ -35,6 +35,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -59,6 +60,9 @@ public final class ViewportChoiceListTest {
                     list, secondEntry, 1, false, false);
 
             assertEquals(ListSelectionModel.SINGLE_SELECTION, list.getSelectionMode());
+            assertFalse(choiceList.isOpaque());
+            assertFalse(choiceList.getViewport().isOpaque());
+            assertFalse(list.isOpaque());
             assertTrue(list.getFixedCellHeight() > 0);
             assertSame(firstComponent, secondComponent);
             choiceList.close();

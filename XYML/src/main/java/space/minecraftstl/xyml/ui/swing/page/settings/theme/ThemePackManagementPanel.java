@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.theme.ThemeReference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
@@ -157,6 +158,7 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
         choiceList = new ViewportChoiceList<>(this.model, itemRenderer);
 
         setName("themePackManagementPanel");
+        setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder());
         add(createHeader(), java.awt.BorderLayout.NORTH);
         add(createListSurface(), java.awt.BorderLayout.CENTER);
@@ -243,7 +245,9 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
     /// Creates the unframed adaptive theme choice list.
     private JComponent createListSurface() {
         choiceList.setName("themePacksChoiceList");
+        SwingTransparency.revealBackgroundThroughScrollPane(choiceList);
         choiceList.getList().setName("themePacksList");
+        choiceList.getList().setOpaque(false);
         choiceList.getList().setVisibleRowCount(0);
         choiceList.getList().getAccessibleContext().setAccessibleName(strings.title());
         return choiceList;
@@ -577,6 +581,7 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
             super(new java.awt.BorderLayout(12, 0));
             this.strings = Objects.requireNonNull(strings, "strings");
             setPreferredSize(new Dimension(320, ROW_HEIGHT));
+            setOpaque(false);
             setBorder(BorderFactory.createEmptyBorder(7, 10, 7, 10));
             primary.setName("themePackRowPrimary");
             secondary.setName("themePackRowSecondary");
@@ -609,6 +614,7 @@ public final class ThemePackManagementPanel extends JPanel implements AutoClosea
                 boolean isSelected,
                 boolean cellHasFocus) {
             setComponentOrientation(list.getComponentOrientation());
+            setOpaque(isSelected);
             Color background = isSelected ? list.getSelectionBackground() : list.getBackground();
             Color foreground = isSelected ? list.getSelectionForeground() : list.getForeground();
             setBackground(background);

@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.setting.GameDirectoryID;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.util.PortablePath;
 
@@ -206,6 +207,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
 
     /// Configures the stable list, editor, and action controls.
     private void configureComponents() {
+        setOpaque(false);
         JPanel content = new JPanel(new MigLayout(
                 "insets 20, fill, wrap 1",
                 "[grow,fill]",
@@ -217,6 +219,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         add(content, BorderLayout.CENTER);
 
         directoryList.setName("gameDirectoryManagementList");
+        directoryList.setOpaque(false);
         directoryList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         directoryList.setCellRenderer((list, value, index, selected, focus) -> renderDirectory(list, value, selected));
         directoryList.addListSelectionListener(event -> {
@@ -267,6 +270,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         JScrollPane listScroll = new JScrollPane(directoryList);
         listScroll.setBorder(BorderFactory.createEmptyBorder());
         listScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        SwingTransparency.revealBackgroundThroughScrollPane(listScroll);
         content.add(listScroll, "grow, push");
         content.add(createEditor(), "grow, push");
         return content;
@@ -290,7 +294,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         editor.add(relativePathBox, "growx");
         JPanel actions = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]8[]8[]", "[]"));
         actions.setOpaque(false);
-        actions.add(new JPanel(), "growx");
+        actions.add(new JLabel(), "growx");
         actions.add(cancelButton);
         actions.add(saveButton);
         editor.add(actions, "growx");
@@ -313,7 +317,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
             text = marker + entry.displayName() + "\n" + entry.path().getPath();
         }
         JLabel label = new JLabel("<html>" + escapeHtml(text).replace("\n", "<br>") + "</html>");
-        label.setOpaque(true);
+        label.setOpaque(selected);
         label.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
         if (selected) {
             label.setBackground(list.getSelectionBackground());

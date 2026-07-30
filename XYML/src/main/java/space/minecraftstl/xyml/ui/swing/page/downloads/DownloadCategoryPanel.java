@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
@@ -91,7 +92,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
 
         categoryTabs = new JTabbedPane();
         categoryTabs.setName("downloadsCategoryTabs");
-        categoryTabs.setOpaque(false);
+        SwingTransparency.revealBackgroundThroughTabs(categoryTabs);
         categoryTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         localModpackImporter = new LocalModpackImportPanel(
                 Objects.requireNonNull(taskProgressStrings, "taskProgressStrings"),

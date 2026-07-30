@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.setting.DefaultIsolationType;
 import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
 import javax.swing.BorderFactory;
@@ -192,6 +193,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
 
     /// Builds the stable list, form, renderers, and action bindings.
     private void configureComponents() {
+        setOpaque(false);
         JPanel content = new JPanel(new MigLayout(
                 "insets 20, fill, wrap 1",
                 "[grow,fill]",
@@ -203,6 +205,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         add(content, BorderLayout.CENTER);
 
         presetList.setName("gameSettingsPresetList");
+        presetList.setOpaque(false);
         presetList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         presetList.setCellRenderer(presetRenderer());
         presetList.addListSelectionListener(event -> {
@@ -266,6 +269,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         JScrollPane listScrollPane = new JScrollPane(presetList);
         listScrollPane.setBorder(BorderFactory.createEmptyBorder());
         listScrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        SwingTransparency.revealBackgroundThroughScrollPane(listScrollPane);
         split.add(listScrollPane, "grow, push");
         split.add(createEditorScrollPane(), "grow, push");
         return split;
@@ -299,6 +303,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
         scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
         return scrollPane;
     }
 
@@ -343,7 +348,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         return (list, value, index, selected, focus) -> comboRenderer(list, isolationText(value), selected);
     }
 
-    /// Creates a list-style label using the active Swing selection colors.
+    /// Creates a list-style label whose solid surface is limited to the active selection.
     ///
     /// @param list source list
     /// @param text visible item text
@@ -351,7 +356,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
     /// @return configured renderer label
     private static JLabel comboRenderer(JList<?> list, String text, boolean selected) {
         JLabel label = new JLabel(Objects.requireNonNull(text, "text"));
-        label.setOpaque(true);
+        label.setOpaque(selected);
         label.setBorder(BorderFactory.createEmptyBorder(5, 8, 5, 8));
         if (selected) {
             label.setBackground(list.getSelectionBackground());

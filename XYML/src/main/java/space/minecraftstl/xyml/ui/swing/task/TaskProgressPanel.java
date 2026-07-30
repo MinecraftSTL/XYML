@@ -307,6 +307,7 @@ public final class TaskProgressPanel extends JPanel implements AutoCloseable {
     private void configureComponents() {
         EdtDispatcher.requireEventDispatchThread();
 
+        setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder(20, 24, 20, 24));
         setPreferredSize(new Dimension(PREFERRED_WIDTH, PREFERRED_HEIGHT));
         setMinimumSize(new Dimension(MINIMUM_WIDTH, PREFERRED_HEIGHT));

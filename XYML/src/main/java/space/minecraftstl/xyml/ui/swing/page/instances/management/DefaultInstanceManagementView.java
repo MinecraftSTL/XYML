@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.addonupdates.AddonUpdatesPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.backups.WorldBackupsPanel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks.DataPackManagementPanel;
@@ -454,7 +455,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
         add(toolbar, "growx");
 
         tabs.setName("instanceManagementTabs");
-        tabs.setOpaque(false);
+        SwingTransparency.revealBackgroundThroughTabs(tabs);
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         addTransparentTab(overview.title(), overview);
         @Nullable InstanceLifecyclePanel currentLifecycle = lifecycle;

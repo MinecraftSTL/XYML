@@ -305,6 +305,7 @@ public final class TaskProgressPanelTest {
 
         BufferedImage image = onEventDispatchThread(() -> {
             Dimension size = panel.getPreferredSize();
+            assertFalse(panel.isOpaque());
             panel.setSize(size);
             layoutRecursively(panel);
 

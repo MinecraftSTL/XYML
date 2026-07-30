@@ -113,6 +113,7 @@ public final class LauncherLogPanel extends JPanel implements AutoCloseable {
 
     /// Configures the two restored diagnostic commands without initiating any file work.
     private void configureComponents() {
+        setOpaque(false);
         revealButton.setName("launcherLogReveal");
         exportButton.setName("launcherLogExport");
         revealButton.addActionListener(event -> revealLogDirectory());

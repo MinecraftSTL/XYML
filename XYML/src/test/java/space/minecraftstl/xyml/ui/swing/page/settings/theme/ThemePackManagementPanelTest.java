@@ -321,7 +321,7 @@ public final class ThemePackManagementPanelTest {
             graphics.dispose();
         }
         assertTrue(distinctColors(image).size() > 20);
-        assertTrue((image.getRGB(460, 310) >>> 24) != 0);
+        assertEquals(0, image.getRGB(460, 310) >>> 24);
         return image;
     }
 

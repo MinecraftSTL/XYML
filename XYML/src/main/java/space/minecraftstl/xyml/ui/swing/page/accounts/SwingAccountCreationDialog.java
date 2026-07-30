@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
 import javax.swing.BorderFactory;
@@ -379,6 +380,7 @@ public final class SwingAccountCreationDialog extends JDialog
                 "insets 20, fill",
                 "[grow,fill]",
                 "[][grow,fill][][pref!]"));
+        SwingTransparency.revealBackgroundThroughTabs(methodTabs);
         for (AccountCreationMethod method : displayedMethods) {
             methodTabs.addTab(methodTitle(method), switch (method) {
                 case OFFLINE -> createOfflinePanel();

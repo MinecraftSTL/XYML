@@ -264,6 +264,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
 
     /// Builds the stable unframed settings layout.
     private void configureComponents() {
+        setOpaque(false);
         configureBackgroundControls();
 
         JLabel heading = new JLabel(strings.pageTitle());

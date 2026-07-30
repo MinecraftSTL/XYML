@@ -106,6 +106,9 @@ public final class ViewportChoiceList<T extends Object> extends JScrollPane impl
         list = new JList<>(choiceModel);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setCellRenderer(this.renderer);
+        setOpaque(false);
+        getViewport().setOpaque(false);
+        list.setOpaque(false);
         measureRowHeight();
         list.addListSelectionListener(selectionListener);
         setViewportView(list);

@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
@@ -323,6 +324,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
 
     /// Builds both cards, shared status feedback, and the task progress host.
     private void configureComponents() {
+        setOpaque(false);
         mainView.setName("javaManagementMainView");
         mainView.setOpaque(false);
         mainView.add(createMainContent(), BorderLayout.CENTER);
@@ -397,6 +399,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         JScrollPane listScrollPane = new JScrollPane(runtimeList);
         listScrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         listScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        SwingTransparency.revealBackgroundThroughScrollPane(listScrollPane);
         split.add(listScrollPane, "grow, push");
         split.add(createDetailsPanel(), "grow, push");
         return split;
@@ -437,6 +440,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         JScrollPane scrollPane = new JScrollPane(disabledList);
         scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
         content.add(scrollPane, "grow, push");
         return content;
     }
@@ -463,6 +467,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// Configures active runtime list selection and rendering.
     private void configureRuntimeList() {
         runtimeList.setName("javaManagementRuntimeList");
+        runtimeList.setOpaque(false);
         runtimeList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         runtimeList.setCellRenderer((list, value, index, selected, focus) ->
                 runtimeRenderer(list, value, selected));
@@ -476,6 +481,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// Configures disabled runtime list selection and rendering.
     private void configureDisabledList() {
         disabledList.setName("javaManagementDisabledList");
+        disabledList.setOpaque(false);
         disabledList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         disabledList.setCellRenderer((list, value, index, selected, focus) ->
                 disabledRenderer(list, value, selected));
@@ -639,7 +645,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         return listLabel(list, text, selected);
     }
 
-    /// Creates one opaque list label with selection-aware colors.
+    /// Creates one list label whose solid background is reserved for selection.
     ///
     /// @param list source list
     /// @param text visible row text
@@ -647,7 +653,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// @return configured renderer label
     private static JLabel listLabel(JList<?> list, String text, boolean selected) {
         JLabel label = new JLabel(Objects.requireNonNull(text, "text"));
-        label.setOpaque(true);
+        label.setOpaque(selected);
         label.setBorder(BorderFactory.createEmptyBorder(5, 8, 5, 8));
         if (selected) {
             label.setBackground(list.getSelectionBackground());

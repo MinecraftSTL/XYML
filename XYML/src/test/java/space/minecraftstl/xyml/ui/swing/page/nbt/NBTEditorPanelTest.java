@@ -263,7 +263,7 @@ final class NBTEditorPanelTest {
             graphics.dispose();
         }
         assertTrue((image.getRGB(500, 350) >>> 24) != 0);
-        assertTrue((image.getRGB(20, 20) >>> 24) != 0);
+        assertFalse(panel.isOpaque());
     }
 
     /// Opens and renders one deterministic editor fixture under a requested production theme.

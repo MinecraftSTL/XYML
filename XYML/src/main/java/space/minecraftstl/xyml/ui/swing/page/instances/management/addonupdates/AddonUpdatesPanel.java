@@ -227,6 +227,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         selectionListener = this::selectionChanged;
 
         setName("addonUpdatesPage");
+        setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder());
         add(createHeadingBand(), BorderLayout.NORTH);
         add(createTableSurface(), BorderLayout.CENTER);
@@ -328,6 +329,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
     /// @return viewport-backed table surface
     private JComponent createTableSurface() {
         JPanel surface = new JPanel(new BorderLayout());
+        surface.setOpaque(false);
         surface.setBorder(BorderFactory.createEmptyBorder(4, 16, 8, 16));
         JScrollPane scrollPane = new JScrollPane(resultsTable);
         scrollPane.setName("addonUpdatesScrollPane");

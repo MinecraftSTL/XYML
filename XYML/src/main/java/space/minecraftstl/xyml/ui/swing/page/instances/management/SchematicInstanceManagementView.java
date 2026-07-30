@@ -179,6 +179,8 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
         this.returnCommand = Objects.requireNonNull(returnCommand, "returnCommand");
 
         setName("schematicInstanceManagement");
+        setOpaque(false);
+        contentCards.setOpaque(false);
         configureComponents(showReturnToolbar);
         startResolution();
     }

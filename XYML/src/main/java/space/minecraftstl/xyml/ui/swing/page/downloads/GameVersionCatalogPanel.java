@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
@@ -687,7 +688,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         gameVersionsPanel.add(workflowCards, "grow");
 
         downloadCenterTabs.setName("downloadCenterTabs");
-        downloadCenterTabs.setOpaque(false);
+        SwingTransparency.revealBackgroundThroughTabs(downloadCenterTabs);
         downloadCenterTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         downloadCenterTabs.setMinimumSize(new java.awt.Dimension(0, 0));
         downloadCenterTabs.addTab(strings.pageTitle(), gameVersionsPanel);
@@ -1511,7 +1512,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
                     "insets 7 10 7 10, fillx, wrap 1",
                     "[grow,fill]",
                     "[][]"));
-            setOpaque(true);
+            setOpaque(false);
             versionLabel.setName("gameVersionRowTitle");
             versionLabel.setFont(versionLabel.getFont().deriveFont(Font.BOLD));
             metadataLabel.setName("gameVersionRowMetadata");

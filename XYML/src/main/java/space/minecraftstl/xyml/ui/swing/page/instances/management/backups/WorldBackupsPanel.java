@@ -23,9 +23,11 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultComboBoxModel;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -186,7 +188,19 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         sourceBox.setName("worldBackupsSource");
         sourceBox.addActionListener(event -> updateControls());
         archiveList.setName("worldBackupsList");
+        archiveList.setOpaque(false);
         archiveList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        DefaultListCellRenderer archiveRenderer = new DefaultListCellRenderer();
+        archiveList.setCellRenderer((list, value, index, selected, focus) -> {
+            JLabel label = (JLabel) archiveRenderer.getListCellRendererComponent(
+                    list,
+                    value,
+                    index,
+                    selected,
+                    focus);
+            label.setOpaque(selected);
+            return label;
+        });
         archiveList.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting()) {
                 updateArchiveDetail();
@@ -255,6 +269,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
         JScrollPane archiveScroll = new JScrollPane(archiveList);
         archiveScroll.setName("worldBackupsScroll");
         archiveScroll.setBorder(BorderFactory.createEmptyBorder());
+        SwingTransparency.revealBackgroundThroughScrollPane(archiveScroll);
         content.add(archiveScroll, "grow");
 
         JPanel archiveFooter = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][]8[]", "[]"));

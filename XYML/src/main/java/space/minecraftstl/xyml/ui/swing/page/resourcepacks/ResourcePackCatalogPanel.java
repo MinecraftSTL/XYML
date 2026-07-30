@@ -25,6 +25,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 
@@ -392,6 +393,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
 
     /// Builds the title command, all state cards, list workspace, and status band.
     private void configureComponents() {
+        setOpaque(false);
         JPanel headingBand = new JPanel(new MigLayout(
                 "insets 0, fillx",
                 "[grow,fill][][][]",
@@ -473,8 +475,10 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Configures single-choice selection and sparse-row observation.
     private void configureChoiceList() {
         choiceList.setName("resourcePacksList");
+        SwingTransparency.revealBackgroundThroughScrollPane(choiceList);
         JList<ChoiceListEntry<ResourcePackCatalogItem>> list = choiceList.getList();
         list.setName("resourcePacksListView");
+        list.setOpaque(false);
         list.getAccessibleContext().setAccessibleName(strings.pageTitle());
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.addListSelectionListener(selectionListener);
@@ -536,7 +540,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         pathArea.setRows(2);
         JScrollPane pathScroll = new JScrollPane(pathArea);
         pathScroll.setName("resourcePacksPathScroll");
-        pathScroll.getViewport().setOpaque(false);
+        SwingTransparency.revealBackgroundThroughScrollPane(pathScroll);
         details.add(pathScroll, "span 2, growx, hmin 52");
 
         JLabel descriptionLabel = new JLabel(strings.descriptionLabel());
@@ -545,7 +549,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         configureReadOnlyArea(descriptionArea, "resourcePacksDescription");
         JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
         descriptionScroll.setName("resourcePacksDescriptionScroll");
-        descriptionScroll.getViewport().setOpaque(false);
+        SwingTransparency.revealBackgroundThroughScrollPane(descriptionScroll);
         details.add(descriptionScroll, "span 2, grow");
 
         JPanel actions = new JPanel(new MigLayout(
@@ -1425,6 +1429,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                 JComponent details) {
             super(JSplitPane.HORIZONTAL_SPLIT, list, details);
             setName("resourcePacksCatalogSplit");
+            setOpaque(false);
             setBorder(BorderFactory.createEmptyBorder());
             setContinuousLayout(true);
             setResizeWeight(0.42D);

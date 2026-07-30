@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 
 import javax.swing.BorderFactory;
@@ -215,6 +216,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
 
         setName("modsCatalogPage");
         setLayout(new BorderLayout());
+        setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder());
         add(createHeadingBand(), BorderLayout.NORTH);
         add(createCatalogSplit(), BorderLayout.CENTER);
@@ -255,6 +257,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 "insets 16 16 8 16, fillx",
                 "[grow,fill][]8[]8[]",
                 "[40!]"));
+        headingBand.setOpaque(false);
         JLabel heading = new JLabel(strings.title());
         heading.setName("modsPageTitle");
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 26.0F));
@@ -291,11 +294,13 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// @return borderless split pane
     private JComponent createCatalogSplit() {
         JPanel listSurface = new JPanel(new BorderLayout(0, 8));
+        listSurface.setOpaque(false);
         listSurface.setBorder(BorderFactory.createEmptyBorder(8, 16, 12, 8));
         JPanel filters = new JPanel(new MigLayout(
                 "insets 0, fillx",
                 "[][grow,fill]8[][140!]",
                 "[32!]"));
+        filters.setOpaque(false);
         JLabel searchLabel = new JLabel(strings.searchLabel());
         filters.add(searchLabel);
         searchField.setName("modsSearch");
@@ -309,7 +314,9 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         filters.add(filterBox, "growx");
         listSurface.add(filters, BorderLayout.NORTH);
         choiceList.setName("modsChoiceList");
+        SwingTransparency.revealBackgroundThroughScrollPane(choiceList);
         choiceList.getList().setName("modsList");
+        choiceList.getList().setOpaque(false);
         listSurface.add(choiceList, BorderLayout.CENTER);
 
         JSplitPane split = new JSplitPane(
@@ -317,6 +324,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 listSurface,
                 createDetailsSurface());
         split.setName("modsCatalogSplit");
+        split.setOpaque(false);
         split.setBorder(BorderFactory.createEmptyBorder());
         split.setContinuousLayout(true);
         split.setResizeWeight(0.44D);
@@ -332,6 +340,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 "insets 12 16 12 12, fill, wrap 2",
                 "[110!][grow,fill]",
                 "[]10[][][][][][]10[grow,fill]12[]"));
+        details.setOpaque(false);
         detailTitle.setName("modsDetailTitle");
         detailTitle.setFont(detailTitle.getFont().deriveFont(Font.BOLD, 20.0F));
         details.add(detailTitle, "span 2, growx");
@@ -349,14 +358,17 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         descriptionArea.setLineWrap(true);
         descriptionArea.setWrapStyleWord(true);
         descriptionArea.setRows(6);
+        descriptionArea.setOpaque(false);
         JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
         descriptionScroll.setBorder(BorderFactory.createEmptyBorder());
+        SwingTransparency.revealBackgroundThroughScrollPane(descriptionScroll);
         details.add(descriptionScroll, "grow, push");
 
         JPanel actions = new JPanel(new MigLayout(
                 "insets 0, fillx",
                 "[grow,fill][]8[]",
                 "[40!]"));
+        actions.setOpaque(false);
         enabledToggle.setName("modsEnabled");
         actions.add(enabledToggle, "growx, h 40!");
         configureIconButton(
@@ -387,6 +399,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
                 "insets 4 16 12 16, fillx",
                 "[grow,fill][grow,fill]",
                 "[]"));
+        statusBand.setOpaque(false);
         statusLabel.setName("modsStatus");
         writeStatusLabel.setName("modsWriteStatus");
         statusBand.add(statusLabel, "growx");

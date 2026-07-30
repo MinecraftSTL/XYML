@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import javax.swing.JButton;
@@ -36,6 +37,10 @@ final class ShellDropdownButton extends JButton {
 
     /// Creates one left-aligned popup button.
     ShellDropdownButton() {
+        setOpaque(false);
+        putClientProperty(
+                FlatClientProperties.BUTTON_TYPE,
+                FlatClientProperties.BUTTON_TYPE_BORDERLESS);
         setHorizontalAlignment(LEFT);
         setMargin(new Insets(4, 10, 4, 8 + DISCLOSURE_WIDTH));
     }

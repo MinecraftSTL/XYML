@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionListener;
@@ -276,6 +277,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     /// Creates the installed-state surface, online selector, task host, and explicit commands without I/O.
     private void configureComponents() {
         setName("instanceInstallerPage");
+        setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder());
 
         JPanel root = new JPanel(new MigLayout(
@@ -286,6 +288,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         root.add(createHeadingBand(), "growx");
 
         tabs.setName("instanceInstallerTabs");
+        SwingTransparency.revealBackgroundThroughTabs(tabs);
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         tabs.addTab(i18n("settings.tabs.installers"), createInstalledPage());
         tabs.addTab(i18n("install.installer.install_online"), createOnlinePage());
@@ -403,6 +406,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     /// Configures the recognized-loader list's stable single-line renderer.
     private void configureInstalledLoaderList() {
         installedLoaderList.setName("instanceInstallerInstalledLoaderList");
+        installedLoaderList.setOpaque(false);
         installedLoaderList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         installedLoaderList.setCellRenderer((list, entry, index, selected, focus) -> {
             if (entry == null) {
@@ -419,6 +423,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     /// Configures third-party library selection and its explicit structural-state renderer.
     private void configureOtherLibraryList() {
         otherLibraryList.setName("instanceInstallerOtherLibraryList");
+        otherLibraryList.setOpaque(false);
         otherLibraryList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         otherLibraryList.setCellRenderer((list, entry, index, selected, focus) -> {
             if (entry == null) {
@@ -443,6 +448,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         JScrollPane scrollPane = new JScrollPane(Objects.requireNonNull(list, "list"));
         scrollPane.setName(requireNonBlank(name, "name"));
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
         return scrollPane;
     }
 
@@ -454,7 +460,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     /// @return configured renderer component
     private static JLabel listRenderer(JList<?> list, String text, boolean selected) {
         JLabel label = new JLabel(Objects.requireNonNull(text, "text"));
-        label.setOpaque(true);
+        label.setOpaque(selected);
         label.setBorder(BorderFactory.createEmptyBorder(4, 7, 4, 7));
         label.setHorizontalAlignment(SwingConstants.LEADING);
         if (selected) {

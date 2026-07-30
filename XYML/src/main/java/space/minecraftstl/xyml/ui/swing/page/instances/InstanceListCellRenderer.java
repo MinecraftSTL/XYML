@@ -96,7 +96,7 @@ public final class InstanceListCellRenderer extends JPanel
     public InstanceListCellRenderer(boolean showSelectionIndicator) {
         super(new BorderLayout(12, 0));
         this.showSelectionIndicator = showSelectionIndicator;
-        setOpaque(true);
+        setOpaque(false);
         setPreferredSize(new Dimension(280, ROW_HEIGHT));
 
         Dimension iconSize = new Dimension(InstanceIconData.WIDTH, InstanceIconData.HEIGHT);

@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.schematic.LitematicFile;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.util.i18n.I18n;
@@ -290,6 +291,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
 
     /// Builds the toolbar, lifecycle cards, responsive browser split, and status band.
     private void configureComponents() {
+        setOpaque(false);
         JPanel toolbar = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 1",
                 "[grow,fill]",
@@ -366,8 +368,10 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         errorPanel.add(retryButton, "h 40!");
 
         choiceList.setName("schematicsList");
+        SwingTransparency.revealBackgroundThroughScrollPane(choiceList);
         JList<ChoiceListEntry<SchematicBrowserItem>> list = choiceList.getList();
         list.setName("schematicsListView");
+        list.setOpaque(false);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting()) {
@@ -382,6 +386,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
                 "[grow,fill]",
                 "[]8[grow,fill]8[]"));
         detailsPanel.setName("schematicsDetailsPanel");
+        detailsPanel.setOpaque(false);
         detailsHeading.setName("schematicsDetailsTitle");
         detailsHeading.setText(strings.detailsTitle());
         detailsHeading.setFont(detailsHeading.getFont().deriveFont(Font.BOLD));
@@ -396,7 +401,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         detailsArea.setText(strings.noSelectionText());
         JScrollPane detailsScroll = new JScrollPane(detailsArea);
         detailsScroll.setName("schematicsDetailsScroll");
-        detailsScroll.getViewport().setOpaque(false);
+        SwingTransparency.revealBackgroundThroughScrollPane(detailsScroll);
         detailsPanel.add(detailsScroll, "grow");
 
         ResponsiveActionStrip selectedActions = new ResponsiveActionStrip();
@@ -430,6 +435,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
 
         JSplitPane browserSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, choiceList, detailsPanel);
         browserSplit.setName("schematicsBrowserSplit");
+        browserSplit.setOpaque(false);
         browserSplit.setBorder(BorderFactory.createEmptyBorder());
         browserSplit.setContinuousLayout(true);
         browserSplit.setResizeWeight(0.62D);
@@ -440,6 +446,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         contentCards.add(errorPanel, ERROR_CARD);
         contentCards.add(emptyLabel, EMPTY_CARD);
         contentCards.add(browserSplit, BROWSER_CARD);
+        contentCards.setOpaque(false);
         add(contentCards, "grow");
 
         statusLabel.setName("schematicsStatus");

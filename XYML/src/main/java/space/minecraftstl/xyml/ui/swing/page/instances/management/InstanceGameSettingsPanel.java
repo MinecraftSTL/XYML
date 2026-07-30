@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaManagerRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementService;
@@ -463,6 +464,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// @return configured tabbed surface
     private JTabbedPane createSettingsTabs() {
         settingsTabs.setName("instanceGameSettingsTabs");
+        SwingTransparency.revealBackgroundThroughTabs(settingsTabs);
         settingsTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         settingsTabs.addTab(i18n("settings.game"), createScrollableTab(createGameSettingsTab()));
         settingsTabs.addTab(i18n("settings.launcher"), createScrollableTab(createLauncherSettingsTab()));
@@ -1704,6 +1706,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
         scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.getVerticalScrollBar().setUnitIncrement(18);
+        SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
         return scrollPane;
     }
 

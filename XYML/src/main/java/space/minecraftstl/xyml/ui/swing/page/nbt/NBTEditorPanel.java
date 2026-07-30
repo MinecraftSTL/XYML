@@ -220,6 +220,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         treeCellRenderer = new NBTTreeCellRenderer(this.strings);
 
         setName("nbtEditorPage");
+        setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder());
         add(createHeadingBand(), BorderLayout.NORTH);
         add(createEditorSurface(), BorderLayout.CENTER);

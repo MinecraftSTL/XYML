@@ -351,6 +351,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
 
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, worldsPanel, packsPanel);
         splitPane.setName("dataPackManagementSplit");
+        splitPane.setOpaque(false);
         splitPane.setResizeWeight(0.42D);
         splitPane.setBorder(BorderFactory.createEmptyBorder());
         add(splitPane, "grow, push");

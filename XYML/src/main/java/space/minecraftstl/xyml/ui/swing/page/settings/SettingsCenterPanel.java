@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.setting.DownloadSource;
 import space.minecraftstl.xyml.setting.EnumCommonDirectory;
 import space.minecraftstl.xyml.setting.ProxyType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.log.LauncherLogPanel;
 import space.minecraftstl.xyml.ui.swing.page.nbt.NBTSettingsPanel;
@@ -285,8 +286,10 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
 
     /// Creates every functional settings tab and configures component interactions.
     private void configureComponents() {
+        setOpaque(false);
         configureGeneralControls();
         configureDownloadAndProxyControls();
+        SwingTransparency.revealBackgroundThroughTabs(tabs);
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
 
         tabs.addTab(i18n("settings.launcher.general"), createScrollPane(createGeneralPage()));
@@ -507,6 +510,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
         scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
         return scrollPane;
     }
 
