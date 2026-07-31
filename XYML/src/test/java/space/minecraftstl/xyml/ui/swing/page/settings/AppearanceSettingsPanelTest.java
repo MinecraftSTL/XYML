@@ -24,7 +24,6 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.BackgroundType;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
@@ -238,12 +237,8 @@ public final class AppearanceSettingsPanelTest {
                 "#123456",
                 0.72,
                 NetworkBackgroundImageCachePolicy.DISABLED,
-                BackgroundType.PAINT,
-                "#AABBCC",
-                BackgroundLoadPolicy.SHOW_FALLBACK_WHILE_LOADING,
                 true,
                 true,
-                false,
                 false);
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
                 ThemeBrightnessPreference.SYSTEM,
@@ -269,8 +264,6 @@ public final class AppearanceSettingsPanelTest {
                     () -> assertFalse(findComponent(
                             panel, "appearanceBackgroundOpacity", JSlider.class).isEnabled()),
                     () -> assertTrue(findComponent(
-                            panel, "appearanceBackgroundFallbackPaint", JTextField.class).isEnabled()),
-                    () -> assertFalse(findComponent(
                             panel, "appearanceWindowTransparent", AbstractButton.class).isEnabled()),
                     () -> assertEquals(0, model.backgroundWriteCount()));
             panel.close();
@@ -289,12 +282,8 @@ public final class AppearanceSettingsPanelTest {
                 initialBackground.customPaint(),
                 initialBackground.opacity(),
                 initialBackground.networkCachePolicy(),
-                initialBackground.fallbackType(),
-                initialBackground.fallbackPaint(),
-                initialBackground.loadPolicy(),
                 initialBackground.windowTransparent(),
                 true,
-                false,
                 false);
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
                 ThemeBrightnessPreference.SYSTEM,
@@ -335,15 +324,6 @@ public final class AppearanceSettingsPanelTest {
 
             findComponent(panel, "appearanceBackgroundOpacityOverridden", AbstractButton.class).doClick();
             findComponent(panel, "appearanceBackgroundOpacity", JSlider.class).setValue(35);
-            findComponent(panel, "appearanceBackgroundFallbackType", JComboBox.class)
-                    .setSelectedItem(BackgroundType.PAINT);
-            JTextField fallbackPaint = findComponent(
-                    panel, "appearanceBackgroundFallbackPaint", JTextField.class);
-            fallbackPaint.setText("rgba(20,40,60,0.8)");
-            fallbackPaint.postActionEvent();
-            findComponent(panel, "appearanceBackgroundLoadPolicy", JComboBox.class)
-                    .setSelectedItem(BackgroundLoadPolicy.SHOW_FALLBACK_WHILE_LOADING);
-            findComponent(panel, "appearanceWindowTransparencyOverridden", AbstractButton.class).doClick();
             findComponent(panel, "appearanceWindowTransparent", AbstractButton.class).doClick();
 
             BackgroundAppearanceSettings replacement = model.snapshot().background();
@@ -361,15 +341,9 @@ public final class AppearanceSettingsPanelTest {
                     () -> assertEquals(
                             NetworkBackgroundImageCachePolicy.DISABLED,
                             replacement.networkCachePolicy()),
-                    () -> assertEquals(BackgroundType.PAINT, replacement.fallbackType()),
-                    () -> assertEquals("rgba(20,40,60,0.8)", replacement.fallbackPaint()),
-                    () -> assertEquals(
-                            BackgroundLoadPolicy.SHOW_FALLBACK_WHILE_LOADING,
-                            replacement.loadPolicy()),
                     () -> assertTrue(replacement.windowTransparent()),
                     () -> assertTrue(replacement.sourceOverridden()),
                     () -> assertTrue(replacement.opacityOverridden()),
-                    () -> assertTrue(replacement.windowTransparencyOverridden()),
                     () -> assertEquals(replacement, panel.displayedBackground()));
             panel.close();
         });
@@ -452,10 +426,6 @@ public final class AppearanceSettingsPanelTest {
                 null,
                 1.0,
                 NetworkBackgroundImageCachePolicy.ENABLED,
-                BackgroundType.BUILTIN,
-                "#FFFFFF",
-                BackgroundLoadPolicy.WAIT_FOR_BACKGROUND,
-                false,
                 false,
                 false,
                 false);

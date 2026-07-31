@@ -19,7 +19,6 @@ package space.minecraftstl.xyml.ui.swing;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ResolvedThemeSelection;
@@ -35,27 +34,21 @@ import java.util.Objects;
 /// Immutable background and native-window request produced from one theme resolution and one settings snapshot.
 ///
 /// @param source exact primary background source
-/// @param fallback exact non-network fallback source
-/// @param opacity primary and fallback opacity in the inclusive range zero to one
-/// @param loadPolicy background replacement behavior while image I/O is active
+/// @param opacity background opacity in the inclusive range zero to one
 /// @param networkCachePolicy whether network image bytes may be cached locally
 /// @param windowTransparent whether unpainted window pixels reveal the desktop
 @NotNullByDefault
 public record SwingWindowAppearanceRequest(
         SwingBackgroundSource source,
-        SwingBackgroundSource fallback,
         double opacity,
-        BackgroundLoadPolicy loadPolicy,
         NetworkBackgroundImageCachePolicy networkCachePolicy,
         boolean windowTransparent) {
     /// Validates one complete request.
     public SwingWindowAppearanceRequest {
         Objects.requireNonNull(source, "source");
-        Objects.requireNonNull(fallback, "fallback");
         if (!Double.isFinite(opacity) || opacity < 0.0 || opacity > 1.0) {
             throw new IllegalArgumentException("Window background opacity must be between zero and one");
         }
-        Objects.requireNonNull(loadPolicy, "loadPolicy");
         Objects.requireNonNull(networkCachePolicy, "networkCachePolicy");
     }
 
@@ -74,9 +67,7 @@ public record SwingWindowAppearanceRequest(
                         assetName));
         return new SwingWindowAppearanceRequest(
                 source,
-                source,
                 1.0,
-                BackgroundLoadPolicy.WAIT_FOR_BACKGROUND,
                 NetworkBackgroundImageCachePolicy.DISABLED,
                 false);
     }
@@ -100,16 +91,11 @@ public record SwingWindowAppearanceRequest(
                 : themeBackground != null && themeBackground.opacity() != null
                         ? themeBackground.opacity()
                         : 1.0;
-        boolean transparent = settings.windowTransparencyOverridden()
-                ? settings.windowTransparent()
-                : Boolean.TRUE.equals(selected.appearance().windowTransparent());
         return new SwingWindowAppearanceRequest(
                 primary,
-                fallbackSource(settings),
                 opacity,
-                settings.loadPolicy(),
                 settings.networkCachePolicy(),
-                transparent);
+                settings.windowTransparent());
     }
 
     /// Converts the explicit launcher source setting.
@@ -150,15 +136,4 @@ public record SwingWindowAppearanceRequest(
         throw new IllegalStateException("Unsupported resolved theme background: " + source);
     }
 
-    /// Converts the configured always-local fallback source.
-    private static SwingBackgroundSource fallbackSource(BackgroundAppearanceSettings settings) {
-        return switch (settings.fallbackType()) {
-            case BUILTIN -> new SwingBackgroundSource.Builtin(
-                    BuiltinBackground.fromIdOrFallback(settings.builtinBackgroundId()));
-            case PAINT -> new SwingBackgroundSource.Paint(settings.fallbackPaint());
-            case THEME_COLOR -> new SwingBackgroundSource.ThemeColorFill();
-            default -> throw new IllegalStateException(
-                    "Unsupported normalized background fallback: " + settings.fallbackType());
-        };
-    }
 }

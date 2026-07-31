@@ -22,7 +22,6 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.observable.Subscription;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingBackgroundSource;
@@ -65,7 +64,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.BooleanSupplier;
 import java.util.random.RandomGenerator;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
@@ -142,7 +140,7 @@ final class SwingWindowBackgroundController implements AutoCloseable {
         }
     }
 
-    /// Starts one primary load and optionally exposes the configured fallback while it runs.
+    /// Starts one background load while retaining the currently painted valid layer.
     ///
     /// @param request newest complete renderer request
     private void begin(@Nullable SwingWindowAppearanceRequest request) {
@@ -154,26 +152,10 @@ final class SwingWindowBackgroundController implements AutoCloseable {
         boolean transparencyActive = frame.applyWindowTransparency(request.windowTransparent());
         shellPanel.setWindowTransparency(transparencyActive);
         Color themeSurface = themeSurfaceColor();
-        AtomicBoolean primaryPublished = new AtomicBoolean();
-
-        if (request.loadPolicy() == BackgroundLoadPolicy.SHOW_FALLBACK_WHILE_LOADING) {
-            load(request.fallback(), request.networkCachePolicy(), themeSurface)
-                    .whenComplete((@Nullable BackgroundLayer layer, @Nullable Throwable failure) -> {
-                        if (failure == null) {
-                            publishFallbackWhilePrimaryPending(
-                                    token,
-                                    Objects.requireNonNull(layer, "completed fallback layer"),
-                                    request.opacity(),
-                                    transparencyActive,
-                                    primaryPublished);
-                        }
-                    });
-        }
 
         load(request.source(), request.networkCachePolicy(), themeSurface)
                 .whenComplete((@Nullable BackgroundLayer layer, @Nullable Throwable failure) -> {
                     if (failure == null) {
-                        primaryPublished.set(true);
                         publish(
                                 token,
                                 Objects.requireNonNull(layer, "completed primary layer"),
@@ -182,26 +164,6 @@ final class SwingWindowBackgroundController implements AutoCloseable {
                         return;
                     }
                     LOG.warning("Failed to load the selected Swing background", unwrap(failure));
-                    load(request.fallback(), request.networkCachePolicy(), themeSurface)
-                            .whenComplete((
-                                    @Nullable BackgroundLayer fallback,
-                                    @Nullable Throwable fallbackFailure) -> {
-                                if (fallbackFailure == null) {
-                                    publish(
-                                            token,
-                                            Objects.requireNonNull(fallback, "completed fallback layer"),
-                                            request.opacity(),
-                                            transparencyActive);
-                                } else {
-                                    LOG.warning("Failed to load the configured Swing background fallback",
-                                            unwrap(fallbackFailure));
-                                    publish(
-                                            token,
-                                            BackgroundLayer.fill(WindowBackgroundPaint.solid(themeSurface)),
-                                            request.opacity(),
-                                            transparencyActive);
-                                }
-                            });
                 });
     }
 
@@ -539,63 +501,16 @@ final class SwingWindowBackgroundController implements AutoCloseable {
             BackgroundLayer layer,
             double opacity,
             boolean transparencyActive) {
-        publishWhen(token, layer, opacity, transparencyActive, () -> true);
-    }
-
-    /// Publishes a loading fallback only if the primary is still pending when the EDT executes the publication.
-    ///
-    /// @param token request generation
-    /// @param layer decoded fallback layer
-    /// @param opacity requested layer opacity
-    /// @param transparencyActive native transparency state
-    /// @param primaryPublished flag set before the successful primary is queued
-    private void publishFallbackWhilePrimaryPending(
-            long token,
-            BackgroundLayer layer,
-            double opacity,
-            boolean transparencyActive,
-            AtomicBoolean primaryPublished) {
-        AtomicBoolean checkedPrimary = Objects.requireNonNull(primaryPublished, "primaryPublished");
-        publishWhen(token, layer, opacity, transparencyActive, () -> !checkedPrimary.get());
-    }
-
-    /// Applies one decoded layer on the EDT when both generation and caller eligibility remain current.
-    ///
-    /// @param token request generation
-    /// @param layer decoded layer
-    /// @param opacity requested layer opacity
-    /// @param transparencyActive native transparency state
-    /// @param eligibility condition evaluated inside the EDT publication point
-    private void publishWhen(
-            long token,
-            BackgroundLayer layer,
-            double opacity,
-            boolean transparencyActive,
-            BooleanSupplier eligibility) {
         BackgroundLayer checkedLayer = Objects.requireNonNull(layer, "layer");
-        BooleanSupplier checkedEligibility = Objects.requireNonNull(eligibility, "eligibility");
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             if (!closed.get() && generation.get() == token) {
-                runWhenEligible(checkedEligibility, () ->
-                        shellPanel.setWindowBackground(new WindowBackgroundVisual(
-                                checkedLayer.image(),
-                                checkedLayer.fill(),
-                                opacity,
-                                transparencyActive)));
+                shellPanel.setWindowBackground(new WindowBackgroundVisual(
+                        checkedLayer.image(),
+                        checkedLayer.fill(),
+                        opacity,
+                        transparencyActive));
             }
         });
-    }
-
-    /// Executes one deferred publication only when its current eligibility still holds.
-    ///
-    /// @param eligibility condition evaluated immediately before publication
-    /// @param publication publication side effect
-    static void runWhenEligible(BooleanSupplier eligibility, Runnable publication) {
-        BooleanSupplier checkedEligibility = Objects.requireNonNull(eligibility, "eligibility");
-        Runnable checkedPublication = Objects.requireNonNull(publication, "publication");
-        if (checkedEligibility.getAsBoolean()) {
-            checkedPublication.run();
-        }
     }
 
     /// Returns the active FlatLaf surface color with a stable light fallback.

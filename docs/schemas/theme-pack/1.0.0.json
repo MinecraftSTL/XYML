@@ -174,9 +174,6 @@
         "titleBar": {
           "$ref": "#/$defs/titleBar"
         },
-        "windowTransparent": {
-          "type": "boolean"
-        },
         "overrides": {
           "type": "array",
           "items": {
@@ -220,11 +217,6 @@
           "required": [
             "titleBar"
           ]
-        },
-        {
-          "required": [
-            "windowTransparent"
-          ]
         }
       ],
       "properties": {
@@ -248,9 +240,6 @@
         },
         "titleBar": {
           "$ref": "#/$defs/titleBar"
-        },
-        "windowTransparent": {
-          "type": "boolean"
         }
       }
     },

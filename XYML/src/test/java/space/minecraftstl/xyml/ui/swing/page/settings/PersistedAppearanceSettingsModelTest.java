@@ -24,7 +24,6 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.BackgroundType;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
@@ -115,10 +114,6 @@ public final class PersistedAppearanceSettingsModelTest {
                 "#123456",
                 0.7,
                 NetworkBackgroundImageCachePolicy.DISABLED,
-                BackgroundType.THEME_COLOR,
-                "#FFFFFF",
-                BackgroundLoadPolicy.SHOW_FALLBACK_WHILE_LOADING,
-                true,
                 true,
                 true,
                 true);
@@ -259,10 +254,6 @@ public final class PersistedAppearanceSettingsModelTest {
                 null,
                 1.0,
                 NetworkBackgroundImageCachePolicy.ENABLED,
-                BackgroundType.BUILTIN,
-                "#FFFFFF",
-                BackgroundLoadPolicy.WAIT_FOR_BACKGROUND,
-                false,
                 false,
                 false,
                 false);

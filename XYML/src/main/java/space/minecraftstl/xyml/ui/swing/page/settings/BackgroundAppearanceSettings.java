@@ -20,7 +20,6 @@ package space.minecraftstl.xyml.ui.swing.page.settings;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.setting.BackgroundType;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 
 import java.util.Objects;
@@ -34,13 +33,9 @@ import java.util.Objects;
 /// @param customPaint custom solid-color or JavaFX-compatible gradient expression, or `null`
 /// @param opacity background opacity in the inclusive range zero to one
 /// @param networkCachePolicy whether a network image may be cached locally
-/// @param fallbackType non-network fallback source
-/// @param fallbackPaint fallback solid-color or JavaFX-compatible gradient expression
-/// @param loadPolicy behavior while an image background is loading
 /// @param windowTransparent whether transparent background pixels reveal the desktop
 /// @param sourceOverridden whether the primary source overrides the selected theme
 /// @param opacityOverridden whether opacity overrides the selected theme
-/// @param windowTransparencyOverridden whether window transparency overrides the selected theme
 @NotNullByDefault
 public record BackgroundAppearanceSettings(
         BackgroundType type,
@@ -50,13 +45,9 @@ public record BackgroundAppearanceSettings(
         @Nullable String customPaint,
         double opacity,
         NetworkBackgroundImageCachePolicy networkCachePolicy,
-        BackgroundType fallbackType,
-        String fallbackPaint,
-        BackgroundLoadPolicy loadPolicy,
         boolean windowTransparent,
         boolean sourceOverridden,
-        boolean opacityOverridden,
-        boolean windowTransparencyOverridden) {
+        boolean opacityOverridden) {
     /// Validates and normalizes one complete background setting.
     public BackgroundAppearanceSettings {
         Objects.requireNonNull(type, "type");
@@ -73,13 +64,5 @@ public record BackgroundAppearanceSettings(
             throw new IllegalArgumentException("Background opacity must be between zero and one");
         }
         Objects.requireNonNull(networkCachePolicy, "networkCachePolicy");
-        Objects.requireNonNull(fallbackType, "fallbackType");
-        if (fallbackType != BackgroundType.BUILTIN
-                && fallbackType != BackgroundType.PAINT
-                && fallbackType != BackgroundType.THEME_COLOR) {
-            throw new IllegalArgumentException("Unsupported background fallback type: " + fallbackType);
-        }
-        fallbackPaint = Objects.requireNonNull(fallbackPaint, "fallbackPaint").trim();
-        Objects.requireNonNull(loadPolicy, "loadPolicy");
     }
 }

@@ -23,7 +23,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.setting.LauncherSettings;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.BuiltinThemePackCatalog;
 import space.minecraftstl.xyml.theme.LocalThemePackRepository;
@@ -287,10 +286,6 @@ public final class ThemeRuntimeControllerTest {
                 null,
                 1.0,
                 NetworkBackgroundImageCachePolicy.ENABLED,
-                BackgroundType.BUILTIN,
-                "#FFFFFF",
-                BackgroundLoadPolicy.WAIT_FOR_BACKGROUND,
-                false,
                 false,
                 false,
                 false);

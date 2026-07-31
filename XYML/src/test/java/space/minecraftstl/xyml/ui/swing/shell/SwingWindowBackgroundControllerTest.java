@@ -18,7 +18,6 @@
 package space.minecraftstl.xyml.ui.swing.shell;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
@@ -27,14 +26,10 @@ import java.awt.LinearGradientPaint;
 import java.awt.MultipleGradientPaint;
 import java.awt.RadialGradientPaint;
 import java.io.IOException;
-import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -195,22 +190,6 @@ public final class SwingWindowBackgroundControllerTest {
                 () -> assertEquals(4, fractions.length),
                 () -> assertEquals(0.5f, fractions[1]),
                 () -> assertEquals(Math.nextUp(0.5f), fractions[2]));
-    }
-
-    /// A fallback queued before primary completion rechecks eligibility and cannot overwrite the primary later.
-    @Test
-    public void rechecksFallbackEligibilityAtPublicationTime() {
-        AtomicBoolean primaryPublished = new AtomicBoolean();
-        AtomicBoolean fallbackApplied = new AtomicBoolean();
-        AtomicReference<@Nullable Runnable> queuedPublication = new AtomicReference<>();
-        queuedPublication.set(() -> SwingWindowBackgroundController.runWhenEligible(
-                () -> !primaryPublished.get(),
-                () -> fallbackApplied.set(true)));
-
-        primaryPublished.set(true);
-        Objects.requireNonNull(queuedPublication.get(), "queued publication").run();
-
-        assertFalse(fallbackApplied.get());
     }
 
     /// A gradient remains invalid when a caller explicitly requires a solid color.

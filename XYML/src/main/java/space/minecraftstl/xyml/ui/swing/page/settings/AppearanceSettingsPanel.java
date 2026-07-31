@@ -25,7 +25,6 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.setting.BackgroundType;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
@@ -113,7 +112,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// Primary launcher background source selector.
     private final JComboBox<BackgroundType> backgroundTypeBox = new JComboBox<>();
 
-    /// Bundled wallpaper identifier used by primary and fallback built-in sources.
+    /// Bundled wallpaper identifier used by the primary built-in source.
     private final JComboBox<String> builtinBackgroundBox = new JComboBox<>();
 
     /// Directly editable local background image file-or-directory path.
@@ -142,21 +141,6 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
 
     /// Network image cache policy selector.
     private final JComboBox<NetworkBackgroundImageCachePolicy> networkCachePolicyBox = new JComboBox<>();
-
-    /// Non-network fallback source selector.
-    private final JComboBox<BackgroundType> fallbackTypeBox = new JComboBox<>();
-
-    /// Directly editable fallback solid-color or JavaFX-compatible gradient expression.
-    private final JTextField fallbackPaintField = new JTextField();
-
-    /// Color swatch opening the fallback paint chooser.
-    private final JButton fallbackPaintButton = new JButton();
-
-    /// Selected image-loading behavior.
-    private final JComboBox<BackgroundLoadPolicy> backgroundLoadPolicyBox = new JComboBox<>();
-
-    /// Whether launcher window transparency overrides the selected theme.
-    private final JCheckBox windowTransparencyOverridden = new JCheckBox();
 
     /// Whether unpainted native-window pixels reveal the desktop.
     private final JCheckBox windowTransparent = new JCheckBox();
@@ -358,13 +342,6 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         add(createFullWidthToggleRow(backgroundOpacityOverridden), "gapbottom 4");
         add(createOpacityRow(), "gapbottom 4");
         add(createFieldRow(backgroundStrings.networkCacheLabel(), networkCachePolicyBox), "gapbottom 4");
-        add(createFieldRow(backgroundStrings.fallbackTypeLabel(), fallbackTypeBox), "gapbottom 4");
-        add(createColorFieldRow(
-                backgroundStrings.fallbackPaintLabel(),
-                fallbackPaintField,
-                fallbackPaintButton), "gapbottom 4");
-        add(createFieldRow(backgroundStrings.loadPolicyLabel(), backgroundLoadPolicyBox), "gapbottom 4");
-        add(createFullWidthToggleRow(windowTransparencyOverridden), "gapbottom 4");
         add(createFullWidthToggleRow(windowTransparent), "gapbottom 12");
 
         if (themePackManagementPanel != null) {
@@ -380,10 +357,6 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
             builtinBackgroundBox.addItem(id);
         }
         networkCachePolicyBox.setModel(enumModel(NetworkBackgroundImageCachePolicy.class));
-        fallbackTypeBox.addItem(BackgroundType.BUILTIN);
-        fallbackTypeBox.addItem(BackgroundType.PAINT);
-        fallbackTypeBox.addItem(BackgroundType.THEME_COLOR);
-        backgroundLoadPolicyBox.setModel(enumModel(BackgroundLoadPolicy.class));
 
         backgroundTypeBox.setRenderer(new LocalizedValueRenderer<>(
                 BackgroundType.class,
@@ -391,12 +364,6 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         networkCachePolicyBox.setRenderer(new LocalizedValueRenderer<>(
                 NetworkBackgroundImageCachePolicy.class,
                 backgroundStrings::networkCachePolicyLabel));
-        fallbackTypeBox.setRenderer(new LocalizedValueRenderer<>(
-                BackgroundType.class,
-                backgroundStrings::fallbackLabel));
-        backgroundLoadPolicyBox.setRenderer(new LocalizedValueRenderer<>(
-                BackgroundLoadPolicy.class,
-                backgroundStrings::loadPolicyLabel));
 
         backgroundSourceOverridden.setName("appearanceBackgroundSourceOverridden");
         backgroundSourceOverridden.setText(backgroundStrings.sourceOverrideLabel());
@@ -414,18 +381,11 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         backgroundOpacityValue.setName("appearanceBackgroundOpacityValue");
         backgroundOpacityValue.setHorizontalAlignment(JLabel.TRAILING);
         networkCachePolicyBox.setName("appearanceNetworkBackgroundCache");
-        fallbackTypeBox.setName("appearanceBackgroundFallbackType");
-        fallbackPaintField.setName("appearanceBackgroundFallbackPaint");
-        fallbackPaintField.putClientProperty("JTextField.placeholderText", "#RRGGBB");
-        backgroundLoadPolicyBox.setName("appearanceBackgroundLoadPolicy");
-        windowTransparencyOverridden.setName("appearanceWindowTransparencyOverridden");
-        windowTransparencyOverridden.setText(backgroundStrings.windowTransparencyOverrideLabel());
         windowTransparent.setName("appearanceWindowTransparent");
         windowTransparent.setText(backgroundStrings.windowTransparentLabel());
 
         configureBrowseButton();
         configureColorButton(customPaintButton, "appearanceBackgroundPaintChooser");
-        configureColorButton(fallbackPaintButton, "appearanceBackgroundFallbackPaintChooser");
         configureBackgroundListeners();
     }
 
@@ -467,24 +427,19 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         backgroundTypeBox.addActionListener(event -> backgroundControlChanged());
         builtinBackgroundBox.addActionListener(event -> commitBackground());
         networkCachePolicyBox.addActionListener(event -> backgroundControlChanged());
-        fallbackTypeBox.addActionListener(event -> backgroundControlChanged());
-        backgroundLoadPolicyBox.addActionListener(event -> commitBackground());
         backgroundOpacityOverridden.addActionListener(event -> backgroundControlChanged());
-        windowTransparencyOverridden.addActionListener(event -> backgroundControlChanged());
         windowTransparent.addActionListener(event -> commitBackground());
 
         BackgroundTextCommitter textCommitter = new BackgroundTextCommitter(this::commitBackground);
         for (JTextField field : List.of(
                 localImagePathField,
                 networkImageUrlField,
-                customPaintField,
-                fallbackPaintField)) {
+                customPaintField)) {
             field.addActionListener(event -> commitBackground());
             field.addFocusListener(textCommitter);
         }
 
         customPaintButton.addActionListener(event -> chooseColor(customPaintField));
-        fallbackPaintButton.addActionListener(event -> chooseColor(fallbackPaintField));
         backgroundOpacitySlider.addChangeListener(event -> {
             backgroundOpacityValue.setText(backgroundOpacitySlider.getValue() + "%");
             if (!backgroundOpacitySlider.getValueIsAdjusting()) {
@@ -711,7 +666,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
 
     /// Opens a native color chooser and commits a canonical hexadecimal expression.
     ///
-    /// @param field target primary or fallback color field
+    /// @param field target primary background color field
     private void chooseColor(JTextField field) {
         JTextField target = Objects.requireNonNull(field, "field");
         Color initial = Objects.requireNonNullElse(parseDisplayColor(target.getText()), Color.WHITE);
@@ -764,13 +719,9 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
                 customPaint,
                 backgroundOpacitySlider.getValue() / (double) OPACITY_SCALE,
                 selectedItem(networkCachePolicyBox, NetworkBackgroundImageCachePolicy.class),
-                selectedItem(fallbackTypeBox, BackgroundType.class),
-                fallbackPaintField.getText(),
-                selectedItem(backgroundLoadPolicyBox, BackgroundLoadPolicy.class),
                 windowTransparent.isSelected(),
                 backgroundSourceOverridden.isSelected(),
-                backgroundOpacityOverridden.isSelected(),
-                windowTransparencyOverridden.isSelected());
+                backgroundOpacityOverridden.isSelected());
     }
 
     /// Returns trimmed text or null when a nullable color field is blank.
@@ -845,10 +796,6 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
             backgroundOpacitySlider.setValue((int) Math.round(background.opacity() * OPACITY_SCALE));
             backgroundOpacityValue.setText(backgroundOpacitySlider.getValue() + "%");
             networkCachePolicyBox.setSelectedItem(background.networkCachePolicy());
-            fallbackTypeBox.setSelectedItem(background.fallbackType());
-            fallbackPaintField.setText(background.fallbackPaint());
-            backgroundLoadPolicyBox.setSelectedItem(background.loadPolicy());
-            windowTransparencyOverridden.setSelected(background.windowTransparencyOverridden());
             windowTransparent.setSelected(background.windowTransparent());
             updatePaintSwatches();
             setControlsEnabled(snapshot.writable());
@@ -873,20 +820,17 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         setBackgroundControlsEnabled(interactive);
     }
 
-    /// Applies source, fallback, and theme-override dependencies to background controls.
+    /// Applies source and theme-override dependencies to background controls.
     ///
     /// @param writable whether the store accepts changes
     private void setBackgroundControlsEnabled(boolean writable) {
         backgroundSourceOverridden.setEnabled(writable);
         backgroundOpacityOverridden.setEnabled(writable);
-        windowTransparencyOverridden.setEnabled(writable);
 
         boolean sourceActive = writable && backgroundSourceOverridden.isSelected();
         BackgroundType type = selectedItem(backgroundTypeBox, BackgroundType.class);
-        BackgroundType fallbackType = selectedItem(fallbackTypeBox, BackgroundType.class);
         backgroundTypeBox.setEnabled(sourceActive);
-        boolean builtinRequired = fallbackType == BackgroundType.BUILTIN
-                || sourceActive && type == BackgroundType.BUILTIN;
+        boolean builtinRequired = sourceActive && type == BackgroundType.BUILTIN;
         builtinBackgroundBox.setEnabled(writable && builtinRequired);
         boolean localActive = sourceActive && type == BackgroundType.CUSTOM;
         localImagePathField.setEnabled(localActive);
@@ -899,18 +843,12 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         customPaintButton.setEnabled(paintActive);
 
         backgroundOpacitySlider.setEnabled(writable && backgroundOpacityOverridden.isSelected());
-        fallbackTypeBox.setEnabled(writable);
-        boolean fallbackPaintActive = writable && fallbackType == BackgroundType.PAINT;
-        fallbackPaintField.setEnabled(fallbackPaintActive);
-        fallbackPaintButton.setEnabled(fallbackPaintActive);
-        backgroundLoadPolicyBox.setEnabled(writable);
-        windowTransparent.setEnabled(writable && windowTransparencyOverridden.isSelected());
+        windowTransparent.setEnabled(writable);
     }
 
-    /// Updates both color chooser buttons from their corresponding text values.
+    /// Updates the background color chooser button from its corresponding text value.
     private void updatePaintSwatches() {
         updatePaintSwatch(customPaintButton, customPaintField.getText());
-        updatePaintSwatch(fallbackPaintButton, fallbackPaintField.getText());
     }
 
     /// Updates one swatch without rejecting expressions supported only by the renderer.

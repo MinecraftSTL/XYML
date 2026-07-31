@@ -25,7 +25,6 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
@@ -91,9 +90,6 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
         propertySubscriptions.add(settings.customBackgroundPaintProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.backgroundOpacityProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.networkBackgroundImageCachePolicyProperty().subscribe(change -> requestSnapshotRefresh()));
-        propertySubscriptions.add(settings.backgroundFallbackTypeProperty().subscribe(change -> requestSnapshotRefresh()));
-        propertySubscriptions.add(settings.backgroundFallbackPaintProperty().subscribe(change -> requestSnapshotRefresh()));
-        propertySubscriptions.add(settings.backgroundLoadPolicyProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.windowTransparentProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.getThemeAppearanceOverrides().subscribe(change -> requestSnapshotRefresh()));
     }
@@ -251,9 +247,6 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
             settings.customBackgroundPaintProperty().set(background.customPaint());
             settings.backgroundOpacityProperty().set(background.opacity());
             settings.networkBackgroundImageCachePolicyProperty().set(background.networkCachePolicy());
-            settings.backgroundFallbackTypeProperty().set(background.fallbackType());
-            settings.backgroundFallbackPaintProperty().set(background.fallbackPaint());
-            settings.backgroundLoadPolicyProperty().set(background.loadPolicy());
             settings.windowTransparentProperty().set(background.windowTransparent());
             setOverrideMembership(
                     LauncherSettings.THEME_APPEARANCE_BACKGROUND,
@@ -261,9 +254,6 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
             setOverrideMembership(
                     LauncherSettings.THEME_APPEARANCE_BACKGROUND_OPACITY,
                     background.opacityOverridden());
-            setOverrideMembership(
-                    LauncherSettings.THEME_APPEARANCE_WINDOW_TRANSPARENT,
-                    background.windowTransparencyOverridden());
         } finally {
             batchingAppearanceWrite = false;
         }
@@ -295,7 +285,6 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
         BackgroundType backgroundType = Objects.requireNonNullElse(
                 settings.backgroundTypeProperty().get(),
                 BackgroundType.DEFAULT);
-        BackgroundType fallbackType = normalizeFallbackType(settings.backgroundFallbackTypeProperty().get());
         double opacity = Math.max(0.0, Math.min(1.0, settings.backgroundOpacityProperty().get()));
         BackgroundAppearanceSettings background = new BackgroundAppearanceSettings(
                 backgroundType,
@@ -309,18 +298,11 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
                 Objects.requireNonNullElse(
                         settings.networkBackgroundImageCachePolicyProperty().get(),
                         NetworkBackgroundImageCachePolicy.ENABLED),
-                fallbackType,
-                Objects.requireNonNullElse(settings.backgroundFallbackPaintProperty().get(), "#FFFFFF"),
-                Objects.requireNonNullElse(
-                        settings.backgroundLoadPolicyProperty().get(),
-                        BackgroundLoadPolicy.WAIT_FOR_BACKGROUND),
                 settings.windowTransparentProperty().get(),
                 settings.getThemeAppearanceOverrides().contains(
                         LauncherSettings.THEME_APPEARANCE_BACKGROUND),
                 settings.getThemeAppearanceOverrides().contains(
-                        LauncherSettings.THEME_APPEARANCE_BACKGROUND_OPACITY),
-                settings.getThemeAppearanceOverrides().contains(
-                        LauncherSettings.THEME_APPEARANCE_WINDOW_TRANSPARENT));
+                        LauncherSettings.THEME_APPEARANCE_BACKGROUND_OPACITY));
         return new StoredAppearanceSettings(
                 Objects.requireNonNullElse(configuredMode, "system"),
                 radius,
@@ -332,16 +314,6 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
                 writableSupplier.getAsBoolean(),
                 settings.getThemeAppearanceOverrides().contains(
                         LauncherSettings.THEME_APPEARANCE_BRIGHTNESS_MODE));
-    }
-
-    /// Restricts externally edited fallback values to renderer-supported non-network sources.
-    ///
-    /// @param configured raw persisted fallback value, or `null`
-    /// @return supported fallback source
-    private static BackgroundType normalizeFallbackType(@Nullable BackgroundType configured) {
-        return configured == BackgroundType.PAINT || configured == BackgroundType.THEME_COLOR
-                ? configured
-                : BackgroundType.BUILTIN;
     }
 
     /// Constrains a launcher or externally edited radius to the supported stepped range.

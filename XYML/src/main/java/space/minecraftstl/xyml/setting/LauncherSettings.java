@@ -37,7 +37,6 @@ import space.minecraftstl.xyml.observable.property.SimpleIntegerProperty;
 import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.observable.property.SimpleStringProperty;
 import space.minecraftstl.xyml.observable.property.StringProperty;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeColor;
@@ -88,9 +87,6 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Theme appearance override key for title-bar transparency.
     public static final String THEME_APPEARANCE_TITLE_BAR_TRANSPARENT = "titleBarTransparent";
 
-    /// Theme appearance override key for window transparency.
-    public static final String THEME_APPEARANCE_WINDOW_TRANSPARENT = "windowTransparent";
-
     /// Theme appearance override key for the primary background source.
     public static final String THEME_APPEARANCE_BACKGROUND = "background";
 
@@ -117,13 +113,20 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
             .setObjectToNumberStrategy(ToNumberPolicy.LONG_OR_DOUBLE)
             .create();
 
-    /// Deserializes launcher settings from JSON.
+    /// Deserializes launcher settings from JSON and removes retired appearance override keys.
     ///
     /// @param json the JSON object to read
     /// @return the deserialized launcher settings
     /// @throws JsonParseException if the JSON cannot be deserialized as launcher settings
     public static LauncherSettings fromJson(JsonObject json) throws JsonParseException {
-        return SETTINGS_GSON.fromJson(json, LauncherSettings.class);
+        // Retired fields must not survive the raw unknown-field preservation used for newer settings.
+        JsonObject normalized = json.deepCopy();
+        normalized.remove("backgroundFallbackType");
+        normalized.remove("backgroundFallbackPaint");
+        normalized.remove("backgroundLoadPolicy");
+        LauncherSettings settings = SETTINGS_GSON.fromJson(normalized, LauncherSettings.class);
+        settings.getThemeAppearanceOverrides().remove("windowTransparent");
+        return settings;
     }
 
     /// Creates empty launcher settings using current defaults.
@@ -424,35 +427,6 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Returns the URL image cache policy for network launcher backgrounds.
     public ObjectProperty<NetworkBackgroundImageCachePolicy> networkBackgroundImageCachePolicyProperty() {
         return networkBackgroundImageCachePolicy;
-    }
-
-    /// The fallback source used when the selected launcher background cannot be loaded.
-    @SerializedName("backgroundFallbackType")
-    private final ObjectProperty<BackgroundType> backgroundFallbackType =
-            new RawPreservingObjectProperty<>(BackgroundType.BUILTIN);
-
-    /// Returns the launcher background fallback source type property.
-    public ObjectProperty<BackgroundType> backgroundFallbackTypeProperty() {
-        return backgroundFallbackType;
-    }
-
-    /// The fallback paint used when the selected launcher background cannot be loaded.
-    @SerializedName("backgroundFallbackPaint")
-    private final ObjectProperty<String> backgroundFallbackPaint = new SimpleObjectProperty<>("#FFFFFF");
-
-    /// Returns the launcher background fallback paint property.
-    public ObjectProperty<String> backgroundFallbackPaintProperty() {
-        return backgroundFallbackPaint;
-    }
-
-    /// How the launcher displays its window while the selected background is loading.
-    @SerializedName("backgroundLoadPolicy")
-    private final ObjectProperty<BackgroundLoadPolicy> backgroundLoadPolicy =
-            new RawPreservingObjectProperty<>(BackgroundLoadPolicy.WAIT_FOR_BACKGROUND);
-
-    /// Returns the launcher background loading policy property.
-    public ObjectProperty<BackgroundLoadPolicy> backgroundLoadPolicyProperty() {
-        return backgroundLoadPolicy;
     }
 
     // Fonts

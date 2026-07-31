@@ -35,7 +35,6 @@ import java.util.Objects;
 /// @param contrast contrast, or `null` when inherited
 /// @param background background patch, or `null` when inherited
 /// @param titleBar title-bar patch, or `null` when inherited
-/// @param windowTransparent window transparency, or `null` when inherited
 @NotNullByDefault
 public record ThemeAppearance(
         @Nullable ThemeColorSource color,
@@ -43,8 +42,7 @@ public record ThemeAppearance(
         @Nullable ThemeColorStyle colorStyle,
         @Nullable ThemeContrast contrast,
         @Nullable ThemeBackgroundSettings background,
-        @Nullable ThemeTitleBar titleBar,
-        @Nullable Boolean windowTransparent) {
+        @Nullable ThemeTitleBar titleBar) {
     /// JSON member naming the color source.
     private static final String FIELD_COLOR = "color";
     /// JSON member naming brightness.
@@ -57,9 +55,6 @@ public record ThemeAppearance(
     private static final String FIELD_BACKGROUND = "background";
     /// JSON member naming title-bar settings.
     private static final String FIELD_TITLE_BAR = "titleBar";
-    /// JSON member naming window transparency.
-    private static final String FIELD_WINDOW_TRANSPARENT = "windowTransparent";
-
     /// Normalizes empty nested patches to inherited values.
     public ThemeAppearance {
         if (background != null && background.isEmpty()) {
@@ -81,8 +76,7 @@ public record ThemeAppearance(
                 readColorStyle(object),
                 readContrast(object),
                 readBackground(object),
-                readTitleBar(object),
-                readBoolean(object, FIELD_WINDOW_TRANSPARENT));
+                readTitleBar(object));
     }
 
     /// Returns whether every appearance value is inherited.
@@ -90,7 +84,7 @@ public record ThemeAppearance(
     /// @return `true` for an empty patch
     public boolean isEmpty() {
         return color == null && brightness == null && colorStyle == null && contrast == null
-                && background == null && titleBar == null && windowTransparent == null;
+                && background == null && titleBar == null;
     }
 
     /// Applies a newer appearance patch over this appearance.
@@ -109,8 +103,7 @@ public record ThemeAppearance(
                         : patch.background != null ? patch.background : background,
                 titleBar != null && patch.titleBar != null
                         ? titleBar.merge(patch.titleBar)
-                        : patch.titleBar != null ? patch.titleBar : titleBar,
-                patch.windowTransparent != null ? patch.windowTransparent : windowTransparent);
+                        : patch.titleBar != null ? patch.titleBar : titleBar);
     }
 
     /// Resolves renderer-independent concrete values using context brightness as the fallback.
@@ -146,9 +139,6 @@ public record ThemeAppearance(
         }
         if (titleBar != null) {
             object.add(FIELD_TITLE_BAR, titleBar.toJsonObject());
-        }
-        if (windowTransparent != null) {
-            object.addProperty(FIELD_WINDOW_TRANSPARENT, windowTransparent);
         }
         return object;
     }
@@ -263,11 +253,4 @@ public record ThemeAppearance(
                 : null;
     }
 
-    /// Reads an optional boolean.
-    private static @Nullable Boolean readBoolean(JsonObject object, String field) {
-        JsonElement element = object.get(field);
-        return element instanceof JsonPrimitive primitive && primitive.isBoolean()
-                ? primitive.getAsBoolean()
-                : null;
-    }
 }

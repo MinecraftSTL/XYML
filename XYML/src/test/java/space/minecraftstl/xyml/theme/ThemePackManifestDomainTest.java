@@ -122,8 +122,7 @@ public final class ThemePackManifestDomainTest {
                     "overrides": [
                       {
                         "condition": { "brightness": "dark" },
-                        "background": { "opacity": 0.75 },
-                        "windowTransparent": true
+                        "background": { "opacity": 0.75 }
                       },
                       {
                         "condition": { "os": ["windows", "linux"] },
@@ -144,7 +143,6 @@ public final class ThemePackManifestDomainTest {
 
         assertEquals(new ThemeBackground.Builtin("2021-08-26"), background.source());
         assertEquals(0.5, background.opacity());
-        assertEquals(Boolean.TRUE, resolved.windowTransparent());
         assertNull(resolved.brightness());
         assertEquals(ThemeBrightness.DARK, resolved.toResolvedTheme(
                 new ThemeResolveContext(ThemeBrightness.DARK, "windows", "en")).brightness());

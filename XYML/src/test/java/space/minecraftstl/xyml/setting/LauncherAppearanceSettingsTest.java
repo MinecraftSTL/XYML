@@ -18,12 +18,15 @@
 package space.minecraftstl.xyml.setting;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests persistence and defaults for Swing appearance settings.
 @NotNullByDefault
@@ -47,5 +50,33 @@ public final class LauncherAppearanceSettingsTest {
 
         assertEquals(14, serialized.get("cornerRadius").getAsInt());
         assertEquals(14, restored.cornerRadiusProperty().get());
+    }
+
+    /// Window transparency persists directly while retired background settings are discarded.
+    @Test
+    public void persistsWindowTransparencyWithoutFallbackSettings() {
+        LauncherSettings settings = new LauncherSettings();
+        settings.windowTransparentProperty().set(true);
+        settings.getThemeAppearanceOverrides().add("windowTransparent");
+
+        JsonObject serialized = LauncherSettings.SETTINGS_GSON.toJsonTree(settings).getAsJsonObject();
+        assertFalse(serialized.has("backgroundFallbackType"));
+        assertFalse(serialized.has("backgroundFallbackPaint"));
+        assertFalse(serialized.has("backgroundLoadPolicy"));
+        serialized.addProperty("backgroundFallbackType", "PAINT");
+        serialized.addProperty("backgroundFallbackPaint", "#123456");
+        serialized.addProperty("backgroundLoadPolicy", "SHOW_FALLBACK_WHILE_LOADING");
+
+        LauncherSettings restored = Objects.requireNonNull(LauncherSettings.fromJson(serialized));
+        JsonObject normalized = LauncherSettings.SETTINGS_GSON.toJsonTree(restored).getAsJsonObject();
+
+        assertTrue(serialized.get("windowTransparent").getAsBoolean());
+        assertTrue(restored.windowTransparentProperty().get());
+        assertFalse(restored.getThemeAppearanceOverrides().contains("windowTransparent"));
+        assertFalse(normalized.getAsJsonArray("themeAppearanceOverrides")
+                .contains(new JsonPrimitive("windowTransparent")));
+        assertFalse(normalized.has("backgroundFallbackType"));
+        assertFalse(normalized.has("backgroundFallbackPaint"));
+        assertFalse(normalized.has("backgroundLoadPolicy"));
     }
 }

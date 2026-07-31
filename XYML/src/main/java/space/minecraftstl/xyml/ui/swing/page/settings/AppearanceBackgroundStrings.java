@@ -19,7 +19,6 @@ package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.setting.BackgroundType;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 
 import java.util.Objects;
@@ -46,15 +45,7 @@ import java.util.Objects;
 /// @param networkCacheLabel network cache policy label
 /// @param cacheEnabledLabel enabled cache policy label
 /// @param cacheDisabledLabel disabled cache policy label
-/// @param fallbackTypeLabel fallback source field label
-/// @param fallbackBuiltinLabel bundled fallback label
-/// @param fallbackPaintLabel solid-color fallback label
-/// @param fallbackThemeColorLabel active-theme-color fallback label
-/// @param loadPolicyLabel background load policy label
-/// @param waitForBackgroundLabel wait-before-showing load policy label
-/// @param showFallbackWhileLoadingLabel immediate-fallback load policy label
 /// @param windowTransparentLabel native window transparency toggle label
-/// @param windowTransparencyOverrideLabel launcher-transparency override toggle label
 @NotNullByDefault
 public record AppearanceBackgroundStrings(
         String sectionTitle,
@@ -77,15 +68,7 @@ public record AppearanceBackgroundStrings(
         String networkCacheLabel,
         String cacheEnabledLabel,
         String cacheDisabledLabel,
-        String fallbackTypeLabel,
-        String fallbackBuiltinLabel,
-        String fallbackPaintLabel,
-        String fallbackThemeColorLabel,
-        String loadPolicyLabel,
-        String waitForBackgroundLabel,
-        String showFallbackWhileLoadingLabel,
-        String windowTransparentLabel,
-        String windowTransparencyOverrideLabel) {
+        String windowTransparentLabel) {
     /// Validates every background settings label.
     public AppearanceBackgroundStrings {
         Objects.requireNonNull(sectionTitle, "sectionTitle");
@@ -108,15 +91,7 @@ public record AppearanceBackgroundStrings(
         Objects.requireNonNull(networkCacheLabel, "networkCacheLabel");
         Objects.requireNonNull(cacheEnabledLabel, "cacheEnabledLabel");
         Objects.requireNonNull(cacheDisabledLabel, "cacheDisabledLabel");
-        Objects.requireNonNull(fallbackTypeLabel, "fallbackTypeLabel");
-        Objects.requireNonNull(fallbackBuiltinLabel, "fallbackBuiltinLabel");
-        Objects.requireNonNull(fallbackPaintLabel, "fallbackPaintLabel");
-        Objects.requireNonNull(fallbackThemeColorLabel, "fallbackThemeColorLabel");
-        Objects.requireNonNull(loadPolicyLabel, "loadPolicyLabel");
-        Objects.requireNonNull(waitForBackgroundLabel, "waitForBackgroundLabel");
-        Objects.requireNonNull(showFallbackWhileLoadingLabel, "showFallbackWhileLoadingLabel");
         Objects.requireNonNull(windowTransparentLabel, "windowTransparentLabel");
-        Objects.requireNonNull(windowTransparencyOverrideLabel, "windowTransparencyOverrideLabel");
     }
 
     /// Returns the localized label for one primary background source.
@@ -134,19 +109,6 @@ public record AppearanceBackgroundStrings(
         };
     }
 
-    /// Returns the localized label for one supported non-network fallback source.
-    ///
-    /// @param type fallback background source
-    /// @return localized fallback label
-    public String fallbackLabel(BackgroundType type) {
-        return switch (Objects.requireNonNull(type, "type")) {
-            case BUILTIN -> fallbackBuiltinLabel;
-            case PAINT -> fallbackPaintLabel;
-            case THEME_COLOR -> fallbackThemeColorLabel;
-            default -> throw new IllegalArgumentException("Unsupported fallback type: " + type);
-        };
-    }
-
     /// Returns the localized label for one network image cache policy.
     ///
     /// @param policy network cache policy
@@ -155,17 +117,6 @@ public record AppearanceBackgroundStrings(
         return switch (Objects.requireNonNull(policy, "policy")) {
             case ENABLED -> cacheEnabledLabel;
             case DISABLED -> cacheDisabledLabel;
-        };
-    }
-
-    /// Returns the localized label for one background load policy.
-    ///
-    /// @param policy background load policy
-    /// @return localized policy label
-    public String loadPolicyLabel(BackgroundLoadPolicy policy) {
-        return switch (Objects.requireNonNull(policy, "policy")) {
-            case WAIT_FOR_BACKGROUND -> waitForBackgroundLabel;
-            case SHOW_FALLBACK_WHILE_LOADING -> showFallbackWhileLoadingLabel;
         };
     }
 
@@ -194,15 +145,7 @@ public record AppearanceBackgroundStrings(
                 "Cache URL images",
                 "Enabled",
                 "Disabled",
-                "Fallback background",
-                "Built-in background",
-                "Solid color",
-                "Follow theme color",
-                "Loading mode",
-                "Wait for background",
-                "Show fallback while loading",
-                "Transparent window",
-                "Use launcher window transparency setting");
+                "Transparent window");
     }
 
     /// Returns complete built-in Simplified Chinese labels for deterministic visual tests.
@@ -230,14 +173,6 @@ public record AppearanceBackgroundStrings(
                 "缓存网络图片",
                 "启用",
                 "禁用",
-                "备用背景",
-                "内置背景",
-                "纯色",
-                "跟随主题色",
-                "背景加载方式",
-                "等待背景加载完成",
-                "加载时先显示备用背景",
-                "窗口透明",
-                "使用启动器窗口透明设置");
+                "窗口透明");
     }
 }

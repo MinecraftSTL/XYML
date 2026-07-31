@@ -50,7 +50,6 @@
           "themeColor",
           "themeColorStyle",
           "titleBarTransparent",
-          "windowTransparent",
           "background",
           "backgroundOpacity"
         ]
@@ -118,20 +117,6 @@
       "enum": [
         "ENABLED",
         "DISABLED"
-      ]
-    },
-    "backgroundFallbackType": {
-      "enum": [
-        "BUILTIN",
-        "PAINT",
-        "THEME_COLOR"
-      ]
-    },
-    "backgroundFallbackPaint": true,
-    "backgroundLoadPolicy": {
-      "enum": [
-        "WAIT_FOR_BACKGROUND",
-        "SHOW_FALLBACK_WHILE_LOADING"
       ]
     },
     "logFontFamily": {

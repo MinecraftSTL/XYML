@@ -21,7 +21,6 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.setting.BackgroundType;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.BuiltinThemePack;
 import space.minecraftstl.xyml.theme.BuiltinThemePackCatalog;
@@ -72,19 +71,14 @@ public final class SwingWindowAppearanceRequestTest {
         SwingBackgroundSource.ThemePackImage image = assertInstanceOf(
                 SwingBackgroundSource.ThemePackImage.class,
                 request.source());
-        SwingBackgroundSource.Builtin fallback = assertInstanceOf(
-                SwingBackgroundSource.Builtin.class,
-                request.fallback());
         assertAll(
                 () -> assertEquals("assets/background-light.png", image.resource().name()),
-                () -> assertEquals(BuiltinBackground.FALLBACK, fallback.background()),
                 () -> assertEquals(1.0, request.opacity()),
-                () -> assertEquals(BackgroundLoadPolicy.WAIT_FOR_BACKGROUND, request.loadPolicy()),
                 () -> assertEquals(NetworkBackgroundImageCachePolicy.ENABLED, request.networkCachePolicy()),
                 () -> assertFalse(request.windowTransparent()));
     }
 
-    /// Explicit launcher source, opacity, transparency, cache, loading, and fallback values replace theme values.
+    /// Explicit launcher source, opacity, transparency, and cache values replace theme values.
     @Test
     public void appliesCompleteLauncherOverrides() {
         BackgroundAppearanceSettings background = new BackgroundAppearanceSettings(
@@ -95,10 +89,6 @@ public final class SwingWindowAppearanceRequestTest {
                 "#102030",
                 0.35,
                 NetworkBackgroundImageCachePolicy.DISABLED,
-                BackgroundType.PAINT,
-                "rgba(10, 20, 30, 0.5)",
-                BackgroundLoadPolicy.SHOW_FALLBACK_WHILE_LOADING,
-                true,
                 true,
                 true,
                 true);
@@ -110,14 +100,9 @@ public final class SwingWindowAppearanceRequestTest {
         SwingBackgroundSource.Network source = assertInstanceOf(
                 SwingBackgroundSource.Network.class,
                 request.source());
-        SwingBackgroundSource.Paint fallback = assertInstanceOf(
-                SwingBackgroundSource.Paint.class,
-                request.fallback());
         assertAll(
                 () -> assertEquals("https://textures.example.invalid/background.png", source.url()),
-                () -> assertEquals("rgba(10, 20, 30, 0.5)", fallback.expression()),
                 () -> assertEquals(0.35, request.opacity()),
-                () -> assertEquals(BackgroundLoadPolicy.SHOW_FALLBACK_WHILE_LOADING, request.loadPolicy()),
                 () -> assertEquals(NetworkBackgroundImageCachePolicy.DISABLED, request.networkCachePolicy()),
                 () -> assertTrue(request.windowTransparent()));
     }
@@ -156,12 +141,12 @@ public final class SwingWindowAppearanceRequestTest {
     ///
     /// @param sourceOverridden whether the launcher source replaces the theme source
     /// @param opacityOverridden whether launcher opacity replaces theme opacity
-    /// @param transparencyOverridden whether launcher transparency replaces theme transparency
+    /// @param windowTransparent whether the native window is transparent
     /// @return complete background controls
     private static BackgroundAppearanceSettings background(
             boolean sourceOverridden,
             boolean opacityOverridden,
-            boolean transparencyOverridden) {
+            boolean windowTransparent) {
         return new BackgroundAppearanceSettings(
                 BackgroundType.DEFAULT,
                 BuiltinBackground.FALLBACK.id(),
@@ -170,13 +155,9 @@ public final class SwingWindowAppearanceRequestTest {
                 null,
                 1.0,
                 NetworkBackgroundImageCachePolicy.ENABLED,
-                BackgroundType.BUILTIN,
-                "#FFFFFF",
-                BackgroundLoadPolicy.WAIT_FOR_BACKGROUND,
-                false,
+                windowTransparent,
                 sourceOverridden,
-                opacityOverridden,
-                transparencyOverridden);
+                opacityOverridden);
     }
 
     /// Verifies one initial request remains entirely within the bundled XYML theme package.
@@ -189,9 +170,6 @@ public final class SwingWindowAppearanceRequestTest {
         SwingBackgroundSource.ThemePackImage source = assertInstanceOf(
                 SwingBackgroundSource.ThemePackImage.class,
                 request.source());
-        SwingBackgroundSource.ThemePackImage fallback = assertInstanceOf(
-                SwingBackgroundSource.ThemePackImage.class,
-                request.fallback());
         ThemePackResource.Builtin resource = assertInstanceOf(
                 ThemePackResource.Builtin.class,
                 source.resource());
@@ -200,9 +178,7 @@ public final class SwingWindowAppearanceRequestTest {
                 () -> assertEquals(
                         "/assets/themes/xyml.default/" + expectedAssetName,
                         resource.resourcePath()),
-                () -> assertEquals(source, fallback),
                 () -> assertEquals(1.0, request.opacity()),
-                () -> assertEquals(BackgroundLoadPolicy.WAIT_FOR_BACKGROUND, request.loadPolicy()),
                 () -> assertEquals(NetworkBackgroundImageCachePolicy.DISABLED, request.networkCachePolicy()),
                 () -> assertFalse(request.windowTransparent()));
     }

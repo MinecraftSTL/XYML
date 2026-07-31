@@ -505,15 +505,7 @@ public final class SwingApplicationPresentationFactory {
                 i18n("launcher.background.network.cache"),
                 i18n("launcher.background.network.cache.enabled"),
                 i18n("launcher.background.network.cache.disabled"),
-                i18n("launcher.background.fallback"),
-                i18n("launcher.background.fallback.builtin"),
-                i18n("launcher.background.fallback.paint"),
-                i18n("launcher.background.fallback.theme_color"),
-                i18n("launcher.background.load_policy"),
-                i18n("launcher.background.load_policy.wait_for_background"),
-                i18n("launcher.background.load_policy.show_fallback_while_loading"),
-                i18n("settings.launcher.window_transparent"),
-                i18n("swing.appearance.background.override_transparency"));
+                i18n("settings.launcher.window_transparent"));
     }
 
     /// Creates localized generic task-progress controls and states.

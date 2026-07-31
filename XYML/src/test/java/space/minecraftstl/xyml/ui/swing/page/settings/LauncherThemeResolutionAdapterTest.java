@@ -23,7 +23,6 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.ThemeColorType;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightness;
@@ -129,10 +128,6 @@ public final class LauncherThemeResolutionAdapterTest {
                 "#123456",
                 0.45,
                 NetworkBackgroundImageCachePolicy.DISABLED,
-                BackgroundType.PAINT,
-                "#654321",
-                BackgroundLoadPolicy.SHOW_FALLBACK_WHILE_LOADING,
-                true,
                 true,
                 true,
                 true);
@@ -159,8 +154,6 @@ public final class LauncherThemeResolutionAdapterTest {
                         LauncherSettings.THEME_APPEARANCE_BACKGROUND)),
                 () -> assertTrue(settings.getThemeAppearanceOverrides().contains(
                         LauncherSettings.THEME_APPEARANCE_BACKGROUND_OPACITY)),
-                () -> assertTrue(settings.getThemeAppearanceOverrides().contains(
-                        LauncherSettings.THEME_APPEARANCE_WINDOW_TRANSPARENT)),
                 () -> assertEquals(1, transitions.get()));
         store.close();
         EdtDispatcher.executeAndWait(() -> { });

@@ -27,7 +27,6 @@ import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.setting.BackgroundType;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
@@ -595,10 +594,6 @@ public final class ThemePackManagementPanelTest {
                         null,
                         1.0,
                         NetworkBackgroundImageCachePolicy.ENABLED,
-                        BackgroundType.BUILTIN,
-                        "#FFFFFF",
-                        BackgroundLoadPolicy.WAIT_FOR_BACKGROUND,
-                        false,
                         false,
                         false,
                         false),
