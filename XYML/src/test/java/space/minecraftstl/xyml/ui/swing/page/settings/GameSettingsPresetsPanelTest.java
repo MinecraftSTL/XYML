@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.DefaultIsolationType;
 import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.setting.JavaVersionType;
+import space.minecraftstl.xyml.setting.LauncherVisibility;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.AbstractButton;
@@ -74,6 +75,15 @@ public final class GameSettingsPresetsPanelTest {
             findComponent(panel, "gameSettingsPresetJvmOptions", JTextArea.class)
                     .setText("-XX:+UseG1GC");
             findComponent(panel, "gameSettingsPresetNoJvmOptions", JCheckBox.class).setSelected(true);
+            JComboBox<?> launcherVisibility =
+                    findComponent(panel, "gameSettingsPresetLauncherVisibility", JComboBox.class);
+            assertAll(
+                    () -> assertEquals(4, launcherVisibility.getItemCount()),
+                    () -> assertEquals(LauncherVisibility.CLOSE, launcherVisibility.getItemAt(0)),
+                    () -> assertEquals(LauncherVisibility.HIDE, launcherVisibility.getItemAt(1)),
+                    () -> assertEquals(LauncherVisibility.KEEP, launcherVisibility.getItemAt(2)),
+                    () -> assertEquals(LauncherVisibility.HIDE_AND_REOPEN, launcherVisibility.getItemAt(3)));
+            launcherVisibility.setSelectedItem(LauncherVisibility.HIDE_AND_REOPEN);
             findComponent(panel, "gameSettingsPresetIsolation", JComboBox.class)
                     .setSelectedItem(DefaultIsolationType.NEVER);
             findComponent(panel, "gameSettingsPresetSave", AbstractButton.class).doClick();
@@ -90,6 +100,7 @@ public final class GameSettingsPresetsPanelTest {
                     () -> assertEquals("C:/java/21/bin/java.exe", saved.customJavaPath()),
                     () -> assertEquals("-XX:+UseG1GC", saved.jvmOptions()),
                     () -> assertEquals(true, saved.noJvmOptions()),
+                    () -> assertEquals(LauncherVisibility.HIDE_AND_REOPEN, saved.launcherVisibility()),
                     () -> assertEquals(DefaultIsolationType.NEVER, saved.defaultIsolationType()));
             panel.close();
         });
@@ -127,6 +138,7 @@ public final class GameSettingsPresetsPanelTest {
                 "",
                 "",
                 false,
+                LauncherVisibility.HIDE,
                 DefaultIsolationType.MODDED);
     }
 
@@ -334,6 +346,7 @@ public final class GameSettingsPresetsPanelTest {
                         preset.customJavaPath(),
                         preset.jvmOptions(),
                         preset.noJvmOptions(),
+                        preset.launcherVisibility(),
                         preset.defaultIsolationType());
             }
             return new GameSettingsPresetSnapshot(
@@ -350,6 +363,7 @@ public final class GameSettingsPresetsPanelTest {
                     editor.customJavaPath(),
                     editor.jvmOptions(),
                     editor.noJvmOptions(),
+                    editor.launcherVisibility(),
                     editor.defaultIsolationType());
         }
 

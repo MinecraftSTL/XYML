@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.setting.DefaultIsolationType;
 import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.setting.JavaVersionType;
+import space.minecraftstl.xyml.setting.LauncherVisibility;
 
 import java.util.Objects;
 
@@ -44,6 +45,7 @@ import java.util.Objects;
 /// @param customJavaPath persisted custom Java executable path
 /// @param jvmOptions persisted custom JVM arguments
 /// @param noJvmOptions whether generated JVM arguments are disabled
+/// @param launcherVisibility launcher behavior after a game process starts
 /// @param defaultIsolationType default isolation strategy for new instances
 @NotNullByDefault
 public record GameSettingsPresetSnapshot(
@@ -60,6 +62,7 @@ public record GameSettingsPresetSnapshot(
         String customJavaPath,
         String jvmOptions,
         boolean noJvmOptions,
+        LauncherVisibility launcherVisibility,
         DefaultIsolationType defaultIsolationType) {
     /// Validates non-null snapshot components retained by Swing controls.
     public GameSettingsPresetSnapshot {
@@ -69,6 +72,7 @@ public record GameSettingsPresetSnapshot(
         customJavaVersion = Objects.requireNonNull(customJavaVersion, "customJavaVersion");
         customJavaPath = Objects.requireNonNull(customJavaPath, "customJavaPath");
         jvmOptions = Objects.requireNonNull(jvmOptions, "jvmOptions");
+        launcherVisibility = Objects.requireNonNull(launcherVisibility, "launcherVisibility");
         defaultIsolationType = Objects.requireNonNull(defaultIsolationType, "defaultIsolationType");
     }
 
@@ -86,6 +90,7 @@ public record GameSettingsPresetSnapshot(
                 customJavaPath,
                 jvmOptions,
                 noJvmOptions,
+                launcherVisibility,
                 defaultIsolationType);
     }
 }

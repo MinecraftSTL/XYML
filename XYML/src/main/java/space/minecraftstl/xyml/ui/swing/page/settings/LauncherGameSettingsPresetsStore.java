@@ -214,6 +214,7 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
             preset.customJavaPathProperty().setValue(values.customJavaPath());
             preset.jvmOptionsProperty().setValue(values.jvmOptions());
             preset.noJVMOptionsProperty().setValue(values.noJvmOptions());
+            preset.launcherVisibilityProperty().setValue(values.launcherVisibility());
             preset.defaultIsolationTypeProperty().setValue(values.defaultIsolationType());
             return snapshot();
         });
@@ -354,6 +355,7 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
                 source.customJavaPathProperty().getValue(),
                 source.jvmOptionsProperty().getValue(),
                 source.noJVMOptionsProperty().getValue(),
+                source.launcherVisibilityProperty().getValue(),
                 source.defaultIsolationTypeProperty().getValue());
     }
 

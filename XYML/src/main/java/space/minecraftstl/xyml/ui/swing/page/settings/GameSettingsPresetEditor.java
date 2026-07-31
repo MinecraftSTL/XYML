@@ -22,13 +22,15 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.setting.DefaultIsolationType;
 import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.setting.JavaVersionType;
+import space.minecraftstl.xyml.setting.LauncherVisibility;
 
 import java.util.Objects;
 
 /// Contains the editable persisted fields of one reusable game-settings preset.
 ///
 /// The editor purposefully covers launcher-wide fields that are meaningful without an instance: memory allocation,
-/// Java selection, JVM arguments, and the default isolation strategy. It does not replace instance-only overrides.
+/// Java selection, JVM arguments, launcher visibility, and the default isolation strategy. It does not replace
+/// instance-only overrides.
 ///
 /// @param id stable identity of the preset to update
 /// @param autoMemory whether the launcher calculates memory allocation automatically
@@ -39,6 +41,7 @@ import java.util.Objects;
 /// @param customJavaPath user-entered Java executable path
 /// @param jvmOptions custom JVM command-line arguments
 /// @param noJvmOptions whether generated JVM arguments are disabled
+/// @param launcherVisibility launcher behavior after a game process starts
 /// @param defaultIsolationType default strategy for isolating newly installed instances
 @NotNullByDefault
 public record GameSettingsPresetEditor(
@@ -51,6 +54,7 @@ public record GameSettingsPresetEditor(
         String customJavaPath,
         String jvmOptions,
         boolean noJvmOptions,
+        LauncherVisibility launcherVisibility,
         DefaultIsolationType defaultIsolationType) {
     /// Validates immutable editor values before they are applied to the live settings model.
     public GameSettingsPresetEditor {
@@ -59,6 +63,7 @@ public record GameSettingsPresetEditor(
         customJavaVersion = Objects.requireNonNull(customJavaVersion, "customJavaVersion");
         customJavaPath = Objects.requireNonNull(customJavaPath, "customJavaPath");
         jvmOptions = Objects.requireNonNull(jvmOptions, "jvmOptions");
+        launcherVisibility = Objects.requireNonNull(launcherVisibility, "launcherVisibility");
         defaultIsolationType = Objects.requireNonNull(defaultIsolationType, "defaultIsolationType");
         validateMemory(minMemoryMiB, maxMemoryMiB, autoMemory);
     }

@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.setting.DefaultIsolationType;
 import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.setting.JavaVersionType;
+import space.minecraftstl.xyml.setting.LauncherVisibility;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
@@ -108,6 +109,10 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
 
     /// Disables launcher-generated JVM arguments when selected.
     private final JCheckBox noJvmOptionsBox = new JCheckBox(i18n("settings.advanced.no_jvm_args"));
+
+    /// Selects launcher-window behavior after a game process starts.
+    private final JComboBox<LauncherVisibility> launcherVisibilityBox =
+            new JComboBox<>(LauncherVisibility.values());
 
     /// Selects the default isolation strategy for future game instances.
     private final JComboBox<DefaultIsolationType> isolationTypeBox = new JComboBox<>(DefaultIsolationType.values());
@@ -237,6 +242,8 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         jvmOptionsArea.setLineWrap(true);
         jvmOptionsArea.setWrapStyleWord(true);
         noJvmOptionsBox.setName("gameSettingsPresetNoJvmOptions");
+        launcherVisibilityBox.setName("gameSettingsPresetLauncherVisibility");
+        launcherVisibilityBox.setRenderer(launcherVisibilityRenderer());
         isolationTypeBox.setName("gameSettingsPresetIsolation");
         isolationTypeBox.setRenderer(isolationRenderer());
         autoMemoryBox.setName("gameSettingsPresetAutoMemory");
@@ -296,6 +303,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         editor.add(new JSeparator(), "growx");
         editor.add(createFieldRow(i18n("settings.advanced.jvm_args"), new JScrollPane(jvmOptionsArea)), "growx, growy");
         editor.add(noJvmOptionsBox, "growx");
+        editor.add(createFieldRow(i18n("settings.advanced.launcher_visible"), launcherVisibilityBox), "growx");
         editor.add(createFieldRow(i18n("settings.game.default_isolation"), isolationTypeBox), "growx");
         editor.add(saveButton, "alignx right");
 
@@ -348,6 +356,13 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         return (list, value, index, selected, focus) -> comboRenderer(list, isolationText(value), selected);
     }
 
+    /// Creates a renderer for launcher visibility behavior.
+    ///
+    /// @return launcher visibility combo-box renderer
+    private static ListCellRenderer<LauncherVisibility> launcherVisibilityRenderer() {
+        return (list, value, index, selected, focus) -> comboRenderer(list, launcherVisibilityText(value), selected);
+    }
+
     /// Creates a list-style label whose solid surface is limited to the active selection.
     ///
     /// @param list source list
@@ -397,6 +412,22 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
             return i18n("settings.game.default_isolation.never");
         }
         return i18n("settings.game.default_isolation.modded");
+    }
+
+    /// Converts a launcher visibility behavior to its localized user-facing label.
+    ///
+    /// @param visibility behavior to display, or null while a renderer initializes
+    /// @return visible behavior label
+    private static String launcherVisibilityText(@Nullable LauncherVisibility visibility) {
+        if (visibility == null) {
+            return "";
+        }
+        return switch (visibility) {
+            case CLOSE -> i18n("settings.advanced.launcher_visibility.close");
+            case HIDE -> i18n("settings.advanced.launcher_visibility.hide");
+            case KEEP -> i18n("settings.advanced.launcher_visibility.keep");
+            case HIDE_AND_REOPEN -> i18n("settings.advanced.launcher_visibility.hide_and_reopen");
+        };
     }
 
     /// Prompts for an optional custom name and starts asynchronous creation.
@@ -476,8 +507,10 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
             return;
         }
         @Nullable JavaVersionType javaType = (JavaVersionType) javaTypeBox.getSelectedItem();
+        @Nullable LauncherVisibility launcherVisibility =
+                (LauncherVisibility) launcherVisibilityBox.getSelectedItem();
         @Nullable DefaultIsolationType isolationType = (DefaultIsolationType) isolationTypeBox.getSelectedItem();
-        if (javaType == null || isolationType == null) {
+        if (javaType == null || launcherVisibility == null || isolationType == null) {
             statusLabel.setText(i18n("message.failed"));
             return;
         }
@@ -492,6 +525,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
                     customJavaPathField.getText().trim(),
                     jvmOptionsArea.getText(),
                     noJvmOptionsBox.isSelected(),
+                    launcherVisibility,
                     isolationType);
             beginMutation(() -> store.updatePreset(editor), selected.id(), false);
         } catch (IllegalArgumentException failure) {
@@ -666,6 +700,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
                 customJavaPathField.setText("");
                 jvmOptionsArea.setText("");
                 noJvmOptionsBox.setSelected(false);
+                launcherVisibilityBox.setSelectedItem(LauncherVisibility.HIDE);
                 isolationTypeBox.setSelectedItem(DefaultIsolationType.MODDED);
             } else {
                 selectedNameLabel.setText(preset.displayName());
@@ -677,6 +712,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
                 customJavaPathField.setText(preset.customJavaPath());
                 jvmOptionsArea.setText(preset.jvmOptions());
                 noJvmOptionsBox.setSelected(preset.noJvmOptions());
+                launcherVisibilityBox.setSelectedItem(preset.launcherVisibility());
                 isolationTypeBox.setSelectedItem(preset.defaultIsolationType());
             }
             updateMemoryControlAvailability();
@@ -729,6 +765,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         javaTypeBox.setEnabled(writable && hasSelection);
         jvmOptionsArea.setEnabled(writable && hasSelection);
         noJvmOptionsBox.setEnabled(writable && hasSelection);
+        launcherVisibilityBox.setEnabled(writable && hasSelection);
         isolationTypeBox.setEnabled(writable && hasSelection);
         saveButton.setEnabled(writable && hasSelection);
         updateMemoryControlAvailability();
