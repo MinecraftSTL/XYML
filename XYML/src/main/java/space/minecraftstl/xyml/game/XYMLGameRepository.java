@@ -316,6 +316,15 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @return whether the instance was removed from disk
     @Override
     public boolean removeInstanceFromDisk(GameInstanceID instanceId) {
+        if (instanceGameSettings.containsKey(instanceId)) {
+            try {
+                FileSaver.waitForAllSaves();
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                LOG.warning("Interrupted while flushing settings for instance " + instanceId, exception);
+                return false;
+            }
+        }
         boolean removed = super.removeInstanceFromDisk(instanceId);
         if (removed) {
             instanceGameSettings.remove(instanceId);
