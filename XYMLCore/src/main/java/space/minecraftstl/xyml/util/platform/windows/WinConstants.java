@@ -17,10 +17,43 @@
  */
 package space.minecraftstl.xyml.util.platform.windows;
 
-/**
- * @author Glavo
- */
+import org.jetbrains.annotations.NotNullByDefault;
+
+/// Windows native constants shared by the launcher platform bindings.
+///
+/// @author Glavo
+@NotNullByDefault
 public interface WinConstants {
+
+    /// Successful Windows `HRESULT` value.
+    int S_OK = 0;
+
+    /// Successful Windows `HRESULT` value carrying a false result.
+    int S_FALSE = 1;
+
+    /// Empty `VARIANT` type tag.
+    int VT_EMPTY = 0;
+
+    /// Null `VARIANT` type tag.
+    int VT_NULL = 1;
+
+    /// Signed 16-bit integer `VARIANT` type tag.
+    int VT_I2 = 2;
+
+    /// Signed 32-bit integer `VARIANT` type tag.
+    int VT_I4 = 3;
+
+    /// Automation string `VARIANT` type tag.
+    int VT_BSTR = 8;
+
+    /// Boolean `VARIANT` type tag.
+    int VT_BOOL = 11;
+
+    /// Null-terminated narrow string `VARIANT` type tag.
+    int VT_LPSTR = 30;
+
+    /// Null-terminated wide string `VARIANT` type tag.
+    int VT_LPWSTR = 31;
 
     // https://learn.microsoft.com/windows/win32/debug/system-error-codes--0-499-
     int ERROR_SUCCESS = 0;

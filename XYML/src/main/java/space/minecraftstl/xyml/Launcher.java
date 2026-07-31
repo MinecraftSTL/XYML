@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.ui.swing.NativeSystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.SwingAnimationFrameRateResolver;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
+import space.minecraftstl.xyml.ui.swing.WindowsNativeUtils;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentation;
 import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentationFactory;
 import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
@@ -556,6 +557,7 @@ public final class Launcher {
 
             LOG.info("Zlib Compatible: " + ZlibUtils.IS_ZLIB_COMPATIBLE);
 
+            WindowsNativeUtils.setProcessAppUserModelId();
             Lang.thread(SystemInfo::initialize, "Detection System Information", true);
 
             Launcher launcher = new Launcher();
