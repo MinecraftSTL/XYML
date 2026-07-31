@@ -519,7 +519,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                         commands.launchCommand(),
                         commands.launchScriptExportCommand()),
                 LauncherGameDirectoryManagementService::new,
-                () -> new InstanceManagementCoordinator((instanceId, ignoredReturnCommand) -> {
+                homeModel -> new InstanceManagementCoordinator((instanceId, ignoredReturnCommand) -> {
                     WorldQuickPlayActions worldQuickPlayActions = WorldQuickPlayActions.available(
                             worldFolder -> commands.launchCommand().launch(new LaunchRequest(
                                     bindings.homeStore().snapshot().accountId(),
@@ -540,6 +540,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                                     commands.launchCommand(),
                                     commands.launchScriptExportCommand());
                     return new DefaultInstanceManagementView(
+                                homeModel,
                                 bindings.repository(),
                                 bindings.repository()::getSchematicsDirectory,
                                 instanceId,
@@ -703,7 +704,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     models,
                     "game-directory selection service");
             InstanceManagementCoordinator instanceManagement = ownCloseable(
-                    factories.instanceManagement().get(),
+                    factories.instanceManagement().apply(home),
                     models,
                     "instance-management coordinator");
             InstancesModel instances = ownCloseable(
@@ -974,7 +975,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     ///
     /// @param home launcher-home model factory receiving the shared add-instance command
     /// @param gameDirectories configured game-directory selection service factory
-    /// @param instanceManagement dynamic instance-management coordinator factory
+    /// @param instanceManagement dynamic instance-management coordinator factory borrowing the created home model
     /// @param instances installed-instance model factory receiving the registered coordinator and shared
     ///                  add-instance command
     /// @param gameVersionSource game-version catalog source factory
@@ -986,7 +987,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     record ProductionPageModelFactories(
             Function<Runnable, ? extends HomeModel> home,
             Supplier<? extends GameDirectoryManagementService> gameDirectories,
-            Supplier<? extends InstanceManagementCoordinator> instanceManagement,
+            Function<HomeModel, ? extends InstanceManagementCoordinator> instanceManagement,
             BiFunction<InstanceManagementCoordinator, Runnable, ? extends InstancesModel> instances,
             Supplier<? extends GameVersionCatalogSource> gameVersionSource,
             Function<GameVersionCatalogSource, ? extends GameVersionCatalogModel> gameVersions,
