@@ -446,6 +446,39 @@ public final class AppearanceSettingsPanelTest {
         assertTrue(distinctColors(image).size() > 4);
     }
 
+    /// All labeled appearance inputs share one stable leading edge regardless of localized label length.
+    @Test
+    public void alignsLabeledAppearanceInputs() {
+        AppearanceSettingsStrings variedLabels = new AppearanceSettingsStrings(
+                "Appearance",
+                "Mode",
+                "Theme",
+                "System",
+                "Light",
+                "Dark",
+                "A deliberately longer corner-radius field label",
+                "Animations",
+                AppearanceBackgroundStrings.englishFallback());
+        FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                ThemeBrightnessPreference.SYSTEM, 6, true, true));
+        AppearanceSettingsPanel panel = onEventDispatchThread(
+                () -> new AppearanceSettingsPanel(model, variedLabels));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(760, 900));
+            layoutRecursively(panel);
+            assertAlignedAppearanceInputs(panel);
+
+            JLabel longestLabel = findComponent(panel, "appearanceCornerRadiusLabel", JLabel.class);
+            assertTrue(longestLabel.getWidth() >= longestLabel.getPreferredSize().width);
+
+            panel.setSize(new Dimension(600, 900));
+            layoutRecursively(panel);
+            assertAlignedAppearanceInputs(panel);
+            panel.close();
+        });
+    }
+
     /// Creates a snapshot with a test-only radius grid from zero through eighteen in increments of three.
     ///
     /// @param preference selected brightness preference
@@ -578,6 +611,50 @@ public final class AppearanceSettingsPanelTest {
                 layoutRecursively(nested);
             }
         }
+    }
+
+    /// Returns one nested component's horizontal position in the appearance page coordinate system.
+    ///
+    /// @param root appearance page root
+    /// @param component nested input component
+    /// @return horizontal location relative to the page
+    private static int horizontalPosition(Container root, Component component) {
+        Container parent = Objects.requireNonNull(component.getParent(), "component is not attached");
+        return SwingUtilities.convertPoint(parent, component.getLocation(), root).x;
+    }
+
+    /// Verifies every labeled appearance input uses the same page-relative leading edge.
+    ///
+    /// @param panel laid-out appearance panel
+    private static void assertAlignedAppearanceInputs(AppearanceSettingsPanel panel) {
+        int expectedX = horizontalPosition(
+                panel,
+                findComponent(panel, "appearanceCustomThemeColor", JTextField.class));
+        assertAll(
+                () -> assertEquals(expectedX, horizontalPosition(
+                        panel,
+                        findComponent(panel, "appearanceCornerRadius", JSlider.class))),
+                () -> assertEquals(expectedX, horizontalPosition(
+                        panel,
+                        findComponent(panel, "appearanceBackgroundType", JComboBox.class))),
+                () -> assertEquals(expectedX, horizontalPosition(
+                        panel,
+                        findComponent(panel, "appearanceBuiltinBackground", JComboBox.class))),
+                () -> assertEquals(expectedX, horizontalPosition(
+                        panel,
+                        findComponent(panel, "appearanceLocalBackgroundPath", JTextField.class))),
+                () -> assertEquals(expectedX, horizontalPosition(
+                        panel,
+                        findComponent(panel, "appearanceNetworkBackgroundUrl", JTextField.class))),
+                () -> assertEquals(expectedX, horizontalPosition(
+                        panel,
+                        findComponent(panel, "appearanceBackgroundPaint", JTextField.class))),
+                () -> assertEquals(expectedX, horizontalPosition(
+                        panel,
+                        findComponent(panel, "appearanceBackgroundOpacity", JSlider.class))),
+                () -> assertEquals(expectedX, horizontalPosition(
+                        panel,
+                        findComponent(panel, "appearanceNetworkBackgroundCache", JComboBox.class))));
     }
 
     /// Collects all pixel colors painted into an image.

@@ -87,6 +87,9 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// Localized launcher-background text.
     private final AppearanceBackgroundStrings backgroundStrings;
 
+    /// Measured label and input columns shared by every independently laid-out field row.
+    private final String fieldColumns;
+
     /// Optional local theme-pack surface owned with this appearance page.
     private final @Nullable ThemePackManagementPanel themePackManagementPanel;
 
@@ -200,6 +203,17 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
         backgroundStrings = strings.background();
+        fieldColumns = measuredFieldColumns(
+                strings.themeModeLabel(),
+                i18n("settings.launcher.theme_color"),
+                strings.cornerRadiusLabel(),
+                backgroundStrings.sourceTypeLabel(),
+                backgroundStrings.builtinSelectionLabel(),
+                backgroundStrings.localPathLabel(),
+                backgroundStrings.networkUrlLabel(),
+                backgroundStrings.paintValueLabel(),
+                backgroundStrings.opacityLabel(),
+                backgroundStrings.networkCacheLabel());
         this.themePackManagementPanel = themePackManagementPanel;
 
         applyingSnapshot = true;
@@ -549,10 +563,11 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     private JPanel createRadiusRow() {
         JPanel row = new JPanel(new MigLayout(
                 "insets 4 0, fillx",
-                "[grow,fill][grow,fill]",
+                fieldColumns,
                 "[][pref!]"));
         row.setOpaque(false);
         JLabel label = new JLabel(strings.cornerRadiusLabel());
+        label.setName("appearanceCornerRadiusLabel");
         cornerRadiusSlider.setPaintTicks(false);
         cornerRadiusSlider.setPaintLabels(false);
         cornerRadiusSlider.setName("appearanceCornerRadius");
@@ -608,7 +623,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// @param labelText localized field label
     /// @param control input component
     /// @return transparent field row
-    private static JPanel createFieldRow(String labelText, Component control) {
+    private JPanel createFieldRow(String labelText, Component control) {
         JPanel row = fieldRow();
         row.add(new JLabel(Objects.requireNonNull(labelText, "labelText")), "growx");
         row.add(Objects.requireNonNull(control, "control"), "wmin 260, growx");
@@ -629,7 +644,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// @param field color expression field
     /// @param button color chooser swatch
     /// @return color field row
-    private static JPanel createColorFieldRow(String labelText, JTextField field, JButton button) {
+    private JPanel createColorFieldRow(String labelText, JTextField field, JButton button) {
         return createFieldRow(labelText, compoundInput(field, button));
     }
 
@@ -661,7 +676,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     ///
     /// @param toggle configured checkbox
     /// @return transparent full-width row
-    private static JPanel createFullWidthToggleRow(JCheckBox toggle) {
+    private JPanel createFullWidthToggleRow(JCheckBox toggle) {
         JPanel row = fieldRow();
         row.add(Objects.requireNonNull(toggle, "toggle"), "span 2, growx");
         return row;
@@ -670,10 +685,23 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// Creates a transparent two-column field row.
     ///
     /// @return layout-only field row
-    private static JPanel fieldRow() {
-        JPanel row = new JPanel(new MigLayout("insets 4 0, fillx", "[grow,fill][grow,fill]", "[]"));
+    private JPanel fieldRow() {
+        JPanel row = new JPanel(new MigLayout("insets 4 0, fillx", fieldColumns, "[]"));
         row.setOpaque(false);
         return row;
+    }
+
+    /// Measures localized labels with the active look-and-feel font and creates one shared field-column grid.
+    ///
+    /// @param labels localized field labels to measure
+    /// @return MigLayout column constraints with a non-clipping label column and expanding input column
+    private static String measuredFieldColumns(String... labels) {
+        int maximumWidth = 0;
+        for (String text : labels) {
+            JLabel label = new JLabel(Objects.requireNonNull(text, "label"));
+            maximumWidth = Math.max(maximumWidth, label.getPreferredSize().width);
+        }
+        return "[" + maximumWidth + "!][grow,fill]";
     }
 
     /// Opens a chooser supporting direct typed paths, image files, and image directories.
