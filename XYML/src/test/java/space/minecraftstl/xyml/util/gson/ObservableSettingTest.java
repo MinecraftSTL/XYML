@@ -34,6 +34,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests toolkit-neutral observable setting persistence and aggregate change tracking.
@@ -67,6 +68,18 @@ public final class ObservableSettingTest {
         assertEquals("tracked", serialized.getAsJsonArray("trackedItems")
                 .get(0).getAsJsonObject().get("name").getAsString());
         assertFalse(serialized.has("rawText"));
+    }
+
+    /// Keeps the aggregate revision accurate even when an exact-field listener rejects a change.
+    @Test
+    public void advancesRevisionBeforePublishingChangedField() {
+        DualSetting setting = new DualSetting();
+        setting.changedFields().subscribe(change -> {
+            throw new IllegalStateException("listener failure");
+        });
+
+        assertThrows(IllegalStateException.class, () -> setting.primary.set("changed"));
+        assertEquals(1L, setting.changes().getValue());
     }
 
     /// Verifies neutral fields deserialize, alternate data survives, and unknown members round-trip unchanged.

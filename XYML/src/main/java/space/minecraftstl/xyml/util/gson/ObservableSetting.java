@@ -192,8 +192,8 @@ public abstract class ObservableSetting {
         synchronized (dirtyFields) {
             dirtyFields.add(fieldValue);
         }
-        changedFields.publish(fieldValue);
         incrementChanges();
+        changedFields.publish(fieldValue);
     }
 
     /// Observable facade that preserves the identity of each changed field, including repeated changes to one field.
