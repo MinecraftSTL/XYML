@@ -1213,8 +1213,8 @@ public final class GameVersionCatalogPanelTest {
                 } finally {
                     unsubscribed.countDown();
                 }
-        });
-    }
+            });
+        }
 
         /// Returns the exact immutable visible count.
         @Override
