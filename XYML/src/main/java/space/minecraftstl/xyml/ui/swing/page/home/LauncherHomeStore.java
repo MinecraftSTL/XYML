@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher.execute;
 import static space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher.requireEventThread;
 
-/// Store projecting launcher account and repository selections into plain strings for the Swing home page.
+/// Store projecting launcher account and repository selections into immutable Swing home-page state.
 @NotNullByDefault
 public final class LauncherHomeStore implements HomeSelectionStore, AutoCloseable {
     /// Serializes listener registration with the transition to the closed lifecycle state.
@@ -52,7 +52,7 @@ public final class LauncherHomeStore implements HomeSelectionStore, AutoCloseabl
     /// Subscription to selected-instance changes.
     private final Subscription instanceSelectionSubscription;
 
-    /// Latest cross-thread-safe plain selection state.
+    /// Latest cross-thread-safe selection state.
     private volatile HomeSelectionState currentSnapshot;
 
     /// Whether closure has been requested from any thread.
@@ -70,13 +70,13 @@ public final class LauncherHomeStore implements HomeSelectionStore, AutoCloseabl
                 .subscribe(change -> execute(this::refreshSnapshot));
     }
 
-    /// Returns the latest plain home selection state.
+    /// Returns the latest home selection state.
     @Override
     public HomeSelectionState snapshot() {
         return currentSnapshot;
     }
 
-    /// Registers a plain selection-state listener.
+    /// Registers a selection-state listener.
     @Override
     public Subscription subscribe(ValueChangeListener<HomeSelectionState> listener) {
         Objects.requireNonNull(listener, "listener");
@@ -99,7 +99,7 @@ public final class LauncherHomeStore implements HomeSelectionStore, AutoCloseabl
         execute(this::removeSubscriptions);
     }
 
-    /// Rebuilds and publishes plain strings after a launcher selection changes.
+    /// Rebuilds and publishes immutable values after a launcher selection changes.
     private void refreshSnapshot() {
         requireEventThread();
         if (closed.get()) {
@@ -132,17 +132,16 @@ public final class LauncherHomeStore implements HomeSelectionStore, AutoCloseabl
         XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
         String gameDirectoryId = repository.getGameDirectory().getId().toString();
         @Nullable GameInstanceID selectedInstanceId = repository.getSelectedInstance();
-        String instanceId = selectedInstanceId == null ? "" : selectedInstanceId.id();
         String instanceDetail = selectedInstanceId == null
                 ? ""
                 : GameDirectoryManager.getGameDirectoryDisplayName(repository.getGameDirectory());
         return new HomeSelectionState(
                 accountId,
                 gameDirectoryId,
-                instanceId,
+                selectedInstanceId,
                 accountName,
                 accountDetail,
-                instanceId,
+                selectedInstanceId == null ? "" : selectedInstanceId.id(),
                 instanceDetail);
     }
 

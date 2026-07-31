@@ -550,13 +550,13 @@ public final class SwingApplicationComposition implements AutoCloseable {
                             worldFolder -> commands.launchCommand().launch(new LaunchRequest(
                                     bindings.homeStore().snapshot().accountId(),
                                     bindings.repository().getGameDirectory().getId().toString(),
-                                    instanceId.id(),
+                                    instanceId,
                                     worldFolder)),
                             (worldFolder, destination) -> commands.launchScriptExportCommand().export(
                                     new LaunchRequest(
                                             bindings.homeStore().snapshot().accountId(),
                                             bindings.repository().getGameDirectory().getId().toString(),
-                                            instanceId.id(),
+                                            instanceId,
                                             worldFolder),
                                     destination));
                     InstanceMaintenanceLaunchActions maintenanceLaunchActions =

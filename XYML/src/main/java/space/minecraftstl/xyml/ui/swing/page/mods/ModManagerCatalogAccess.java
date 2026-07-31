@@ -52,10 +52,10 @@ final class ModManagerCatalogAccess implements ModCatalogAccess {
     ///
     /// @param repository real game repository
     /// @param instanceId stable managed instance identifier
-    ModManagerCatalogAccess(GameRepository repository, String instanceId) {
+    ModManagerCatalogAccess(GameRepository repository, GameInstanceID instanceId) {
         manager = new ModManager(
                 Objects.requireNonNull(repository, "repository"),
-                new GameInstanceID(Objects.requireNonNull(instanceId, "instanceId")));
+                Objects.requireNonNull(instanceId, "instanceId"));
     }
 
     /// Returns the normalized path supplied by the real repository.

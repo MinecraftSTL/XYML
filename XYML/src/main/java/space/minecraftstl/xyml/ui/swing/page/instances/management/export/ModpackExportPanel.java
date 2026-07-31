@@ -762,7 +762,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         try {
             request = new ModpackExportRequest(
                     selectedFormat(),
-                    instanceId.id(),
+                    instanceId,
                     createMetadata(),
                     ModpackExportFileSelection.of(selectedPaths),
                     selectedOutput);

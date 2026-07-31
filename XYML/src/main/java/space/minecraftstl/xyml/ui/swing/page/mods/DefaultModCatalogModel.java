@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.mods;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -91,7 +92,7 @@ public final class DefaultModCatalogModel implements ModCatalogModel {
     /// @param strings localized status presentation
     public DefaultModCatalogModel(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             ModCatalogStatusStrings strings) {
         this(new ModManagerCatalogAccess(repository, instanceId), executor, strings);

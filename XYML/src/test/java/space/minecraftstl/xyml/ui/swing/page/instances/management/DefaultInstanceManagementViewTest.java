@@ -605,11 +605,9 @@ final class DefaultInstanceManagementViewTest {
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "getResourcePackDirectory" -> repositoryRoot.resolve("resourcepacks");
                     case "getModsDirectory" -> repositoryRoot.resolve("mods");
-                    case "getVersionRoot" -> repositoryRoot.resolve("versions").resolve("instance");
+                    case "getInstanceRoot" -> repositoryRoot.resolve("versions").resolve("instance");
                     case "getRunDirectory" -> repositoryRoot;
                     case "getGameVersion" -> Optional.of("1.21.1");
-                    case "getResolvedPreservingPatchesVersion" -> throw new IllegalStateException(
-                            "The test repository intentionally has no Mod metadata");
                     case "toString" -> "TestGameRepository";
                     case "hashCode" -> System.identityHashCode(proxy);
                     case "equals" -> proxy == Objects.requireNonNull(arguments)[0];

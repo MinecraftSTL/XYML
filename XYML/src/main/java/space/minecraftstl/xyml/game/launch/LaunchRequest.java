@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.game.launch;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import java.util.Objects;
 
@@ -35,7 +36,7 @@ import java.util.Objects;
 public record LaunchRequest(
         String accountId,
         String gameDirectoryId,
-        String instanceId,
+        GameInstanceID instanceId,
         @Nullable String quickPlaySingleplayer,
         boolean testMode) {
     /// Creates an ordinary launch request without a quick-play destination.
@@ -43,7 +44,7 @@ public record LaunchRequest(
     /// @param accountId stable selected-account identifier
     /// @param gameDirectoryId stable selected game-directory identifier
     /// @param instanceId stable selected-instance identifier within the game directory
-    public LaunchRequest(String accountId, String gameDirectoryId, String instanceId) {
+    public LaunchRequest(String accountId, String gameDirectoryId, GameInstanceID instanceId) {
         this(accountId, gameDirectoryId, instanceId, null, false);
     }
 
@@ -56,7 +57,7 @@ public record LaunchRequest(
     public LaunchRequest(
             String accountId,
             String gameDirectoryId,
-            String instanceId,
+            GameInstanceID instanceId,
             String quickPlaySingleplayer) {
         this(accountId, gameDirectoryId, instanceId, quickPlaySingleplayer, false);
     }
@@ -70,7 +71,7 @@ public record LaunchRequest(
     public static LaunchRequest test(
             String accountId,
             String gameDirectoryId,
-            String instanceId) {
+            GameInstanceID instanceId) {
         return new LaunchRequest(accountId, gameDirectoryId, instanceId, null, true);
     }
 
@@ -78,7 +79,7 @@ public record LaunchRequest(
     public LaunchRequest {
         requireIdentifier(accountId, "accountId");
         requireIdentifier(gameDirectoryId, "gameDirectoryId");
-        requireIdentifier(instanceId, "instanceId");
+        Objects.requireNonNull(instanceId, "instanceId");
         if (quickPlaySingleplayer != null) {
             requireIdentifier(quickPlaySingleplayer, "quickPlaySingleplayer");
         }

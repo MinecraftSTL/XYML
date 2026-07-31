@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.runtime;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.launch.LaunchRequest;
 import space.minecraftstl.xyml.task.Task;
 
@@ -53,7 +54,8 @@ public final class LaunchScriptExportServiceTest {
                     return Task.completed(scriptFile);
                 },
                 Runnable::run);
-        LaunchRequest request = new LaunchRequest("account-a", "directory-a", "instance-a");
+        LaunchRequest request = new LaunchRequest(
+                "account-a", "directory-a", new GameInstanceID("instance-a"));
         Path target = Path.of("build", "launcher-export-service-test.bat").toAbsolutePath().normalize();
         try {
             CompletionStage<Path> completion = service.export(request, target);
@@ -79,7 +81,8 @@ public final class LaunchScriptExportServiceTest {
                 command -> queuedCommand.set(command));
         Path target = Path.of("build", "launcher-export-service-cancelled.bat").toAbsolutePath().normalize();
         CompletionStage<Path> completion = service.export(
-                new LaunchRequest("account-a", "directory-a", "instance-a"),
+                new LaunchRequest(
+                        "account-a", "directory-a", new GameInstanceID("instance-a")),
                 target);
         CompletableFuture<Path> exposedCompletion = completion.toCompletableFuture();
         service.close();
