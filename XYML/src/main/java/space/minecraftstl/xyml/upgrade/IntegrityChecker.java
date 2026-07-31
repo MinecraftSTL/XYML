@@ -38,17 +38,17 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /**
- * A class that checks the integrity of HMCL.
+ * A class that checks the integrity of XYML.
  *
  * @author yushijinhun
  */
 public final class IntegrityChecker {
     private IntegrityChecker() {}
 
-    public static final boolean DISABLE_SELF_INTEGRITY_CHECK = "true".equals(System.getProperty("hmcl.self_integrity_check.disable"));
+    public static final boolean DISABLE_SELF_INTEGRITY_CHECK = "true".equals(System.getProperty("xyml.self_integrity_check.disable"));
 
-    private static final String SIGNATURE_FILE = "META-INF/hmcl_signature";
-    private static final String PUBLIC_KEY_FILE = "assets/hmcl_signature_publickey.der";
+    private static final String SIGNATURE_FILE = "META-INF/xyml_signature";
+    private static final String PUBLIC_KEY_FILE = "assets/xyml_signature_publickey.der";
 
     private static PublicKey getPublicKey() throws IOException {
         try (InputStream in = IntegrityChecker.class.getResourceAsStream("/" + PUBLIC_KEY_FILE)) {
@@ -124,7 +124,7 @@ public final class IntegrityChecker {
             try {
                 Path jarPath = JarUtils.thisJarPath();
                 if (jarPath == null) {
-                    throw new IOException("Failed to find current HMCL location");
+                    throw new IOException("Failed to find current XYML location");
                 }
 
                 verifyJar(jarPath);

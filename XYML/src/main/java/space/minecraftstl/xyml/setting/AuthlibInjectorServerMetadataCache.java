@@ -20,11 +20,11 @@ package space.minecraftstl.xyml.setting;
 import com.google.gson.JsonParseException;
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorServer;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableList;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.ObservableSetting;
@@ -38,7 +38,7 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// Stores derived authlib-injector server metadata separately from the user-managed server list.
 ///
 /// The JSON representation is saved as `cache/authlib-injector-server-metadata.json`
-/// under the current HMCL directory.
+/// under the current XYML directory.
 @JsonAdapter(AuthlibInjectorServerMetadataCache.Adapter.class)
 @NotNullByDefault
 @JsonSerializable
@@ -49,7 +49,7 @@ final class AuthlibInjectorServerMetadataCache extends ObservableSetting impleme
 
     /// Creates an empty metadata cache.
     AuthlibInjectorServerMetadataCache() {
-        tracker.markDirty(schema);
+        markDirty(schema);
         register();
     }
 
@@ -106,7 +106,7 @@ final class AuthlibInjectorServerMetadataCache extends ObservableSetting impleme
 
     /// Authlib-injector metadata entries.
     @SerializedName("servers")
-    private final ObservableList<Entry> servers = FXCollections.observableArrayList();
+    private final ObservableList<Entry> servers = ObservableCollections.observableList();
 
     /// Returns authlib-injector metadata entries.
     ObservableList<Entry> getServers() {

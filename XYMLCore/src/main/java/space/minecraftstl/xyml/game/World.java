@@ -17,13 +17,19 @@
  */
 package space.minecraftstl.xyml.game;
 
-import javafx.scene.image.Image;
 import org.glavo.nbt.io.NBTCodec;
 import org.glavo.nbt.tag.*;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.util.io.*;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
-import org.jetbrains.annotations.Nullable;
 
+import javax.imageio.ImageIO;
+import java.awt.AlphaComposite;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -39,23 +45,55 @@ import java.util.zip.GZIPOutputStream;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Represents a Minecraft world directory or importable archive and its editable NBT metadata.
+///
+/// Directory instances can mutate, copy, export, lock, and delete world data. Archive instances
+/// are read-only sources until installed. World icons are exposed as toolkit-neutral 64-by-64
+/// buffered images so Core does not depend on a desktop UI framework.
+@NotNullByDefault
 public final class World {
+    /// Fixed edge length used for normalized world icons.
+    private static final int ICON_SIZE = 64;
 
+    /// Original world directory or archive path.
     private final Path file;
-    private String fileName;
-    private Image icon;
 
+    /// Display and installation file name derived from the source layout.
+    private String fileName;
+
+    /// Normalized world icon, or `null` when absent or unreadable.
+    private @Nullable BufferedImage icon;
+
+    /// Complete root level-data tag.
     private CompoundTag levelData;
+
+    /// Mutable `Data` child within `levelData`.
     private CompoundTag dataTag;
+
+    /// Path from which `levelData` was loaded and to which it is written.
     private Path levelDataPath;
 
-    private CompoundTag worldGenSettingsDataBackingTag; // Use for writing back to the file
-    private CompoundTag normalizedWorldGenSettingsData; // Use for reading/modification
-    private Path worldGenSettingsDataPath;
+    /// Optional backing tag written to a separate world-generation settings file.
+    private @Nullable CompoundTag worldGenSettingsDataBackingTag;
 
-    private CompoundTag playerData; // Use for both reading/modification and writing back to the file
-    private Path playerDataPath;
+    /// Optional normalized world-generation settings used for reading and modification.
+    private @Nullable CompoundTag normalizedWorldGenSettingsData;
 
+    /// Optional separate world-generation settings file path.
+    private @Nullable Path worldGenSettingsDataPath;
+
+    /// Optional player data used for both modification and write-back.
+    private @Nullable CompoundTag playerData;
+
+    /// Optional separate player-data file path.
+    private @Nullable Path playerDataPath;
+
+    /// Loads and validates a world directory or archive.
+    ///
+    /// Icon decoding failures are logged and do not invalidate an otherwise valid world.
+    ///
+    /// @param file world directory or archive
+    /// @throws IOException if the source is not a valid readable world
     public World(Path file) throws IOException {
         this.file = file;
 
@@ -73,13 +111,7 @@ public final class World {
 
             Path iconFile = this.file.resolve("icon.png");
             if (Files.isRegularFile(iconFile)) {
-                try (InputStream inputStream = Files.newInputStream(iconFile)) {
-                    icon = new Image(inputStream, 64, 64, true, false);
-                    if (icon.isError())
-                        throw icon.getException();
-                } catch (Exception e) {
-                    LOG.warning("Failed to load world icon", e);
-                }
+                icon = loadIcon(iconFile);
             }
         } else if (Files.isRegularFile(file))
             try (FileSystem fs = CompressingUtils.readonly(this.file).setAutoDetectEncoding(true).build()) {
@@ -89,7 +121,7 @@ public final class World {
                     fileName = FileUtils.getName(this.file);
                 } else {
                     try (Stream<Path> filesStream = Files.list(fs.getPath("/"))) {
-                        List<Path> files = filesStream.toList();
+                        @Unmodifiable List<Path> files = filesStream.toList();
                         if (files.size() != 1 || !Files.isDirectory(files.get(0))) {
                             throw new IOException("Not a valid world zip file");
                         }
@@ -110,27 +142,79 @@ public final class World {
 
                 Path iconFile = root.resolve("icon.png");
                 if (Files.isRegularFile(iconFile)) {
-                    try (InputStream inputStream = Files.newInputStream(iconFile)) {
-                        icon = new Image(inputStream, 64, 64, true, false);
-                        if (icon.isError())
-                            throw icon.getException();
-                    } catch (Exception e) {
-                        LOG.warning("Failed to load world icon", e);
-                    }
+                    icon = loadIcon(iconFile);
                 }
             }
         else
             throw new IOException("Path " + file + " cannot be recognized as a Minecraft world");
     }
 
+    /// Decodes and normalizes one world icon.
+    ///
+    /// @param iconFile readable icon path, including paths inside an archive file system
+    /// @return normalized icon, or `null` when decoding or scaling fails
+    private static @Nullable BufferedImage loadIcon(Path iconFile) {
+        try (InputStream inputStream = Files.newInputStream(iconFile)) {
+            @Nullable BufferedImage source = ImageIO.read(inputStream);
+            if (source == null) {
+                throw new IOException("Unsupported or empty world icon " + iconFile);
+            }
+            return normalizeIcon(source);
+        } catch (Exception e) {
+            LOG.warning("Failed to load world icon", e);
+            return null;
+        }
+    }
+
+    /// Scales an image into a transparent 64-by-64 canvas using nearest-neighbor interpolation.
+    ///
+    /// Content retains its aspect ratio and is centered in the canvas, matching the historical
+    /// JavaFX image request with `preserveRatio=true` and `smooth=false`.
+    ///
+    /// @param source decoded source image
+    /// @return normalized 64-by-64 ARGB image
+    private static BufferedImage normalizeIcon(BufferedImage source) {
+        int sourceWidth = source.getWidth();
+        int sourceHeight = source.getHeight();
+        if (sourceWidth <= 0 || sourceHeight <= 0) {
+            throw new IllegalArgumentException("World icon has invalid dimensions");
+        }
+
+        double scale = Math.min((double) ICON_SIZE / sourceWidth, (double) ICON_SIZE / sourceHeight);
+        int scaledWidth = Math.max(1, (int) (sourceWidth * scale));
+        int scaledHeight = Math.max(1, (int) (sourceHeight * scale));
+        int x = (ICON_SIZE - scaledWidth) / 2;
+        int y = (ICON_SIZE - scaledHeight) / 2;
+
+        BufferedImage normalized = new BufferedImage(ICON_SIZE, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = normalized.createGraphics();
+        try {
+            graphics.setComposite(AlphaComposite.Src);
+            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            graphics.drawImage(source, x, y, scaledWidth, scaledHeight, null);
+        } finally {
+            graphics.dispose();
+        }
+        return normalized;
+    }
+
+    /// Returns the original world source path.
+    ///
+    /// @return world directory or archive path
     public Path getFile() {
         return file;
     }
 
+    /// Returns the source-derived world file name.
+    ///
+    /// @return world file or root-directory name
     public String getFileName() {
         return fileName;
     }
 
+    /// Returns the world name stored in level data.
+    ///
+    /// @return stored world name, or an empty string when unavailable
     public String getWorldName() {
         if (levelData.get("Data") instanceof CompoundTag data
                 && data.get("LevelName") instanceof StringTag levelNameTag)
@@ -139,6 +223,10 @@ public final class World {
             return "";
     }
 
+    /// Updates the stored world name and immediately writes level data for a directory world.
+    ///
+    /// @param worldName new stored world name
+    /// @throws IOException if level data cannot be written
     public void setWorldName(String worldName) throws IOException {
         if (levelData.get("Data") instanceof CompoundTag data && data.get("LevelName") instanceof StringTag levelNameTag) {
             levelNameTag.setValue(worldName);
@@ -146,22 +234,37 @@ public final class World {
         }
     }
 
+    /// Returns the conventional session-lock path for this source.
+    ///
+    /// @return session-lock path
     public Path getSessionLockFile() {
         return file.resolve("session.lock");
     }
 
+    /// Returns the mutable complete level-data tag.
+    ///
+    /// @return root level-data tag
     public CompoundTag getLevelData() {
         return levelData;
     }
 
+    /// Returns normalized world-generation settings when present.
+    ///
+    /// @return mutable normalized settings, or `null` when unavailable
     public @Nullable CompoundTag getNormalizedWorldGenSettingsData() {
         return normalizedWorldGenSettingsData;
     }
 
+    /// Returns loaded single-player data when present.
+    ///
+    /// @return mutable player data, or `null` when unavailable
     public @Nullable CompoundTag getPlayerData() {
         return playerData;
     }
 
+    /// Returns the last-played epoch timestamp stored by Minecraft.
+    ///
+    /// @return epoch milliseconds, or zero when unavailable
     public long getLastPlayed() {
         if (dataTag.get("LastPlayed") instanceof LongTag lastPlayedTag) {
             return lastPlayedTag.get();
@@ -170,6 +273,9 @@ public final class World {
         }
     }
 
+    /// Parses the recorded Minecraft version.
+    ///
+    /// @return parsed version, or `null` when absent or unrecognized
     public @Nullable GameVersionNumber getGameVersion() {
         if (levelData.get("Data") instanceof CompoundTag data &&
                 data.get("Version") instanceof CompoundTag versionTag &&
@@ -179,6 +285,9 @@ public final class World {
         return null;
     }
 
+    /// Returns the world seed across legacy and modern NBT layouts.
+    ///
+    /// @return seed, or `null` when unavailable
     public @Nullable Long getSeed() {
         // Valid after 1.16(20w20a)
         if (normalizedWorldGenSettingsData != null
@@ -192,6 +301,9 @@ public final class World {
         return null;
     }
 
+    /// Determines whether the world uses the large-biomes generator across supported layouts.
+    ///
+    /// @return whether large biomes are enabled
     public boolean isLargeBiomes() {
         // Valid before 1.16(20w20a)
         if (dataTag.get("generatorName") instanceof StringTag generatorNameTag) {
@@ -216,31 +328,55 @@ public final class World {
         return false;
     }
 
-    public Image getIcon() {
+    /// Returns the normalized toolkit-neutral world icon.
+    ///
+    /// @return 64-by-64 ARGB icon, or `null` when absent or unreadable
+    public @Nullable BufferedImage getIcon() {
         return icon;
     }
 
+    /// Probes whether the world session lock is currently held.
+    ///
+    /// @return whether the world appears locked
     public boolean isLocked() {
         return isLocked(getSessionLockFile());
     }
 
+    /// Determines whether the recorded game version supports data packs.
+    ///
+    /// @return whether data packs are supported
     public boolean supportDataPacks() {
-        return getGameVersion() != null && getGameVersion().isAtLeast("1.13", "17w43a");
+        @Nullable GameVersionNumber gameVersion = getGameVersion();
+        return gameVersion != null && gameVersion.isAtLeast("1.13", "17w43a");
     }
 
+    /// Determines whether the recorded game version supports quick play.
+    ///
+    /// @return whether quick play is supported
     public boolean supportQuickPlay() {
-        return getGameVersion() != null && getGameVersion().isAtLeast("1.20", "23w14a");
+        return supportQuickPlay(getGameVersion());
     }
 
-    public static boolean supportQuickPlay(GameVersionNumber gameVersionNumber) {
+    /// Determines quick-play support for an optional parsed game version.
+    ///
+    /// @param gameVersionNumber parsed game version, or `null`
+    /// @return whether quick play is supported
+    public static boolean supportQuickPlay(@Nullable GameVersionNumber gameVersionNumber) {
         return gameVersionNumber != null && gameVersionNumber.isAtLeast("1.20", "23w14a");
     }
 
+    /// Reloads validated level data and auxiliary directory-only data.
+    ///
+    /// @throws IOException if required or auxiliary NBT cannot be read
     private void loadAndCheckWorldData() throws IOException {
         loadAndCheckLevelData(levelDataPath);
         loadOtherData();
     }
 
+    /// Loads and validates the required fields from one level-data file.
+    ///
+    /// @param levelDat level-data path
+    /// @throws IOException if the NBT is unreadable or required fields are absent
     private void loadAndCheckLevelData(Path levelDat) throws IOException {
         this.levelData = NBTCodec.of().readTag(levelDat, TagType.COMPOUND);
         if (!(levelData.get("Data") instanceof CompoundTag data))
@@ -254,6 +390,9 @@ public final class World {
         this.dataTag = data;
     }
 
+    /// Loads optional world-generation and player data for a directory world.
+    ///
+    /// @throws IOException if a referenced auxiliary NBT file cannot be read
     private void loadOtherData() throws IOException {
         if (!(levelData.get("Data") instanceof CompoundTag data)) return;
 
@@ -286,23 +425,43 @@ public final class World {
         }
     }
 
-    private void setWorldGenSettingsData(Path worldGenSettingsDataPath, CompoundTag worldGenSettingsDataBackingTag, CompoundTag unifiedWorldGenSettingsData) {
+    /// Replaces all optional world-generation settings references atomically.
+    ///
+    /// @param worldGenSettingsDataPath separate backing path, or `null`
+    /// @param worldGenSettingsDataBackingTag tag written to the backing path, or `null`
+    /// @param unifiedWorldGenSettingsData normalized mutable settings, or `null`
+    private void setWorldGenSettingsData(
+            @Nullable Path worldGenSettingsDataPath,
+            @Nullable CompoundTag worldGenSettingsDataBackingTag,
+            @Nullable CompoundTag unifiedWorldGenSettingsData) {
         this.worldGenSettingsDataPath = worldGenSettingsDataPath;
         this.worldGenSettingsDataBackingTag = worldGenSettingsDataBackingTag;
         this.normalizedWorldGenSettingsData = unifiedWorldGenSettingsData;
     }
 
-    private void setPlayerData(Path playerDataPath, CompoundTag playerData) {
+    /// Replaces optional player data and its separate backing path together.
+    ///
+    /// @param playerDataPath separate player-data path, or `null`
+    /// @param playerData loaded player tag, or `null`
+    private void setPlayerData(@Nullable Path playerDataPath, @Nullable CompoundTag playerData) {
         this.playerDataPath = playerDataPath;
         this.playerData = playerData;
     }
 
+    /// Reloads mutable NBT state from the directory source.
+    ///
+    /// @throws IOException if required or auxiliary NBT cannot be read
     public void reloadWorldData() throws IOException {
         loadAndCheckWorldData();
     }
 
-    // The rename method is used to rename temporary world object during installation and copying,
-    // so there is no need to modify the `file` field.
+    /// Renames a temporary directory world on disk and updates its stored level name.
+    ///
+    /// This operation intentionally retains the original `file` field because callers use the
+    /// object only as a temporary installation or copy helper.
+    ///
+    /// @param newName new stored and directory name
+    /// @throws IOException if the source is not a directory or either write/move fails
     public void rename(String newName) throws IOException {
         if (!Files.isDirectory(file))
             throw new IOException("Not a valid world directory");
@@ -315,6 +474,11 @@ public final class World {
         Files.move(file, file.resolveSibling(newName));
     }
 
+    /// Installs this directory or archive into a saves directory under a new name.
+    ///
+    /// @param savesDir target saves directory
+    /// @param name target directory and stored world name
+    /// @throws IOException if the target name is invalid, already exists, or installation fails
     public void install(Path savesDir, String name) throws IOException {
         Path worldDir;
         try {
@@ -336,7 +500,7 @@ public final class World {
                     new Unzipper(file, worldDir).unzip();
                 } else {
                     try (Stream<Path> stream = Files.list(fs.getPath("/"))) {
-                        List<Path> subDirs = stream.toList();
+                        @Unmodifiable List<Path> subDirs = stream.toList();
                         if (subDirs.size() != 1) {
                             throw new IOException("World zip malformed");
                         }
@@ -354,6 +518,11 @@ public final class World {
         }
     }
 
+    /// Exports a directory world into a ZIP archive with the supplied root directory name.
+    ///
+    /// @param zip destination ZIP path
+    /// @param worldName archive root directory name
+    /// @throws IOException if this source is not a directory or export fails
     public void export(Path zip, String worldName) throws IOException {
         if (!Files.isDirectory(file))
             throw new IOException();
@@ -363,6 +532,9 @@ public final class World {
         }
     }
 
+    /// Deletes an unlocked world directory recursively.
+    ///
+    /// @throws IOException if the world is locked or deletion fails
     public void delete() throws IOException {
         if (isLocked()) {
             throw new WorldLockedException("The world " + getFile() + " has been locked");
@@ -370,6 +542,10 @@ public final class World {
         FileUtils.forceDelete(file);
     }
 
+    /// Copies an unlocked directory world beside its source and updates the copied level name.
+    ///
+    /// @param newName destination directory and stored world name
+    /// @throws IOException if the source is invalid, locked, or cannot be copied
     public void copy(String newName) throws IOException {
         if (!Files.isDirectory(file)) {
             throw new IOException("Not a valid world directory");
@@ -385,14 +561,20 @@ public final class World {
         newWorld.rename(newName);
     }
 
+    /// Acquires and retains the world session lock.
+    ///
+    /// The caller owns and must close the returned channel to release the lock.
+    ///
+    /// @return open channel holding the session lock
+    /// @throws WorldLockedException if the lock cannot be opened or acquired
     public FileChannel lock() throws WorldLockedException {
         Path lockFile = getSessionLockFile();
-        FileChannel channel = null;
+        @Nullable FileChannel channel = null;
         try {
             channel = FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
             channel.write(ByteBuffer.wrap("\u2603".getBytes(StandardCharsets.UTF_8)));
             channel.force(true);
-            FileLock fileLock = channel.tryLock();
+            @Nullable FileLock fileLock = channel.tryLock();
             if (fileLock != null) {
                 return channel;
             } else {
@@ -405,6 +587,9 @@ public final class World {
         }
     }
 
+    /// Writes modified level, world-generation, and player data to a directory world.
+    ///
+    /// @throws IOException if this source is not a directory or any write fails
     public void writeWorldData() throws IOException {
         if (!Files.isDirectory(file)) throw new IOException("Not a valid world directory");
 
@@ -419,10 +604,18 @@ public final class World {
         }
     }
 
+    /// Writes only the complete level-data tag using safe replacement.
+    ///
+    /// @throws IOException if this source is not a directory or the write fails
     public void writeLevelData() throws IOException {
         writeTag(levelData, levelDataPath);
     }
 
+    /// Writes one NBT tag as GZIP-compressed data using safe replacement.
+    ///
+    /// @param nbt tag to write
+    /// @param path target file path
+    /// @throws IOException if this source is not a directory or the write fails
     private void writeTag(CompoundTag nbt, Path path) throws IOException {
         if (!Files.isDirectory(file)) throw new IOException("Not a valid world directory");
         FileUtils.saveSafely(path, os -> {
@@ -432,6 +625,10 @@ public final class World {
         });
     }
 
+    /// Probes one session-lock path without retaining a successfully acquired lock.
+    ///
+    /// @param sessionLockFile session-lock path
+    /// @return whether the path is inaccessible or already locked
     private static boolean isLocked(Path sessionLockFile) {
         try (FileChannel fileChannel = FileChannel.open(sessionLockFile, StandardOpenOption.WRITE)) {
             return fileChannel.tryLock() == null;
@@ -445,7 +642,13 @@ public final class World {
         }
     }
 
-    public static List<World> getWorlds(Path savesDir) {
+    /// Loads every valid direct child world directory in a saves directory.
+    ///
+    /// Invalid entries and directory-listing failures are logged and omitted.
+    ///
+    /// @param savesDir saves directory
+    /// @return immutable list of readable worlds
+    public static @Unmodifiable List<World> getWorlds(Path savesDir) {
         if (Files.exists(savesDir)) {
             try (Stream<Path> stream = Files.list(savesDir)) {
                 return stream

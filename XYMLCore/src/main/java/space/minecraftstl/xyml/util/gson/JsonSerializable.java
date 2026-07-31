@@ -22,7 +22,7 @@ import java.lang.annotation.*;
 /// Marks a class as being serialized/deserialized by Gson.
 /// This annotation is not retained at runtime and only serves as a reminder to developers not to change field names arbitrarily.
 ///
-/// TODO: Add this annotation to all classes in the HMCL project that need to be serialized/deserialized.
+/// TODO: Add this annotation to all classes in the XYML project that need to be serialized/deserialized.
 ///
 /// @author Glavo
 @Documented

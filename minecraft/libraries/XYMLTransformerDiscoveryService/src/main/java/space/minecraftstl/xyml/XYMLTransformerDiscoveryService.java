@@ -28,7 +28,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class XYMLTransformerDiscoveryService implements ITransformerDiscoveryService {
-    private static final String CANDIDATES = System.getProperty("hmcl.transformer.candidates");
+    private static final String CANDIDATES = System.getProperty("xyml.transformer.candidates");
 
     @Override
     public List<Path> candidates(Path gameDirectory) {

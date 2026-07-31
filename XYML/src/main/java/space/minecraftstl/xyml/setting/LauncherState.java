@@ -19,14 +19,14 @@ package space.minecraftstl.xyml.setting;
 
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.property.DoubleProperty;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleDoubleProperty;
-import javafx.beans.property.SimpleObjectProperty;
-import javafx.beans.property.SimpleStringProperty;
-import javafx.beans.property.StringProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableMap;
+import space.minecraftstl.xyml.observable.collection.ObservableMap;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.property.DoubleProperty;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleDoubleProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleStringProperty;
+import space.minecraftstl.xyml.observable.property.StringProperty;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.ObservableSetting;
@@ -37,7 +37,7 @@ import java.util.Objects;
 
 /// Stores per-workspace launcher runtime state independently from the main settings file.
 ///
-/// The JSON representation is saved as `state/launcher-state.json` under the current HMCL directory.
+/// The JSON representation is saved as `state/launcher-state.json` under the current XYML directory.
 ///
 /// @author Glavo
 @JsonAdapter(LauncherState.Adapter.class)
@@ -50,7 +50,7 @@ public final class LauncherState extends ObservableSetting implements JsonSchema
 
     /// Creates an empty launcher state store.
     public LauncherState() {
-        tracker.markDirty(schema);
+        markDirty(schema);
         register();
     }
 
@@ -65,7 +65,7 @@ public final class LauncherState extends ObservableSetting implements JsonSchema
 
     /// Returns the schema used by this launcher state file.
     public JsonSchema getSchema() {
-        return schema.get();
+        return Objects.requireNonNull(schema.get());
     }
 
     /// Sets the schema used by this launcher state file.
@@ -200,7 +200,7 @@ public final class LauncherState extends ObservableSetting implements JsonSchema
 
     /// Tip markers that prevent repeated prompts.
     @SerializedName("shownTips")
-    private final ObservableMap<String, Object> shownTips = FXCollections.observableHashMap();
+    private final ObservableMap<String, Object> shownTips = ObservableCollections.observableMap();
 
     /// Returns tip markers that prevent repeated prompts.
     public ObservableMap<String, Object> getShownTips() {
@@ -208,6 +208,7 @@ public final class LauncherState extends ObservableSetting implements JsonSchema
     }
 
     /// JSON adapter for [LauncherState].
+    @NotNullByDefault
     public static final class Adapter extends ObservableSetting.Adapter<LauncherState> {
         /// Creates an empty launcher state store for deserialization.
         @Override

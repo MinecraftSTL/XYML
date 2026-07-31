@@ -69,11 +69,11 @@ public class ModpackUpdateTask extends Task<Void> {
             // Keep backup game version for further repair.
         } else {
             // Restore backup
-            repository.removeVersionFromDisk(id);
+            repository.removeInstanceFromDisk(id);
 
             FileUtils.copyDirectory(backupFolder, repository.getVersionRoot(id));
 
-            repository.refreshVersionsAsync().start();
+            repository.refreshInstancesAsync().start();
         }
     }
 }

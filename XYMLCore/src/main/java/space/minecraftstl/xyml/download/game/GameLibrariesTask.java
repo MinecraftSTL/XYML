@@ -82,7 +82,7 @@ public final class GameLibrariesTask extends Task<Void> {
         this.integrityCheck = integrityCheck;
         this.libraries = libraries;
 
-        setStage("hmcl.install.libraries");
+        setStage("xyml.install.libraries");
         setSignificance(TaskSignificance.MODERATE);
     }
 
@@ -155,7 +155,7 @@ public final class GameLibrariesTask extends Task<Void> {
                             List<URI> uris = dependencyManager.getDownloadProvider()
                                     .injectURLWithCandidates(fmlLib.downloadUrl());
                             dependencies.add(new FileDownloadTask(uris, file)
-                                    .withCounter("hmcl.install.libraries"));
+                                    .withCounter("xyml.install.libraries"));
                         }
                     }
                 }
@@ -183,7 +183,7 @@ public final class GameLibrariesTask extends Task<Void> {
             }
 
             if (shouldDownloadLibrary(gameRepository, version, library, integrityCheck) && (library.hasDownloadURL() || !"optifine".equals(library.getGroupId()))) {
-                dependencies.add(new LibraryDownloadTask(dependencyManager, file, library).withCounter("hmcl.install.libraries"));
+                dependencies.add(new LibraryDownloadTask(dependencyManager, file, library).withCounter("xyml.install.libraries"));
             } else {
                 dependencyManager.getCacheRepository().tryCacheLibrary(library, file);
             }

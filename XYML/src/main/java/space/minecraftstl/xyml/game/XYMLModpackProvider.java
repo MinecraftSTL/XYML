@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.game;
 
 import com.google.gson.JsonParseException;
 import kala.compress.archivers.zip.ZipArchiveReader;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.modpack.MismatchedModpackTypeException;
 import space.minecraftstl.xyml.modpack.Modpack;
@@ -38,11 +39,11 @@ public final class XYMLModpackProvider implements ModpackProvider {
 
     @Override
     public String getName() {
-        return "HMCL";
+        return "XYML";
     }
 
     @Override
-    public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String version) {
+    public @Nullable Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
         return null;
     }
 

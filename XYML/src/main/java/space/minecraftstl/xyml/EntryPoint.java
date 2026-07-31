@@ -18,41 +18,46 @@
 package space.minecraftstl.xyml;
 
 import space.minecraftstl.xyml.util.FileSaver;
-import space.minecraftstl.xyml.util.SelfDependencyPatcher;
 import space.minecraftstl.xyml.util.SwingUtils;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.JarUtils;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
+import space.minecraftstl.xyml.ui.swing.shell.LauncherIconImages;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import javax.swing.JOptionPane;
 import java.io.IOException;
-import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.CancellationException;
+import java.util.List;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
+/// Prepares process-wide directories and AWT settings before starting the Swing launcher.
+@NotNullByDefault
 public final class EntryPoint {
-
+    /// Prevents utility instantiation.
     private EntryPoint() {
     }
 
-    public static void main(String[] args) {
+    /// Starts the launcher after configuring process-wide networking, logging, and native UI behavior.
+    ///
+    /// @param args launcher and updater arguments
+    public static void main(String @Unmodifiable [] args) {
         System.getProperties().putIfAbsent("java.net.useSystemProxies", "true");
-        System.getProperties().putIfAbsent("javafx.autoproxy.disable", "true");
-        System.getProperties().putIfAbsent("http.agent", "HMCL/" + Metadata.VERSION);
+        System.getProperties().putIfAbsent("http.agent", "XYML/" + Metadata.VERSION);
 
-        createHMCLDirectories();
-        LOG.start(Metadata.HMCL_LOCAL_HOME.resolve("logs"));
+        createXYMLDirectories();
+        LOG.start(Metadata.XYML_LOCAL_HOME.resolve("logs"));
 
+        setupAwtVmOptions();
         checkWine();
-
-        setupJavaFXVMOptions();
 
         if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS) {
             System.getProperties().putIfAbsent("apple.awt.application.appearance", "system");
@@ -60,45 +65,53 @@ public final class EntryPoint {
                 initIcon();
         }
 
-        checkJavaFX();
-        verifyJavaFX();
-        addEnableNativeAccess();
         enableUnsafeMemoryAccess();
 
         Launcher.main(args);
     }
 
+    /// Flushes pending saves and logs before terminating the process.
+    ///
+    /// @param exitCode process exit status
     public static void exit(int exitCode) {
         FileSaver.shutdown();
         LOG.shutdown();
         System.exit(exitCode);
     }
 
-    private static void setupJavaFXVMOptions() {
-        if ("true".equalsIgnoreCase(System.getenv("HMCL_FORCE_GPU"))) {
-            LOG.info("HMCL_FORCE_GPU: true");
-            System.getProperties().putIfAbsent("prism.forceGPU", "true");
+    /// Maps supported launcher environment overrides to the Java 2D and Swing runtime.
+    private static void setupAwtVmOptions() {
+        if ("true".equalsIgnoreCase(System.getenv("XYML_FORCE_GPU"))) {
+            LOG.info("XYML_FORCE_GPU: true");
+            if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS) {
+                System.getProperties().putIfAbsent("sun.java2d.metal", "true");
+            } else {
+                System.getProperties().putIfAbsent("sun.java2d.opengl", "true");
+            }
         }
 
-        String animationFrameRate = System.getenv("HMCL_ANIMATION_FRAME_RATE");
+        @Nullable String animationFrameRate = System.getenv("XYML_ANIMATION_FRAME_RATE");
         if (animationFrameRate != null) {
-            LOG.info("HMCL_ANIMATION_FRAME_RATE: " + animationFrameRate);
+            LOG.info("XYML_ANIMATION_FRAME_RATE: " + animationFrameRate);
 
             try {
-                if (Integer.parseInt(animationFrameRate) <= 0)
+                int framesPerSecond = Integer.parseInt(animationFrameRate);
+                if (framesPerSecond <= 0)
                     throw new NumberFormatException(animationFrameRate);
-
-                System.getProperties().putIfAbsent("javafx.animation.pulse", animationFrameRate);
+                int frameDelayMillis = Math.max(1, Math.round(1000.0f / framesPerSecond));
+                System.getProperties().putIfAbsent(
+                        "xyml.swing.animationFrameDelayMillis",
+                        Integer.toString(frameDelayMillis));
             } catch (NumberFormatException e) {
                 LOG.warning("Invalid animation frame rate: " + animationFrameRate);
             }
         }
 
-        String uiScale = System.getProperty("hmcl.uiScale", System.getenv("HMCL_UI_SCALE"));
+        @Nullable String uiScale = System.getProperty("xyml.uiScale", System.getenv("XYML_UI_SCALE"));
         if (uiScale != null) {
             uiScale = uiScale.trim();
 
-            LOG.info("HMCL_UI_SCALE: " + uiScale);
+            LOG.info("XYML_UI_SCALE: " + uiScale);
 
             try {
                 float scaleValue;
@@ -110,26 +123,11 @@ public final class EntryPoint {
                     scaleValue = Float.parseFloat(uiScale);
                 }
 
-                float lowerBound;
-                float upperBound;
-
-                if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
-                    // JavaFX behavior may be abnormal when the DPI scaling factor is too high
-                    lowerBound = 0.25f;
-                    upperBound = 4f;
-                } else {
-                    lowerBound = 0.01f;
-                    upperBound = 10f;
-                }
+                float lowerBound = OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS ? 0.25f : 0.01f;
+                float upperBound = OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS ? 4f : 10f;
 
                 if (scaleValue >= lowerBound && scaleValue <= upperBound) {
-                    if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
-                        System.getProperties().putIfAbsent("glass.win.uiScale", uiScale);
-                    } else if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS) {
-                        LOG.warning("macOS does not support setting UI scale, so it will be ignored");
-                    } else {
-                        System.getProperties().putIfAbsent("glass.gtk.uiScale", uiScale);
-                    }
+                    System.getProperties().putIfAbsent("sun.java2d.uiScale", Float.toString(scaleValue));
                 } else {
                     LOG.warning("UI scale out of range: " + uiScale);
                 }
@@ -139,36 +137,40 @@ public final class EntryPoint {
         }
     }
 
-    private static void createHMCLDirectories() {
-        if (!Files.isDirectory(Metadata.HMCL_LOCAL_HOME)) {
+    /// Creates launcher data directories before logging and settings initialization.
+    private static void createXYMLDirectories() {
+        if (!Files.isDirectory(Metadata.XYML_LOCAL_HOME)) {
             try {
-                Files.createDirectories(Metadata.HMCL_LOCAL_HOME);
-                if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
+                Files.createDirectories(Metadata.XYML_LOCAL_HOME);
+                if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS && !Metadata.PACKAGED) {
                     try {
-                        Files.setAttribute(Metadata.HMCL_LOCAL_HOME, "dos:hidden", true);
+                        Files.setAttribute(Metadata.XYML_LOCAL_HOME, "dos:hidden", true);
                     } catch (IOException e) {
-                        LOG.warning("Failed to set hidden attribute of " + Metadata.HMCL_LOCAL_HOME, e);
+                        LOG.warning("Failed to set hidden attribute of " + Metadata.XYML_LOCAL_HOME, e);
                     }
                 }
             } catch (IOException e) {
                 // Logger has not been started yet, so print directly to System.err
-                System.err.println("Failed to create HMCL directory: " + Metadata.HMCL_LOCAL_HOME);
+                System.err.println("Failed to create XYML directory: " + Metadata.XYML_LOCAL_HOME);
                 e.printStackTrace(System.err);
-                showErrorAndExit(i18n("fatal.create_hmcl_current_directory_failure", Metadata.HMCL_LOCAL_HOME));
+                showErrorAndExit(i18n("fatal.create_xyml_current_directory_failure", Metadata.XYML_LOCAL_HOME));
             }
         }
 
-        if (!Files.isDirectory(Metadata.HMCL_USER_HOME)) {
+        if (!Files.isDirectory(Metadata.XYML_USER_HOME)) {
             try {
-                Files.createDirectories(Metadata.HMCL_USER_HOME);
+                Files.createDirectories(Metadata.XYML_USER_HOME);
             } catch (IOException e) {
-                LOG.warning("Failed to create HMCL user home " + Metadata.HMCL_USER_HOME, e);
+                LOG.warning("Failed to create XYML user home " + Metadata.XYML_USER_HOME, e);
             }
         }
     }
 
+    /// Returns whether the running launcher JAR is located inside a macOS application bundle.
+    ///
+    /// @return true when a parent `Contents` directory belongs to an application bundle
     private static boolean isInsideMacAppBundle() {
-        Path thisJar = JarUtils.thisJarPath();
+        @Nullable Path thisJar = JarUtils.thisJarPath();
         if (thisJar == null)
             return false;
 
@@ -186,47 +188,23 @@ public final class EntryPoint {
         return false;
     }
 
+    /// Installs the launcher icon when macOS is not already managing it through an application bundle.
     private static void initIcon() {
         try {
-            if (java.awt.Taskbar.isTaskbarSupported()) {
-                var image = java.awt.Toolkit.getDefaultToolkit().getImage(EntryPoint.class.getResource("/assets/img/icon-mac.png"));
-                java.awt.Taskbar.getTaskbar().setIconImage(image);
+            List<java.awt.Image> iconImages = LauncherIconImages.windowIcons();
+            if (java.awt.Taskbar.isTaskbarSupported() && !iconImages.isEmpty()) {
+                java.awt.Taskbar.getTaskbar().setIconImage(iconImages.get(iconImages.size() - 1));
             }
         } catch (Throwable e) {
             LOG.warning("Failed to set application icon", e);
         }
     }
 
-    private static void checkJavaFX() {
-        try {
-            SelfDependencyPatcher.patch();
-        } catch (SelfDependencyPatcher.PatchException e) {
-            LOG.error("Unable to patch JVM", e);
-            showErrorAndExit(i18n("fatal.javafx.missing"));
-        } catch (CancellationException e) {
-            LOG.error("User cancels downloading JavaFX", e);
-            exit(0);
-        }
-    }
-
-    /**
-     * Check if JavaFX exists but is incomplete
-     */
-    private static void verifyJavaFX() {
-        try {
-            Class.forName("javafx.beans.binding.Binding"); // javafx.base
-            Class.forName("javafx.stage.Stage");           // javafx.graphics
-            Class.forName("javafx.scene.control.Skin");    // javafx.controls
-        } catch (Exception e) {
-            LOG.warning("JavaFX is incomplete or not found", e);
-            showErrorAndExit(i18n("fatal.javafx.incomplete"));
-        }
-    }
-
+    /// Warns before running under Wine because native integrations may behave differently.
     private static void checkWine() {
         if (OperatingSystem.isRunningUnderWine()) {
             SwingUtils.initLookAndFeel();
-            LOG.warning("HMCL is running under Wine or its distributions!");
+            LOG.warning("XYML is running under Wine or its distributions!");
 
             int result = JOptionPane.showOptionDialog(null, i18n("fatal.wine_warning"), i18n("message.warning"), JOptionPane.OK_CANCEL_OPTION,
                     JOptionPane.WARNING_MESSAGE, null, null, null);
@@ -237,28 +215,7 @@ public final class EntryPoint {
         }
     }
 
-    private static void addEnableNativeAccess() {
-        if (JavaRuntime.CURRENT_VERSION > 21) {
-            try {
-                // javafx.graphics
-                Module module = Class.forName("javafx.stage.Stage").getModule();
-                if (module.isNamed()) {
-                    try {
-                        MethodHandles.Lookup lookup = MethodHandles.privateLookupIn(Module.class, MethodHandles.lookup());
-                        MethodHandle implAddEnableNativeAccess = lookup.findVirtual(Module.class,
-                                "implAddEnableNativeAccess", MethodType.methodType(Module.class));
-                        Module ignored = (Module) implAddEnableNativeAccess.invokeExact(module);
-                    } catch (Throwable e) {
-                        e.printStackTrace(System.err);
-                    }
-                }
-            } catch (ClassNotFoundException e) {
-                LOG.error("Failed to add enable native access for JavaFX", e);
-                showErrorAndExit(i18n("fatal.javafx.incomplete"));
-            }
-        }
-    }
-
+    /// Enables the JDK compatibility switch required by Java 24 and 25 memory-access warnings.
     private static void enableUnsafeMemoryAccess() {
         // https://openjdk.org/jeps/498
         if (JavaRuntime.CURRENT_VERSION == 24 || JavaRuntime.CURRENT_VERSION == 25) {
@@ -273,9 +230,9 @@ public final class EntryPoint {
         }
     }
 
-    /**
-     * Indicates that a fatal error has occurred, and that the application cannot start.
-     */
+    /// Displays a fatal startup error through Swing and terminates the process.
+    ///
+    /// @param message localized error text
     private static void showErrorAndExit(String message) {
         SwingUtils.showErrorDialog(message);
         exit(1);

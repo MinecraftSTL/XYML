@@ -19,51 +19,39 @@ package space.minecraftstl.xyml.theme;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParseException;
 import com.google.gson.JsonPrimitive;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
-import static space.minecraftstl.xyml.util.logging.Logger.LOG;
-
-/// Background settings contributed by a theme-pack appearance.
+/// Inheritable background source and opacity settings.
 ///
-/// @param source the background source, or `null` when inherited
-/// @param opacity the background opacity override, or `null` when inherited
+/// @param source background source, or `null` when inherited
+/// @param opacity opacity in the inclusive range `0` to `1`, or `null` when inherited
 @NotNullByDefault
-public record ThemeBackgroundSettings(
-        @Nullable ThemeBackground source,
-        @Nullable Double opacity) {
-    /// JSON member name for the background opacity.
+public record ThemeBackgroundSettings(@Nullable ThemeBackground source, @Nullable Double opacity) {
+    /// JSON member naming opacity.
     private static final String FIELD_OPACITY = "opacity";
 
-    /// Creates background settings.
-    ///
-    /// @param source the background source, or `null` when inherited
-    /// @param opacity the background opacity override, or `null` when inherited
+    /// Validates an appearance background patch.
     public ThemeBackgroundSettings {
-        if (opacity != null && (opacity < 0.0 || opacity > 1.0 || !Double.isFinite(opacity))) {
+        if (opacity != null && (!Double.isFinite(opacity) || opacity < 0.0 || opacity > 1.0)) {
             throw new IllegalArgumentException("Theme background opacity must be between 0 and 1: " + opacity);
         }
     }
 
-    /// Parses background settings from a JSON object.
+    /// Parses a background patch.
     ///
-    /// @param object the JSON object
-    /// @return the parsed background settings
-    static ThemeBackgroundSettings fromJson(JsonObject object) throws JsonParseException {
-        Objects.requireNonNull(object);
-
-        return new ThemeBackgroundSettings(
-                ThemeBackground.fromJson(object),
-                readOpacity(object));
+    /// @param object manifest object
+    /// @return parsed patch
+    static ThemeBackgroundSettings fromJson(JsonObject object) {
+        return new ThemeBackgroundSettings(ThemeBackground.fromJson(object), readOpacity(object));
     }
 
-    /// Converts these settings to their JSON representation.
+    /// Converts this patch to JSON.
     ///
-    /// @return the JSON object representing these background settings
+    /// @return background object
     public JsonObject toJsonObject() {
         JsonObject object = source != null ? source.toJsonObject() : new JsonObject();
         if (opacity != null) {
@@ -72,46 +60,34 @@ public record ThemeBackgroundSettings(
         return object;
     }
 
-    /// Returns whether these settings contain no concrete fields.
+    /// Returns whether every member is inherited.
     ///
-    /// @return `true` when every background setting is inherited
+    /// @return `true` for an empty patch
     public boolean isEmpty() {
         return source == null && opacity == null;
     }
 
-    /// Returns settings that apply the given patch over these settings.
+    /// Applies another patch over this patch.
     ///
-    /// @param patch the patch to apply
-    /// @return the merged settings
+    /// @param patch newer patch
+    /// @return merged settings
     public ThemeBackgroundSettings merge(ThemeBackgroundSettings patch) {
-        Objects.requireNonNull(patch);
-
-        @Nullable ThemeBackground mergedSource = patch.source != null ? patch.source : source;
-        @Nullable Double mergedOpacity = patch.opacity != null ? patch.opacity : opacity;
-        return new ThemeBackgroundSettings(mergedSource, mergedOpacity);
+        Objects.requireNonNull(patch, "patch");
+        return new ThemeBackgroundSettings(
+                patch.source != null ? patch.source : source,
+                patch.opacity != null ? patch.opacity : opacity);
     }
 
-    /// Reads the optional opacity field.
+    /// Reads a valid optional opacity while ignoring malformed optional values.
     private static @Nullable Double readOpacity(JsonObject object) {
         JsonElement element = object.get(FIELD_OPACITY);
-        if (element == null) {
-            return null;
-        }
         if (!(element instanceof JsonPrimitive primitive) || !primitive.isNumber()) {
-            LOG.warning("Ignored invalid theme background opacity: expected a number, got " + element);
             return null;
         }
-
         try {
-            double opacity = primitive.getAsDouble();
-            if (opacity < 0.0 || opacity > 1.0 || !Double.isFinite(opacity)) {
-                LOG.warning("Ignored invalid theme background opacity: expected a number between 0 and 1, got "
-                        + opacity);
-                return null;
-            }
-            return opacity;
-        } catch (NumberFormatException e) {
-            LOG.warning("Ignored invalid theme background opacity: " + e.getMessage(), e);
+            double value = primitive.getAsDouble();
+            return Double.isFinite(value) && value >= 0.0 && value <= 1.0 ? value : null;
+        } catch (NumberFormatException ignored) {
             return null;
         }
     }

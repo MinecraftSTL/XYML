@@ -172,9 +172,9 @@ public final class XYMLGameLauncher extends DefaultLauncher {
     }
 
     private Path extractLwjglUnsafeAgent() throws IOException {
-        String agentVersion = JarUtils.getAttribute("hmcl.lwjgl-unsafe-agent.version", null);
+        String agentVersion = JarUtils.getAttribute("xyml.lwjgl-unsafe-agent.version", null);
         if (agentVersion == null) {
-            throw new IOException("Missing hmcl.lwjgl-unsafe-agent.version attribute");
+            throw new IOException("Missing xyml.lwjgl-unsafe-agent.version attribute");
         }
 
         Library library = new Library(new Artifact("org.glavo", "lwjgl-unsafe-agent", agentVersion));

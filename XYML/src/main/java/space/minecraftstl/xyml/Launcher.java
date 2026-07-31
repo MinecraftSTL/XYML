@@ -17,150 +17,393 @@
  */
 package space.minecraftstl.xyml;
 
-import javafx.animation.KeyFrame;
-import javafx.animation.KeyValue;
-import javafx.animation.Timeline;
-import javafx.application.Application;
-import javafx.application.Platform;
-import javafx.beans.binding.Bindings;
-import javafx.beans.value.ObservableBooleanValue;
-import javafx.geometry.Rectangle2D;
-import javafx.scene.control.Alert;
-import javafx.scene.control.Alert.AlertType;
-import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
-import javafx.scene.input.Clipboard;
-import javafx.scene.input.DataFormat;
-import javafx.stage.Screen;
-import javafx.stage.Stage;
-import javafx.util.Duration;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.XYMLCacheRepository;
+import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.setting.*;
 import space.minecraftstl.xyml.task.AsyncTaskExecutor;
 import space.minecraftstl.xyml.task.Schedulers;
-import space.minecraftstl.xyml.theme.Themes;
-import space.minecraftstl.xyml.ui.Controllers;
-import space.minecraftstl.xyml.ui.FXUtils;
-import space.minecraftstl.xyml.ui.animation.AnimationUtils;
-import space.minecraftstl.xyml.upgrade.UpdateChecker;
-import space.minecraftstl.xyml.upgrade.UpdateHandler;
+import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.NativeSystemThemeDetector;
+import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
+import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentation;
+import space.minecraftstl.xyml.ui.swing.application.SwingApplicationPresentationFactory;
+import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
+import space.minecraftstl.xyml.ui.swing.runtime.SwingApplicationRuntime;
+import space.minecraftstl.xyml.ui.swing.runtime.SwingStartupPrompts;
+import space.minecraftstl.xyml.ui.swing.launch.SwingLaunchInteraction;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountReauthentication;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountCreationWorkflowHandle;
+import space.minecraftstl.xyml.ui.swing.page.accounts.SwingAccountCreationWorkflow;
+import space.minecraftstl.xyml.ui.swing.page.accounts.SwingAccountReauthentication;
+import space.minecraftstl.xyml.ui.swing.startup.StartupPromptCoordinator;
+import space.minecraftstl.xyml.ui.swing.startup.SwingStartupPromptPresenter;
+import space.minecraftstl.xyml.ui.swing.startup.SwingStartupSafetyDialogs;
+import space.minecraftstl.xyml.ui.swing.update.SwingUpdateCheckService;
+import space.minecraftstl.xyml.ui.swing.update.SwingUpdateNotificationController;
+import space.minecraftstl.xyml.ui.swing.update.SwingUpdatePromptPresenter;
+import space.minecraftstl.xyml.ui.swing.update.UpdateCheckRequest;
+import space.minecraftstl.xyml.ui.swing.update.UpdateCheckResult;
+import space.minecraftstl.xyml.upgrade.UpdateApplier;
+import space.minecraftstl.xyml.upgrade.UpdateChannel;
+import space.minecraftstl.xyml.upgrade.UpdateStartupResult;
 import space.minecraftstl.xyml.util.*;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.JarUtils;
 import space.minecraftstl.xyml.util.platform.*;
-import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 
+import java.awt.Component;
 import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryPoolMXBean;
 import java.net.CookieHandler;
 import java.net.CookieManager;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.text.DecimalFormat;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.setting.SettingsManager.settings;
-import static space.minecraftstl.xyml.ui.FXUtils.runInFX;
 import static space.minecraftstl.xyml.util.DataSizeUnit.MEGABYTES;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
+import static space.minecraftstl.xyml.ui.swing.startup.SwingStartupSafetyDialogs.Severity.ERROR;
+import static space.minecraftstl.xyml.ui.swing.startup.SwingStartupSafetyDialogs.Severity.INFO;
+import static space.minecraftstl.xyml.ui.swing.startup.SwingStartupSafetyDialogs.Severity.WARNING;
 
-/// JavaFX application entry point for the launcher.
+/// Initializes launcher services and owns the native Swing application lifecycle.
 @NotNullByDefault
-public final class Launcher extends Application {
+public final class Launcher {
+    /// Shared HTTP cookie manager installed before account and download services start.
     public static final CookieManager COOKIE_MANAGER = new CookieManager();
 
-    /// Initializes launcher services, displays startup warnings, and schedules the main window.
-    @Override
-    public void start(Stage primaryStage) {
+    /// Page transition duration chosen for a short, legible navigation change without delaying repeated work.
+    private static final java.time.Duration SWING_PAGE_TRANSITION_DURATION =
+            java.time.Duration.ofMillis(180L);
+
+    /// Task-surface transition duration kept slightly shorter than full page navigation.
+    private static final java.time.Duration SWING_TASK_TRANSITION_DURATION =
+            java.time.Duration.ofMillis(140L);
+
+    /// Swing timer delay targeting approximately sixty animation updates per second.
+    private static final int SWING_ANIMATION_FRAME_DELAY_MILLIS = Math.max(
+            1,
+            Integer.getInteger("xyml.swing.animationFrameDelayMillis", 16));
+
+    /// Process-wide active Swing runtime used to enforce a single native application owner.
+    private static final AtomicReference<@Nullable SwingApplicationRuntime> ACTIVE_SWING_RUNTIME =
+            new AtomicReference<>();
+
+    /// Process-wide launcher owner used to enforce a single launcher lifecycle.
+    private static final AtomicReference<@Nullable Launcher> ACTIVE_LAUNCHER = new AtomicReference<>();
+
+    /// Latest successful native update-check result used when selecting the launcher crash headline.
+    private static final AtomicBoolean LAUNCHER_UPDATE_AVAILABLE = new AtomicBoolean();
+
+    /// Prevents repeated application-stop cleanup.
+    private final AtomicBoolean stopped = new AtomicBoolean();
+
+    /// Runtime owned by this launcher instance, or null before successful creation.
+    private @Nullable SwingApplicationRuntime swingRuntime;
+
+    /// Swing startup prompt sequence, or null before the production window opens.
+    private @Nullable StartupPromptCoordinator startupPromptCoordinator;
+
+    /// Active native account-creation workflow, or null before the first add-account request.
+    private final AtomicReference<@Nullable AccountCreationWorkflowHandle> accountCreationWorkflow =
+            new AtomicReference<>();
+
+    /// Serializes account-workflow creation against cross-toolkit application shutdown.
+    private final Object accountCreationLifecycleLock = new Object();
+
+    /// Serializes native update-resource publication against cross-toolkit application shutdown.
+    private final Object swingUpdateLifecycleLock = new Object();
+
+    /// Native update-check service, or null until startup prompts permit background work.
+    private @Nullable SwingUpdateCheckService swingUpdateCheckService;
+
+    /// Automatic native update notification subscription, or null when disabled or not yet initialized.
+    private @Nullable SwingUpdateNotificationController swingUpdateNotifications;
+
+    /// Initializes launcher services, displays startup warnings, and opens the native Swing window.
+    public void start() {
         Thread.currentThread().setUncaughtExceptionHandler(CRASH_REPORTER);
+        Schedulers.installUiExecutor(SwingUiDispatcher.INSTANCE::dispatch);
 
         CookieHandler.setDefault(COOKIE_MANAGER);
 
-        LOG.info("JavaFX Version: " + System.getProperty("javafx.runtime.version"));
-        LOG.info("Prism Pipeline: " + FXUtils.GRAPHICS_PIPELINE);
-        LOG.info("Dark Mode: " + Optional.ofNullable(FXUtils.DARK_MODE).map(ObservableBooleanValue::get).orElse(false));
-        LOG.info("Reduced Motion: " + Objects.requireNonNullElse(FXUtils.REDUCED_MOTION, false));
-
-        if (Screen.getScreens().isEmpty()) {
-            LOG.info("No screen");
-        } else {
-            StringBuilder builder = new StringBuilder("Screens:");
-            int count = 0;
-            for (Screen screen : Screen.getScreens()) {
-                builder.append("\n - Screen ").append(++count).append(": ");
-                appendScreen(builder, screen);
-            }
-            LOG.info(builder.toString());
-        }
+        LOG.info("UI Toolkit: Swing/AWT");
+        LOG.info("Headless Graphics Environment: " + java.awt.GraphicsEnvironment.isHeadless());
 
         try {
             try {
                 SettingsManager.init();
                 initializeSettingsRuntime();
             } catch (SambaException e) {
-                showAlert(AlertType.WARNING, i18n("fatal.samba"));
+                SwingStartupSafetyDialogs.showMessage(WARNING, i18n("fatal.samba"));
             } catch (IOException e) {
                 LOG.error("Failed to load config", e);
                 checkConfigInTempDir();
                 checkConfigOwner();
-                showAlert(AlertType.ERROR, i18n("fatal.config_loading_failure", SettingsManager.localConfigDirectory()));
+                SwingStartupSafetyDialogs.showMessage(
+                        ERROR,
+                        i18n(
+                                "fatal.config_loading_failure",
+                                SettingsManager.localConfigDirectory()));
                 EntryPoint.exit(1);
             }
 
             if (Metadata.SKIP_OFFLINE_USERNAME_CHECK) {
                 LOG.warning(Metadata.SKIP_OFFLINE_USERNAME_CHECK_ENVIRONMENT_VARIABLE
                         + " is enabled; illegal offline usernames will not be checked.");
-                showAlert(AlertType.WARNING, i18n("account.methods.offline.name.check_disabled"));
+                SwingStartupSafetyDialogs.showMessage(
+                        WARNING,
+                        i18n("account.methods.offline.name.check_disabled"));
             }
 
             // https://lapcatsoftware.com/articles/app-translocation.html
             if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS
                     && SettingsManager.isNewlyCreated()
                     && System.getProperty("user.dir").startsWith("/private/var/folders/")) {
-                if (!confirmWithCountdown(AlertType.WARNING, i18n("fatal.mac_app_translocation"), 5))
+                if (!SwingStartupSafetyDialogs.confirmWithCountdown(
+                        WARNING,
+                        i18n("fatal.mac_app_translocation"),
+                        5)) {
+                    stop();
                     return;
+                }
             } else {
                 checkConfigInTempDir();
             }
 
             if (SettingsManager.isOwnerChanged()) {
-                if (showAlert(AlertType.WARNING, i18n("fatal.config_change_owner_root"), ButtonType.YES, ButtonType.NO) == ButtonType.NO)
+                if (!SwingStartupSafetyDialogs.confirm(
+                        WARNING,
+                        i18n("fatal.config_change_owner_root"))) {
+                    stop();
                     return;
+                }
             }
 
             if (SettingsManager.hasReadOnlyCoreSettings()) {
-                showAlert(AlertType.WARNING, i18n("fatal.config_unsupported_version"));
+                SwingStartupSafetyDialogs.showMessage(
+                        WARNING,
+                        i18n("fatal.config_unsupported_version"));
             }
 
-            if (Metadata.HMCL_LOCAL_HOME.toString().indexOf('=') >= 0) {
-                showAlert(AlertType.WARNING, i18n("fatal.illegal_char"));
+            if (Metadata.XYML_LOCAL_HOME.toString().indexOf('=') >= 0) {
+                SwingStartupSafetyDialogs.showMessage(WARNING, i18n("fatal.illegal_char"));
             }
 
-            // runLater to ensure SettingsManager.init() finished initialization
-            Platform.runLater(() -> {
-                // When launcher visibility is set to "hide and reopen" without Platform.implicitExit = false,
-                // Stage.show() cannot work again because JavaFX Toolkit have already shut down.
-                Platform.setImplicitExit(false);
-                Controllers.initialize(primaryStage);
-
-                if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS)
-                    Themes.applyNativeDarkMode(primaryStage);
-
-                UpdateChecker.init();
-
-                primaryStage.show();
-            });
+            Lang.thread(JavaManager::initialize, "Search Java", true);
+            startSwingWindow();
         } catch (Throwable e) {
-            CRASH_REPORTER.uncaughtException(Thread.currentThread(), e);
+            try {
+                CRASH_REPORTER.uncaughtException(Thread.currentThread(), e);
+            } finally {
+                try {
+                    stop();
+                } catch (Throwable cleanupFailure) {
+                    if (cleanupFailure != e) {
+                        e.addSuppressed(cleanupFailure);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Creates and opens the production Swing runtime.
+    private void startSwingWindow() {
+        try {
+            boolean acceptPreviewUpdate = settings().acceptPreviewUpdateProperty().get();
+            boolean disableAutomaticUpdatePrompt = settings().disableAutoShowUpdateDialogProperty().get();
+            SwingApplicationPresentation presentation = SwingApplicationPresentationFactory.create(
+                    SWING_PAGE_TRANSITION_DURATION,
+                    SWING_TASK_TRANSITION_DURATION);
+            AtomicReference<@Nullable SwingApplicationRuntime> dialogRuntime = new AtomicReference<>();
+            Supplier<@Nullable Component> dialogOwner = () -> {
+                @Nullable SwingApplicationRuntime currentRuntime = dialogRuntime.get();
+                return currentRuntime == null || currentRuntime.isClosed()
+                        ? null
+                        : currentRuntime.dialogOwner();
+            };
+            SwingLaunchInteraction launchInteraction = new SwingLaunchInteraction(dialogOwner);
+            AccountReauthentication accountReauthentication = SwingAccountReauthentication.create(
+                    dialogOwner,
+                    Schedulers.io());
+            SwingApplicationRuntime runtime;
+            try {
+                runtime = SwingApplicationRuntime.create(
+                        presentation,
+                        this::openSwingAccountDialog,
+                        launchInteraction,
+                        accountReauthentication,
+                        captureSystemThemeDetector(),
+                        SWING_ANIMATION_FRAME_DELAY_MILLIS,
+                        Schedulers.io(),
+                        this::stop);
+            } catch (RuntimeException | Error creationFailure) {
+                closeAfterFailure(accountReauthentication, creationFailure);
+                throw creationFailure;
+            }
+            dialogRuntime.set(runtime);
+            swingRuntime = runtime;
+            if (!ACTIVE_SWING_RUNTIME.compareAndSet(null, runtime)) {
+                runtime.close();
+                throw new IllegalStateException("Another Swing application runtime is already active");
+            }
+            try {
+                runtime.setInteractionEnabled(false);
+                runtime.open();
+                StartupPromptCoordinator prompts = SwingStartupPrompts.create(
+                        new SwingStartupPromptPresenter(runtime::dialogOwner),
+                        Schedulers.io(),
+                        runtime::close);
+                startupPromptCoordinator = prompts;
+                prompts.agreementGate().whenComplete((
+                        @Nullable Boolean accepted,
+                        @Nullable Throwable gateFailure) -> {
+                    SwingUiDispatcher.INSTANCE.dispatch(() -> {
+                        if (runtime.isClosed()) {
+                            return;
+                        }
+                        if (gateFailure != null || !Boolean.TRUE.equals(accepted)) {
+                            runtime.close();
+                            return;
+                        }
+                        try {
+                            runtime.setInteractionEnabled(true);
+                        } catch (IllegalStateException failure) {
+                            if (!runtime.isClosed()) {
+                                throw failure;
+                            }
+                        }
+                    });
+                });
+                prompts.start().whenComplete((
+                        @Nullable Void ignored,
+                        @Nullable Throwable promptFailure) -> {
+                    if (promptFailure != null) {
+                        LOG.warning("Swing startup prompt sequence failed", promptFailure);
+                        return;
+                    }
+                    SwingUiDispatcher.INSTANCE.dispatch(() -> {
+                        if (!runtime.isClosed()) {
+                            startSwingUpdateCheck(
+                                    runtime,
+                                    acceptPreviewUpdate,
+                                    disableAutomaticUpdatePrompt);
+                        }
+                    });
+                });
+            } catch (RuntimeException | Error openingFailure) {
+                ACTIVE_SWING_RUNTIME.compareAndSet(runtime, null);
+                @Nullable StartupPromptCoordinator prompts = startupPromptCoordinator;
+                startupPromptCoordinator = null;
+                if (prompts != null) {
+                    closeAfterFailure(prompts, openingFailure);
+                }
+                closeAfterFailure(runtime, openingFailure);
+                throw openingFailure;
+            }
+        } catch (Throwable failure) {
+            CRASH_REPORTER.uncaughtException(Thread.currentThread(), failure);
+            stop();
+        }
+    }
+
+    /// Creates the non-throwing native appearance detector used by Swing system-theme mode.
+    ///
+    /// @return detector that rereads the current operating-system appearance on demand
+    private static SystemThemeDetector captureSystemThemeDetector() {
+        return NativeSystemThemeDetector.create();
+    }
+
+    /// Opens at most one native account-creation workflow owned by the active Swing window.
+    private void openSwingAccountDialog() {
+        synchronized (accountCreationLifecycleLock) {
+            @Nullable SwingApplicationRuntime runtime = swingRuntime;
+            if (stopped.get() || runtime == null || runtime.isClosed()) {
+                return;
+            }
+
+            @Nullable AccountCreationWorkflowHandle previous = accountCreationWorkflow.get();
+            if (previous != null && !previous.isClosed()) {
+                return;
+            }
+
+            AccountCreationWorkflowHandle created = SwingAccountCreationWorkflow.openPreferred(
+                    runtime.dialogOwner(),
+                    Schedulers.io());
+            if (!accountCreationWorkflow.compareAndSet(previous, created)) {
+                created.close();
+            }
+        }
+    }
+
+    /// Starts the toolkit-neutral update service after startup decisions have enabled the main window.
+    ///
+    /// @param runtime active native runtime used as the update-dialog owner
+    /// @param acceptPreviewUpdate whether preview releases are eligible
+    /// @param disableAutomaticPrompt whether successful checks must remain silent
+    private void startSwingUpdateCheck(
+            SwingApplicationRuntime runtime,
+            boolean acceptPreviewUpdate,
+            boolean disableAutomaticPrompt) {
+        SwingUpdateCheckService service;
+        synchronized (swingUpdateLifecycleLock) {
+            if (stopped.get() || runtime.isClosed()) {
+                return;
+            }
+            if (swingUpdateCheckService != null) {
+                throw new IllegalStateException("Swing update checking was already initialized");
+            }
+
+            service = SwingUpdateCheckService.production();
+            @Nullable SwingUpdateNotificationController notifications = null;
+            try {
+                if (!disableAutomaticPrompt) {
+                    SwingUpdatePromptPresenter presenter = SwingUpdatePromptPresenter.production(
+                            runtime::dialogOwner,
+                            URI.create(Metadata.MANUAL_UPDATE_URL),
+                            Schedulers.io());
+                    notifications = new SwingUpdateNotificationController(service, presenter);
+                }
+            } catch (RuntimeException | Error creationFailure) {
+                service.close();
+                throw creationFailure;
+            }
+            swingUpdateCheckService = service;
+            swingUpdateNotifications = notifications;
+        }
+        try {
+            service.check(new UpdateCheckRequest(
+                    UpdateChannel.getChannel(),
+                    acceptPreviewUpdate)).whenComplete((
+                    @Nullable UpdateCheckResult result,
+                    @Nullable Throwable failure) -> {
+                if (result != null) {
+                    LAUNCHER_UPDATE_AVAILABLE.set(result.updateAvailable());
+                }
+                if (failure != null && !(failure instanceof CancellationException)) {
+                    LOG.warning("Failed to check for launcher updates", failure);
+                }
+            });
+        } catch (IllegalStateException closedRace) {
+            synchronized (swingUpdateLifecycleLock) {
+                if (!stopped.get() && swingUpdateCheckService == service) {
+                    throw closedRace;
+                }
+            }
         }
     }
 
@@ -170,86 +413,32 @@ public final class Launcher extends Application {
         ProxyManager.init();
         Accounts.init();
         GameDirectoryManager.init();
-        AuthlibInjectorServers.init();
-        AnimationUtils.init();
 
         CacheRepository.setInstance(XYMLCacheRepository.REPOSITORY);
-        XYMLCacheRepository.REPOSITORY.directoryProperty().bind(Bindings.createStringBinding(() -> {
-            String commonDirectory = settings().getResolvedCommonDirectory();
+        Runnable refreshCacheDirectory = () -> {
+            @Nullable String commonDirectory = settings().getResolvedCommonDirectory();
             if (commonDirectory != null && FileUtils.canCreateDirectory(commonDirectory)) {
-                return commonDirectory;
+                XYMLCacheRepository.REPOSITORY.setDirectory(commonDirectory);
             } else {
-                return LauncherSettings.getDefaultCommonDirectory();
+                XYMLCacheRepository.REPOSITORY.setDirectory(LauncherSettings.getDefaultCommonDirectory());
             }
-        }, settings().commonDirectoryProperty(), settings().commonDirectoryTypeProperty()));
+        };
+        refreshCacheDirectory.run();
+        settings().commonDirectoryProperty().subscribe(change -> refreshCacheDirectory.run());
+        settings().commonDirectoryTypeProperty().subscribe(change -> refreshCacheDirectory.run());
     }
 
-    private static void appendScreen(StringBuilder builder, Screen screen) {
-        Rectangle2D bounds = screen.getBounds();
-        double scale = screen.getOutputScaleX();
-
-        builder.append(Math.round(bounds.getWidth() * scale));
-        builder.append('x');
-        builder.append(Math.round(bounds.getHeight() * scale));
-
-        DecimalFormat decimalFormat = new DecimalFormat("#.##");
-
-        if (scale != 1.0) {
-            builder.append(" @ ");
-            builder.append(decimalFormat.format(scale));
-            builder.append('x');
-        }
-
-        double dpi = screen.getDpi();
-        builder.append(' ');
-        builder.append(decimalFormat.format(dpi));
-        builder.append("dpi");
-
-        builder.append(" in ")
-                .append(Math.round(Math.sqrt(bounds.getWidth() * bounds.getWidth() + bounds.getHeight() * bounds.getHeight()) / dpi))
-                .append('"');
-
-        builder.append(" (").append(decimalFormat.format(bounds.getMinX()))
-                .append(", ").append(decimalFormat.format(bounds.getMinY()))
-                .append(", ").append(decimalFormat.format(bounds.getMaxX()))
-                .append(", ").append(decimalFormat.format(bounds.getMaxY()))
-                .append(")");
-    }
-
-    /// Shows a blocking JavaFX alert and returns the selected button, if any.
-    private static @Nullable ButtonType showAlert(AlertType alertType, String contentText, ButtonType... buttons) {
-        return new Alert(alertType, contentText, buttons).showAndWait().orElse(null);
-    }
-
-    private static boolean confirmWithCountdown(Alert.AlertType alertType, String contentText, int seconds) {
-        Alert alert = new Alert(alertType, contentText, ButtonType.YES, ButtonType.NO);
-        Button okButton = (Button) alert.getDialogPane().lookupButton(ButtonType.YES);
-
-        okButton.setDisable(true);
-
-        KeyFrame[] keyFrames = new KeyFrame[seconds + 1];
-        for (int i = 0; i < seconds; i++) {
-            keyFrames[i] = new KeyFrame(Duration.seconds(i),
-                    new KeyValue(okButton.textProperty(), i18n("button.ok.countdown", seconds - i)));
-        }
-        keyFrames[seconds] = new KeyFrame(Duration.seconds(seconds),
-                new KeyValue(okButton.textProperty(), i18n("button.ok")),
-                new KeyValue(okButton.disableProperty(), false));
-
-        Timeline timeline = new Timeline(keyFrames);
-        alert.setOnShown(e -> timeline.play());
-        alert.setOnCloseRequest(e -> timeline.stop());
-        return alert.showAndWait().orElse(null) == ButtonType.YES;
-    }
-
+    /// Returns whether the active config directory appears to be temporary or disposable.
+    ///
+    /// @return true when the config path matches a platform temporary location
     private static boolean isConfigInTempDir() {
         String configPath = SettingsManager.localConfigDirectory().toString();
 
-        String tmpdir = System.getProperty("java.io.tmpdir");
+        @Nullable String tmpdir = System.getProperty("java.io.tmpdir");
         if (StringUtils.isNotBlank(tmpdir) && configPath.startsWith(tmpdir))
             return true;
 
-        String[] tempFolderNames = {"Temp", "Cache", "Caches"};
+        String @Unmodifiable [] tempFolderNames = {"Temp", "Cache", "Caches"};
         for (String name : tempFolderNames) {
             if (configPath.contains(File.separator + name + File.separator))
                 return true;
@@ -279,18 +468,23 @@ public final class Launcher extends Application {
         }
     }
 
+    /// Warns a new installation before it persists configuration in a temporary directory.
     private static void checkConfigInTempDir() {
         if (SettingsManager.isNewlyCreated() && isConfigInTempDir()
-                && !confirmWithCountdown(AlertType.WARNING, i18n("fatal.config_in_temp_dir"), 5)) {
+                && !SwingStartupSafetyDialogs.confirmWithCountdown(
+                        WARNING,
+                        i18n("fatal.config_in_temp_dir"),
+                        5)) {
             EntryPoint.exit(0);
         }
     }
 
+    /// Offers a Unix ownership repair command when the configuration directory is not writable.
     private static void checkConfigOwner() {
         if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS)
             return;
 
-        String userName = System.getProperty("user.name");
+        String userName = Objects.requireNonNullElse(System.getProperty("user.name"), "");
         Path configDirectory = SettingsManager.localConfigDirectory();
         if (!Files.exists(configDirectory)) {
             return;
@@ -309,34 +503,71 @@ public final class Launcher extends Application {
 
         ArrayList<String> files = new ArrayList<>();
         files.add(configDirectory.toString());
-        if (Files.exists(Metadata.HMCL_USER_HOME))
-            files.add(Metadata.HMCL_USER_HOME.toString());
+        if (Files.exists(Metadata.XYML_USER_HOME))
+            files.add(Metadata.XYML_USER_HOME.toString());
 
         Path mcDir = Paths.get(".minecraft").toAbsolutePath().normalize();
         if (Files.exists(mcDir))
             files.add(mcDir.toString());
 
         String command = new CommandBuilder().addAll("sudo", "chown", "-R", userName).addAll(files).toString();
-        ButtonType copyAndExit = new ButtonType(i18n("button.copy_and_exit"));
-
-        if (showAlert(AlertType.ERROR,
+        SwingStartupSafetyDialogs.offerCopyAndExit(
                 i18n("fatal.config_loading_failure.unix", owner, command),
-                copyAndExit, ButtonType.CLOSE) == copyAndExit) {
-            Clipboard.getSystemClipboard()
-                    .setContent(Collections.singletonMap(DataFormat.PLAIN_TEXT, command));
-        }
+                command);
         EntryPoint.exit(1);
     }
 
-    @Override
-    public void stop() throws Exception {
-        Controllers.onApplicationStop();
-        FileSaver.shutdown();
-        LOG.shutdown();
+    /// Releases the Swing runtime, schedulers, pending saves, and logger once.
+    public void stop() {
+        if (!stopped.compareAndSet(false, true)) {
+            return;
+        }
+        ACTIVE_LAUNCHER.compareAndSet(this, null);
+
+        @Nullable Throwable failure = null;
+        @Nullable AccountCreationWorkflowHandle accountWorkflow;
+        synchronized (accountCreationLifecycleLock) {
+            accountWorkflow = accountCreationWorkflow.getAndSet(null);
+        }
+        if (accountWorkflow != null) {
+            failure = closeCollecting(accountWorkflow, failure);
+        }
+        @Nullable SwingUpdateNotificationController updateNotifications;
+        @Nullable SwingUpdateCheckService updateService;
+        synchronized (swingUpdateLifecycleLock) {
+            updateNotifications = swingUpdateNotifications;
+            swingUpdateNotifications = null;
+            updateService = swingUpdateCheckService;
+            swingUpdateCheckService = null;
+        }
+        if (updateNotifications != null) {
+            failure = closeCollecting(updateNotifications, failure);
+        }
+        if (updateService != null) {
+            failure = closeCollecting(updateService, failure);
+        }
+        @Nullable StartupPromptCoordinator prompts = startupPromptCoordinator;
+        startupPromptCoordinator = null;
+        if (prompts != null) {
+            failure = closeCollecting(prompts, failure);
+        }
+        @Nullable SwingApplicationRuntime runtime = swingRuntime;
+        swingRuntime = null;
+        if (runtime != null) {
+            ACTIVE_SWING_RUNTIME.compareAndSet(runtime, null);
+            failure = closeCollecting(runtime, failure);
+        }
+        failure = runCollecting(Schedulers::shutdown, failure);
+        failure = runCollecting(FileSaver::shutdown, failure);
+        failure = runCollecting(LOG::shutdown, failure);
+        rethrowCleanupFailure(failure);
     }
 
-    public static void main(String[] args) {
-        if (UpdateHandler.processArguments(args)) {
+    /// Logs the runtime environment and starts the Swing application toolkit.
+    ///
+    /// @param args launcher and updater arguments
+    public static void main(String @Unmodifiable [] args) {
+        if (processUpdateArguments(args)) {
             LOG.shutdown();
             return;
         }
@@ -363,10 +594,10 @@ public final class Launcher extends Application {
             LOG.info("Java VM Version: " + System.getProperty("java.vm.name") + " (" + System.getProperty("java.vm.info") + "), " + System.getProperty("java.vm.vendor"));
             LOG.info("Java Home: " + System.getProperty("java.home"));
             LOG.info("Current Directory: " + Metadata.CURRENT_DIRECTORY);
-            LOG.info("HMCL User Home: " + Metadata.HMCL_USER_HOME);
-            LOG.info("HMCL Local Home: " + Metadata.HMCL_LOCAL_HOME);
-            LOG.info("HMCL Jar Path: " + Lang.requireNonNullElse(JarUtils.thisJarPath(), "Not Found"));
-            LOG.info("HMCL Log File: " + Lang.requireNonNullElse(LOG.getLogFile(), "In Memory"));
+            LOG.info("XYML User Home: " + Metadata.XYML_USER_HOME);
+            LOG.info("XYML Local Home: " + Metadata.XYML_LOCAL_HOME);
+            LOG.info("XYML Jar Path: " + Lang.requireNonNullElse(JarUtils.thisJarPath(), "Not Found"));
+            LOG.info("XYML Log File: " + Lang.requireNonNullElse(LOG.getLogFile(), "In Memory"));
             LOG.info("JVM Max Memory: " + MEGABYTES.formatBytes(Runtime.getRuntime().maxMemory()));
             try {
                 for (MemoryPoolMXBean bean : ManagementFactory.getMemoryPoolMXBeans()) {
@@ -388,37 +619,132 @@ public final class Launcher extends Application {
 
             Lang.thread(SystemInfo::initialize, "Detection System Information", true);
 
-            launch(Launcher.class, args);
-        } catch (Throwable e) { // Fucking JavaFX will suppress the exception and will break our crash reporter.
+            Launcher launcher = new Launcher();
+            if (!ACTIVE_LAUNCHER.compareAndSet(null, launcher)) {
+                throw new IllegalStateException("Another launcher instance is already active");
+            }
+            try {
+                LauncherStateDispatcher.execute(launcher::start);
+            } catch (RuntimeException | Error dispatchFailure) {
+                launcher.stop();
+                throw dispatchFailure;
+            }
+        } catch (Throwable e) {
             CRASH_REPORTER.uncaughtException(Thread.currentThread(), e);
         }
     }
 
-    public static void stopApplication() {
-        LOG.info("Stopping application.\n" + StringUtils.getStackTrace(Thread.currentThread().getStackTrace()));
+    /// Applies toolkit-neutral startup update operations and presents only their semantic result with Swing.
+    ///
+    /// @param args launcher and updater arguments
+    /// @return whether the current process must exit before initializing launcher state
+    private static boolean processUpdateArguments(String @Unmodifiable [] args) {
+        UpdateStartupResult result = UpdateApplier.processArguments(args);
+        if (!result.shouldExit()) {
+            return false;
+        }
 
-        runInFX(() -> {
-            if (Controllers.getStage() == null)
-                return;
-            Controllers.getStage().close();
-            Schedulers.shutdown();
-            Controllers.shutdown();
-            Platform.exit();
-        });
+        @Nullable UpdateStartupResult.Notice notice = result.notice();
+        if (notice == null) {
+            return true;
+        }
+
+        switch (notice) {
+            case UNSUPPORTED_WINDOWS_VERSION -> SwingStartupSafetyDialogs.showMessage(
+                    ERROR,
+                    i18n("fatal.apply_update_need_win7", Metadata.PUBLISH_URL));
+            case APPLY_FAILED -> SwingStartupSafetyDialogs.showMessage(
+                    ERROR,
+                    i18n("fatal.apply_update_failure", Metadata.MANUAL_UPDATE_URL)
+                            + "\n"
+                            + StringUtils.getStackTrace(Objects.requireNonNull(
+                                    result.failure(),
+                                    "apply-failure result did not carry its failure")));
+            case MANUAL_REBOOT_REQUIRED -> SwingStartupSafetyDialogs.showMessage(
+                    INFO,
+                    i18n("fatal.migration_requires_manual_reboot"));
+        }
+        return true;
     }
 
-    public static void stopWithoutPlatform() {
-        LOG.info("Stopping application without JavaFX Toolkit.\n" + StringUtils.getStackTrace(Thread.currentThread().getStackTrace()));
-
-        runInFX(() -> {
-            if (Controllers.getStage() == null)
-                return;
-            Controllers.getStage().close();
-            Schedulers.shutdown();
-            Controllers.shutdown();
-            Lang.executeDelayed(System::gc, TimeUnit.SECONDS, 5, true);
-        });
+    /// Adds a cleanup failure to an existing startup or cleanup failure without replacing its identity.
+    ///
+    /// @param resource resource that could not be retained after startup failure
+    /// @param originalFailure original startup failure
+    private static void closeAfterFailure(AutoCloseable resource, Throwable originalFailure) {
+        try {
+            resource.close();
+        } catch (Throwable cleanupFailure) {
+            if (originalFailure != cleanupFailure) {
+                originalFailure.addSuppressed(cleanupFailure);
+            }
+        }
     }
 
-    public static final CrashReporter CRASH_REPORTER = new CrashReporter(true);
+    /// Closes one resource while retaining the first failure.
+    ///
+    /// @param resource resource to close
+    /// @param previous first earlier failure, or null
+    /// @return first failure with any later failure suppressed
+    private static @Nullable Throwable closeCollecting(
+            AutoCloseable resource,
+            @Nullable Throwable previous) {
+        try {
+            resource.close();
+            return previous;
+        } catch (Throwable current) {
+            return accumulateFailure(previous, current);
+        }
+    }
+
+    /// Runs one cleanup command while retaining the first failure.
+    ///
+    /// @param command cleanup command
+    /// @param previous first earlier failure, or null
+    /// @return first failure with any later failure suppressed
+    private static @Nullable Throwable runCollecting(
+            Runnable command,
+            @Nullable Throwable previous) {
+        try {
+            command.run();
+            return previous;
+        } catch (Throwable current) {
+            return accumulateFailure(previous, current);
+        }
+    }
+
+    /// Appends a later cleanup failure to the first failure.
+    ///
+    /// @param previous first earlier failure, or null
+    /// @param current next cleanup failure
+    /// @return first failure with later failures suppressed
+    private static Throwable accumulateFailure(@Nullable Throwable previous, Throwable current) {
+        if (previous == null) {
+            return current;
+        }
+        if (previous != current) {
+            previous.addSuppressed(current);
+        }
+        return previous;
+    }
+
+    /// Rethrows accumulated cleanup without losing unchecked failure types.
+    ///
+    /// @param failure accumulated cleanup failure, or null when cleanup succeeded
+    private static void rethrowCleanupFailure(@Nullable Throwable failure) {
+        if (failure == null) {
+            return;
+        }
+        if (failure instanceof RuntimeException runtimeException) {
+            throw runtimeException;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        throw new IllegalStateException("Failed to stop launcher", failure);
+    }
+
+    /// Process-wide uncaught-exception reporter used by both UI toolkits and task executors.
+    public static final CrashReporter CRASH_REPORTER =
+            new CrashReporter(true, LAUNCHER_UPDATE_AVAILABLE::get);
 }

@@ -40,8 +40,8 @@ public final class McbbsModpackProvider implements ModpackProvider {
     }
 
     @Override
-    public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String version) {
-        return new McbbsModpackCompletionTask(dependencyManager, version);
+    public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+        return new McbbsModpackCompletionTask(dependencyManager, instanceId);
     }
 
     @Override

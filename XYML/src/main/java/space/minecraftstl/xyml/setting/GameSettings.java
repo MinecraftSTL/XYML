@@ -22,10 +22,10 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableSet;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableSet;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.game.*;
 import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
@@ -79,6 +79,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Instance-specific game setting.
     @JsonAdapter(Instance.Adapter.class)
     @JsonSerializable
+    @NotNullByDefault
     public static final class Instance extends GameSettings implements JsonSchemaSetting {
         /// The JSON schema supported by instance-specific game settings.
         public static final JsonSchema CURRENT_SCHEMA =
@@ -86,7 +87,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
 
         /// Creates an empty instance setting.
         public Instance() {
-            tracker.markDirty(schema);
+            markDirty(schema);
             register();
         }
 
@@ -102,7 +103,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
         /// Returns the schema used by this instance game settings file.
         @Override
         public JsonSchema getSchema() {
-            return schema.get();
+            return Objects.requireNonNull(schema.get(), "schema");
         }
 
         /// Sets the schema used by this instance game settings file.
@@ -152,16 +153,16 @@ public sealed abstract class GameSettings extends ObservableSetting {
 
         /// The icon of the instance.
         @SerializedName("icon")
-        private final SettingProperty<VersionIconType> icon = newSettingProperty("icon", VersionIconType.DEFAULT);
+        private final SettingProperty<InstanceIconType> icon = newSettingProperty("icon", InstanceIconType.DEFAULT);
 
         /// Returns the instance icon property.
-        public SettingProperty<VersionIconType> iconProperty() {
+        public SettingProperty<InstanceIconType> iconProperty() {
             return icon;
         }
 
         /// Setting property names overridden by this instance.
         @SerializedName("overrideProperties")
-        private final ObservableSet<String> overrideProperties = FXCollections.observableSet();
+        private final ObservableSet<String> overrideProperties = ObservableCollections.observableSet();
 
         /// Returns the overridden setting property names.
         public ObservableSet<String> getOverrideProperties() {
@@ -169,7 +170,9 @@ public sealed abstract class GameSettings extends ObservableSetting {
         }
 
         /// JSON adapter for instance settings.
+        @NotNullByDefault
         public static final class Adapter extends ObservableSetting.Adapter<Instance> {
+            /// Creates an empty instance setting for deserialization.
             @Override
             protected Instance createInstance() {
                 return new Instance();
@@ -180,6 +183,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Reusable game setting preset.
     @JsonAdapter(Preset.Adapter.class)
     @JsonSerializable
+    @NotNullByDefault
     public static final class Preset extends GameSettings {
         /// Creates a preset with the given identity.
         public Preset(GameSettingsPresetID id) {
@@ -230,12 +234,15 @@ public sealed abstract class GameSettings extends ObservableSetting {
         }
 
         /// JSON adapter for presets.
+        @NotNullByDefault
         public static final class Adapter extends ObservableSetting.Adapter<@Nullable Preset> {
+            /// Creates an empty preset for deserialization.
             @Override
             protected Preset createInstance() {
                 return new Preset();
             }
 
+            /// Deserializes a preset and rejects the reserved nil preset ID.
             @Override
             public @Nullable Preset deserialize(
                     JsonElement json,
@@ -250,7 +257,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
         }
     }
 
-    /// Reference to a Java runtime selected from HMCL's detected Java list.
+    /// Reference to a Java runtime selected from XYML's detected Java list.
     ///
     /// @param version the runtime version reported by the detected Java executable
     /// @param pathHash the SHA-256 hash of the normalized Java executable path, or an empty string when unavailable
@@ -278,22 +285,6 @@ public sealed abstract class GameSettings extends ObservableSetting {
         /// Returns a detected Java reference for the given runtime.
         public static DetectedJava of(JavaRuntime java) {
             return new DetectedJava(java.getVersion(), hashExistingPath(java.getBinary()));
-        }
-
-        /// Returns a detected Java reference migrated from legacy persisted fields.
-        public static DetectedJava ofLegacyPath(String version, String javaBinaryPath) {
-            String pathHash = "";
-            if (StringUtils.isNotBlank(javaBinaryPath)) {
-                try {
-                    pathHash = hashExistingPath(Path.of(javaBinaryPath));
-                } catch (InvalidPathException ignored) {
-                }
-
-                if (StringUtils.isBlank(pathHash)) {
-                    pathHash = hashPathText(javaBinaryPath);
-                }
-            }
-            return new DetectedJava(version, pathHash);
         }
 
         /// Returns the path hash for an executable that is expected to exist on this machine.
@@ -403,7 +394,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for disabling generated JVM options.
     public static final String PROPERTY_NO_JVM_OPTIONS = "noJVMOptions";
 
-    /// If `true`, HMCL will not use default JVM arguments.
+    /// If `true`, XYML will not use default JVM arguments.
     @SerializedName(PROPERTY_NO_JVM_OPTIONS)
     private final InheritableProperty<Boolean> noJVMOptions = newInheritableProperty(PROPERTY_NO_JVM_OPTIONS, false);
 
@@ -415,7 +406,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for disabling generated optimizing JVM options.
     public static final String PROPERTY_NO_OPTIMIZING_JVM_OPTIONS = "noOptimizingJVMOptions";
 
-    /// If `true`, HMCL will not use the default optimizing JVM options.
+    /// If `true`, XYML will not use the default optimizing JVM options.
     @SerializedName(PROPERTY_NO_OPTIMIZING_JVM_OPTIONS)
     private final InheritableProperty<Boolean> noOptimizingJVMOptions = newInheritableProperty(PROPERTY_NO_OPTIMIZING_JVM_OPTIONS, false);
 
@@ -427,7 +418,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for disabling JVM validity checks.
     public static final String PROPERTY_NOT_CHECK_JVM = "notCheckJVM";
 
-    /// If `true`, HMCL does not check JVM validity.
+    /// If `true`, XYML does not check JVM validity.
     @SerializedName(PROPERTY_NOT_CHECK_JVM)
     private final InheritableProperty<Boolean> notCheckJVM = newInheritableProperty(PROPERTY_NOT_CHECK_JVM, false);
 
@@ -439,7 +430,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for disabling game completeness checks.
     public static final String PROPERTY_NOT_CHECK_GAME = "notCheckGame";
 
-    /// If `true`, HMCL does not check game completeness.
+    /// If `true`, XYML does not check game completeness.
     @SerializedName(PROPERTY_NOT_CHECK_GAME)
     private final InheritableProperty<Boolean> notCheckGame = newInheritableProperty(PROPERTY_NOT_CHECK_GAME, false);
 
@@ -451,7 +442,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for automatic memory allocation.
     public static final String PROPERTY_AUTO_MEMORY = "autoMemory";
 
-    /// If `true`, HMCL will automatically adjust memory allocation.
+    /// If `true`, XYML will automatically adjust memory allocation.
     @SerializedName(PROPERTY_AUTO_MEMORY)
     private final InheritableProperty<Boolean> autoMemory = newInheritableProperty(PROPERTY_AUTO_MEMORY, true);
 
@@ -568,10 +559,10 @@ public sealed abstract class GameSettings extends ObservableSetting {
         return launcherVisibility;
     }
 
-    /// Property name for allowing HMCL to modify the game with Java agents.
+    /// Property name for allowing XYML to modify the game with Java agents.
     public static final String PROPERTY_ALLOW_AUTO_AGENT = "allowAutoAgent";
 
-    /// If `true`, HMCL may attach Java agents to improve the game experience.
+    /// If `true`, XYML may attach Java agents to improve the game experience.
     @SerializedName(PROPERTY_ALLOW_AUTO_AGENT)
     private final InheritableProperty<Boolean> allowAutoAgent = newInheritableProperty(PROPERTY_ALLOW_AUTO_AGENT, false);
 
@@ -583,7 +574,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for disabling automatic game options generation.
     public static final String PROPERTY_DISABLE_AUTO_GAME_OPTIONS = "disableAutoGameOptions";
 
-    /// If `true`, HMCL will not generate game options automatically.
+    /// If `true`, XYML will not generate game options automatically.
     @SerializedName(PROPERTY_DISABLE_AUTO_GAME_OPTIONS)
     private final InheritableProperty<Boolean> disableAutoGameOptions =
             newInheritableProperty(PROPERTY_DISABLE_AUTO_GAME_OPTIONS, false);
@@ -766,7 +757,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for disabling native library patching.
     public static final String PROPERTY_NOT_PATCH_NATIVES = "notPatchNatives";
 
-    /// If `true`, HMCL does not patch native libraries.
+    /// If `true`, XYML does not patch native libraries.
     @SerializedName(PROPERTY_NOT_PATCH_NATIVES)
     private final InheritableProperty<Boolean> notPatchNatives = newInheritableProperty(PROPERTY_NOT_PATCH_NATIVES, false);
 
@@ -778,7 +769,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for using custom native libraries.
     public static final String PROPERTY_USE_CUSTOM_NATIVES = "useCustomNatives";
 
-    /// If `true`, HMCL leaves native library management to the user.
+    /// If `true`, XYML leaves native library management to the user.
     @SerializedName(PROPERTY_USE_CUSTOM_NATIVES)
     private final InheritableProperty<Boolean> useCustomNatives = newInheritableProperty(PROPERTY_USE_CUSTOM_NATIVES, false);
 
@@ -802,7 +793,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for using native GLFW.
     public static final String PROPERTY_USE_NATIVE_GLFW = "useNativeGLFW";
 
-    /// If `true`, HMCL will use native GLFW.
+    /// If `true`, XYML will use native GLFW.
     @SerializedName(PROPERTY_USE_NATIVE_GLFW)
     private final InheritableProperty<Boolean> useNativeGLFW = newInheritableProperty(PROPERTY_USE_NATIVE_GLFW, false);
 
@@ -814,7 +805,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
     /// Property name for using native OpenAL.
     public static final String PROPERTY_USE_NATIVE_OPENAL = "useNativeOpenAL";
 
-    /// If `true`, HMCL will use native OpenAL.
+    /// If `true`, XYML will use native OpenAL.
     @SerializedName(PROPERTY_USE_NATIVE_OPENAL)
     private final InheritableProperty<Boolean> useNativeOpenAL = newInheritableProperty(PROPERTY_USE_NATIVE_OPENAL, false);
 
@@ -823,6 +814,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
         return useNativeOpenAL;
     }
 
+    /// Returns the requested renderer when compatible with the graphics API, otherwise the default renderer.
     private static Renderer selectRenderer(GraphicsAPI api, @Nullable Renderer renderer) {
         if (renderer instanceof Renderer.Driver driver && driver.api() != api) {
             return Renderer.DEFAULT;
@@ -879,15 +871,20 @@ public sealed abstract class GameSettings extends ObservableSetting {
 
     /// Returns the property's direct value, or its default value when the direct value is `null`.
     private static <T extends @UnknownNullability Object> T getDirectValue(SettingProperty<T> property) {
-        T value = property.getValue();
+        @Nullable T value = property.getValue();
         return value != null ? value : property.defaultValue();
     }
 
     /// Launch-time effective game setting.
+    @NotNullByDefault
     public static final class Effective {
+        /// Parent preset supplying inherited values.
         private final Preset preset;
+
+        /// Instance-specific overrides, or `null` when resolving only a preset.
         private final @Nullable Instance instance;
 
+        /// Creates an effective setting view over the given preset and optional instance overrides.
         private Effective(Preset preset, @Nullable Instance instance) {
             this.preset = Objects.requireNonNull(preset);
             this.instance = instance;
@@ -981,7 +978,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
 
         /// Returns the effective maximum heap memory in MiB.
         public int getMaxMemory() {
-            Integer value = getInheritable(GameSettings::maxMemoryProperty);
+            @Nullable Integer value = getInheritable(GameSettings::maxMemoryProperty);
             return value != null && value > 0 ? value : SUGGESTED_MEMORY;
         }
 

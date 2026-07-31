@@ -20,27 +20,27 @@ package space.minecraftstl.xyml.setting;
 import com.google.gson.*;
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.property.*;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
-import javafx.collections.ObservableMap;
-import javafx.collections.ObservableSet;
-import javafx.scene.paint.Color;
-import javafx.scene.paint.Paint;
-import org.glavo.monetfx.ColorStyle;
-import org.hildan.fxgson.creators.ObservableListCreator;
-import org.hildan.fxgson.creators.ObservableMapCreator;
-import org.hildan.fxgson.creators.ObservableSetCreator;
-import org.hildan.fxgson.factories.JavaFxPropertyTypeAdapterFactory;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.auth.AccountID;
 import space.minecraftstl.xyml.java.JavaRuntime;
-import space.minecraftstl.xyml.theme.BackgroundLoadPolicy;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableList;
+import space.minecraftstl.xyml.observable.collection.ObservableMap;
+import space.minecraftstl.xyml.observable.collection.ObservableSet;
+import space.minecraftstl.xyml.observable.property.BooleanProperty;
+import space.minecraftstl.xyml.observable.property.DoubleProperty;
+import space.minecraftstl.xyml.observable.property.IntegerProperty;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleBooleanProperty;
+import space.minecraftstl.xyml.observable.property.SimpleDoubleProperty;
+import space.minecraftstl.xyml.observable.property.SimpleIntegerProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleStringProperty;
+import space.minecraftstl.xyml.observable.property.StringProperty;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.theme.ThemeReference;
-import space.minecraftstl.xyml.ui.FXUtils;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.*;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
@@ -73,7 +73,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     static final String PROPERTY_SELECTED_INSTANCE = "selectedInstance";
 
     /// Default launcher theme used when no stored theme reference is available.
-    public static final ThemeReference DEFAULT_THEME_REFERENCE = new ThemeReference("hmcl.default", null);
+    public static final ThemeReference DEFAULT_THEME_REFERENCE = new ThemeReference("xyml.default", null);
 
     /// Theme appearance override key for theme brightness mode.
     public static final String THEME_APPEARANCE_BRIGHTNESS_MODE = "themeBrightnessMode";
@@ -87,40 +87,54 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Theme appearance override key for title-bar transparency.
     public static final String THEME_APPEARANCE_TITLE_BAR_TRANSPARENT = "titleBarTransparent";
 
-    /// Theme appearance override key for window transparency.
-    public static final String THEME_APPEARANCE_WINDOW_TRANSPARENT = "windowTransparent";
-
     /// Theme appearance override key for the primary background source.
     public static final String THEME_APPEARANCE_BACKGROUND = "background";
 
     /// Theme appearance override key for background opacity.
     public static final String THEME_APPEARANCE_BACKGROUND_OPACITY = "backgroundOpacity";
 
-    /// Gson instance used for launcher settings and related settings objects that depend on JavaFX properties.
+    /// Smallest supported Swing component corner radius in logical pixels.
+    public static final int MINIMUM_CORNER_RADIUS = 0;
+
+    /// Largest supported radius for controls whose minimum stable height is forty logical pixels.
+    public static final int MAXIMUM_CORNER_RADIUS = 20;
+
+    /// Persisted corner-radius adjustment increment in logical pixels.
+    public static final int CORNER_RADIUS_STEP = 1;
+
+    /// Default derived from the launcher's predominant six-pixel surface radius.
+    public static final int DEFAULT_CORNER_RADIUS = 6;
+
+    /// Gson instance used for launcher settings and related toolkit-neutral settings objects.
     public static final Gson SETTINGS_GSON = new GsonBuilder()
             .registerTypeAdapter(Path.class, PathTypeAdapter.INSTANCE)
             .registerTypeAdapter(UUID.class, UUIDTypeAdapter.INSTANCE)
-            .registerTypeAdapter(ObservableList.class, new ObservableListCreator())
-            .registerTypeAdapter(ObservableSet.class, new ObservableSetCreator())
-            .registerTypeAdapter(ObservableMap.class, new ObservableMapCreator())
-            .registerTypeAdapterFactory(new JavaFxPropertyTypeAdapterFactory(true, true))
-            .registerTypeAdapter(Paint.class, new PaintAdapter())
             .setPrettyPrinting()
             .setObjectToNumberStrategy(ToNumberPolicy.LONG_OR_DOUBLE)
             .create();
 
-    /// Deserializes launcher settings from JSON.
+    /// Deserializes launcher settings from JSON and removes retired appearance override keys.
     ///
     /// @param json the JSON object to read
     /// @return the deserialized launcher settings
     /// @throws JsonParseException if the JSON cannot be deserialized as launcher settings
     public static LauncherSettings fromJson(JsonObject json) throws JsonParseException {
-        return SETTINGS_GSON.fromJson(json, LauncherSettings.class);
+        // Retired fields must not survive the raw unknown-field preservation used for newer settings.
+        JsonObject normalized = json.deepCopy();
+        normalized.remove("backgroundFallbackType");
+        normalized.remove("backgroundFallbackPaint");
+        normalized.remove("backgroundLoadPolicy");
+        LauncherSettings settings = SETTINGS_GSON.fromJson(normalized, LauncherSettings.class);
+        settings.getThemeAppearanceOverrides().remove("windowTransparent");
+        if (settings.themeColorTypeProperty().get() != ThemeColorType.CUSTOM) {
+            settings.getThemeAppearanceOverrides().remove(THEME_APPEARANCE_COLOR);
+        }
+        return settings;
     }
 
     /// Creates empty launcher settings using current defaults.
     public LauncherSettings() {
-        tracker.markDirty(schema);
+        markDirty(schema);
         register();
     }
 
@@ -285,7 +299,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     /// Theme appearance setting keys overridden by the launcher.
     @SerializedName("themeAppearanceOverrides")
-    private final ObservableSet<String> themeAppearanceOverrides = FXCollections.observableSet();
+    private final ObservableSet<String> themeAppearanceOverrides = ObservableCollections.observableSet();
 
     /// Returns the theme appearance setting keys overridden by the launcher.
     public ObservableSet<String> getThemeAppearanceOverrides() {
@@ -296,7 +310,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     /// The configured theme brightness mode identifier.
     @SerializedName("themeBrightnessMode")
-    private final StringProperty themeBrightnessMode = new SimpleStringProperty("auto");
+    private final StringProperty themeBrightnessMode = new SimpleStringProperty("system");
 
     /// Returns the theme brightness mode property.
     public StringProperty themeBrightnessModeProperty() {
@@ -321,12 +335,12 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         return themeColorType;
     }
 
-    /// The MonetFX color style used to generate the launcher color scheme.
+    /// The persisted theme color-style identifier used by the current Swing theme resolver.
     @SerializedName("themeColorStyle")
-    private final ObjectProperty<ColorStyle> themeColorStyle = new RawPreservingObjectProperty<>(ColorStyle.FIDELITY);
+    private final ObjectProperty<String> themeColorStyle = new RawPreservingObjectProperty<>("fidelity");
 
     /// Returns the launcher theme color style property.
-    public ObjectProperty<ColorStyle> themeColorStyleProperty() {
+    public ObjectProperty<String> themeColorStyleProperty() {
         return themeColorStyle;
     }
 
@@ -388,10 +402,10 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     /// The custom launcher background paint.
     @SerializedName("customBackgroundPaint")
-    private final ObjectProperty<@Nullable Paint> customBackgroundPaint = new SimpleObjectProperty<>();
+    private final ObjectProperty<@Nullable String> customBackgroundPaint = new SimpleObjectProperty<>();
 
     /// Returns the custom launcher background paint property.
-    public ObjectProperty<@Nullable Paint> customBackgroundPaintProperty() {
+    public ObjectProperty<@Nullable String> customBackgroundPaintProperty() {
         return customBackgroundPaint;
     }
 
@@ -416,35 +430,6 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Returns the URL image cache policy for network launcher backgrounds.
     public ObjectProperty<NetworkBackgroundImageCachePolicy> networkBackgroundImageCachePolicyProperty() {
         return networkBackgroundImageCachePolicy;
-    }
-
-    /// The fallback source used when the selected launcher background cannot be loaded.
-    @SerializedName("backgroundFallbackType")
-    private final ObjectProperty<BackgroundType> backgroundFallbackType =
-            new RawPreservingObjectProperty<>(BackgroundType.BUILTIN);
-
-    /// Returns the launcher background fallback source type property.
-    public ObjectProperty<BackgroundType> backgroundFallbackTypeProperty() {
-        return backgroundFallbackType;
-    }
-
-    /// The fallback paint used when the selected launcher background cannot be loaded.
-    @SerializedName("backgroundFallbackPaint")
-    private final ObjectProperty<Paint> backgroundFallbackPaint = new SimpleObjectProperty<>(Color.WHITE);
-
-    /// Returns the launcher background fallback paint property.
-    public ObjectProperty<Paint> backgroundFallbackPaintProperty() {
-        return backgroundFallbackPaint;
-    }
-
-    /// How the launcher displays its window while the selected background is loading.
-    @SerializedName("backgroundLoadPolicy")
-    private final ObjectProperty<BackgroundLoadPolicy> backgroundLoadPolicy =
-            new RawPreservingObjectProperty<>(BackgroundLoadPolicy.WAIT_FOR_BACKGROUND);
-
-    /// Returns the launcher background loading policy property.
-    public ObjectProperty<BackgroundLoadPolicy> backgroundLoadPolicyProperty() {
-        return backgroundLoadPolicy;
     }
 
     // Fonts
@@ -478,13 +463,18 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     // General UI
 
+    /// Global Swing component corner radius in logical pixels.
+    @SerializedName("cornerRadius")
+    private final IntegerProperty cornerRadius = new SimpleIntegerProperty(DEFAULT_CORNER_RADIUS);
+
+    /// Returns the adjustable Swing component corner-radius property.
+    public IntegerProperty cornerRadiusProperty() {
+        return cornerRadius;
+    }
+
     /// Whether UI animations are disabled.
     @SerializedName("animationDisabled")
-    private final BooleanProperty animationDisabled = new SimpleBooleanProperty(
-            FXUtils.REDUCED_MOTION == Boolean.TRUE
-                    || !JavaRuntime.CURRENT_JIT_ENABLED
-                    || !FXUtils.GPU_ACCELERATION_ENABLED
-    );
+    private final BooleanProperty animationDisabled = new SimpleBooleanProperty(!JavaRuntime.CURRENT_JIT_ENABLED);
 
     /// Returns the UI animation disable property.
     public BooleanProperty animationDisabledProperty() {
@@ -493,7 +483,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     // Networks
 
-    /// Whether HMCL automatically selects the number of download threads.
+    /// Whether XYML automatically selects the number of download threads.
     @SerializedName("autoDownloadThreads")
     private final BooleanProperty autoDownloadThreads = new SimpleBooleanProperty(true);
 
@@ -621,7 +611,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     ///
     /// This field is owned by [GameDirectoryManager]. Code outside [GameDirectoryManager] should not modify it directly.
     @SerializedName(PROPERTY_SELECTED_INSTANCE)
-    private final ObservableMap<GameDirectoryID, String> selectedInstance = FXCollections.observableHashMap();
+    private final ObservableMap<GameDirectoryID, String> selectedInstance = ObservableCollections.observableMap();
 
     /// Returns selected instance IDs keyed by game directory ID.
     ///
@@ -652,6 +642,46 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         }
     }
 
+    /// Game-directory identifiers ordered from most recently selected to least recently selected.
+    ///
+    /// The title-bar selector owns this ordering. Directory-management pages retain their own source order.
+    @SerializedName("recentGameDirectories")
+    private final ObservableList<String> recentGameDirectories = ObservableCollections.observableList();
+
+    /// Returns the persistent title-bar game-directory usage order.
+    ///
+    /// @return mutable observable most-recently-used identifier list
+    public ObservableList<String> getRecentGameDirectories() {
+        return recentGameDirectories;
+    }
+
+    /// Account identifiers ordered from most recently selected to least recently selected.
+    ///
+    /// The account-management page keeps its storage order; only compact selection popups consume this list.
+    @SerializedName("recentAccounts")
+    private final ObservableList<String> recentAccounts = ObservableCollections.observableList();
+
+    /// Returns the persistent title-bar account usage order.
+    ///
+    /// @return mutable observable most-recently-used account identifier list
+    public ObservableList<String> getRecentAccounts() {
+        return recentAccounts;
+    }
+
+    /// Directory-qualified instance identifiers ordered by most recent selection.
+    ///
+    /// Entries use the title-bar store's length-prefixed encoding so equal instance folder names in two
+    /// game directories never share history.
+    @SerializedName("recentInstances")
+    private final ObservableList<String> recentInstances = ObservableCollections.observableList();
+
+    /// Returns the persistent title-bar instance usage order.
+    ///
+    /// @return mutable observable directory-qualified most-recently-used instance list
+    public ObservableList<String> getRecentInstances() {
+        return recentInstances;
+    }
+
     // Accounts
 
     /// The preferred login type to use when the user wants to add an account.
@@ -673,6 +703,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     }
 
     /// JSON adapter for [LauncherSettings].
+    @NotNullByDefault
     public static final class Adapter extends ObservableSetting.Adapter<LauncherSettings> {
         /// Creates empty launcher settings for deserialization.
         @Override

@@ -93,7 +93,7 @@ public final class SupportedLocale {
         this.isDefault = true;
         this.name = "default";
 
-        String language = System.getenv("HMCL_LANGUAGE");
+        String language = System.getenv("XYML_LANGUAGE");
         if (StringUtils.isBlank(language)) {
             this.locale = LocaleUtils.SYSTEM_DEFAULT;
             this.displayLocale = isExperimentalSupported(this.locale)
@@ -126,7 +126,7 @@ public final class SupportedLocale {
         return locale;
     }
 
-    /// Used to represent the text display language of HMCL.
+    /// Used to represent the text display language of XYML.
     ///
     /// Usually equivalent to [#getLocale()],
     /// but for [experimentally supported languages][#isExperimentalSupported(Locale)],
@@ -172,7 +172,7 @@ public final class SupportedLocale {
             LOG.warning("Failed to get localized name for language " + language, e);
         }
 
-        // Currently, HMCL does not support any locales with regions or variants, so they are not handled for now
+        // Currently, XYML does not support any locales with regions or variants, so they are not handled for now
         List<String> subTags = Stream.of(subLanguage, currentLocale.getScript())
                 .filter(it -> !it.isEmpty())
                 .map(it -> {

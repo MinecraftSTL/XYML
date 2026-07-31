@@ -17,43 +17,31 @@
  */
 package space.minecraftstl.xyml.theme;
 
-import javafx.scene.image.Image;
-import space.minecraftstl.xyml.ui.FXUtils;
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.function.Executable;
 
-import java.io.InputStream;
-import java.util.Arrays;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 /// Tests for built-in launcher wallpapers.
 @NotNullByDefault
 public final class BuiltinBackgroundTest {
-    /// Checks precomputed MonetFX seed colors against dynamic extraction.
+    /// Checks stable wallpaper IDs, accent colors, and fallback lookup behavior.
     @Test
-    public void precomputedThemeColorsMatchDynamicExtraction() {
-        List<Executable> checks = Arrays.stream(BuiltinBackground.values())
-                .<Executable>map(background -> () -> assertEquals(
-                        WallpaperColorExtractor.extract(loadWallpaper(background), ThemeColor.DEFAULT),
-                        background.themeColor(),
-                        background.id()))
-                .toList();
-        assertAll(checks);
-    }
-
-    /// Loads the bundled wallpaper for a built-in background.
-    private static Image loadWallpaper(BuiltinBackground background) throws Exception {
-        String fileName = background.id() + ".jpg";
-        @Nullable InputStream input = BuiltinBackgroundTest.class.getResourceAsStream(
-                "/assets/img/wallpapers/" + fileName);
-        if (input == null) {
-            throw new AssertionError("Missing built-in wallpaper: " + fileName);
-        }
-        return FXUtils.loadImage(input, fileName);
+    public void exposesStableConfigurationValues() {
+        assertEquals(
+                List.of("2021-08-26", "2016-02-25", "2015-06-22"),
+                BuiltinBackground.BUILTIN_BACKGROUND_IDS);
+        assertEquals("#3F6AA2", BuiltinBackground.WALLPAPER_2021_08_26.themeColor().color());
+        assertEquals("#354264", BuiltinBackground.WALLPAPER_2016_02_25.themeColor().color());
+        assertEquals("#FBC578", BuiltinBackground.WALLPAPER_2015_06_22.themeColor().color());
+        assertSame(
+                BuiltinBackground.WALLPAPER_2016_02_25,
+                BuiltinBackground.fromId("2016-02-25"));
+        assertNull(BuiltinBackground.fromId("missing"));
+        assertSame(BuiltinBackground.FALLBACK, BuiltinBackground.fromIdOrFallback("missing"));
     }
 }

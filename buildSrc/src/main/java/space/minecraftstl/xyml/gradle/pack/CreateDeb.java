@@ -54,7 +54,7 @@ import java.util.zip.GZIPOutputStream;
 ///
 /// ## Channel commands and aliases
 ///
-/// Every package installs a channel-specific executable such as `hmcl-stable`
+/// Every package installs a channel-specific executable such as `xyml-stable`
 /// or `xyml-beta`. The generic `xyml` command is intentionally not shipped as a
 /// plain file. Instead, maintainer scripts register the channel command into
 /// the shared `xyml` alternatives group so multiple channel packages can
@@ -265,18 +265,18 @@ public abstract class CreateDeb extends DefaultTask {
         return """
                 #!/usr/bin/env bash
                 cd "$HOME"
-                if [ -z "${HMCL_USER_HOME:-}" ]; then
+                if [ -z "${XYML_USER_HOME:-}" ]; then
                     if [ -z "${XDG_DATA_HOME:-}" ]; then
-                        export HMCL_USER_HOME="$HOME/.local/share/hmcl"
+                        export XYML_USER_HOME="$HOME/.local/share/xyml"
                     else
-                        export HMCL_USER_HOME="$XDG_DATA_HOME/hmcl"
+                        export XYML_USER_HOME="$XDG_DATA_HOME/xyml"
                     fi
                 fi
-                if [ -z "${HMCL_LOCAL_HOME:-}" ]; then
-                    export HMCL_LOCAL_HOME="$HMCL_USER_HOME/local-%s"
+                if [ -z "${XYML_LOCAL_HOME:-}" ]; then
+                    export XYML_LOCAL_HOME="$XYML_USER_HOME/local-%s"
                 fi
-                if [ -z "${HMCL_DEPENDENCIES_DIR:-}" ]; then
-                    export HMCL_DEPENDENCIES_DIR="$HMCL_USER_HOME/dependencies"
+                if [ -z "${XYML_DEPENDENCIES_DIR:-}" ]; then
+                    export XYML_DEPENDENCIES_DIR="$XYML_USER_HOME/dependencies"
                 fi
                 exec %s "$@"
                 """.formatted(getCurrentTypeName(), getTargetPath());

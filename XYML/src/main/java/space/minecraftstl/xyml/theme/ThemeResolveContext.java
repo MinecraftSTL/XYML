@@ -17,75 +17,59 @@
  */
 package space.minecraftstl.xyml.theme;
 
-import org.glavo.monetfx.Brightness;
-import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
 import java.util.Locale;
 import java.util.Objects;
 
-/// Environment values used to resolve conditional theme-pack overrides.
+/// Environment values used to resolve conditional theme overrides.
 ///
-/// @param brightness the effective light or dark mode after resolving launcher and system settings
-/// @param os the normalized operating system name used by theme conditions
-/// @param language the normalized UI language subtag used by theme conditions
+/// @param brightness effective light or dark mode
+/// @param os normalized operating-system token
+/// @param language normalized UI language token
 @NotNullByDefault
-public record ThemeResolveContext(
-        Brightness brightness,
-        String os,
-        String language) {
-
-    /// Creates a theme resolution context.
-    ///
-    /// @param brightness the effective light or dark mode after resolving launcher and system settings
-    /// @param os the normalized operating system name used by theme conditions
-    /// @param language the normalized UI language subtag used by theme conditions
+public record ThemeResolveContext(ThemeBrightness brightness, String os, String language) {
+    /// Normalizes all context values.
     public ThemeResolveContext {
-        Objects.requireNonNull(brightness);
+        Objects.requireNonNull(brightness, "brightness");
         os = normalizeToken(os, "os");
         language = normalizeToken(language, "language");
     }
 
-    /// Creates a context for the current process platform.
+    /// Creates a context for the current process platform and default locale.
     ///
-    /// @param brightness the effective light or dark mode after resolving launcher and system settings
-    /// @return a context containing the current OS and default language
-    public static ThemeResolveContext current(Brightness brightness) {
+    /// @param brightness effective brightness
+    /// @return current context
+    public static ThemeResolveContext current(ThemeBrightness brightness) {
         return new ThemeResolveContext(
                 brightness,
                 normalizeOperatingSystem(OperatingSystem.CURRENT_OS),
                 Locale.getDefault().getLanguage());
     }
 
-    /// Returns the normalized value for one supported condition key.
+    /// Returns the context value for one supported condition key.
     ///
-    /// @param key the condition key
-    /// @return the normalized context value, or `null` when the key is unsupported
+    /// @param key condition key
+    /// @return normalized value, or `null` for an unknown key
     @Nullable String conditionValue(String key) {
         return switch (key) {
-            case ThemeCondition.KEY_BRIGHTNESS -> brightness.name().toLowerCase(Locale.ROOT);
+            case ThemeCondition.KEY_BRIGHTNESS -> brightness.serializedName();
             case ThemeCondition.KEY_OS -> os;
             case ThemeCondition.KEY_LANGUAGE -> language;
             default -> null;
         };
     }
 
-    /// Returns the normalized name for an operating system.
-    ///
-    /// @param operatingSystem the operating system to normalize
-    /// @return the normalized operating system name
-    static String normalizeOperatingSystem(OperatingSystem operatingSystem) {
-        Objects.requireNonNull(operatingSystem);
-
+    /// Converts one launcher operating-system value to the manifest token.
+    private static String normalizeOperatingSystem(OperatingSystem operatingSystem) {
         return operatingSystem == OperatingSystem.UNKNOWN ? "unknown" : operatingSystem.getCheckedName();
     }
 
-    /// Normalizes one condition context token.
+    /// Normalizes one non-empty condition token.
     private static String normalizeToken(String value, String name) {
-        Objects.requireNonNull(value, name);
-
-        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        String normalized = Objects.requireNonNull(value, name).trim().toLowerCase(Locale.ROOT);
         if (normalized.isEmpty()) {
             throw new IllegalArgumentException("Empty theme condition context value: " + name);
         }

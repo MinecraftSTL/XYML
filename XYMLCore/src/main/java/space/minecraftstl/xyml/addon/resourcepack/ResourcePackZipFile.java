@@ -17,15 +17,16 @@
  */
 package space.minecraftstl.xyml.addon.resourcepack;
 
-import javafx.scene.image.Image;
-import space.minecraftstl.xyml.download.DownloadProvider;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.meta.PackMcMeta;
+import space.minecraftstl.xyml.download.DownloadProvider;
+import space.minecraftstl.xyml.image.EncodedImage;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
-import org.jetbrains.annotations.Nullable;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,73 +36,93 @@ import java.util.Optional;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// ZIP resource pack with eagerly parsed metadata and a lazily loaded encoded icon.
+@NotNullByDefault
 final class ResourcePackZipFile extends ResourcePackFile {
-    private final PackMcMeta meta;
-    private final @Nullable Image icon;
+    /// Parsed `pack.mcmeta`, or null after a parse failure.
+    private final @Nullable PackMcMeta meta;
 
-    public ResourcePackZipFile(ResourcePackManager manager, Path path) throws IOException {
+    /// Loads one ZIP resource pack without constructing a UI-toolkit image.
+    ///
+    /// @param manager owning resource-pack manager
+    /// @param path resource-pack ZIP path
+    ResourcePackZipFile(ResourcePackManager manager, Path path) throws IOException {
         super(manager, path);
 
-        PackMcMeta metaTemp = null;
-        byte[] iconData = null;
-
+        @Nullable PackMcMeta parsedMeta = null;
         try (var zipFileTree = CompressingUtils.openZipTree(path)) {
             try {
-                metaTemp = PackMcMeta.fromNonNullJson(zipFileTree.readTextEntry("/pack.mcmeta"));
-            } catch (Exception e) {
-                LOG.warning("Failed to parse resource pack meta", e);
-            }
-
-            var iconEntry = zipFileTree.getEntry("/pack.png");
-            if (iconEntry != null) {
-                try {
-                    iconData = zipFileTree.readBinaryEntry(iconEntry);
-                } catch (Exception e) {
-                    LOG.warning("Failed to load resource pack icon", e);
-                }
+                parsedMeta = PackMcMeta.fromNonNullJson(zipFileTree.readTextEntry("/pack.mcmeta"));
+            } catch (Exception failure) {
+                LOG.warning("Failed to parse resource pack meta", failure);
             }
         }
-        this.meta = metaTemp;
-
-        Image iconTemp = null;
-        if (iconData != null) {
-            try (ByteArrayInputStream inputStream = new ByteArrayInputStream(iconData)) {
-                iconTemp = new Image(inputStream, 64, 64, true, true);
-            } catch (Exception e) {
-                LOG.warning("Failed to load resource pack icon", e);
-            }
-        }
-        this.icon = iconTemp;
+        meta = parsedMeta;
     }
 
+    /// Returns parsed ZIP metadata.
+    ///
+    /// @return parsed metadata, or null after failure
     @Override
-    public PackMcMeta getMeta() {
+    public @Nullable PackMcMeta getMeta() {
         return meta;
     }
 
+    /// Loads bounded decompressed ZIP icon data on demand.
+    ///
+    /// @return encoded icon, or null when `pack.png` is absent
     @Override
-    public @Nullable Image getIcon() {
-        return icon;
+    public @Nullable EncodedImage loadIconData() throws IOException {
+        try (var zipFileTree = CompressingUtils.openZipTree(file)) {
+            @Nullable var iconEntry = zipFileTree.getEntry("/pack.png");
+            if (iconEntry == null) {
+                return null;
+            }
+            long declaredSize = iconEntry.getSize();
+            if (declaredSize > MAX_ICON_BYTES) {
+                throw new IOException("Resource pack icon exceeds " + MAX_ICON_BYTES + " bytes");
+            }
+            try (var input = zipFileTree.getInputStream(iconEntry)) {
+                return EncodedImage.read(input, MAX_ICON_BYTES);
+            }
+        }
     }
 
+    /// Deletes this resource-pack ZIP when it still exists.
     @Override
     public void delete() throws IOException {
         Files.deleteIfExists(file);
     }
 
+    /// Finds the newest matching remote artifact newer than this local ZIP.
+    ///
+    /// @param downloadProvider selected download provider
+    /// @param gameVersion owning game version
+    /// @param source remote source descriptor
+    /// @return update descriptor, or null when no newer matching artifact exists
     @Override
-    public AddonUpdate checkUpdates(DownloadProvider downloadProvider, String gameVersion, RemoteAddon.Source source) throws IOException {
-        RemoteAddonRepository repository = source.getRepoForType(RemoteAddonRepository.Type.RESOURCE_PACK);
-        if (repository == null) return null;
+    public @Nullable AddonUpdate checkUpdates(
+            DownloadProvider downloadProvider,
+            String gameVersion,
+            RemoteAddon.Source source) throws IOException {
+        @Nullable RemoteAddonRepository repository = source.getRepoForType(
+                RemoteAddonRepository.Type.RESOURCE_PACK);
+        if (repository == null) {
+            return null;
+        }
         Optional<RemoteAddon.Version> currentVersion = repository.getRemoteVersionByLocalFile(file);
-        if (currentVersion.isEmpty()) return null;
-        List<RemoteAddon.Version> remoteVersions = repository.getRemoteVersionsById(downloadProvider, currentVersion.get().modid())
+        if (currentVersion.isEmpty()) {
+            return null;
+        }
+        RemoteAddon.Version current = currentVersion.orElseThrow();
+        @Unmodifiable List<RemoteAddon.Version> remoteVersions = repository
+                .getRemoteVersionsById(downloadProvider, current.modid())
                 .filter(version -> version.gameVersions().contains(gameVersion))
-                .filter(version -> version.datePublished().compareTo(currentVersion.get().datePublished()) > 0)
+                .filter(version -> version.datePublished().compareTo(current.datePublished()) > 0)
                 .sorted(Comparator.comparing(RemoteAddon.Version::datePublished).reversed())
                 .toList();
-        if (remoteVersions.isEmpty()) return null;
-        return new AddonUpdate(this, currentVersion.get(), remoteVersions.get(0), false);
+        return remoteVersions.isEmpty()
+                ? null
+                : new AddonUpdate(this, current, remoteVersions.get(0), false);
     }
 }
-

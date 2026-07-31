@@ -54,12 +54,12 @@ public final class XYMLModpackInstallTask extends Task<Void> {
         Path run = repository.getRunDirectory(name);
         Path json = repository.getModpackConfiguration(name);
         if (repository.hasVersion(name) && Files.notExists(json))
-            throw new IllegalArgumentException("Version " + name + " already exists");
+            throw new IllegalArgumentException("Instance " + name + " already exists");
 
         dependents.add(dependency.gameBuilder().name(name).gameVersion(modpack.getGameVersion()).buildAsync());
 
         onDone().register(event -> {
-            if (event.isFailed()) repository.removeVersionFromDisk(name);
+            if (event.isFailed()) repository.removeInstanceFromDisk(name);
         });
 
         ModpackConfiguration<Modpack> config = null;
@@ -68,12 +68,12 @@ public final class XYMLModpackInstallTask extends Task<Void> {
                 config = JsonUtils.fromJsonFile(json, ModpackConfiguration.typeOf(Modpack.class));
 
                 if (!XYMLModpackProvider.INSTANCE.getName().equals(config.getType()))
-                    throw new IllegalArgumentException("Version " + name + " is not a HMCL modpack. Cannot update this version.");
+                    throw new IllegalArgumentException("Instance " + name + " is not an XYML modpack. Cannot update this instance.");
             }
         } catch (JsonParseException | IOException ignore) {
         }
         dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), Collections.singletonList("/minecraft"), it -> !"pack.json".equals(it), config));
-        dependents.add(new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), Collections.singletonList("/minecraft"), modpack, XYMLModpackProvider.INSTANCE, modpack.getName(), modpack.getVersion(), repository.getModpackConfiguration(name)).withStage("hmcl.modpack"));
+        dependents.add(new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), Collections.singletonList("/minecraft"), modpack, XYMLModpackProvider.INSTANCE, modpack.getName(), modpack.getVersion(), repository.getModpackConfiguration(name)).withStage("xyml.modpack"));
     }
 
     @Override

@@ -61,13 +61,13 @@ public enum BuiltinBackground {
     /// Serialized wallpaper ID.
     private final String id;
 
-    /// Precomputed MonetFX seed color extracted from this wallpaper.
+    /// Precomputed accent color extracted from this wallpaper.
     private final ThemeColor themeColor;
 
     /// Creates a built-in wallpaper entry.
     ///
     /// @param id         the serialized wallpaper ID
-    /// @param themeColor the precomputed MonetFX seed color
+    /// @param themeColor the precomputed accent color
     BuiltinBackground(String id, String themeColor) {
         this.id = id;
         this.themeColor = Objects.requireNonNull(ThemeColor.of(themeColor));
@@ -78,7 +78,7 @@ public enum BuiltinBackground {
         return id;
     }
 
-    /// Returns the precomputed MonetFX seed color extracted from this wallpaper.
+    /// Returns the precomputed accent color extracted from this wallpaper.
     public ThemeColor themeColor() {
         return themeColor;
     }
@@ -96,7 +96,7 @@ public enum BuiltinBackground {
     /// @param id the serialized wallpaper ID
     /// @return the matching built-in wallpaper, or the fallback wallpaper
     public static BuiltinBackground fromIdOrFallback(@Nullable String id) {
-        BuiltinBackground background = fromId(id);
+        @Nullable BuiltinBackground background = fromId(id);
         return background != null ? background : FALLBACK;
     }
 }

@@ -21,31 +21,25 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
-import space.minecraftstl.xyml.util.gson.JsonUtils;
-import space.minecraftstl.xyml.util.i18n.I18n;
-import space.minecraftstl.xyml.util.i18n.LocalizedText;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.util.i18n.I18n;
+import space.minecraftstl.xyml.util.i18n.LocalizedText;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import static space.minecraftstl.xyml.util.logging.Logger.LOG;
-
-/// One selectable theme inside a theme pack.
+/// One selectable theme whose matching overrides are applied in declaration order.
 ///
-/// The theme object's top-level appearance fields provide default values. Each
-/// matching override is applied in array order to produce the resolved appearance.
-///
-/// @param id          the stable theme identifier inside its pack, or `null` for an unnamed single-theme pack
-/// @param name        the localized display name, or `null` for an unnamed single-theme pack
-/// @param authors     authors of this specific theme
-/// @param description the optional localized description
-/// @param icon        the optional theme-pack relative icon path
-/// @param appearance  the default appearance fields
-/// @param overrides   conditional appearance patches applied in declaration order
+/// @param id stable identifier, or `null` for an unnamed single-theme pack
+/// @param name localized name, or `null` for an unnamed single-theme pack
+/// @param authors theme-specific authors
+/// @param description optional localized description
+/// @param icon optional normalized asset icon path
+/// @param appearance default appearance patch
+/// @param overrides conditional patches in declaration order
 @NotNullByDefault
 public record Theme(
         @Nullable String id,
@@ -55,153 +49,81 @@ public record Theme(
         @Nullable String icon,
         ThemeAppearance appearance,
         @Unmodifiable List<ThemeOverride> overrides) {
+    /// Maximum overrides accepted from one theme.
+    private static final int MAXIMUM_OVERRIDE_COUNT = 128;
 
-    /// Creates a theme.
-    ///
-    /// @param id          the stable theme identifier inside its pack, or `null` for an unnamed single-theme pack
-    /// @param name        the localized display name, or `null` for an unnamed single-theme pack
-    /// @param authors     authors of this specific theme
-    /// @param description the optional localized description
-    /// @param icon        the optional theme-pack relative icon path
-    /// @param appearance  the default appearance fields
-    /// @param overrides   conditional appearance patches applied in declaration order
+    /// Validates and copies theme values.
     public Theme {
         if (id != null) {
             id = ThemePackManifest.requireThemeId(id);
         }
         if (name != null && name.mayBeEmpty()) {
-            throw new IllegalArgumentException("Theme name is empty: " + name);
+            throw new IllegalArgumentException("Theme name cannot be empty");
+        }
+        authors = List.copyOf(authors);
+        if (description != null && description.mayBeEmpty()) {
+            throw new IllegalArgumentException("Theme description cannot be empty");
         }
         if (icon != null) {
             icon = ThemePackAsset.normalizeEntryName(icon);
         }
-        authors = List.copyOf(authors);
-        Objects.requireNonNull(appearance);
+        Objects.requireNonNull(appearance, "appearance");
         overrides = List.copyOf(overrides);
+        if (overrides.size() > MAXIMUM_OVERRIDE_COUNT) {
+            throw new IllegalArgumentException("Theme has too many overrides");
+        }
     }
 
-    /// Parses a theme from JSON.
+    /// Parses one theme object.
     ///
-    /// @param object          the theme JSON object
-    /// @param requireIdentity whether the theme must declare an explicit ID and name
-    /// @return the parsed theme
-    /// @throws JsonParseException if required identity fields are missing or malformed
-    static Theme fromJson(JsonObject object, boolean requireIdentity) throws JsonParseException {
-        Objects.requireNonNull(object);
-
-        @Nullable String id = JsonUtils.getString(object, "id");
-        if (id != null) {
-            try {
+    /// @param object theme object
+    /// @param requireIdentity whether ID and name are mandatory
+    /// @return parsed theme
+    static Theme fromJson(JsonObject object, boolean requireIdentity) {
+        @Nullable String id = optionalString(object, "id");
+        try {
+            if (id != null) {
                 id = ThemePackManifest.requireThemeId(id);
-            } catch (IllegalArgumentException e) {
-                if (requireIdentity) {
-                    throw new JsonParseException(e);
-                }
-                LOG.warning("Ignored invalid theme id: " + id, e);
-                id = null;
             }
+        } catch (IllegalArgumentException ignored) {
+            id = null;
         }
-        if (id == null && requireIdentity) {
-            throw new JsonParseException("Theme is missing the id");
+        @Nullable LocalizedText name = optionalLocalizedText(object.get("name"));
+        if (requireIdentity && (id == null || name == null)) {
+            throw new JsonParseException("Theme ID and name are required in multi-theme packs");
         }
-        @Nullable LocalizedText name;
-        try {
-            name = LocalizedText.fromJson(object.get("name"));
-            if (name != null && name.mayBeEmpty()) {
-                throw new JsonParseException("Theme name is empty: " + name);
-            }
-        } catch (JsonParseException | IllegalArgumentException e) {
-            if (requireIdentity) {
-                throw e;
-            }
-            LOG.warning("Ignored invalid theme name", e);
-            name = null;
-        }
-        if (name == null && requireIdentity) {
-            throw new JsonParseException("Theme is missing required localized text field: " + "name");
-        }
-
-        List<ThemePackAuthor> authors;
-        try {
-            authors = ThemePackAuthor.parseAuthors(object.get("authors"));
-        } catch (Exception e) {
-            LOG.warning("Failed to parse authors", e);
-            authors = List.of();
-        }
-
-        @Nullable LocalizedText description;
-
-        try {
-            description = LocalizedText.fromJson(object.get("description"));
-            if (description != null) {
-                description = ThemePackManifest.requireLocalizedText(description, "description");
-            }
-        } catch (Exception e) {
-            LOG.warning("Failed to parse description", e);
-            description = null;
-        }
-
-        ThemeAppearance appearance = ThemeAppearance.fromJson(object);
-
-        JsonElement overridesJson = object.get("overrides");
-        List<ThemeOverride> overrides;
-
-        if (overridesJson == null || overridesJson.isJsonNull()) {
-            overrides = List.of();
-        } else if (overridesJson instanceof JsonArray array) {
-            overrides = new ArrayList<>(array.size());
-
-            for (JsonElement overrideJson : array) {
-                try {
-                    ThemeOverride override = ThemeOverride.fromJson(overrideJson);
-                    if (override != null)
-                        overrides.add(override);
-                } catch (Exception e) {
-                    LOG.warning("Invalid theme override", e);
-                }
-            }
-
-        } else {
-            LOG.warning("Invalid theme overrides: expected an array, got " + overridesJson);
-            overrides = List.of();
-        }
-
-        @Nullable String icon = JsonUtils.getString(object, "icon");
-        if (icon != null) {
-            try {
-                icon = ThemePackAsset.normalizeEntryName(icon);
-            } catch (IllegalArgumentException e) {
-                LOG.warning("Ignored invalid theme icon: " + icon, e);
-                icon = null;
-            }
-        }
-
-        return new Theme(id, name, authors, description,
+        @Nullable LocalizedText description = optionalLocalizedText(object.get("description"));
+        @Nullable String icon = optionalAsset(object, "icon");
+        List<ThemeOverride> overrides = readOverrides(object.get("overrides"));
+        return new Theme(
+                id,
+                name,
+                ThemePackAuthor.parseAuthors(object.get("authors")),
+                description,
                 icon,
-                appearance, overrides);
+                ThemeAppearance.fromJson(object),
+                overrides);
     }
 
-    /// Returns the theme display name in the current locale.
+    /// Returns the localized name, when declared.
     ///
-    /// @return the localized display name, or `null` when this theme has no matching display name
+    /// @return display name or `null`
     public @Nullable String displayName() {
         return name != null ? name.getText(I18n.getLocale().getCandidateLocales()) : null;
     }
 
-    /// Returns the theme description in the current locale.
+    /// Returns the localized description, when declared.
     ///
-    /// @return the localized description, or `null` when this theme has no matching description
+    /// @return display description or `null`
     public @Nullable String displayDescription() {
         return description != null ? description.getText(I18n.getLocale().getCandidateLocales()) : null;
     }
 
-    /// Resolves this theme against a context by applying matching overrides.
+    /// Applies all matching overrides in declaration order.
     ///
-    /// @param context the resolution context
-    /// @return the resolved appearance
+    /// @param context resolution context
+    /// @return merged appearance
     public ThemeAppearance resolve(ThemeResolveContext context) {
-        Objects.requireNonNull(context);
-
         ThemeAppearance resolved = appearance;
         for (ThemeOverride override : overrides) {
             if (override.matches(context)) {
@@ -211,34 +133,81 @@ public record Theme(
         return resolved;
     }
 
-    /// Converts this theme to its JSON representation.
+    /// Converts this theme to JSON.
     ///
-    /// @return the JSON object representing this theme
+    /// @return theme object
     public JsonObject toJsonObject() {
-        JsonObject object = new JsonObject();
+        JsonObject object = appearance.toJsonObject();
         if (id != null) {
             object.addProperty("id", id);
         }
         if (name != null) {
-            object.add("name", JsonUtils.GSON.toJsonTree(name, LocalizedText.class));
+            object.add("name", name.toJsonElement());
         }
-        object.add("authors", ThemePackAuthor.toJson(authors));
+        if (!authors.isEmpty()) {
+            object.add("authors", ThemePackAuthor.toJson(authors));
+        }
         if (description != null) {
-            object.add("description", JsonUtils.GSON.toJsonTree(description, LocalizedText.class));
+            object.add("description", description.toJsonElement());
         }
         if (icon != null) {
             object.addProperty("icon", icon);
         }
-        appearance.addToJsonObject(object);
-
         if (!overrides.isEmpty()) {
             JsonArray array = new JsonArray();
-            for (ThemeOverride override : overrides) {
-                array.add(override.toJsonObject());
-            }
+            overrides.forEach(override -> array.add(override.toJsonObject()));
             object.add("overrides", array);
         }
         return object;
     }
 
+    /// Parses a bounded override array while ignoring malformed optional entries.
+    private static @Unmodifiable List<ThemeOverride> readOverrides(@Nullable JsonElement element) {
+        if (element == null || element.isJsonNull()) {
+            return List.of();
+        }
+        if (!(element instanceof JsonArray array) || array.size() > MAXIMUM_OVERRIDE_COUNT) {
+            throw new JsonParseException("Theme overrides must be a bounded array");
+        }
+        List<ThemeOverride> overrides = new ArrayList<>(array.size());
+        for (JsonElement item : array) {
+            try {
+                overrides.add(ThemeOverride.fromJson(item));
+            } catch (JsonParseException | IllegalArgumentException ignored) {
+                // One optional invalid override must not disable the remaining valid overrides.
+            }
+        }
+        return List.copyOf(overrides);
+    }
+
+    /// Reads an optional string member.
+    private static @Nullable String optionalString(JsonObject object, String field) {
+        JsonElement element = object.get(field);
+        return element != null && element.isJsonPrimitive() && element.getAsJsonPrimitive().isString()
+                ? element.getAsString()
+                : null;
+    }
+
+    /// Reads a valid optional localized text value.
+    private static @Nullable LocalizedText optionalLocalizedText(@Nullable JsonElement element) {
+        try {
+            @Nullable LocalizedText text = LocalizedText.fromJson(element);
+            return text == null || text.mayBeEmpty() ? null : text;
+        } catch (JsonParseException | IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
+    /// Reads a valid optional asset path.
+    private static @Nullable String optionalAsset(JsonObject object, String field) {
+        @Nullable String value = optionalString(object, field);
+        if (value == null) {
+            return null;
+        }
+        try {
+            return ThemePackAsset.normalizeEntryName(value);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
 }

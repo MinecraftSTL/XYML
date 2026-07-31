@@ -15,9 +15,9 @@ gradle.properties
 /externalgames
 NVIDIA
 minecraft-exported-crash-info*
-hmcl-exported-logs-*
+xyml-exported-logs-*
 terracotta-log-*
-*.hmcl-theme
+*.xyml-theme
 /.java/
 /.local/
 /.cache/
@@ -65,9 +65,9 @@ language-subtag-registry
 .vscode/
 
 # test
-/hmcl.json
-/.hmcl.json
-/.hmcl/
+/xyml.json
+/.xyml.json
+/.xyml/
 
 # AI
 /.gemini/

@@ -17,8 +17,6 @@
  */
 package space.minecraftstl.xyml.setting;
 
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -26,47 +24,20 @@ import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/// Tests for detached launcher state migration.
+/// Tests for detached launcher state behavior.
 @NotNullByDefault
 public final class LauncherStateTest {
-    /// Tests extracting runtime state fields from a legacy config object.
+    /// Tests that neutral properties and maps publish aggregate state revisions.
     @Test
-    public void extractsLauncherStateFromLegacyConfigJson() {
-        JsonObject settings = JsonParser.parseString("""
-                {
-                  "x": 0.25,
-                  "y": 0.5,
-                  "width": 1280.0,
-                  "height": 720.0,
-                  "promptedVersion": "3.6.15",
-                  "shownTips": {
-                    "javaVersionTip": 21
-                  },
-                  "logLines": 5000,
-                  "localization": "en"
-                }
-                """).getAsJsonObject();
+    public void publishesNeutralStateChanges() {
+        LauncherState state = new LauncherState();
+        long initialRevision = Objects.requireNonNull(state.changes().getValue());
 
-        LauncherState state = LegacyConfigMigrator.extractLauncherState(settings);
+        state.setWidth(1280.0);
+        long afterProperty = Objects.requireNonNull(state.changes().getValue());
+        assertTrue(afterProperty > initialRevision);
 
-        assertFalse(settings.has("x"));
-        assertFalse(settings.has("y"));
-        assertFalse(settings.has("width"));
-        assertFalse(settings.has("height"));
-        assertFalse(settings.has("promptedVersion"));
-        assertFalse(settings.has("shownTips"));
-        assertTrue(settings.has("logLines"));
-        assertTrue(settings.has("localization"));
-
-        assertEquals(0.25, state.getX(), 1e-9);
-        assertEquals(0.5, state.getY(), 1e-9);
-        assertEquals(1264.0, state.getWidth());
-        assertEquals(704.0, state.getHeight());
-        assertEquals("3.6.15", state.getPromptedVersion());
-        assertEquals(21.0, state.getShownTips().get("javaVersionTip"));
-        assertEquals(LauncherState.CURRENT_SCHEMA, state.getSchema());
-
-        LauncherSettings config = Objects.requireNonNull(LauncherSettings.fromJson(settings));
-        assertEquals(5000, config.logLinesProperty().get());
+        state.getShownTips().put("javaVersionTip", 21);
+        assertTrue(Objects.requireNonNull(state.changes().getValue()) > afterProperty);
     }
 }

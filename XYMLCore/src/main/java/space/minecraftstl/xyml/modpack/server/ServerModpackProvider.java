@@ -41,8 +41,8 @@ public final class ServerModpackProvider implements ModpackProvider {
     }
 
     @Override
-    public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String version) {
-        return new ServerModpackCompletionTask(dependencyManager, version);
+    public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+        return new ServerModpackCompletionTask(dependencyManager, instanceId);
     }
 
     @Override

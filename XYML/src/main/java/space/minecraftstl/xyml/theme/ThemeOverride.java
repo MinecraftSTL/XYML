@@ -21,68 +21,52 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
-/// A conditional appearance patch in a theme.
+/// Conditional appearance patch applied in declaration order.
 ///
-/// @param condition  the condition required for this override to apply
-/// @param appearance the appearance fields applied when the condition matches
+/// @param condition condition required for the patch
+/// @param appearance appearance values applied when matched
 @NotNullByDefault
 public record ThemeOverride(ThemeCondition condition, ThemeAppearance appearance) {
-    /// JSON member name for an override condition.
+    /// JSON member naming the condition object.
     private static final String FIELD_CONDITION = "condition";
 
-    /// Creates a conditional theme override.
-    ///
-    /// @param condition  the condition required for this override to apply
-    /// @param appearance the appearance fields applied when the condition matches
+    /// Validates a non-empty override.
     public ThemeOverride {
-        Objects.requireNonNull(condition);
-        Objects.requireNonNull(appearance);
+        Objects.requireNonNull(condition, "condition");
+        Objects.requireNonNull(appearance, "appearance");
         if (appearance.isEmpty()) {
-            throw new IllegalArgumentException("Theme override does not define any appearance fields");
+            throw new IllegalArgumentException("Theme override has no appearance fields");
         }
     }
 
-    /// Parses a theme override from JSON.
+    /// Parses one override object.
     ///
-    /// @param element the override object
-    /// @return the parsed override
-    /// @throws JsonParseException if the override is malformed
-    static @Nullable ThemeOverride fromJson(@Nullable JsonElement element) throws JsonParseException {
-        if (element == null || element.isJsonNull())
-            return null;
-
+    /// @param element manifest value
+    /// @return parsed override
+    static ThemeOverride fromJson(JsonElement element) {
         if (!(element instanceof JsonObject object)) {
-            throw new JsonParseException("Invalid theme override");
+            throw new JsonParseException("Theme override must be an object");
         }
-
-        JsonElement conditionElement = object.get(FIELD_CONDITION);
-        if (!(conditionElement instanceof JsonObject conditionObject)) {
+        if (!(object.get(FIELD_CONDITION) instanceof JsonObject conditionObject)) {
             throw new JsonParseException("Theme override must define an object condition");
         }
-
-        ThemeCondition condition = ThemeCondition.fromJson(conditionObject);
-        ThemeAppearance appearance = ThemeAppearance.fromJson(object);
-        if (appearance.isEmpty()) {
-            throw new JsonParseException("Theme override does not define any appearance fields");
-        }
-        return new ThemeOverride(condition, appearance);
+        return new ThemeOverride(ThemeCondition.fromJson(conditionObject), ThemeAppearance.fromJson(object));
     }
 
-    /// Returns whether this override matches the given resolution context.
+    /// Tests this override against one context.
     ///
-    /// @param context the context to test
-    /// @return `true` when the override should be applied
+    /// @param context resolution context
+    /// @return `true` when matched
     public boolean matches(ThemeResolveContext context) {
         return condition.matches(context);
     }
 
-    /// Converts this override to its JSON representation.
+    /// Converts this override to JSON.
     ///
-    /// @return the JSON object representing this override
+    /// @return override object
     public JsonObject toJsonObject() {
         JsonObject object = appearance.toJsonObject();
         object.add(FIELD_CONDITION, condition.toJsonObject());

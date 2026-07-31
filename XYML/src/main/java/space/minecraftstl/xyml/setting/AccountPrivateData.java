@@ -26,11 +26,11 @@ import com.google.gson.JsonSerializationContext;
 import com.google.gson.JsonSerializer;
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableMap;
 import space.minecraftstl.xyml.auth.AccountID;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableMap;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.ObservableSetting;
@@ -53,12 +53,12 @@ final class AccountPrivateData extends ObservableSetting implements JsonSchemaSe
             new JsonSchema("account-private-data", new JsonSchema.Version(1, 0, 0));
 
     /// JVM system property selecting the account private data protection mode.
-    static final String PROTECTION_PROPERTY = "hmcl.account.privateData.protection";
+    static final String PROTECTION_PROPERTY = "xyml.account.privateData.protection";
 
     /// Creates an empty account private data store.
     AccountPrivateData() {
-        tracker.markDirty(schema);
-        tracker.markDirty(privateData);
+        markDirty(schema);
+        markDirty(privateData);
         register();
     }
 
@@ -68,7 +68,7 @@ final class AccountPrivateData extends ObservableSetting implements JsonSchemaSe
 
     /// Private account data keyed by account ID.
     private final ObservableMap<AccountID, JsonObject> privateData =
-            FXCollections.observableMap(new LinkedHashMap<>());
+            ObservableCollections.observableMap();
 
     /// Whether this account private data store may be saved back to its JSON file.
     private transient boolean savable = true;
@@ -183,6 +183,7 @@ final class AccountPrivateData extends ObservableSetting implements JsonSchemaSe
     }
 
     /// JSON adapter for [AccountPrivateData].
+    @NotNullByDefault
     static final class Adapter implements JsonSerializer<AccountPrivateData>,
             com.google.gson.JsonDeserializer<AccountPrivateData> {
         /// Creates the JSON payload protected inside an account private data file.
@@ -237,7 +238,7 @@ final class AccountPrivateData extends ObservableSetting implements JsonSchemaSe
                     continue;
                 }
 
-                JsonElement privateDataElement = item.get("privateData");
+                @Nullable JsonElement privateDataElement = item.get("privateData");
                 if (privateDataElement == null || !privateDataElement.isJsonObject()) {
                     continue;
                 }
@@ -274,7 +275,7 @@ final class AccountPrivateData extends ObservableSetting implements JsonSchemaSe
 
             AccountPrivateData accountPrivateData = new AccountPrivateData();
             Map<String, JsonElement> values = new LinkedHashMap<>(object.asMap());
-            JsonElement schema = values.remove(JsonSchema.PROPERTY_SCHEMA);
+            @Nullable JsonElement schema = values.remove(JsonSchema.PROPERTY_SCHEMA);
             if (schema != null && schema.isJsonPrimitive() && schema.getAsJsonPrimitive().isString()) {
                 accountPrivateData.setSchema(new JsonSchema(schema.getAsString()));
             }

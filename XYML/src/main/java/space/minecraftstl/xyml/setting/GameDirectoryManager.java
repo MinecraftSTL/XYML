@@ -17,22 +17,27 @@
  */
 package space.minecraftstl.xyml.setting;
 
-import javafx.beans.property.*;
-import javafx.beans.value.ChangeListener;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.event.EventBus;
-import space.minecraftstl.xyml.event.RefreshedVersionsEvent;
+import space.minecraftstl.xyml.event.RefreshedInstancesEvent;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableList;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleStringProperty;
+import space.minecraftstl.xyml.observable.property.StringProperty;
+import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.util.PortablePath;
 import space.minecraftstl.xyml.util.i18n.I18n;
 import space.minecraftstl.xyml.util.i18n.LocalizedText;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.UnknownNullability;
 import org.jetbrains.annotations.UnmodifiableView;
 
+import javax.swing.SwingUtilities;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -43,7 +48,6 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 import static space.minecraftstl.xyml.setting.SettingsManager.*;
-import static space.minecraftstl.xyml.ui.FXUtils.runInFX;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Manages the merged runtime view of local and user game directories.
@@ -55,11 +59,11 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 @NotNullByDefault
 public final class GameDirectoryManager {
 
-    /// The stable ID shared by newly created and migrated current-workspace game directories.
+    /// The stable ID assigned to the built-in current-workspace game directory.
     static final GameDirectoryID DEFAULT_GAME_DIRECTORY_ID =
             new GameDirectoryID(new UUID(0x7105bc1f490e5e8cL, 0x878cf5844c3d4bc3L));
 
-    /// The stable ID shared by newly created and migrated user-home game directories.
+    /// The stable ID assigned to the built-in user-home game directory.
     static final GameDirectoryID HOME_GAME_DIRECTORY_ID =
             new GameDirectoryID(new UUID(0xf3eafde8506e5a77L, 0xbc88f24b4728dfb2L));
 
@@ -92,7 +96,7 @@ public final class GameDirectoryManager {
 
     /// Returns the display name for the given game directory.
     public static String getGameDirectoryDisplayName(GameDirectory gameDirectory) {
-        String name = getGameDirectoryCustomName(gameDirectory);
+        @Nullable String name = getGameDirectoryCustomName(gameDirectory);
         if (name != null) {
             return name;
         }
@@ -125,27 +129,31 @@ public final class GameDirectoryManager {
 
     /// The mutable merged game directory list used by UI bindings and game directory selection.
     private static final ObservableList<GameDirectory> mergedGameDirectories =
-            FXCollections.observableArrayList(gameDirectory -> new javafx.beans.Observable[]{gameDirectory});
+            ObservableCollections.observableList(gameDirectory -> List.of(
+                    gameDirectory.nameProperty(),
+                    gameDirectory.pathProperty()));
 
     /// Read-only view of [#mergedGameDirectories] exposed to callers.
     private static final @UnmodifiableView ObservableList<GameDirectory> mergedGameDirectoriesUnmodifiable =
-            FXCollections.unmodifiableObservableList(mergedGameDirectories);
+            ObservableCollections.unmodifiableObservableList(mergedGameDirectories);
 
     /// Runtime repositories keyed by game directory object identity.
     private static final Map<GameDirectory, XYMLGameRepository> repositories = new IdentityHashMap<>();
 
     /// The selected game directory, or `null` before the fallback game directory is resolved.
-    private static final ObjectProperty<@UnknownNullability GameDirectory> selectedGameDirectory = new SimpleObjectProperty<>(GameDirectoryManager.class, "selectedGameDirectory");
+    private static final ObjectProperty<@Nullable GameDirectory> selectedGameDirectory =
+            new SimpleObjectProperty<>(GameDirectoryManager.class, "selectedGameDirectory");
 
     /// The selected game repository, or `null` before the fallback game directory is resolved.
-    private static final ObjectProperty<@UnknownNullability XYMLGameRepository> selectedRepository = new SimpleObjectProperty<>(GameDirectoryManager.class, "selectedRepository");
+    private static final ObjectProperty<@Nullable XYMLGameRepository> selectedRepository =
+            new SimpleObjectProperty<>(GameDirectoryManager.class, "selectedRepository");
 
     /// The selected instance ID projected from the selected repository.
-    private static final ReadOnlyStringWrapper selectedInstance = new ReadOnlyStringWrapper(GameDirectoryManager.class, "selectedInstance");
+    private static final StringProperty selectedInstance =
+            new SimpleStringProperty(GameDirectoryManager.class, "selectedInstance");
 
-    /// Updates [#selectedInstance] when the selected repository changes its selected instance.
-    private static final ChangeListener<String> selectedRepositoryInstanceListener =
-            (observable, oldValue, newValue) -> selectedInstance.set(newValue);
+    /// Subscription projecting the selected repository's selected instance, or `null` before initialization.
+    private static @Nullable Subscription selectedRepositoryInstanceSubscription;
 
     /// Initializes game directory state from the stores loaded by [SettingsManager].
     ///
@@ -181,7 +189,7 @@ public final class GameDirectoryManager {
         assert !mergedGameDirectories.isEmpty();
 
         @Nullable GameDirectoryID selectedId = settings().selectedGameDirectoryProperty().get();
-        GameDirectory currentGameDirectory = null;
+        @Nullable GameDirectory currentGameDirectory = null;
 
         if (selectedId != null) {
             for (GameDirectory gameDirectory : mergedGameDirectories) {
@@ -192,30 +200,32 @@ public final class GameDirectoryManager {
             }
         }
 
-        selectedGameDirectory.addListener((a, b, newValue) -> {
+        selectedGameDirectory.subscribe(change -> {
+            @Nullable GameDirectory newValue = change.currentValue();
             if (newValue == null) {
                 throw new IllegalStateException("selectedGameDirectory cannot be null");
             }
 
             settings().selectedGameDirectoryProperty().set(newValue.getId());
-            @Nullable XYMLGameRepository oldRepository = selectedRepository.get();
-            if (oldRepository != null) {
-                oldRepository.selectedInstanceProperty().removeListener(selectedRepositoryInstanceListener);
+            @Nullable Subscription oldSubscription = selectedRepositoryInstanceSubscription;
+            if (oldSubscription != null) {
+                oldSubscription.unsubscribe();
             }
             XYMLGameRepository repository = getOrCreateRepository(newValue);
             selectedRepository.set(repository);
             selectedInstance.set(repository.getSelectedInstance());
-            repository.selectedInstanceProperty().addListener(selectedRepositoryInstanceListener);
-            repository.refreshVersionsAsync().start();
+            selectedRepositoryInstanceSubscription = repository.selectedInstanceProperty()
+                    .subscribe(instanceChange -> selectedInstance.set(instanceChange.currentValue()));
+            repository.refreshInstancesAsync().start();
         });
         selectedGameDirectory.set(currentGameDirectory != null ? currentGameDirectory : mergedGameDirectories.get(0));
 
-        EventBus.EVENT_BUS.channel(RefreshedVersionsEvent.class).registerWeak(event -> {
-            runInFX(() -> {
+        EventBus.EVENT_BUS.channel(RefreshedInstancesEvent.class).registerWeak(event -> {
+            Schedulers.ui().execute(() -> {
                 @Nullable XYMLGameRepository repository = selectedRepository.get();
                 if (repository != null && repository == event.getSource()) {
                     repository.refreshSelectedInstance();
-                    for (Consumer<XYMLGameRepository> listener : versionsListeners)
+                    for (Consumer<XYMLGameRepository> listener : instancesListeners)
                         listener.accept(repository);
                 }
             });
@@ -259,6 +269,27 @@ public final class GameDirectoryManager {
     /// Returns the read-only merged game directory list.
     public static @UnmodifiableView ObservableList<GameDirectory> getGameDirectories() {
         return mergedGameDirectoriesUnmodifiable;
+    }
+
+    /// Returns the cached repository identified by one stable game-directory ID.
+    ///
+    /// This lookup must run on the Swing event dispatch thread while the active directory list
+    /// remains observable and mutable. It never follows the mutable selected-directory property.
+    ///
+    /// @param gameDirectoryId stable persisted game-directory identifier
+    /// @return repository belonging to the exact identified directory
+    /// @throws IllegalArgumentException when the identifier is not present in the merged directory list
+    public static XYMLGameRepository getRepository(GameDirectoryID gameDirectoryId) {
+        Objects.requireNonNull(gameDirectoryId, "gameDirectoryId");
+        if (!SwingUtilities.isEventDispatchThread()) {
+            throw new IllegalStateException("Game-directory repository lookup requires the Swing event dispatch thread");
+        }
+        for (GameDirectory gameDirectory : mergedGameDirectories) {
+            if (gameDirectory.getId().equals(gameDirectoryId)) {
+                return getOrCreateRepository(gameDirectory);
+            }
+        }
+        throw new IllegalArgumentException("Unknown game directory: " + gameDirectoryId);
     }
 
     /// Returns the repository for the given game directory, creating it when needed.
@@ -439,7 +470,7 @@ public final class GameDirectoryManager {
 
     /// Returns the selected game directory, creating built-in game directories first if the list is empty.
     public static GameDirectory getSelectedGameDirectory() {
-        GameDirectory gameDirectory = selectedGameDirectory.get();
+        @Nullable GameDirectory gameDirectory = selectedGameDirectory.get();
         if (gameDirectory == null) {
             throw new IllegalStateException("Selected game directory cannot be null");
         }
@@ -448,7 +479,7 @@ public final class GameDirectoryManager {
 
     /// Returns the selected game repository.
     public static XYMLGameRepository getSelectedRepository() {
-        XYMLGameRepository repository = selectedRepository.get();
+        @Nullable XYMLGameRepository repository = selectedRepository.get();
         if (repository == null) {
             throw new IllegalStateException("Selected repository cannot be null");
         }
@@ -469,18 +500,18 @@ public final class GameDirectoryManager {
     /// The property is exposed for UI binding. Values should be changed through
     /// [#setSelectedGameDirectory(GameDirectory)] or by bidirectional bindings that only select
     /// game directories from [#getGameDirectories()].
-    public static ObjectProperty<GameDirectory> selectedGameDirectoryProperty() {
+    public static ObjectProperty<@Nullable GameDirectory> selectedGameDirectoryProperty() {
         return selectedGameDirectory;
     }
 
     /// Returns the selected game repository property.
-    public static ObjectProperty<XYMLGameRepository> selectedRepositoryProperty() {
+    public static ObjectProperty<@Nullable XYMLGameRepository> selectedRepositoryProperty() {
         return selectedRepository;
     }
 
     /// Returns the selected instance property projected from the selected repository.
-    public static ReadOnlyStringProperty selectedInstanceProperty() {
-        return selectedInstance.getReadOnlyProperty();
+    public static ReadOnlyProperty<String> selectedInstanceProperty() {
+        return selectedInstance;
     }
 
     /// Returns the selected instance ID for the selected repository.
@@ -493,14 +524,14 @@ public final class GameDirectoryManager {
         getSelectedRepository().setSelectedInstance(instance);
     }
 
-    /// Listeners notified after the selected repository has loaded versions.
-    private static final List<Consumer<XYMLGameRepository>> versionsListeners = new ArrayList<>(4);
+    /// Listeners notified after the selected repository has loaded its installed instances.
+    private static final List<Consumer<XYMLGameRepository>> instancesListeners = new ArrayList<>(4);
 
-    /// Registers a listener that is notified when the selected repository's versions are available.
-    public static void registerVersionsListener(Consumer<XYMLGameRepository> listener) {
+    /// Registers a listener that is notified when the selected repository's instances are available.
+    public static void registerInstancesListener(Consumer<XYMLGameRepository> listener) {
         XYMLGameRepository repository = getSelectedRepository();
         if (repository.isLoaded())
             listener.accept(repository);
-        versionsListeners.add(listener);
+        instancesListeners.add(listener);
     }
 }

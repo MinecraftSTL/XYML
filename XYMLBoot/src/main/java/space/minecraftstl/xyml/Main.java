@@ -38,7 +38,7 @@ public final class Main {
     private static final int MINIMUM_JAVA_VERSION = 17;
 
     /// Manual download page opened when the bootstrap updater cannot proceed.
-    private static final String DOWNLOAD_PAGE = "https://hmcl.huangyuhui.net/download/";
+    private static final String DOWNLOAD_PAGE = "https://github.com/MinecraftSTL/XYML/releases";
 
     /// Prevents construction of the bootstrap entry point.
     private Main() {
@@ -133,13 +133,13 @@ public final class Main {
         if (currentDir.contains("!")) {
             SwingUtils.initLookAndFeel();
             System.err.println("The current working path contains an exclamation mark: " + currentDir);
-            // No Chinese translation because both Swing and JavaFX cannot render Chinese character properly when exclamation mark exists in the path.
+            // Keep this message ASCII because Swing cannot reliably render the failing path in this case.
             SwingUtils.showErrorDialog("Exclamation mark(!) is not allowed in the working path.\n" + "The path is " + currentDir);
             System.exit(1);
         } else if (jarPath != null && jarPath.contains("!")) {
             SwingUtils.initLookAndFeel();
             System.err.println("The jar path contains an exclamation mark: " + jarPath);
-            // No Chinese translation because both Swing and JavaFX cannot render Chinese character properly when exclamation mark exists in the path.
+            // Keep this message ASCII because Swing cannot reliably render the failing path in this case.
             SwingUtils.showErrorDialog("Exclamation mark(!) is not allowed in the path where XYML is in.\n" + "The path is " + jarPath);
             System.exit(1);
         }

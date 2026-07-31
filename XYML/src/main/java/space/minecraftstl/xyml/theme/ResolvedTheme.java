@@ -17,37 +17,34 @@
  */
 package space.minecraftstl.xyml.theme;
 
-import org.glavo.monetfx.*;
 import org.jetbrains.annotations.NotNullByDefault;
 
-import java.util.*;
+import java.util.Objects;
 
-/// Concrete launcher theme values resolved for MonetFX.
+/// Concrete theme values that presentation-toolkit adapters can translate into their own tokens.
 ///
-/// @param primaryColorSeed Color seed used to generate the MonetFX color scheme.
-/// @param brightness       Brightness used by the generated color scheme.
-/// @param colorStyle       MonetFX color style used by the generated color scheme.
-/// @param contrast         MonetFX contrast level used by the generated color scheme.
+/// @param primaryColorSeed canonical color seed
+/// @param brightness effective brightness
+/// @param colorStyle historical palette-generation style
+/// @param contrast normalized contrast
 @NotNullByDefault
-public record ResolvedTheme(ThemeColor primaryColorSeed,
-                            Brightness brightness,
-                            ColorStyle colorStyle,
-                            Contrast contrast) {
+public record ResolvedTheme(
+        ThemeColor primaryColorSeed,
+        ThemeBrightness brightness,
+        ThemeColorStyle colorStyle,
+        ThemeContrast contrast) {
+    /// Launcher fallback values used when a theme omits appearance fields.
+    public static final ResolvedTheme DEFAULT = new ResolvedTheme(
+            ThemeColor.DEFAULT,
+            ThemeBrightness.LIGHT,
+            ThemeColorStyle.FIDELITY,
+            ThemeContrast.STANDARD);
 
-    /// Default launcher theme used when no custom theme values are configured.
-    public static final ResolvedTheme DEFAULT = new ResolvedTheme(ThemeColor.DEFAULT, Brightness.DEFAULT, ColorStyle.FIDELITY, Contrast.DEFAULT);
-
-    /// Converts these resolved values to a MonetFX color scheme.
-    ///
-    /// @return the generated color scheme
-    public ColorScheme toColorScheme() {
-        return ColorScheme.newBuilder()
-                .setPrimaryColorSeed(primaryColorSeed.color())
-                .setColorStyle(colorStyle)
-                .setBrightness(brightness)
-                .setSpecVersion(ColorSpecVersion.SPEC_2025)
-                .setContrast(contrast)
-                .build();
+    /// Validates the resolved values.
+    public ResolvedTheme {
+        Objects.requireNonNull(primaryColorSeed, "primaryColorSeed");
+        Objects.requireNonNull(brightness, "brightness");
+        Objects.requireNonNull(colorStyle, "colorStyle");
+        Objects.requireNonNull(contrast, "contrast");
     }
-
 }

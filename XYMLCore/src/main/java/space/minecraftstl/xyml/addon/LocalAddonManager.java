@@ -49,9 +49,13 @@ public abstract class LocalAddonManager<T extends LocalAddonFile> {
     protected final GameRepository repository;
     protected final String id;
 
-    public LocalAddonManager(GameRepository gameRepository, String versionId) {
+    /// Creates an add-on manager scoped to one installed game instance.
+    ///
+    /// @param gameRepository repository containing the installed instance
+    /// @param instanceId target installed instance identifier
+    public LocalAddonManager(GameRepository gameRepository, String instanceId) {
         this.repository = gameRepository;
-        this.id = versionId;
+        this.id = instanceId;
     }
 
     public GameRepository getRepository() {

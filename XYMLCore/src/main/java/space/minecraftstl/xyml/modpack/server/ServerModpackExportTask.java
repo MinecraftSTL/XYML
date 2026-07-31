@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.modpack.server;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.modpack.ModAdviser;
@@ -39,15 +40,34 @@ import java.util.List;
 import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Exports one installed instance as an XYML server-modpack archive.
+@NotNullByDefault
 public class ServerModpackExportTask extends Task<Void> {
+    /// Repository containing the exported instance and its version manifests.
     private final DefaultGameRepository repository;
-    private final String versionId;
+
+    /// Target installed instance identifier.
+    private final String instanceId;
+
+    /// Validated modpack metadata and export selections.
     private final ModpackExportInfo exportInfo;
+
+    /// Destination archive path.
     private final Path modpackFile;
 
-    public ServerModpackExportTask(DefaultGameRepository repository, String version, ModpackExportInfo exportInfo, Path modpackFile) {
+    /// Creates a server-modpack export task for one installed instance.
+    ///
+    /// @param repository repository containing the target instance
+    /// @param instanceId target installed instance identifier
+    /// @param exportInfo modpack metadata and export selections
+    /// @param modpackFile destination archive path
+    public ServerModpackExportTask(
+            DefaultGameRepository repository,
+            String instanceId,
+            ModpackExportInfo exportInfo,
+            Path modpackFile) {
         this.repository = repository;
-        this.versionId = version;
+        this.instanceId = instanceId;
         this.exportInfo = exportInfo.validate();
         this.modpackFile = modpackFile;
 
@@ -62,14 +82,20 @@ public class ServerModpackExportTask extends Task<Void> {
         });
     }
 
+    /// Writes selected instance files and the generated server manifest to the destination archive.
+    ///
+    /// A failed task removes the partial destination archive through the completion listener installed
+    /// by the constructor.
+    ///
+    /// @throws Exception if instance inspection, hashing, manifest serialization, or archive writing fails
     @Override
     public void execute() throws Exception {
         ArrayList<String> blackList = new ArrayList<>(ModAdviser.MODPACK_BLACK_LIST);
-        blackList.add(versionId + ".jar");
-        blackList.add(versionId + ".json");
+        blackList.add(instanceId + ".jar");
+        blackList.add(instanceId + ".json");
         LOG.info("Compressing game files without some files in blacklist, including files or directories: usernamecache.json, asm, logs, backups, versions, assets, usercache.json, libraries, crash-reports, launcher_profiles.json, NVIDIA, TCNodeTracker");
         try (Zipper zip = new Zipper(modpackFile)) {
-            Path runDirectory = repository.getRunDirectory(versionId);
+            Path runDirectory = repository.getRunDirectory(instanceId);
             List<ModpackConfiguration.FileInformation> files = new ArrayList<>();
             zip.putDirectory(runDirectory, "overrides", path -> {
                 if (Modpack.acceptFile(path, blackList, exportInfo.getWhitelist())) {
@@ -84,9 +110,10 @@ public class ServerModpackExportTask extends Task<Void> {
                 }
             });
 
-            String gameVersion = repository.getGameVersion(versionId)
-                    .orElseThrow(() -> new IOException("Cannot parse the version of " + versionId));
-            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(repository.getResolvedPreservingPatchesVersion(versionId), gameVersion);
+            String gameVersion = repository.getGameVersion(instanceId)
+                    .orElseThrow(() -> new IOException("Cannot parse the game version of instance " + instanceId));
+            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(
+                    repository.getResolvedPreservingPatchesVersion(instanceId), gameVersion);
             List<ServerModpackManifest.Addon> addons = new ArrayList<>();
             addons.add(new ServerModpackManifest.Addon(MINECRAFT.getPatchId(), gameVersion));
             analyzer.getVersion(FORGE).ifPresent(forgeVersion ->
@@ -106,6 +133,7 @@ public class ServerModpackExportTask extends Task<Void> {
         }
     }
 
+    /// Metadata fields and export switches exposed for the server-modpack format.
     public static final ModpackExportInfo.Options OPTION = new ModpackExportInfo.Options()
             .requireAuthor()
             .requireFileApi(false);

@@ -19,7 +19,7 @@ package space.minecraftstl.xyml.setting;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Describes whether a settings file can be read and safely overwritten by this HMCL version.
+/// Describes whether a settings file can be read and safely overwritten by this XYML version.
 @NotNullByDefault
 public enum SettingFileAccess {
     /// The file can be read and overwritten safely.

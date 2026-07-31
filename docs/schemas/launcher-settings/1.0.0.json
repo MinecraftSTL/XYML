@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.glavo.site/hmcl/launcher-settings/1.0.0",
-  "title": "HMCL Launcher Settings",
+  "$id": "https://raw.githubusercontent.com/MinecraftSTL/XYML/main/docs/schemas/launcher-settings/1.0.0.json",
+  "title": "XYML Launcher Settings",
   "type": "object",
   "additionalProperties": true,
   "required": [
@@ -10,7 +10,7 @@
   "patternProperties": {
     "^\\$schema$": {
       "enum": [
-        "https://schemas.glavo.site/hmcl/launcher-settings/1.0.0"
+        "https://raw.githubusercontent.com/MinecraftSTL/XYML/main/docs/schemas/launcher-settings/1.0.0.json"
       ]
     }
   },
@@ -50,7 +50,6 @@
           "themeColor",
           "themeColorStyle",
           "titleBarTransparent",
-          "windowTransparent",
           "background",
           "backgroundOpacity"
         ]
@@ -58,7 +57,12 @@
       "uniqueItems": true
     },
     "themeBrightnessMode": {
-      "type": "string"
+      "enum": [
+        "system",
+        "light",
+        "dark"
+      ],
+      "default": "system"
     },
     "customThemeColor": true,
     "themeColorType": {
@@ -115,20 +119,6 @@
         "DISABLED"
       ]
     },
-    "backgroundFallbackType": {
-      "enum": [
-        "BUILTIN",
-        "PAINT",
-        "THEME_COLOR"
-      ]
-    },
-    "backgroundFallbackPaint": true,
-    "backgroundLoadPolicy": {
-      "enum": [
-        "WAIT_FOR_BACKGROUND",
-        "SHOW_FALLBACK_WHILE_LOADING"
-      ]
-    },
     "logFontFamily": {
       "type": "string"
     },
@@ -140,6 +130,11 @@
     },
     "windowTransparent": {
       "type": "boolean"
+    },
+    "cornerRadius": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20
     },
     "animationDisabled": {
       "type": "boolean"

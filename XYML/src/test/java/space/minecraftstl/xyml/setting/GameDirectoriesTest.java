@@ -21,17 +21,19 @@ import com.google.common.jimfs.Configuration;
 import com.google.common.jimfs.Jimfs;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
-import com.google.gson.JsonParser;
-import javafx.beans.property.ObjectProperty;
-import javafx.collections.ObservableList;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.observable.collection.ListChange;
+import space.minecraftstl.xyml.observable.collection.ObservableList;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
 import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.PortablePath;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.i18n.LocalizedText;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -41,134 +43,31 @@ import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Objects;
 
 import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 import static org.junit.jupiter.api.Assertions.*;
 
-/// Tests for detached game directory migration.
+/// Tests for detached game directory storage and repository selection.
 @NotNullByDefault
 public final class GameDirectoriesTest {
-    /// Tests extracting legacy configuration data into a detached game directory store.
+    /// Tests that editing one stored directory publishes an element update through the neutral list.
     @Test
-    public void extractsConfigurationsFromLegacyConfigJson() {
-        GameDirectoryID id = LegacyConfigMigrator.getLegacyProfileID("Dev");
-        JsonObject settings = JsonParser.parseString("""
-                {
-                  "configurations": {
-                    "Dev": {
-                      "gameDir": ".minecraft",
-                      "useRelativePath": true
-                    }
-                  }
-                }
-                """).getAsJsonObject();
+    public void observesStoredDirectoryPropertyUpdates() {
+        GameDirectories gameDirectories = new GameDirectories();
+        GameDirectory gameDirectory = new GameDirectory(
+                GameDirectoryID.generate(),
+                LocalizedText.plain("Before"),
+                PortablePath.of(".minecraft"));
+        gameDirectories.getGameDirectories().add(gameDirectory);
+        List<ListChange.Kind> changes = new ArrayList<>();
+        gameDirectories.getGameDirectories().subscribe(change -> changes.add(change.kind()));
 
-        GameDirectories gameDirectories = Objects.requireNonNull(LegacyConfigMigrator.extractGameDirectoriesFromConfigJson(settings));
+        gameDirectory.setName(LocalizedText.plain("After"));
 
-        assertFalse(settings.has("configurations"));
-        assertEquals(1, gameDirectories.getGameDirectories().size());
-        assertEquals(id, gameDirectories.getGameDirectories().get(0).getId());
-        assertEquals("Dev", GameDirectoryManager.getGameDirectoryCustomName(gameDirectories.getGameDirectories().get(0)));
-        assertEquals(".minecraft", gameDirectories.getGameDirectories().get(0).getPath().getPath());
-        assertNull(gameDirectories.getGameDirectories().get(0).getLegacyGameSettings());
-    }
-
-    /// Tests that built-in profiles do not store names after migration.
-    @Test
-    public void removesBuiltInProfileNamesDuringMigration() {
-        JsonObject settings = JsonParser.parseString("""
-                {
-                  "configurations": {
-                    "Default": {
-                      "gameDir": ".minecraft"
-                    },
-                    "Home": {
-                      "gameDir": "/home/user/.minecraft"
-                    },
-                    "Dev": {
-                      "gameDir": "versions/Dev"
-                    }
-                  }
-                }
-                """).getAsJsonObject();
-
-        GameDirectories gameDirectories = Objects.requireNonNull(LegacyConfigMigrator.extractGameDirectoriesFromConfigJson(settings));
-
-        GameDirectoryID defaultGameDirectoryId = GameDirectoryManager.DEFAULT_GAME_DIRECTORY_ID;
-        GameDirectoryID homeGameDirectoryId = GameDirectoryManager.HOME_GAME_DIRECTORY_ID;
-        GameDirectory defaultGameDirectory = gameDirectories.getGameDirectories().stream()
-                .filter(gameDirectory -> defaultGameDirectoryId.equals(gameDirectory.getId()))
-                .findFirst()
-                .orElseThrow();
-        GameDirectory homeGameDirectory = gameDirectories.getGameDirectories().stream()
-                .filter(gameDirectory -> homeGameDirectoryId.equals(gameDirectory.getId()))
-                .findFirst()
-                .orElseThrow();
-        GameDirectory devGameDirectory = gameDirectories.getGameDirectories().stream()
-                .filter(gameDirectory -> "Dev".equals(GameDirectoryManager.getGameDirectoryCustomName(gameDirectory)))
-                .findFirst()
-                .orElseThrow();
-
-        assertNull(defaultGameDirectory.getName());
-        assertNull(homeGameDirectory.getName());
-        assertEquals("Dev", GameDirectoryManager.getGameDirectoryCustomName(devGameDirectory));
-    }
-
-    /// Tests migrating legacy selected version fields into the main config.
-    @Test
-    public void migratesLegacySelectedVersionsFromConfigurations() {
-        GameDirectoryID id = LegacyConfigMigrator.getLegacyProfileID("Dev");
-        assertEquals(5, id.uuid().version());
-        JsonObject settings = JsonParser.parseString("""
-                {
-                  "last": "Dev",
-                  "configurations": {
-                    "Dev": {
-                      "gameDir": ".minecraft",
-                      "selectedMinecraftVersion": "1.20.1"
-                    }
-                  }
-                }
-                """).getAsJsonObject();
-
-        assertTrue(LegacyConfigMigrator.migrateLegacySelectedVersions(settings));
-        assertTrue(LegacyConfigMigrator.migrateLegacySelectedGameDirectory(settings));
-        GameDirectories gameDirectories = Objects.requireNonNull(LegacyConfigMigrator.extractGameDirectoriesFromConfigJson(settings));
-        LauncherSettings config = Objects.requireNonNull(LauncherSettings.fromJson(settings));
-
-        assertFalse(settings.has("configurations"));
-        assertEquals(id, config.selectedGameDirectoryProperty().get());
-        assertEquals("1.20.1", config.getSelectedInstance(id));
-
-        JsonObject serialized = JsonParser.parseString(config.toJson()).getAsJsonObject();
-        assertEquals("1.20.1", serialized
-                .getAsJsonObject(LauncherSettings.PROPERTY_SELECTED_INSTANCE)
-                .get(id.toString())
-                .getAsString());
-    }
-
-    /// Tests that an unknown legacy selected profile name is not migrated into an invalid ID.
-    @Test
-    public void ignoresUnknownLegacySelectedGameDirectory() {
-        JsonObject settings = JsonParser.parseString("""
-                {
-                  "last": "Missing",
-                  "configurations": {
-                    "Dev": {
-                      "gameDir": ".minecraft"
-                    }
-                  }
-                }
-                """).getAsJsonObject();
-
-        assertTrue(LegacyConfigMigrator.migrateLegacySelectedGameDirectory(settings));
-        LauncherSettings config = Objects.requireNonNull(LauncherSettings.fromJson(settings));
-
-        assertFalse(settings.has("last"));
-        assertFalse(settings.has(LauncherSettings.PROPERTY_SELECTED_GAME_DIRECTORY));
-        assertNull(config.selectedGameDirectoryProperty().get());
+        assertEquals(List.of(ListChange.Kind.UPDATE), changes);
     }
 
     /// Tests that game directories store their path as a portable path.
@@ -186,25 +85,6 @@ public final class GameDirectoriesTest {
         assertFalse(serialized.has("useRelativePath"));
         assertEquals("versions/Dev", deserialized.getPath().getPath());
         assertFalse(deserialized.getPath().isAbsolute());
-    }
-
-    /// Tests that game directories preserve migrated legacy game settings IDs.
-    @Test
-    public void storesLegacyGameSettingsId() {
-        GameDirectoryID id = GameDirectoryID.parse("game-directory:123e4567-e89b-12d3-a456-426614174000");
-        GameSettingsPresetID legacyGameSettings =
-                GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174001");
-        GameDirectory gameDirectory = new GameDirectory(
-                id,
-                LocalizedText.plain("Dev"),
-                PortablePath.of("versions\\Dev"),
-                legacyGameSettings);
-
-        JsonObject serialized = JsonUtils.GSON.toJsonTree(gameDirectory, GameDirectory.class).getAsJsonObject();
-        GameDirectory deserialized = Objects.requireNonNull(JsonUtils.GSON.fromJson(serialized, GameDirectory.class));
-
-        assertEquals(legacyGameSettings.toString(), serialized.get("legacyGameSettings").getAsString());
-        assertEquals(legacyGameSettings, deserialized.getLegacyGameSettings());
     }
 
     /// Tests that the merged game directory view is read-only and does not own the backing store data.
@@ -441,7 +321,7 @@ public final class GameDirectoriesTest {
         GameSettings.Preset defaultPreset = new GameSettings.Preset(defaultPresetId);
         defaultPreset.defaultIsolationTypeProperty().setValue(DefaultIsolationType.MODDED);
         GameSettingsPresets presets = new GameSettingsPresets();
-        presets.getPresets().setAll(defaultPreset);
+        presets.getPresets().setAll(List.of(defaultPreset));
 
         GameDirectory gameDirectory = new GameDirectory(
                 GameDirectoryID.generate(),
@@ -465,29 +345,25 @@ public final class GameDirectoriesTest {
             assertEquals(repository.getVersionRoot(id), repository.getRunDirectory(id));
             assertEquals(repository.getVersionRoot(id).resolve("mods"), repository.getModsDirectory(id));
 
-            assertTrue(repository.removeVersionFromDisk(id));
+            assertTrue(repository.removeInstanceFromDisk(id));
             assertEquals(repository.getBaseDirectory(), repository.getRunDirectory(id));
         }
     }
 
     /// Tests that instance settings without an explicit parent use the default preset.
     @Test
-    public void nullInstanceParentUsesDefaultPresetInsteadOfLegacyGameDirectoryPreset()
+    public void nullInstanceParentUsesDefaultPreset()
             throws ReflectiveOperationException {
         GameSettingsPresetID defaultPresetId =
                 GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174000");
-        GameSettingsPresetID legacyPresetId =
-                GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174001");
         GameSettings.Preset defaultPreset = new GameSettings.Preset(defaultPresetId);
-        GameSettings.Preset legacyPreset = new GameSettings.Preset(legacyPresetId);
         GameSettingsPresets presets = new GameSettingsPresets();
-        presets.getPresets().setAll(defaultPreset, legacyPreset);
+        presets.getPresets().setAll(List.of(defaultPreset));
 
         GameDirectory gameDirectory = new GameDirectory(
                 GameDirectoryID.generate(),
                 LocalizedText.plain("Dev"),
-                PortablePath.of("local/Dev"),
-                legacyPresetId);
+                PortablePath.of("local/Dev"));
         GameDirectories localDirectories = new GameDirectories();
         localDirectories.getGameDirectories().add(gameDirectory);
         GameDirectories userDirectories = new GameDirectories();
@@ -501,163 +377,8 @@ public final class GameDirectoriesTest {
         }
     }
 
-    /// Tests that legacy per-version settings migration stores the game directory preset as an explicit parent.
-    @Test
-    public void legacyInstanceSettingsMigrationStoresLegacyGameDirectoryPresetAsParent(@TempDir Path tempDirectory)
-            throws IOException, ReflectiveOperationException {
-        GameSettingsPresetID defaultPresetId =
-                GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174000");
-        GameSettingsPresetID legacyPresetId =
-                GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174001");
-        GameSettingsPresets presets = new GameSettingsPresets();
-        presets.getPresets().setAll(
-                new GameSettings.Preset(defaultPresetId),
-                new GameSettings.Preset(legacyPresetId));
-
-        GameDirectory gameDirectory = new GameDirectory(
-                GameDirectoryID.generate(),
-                LocalizedText.plain("Dev"),
-                PortablePath.of(tempDirectory.toString()),
-                legacyPresetId);
-        GameDirectories localDirectories = new GameDirectories();
-        localDirectories.getGameDirectories().add(gameDirectory);
-        GameDirectories userDirectories = new GameDirectories();
-
-        try (GameDirectoryEnvironment ignored =
-                     new GameDirectoryEnvironment(localDirectories, userDirectories, presets)) {
-            settings().defaultGameSettingsPresetProperty().set(defaultPresetId);
-            XYMLGameRepository repository = new XYMLGameRepository(gameDirectory);
-            Path versionRoot = repository.getVersionRoot("1.20.1");
-            Files.createDirectories(versionRoot);
-            Files.writeString(versionRoot.resolve("hmclversion.cfg"), """
-                    {
-                      "usesGlobal": true
-                    }
-                    """);
-
-            GameSettings.Instance setting = Objects.requireNonNull(repository.getInstanceGameSettings("1.20.1"));
-
-            assertEquals(legacyPresetId, setting.parentProperty().getValue());
-        }
-    }
-
-    /// Tests that startup migration leaves legacy per-version settings for lazy migration.
-    @Test
-    public void startupMigrationSkipsLegacyInstanceSettingsFile(@TempDir Path tempDirectory)
-            throws IOException, ReflectiveOperationException {
-        GameSettingsPresetID defaultPresetId =
-                GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174000");
-        GameSettingsPresetID legacyPresetId =
-                GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174001");
-        GameSettingsPresets presets = new GameSettingsPresets();
-        presets.getPresets().setAll(
-                new GameSettings.Preset(defaultPresetId),
-                new GameSettings.Preset(legacyPresetId));
-
-        GameDirectory gameDirectory = new GameDirectory(
-                GameDirectoryID.generate(),
-                LocalizedText.plain("Dev"),
-                PortablePath.of(tempDirectory.toString()),
-                legacyPresetId);
-        GameDirectories localDirectories = new GameDirectories();
-        localDirectories.getGameDirectories().add(gameDirectory);
-        GameDirectories userDirectories = new GameDirectories();
-
-        try (GameDirectoryEnvironment ignored =
-                     new GameDirectoryEnvironment(localDirectories, userDirectories, presets)) {
-            settings().defaultGameSettingsPresetProperty().set(defaultPresetId);
-            XYMLGameRepository repository = new XYMLGameRepository(gameDirectory);
-            writeVersionJson(repository, "1.20.1");
-            Path versionRoot = repository.getVersionRoot("1.20.1");
-            Files.writeString(versionRoot.resolve(LegacyGameSettingsMigrator.LEGACY_INSTANCE_SETTINGS_FILENAME), """
-                    {
-                      "usesGlobal": true
-                    }
-                    """);
-
-            LegacyConfigMigrator.migrateLegacyInstanceGameSettings(localDirectories, presets);
-
-            assertFalse(Files.exists(repository.getInstanceConfigDirectory("1.20.1")
-                    .resolve(LegacyGameSettingsMigrator.INSTANCE_GAME_SETTINGS_FILENAME)));
-            GameSettings.Instance setting = Objects.requireNonNull(repository.getInstanceGameSettings("1.20.1"));
-            assertEquals(legacyPresetId, setting.parentProperty().getValue());
-        }
-    }
-
-    /// Tests that existing versions without instance settings store the legacy game directory parent.
-    @Test
-    public void absentInstanceSettingsStoreLegacyGameDirectoryPresetAsParent(@TempDir Path tempDirectory)
-            throws IOException, ReflectiveOperationException {
-        GameSettingsPresetID defaultPresetId =
-                GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174000");
-        GameSettingsPresetID legacyPresetId =
-                GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174001");
-        GameSettings.Preset legacyPreset = new GameSettings.Preset(legacyPresetId);
-        legacyPreset.defaultIsolationTypeProperty().setValue(DefaultIsolationType.ALWAYS);
-        GameSettingsPresets presets = new GameSettingsPresets();
-        presets.getPresets().setAll(
-                new GameSettings.Preset(defaultPresetId),
-                legacyPreset);
-
-        GameDirectory gameDirectory = new GameDirectory(
-                GameDirectoryID.generate(),
-                LocalizedText.plain("Dev"),
-                PortablePath.of(tempDirectory.toString()),
-                legacyPresetId);
-        GameDirectories localDirectories = new GameDirectories();
-        localDirectories.getGameDirectories().add(gameDirectory);
-        GameDirectories userDirectories = new GameDirectories();
-
-        try (GameDirectoryEnvironment ignored =
-                     new GameDirectoryEnvironment(localDirectories, userDirectories, presets)) {
-            settings().defaultGameSettingsPresetProperty().set(defaultPresetId);
-            XYMLGameRepository repository = new XYMLGameRepository(gameDirectory);
-            writeVersionJson(repository, "1.20.1");
-            LegacyConfigMigrator.migrateLegacyInstanceGameSettings(localDirectories, presets);
-
-            GameSettings.Instance setting = Objects.requireNonNull(repository.getInstanceGameSettings("1.20.1"));
-
-            assertEquals(legacyPresetId, setting.parentProperty().getValue());
-            assertTrue(setting.getOverrideProperties().contains(GameSettings.PROPERTY_RUNNING_DIRECTORY));
-        }
-    }
-
-    /// Tests that versions created after migration do not inherit the legacy game directory parent.
-    @Test
-    public void newInstanceAfterMigrationDoesNotUseLegacyGameDirectoryParent(@TempDir Path tempDirectory)
-            throws IOException, ReflectiveOperationException {
-        GameSettingsPresetID defaultPresetId =
-                GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174000");
-        GameSettingsPresetID legacyPresetId =
-                GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174001");
-        GameSettings.Preset defaultPreset = new GameSettings.Preset(defaultPresetId);
-        defaultPreset.defaultIsolationTypeProperty().setValue(DefaultIsolationType.NEVER);
-        GameSettings.Preset legacyPreset = new GameSettings.Preset(legacyPresetId);
-        legacyPreset.defaultIsolationTypeProperty().setValue(DefaultIsolationType.ALWAYS);
-        GameSettingsPresets presets = new GameSettingsPresets();
-        presets.getPresets().setAll(defaultPreset, legacyPreset);
-
-        GameDirectory gameDirectory = new GameDirectory(
-                GameDirectoryID.generate(),
-                LocalizedText.plain("Dev"),
-                PortablePath.of(tempDirectory.toString()),
-                legacyPresetId);
-        GameDirectories localDirectories = new GameDirectories();
-        localDirectories.getGameDirectories().add(gameDirectory);
-        GameDirectories userDirectories = new GameDirectories();
-
-        try (GameDirectoryEnvironment ignored =
-                     new GameDirectoryEnvironment(localDirectories, userDirectories, presets)) {
-            settings().defaultGameSettingsPresetProperty().set(defaultPresetId);
-            XYMLGameRepository repository = new XYMLGameRepository(gameDirectory);
-            LegacyConfigMigrator.migrateLegacyInstanceGameSettings(localDirectories, presets);
-            writeVersionJson(repository, "1.20.1");
-
-            assertNull(repository.getInstanceGameSettings("1.20.1"));
-        }
-    }
-
     /// Temporary static state override for game directory tests.
+    @NotNullByDefault
     private static final class GameDirectoryEnvironment implements AutoCloseable {
         /// The reflected SettingsManager local game directories field.
         private final Field localGameDirectoriesField;
@@ -681,10 +402,10 @@ public final class GameDirectoriesTest {
         private final Field initializedField;
 
         /// The reflected GameDirectoryManager selected game directory property.
-        private final ObjectProperty<GameDirectory> selectedGameDirectory;
+        private final ObjectProperty<@Nullable GameDirectory> selectedGameDirectory;
 
         /// The reflected GameDirectoryManager selected repository property.
-        private final ObjectProperty<XYMLGameRepository> selectedRepository;
+        private final ObjectProperty<@Nullable XYMLGameRepository> selectedRepository;
 
         /// The merged game directory list used by GameDirectoryManager.
         private final ObservableList<GameDirectory> mergedGameDirectories;
@@ -693,16 +414,16 @@ public final class GameDirectoriesTest {
         private final Map<GameDirectory, XYMLGameRepository> repositories;
 
         /// The previous local game directories instance.
-        private final Object previousLocalGameDirectories;
+        private final @Nullable Object previousLocalGameDirectories;
 
         /// The previous user game directories instance.
-        private final Object previousUserGameDirectories;
+        private final @Nullable Object previousUserGameDirectories;
 
         /// The previous launcher settings instance.
-        private final Object previousLauncherSettings;
+        private final @Nullable Object previousLauncherSettings;
 
         /// The previous game settings presets instance.
-        private final Object previousGameSettingsPresets;
+        private final @Nullable Object previousGameSettingsPresets;
 
         /// The previous local game directories access.
         private final SettingFileAccess previousLocalGameDirectoriesAccess;
@@ -714,16 +435,16 @@ public final class GameDirectoriesTest {
         private final boolean previousInitialized;
 
         /// The previous selected game directory.
-        private final GameDirectory previousSelectedGameDirectory;
+        private final @Nullable GameDirectory previousSelectedGameDirectory;
 
         /// The previous selected repository.
-        private final XYMLGameRepository previousSelectedRepository;
+        private final @Nullable XYMLGameRepository previousSelectedRepository;
 
         /// The previous merged game directories.
-        private final List<GameDirectory> previousMergedGameDirectories;
+        private final @Unmodifiable List<GameDirectory> previousMergedGameDirectories;
 
         /// The previous repository map entries.
-        private final Map<GameDirectory, XYMLGameRepository> previousRepositories;
+        private final @Unmodifiable Map<GameDirectory, XYMLGameRepository> previousRepositories;
 
         /// Replaces game-directory-related static state with the given stores and an empty preset store.
         private GameDirectoryEnvironment(GameDirectories localDirectories, GameDirectories userDirectories)
@@ -769,14 +490,14 @@ public final class GameDirectoriesTest {
             previousInitialized = initializedField.getBoolean(null);
 
             @SuppressWarnings("unchecked")
-            ObjectProperty<GameDirectory> selectedGameDirectory =
-                    (ObjectProperty<GameDirectory>) selectedGameDirectoryField.get(null);
+            ObjectProperty<@Nullable GameDirectory> selectedGameDirectory =
+                    (ObjectProperty<@Nullable GameDirectory>) selectedGameDirectoryField.get(null);
             this.selectedGameDirectory = selectedGameDirectory;
             previousSelectedGameDirectory = selectedGameDirectory.get();
 
             @SuppressWarnings("unchecked")
-            ObjectProperty<XYMLGameRepository> selectedRepository =
-                    (ObjectProperty<XYMLGameRepository>) selectedRepositoryField.get(null);
+            ObjectProperty<@Nullable XYMLGameRepository> selectedRepository =
+                    (ObjectProperty<@Nullable XYMLGameRepository>) selectedRepositoryField.get(null);
             this.selectedRepository = selectedRepository;
             previousSelectedRepository = selectedRepository.get();
 
@@ -834,17 +555,6 @@ public final class GameDirectoriesTest {
         }
     }
 
-    /// Writes a minimal valid version json for repository refresh tests.
-    private static void writeVersionJson(XYMLGameRepository repository, String id) throws IOException {
-        Path versionRoot = repository.getVersionRoot(id);
-        Files.createDirectories(versionRoot);
-        Files.writeString(versionRoot.resolve(id + ".json"), """
-                {
-                  "id": "%s"
-                }
-                """.formatted(id));
-    }
-
     /// Returns the only default game directory in the given store, asserting its path.
     private static GameDirectory assertSingleDefaultGameDirectory(GameDirectories gameDirectories, PortablePath path) {
         assertEquals(1, gameDirectories.getGameDirectories().size());
@@ -874,7 +584,7 @@ public final class GameDirectoriesTest {
             Path location = tempDir.resolve("game-directories.json");
             Files.writeString(location, """
                     {
-                      "$schema": "https://schemas.glavo.site/hmcl/game-directories/1.1.0",
+                      "$schema": "https://raw.githubusercontent.com/MinecraftSTL/XYML/main/docs/schemas/game-directories/1.1.0.json",
                       "directories": []
                     }
                     """);
@@ -886,12 +596,12 @@ public final class GameDirectoriesTest {
                     GameDirectories.CURRENT_SCHEMA,
                     GameDirectories::new);
 
-            JsonSettingFile.LoadResult<GameDirectories> result = file.load(null);
+            JsonSettingFile.LoadResult<GameDirectories> result = file.load();
 
             assertEquals(SettingFileAccess.READ_ONLY, result.access());
             assertFalse(result.value().isSavable());
             assertFalse(result.value().isBackupOnNextSave());
-            assertEquals(new JsonSchema("https://schemas.glavo.site/hmcl/game-directories/1.1.0"),
+            assertEquals(new JsonSchema("https://raw.githubusercontent.com/MinecraftSTL/XYML/main/docs/schemas/game-directories/1.1.0.json"),
                     result.value().getSchema());
         }
     }
@@ -911,7 +621,7 @@ public final class GameDirectoriesTest {
                     GameDirectories.CURRENT_SCHEMA,
                     GameDirectories::new);
 
-            JsonSettingFile.LoadResult<GameDirectories> result = file.load(null);
+            JsonSettingFile.LoadResult<GameDirectories> result = file.load();
 
             assertTrue(result.value().isSavable());
             assertTrue(result.value().isBackupOnNextSave());

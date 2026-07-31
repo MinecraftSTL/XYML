@@ -76,15 +76,14 @@ final class JsonSettingFile<T extends ObservableSetting & JsonSchemaSetting> {
         this.createDefault = Objects.requireNonNull(createDefault);
     }
 
-    /// Loads the settings file, falling back to migrated data or a default object when absent.
+    /// Loads the settings file, falling back to a default object when absent.
     ///
-    /// @param migrated migrated settings data used when the file is absent
     /// @return the loaded settings object
     /// @throws IOException if reading the file fails
-    LoadResult<T> load(@Nullable T migrated) throws IOException {
+    LoadResult<T> load() throws IOException {
         if (Files.exists(location)) {
             try {
-                JsonObject jsonObject = JsonUtils.fromJsonFile(location, JsonObject.class);
+                @Nullable JsonObject jsonObject = JsonUtils.fromJsonFile(location, JsonObject.class);
                 if (jsonObject == null) {
                     LOG.warning(displayName + " are empty: " + location);
                     return result(createDefault.get(), true);
@@ -108,7 +107,7 @@ final class JsonSettingFile<T extends ObservableSetting & JsonSchemaSetting> {
                         return result(createDefault.get(), SettingFileAccess.UNREADABLE);
                     }
 
-                    T deserialized = LauncherSettings.SETTINGS_GSON.<@Nullable T>fromJson(jsonObject, type);
+                    @Nullable T deserialized = LauncherSettings.SETTINGS_GSON.<@Nullable T>fromJson(jsonObject, type);
                     if (deserialized != null) {
                         // Patch-compatible files keep their original schema because unknown members are preserved.
                         if (!schemaResult.preserveSchema() && !expectedSchema.equals(deserialized.getSchema())) {
@@ -130,7 +129,7 @@ final class JsonSettingFile<T extends ObservableSetting & JsonSchemaSetting> {
             return result(createDefault.get(), SettingFileAccess.UNREADABLE);
         }
 
-        return result(Objects.requireNonNullElseGet(migrated, createDefault), true);
+        return result(createDefault.get(), true);
     }
 
     /// Creates a load result and stores the saveability metadata on the settings object.
@@ -156,7 +155,7 @@ final class JsonSettingFile<T extends ObservableSetting & JsonSchemaSetting> {
     ///
     /// @param value the settings object to observe
     void installAutoSave(T value) {
-        value.addListener(source -> save(value));
+        value.changes().subscribe(ignored -> save(value));
     }
 
     /// Saves a settings object.
@@ -213,6 +212,7 @@ final class JsonSettingFile<T extends ObservableSetting & JsonSchemaSetting> {
     ///
     /// @param value the loaded settings object
     /// @param access whether the source file may be read and overwritten
+    @NotNullByDefault
     record LoadResult<T extends ObservableSetting & JsonSchemaSetting>(T value, SettingFileAccess access) {
     }
 }

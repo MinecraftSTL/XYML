@@ -57,7 +57,7 @@ public final class JsonSchemaTest {
         assertEquals(schemaUrl("settings", "3.0"), schema.url());
     }
 
-    /// Tests reading schema strings that are not HMCL schema URLs.
+    /// Tests reading schema strings that are not XYML schema URLs.
     @Test
     public void readsUnparseableSchemaString() {
         JsonObject object = new JsonObject();
@@ -103,10 +103,10 @@ public final class JsonSchemaTest {
         assertEquals(JsonSchema.CompatibilityResult.Status.MISSING, missing.status());
         assertFalse(missing.readable());
 
-        object.addProperty(JsonSchema.PROPERTY_SCHEMA, "hmcl.config/3.x");
+        object.addProperty(JsonSchema.PROPERTY_SCHEMA, "invalid-schema");
         JsonSchema.CompatibilityResult unparseable = JsonSchema.check(object, expected);
         assertEquals(JsonSchema.CompatibilityResult.Status.UNPARSEABLE, unparseable.status());
-        assertEquals("hmcl.config/3.x", unparseable.actual().url());
+        assertEquals("invalid-schema", unparseable.actual().url());
 
         object.add(JsonSchema.PROPERTY_SCHEMA, new JsonObject());
         JsonSchema.CompatibilityResult invalid = JsonSchema.check(object, expected);
@@ -158,6 +158,7 @@ public final class JsonSchemaTest {
 
     /// Creates a schema URL string.
     private static String schemaUrl(String id, String version) {
-        return "https://schemas.glavo.site/hmcl/" + id + "/" + version;
+        return "https://raw.githubusercontent.com/MinecraftSTL/XYML/main/docs/schemas/"
+                + id + "/" + version + ".json";
     }
 }

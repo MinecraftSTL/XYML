@@ -34,7 +34,7 @@ public enum BackgroundType {
     /// Uses an image loaded from a user-provided URL.
     NETWORK,
 
-    /// Uses the configured paint value as a flat background.
+    /// Uses the configured solid-color or gradient paint value as the background.
     PAINT,
 
     /// Uses the current theme color scheme surface container as a flat background.

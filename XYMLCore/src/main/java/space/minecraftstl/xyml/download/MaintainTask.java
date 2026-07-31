@@ -154,13 +154,13 @@ public class MaintainTask extends Task<Version> {
         if (!libraryAnalyzer.has(FORGE)) return version;
 
         if (libraryAnalyzer.has(OPTIFINE)) {
-            Library hmclTransformerDiscoveryService = new Library(new Artifact("space.minecraftstl.xyml", "transformer-discovery-service", "1.0"));
+            Library xymlTransformerDiscoveryService = new Library(new Artifact("space.minecraftstl.xyml", "transformer-discovery-service", "1.0"));
             Optional<Library> optiFine = version.getLibraries().stream().filter(library -> library.is("optifine", "OptiFine")).findAny();
             boolean libraryExisting = version.getLibraries().stream().anyMatch(library -> library.is("space.minecraftstl.xyml", "transformer-discovery-service"));
             optiFine.ifPresent(library -> {
-                builder.addJvmArgument("-Dhmcl.transformer.candidates=${library_directory}/" + library.getPath());
-                if (!libraryExisting) builder.addLibrary(hmclTransformerDiscoveryService);
-                Path libraryPath = repository.getLibraryFile(version, hmclTransformerDiscoveryService);
+                builder.addJvmArgument("-Dxyml.transformer.candidates=${library_directory}/" + library.getPath());
+                if (!libraryExisting) builder.addLibrary(xymlTransformerDiscoveryService);
+                Path libraryPath = repository.getLibraryFile(version, xymlTransformerDiscoveryService);
                 try (InputStream input = MaintainTask.class.getResourceAsStream("/assets/game/XYMLTransformerDiscoveryService-1.0.jar")) {
                     Files.createDirectories(libraryPath.getParent());
                     Files.copy(Objects.requireNonNull(input, "Bundled XYMLTransformerDiscoveryService is missing."), libraryPath, StandardCopyOption.REPLACE_EXISTING);

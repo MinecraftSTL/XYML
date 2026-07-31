@@ -20,82 +20,41 @@ package space.minecraftstl.xyml.setting;
 import com.google.common.jimfs.Configuration;
 import com.google.common.jimfs.Jimfs;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import space.minecraftstl.xyml.util.gson.JsonSchema;
+import space.minecraftstl.xyml.util.FileSaver;
+import space.minecraftstl.xyml.util.gson.JsonUtils;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.FileSystem;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/// Tests for user settings serialization and legacy migration.
+/// Tests for current user settings behavior.
 @NotNullByDefault
 public final class UserSettingsTest {
-    /// Tests that legacy global config content is split without preserving unowned fields.
+    /// Tests that detached settings auto-save from the toolkit-neutral aggregate revision.
     @Test
-    public void migratesLegacyGlobalConfigWithoutPreservingUnownedFields() throws IOException {
+    public void autoSavesNeutralPropertyChanges() throws IOException, InterruptedException {
         try (FileSystem fileSystem = Jimfs.newFileSystem(Configuration.unix())) {
-            Path legacyConfig = fileSystem.getPath("/config.json");
-            Files.writeString(legacyConfig, """
-                    {
-                      "agreementVersion": 1,
-                      "terracottaAgreementVersion": 2,
-                      "platformPromptVersion": 3,
-                      "logRetention": 7,
-                      "enableOfflineAccount": true,
-                      "fontAntiAliasing": "gray",
-                      "userJava": ["java-a"],
-                      "disabledJava": ["java-b"],
-                      "selectedAccount": "Alex:Alex",
-                      "accounts": [],
-                      "configurations": {},
-                      "futureLauncherField": true
-                    }
-                    """);
+            Path location = fileSystem.getPath("/user-settings.json");
+            JsonSettingFile<UserSettings> file = new JsonSettingFile<>(
+                    location,
+                    "user settings",
+                    UserSettings.class,
+                    UserSettings.CURRENT_SCHEMA,
+                    UserSettings::new);
+            UserSettings settings = new UserSettings();
+            file.installAutoSave(settings);
 
-            LegacyConfigMigrator.UserSettingsMigrationResult migration =
-                    Objects.requireNonNull(LegacyConfigMigrator.migrateLegacyUserSettings(legacyConfig));
-            UserSettings settings = migration.userSettings();
-            UserState state = migration.userState();
+            settings.logRetentionProperty().set(42);
+            FileSaver.waitForAllSaves();
 
-            assertEquals(UserSettings.CURRENT_SCHEMA, settings.getSchema());
-            assertEquals(UserState.CURRENT_SCHEMA, state.getSchema());
-            assertEquals(1, state.agreementVersionProperty().get());
-            assertEquals(2, state.terracottaAgreementVersionProperty().get());
-            assertEquals(3, state.platformPromptVersionProperty().get());
-            assertEquals(7, settings.logRetentionProperty().get());
-            assertTrue(settings.enableOfflineAccountProperty().get());
-            assertEquals("gray", settings.fontAntiAliasingProperty().get());
-            assertTrue(settings.getUserJava().contains("java-a"));
-            assertTrue(settings.getDisabledJava().contains("java-b"));
-
-            JsonObject serializedSettings = JsonParser.parseString(settings.toJson()).getAsJsonObject();
-            assertEquals(UserSettings.CURRENT_SCHEMA.url(),
-                    serializedSettings.get(JsonSchema.PROPERTY_SCHEMA).getAsString());
-            assertFalse(serializedSettings.has("agreementVersion"));
-            assertFalse(serializedSettings.has("terracottaAgreementVersion"));
-            assertFalse(serializedSettings.has("platformPromptVersion"));
-            assertFalse(serializedSettings.has("selectedAccount"));
-            assertFalse(serializedSettings.has("accounts"));
-            assertFalse(serializedSettings.has("configurations"));
-            assertFalse(serializedSettings.has("futureLauncherField"));
-
-            JsonObject serializedState = JsonParser.parseString(state.toJson()).getAsJsonObject();
-            assertEquals(UserState.CURRENT_SCHEMA.url(), serializedState.get(JsonSchema.PROPERTY_SCHEMA).getAsString());
-            assertFalse(serializedState.has("logRetention"));
-            assertFalse(serializedState.has("enableOfflineAccount"));
-            assertFalse(serializedState.has("fontAntiAliasing"));
-            assertFalse(serializedState.has("userJava"));
-            assertFalse(serializedState.has("disabledJava"));
-            assertFalse(serializedState.has("selectedAccount"));
-            assertFalse(serializedState.has("accounts"));
-            assertFalse(serializedState.has("configurations"));
-            assertFalse(serializedState.has("futureLauncherField"));
+            JsonObject saved = Objects.requireNonNull(JsonUtils.fromJsonFile(location, JsonObject.class));
+            assertEquals(42, saved.get("logRetention").getAsInt());
         }
     }
+
 }

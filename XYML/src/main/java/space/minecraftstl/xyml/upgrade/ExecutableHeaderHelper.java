@@ -36,7 +36,7 @@ import static space.minecraftstl.xyml.util.Lang.mapOf;
 import static space.minecraftstl.xyml.util.Pair.pair;
 
 /**
- * Helper class for adding/removing executable header from HMCL file.
+ * Helper class for adding/removing executable header from XYML file.
  *
  * @author yushijinhun
  */
@@ -44,8 +44,8 @@ final class ExecutableHeaderHelper {
     private ExecutableHeaderHelper() {}
 
     private static Map<String, String> suffix2header = mapOf(
-            pair("exe", "assets/HMCLauncher.exe"),
-            pair("sh", "assets/HMCLauncher.sh")
+            pair("exe", "assets/XYMLLauncher.exe"),
+            pair("sh", "assets/XYMLLauncher.sh")
     );
 
     private static Optional<String> getSuffix(Path file) {

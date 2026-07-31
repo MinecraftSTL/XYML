@@ -18,13 +18,14 @@
 package space.minecraftstl.xyml.addon.datapack;
 
 import com.google.gson.JsonParseException;
-import javafx.application.Platform;
-import javafx.beans.property.BooleanProperty;
-import javafx.beans.property.SimpleBooleanProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.LocalAddonFile;
 import space.minecraftstl.xyml.addon.meta.PackMcMeta;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
@@ -33,36 +34,102 @@ import space.minecraftstl.xyml.util.io.Unzipper;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.io.IOException;
-import java.nio.file.*;
-import java.util.*;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileSystem;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Discovers and mutates the data packs belonging to one world directory without depending on a UI toolkit.
+///
+/// Pack-list reads return immutable snapshots. Loading, installing, and deleting are serialized so the file-system
+/// mutation and corresponding snapshot publication form one ordered operation. Change listeners run synchronously on
+/// the calling thread; UI consumers must dispatch toolkit work themselves.
+@NotNullByDefault
 public class DataPack {
+    /// Extension used for disabled archives and metadata files.
     private static final String DISABLED_EXT = "disabled";
+
+    /// Extension used for data-pack archives.
     private static final String ZIP_EXT = "zip";
 
+    /// Directory containing this world's data packs.
     private final Path path;
-    private final ObservableList<Pack> packs = FXCollections.observableArrayList();
 
+    /// Serializes file-system mutations with immutable snapshot replacement and ordered notification.
+    private final Object mutationLock = new Object();
+
+    /// Publishes complete immutable list transitions without imposing a UI dispatch policy.
+    private final ValueChangeSupport<@Unmodifiable List<Pack>> packsChangeSupport =
+            new ValueChangeSupport<>(this);
+
+    /// Latest immutable pack snapshot, safely published to readers on any thread.
+    private volatile @Unmodifiable List<Pack> packs = List.of();
+
+    /// Creates a data-pack manager for one directory.
+    ///
+    /// @param path data-pack directory
     public DataPack(Path path) {
-        this.path = path;
+        this.path = Objects.requireNonNull(path, "path");
     }
 
+    /// Returns the managed data-pack directory.
+    ///
+    /// @return data-pack directory
     public Path getPath() {
         return path;
     }
 
-    public ObservableList<Pack> getPacks() {
+    /// Returns the latest immutable pack snapshot.
+    ///
+    /// The returned list remains stable when a later load, install, or delete publishes a replacement.
+    ///
+    /// @return immutable pack snapshot
+    public @Unmodifiable List<Pack> getPacks() {
         return packs;
     }
 
-    public static void installPack(Path sourceDataPackPath, Path targetDataPackDirectory, GameVersionNumber gameVersionNumber) throws IOException {
+    /// Subscribes to complete immutable pack-snapshot transitions.
+    ///
+    /// Notifications are synchronous on the thread performing the successful load, install, or delete operation.
+    /// The subscription does not emit the current value immediately; callers should read [#getPacks()] when attaching.
+    ///
+    /// @param listener snapshot listener
+    /// @return independently cancellable subscription
+    public Subscription subscribePacks(
+            ValueChangeListener<@Unmodifiable List<Pack>> listener) {
+        return packsChangeSupport.subscribe(listener);
+    }
+
+    /// Installs one single-pack or multi-pack archive into a target world data-pack directory.
+    ///
+    /// Existing entries with matching logical names are removed first. Multi-pack archives may also contribute a
+    /// resource-pack archive in the location selected by the target game version.
+    ///
+    /// @param sourceDataPackPath source archive
+    /// @param targetDataPackDirectory target data-pack directory
+    /// @param gameVersionNumber target version, or null when the old resource-pack location must be used
+    /// @throws IOException when the source cannot be read or the destination cannot be updated
+    public static void installPack(
+            Path sourceDataPackPath,
+            Path targetDataPackDirectory,
+            @Nullable GameVersionNumber gameVersionNumber) throws IOException {
         boolean containsMultiplePacks;
-        Set<String> packs = new HashSet<>();
-        try (FileSystem fs = CompressingUtils.readonly(sourceDataPackPath).setAutoDetectEncoding(true).build()) {
+        Set<String> packNames = new HashSet<>();
+        try (FileSystem fs = CompressingUtils.readonly(sourceDataPackPath)
+                .setAutoDetectEncoding(true)
+                .build()) {
             Path dataPacks = fs.getPath("datapacks");
             Path mcmeta = fs.getPath("pack.mcmeta");
 
@@ -75,25 +142,27 @@ public class DataPack {
             }
 
             if (containsMultiplePacks) {
-                try (Stream<Path> s = Files.list(dataPacks)) {
-                    packs = s.map(FileUtils::getNameWithoutExtension).collect(Collectors.toSet());
+                try (Stream<Path> stream = Files.list(dataPacks)) {
+                    packNames = stream
+                            .map(FileUtils::getNameWithoutExtension)
+                            .collect(Collectors.toSet());
                 }
             } else {
-                packs.add(FileUtils.getNameWithoutExtension(sourceDataPackPath));
+                packNames.add(FileUtils.getNameWithoutExtension(sourceDataPackPath));
             }
 
             try (DirectoryStream<Path> stream = Files.newDirectoryStream(targetDataPackDirectory)) {
-                for (Path dir : stream) {
-                    String packName = FileUtils.getName(dir);
-                    if (FileUtils.getExtension(dir).equals(DISABLED_EXT)) {
+                for (Path entry : stream) {
+                    String packName = FileUtils.getName(entry);
+                    if (FileUtils.getExtension(entry).equals(DISABLED_EXT)) {
                         packName = StringUtils.removeSuffix(packName, "." + DISABLED_EXT);
                     }
                     packName = FileUtils.getNameWithoutExtension(packName);
-                    if (packs.contains(packName)) {
-                        if (Files.isDirectory(dir)) {
-                            FileUtils.deleteDirectory(dir);
-                        } else if (Files.isRegularFile(dir)) {
-                            Files.delete(dir);
+                    if (packNames.contains(packName)) {
+                        if (Files.isDirectory(entry)) {
+                            FileUtils.deleteDirectory(entry);
+                        } else if (Files.isRegularFile(entry)) {
+                            Files.delete(entry);
                         }
                     }
                 }
@@ -101,139 +170,260 @@ public class DataPack {
         }
 
         if (!containsMultiplePacks) {
-            FileUtils.copyFile(sourceDataPackPath, targetDataPackDirectory.resolve(FileUtils.getName(sourceDataPackPath)));
+            FileUtils.copyFile(
+                    sourceDataPackPath,
+                    targetDataPackDirectory.resolve(FileUtils.getName(sourceDataPackPath)));
+            return;
+        }
+
+        new Unzipper(sourceDataPackPath, targetDataPackDirectory)
+                .setReplaceExistentFile(true)
+                .setSubDirectory("/datapacks/")
+                .unzip();
+
+        Path worldDirectory = Objects.requireNonNull(
+                targetDataPackDirectory.getParent(),
+                "targetDataPackDirectory parent");
+        Path targetResourceZipPath;
+        // When the version cannot be obtained, retain the old-version resource-pack location.
+        boolean useNewResourcePath = gameVersionNumber != null
+                && gameVersionNumber.compareTo("26.1-snapshot-6") >= 0;
+
+        if (useNewResourcePath) {
+            Path resourcePackDirectory = worldDirectory.resolve("resourcepacks");
+            Files.createDirectories(resourcePackDirectory);
+            targetResourceZipPath = resourcePackDirectory.resolve("resources.zip");
         } else {
-            new Unzipper(sourceDataPackPath, targetDataPackDirectory)
-                    .setReplaceExistentFile(true)
-                    .setSubDirectory("/datapacks/")
-                    .unzip();
+            targetResourceZipPath = worldDirectory.resolve("resources.zip");
+        }
 
-            Path targetResourceZipPath;
-            // When the version cannot be obtained, the old version logic is used by default.
-            boolean useNewResourcePath = gameVersionNumber != null
-                    && gameVersionNumber.compareTo("26.1-snapshot-6") >= 0;
-
-            if (useNewResourcePath) {
-                Files.createDirectories(targetDataPackDirectory.getParent().resolve("resourcepacks"));
-                targetResourceZipPath = targetDataPackDirectory.getParent().resolve("resourcepacks/resources.zip");
-            } else {
-                targetResourceZipPath = targetDataPackDirectory.getParent().resolve("resources.zip");
+        try (FileSystem outputResourcesZipFileSystem =
+                     CompressingUtils.createWritableZipFileSystem(targetResourceZipPath);
+             FileSystem inputPackZipFileSystem =
+                     CompressingUtils.createReadOnlyZipFileSystem(sourceDataPackPath)) {
+            Path resourcesZip = inputPackZipFileSystem.getPath("resources.zip");
+            if (Files.isRegularFile(resourcesZip)) {
+                copyEmbeddedResources(resourcesZip, outputResourcesZipFileSystem);
             }
+            writeGeneratedResourceMetadata(outputResourcesZipFileSystem);
+        }
+    }
 
-            try (FileSystem outputResourcesZipFS = CompressingUtils.createWritableZipFileSystem(targetResourceZipPath);
-                 FileSystem inputPackZipFS = CompressingUtils.createReadOnlyZipFileSystem(sourceDataPackPath)) {
-                Path resourcesZip = inputPackZipFS.getPath("resources.zip");
-                if (Files.isRegularFile(resourcesZip)) {
-                    Path tempResourcesFile = Files.createTempFile("hmcl", ".zip");
-                    try {
-                        Files.copy(resourcesZip, tempResourcesFile, StandardCopyOption.REPLACE_EXISTING);
-                        try (FileSystem resources = CompressingUtils.createReadOnlyZipFileSystem(tempResourcesFile)) {
-                            FileUtils.copyDirectory(resources.getPath("/"), outputResourcesZipFS.getPath("/"));
-                        }
-                    } finally {
-                        Files.deleteIfExists(tempResourcesFile);
+    /// Copies an embedded resource archive into the generated world resource archive.
+    ///
+    /// @param resourcesZip embedded resource archive
+    /// @param outputResourcesZipFileSystem writable destination archive file system
+    /// @throws IOException when either archive cannot be copied
+    private static void copyEmbeddedResources(
+            Path resourcesZip,
+            FileSystem outputResourcesZipFileSystem) throws IOException {
+        Path temporaryResourcesFile = Files.createTempFile("xyml", ".zip");
+        try {
+            Files.copy(resourcesZip, temporaryResourcesFile, StandardCopyOption.REPLACE_EXISTING);
+            try (FileSystem resources =
+                         CompressingUtils.createReadOnlyZipFileSystem(temporaryResourcesFile)) {
+                FileUtils.copyDirectory(
+                        resources.getPath("/"),
+                        outputResourcesZipFileSystem.getPath("/"));
+            }
+        } finally {
+            Files.deleteIfExists(temporaryResourcesFile);
+        }
+    }
+
+    /// Writes deterministic metadata and removes a stale icon from a generated world resource archive.
+    ///
+    /// @param outputResourcesZipFileSystem writable destination archive file system
+    /// @throws IOException when metadata or icon entries cannot be updated
+    private static void writeGeneratedResourceMetadata(
+            FileSystem outputResourcesZipFileSystem) throws IOException {
+        Path packMcMeta = outputResourcesZipFileSystem.getPath("pack.mcmeta");
+        String metaContent = """
+                {
+                    "pack": {
+                        "pack_format": 4,
+                        "description": "Modified by XYML."
                     }
                 }
-                Path packMcMeta = outputResourcesZipFS.getPath("pack.mcmeta");
-                String metaContent = """
-                        {
-                            "pack": {
-                                "pack_format": 4,
-                                "description": "Modified by HMCL."
-                            }
-                        }
-                        """;
-                Files.writeString(packMcMeta, metaContent, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                """;
+        Files.writeString(
+                packMcMeta,
+                metaContent,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING);
 
-                Path packPng = outputResourcesZipFS.getPath("pack.png");
-                if (Files.isRegularFile(packPng))
-                    Files.delete(packPng);
-            }
+        Path packPng = outputResourcesZipFileSystem.getPath("pack.png");
+        if (Files.isRegularFile(packPng)) {
+            Files.delete(packPng);
         }
     }
 
-    public void installPack(Path sourcePackPath, GameVersionNumber gameVersionNumber) throws IOException {
-        installPack(sourcePackPath, path, gameVersionNumber);
-        loadFromDir();
+    /// Installs an archive into this manager and immediately publishes a refreshed snapshot.
+    ///
+    /// @param sourcePackPath source archive
+    /// @param gameVersionNumber target version, or null when the old resource-pack location must be used
+    /// @throws IOException when the archive cannot be installed
+    public void installPack(
+            Path sourcePackPath,
+            @Nullable GameVersionNumber gameVersionNumber) throws IOException {
+        synchronized (mutationLock) {
+            installPack(sourcePackPath, path, gameVersionNumber);
+            loadFromDirLocked();
+        }
     }
 
+    /// Deletes one pack from disk and removes every snapshot entry with the same stable identifier.
+    ///
+    /// @param packToDelete pack to delete
+    /// @throws IOException when the pack cannot be deleted
     public void deletePack(Pack packToDelete) throws IOException {
-        Path pathToDelete = packToDelete.path;
-        if (Files.isDirectory(pathToDelete))
-            FileUtils.deleteDirectory(pathToDelete);
-        else if (Files.isRegularFile(pathToDelete))
-            Files.delete(pathToDelete);
+        Objects.requireNonNull(packToDelete, "packToDelete");
+        synchronized (mutationLock) {
+            Path pathToDelete = packToDelete.getPath();
+            if (Files.isDirectory(pathToDelete)) {
+                FileUtils.deleteDirectory(pathToDelete);
+            } else if (Files.isRegularFile(pathToDelete)) {
+                Files.delete(pathToDelete);
+            }
 
-        Platform.runLater(() -> packs.removeIf(p -> p.getId().equals(packToDelete.getId())));
+            @Unmodifiable List<Pack> retained = packs.stream()
+                    .filter(pack -> !pack.getId().equals(packToDelete.getId()))
+                    .toList();
+            publishPacksLocked(retained);
+        }
     }
 
+    /// Discovers the managed directory and publishes a complete immutable snapshot on the calling thread.
+    ///
+    /// Failures are logged and leave the previous snapshot unchanged.
     public void loadFromDir() {
+        synchronized (mutationLock) {
+            loadFromDirLocked();
+        }
+    }
+
+    /// Discovers and publishes the managed directory while [#mutationLock] is held.
+    private void loadFromDirLocked() {
+        final @Unmodifiable List<Pack> discoveredPacks;
         try {
-            loadFromDir(path);
+            discoveredPacks = discoverPacks(path);
         } catch (Exception e) {
             LOG.warning("Failed to read datapacks " + path, e);
+            return;
         }
+        publishPacksLocked(discoveredPacks);
     }
 
-    private void loadFromDir(Path dir) throws IOException {
-        List<Pack> discoveredPacks;
-        try (Stream<Path> stream = Files.list(dir)) {
-            discoveredPacks = stream
+    /// Discovers supported packs beneath one directory and returns a sorted immutable snapshot.
+    ///
+    /// @param directory directory to scan
+    /// @return immutable snapshot sorted by stable identifier
+    /// @throws IOException when the directory cannot be listed
+    private @Unmodifiable List<Pack> discoverPacks(Path directory) throws IOException {
+        try (Stream<Path> stream = Files.list(directory)) {
+            return stream
                     .parallel()
                     .map(this::loadSinglePackFromPath)
                     .flatMap(Optional::stream)
                     .sorted(Comparator.comparing(Pack::getId, String.CASE_INSENSITIVE_ORDER))
-                    .collect(Collectors.toList());
+                    .toList();
         }
-        Platform.runLater(() -> this.packs.setAll(discoveredPacks));
     }
 
-    private Optional<Pack> loadSinglePackFromPath(Path path) {
-        if (Files.isDirectory(path)) {
-            return loadSinglePackFromDirectory(path);
-        } else if (Files.isRegularFile(path)) {
-            return loadSinglePackFromZipFile(path);
+    /// Atomically replaces and synchronously publishes the current immutable snapshot.
+    ///
+    /// This method must be called while [#mutationLock] is held so concurrent operations cannot reorder
+    /// publications.
+    ///
+    /// @param discoveredPacks newly discovered or retained packs
+    private void publishPacksLocked(List<? extends Pack> discoveredPacks) {
+        @Unmodifiable List<Pack> previous = packs;
+        @Unmodifiable List<Pack> current = List.copyOf(discoveredPacks);
+        packs = current;
+        packsChangeSupport.fireChange(previous, current);
+    }
+
+    /// Loads one path according to whether it is a directory or regular archive.
+    ///
+    /// @param candidate candidate path
+    /// @return parsed pack, or empty when the path is not a supported pack
+    private Optional<Pack> loadSinglePackFromPath(Path candidate) {
+        if (Files.isDirectory(candidate)) {
+            return loadSinglePackFromDirectory(candidate);
+        }
+        if (Files.isRegularFile(candidate)) {
+            return loadSinglePackFromZipFile(candidate);
         }
         return Optional.empty();
     }
 
-    private Optional<Pack> loadSinglePackFromDirectory(Path path) {
-        Path mcmeta = path.resolve("pack.mcmeta");
-        Path mcmetaDisabled = path.resolve("pack.mcmeta.disabled");
+    /// Loads a directory containing enabled or disabled metadata.
+    ///
+    /// @param candidate candidate directory
+    /// @return parsed pack, or empty when no metadata exists
+    private Optional<Pack> loadSinglePackFromDirectory(Path candidate) {
+        Path mcmeta = candidate.resolve("pack.mcmeta");
+        Path disabledMcmeta = candidate.resolve("pack.mcmeta.disabled");
 
-        if (!Files.exists(mcmeta) && !Files.exists(mcmetaDisabled)) {
+        if (!Files.exists(mcmeta) && !Files.exists(disabledMcmeta)) {
             return Optional.empty();
         }
 
-        Path targetPath = Files.exists(mcmeta) ? mcmeta : mcmetaDisabled;
-        return parsePack(path, true, FileUtils.getNameWithoutExtension(path), targetPath);
+        Path metadataPath = Files.exists(mcmeta) ? mcmeta : disabledMcmeta;
+        return parsePack(
+                candidate,
+                true,
+                FileUtils.getNameWithoutExtension(candidate),
+                metadataPath);
     }
 
-    private Optional<Pack> loadSinglePackFromZipFile(Path path) {
-        try (FileSystem fs = CompressingUtils.createReadOnlyZipFileSystem(path)) {
+    /// Loads a zip archive whose root contains pack metadata.
+    ///
+    /// @param candidate candidate archive
+    /// @return parsed pack, or empty when the archive is unsupported or unreadable
+    private Optional<Pack> loadSinglePackFromZipFile(Path candidate) {
+        try (FileSystem fs = CompressingUtils.createReadOnlyZipFileSystem(candidate)) {
             Path mcmeta = fs.getPath("pack.mcmeta");
 
             if (!Files.exists(mcmeta)) {
                 return Optional.empty();
             }
 
-            String packName = FileUtils.getName(path);
-            if (FileUtils.getExtension(path).equals(DISABLED_EXT)) {
+            String packName = FileUtils.getName(candidate);
+            if (FileUtils.getExtension(candidate).equals(DISABLED_EXT)) {
                 packName = FileUtils.getNameWithoutExtension(packName);
             }
             packName = FileUtils.getNameWithoutExtension(packName);
 
-            return parsePack(path, false, packName, mcmeta);
+            return parsePack(candidate, false, packName, mcmeta);
         } catch (IOException e) {
-            LOG.warning("IO error reading " + path, e);
+            LOG.warning("IO error reading " + candidate, e);
             return Optional.empty();
         }
     }
 
-    private Optional<Pack> parsePack(Path dataPackPath, boolean isDirectory, String name, Path mcmetaPath) {
+    /// Parses one metadata file into a pack model.
+    ///
+    /// @param dataPackPath persistent pack path
+    /// @param directory whether the pack is a directory
+    /// @param name stable display identifier
+    /// @param mcmetaPath metadata path, which may belong to a mounted archive
+    /// @return parsed pack, or empty when metadata is invalid or unreadable
+    private Optional<Pack> parsePack(
+            Path dataPackPath,
+            boolean directory,
+            String name,
+            Path mcmetaPath) {
         try {
-            PackMcMeta mcMeta = JsonUtils.fromNonNullJson(Files.readString(mcmetaPath), PackMcMeta.class);
-            return Optional.of(new Pack(dataPackPath, isDirectory, name, mcMeta.pack().description(), this));
+            PackMcMeta mcMeta = JsonUtils.fromNonNullJson(
+                    Files.readString(mcmetaPath),
+                    PackMcMeta.class);
+            return Optional.of(new Pack(
+                    dataPackPath,
+                    directory,
+                    name,
+                    mcMeta.pack().description(),
+                    this));
         } catch (JsonParseException e) {
             LOG.warning("Invalid pack.mcmeta format in " + dataPackPath, e);
         } catch (IOException e) {
@@ -242,101 +432,181 @@ public class DataPack {
         return Optional.empty();
     }
 
+    /// Toolkit-neutral model for one discovered data pack and its requested active state.
+    @NotNullByDefault
     public static class Pack {
-        private Path path;
-        private final boolean isDirectory;
+        /// Serializes active-state transitions and related file renames.
+        private final Object stateLock = new Object();
+
+        /// Current pack path, updated after a successful archive rename.
+        private volatile Path path;
+
+        /// Whether the pack is represented by a directory rather than an archive.
+        private final boolean directory;
+
+        /// Metadata file for directories or archive file for zip packs; guarded by [#stateLock].
         private Path statusFile;
-        private final BooleanProperty activeProperty;
+
+        /// Requested active state, safely published to readers on any thread.
+        private volatile boolean active;
+
+        /// Publishes requested active-state transitions without exposing a toolkit property.
+        private final ValueChangeSupport<Boolean> activeChangeSupport = new ValueChangeSupport<>(this);
+
+        /// Stable pack identifier.
         private final String id;
+
+        /// Parsed pack description.
         private final LocalAddonFile.Description description;
+
+        /// Manager that discovered and owns this pack snapshot entry.
         private final DataPack parentDataPack;
 
-        public Pack(Path path, boolean isDirectory, String id, LocalAddonFile.Description description, DataPack parentDataPack) {
-            this.path = path;
-            this.isDirectory = isDirectory;
-            this.id = id;
-            this.description = description;
-            this.parentDataPack = parentDataPack;
+        /// Creates one discovered pack model and derives its initial active state from its status path.
+        ///
+        /// @param path persistent pack path
+        /// @param directory whether the pack is represented by a directory
+        /// @param id stable pack identifier
+        /// @param description parsed pack description
+        /// @param parentDataPack owning manager
+        public Pack(
+                Path path,
+                boolean directory,
+                String id,
+                LocalAddonFile.Description description,
+                DataPack parentDataPack) {
+            this.path = Objects.requireNonNull(path, "path");
+            this.directory = directory;
+            this.id = Objects.requireNonNull(id, "id");
+            this.description = Objects.requireNonNull(description, "description");
+            this.parentDataPack = Objects.requireNonNull(parentDataPack, "parentDataPack");
 
-            this.statusFile = initializeStatusFile(path, isDirectory);
-            this.activeProperty = initializeActiveProperty();
+            statusFile = initializeStatusFile(path, directory);
+            active = !FileUtils.getExtension(statusFile).equals(DISABLED_EXT);
         }
 
-        private Path initializeStatusFile(Path path, boolean isDirectory) {
-            if (isDirectory) {
-                Path mcmeta = path.resolve("pack.mcmeta");
-                return Files.exists(mcmeta) ? mcmeta : path.resolve("pack.mcmeta.disabled");
+        /// Chooses the enabled or disabled status path that currently exists.
+        ///
+        /// @param packPath persistent pack path
+        /// @param directory whether the pack is represented by a directory
+        /// @return current metadata or archive status path
+        private static Path initializeStatusFile(Path packPath, boolean directory) {
+            if (directory) {
+                Path mcmeta = packPath.resolve("pack.mcmeta");
+                return Files.exists(mcmeta) ? mcmeta : packPath.resolve("pack.mcmeta.disabled");
             }
-            return path;
+            return packPath;
         }
 
-        private BooleanProperty initializeActiveProperty() {
-            BooleanProperty property = new SimpleBooleanProperty(this, "active", !FileUtils.getExtension(this.statusFile).equals(DISABLED_EXT));
-            property.addListener((obs, wasActive, isNowActive) -> {
-                if (wasActive != isNowActive) {
-                    handleFileRename(isNowActive);
-                }
-            });
-            return property;
-        }
-
-        private void handleFileRename(boolean isNowActive) {
-            Path newStatusFile = calculateNewStatusFilePath(isNowActive);
+        /// Renames the status file to reflect a requested active state while [#stateLock] is held.
+        ///
+        /// Rename failures are logged and leave the last known paths unchanged. The requested active state remains
+        /// changed, matching the existing launcher behavior for file-system failures.
+        ///
+        /// @param nowActive requested active state
+        private void handleFileRenameLocked(boolean nowActive) {
+            Path newStatusFile = calculateNewStatusFilePathLocked(nowActive);
             if (statusFile.equals(newStatusFile)) {
                 return;
             }
             try {
-                Files.move(this.statusFile, newStatusFile);
-                this.statusFile = newStatusFile;
-                if (!this.isDirectory) {
-                    this.path = newStatusFile;
+                Files.move(statusFile, newStatusFile);
+                statusFile = newStatusFile;
+                if (!directory) {
+                    path = newStatusFile;
                 }
             } catch (IOException e) {
-                LOG.warning("Unable to rename file from " + this.statusFile + " to " + newStatusFile, e);
+                LOG.warning("Unable to rename file from " + statusFile + " to " + newStatusFile, e);
             }
         }
 
-        private Path calculateNewStatusFilePath(boolean isActive) {
-            boolean isFileDisabled = DISABLED_EXT.equals(FileUtils.getExtension(this.statusFile));
-            if (isActive && isFileDisabled) {
-                return this.statusFile.getParent().resolve(FileUtils.getNameWithoutExtension(this.statusFile));
-            } else if (!isActive && !isFileDisabled) {
-                return this.statusFile.getParent().resolve(FileUtils.getName(this.statusFile) + "." + DISABLED_EXT);
+        /// Calculates the status path for an active-state transition while [#stateLock] is held.
+        ///
+        /// @param nowActive requested active state
+        /// @return current or renamed status path
+        private Path calculateNewStatusFilePathLocked(boolean nowActive) {
+            boolean fileDisabled = DISABLED_EXT.equals(FileUtils.getExtension(statusFile));
+            if (nowActive && fileDisabled) {
+                return statusFile.resolveSibling(FileUtils.getNameWithoutExtension(statusFile));
             }
-            return this.statusFile;
+            if (!nowActive && !fileDisabled) {
+                return statusFile.resolveSibling(
+                        FileUtils.getName(statusFile) + "." + DISABLED_EXT);
+            }
+            return statusFile;
         }
 
+        /// Returns the stable pack identifier.
+        ///
+        /// @return stable identifier
         public String getId() {
             return id;
         }
 
+        /// Returns the parsed pack description.
+        ///
+        /// @return parsed description
         public LocalAddonFile.Description getDescription() {
             return description;
         }
 
+        /// Returns the manager that discovered this pack.
+        ///
+        /// @return owning manager
         public DataPack getParentDataPack() {
             return parentDataPack;
         }
 
-        public BooleanProperty activeProperty() {
-            return activeProperty;
+        /// Subscribes to requested active-state transitions.
+        ///
+        /// Notifications are synchronous on the thread calling [#setActive(boolean)].
+        ///
+        /// @param listener active-state listener
+        /// @return independently cancellable subscription
+        public Subscription subscribeActive(ValueChangeListener<Boolean> listener) {
+            return activeChangeSupport.subscribe(listener);
         }
 
+        /// Returns the requested active state.
+        ///
+        /// A failed file rename can leave this requested state different from the last known path state.
+        ///
+        /// @return whether the pack is requested to be active
         public boolean isActive() {
-            return activeProperty.get();
+            return active;
         }
 
+        /// Changes the requested active state and attempts the corresponding status-file rename.
+        ///
+        /// Repeated writes of the current requested state have no effect. Successful transitions are published after
+        /// the rename attempt, synchronously on the calling thread.
+        ///
+        /// @param active whether the pack should be active
         public void setActive(boolean active) {
-            this.activeProperty.set(active);
+            synchronized (stateLock) {
+                boolean previous = this.active;
+                if (previous == active) {
+                    return;
+                }
+
+                this.active = active;
+                handleFileRenameLocked(active);
+                activeChangeSupport.fireChange(previous, active);
+            }
         }
 
+        /// Returns the current directory or archive path.
+        ///
+        /// @return current persistent path
         public Path getPath() {
             return path;
         }
 
+        /// Returns whether this pack is represented by a directory.
+        ///
+        /// @return whether this pack is a directory
         public boolean isDirectory() {
-            return isDirectory;
+            return directory;
         }
     }
-
 }

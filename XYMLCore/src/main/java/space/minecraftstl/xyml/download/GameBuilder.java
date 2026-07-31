@@ -17,60 +17,87 @@
  */
 package space.minecraftstl.xyml.download;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.task.Task;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
-/**
- * The builder which provide a task to build Minecraft environment.
- *
- * @author huangyuhui
- */
+/// Builds one Minecraft environment from the requested base game and optional libraries.
+///
+/// Remote library selections retain the exact caller order and are never deduplicated by
+/// [RemoteVersion#equals(Object)], because that legacy equality only compares the version text and
+/// therefore cannot distinguish different loaders that publish the same version string.
+@NotNullByDefault
 public abstract class GameBuilder {
-
+    /// Target instance identifier used for the generated instance directory.
     protected String name = "";
-    protected String gameVersion = "";
-    protected final Map<String, String> toolVersions = new HashMap<>();
-    protected final Set<RemoteVersion> remoteVersions = new HashSet<>();
 
+    /// Selected base Minecraft version identifier.
+    protected String gameVersion = "";
+
+    /// Legacy library versions keyed by their core-library identifier.
+    protected final Map<String, String> toolVersions = new HashMap<>();
+
+    /// Selected remote library installers in the exact caller-supplied order.
+    protected final List<RemoteVersion> remoteVersions = new ArrayList<>();
+
+    /// Returns the target instance identifier.
+    ///
+    /// @return exact target instance identifier
     public String getName() {
         return name;
     }
 
-    /**
-     * The new game version name, for .minecraft/&lt;version name&gt;.
-     *
-     * @param name the name of new game version.
-     */
+    /// Sets the target instance identifier used under `.minecraft/versions`.
+    ///
+    /// @param name identifier of the new game instance
+    /// @return this builder
     public GameBuilder name(String name) {
         this.name = Objects.requireNonNull(name);
         return this;
     }
 
+    /// Sets the selected base Minecraft version identifier.
+    ///
+    /// @param version exact base Minecraft version identifier
+    /// @return this builder
     public GameBuilder gameVersion(String version) {
         this.gameVersion = Objects.requireNonNull(version);
         return this;
     }
 
-    /**
-     * @param id the core library id. i.e. "forge", "liteloader", "optifine"
-     * @param version the version of the core library. For documents, you can first try [VersionList.versions]
-     */
+    /// Sets one legacy core-library version by identifier.
+    ///
+    /// The special `game` identifier updates the base Minecraft version; all other identifiers replace
+    /// the previous value for that one identifier.
+    ///
+    /// @param id core-library identifier, such as `forge`, `liteloader`, or `optifine`
+    /// @param version exact core-library version identifier
+    /// @return this builder
     public GameBuilder version(String id, String version) {
-        if ("game".equals(id))
+        if ("game".equals(id)) {
             gameVersion(version);
-        else
-            toolVersions.put(id, version);
+        } else {
+            toolVersions.put(Objects.requireNonNull(id, "id"), Objects.requireNonNull(version, "version"));
+        }
         return this;
     }
 
+    /// Adds one selected remote library installer without reordering or equality-based deduplication.
+    ///
+    /// @param remoteVersion selected installer metadata
+    /// @return this builder
     public GameBuilder version(RemoteVersion remoteVersion) {
-        remoteVersions.add(remoteVersion);
+        remoteVersions.add(Objects.requireNonNull(remoteVersion, "remoteVersion"));
         return this;
     }
 
-    /**
-     * @return the task that can build the whole Minecraft environment
-     */
+    /// Creates the stopped task that builds and persists the requested Minecraft environment.
+    ///
+    /// @return task that builds the whole Minecraft environment
     public abstract Task<?> buildAsync();
 }

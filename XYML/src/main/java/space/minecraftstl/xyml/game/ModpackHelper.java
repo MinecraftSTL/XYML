@@ -69,9 +69,11 @@ import static space.minecraftstl.xyml.util.Pair.pair;
 /// Utilities for reading, installing, and applying modpack-specific game settings.
 @NotNullByDefault
 public final class ModpackHelper {
+    /// Prevents instantiation of this utility class.
     private ModpackHelper() {
     }
 
+    /// Modpack providers indexed by their persisted type names.
     private static final Map<String, ModpackProvider> providers = mapOf(
             pair(CurseModpackProvider.INSTANCE.getName(), CurseModpackProvider.INSTANCE),
             pair(McbbsModpackProvider.INSTANCE.getName(), McbbsModpackProvider.INSTANCE),
@@ -85,16 +87,31 @@ public final class ModpackHelper {
         MultiMCComponents.setImplementation(Metadata.FULL_TITLE);
     }
 
+    /// Finds the provider registered for a persisted modpack type.
+    ///
+    /// @param type persisted provider type
+    /// @return the matching provider, or `null` when the type is unknown
     @Nullable
     public static ModpackProvider getProviderByType(String type) {
         return providers.get(type);
     }
 
+    /// Returns whether a file suffix identifies a supported archive modpack.
+    ///
+    /// @param file candidate archive path
+    /// @return whether the suffix is supported
     public static boolean isFileModpackByExtension(Path file) {
         String ext = FileUtils.getExtension(file);
         return "zip".equals(ext) || "mrpack".equals(ext);
     }
 
+    /// Reads a supported modpack manifest from an archive.
+    ///
+    /// @param file archive path
+    /// @param charset archive entry-name charset
+    /// @return parsed modpack
+    /// @throws UnsupportedModpackException if no supported manifest or manual game directory is found
+    /// @throws ManuallyCreatedModpackException if the archive contains a manually assembled game directory
     public static Modpack readModpackManifest(Path file, Charset charset) throws UnsupportedModpackException, ManuallyCreatedModpackException {
         try (ZipArchiveReader zipFile = CompressingUtils.openZipFile(file, charset)) {
             // Order for trying detecting manifest is necessary here.
@@ -124,6 +141,13 @@ public final class ModpackHelper {
         throw new UnsupportedModpackException(file.toString());
     }
 
+    /// Locates the Minecraft directory in a manually assembled modpack archive.
+    ///
+    /// @param modpackName name used when reporting an unsupported archive
+    /// @param fs read-only archive file system
+    /// @return the archive directory containing the `versions` directory
+    /// @throws IOException if an archive directory cannot be inspected
+    /// @throws UnsupportedModpackException if no Minecraft directory is found within two levels
     public static Path findMinecraftDirectoryInManuallyCreatedModpack(String modpackName, FileSystem fs) throws IOException, UnsupportedModpackException {
         Path root = fs.getPath("/");
         if (isMinecraftDirectory(root)) return root;
@@ -143,11 +167,20 @@ public final class ModpackHelper {
         throw new UnsupportedModpackException(modpackName);
     }
 
+    /// Returns whether a path has the directory structure of a Minecraft installation.
+    ///
+    /// @param path candidate directory
+    /// @return whether the path contains a `versions` directory and has an accepted root name
     private static boolean isMinecraftDirectory(Path path) {
         return Files.isDirectory(path.resolve("versions")) &&
                 (path.getFileName() == null || ".minecraft".equals(FileUtils.getName(path)));
     }
 
+    /// Reads persisted modpack configuration from JSON.
+    ///
+    /// @param file configuration file
+    /// @return parsed modpack configuration
+    /// @throws IOException if the file cannot be read or contains malformed JSON
     public static ModpackConfiguration<?> readModpackConfiguration(Path file) throws IOException {
         try {
             return JsonUtils.fromJsonFile(file, ModpackConfiguration.class);
@@ -156,12 +189,19 @@ public final class ModpackHelper {
         }
     }
 
+    /// Creates a task that installs a remote server modpack and updates repository state afterward.
+    ///
+    /// @param repository destination game repository
+    /// @param manifest remote server manifest
+    /// @param name destination instance name
+    /// @param modpack modpack metadata retained for API symmetry with archive installs
+    /// @return configured installation task
     public static Task<?> getInstallTask(XYMLGameRepository repository, ServerModpackManifest manifest, String name, Modpack modpack) {
-        repository.markVersionAsModpack(name);
+        repository.markInstanceAsModpack(name);
 
         ExceptionalRunnable<?> success = () -> {
-            repository.refreshVersions();
-            GameSettings.Instance setting = repository.getInstanceGameSettingsOrCreate(name);
+            repository.refreshInstances();
+            @Nullable GameSettings.Instance setting = repository.getInstanceGameSettingsOrCreate(name);
             repository.undoMark(name);
             if (setting != null) {
                 setting.getOverrideProperties().add(GameSettings.PROPERTY_RUNNING_DIRECTORY);
@@ -177,20 +217,31 @@ public final class ModpackHelper {
 
         return new ServerModpackRemoteInstallTask(repository.getDependency(), manifest, name)
                 .whenComplete(Schedulers.defaultScheduler(), success, failure)
-                .withStagesHints(new Task.StagesHint("hmcl.modpack"), new Task.StagesHint("hmcl.modpack.download", List.of("hmcl.install.assets", "hmcl.install.libraries")));
+                .withStagesHints(new Task.StagesHint("xyml.modpack"), new Task.StagesHint("xyml.modpack.download", List.of("xyml.install.assets", "xyml.install.libraries")));
     }
 
+    /// Returns whether an external game directory already uses an instance name.
+    ///
+    /// @param name candidate instance name
+    /// @return whether the name conflicts
     public static boolean isExternalGameNameConflicts(String name) {
         return Files.exists(Paths.get("externalgames").resolve(name));
     }
 
+    /// Creates a task that installs a manually assembled archive as a local game directory.
+    ///
+    /// @param zipFile archive path
+    /// @param name destination instance name
+    /// @param charset archive entry-name charset
+    /// @return configured installation task
+    /// @throws IllegalArgumentException if the destination name already exists
     public static Task<?> getInstallManuallyCreatedModpackTask(Path zipFile, String name, Charset charset) {
         if (isExternalGameNameConflicts(name)) {
             throw new IllegalArgumentException("name existing");
         }
 
         return new ManuallyCreatedModpackInstallTask(zipFile, charset, name)
-                .thenAcceptAsync(Schedulers.javafx(), location -> {
+                .thenAcceptAsync(Schedulers.ui(), location -> {
                     GameDirectory newGameDirectory = new GameDirectory(
                             GameDirectoryManager.newGameDirectoryId(),
                             LocalizedText.plain(name),
@@ -200,12 +251,20 @@ public final class ModpackHelper {
                 });
     }
 
+    /// Creates a task that installs an archive modpack and applies provider-specific settings.
+    ///
+    /// @param repository destination game repository
+    /// @param zipFile archive path
+    /// @param name destination instance name
+    /// @param modpack parsed modpack
+    /// @param iconUrl instance icon URL
+    /// @return configured installation task
     public static Task<?> getInstallTask(XYMLGameRepository repository, Path zipFile, String name, Modpack modpack, String iconUrl) {
-        repository.markVersionAsModpack(name);
+        repository.markInstanceAsModpack(name);
 
         ExceptionalRunnable<?> success = () -> {
-            repository.refreshVersions();
-            GameSettings.Instance setting = repository.getInstanceGameSettingsOrCreate(name);
+            repository.refreshInstances();
+            @Nullable GameSettings.Instance setting = repository.getInstanceGameSettingsOrCreate(name);
             repository.undoMark(name);
             if (setting != null) {
                 setting.getOverrideProperties().add(GameSettings.PROPERTY_RUNNING_DIRECTORY);
@@ -223,44 +282,71 @@ public final class ModpackHelper {
             return modpack.getInstallTask(repository.getDependency(), zipFile, name, iconUrl)
                     .whenComplete(Schedulers.defaultScheduler(), success, failure)
                     .thenComposeAsync(createMultiMCPostInstallTask(repository, (MultiMCInstanceConfiguration) modpack.getManifest(), name))
-                    .withStagesHints(new Task.StagesHint("hmcl.modpack"), new Task.StagesHint("hmcl.modpack.download", List.of("hmcl.install.assets", "hmcl.install.libraries")));
+                    .withStagesHints(new Task.StagesHint("xyml.modpack"), new Task.StagesHint("xyml.modpack.download", List.of("xyml.install.assets", "xyml.install.libraries")));
         else if (modpack.getManifest() instanceof McbbsModpackManifest)
             return modpack.getInstallTask(repository.getDependency(), zipFile, name, iconUrl)
                     .whenComplete(Schedulers.defaultScheduler(), success, failure)
                     .thenComposeAsync(createMcbbsPostInstallTask(repository, (McbbsModpackManifest) modpack.getManifest(), name))
-                    .withStagesHints(new Task.StagesHint("hmcl.modpack"), new Task.StagesHint("hmcl.modpack.download", List.of("hmcl.install.assets", "hmcl.install.libraries")));
+                    .withStagesHints(new Task.StagesHint("xyml.modpack"), new Task.StagesHint("xyml.modpack.download", List.of("xyml.install.assets", "xyml.install.libraries")));
         else
             return modpack.getInstallTask(repository.getDependency(), zipFile, name, iconUrl)
-                    .whenComplete(Schedulers.javafx(), success, failure)
-                    .withStagesHints(new Task.StagesHint("hmcl.modpack"), new Task.StagesHint("hmcl.modpack.download", List.of("hmcl.install.assets", "hmcl.install.libraries")));
+                    .whenComplete(Schedulers.ui(), success, failure)
+                    .withStagesHints(new Task.StagesHint("xyml.modpack"), new Task.StagesHint("xyml.modpack.download", List.of("xyml.install.assets", "xyml.install.libraries")));
     }
 
-    public static Task<Void> getUpdateTask(XYMLGameRepository repository, ServerModpackManifest manifest, Charset charset, String name, ModpackConfiguration<?> configuration) throws UnsupportedModpackException {
+    /// Creates a task that updates an installed remote server modpack.
+    ///
+    /// @param repository destination game repository
+    /// @param manifest current remote server manifest
+    /// @param name installed instance name
+    /// @param configuration persisted modpack configuration
+    /// @return configured update task
+    /// @throws UnsupportedModpackException if the persisted provider type cannot be updated
+    public static Task<Void> getUpdateTask(
+            XYMLGameRepository repository,
+            ServerModpackManifest manifest,
+            String name,
+            ModpackConfiguration<?> configuration) throws UnsupportedModpackException {
         switch (configuration.getType()) {
             case ServerModpackRemoteInstallTask.MODPACK_TYPE:
                 return new ModpackUpdateTask(repository, name, new ServerModpackRemoteInstallTask(repository.getDependency(), manifest, name))
-                        .thenComposeAsync(repository.refreshVersionsAsync())
-                        .withStagesHints(new Task.StagesHint("hmcl.modpack"), new Task.StagesHint("hmcl.modpack.download", List.of("hmcl.install.assets", "hmcl.install.libraries")));
+                        .thenComposeAsync(repository.refreshInstancesAsync())
+                        .withStagesHints(new Task.StagesHint("xyml.modpack"), new Task.StagesHint("xyml.modpack.download", List.of("xyml.install.assets", "xyml.install.libraries")));
             default:
                 throw new UnsupportedModpackException();
         }
     }
 
+    /// Creates a task that updates an installed modpack from a local archive.
+    ///
+    /// @param repository destination game repository
+    /// @param zipFile update archive path
+    /// @param charset archive entry-name charset
+    /// @param name installed instance name
+    /// @param configuration persisted modpack configuration
+    /// @return configured update task
+    /// @throws UnsupportedModpackException if the provider type is unsupported
+    /// @throws ManuallyCreatedModpackException if the update is a manually assembled archive
+    /// @throws MismatchedModpackTypeException if the archive provider differs from the installed modpack
     public static Task<?> getUpdateTask(XYMLGameRepository repository, Path zipFile, Charset charset, String name, ModpackConfiguration<?> configuration) throws UnsupportedModpackException, ManuallyCreatedModpackException, MismatchedModpackTypeException {
         Modpack modpack = ModpackHelper.readModpackManifest(zipFile, charset);
-        ModpackProvider provider = getProviderByType(configuration.getType());
+        @Nullable ModpackProvider provider = getProviderByType(configuration.getType());
         if (provider == null) {
             throw new UnsupportedModpackException();
         }
         if (modpack.getManifest() instanceof MultiMCInstanceConfiguration)
             return provider.createUpdateTask(repository.getDependency(), name, zipFile, modpack)
                     .thenComposeAsync(() -> createMultiMCPostUpdateTask(repository, (MultiMCInstanceConfiguration) modpack.getManifest(), name))
-                    .thenComposeAsync(repository.refreshVersionsAsync());
+                    .thenComposeAsync(repository.refreshInstancesAsync());
         else
             return provider.createUpdateTask(repository.getDependency(), name, zipFile, modpack)
-                    .thenComposeAsync(repository.refreshVersionsAsync());
+                    .thenComposeAsync(repository.refreshInstancesAsync());
     }
 
+    /// Applies MultiMC launch overrides to instance-specific launcher settings.
+    ///
+    /// @param c MultiMC instance configuration
+    /// @param setting mutable destination settings
     public static void toGameSettings(MultiMCInstanceConfiguration c, GameSettings.Instance setting) {
         setting.getOverrideProperties().add(GameSettings.PROPERTY_RUNNING_DIRECTORY);
 
@@ -317,6 +403,10 @@ public final class ModpackHelper {
         }
     }
 
+    /// Applies MultiMC command and JVM argument overrides after an update.
+    ///
+    /// @param c MultiMC instance configuration
+    /// @param setting mutable destination settings
     private static void applyCommandAndJvmSettings(MultiMCInstanceConfiguration c, GameSettings.Instance setting) {
         if (c.isOverrideCommands()) {
             setting.getOverrideProperties().addAll(List.of(
@@ -333,25 +423,43 @@ public final class ModpackHelper {
         }
     }
 
-    private static Task<Void> createMultiMCPostUpdateTask(XYMLGameRepository repository, MultiMCInstanceConfiguration manifest, String version) {
-        return Task.runAsync(Schedulers.javafx(), () -> {
-            GameSettings.Instance setting = Objects.requireNonNull(repository.getInstanceGameSettingsOrCreate(version));
+    /// Creates the post-update task that reapplies mutable MultiMC launch settings.
+    ///
+    /// @param repository destination game repository
+    /// @param manifest MultiMC instance configuration
+    /// @param instance installed instance ID
+    /// @return post-update task
+    private static Task<Void> createMultiMCPostUpdateTask(XYMLGameRepository repository, MultiMCInstanceConfiguration manifest, String instance) {
+        return Task.runAsync(Schedulers.ui(), () -> {
+            GameSettings.Instance setting = Objects.requireNonNull(repository.getInstanceGameSettingsOrCreate(instance));
             ModpackHelper.applyCommandAndJvmSettings(manifest, setting);
         });
     }
 
-    private static Task<Void> createMultiMCPostInstallTask(XYMLGameRepository repository, MultiMCInstanceConfiguration manifest, String version) {
-        return Task.runAsync(Schedulers.javafx(), () -> {
-            GameSettings.Instance setting = Objects.requireNonNull(repository.getInstanceGameSettingsOrCreate(version));
+    /// Creates the post-install task that imports all supported MultiMC settings.
+    ///
+    /// @param repository destination game repository
+    /// @param manifest MultiMC instance configuration
+    /// @param instance installed instance ID
+    /// @return post-install task
+    private static Task<Void> createMultiMCPostInstallTask(XYMLGameRepository repository, MultiMCInstanceConfiguration manifest, String instance) {
+        return Task.runAsync(Schedulers.ui(), () -> {
+            GameSettings.Instance setting = Objects.requireNonNull(repository.getInstanceGameSettingsOrCreate(instance));
             ModpackHelper.toGameSettings(manifest, setting);
         });
     }
 
-    private static Task<Void> createMcbbsPostInstallTask(XYMLGameRepository repository, McbbsModpackManifest manifest, String version) {
-        return Task.runAsync(Schedulers.javafx(), () -> {
-            GameSettings.Effective effective = repository.getEffectiveGameSettings(version);
+    /// Creates the post-install task that enforces an MCBBS manifest's minimum memory.
+    ///
+    /// @param repository destination game repository
+    /// @param manifest MCBBS manifest
+    /// @param instance installed instance ID
+    /// @return post-install task
+    private static Task<Void> createMcbbsPostInstallTask(XYMLGameRepository repository, McbbsModpackManifest manifest, String instance) {
+        return Task.runAsync(Schedulers.ui(), () -> {
+            GameSettings.Effective effective = repository.getEffectiveGameSettings(instance);
             if (manifest.getLaunchInfo().getMinMemory() > effective.getMaxMemory()) {
-                GameSettings.Instance setting = Objects.requireNonNull(repository.getInstanceGameSettingsOrCreate(version));
+                GameSettings.Instance setting = Objects.requireNonNull(repository.getInstanceGameSettingsOrCreate(instance));
                 setting.getOverrideProperties().addAll(List.of(
                         GameSettings.PROPERTY_AUTO_MEMORY,
                         GameSettings.PROPERTY_MIN_MEMORY,

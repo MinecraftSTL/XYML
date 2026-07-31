@@ -51,7 +51,7 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 public class DefaultGameRepository implements GameRepository {
 
     private Path baseDirectory;
-    protected Map<String, Version> versions;
+    protected Map<String, Version> instances;
     private final ConcurrentHashMap<Path, Optional<String>> gameVersions = new ConcurrentHashMap<>();
 
     public DefaultGameRepository(Path baseDirectory) {
@@ -68,24 +68,25 @@ public class DefaultGameRepository implements GameRepository {
 
     @Override
     public boolean hasVersion(String id) {
-        return id != null && versions != null && versions.containsKey(id);
+        return id != null && instances != null && instances.containsKey(id);
     }
 
     @Override
     public Version getVersion(String id) {
         if (!hasVersion(id))
-            throw new VersionNotFoundException("Version '" + id + "' does not exist in " + (versions == null ? "[]" : versions.keySet()) + ".");
-        return versions.get(id);
+            throw new VersionNotFoundException("Version manifest '" + id + "' does not exist in installed instances "
+                    + (instances == null ? "[]" : instances.keySet()) + ".");
+        return instances.get(id);
     }
 
     @Override
-    public int getVersionCount() {
-        return versions == null ? 0 : versions.size();
+    public int getInstanceCount() {
+        return instances == null ? 0 : instances.size();
     }
 
     @Override
-    public Collection<Version> getVersions() {
-        return versions == null ? Collections.emptySet() : versions.values();
+    public Collection<Version> getInstances() {
+        return instances == null ? Collections.emptySet() : instances.values();
     }
 
     @Override
@@ -183,8 +184,8 @@ public class DefaultGameRepository implements GameRepository {
     }
 
     @Override
-    public boolean renameVersion(String from, String to) {
-        if (EventBus.EVENT_BUS.fireEvent(new RenameVersionEvent(this, from, to)) == Event.Result.DENY)
+    public boolean renameInstance(String from, String to) {
+        if (EventBus.EVENT_BUS.fireEvent(new RenameInstanceEvent(this, from, to)) == Event.Result.DENY)
             return false;
 
         try {
@@ -216,7 +217,7 @@ public class DefaultGameRepository implements GameRepository {
             JsonUtils.writeToJsonFile(toJson, fromVersion.setId(to));
 
             // fix inheritsFrom of versions that inherits from version [from].
-            for (Version version : getVersions()) {
+            for (Version version : getInstances()) {
                 if (from.equals(version.getInheritsFrom())) {
                     Path targetPath = getVersionJson(version.getId());
                     Files.createDirectories(targetPath.getParent());
@@ -230,10 +231,10 @@ public class DefaultGameRepository implements GameRepository {
         }
     }
 
-    public boolean removeVersionFromDisk(String id) {
-        if (EventBus.EVENT_BUS.fireEvent(new RemoveVersionEvent(this, id)) == Event.Result.DENY)
+    public boolean removeInstanceFromDisk(String id) {
+        if (EventBus.EVENT_BUS.fireEvent(new RemoveInstanceEvent(this, id)) == Event.Result.DENY)
             return false;
-        if (versions == null || !versions.containsKey(id))
+        if (instances == null || !instances.containsKey(id))
             return FileUtils.deleteDirectoryQuietly(getVersionRoot(id));
         Path file = getVersionRoot(id);
         if (Files.notExists(file))
@@ -248,13 +249,13 @@ public class DefaultGameRepository implements GameRepository {
         }
 
         try {
-            versions.remove(id);
+            instances.remove(id);
 
             if (FileUtils.moveToTrash(removedFile)) {
                 return true;
             }
 
-            // remove json files first to ensure HMCL will not recognize this folder as a valid version.
+            // Remove JSON files first to ensure XYML will not recognize this folder as a valid game version.
 
             for (Path path : FileUtils.listFilesByExtension(removedFile, "json")) {
                 try {
@@ -268,20 +269,20 @@ public class DefaultGameRepository implements GameRepository {
             try {
                 FileUtils.deleteDirectory(removedFile);
             } catch (IOException e) {
-                LOG.warning("Unable to remove version folder: " + file, e);
+                LOG.warning("Unable to remove instance folder: " + file, e);
             }
             return true;
         } finally {
-            refreshVersionsAsync().start();
+            refreshInstancesAsync().start();
         }
     }
 
-    protected void refreshVersionsImpl() {
-        Map<String, Version> versions = new TreeMap<>();
+    protected void refreshInstancesImpl() {
+        Map<String, Version> instances = new TreeMap<>();
 
         if (ClassicVersion.hasClassicVersion(getBaseDirectory())) {
             Version version = new ClassicVersion();
-            versions.put(version.getId(), version);
+            instances.put(version.getId(), version);
         }
 
         SimpleVersionProvider provider = new SimpleVersionProvider();
@@ -381,24 +382,24 @@ public class DefaultGameRepository implements GameRepository {
                 Version resolved = version.resolve(provider);
 
                 if (resolved.appliesToCurrentEnvironment() &&
-                        EventBus.EVENT_BUS.fireEvent(new LoadedOneVersionEvent(this, resolved)) != Event.Result.DENY)
-                    versions.put(version.getId(), version);
+                        EventBus.EVENT_BUS.fireEvent(new LoadedOneInstanceEvent(this, resolved)) != Event.Result.DENY)
+                    instances.put(version.getId(), version);
             } catch (VersionNotFoundException e) {
                 LOG.warning("Ignoring version " + version.getId() + " because it inherits from a nonexistent version.");
             }
         }
 
         this.gameVersions.clear();
-        this.versions = versions;
+        this.instances = instances;
     }
 
     @Override
-    public void refreshVersions() {
-        if (EventBus.EVENT_BUS.fireEvent(new RefreshingVersionsEvent(this)) == Event.Result.DENY)
+    public void refreshInstances() {
+        if (EventBus.EVENT_BUS.fireEvent(new RefreshingInstancesEvent(this)) == Event.Result.DENY)
             return;
 
-        refreshVersionsImpl();
-        EventBus.EVENT_BUS.fireEvent(new RefreshedVersionsEvent(this));
+        refreshInstancesImpl();
+        EventBus.EVENT_BUS.fireEvent(new RefreshedInstancesEvent(this));
     }
 
     @Override
@@ -511,35 +512,45 @@ public class DefaultGameRepository implements GameRepository {
     }
 
     public boolean isLoaded() {
-        return versions != null;
+        return instances != null;
     }
 
-    public Path getModpackConfiguration(String version) {
-        return getVersionRoot(version).resolve("modpack.json");
+    /// Returns the modpack configuration path for an installed instance.
+    ///
+    /// @param instanceId target installed instance identifier
+    /// @return path to the instance's `modpack.json`
+    public Path getModpackConfiguration(String instanceId) {
+        return getVersionRoot(instanceId).resolve("modpack.json");
     }
 
-    /**
-     * read modpack configuration for a version.
-     *
-     * @param version version installed as modpack
-     * @return modpack configuration object, or null if this version is not a modpack.
-     * @throws VersionNotFoundException if version does not exist.
-     * @throws IOException              if an i/o error occurs.
-     */
+    /// Reads the modpack configuration for an installed instance.
+    ///
+    /// @param instanceId target installed instance identifier
+    /// @return modpack configuration object, or `null` if the instance is not a modpack
+    /// @throws VersionNotFoundException if the instance does not exist
+    /// @throws IOException if an I/O error occurs
     @Nullable
-    public ModpackConfiguration<?> readModpackConfiguration(String version) throws IOException, VersionNotFoundException {
-        if (!hasVersion(version)) throw new VersionNotFoundException(version);
-        Path file = getModpackConfiguration(version);
+    public ModpackConfiguration<?> readModpackConfiguration(String instanceId) throws IOException, VersionNotFoundException {
+        if (!hasVersion(instanceId)) throw new VersionNotFoundException(instanceId);
+        Path file = getModpackConfiguration(instanceId);
         if (Files.notExists(file)) return null;
         return JsonUtils.fromJsonFile(file, ModpackConfiguration.class);
     }
 
-    public boolean isModpack(String version) {
-        return Files.exists(getModpackConfiguration(version));
+    /// Returns whether an installed instance has modpack configuration metadata.
+    ///
+    /// @param instanceId target installed instance identifier
+    /// @return whether the instance contains `modpack.json`
+    public boolean isModpack(String instanceId) {
+        return Files.exists(getModpackConfiguration(instanceId));
     }
 
-    public ModManager getModManager(String version) {
-        return new ModManager(this, version);
+    /// Creates a mod manager scoped to one installed instance.
+    ///
+    /// @param instanceId target installed instance identifier
+    /// @return mod manager bound to the instance
+    public ModManager getModManager(String instanceId) {
+        return new ModManager(this, instanceId);
     }
 
     public Path getSavesDirectory(String id) {
@@ -557,7 +568,7 @@ public class DefaultGameRepository implements GameRepository {
     @Override
     public String toString() {
         return new ToStringBuilder(this)
-                .append("versions", versions == null ? null : versions.keySet())
+                .append("instances", instances == null ? null : instances.keySet())
                 .append("baseDirectory", baseDirectory)
                 .toString();
     }

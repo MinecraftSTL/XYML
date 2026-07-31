@@ -25,68 +25,51 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Locale;
-import java.util.Objects;
 
-/// Background source contributed by a theme-pack appearance.
-///
-/// The sealed implementations describe where the wallpaper comes from. Rendering
-/// parameters such as opacity are stored by [ThemeBackgroundSettings].
+/// Toolkit-neutral background source contributed by a theme appearance.
 @NotNullByDefault
-public sealed interface ThemeBackground
-        permits ThemeBackground.Default, ThemeBackground.Builtin, ThemeBackground.Image,
-        ThemeBackground.Paint, ThemeBackground.ThemeColor {
-    /// JSON member name for the background type.
+public sealed interface ThemeBackground permits ThemeBackground.Default, ThemeBackground.Builtin,
+        ThemeBackground.Image, ThemeBackground.Paint, ThemeBackground.ThemeColorFill {
+    /// JSON member naming the source kind.
     String FIELD_TYPE = "type";
 
-    /// JSON member name for the built-in wallpaper ID.
+    /// JSON member naming a built-in wallpaper.
     String FIELD_ID = "id";
 
-    /// JSON member name for the local theme-pack image path.
+    /// JSON member naming a theme-pack image asset.
     String FIELD_PATH = "path";
 
-    /// JSON member name for a serialized paint value.
+    /// JSON member containing a toolkit-neutral CSS-compatible paint string.
     String FIELD_PAINT = "paint";
 
-    /// Adds this background source's concrete fields to a JSON object.
+    /// Adds concrete source members to one JSON object.
     ///
-    /// @param object the target JSON object
+    /// @param object target object
     void addToJsonObject(JsonObject object);
 
-    /// Converts this background source to its JSON representation.
+    /// Converts this source to JSON.
     ///
-    /// @return the JSON object representing this background source
+    /// @return source object
     default JsonObject toJsonObject() {
         JsonObject object = new JsonObject();
         addToJsonObject(object);
         return object;
     }
 
-    /// Parses a background source from a JSON object.
+    /// Parses a historical source object.
     ///
-    /// @param object the JSON object
-    /// @return the parsed background source, or `null` when no source field is present
-    /// @throws JsonParseException if a known field is malformed
+    /// @param object source object
+    /// @return parsed source, or `null` when only inherited settings are present
+    /// @throws JsonParseException when known source members are malformed
     static @Nullable ThemeBackground fromJson(JsonObject object) throws JsonParseException {
-        Objects.requireNonNull(object);
-
         @Nullable String type = readString(object, FIELD_TYPE);
         @Nullable String id = readString(object, FIELD_ID);
         @Nullable String path = readString(object, FIELD_PATH);
         @Nullable String paint = readString(object, FIELD_PAINT);
-
         if (type == null) {
-            int sourceFields = 0;
-            if (id != null) {
-                sourceFields++;
-            }
-            if (path != null) {
-                sourceFields++;
-            }
-            if (paint != null) {
-                sourceFields++;
-            }
-            if (sourceFields > 1) {
-                throw new JsonParseException("Theme background without type must contain only one source field");
+            int count = (id == null ? 0 : 1) + (path == null ? 0 : 1) + (paint == null ? 0 : 1);
+            if (count > 1) {
+                throw new JsonParseException("Theme background without type has multiple sources");
             }
             if (id != null) {
                 return new Builtin(id);
@@ -94,23 +77,19 @@ public sealed interface ThemeBackground
             if (path != null) {
                 return new Image(path);
             }
-            if (paint != null) {
-                return new Paint(paint);
-            }
-            return null;
+            return paint != null ? new Paint(paint) : null;
         }
-
-        return switch (type.trim().replace('-', '_').toUpperCase(Locale.ROOT)) {
-            case "DEFAULT" -> new Default();
-            case "BUILTIN" -> new Builtin(id);
-            case "IMAGE" -> new Image(path);
-            case "PAINT" -> new Paint(paint);
-            case "THEME_COLOR" -> new ThemeColor();
+        return switch (type.trim().replace('-', '_').toLowerCase(Locale.ROOT)) {
+            case "default" -> new Default();
+            case "builtin" -> new Builtin(id);
+            case "image" -> new Image(path);
+            case "paint" -> new Paint(paint);
+            case "theme_color" -> new ThemeColorFill();
             default -> throw new JsonParseException("Unsupported theme background type: " + type);
         };
     }
 
-    /// Reads an optional string field.
+    /// Reads one optional string field.
     private static @Nullable String readString(JsonObject object, String field) {
         JsonElement element = object.get(field);
         if (element == null) {
@@ -122,49 +101,42 @@ public sealed interface ThemeBackground
         return primitive.getAsString();
     }
 
-    /// Returns a required non-blank string value.
+    /// Validates one required string field.
     private static String requireNonBlank(@Nullable String value, String field) {
-        if (value == null) {
-            throw new JsonParseException("Theme background field is missing: " + field);
+        if (value == null || value.isBlank()) {
+            throw new JsonParseException("Theme background field is missing or blank: " + field);
         }
-        String trimmed = value.trim();
-        if (trimmed.isEmpty()) {
-            throw new JsonParseException("Theme background field is blank: " + field);
-        }
-        return trimmed;
+        return value.trim();
     }
 
-    /// A source that delegates to HMCL's launcher default background resolution.
+    /// Source delegating to launcher-default background selection.
     @NotNullByDefault
     record Default() implements ThemeBackground {
-        /// Adds this source to a JSON object.
+        /// Adds this source to JSON.
         @Override
         public void addToJsonObject(JsonObject object) {
             object.addProperty(FIELD_TYPE, "default");
         }
-
     }
 
-    /// A source that uses a launcher built-in wallpaper.
+    /// Source selecting a bundled wallpaper.
     ///
-    /// @param id the built-in wallpaper ID, or `null` for the fallback built-in wallpaper
+    /// @param id wallpaper identifier, or `null` for the fallback wallpaper
     @NotNullByDefault
     record Builtin(@Nullable String id) implements ThemeBackground {
-        /// Creates a source that uses the fallback built-in wallpaper.
+        /// Creates a fallback built-in source.
         public Builtin() {
             this(null);
         }
 
-        /// Creates a built-in wallpaper source.
-        ///
-        /// @param id the built-in wallpaper ID, or `null` for the fallback built-in wallpaper
+        /// Validates the optional identifier.
         public Builtin {
             if (id != null) {
                 id = requireNonBlank(id, FIELD_ID);
             }
         }
 
-        /// Adds this source to a JSON object.
+        /// Adds this source to JSON.
         @Override
         public void addToJsonObject(JsonObject object) {
             object.addProperty(FIELD_TYPE, "builtin");
@@ -172,59 +144,54 @@ public sealed interface ThemeBackground
                 object.addProperty(FIELD_ID, id);
             }
         }
-
     }
 
-    /// A source that uses an image stored inside the theme pack.
+    /// Source selecting an image inside the same theme pack.
     ///
-    /// @param path the theme-pack relative image path
+    /// @param path normalized asset entry name
     @NotNullByDefault
     record Image(String path) implements ThemeBackground {
-        /// Creates an image background source.
-        ///
-        /// @param path the theme-pack relative image path
+        /// Validates and normalizes the image path.
         public Image {
-            path = requireNonBlank(path, FIELD_PATH);
+            path = ThemePackAsset.normalizeEntryName(requireNonBlank(path, FIELD_PATH));
         }
 
-        /// Adds this source to a JSON object.
+        /// Adds this source to JSON.
         @Override
         public void addToJsonObject(JsonObject object) {
             object.addProperty(FIELD_TYPE, "image");
             object.addProperty(FIELD_PATH, path);
         }
-
     }
 
-    /// A source that uses a JavaFX paint string.
+    /// Source carrying a CSS-compatible paint expression for later toolkit adaptation.
     ///
-    /// @param paint the serialized paint value
+    /// @param paint serialized paint expression
     @NotNullByDefault
     record Paint(String paint) implements ThemeBackground {
-        /// Creates a paint background source.
-        ///
-        /// @param paint the serialized paint value
+        /// Validates the paint expression without interpreting it.
         public Paint {
             paint = requireNonBlank(paint, FIELD_PAINT);
+            if (paint.length() > 4_096) {
+                throw new IllegalArgumentException("Theme paint value is too long");
+            }
         }
 
-        /// Adds this source to a JSON object.
+        /// Adds this source to JSON.
         @Override
         public void addToJsonObject(JsonObject object) {
             object.addProperty(FIELD_TYPE, "paint");
             object.addProperty(FIELD_PAINT, paint);
         }
-
     }
 
-    /// A source that follows the current launcher theme color.
+    /// Source following the active theme surface color.
     @NotNullByDefault
-    record ThemeColor() implements ThemeBackground {
-        /// Adds this source to a JSON object.
+    record ThemeColorFill() implements ThemeBackground {
+        /// Adds this source to JSON.
         @Override
         public void addToJsonObject(JsonObject object) {
             object.addProperty(FIELD_TYPE, "theme_color");
         }
-
     }
 }

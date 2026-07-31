@@ -17,137 +17,100 @@
  */
 package space.minecraftstl.xyml.theme;
 
-import com.google.gson.*;
-import com.google.gson.annotations.JsonAdapter;
-import space.minecraftstl.xyml.util.gson.JsonSerializable;
-import space.minecraftstl.xyml.util.i18n.I18n;
-import space.minecraftstl.xyml.util.i18n.LocalizedText;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonPrimitive;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.util.i18n.I18n;
+import space.minecraftstl.xyml.util.i18n.LocalizedText;
 
-import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
-import static space.minecraftstl.xyml.util.logging.Logger.LOG;
-
-/// Author metadata declared by a theme pack.
+/// Localized author metadata declared by a theme pack or individual theme.
 ///
-/// @param name the localized author display name
+/// @param name localized author name
 @NotNullByDefault
-@JsonSerializable
-@JsonAdapter(ThemePackAuthor.Adapter.class)
 public record ThemePackAuthor(LocalizedText name) {
+    /// Maximum authors retained from one manifest location.
+    private static final int MAXIMUM_AUTHOR_COUNT = 64;
 
-    /// Parses author metadata from a JSON array.
-    static @Unmodifiable List<ThemePackAuthor> parseAuthors(@Nullable JsonElement element) throws JsonParseException {
+    /// Validates non-empty author text.
+    public ThemePackAuthor {
+        Objects.requireNonNull(name, "name");
+        if (name.mayBeEmpty()) {
+            throw new IllegalArgumentException("Theme-pack author name cannot be empty");
+        }
+    }
+
+    /// Parses a bounded author array, ignoring individual malformed optional entries.
+    ///
+    /// @param element authors value
+    /// @return immutable authors
+    static @Unmodifiable List<ThemePackAuthor> parseAuthors(@Nullable JsonElement element) {
         if (element == null || element.isJsonNull()) {
             return List.of();
         }
-
-        if (!(element instanceof JsonArray jsonArray)) {
-            throw new JsonParseException("Theme-pack authors must be an array");
+        if (!(element instanceof JsonArray array) || array.size() > MAXIMUM_AUTHOR_COUNT) {
+            return List.of();
         }
-
-        ArrayList<ThemePackAuthor> authors = new ArrayList<>(jsonArray.size());
-        int index = 0;
-        for (JsonElement authorJson : jsonArray) {
+        List<ThemePackAuthor> authors = new ArrayList<>(array.size());
+        for (JsonElement author : array) {
             try {
-                ThemePackAuthor author = fromJson(authorJson);
-                if (author != null) {
-                    authors.add(author);
-                }
-            } catch (JsonParseException | IllegalArgumentException e) {
-                LOG.warning("Ignored invalid theme-pack author at authors[" + index + "]: " + authorJson, e);
+                authors.add(fromJson(author));
+            } catch (JsonParseException | IllegalArgumentException ignored) {
+                // Optional malformed author metadata does not invalidate the complete pack.
             }
-            index++;
         }
-
         return List.copyOf(authors);
     }
 
-    /// Converts author metadata to a JSON array.
-    static JsonArray toJson(List<ThemePackAuthor> authors) {
-        JsonArray array = new JsonArray();
-        for (ThemePackAuthor author : authors) {
-            array.add(author.toJsonObject());
-        }
-        return array;
-    }
-
-    /// Parses author metadata from a JSON object or a plain string.
+    /// Parses a plain author string or object with a name field.
     ///
-    /// @param json the author metadata JSON
-    /// @return the parsed author metadata, or `null` when `json` is `null`
-    /// @throws JsonParseException if `json` is neither an object nor a string author name
-    public static @Nullable ThemePackAuthor fromJson(@Nullable JsonElement json) throws JsonParseException {
-        if (json == null || json instanceof JsonNull)
-            return null;
-
-        if (json instanceof JsonPrimitive primitive && primitive.isString()) {
-            try {
-                return new ThemePackAuthor(LocalizedText.plain(primitive.getAsString()));
-            } catch (IllegalArgumentException e) {
-                throw new JsonParseException(e);
-            }
+    /// @param element author value
+    /// @return parsed author
+    public static ThemePackAuthor fromJson(JsonElement element) {
+        if (element instanceof JsonPrimitive primitive && primitive.isString()) {
+            return new ThemePackAuthor(LocalizedText.plain(primitive.getAsString()));
         }
-
-        if (!(json instanceof JsonObject jsonObject)) {
-            throw new JsonParseException("Theme-pack author must be an object or a string");
+        if (!(element instanceof JsonObject object)) {
+            throw new JsonParseException("Theme-pack author must be a string or object");
         }
-
-        JsonElement nameJson = jsonObject.get("name");
-        if (nameJson == null) {
-            throw new JsonParseException("Missing author name: " + json);
-        }
-
-        LocalizedText name = LocalizedText.fromJson(nameJson);
+        LocalizedText name = LocalizedText.fromJson(object.get("name"));
         if (name == null) {
-            throw new JsonParseException("The author name is null");
+            throw new JsonParseException("Theme-pack author is missing name");
         }
-
-        try {
-            return new ThemePackAuthor(name);
-        } catch (IllegalArgumentException e) {
-            throw new JsonParseException(e);
-        }
+        return new ThemePackAuthor(name);
     }
 
-    /// Creates theme-pack author metadata.
+    /// Returns the localized author name.
     ///
-    /// @param name the localized author display name
-    public ThemePackAuthor {
-        if (name.mayBeEmpty()) {
-            throw new IllegalArgumentException("The author name cannot be empty");
-        }
-    }
-
-    /// Returns the author display name in the current locale.
-    ///
-    /// @return the localized author display name
+    /// @return display name
     public String displayName() {
         return name.getText(I18n.getLocale().getCandidateLocales());
     }
 
-    /// Converts this author to its JSON representation.
+    /// Converts this author to JSON.
     ///
-    /// @return the JSON object representing this author
+    /// @return author object
     public JsonObject toJsonObject() {
         JsonObject object = new JsonObject();
         object.add("name", name.toJsonElement());
         return object;
     }
 
-    static final class Adapter implements JsonSerializer<@Nullable ThemePackAuthor>, JsonDeserializer<@Nullable ThemePackAuthor> {
-        @Override
-        public @Nullable ThemePackAuthor deserialize(@Nullable JsonElement json, Type typeOfT, JsonDeserializationContext context) throws JsonParseException {
-            return ThemePackAuthor.fromJson(json);
-        }
-
-        @Override
-        public JsonElement serialize(@Nullable ThemePackAuthor src, Type typeOfSrc, JsonSerializationContext context) {
-            return src != null ? src.toJsonObject() : JsonNull.INSTANCE;
-        }
+    /// Converts an author list to JSON.
+    ///
+    /// @param authors authors to encode
+    /// @return author array
+    static JsonArray toJson(@Unmodifiable List<ThemePackAuthor> authors) {
+        JsonArray array = new JsonArray();
+        authors.forEach(author -> array.add(author.toJsonObject()));
+        return array;
     }
 }

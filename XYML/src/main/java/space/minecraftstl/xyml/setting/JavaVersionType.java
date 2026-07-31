@@ -19,7 +19,7 @@ package space.minecraftstl.xyml.setting;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Selects how HMCL resolves the Java runtime used to launch a game.
+/// Selects how XYML resolves the Java runtime used to launch a game.
 ///
 /// Additional payload for these modes is stored in `GameSettings`:
 /// - [VERSION] uses `customJavaVersion` as the user-entered Java version selector.
@@ -35,7 +35,7 @@ public enum JavaVersionType {
     /// Selects an installed Java runtime by major version.
     VERSION,
 
-    /// Selects one runtime from the Java runtimes detected by HMCL.
+    /// Selects one runtime from the Java runtimes detected by XYML.
     DETECTED,
 
     /// Uses a user-provided Java executable path.

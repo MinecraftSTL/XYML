@@ -17,26 +17,33 @@
  */
 package space.minecraftstl.xyml.task;
 
-import javafx.application.Platform;
-import space.minecraftstl.xyml.util.Lang;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.util.Lang;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.function.Function;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// @author huangyuhui
+@NotNullByDefault
 public final class Schedulers {
-
+    /// Prevents instantiation of this scheduler registry.
     private Schedulers() {
     }
 
+    /// Reflective virtual-thread executor factory, or null on Java versions below 21.
     private static final @Nullable Function<String, ExecutorService> NEW_VIRTUAL_THREAD_PER_TASK_EXECUTOR;
 
+    /// Application UI executor installed by the active presentation toolkit.
+    private static volatile Executor uiExecutor = Runnable::run;
+
+    /// Initializes the optional virtual-thread executor factory without linking Java 17 to newer APIs.
     static {
         if (Runtime.version().feature() >= 21) {
             try {
@@ -68,8 +75,11 @@ public final class Schedulers {
         }
     }
 
-    /// @return Returns null if the Java version is below 21, otherwise always returns a non-null value.
-    public static ExecutorService newVirtualThreadPerTaskExecutor(String name) {
+    /// Creates a virtual-thread-per-task executor when supported.
+    ///
+    /// @param name worker thread name prefix
+    /// @return executor, or null on Java versions below 21
+    public static @Nullable ExecutorService newVirtualThreadPerTaskExecutor(String name) {
         if (NEW_VIRTUAL_THREAD_PER_TASK_EXECUTOR == null) {
             return null;
         }
@@ -86,8 +96,21 @@ public final class Schedulers {
         return Holder.IO_EXECUTOR;
     }
 
-    public static Executor javafx() {
-        return Platform::runLater;
+    /// Installs the executor used for presentation-thread continuations.
+    ///
+    /// Swing production startup installs the EDT dispatcher. Calls made before toolkit startup execute directly,
+    /// which keeps headless tasks usable.
+    ///
+    /// @param executor presentation-thread executor
+    public static void installUiExecutor(Executor executor) {
+        uiExecutor = Objects.requireNonNull(executor, "executor");
+    }
+
+    /// Returns the executor for presentation-thread continuations.
+    ///
+    /// @return currently installed UI executor
+    public static Executor ui() {
+        return uiExecutor;
     }
 
     /// Default thread pool, equivalent to [ForkJoinPool#commonPool()].
@@ -97,6 +120,7 @@ public final class Schedulers {
         return ForkJoinPool.commonPool();
     }
 
+    /// Logs scheduler shutdown; shared daemon and common-pool executors require no blocking termination.
     public static void shutdown() {
         LOG.info("Shutting down executor services.");
 
@@ -105,12 +129,16 @@ public final class Schedulers {
         // Sometimes it resolves the problem that the app does not exit.
     }
 
+    /// Lazily initializes the process-wide I/O executor.
+    @NotNullByDefault
     private static final class Holder {
+        /// Shared I/O executor backed by virtual threads when the running JDK supports them.
         private static final ExecutorService IO_EXECUTOR;
 
+        /// Selects the runtime-appropriate I/O executor implementation.
         static {
             //noinspection resource
-            ExecutorService vtExecutor = newVirtualThreadPerTaskExecutor("IO");
+            @Nullable ExecutorService vtExecutor = newVirtualThreadPerTaskExecutor("IO");
             IO_EXECUTOR = vtExecutor != null
                     ? vtExecutor
                     : Executors.newCachedThreadPool(Lang.counterThreadFactory("IO", true));

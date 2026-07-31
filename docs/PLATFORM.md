@@ -28,7 +28,7 @@
         <br>
         🕰️ <a href="https://github.com/HMCL-dev/HMCL/releases?q=3.6">HMCL 3.6</a> (Windows Vista)
         <br>
-        🕰️ <a href="https://github.com/HMCL-dev/HMCL/releases?q=3.6">HMCL 3.6</a> (Windows Server 2003 ~ 2008) 
+        🕰️ <a href="https://github.com/HMCL-dev/HMCL/releases?q=3.6">HMCL 3.6</a> (Windows Server 2003 ~ 2008)
       </td>
       <td>✅️ Fully supported</td>
       <td>✅️ Fully supported</td>
@@ -92,26 +92,26 @@ Legend:
 
 * ✅️ Fully supported
 
-  Platforms that are fully supported. HMCL will provide support for these platforms as much as possible.
+  Platforms that are fully supported. XYML will provide support for these platforms as much as possible.
 
 * 🕰️ Limited support
 
   These platforms are usually legacy platforms.
 
-  HMCL can work on these platforms, but some features may not be available.
+  XYML can work on these platforms, but some features may not be available.
 
   We may drop some features for these platforms to reduce maintenance costs.
 
 * 🕰️ HMCL 3.6 (Limited support)
 
-  The main branch of HMCL no longer supports these platforms.
+  The main branch of XYML no longer supports these platforms.
 
   We continue to provide security patches and bug fixes for these platforms through the HMCL 3.6 LTS branch,
   but no feature updates will be available.
 
 * / (Not supported)
 
-  HMCL does not support these platforms yet. We may support them in the future.
+  XYML does not support these platforms yet. We may support them in the future.
 
 ## Game Compatibility
 
@@ -139,18 +139,18 @@ Legend:
 
 * 👌: Supported platforms.
 
-  Support is provided by HMCL, tested to work, but may have more problems than a fully supported platform.  
-  Support for versions below Minecraft 1.6 is not guaranteed.  
-  If you encounter a problem that does not exist on fully supported platforms, you can report it to HMCL.
+  Support is provided by XYML, tested to work, but may have more problems than a fully supported platform.
+  Support for versions below Minecraft 1.6 is not guaranteed.
+  If you encounter a problem that does not exist on fully supported platforms, you can report it to XYML.
 
 * ❔: Low-level supported platforms.
 
-  HMCL can run on this platform and has some basic support. However, launching the game directly is not yet available.  
+  XYML can run on this platform and has some basic support. However, launching the game directly is not yet available.
   If you want to start the game, you will need to get the native libraries needed by Minecraft in another way and specify the native path in the instance settings.
 
 * `/`: Not applicable.
 
-  We have no plans to support these platforms at this time, mainly because we do not have the equipment to test them.  
+  We have no plans to support these platforms at this time, mainly because we do not have the equipment to test them.
   If you can help us adapt, please file a support request via GitHub Issue.
 
 ## Terracotta Compatibility

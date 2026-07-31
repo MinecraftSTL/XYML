@@ -22,9 +22,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 /// Controls whether a remote launcher background image may be stored in the local cache.
 @NotNullByDefault
 public enum NetworkBackgroundImageCachePolicy {
-    /// Allows HMCL to cache the image file locally.
+    /// Allows XYML to cache the image file locally.
     ENABLED,
 
-    /// Forces HMCL to load the image directly without storing it in the file cache.
+    /// Forces XYML to load the image directly without storing it in the file cache.
     DISABLED
 }

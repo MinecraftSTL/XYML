@@ -19,7 +19,8 @@ package space.minecraftstl.xyml.auth.offline;
 
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
-import javafx.beans.binding.ObjectBinding;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.glavo.uuid.UUIDs;
 import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.auth.AccountID;
@@ -28,16 +29,12 @@ import space.minecraftstl.xyml.auth.AuthenticationException;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorArtifactInfo;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorArtifactProvider;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorDownloadException;
-import space.minecraftstl.xyml.auth.yggdrasil.Texture;
-import space.minecraftstl.xyml.auth.yggdrasil.TextureType;
 import space.minecraftstl.xyml.game.Arguments;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.ToStringBuilder;
 
 import java.io.IOException;
-import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -45,23 +42,40 @@ import java.util.concurrent.ExecutionException;
 
 import static java.util.Objects.requireNonNull;
 
-/**
- *
- * @author huang
- */
+/// Offline Minecraft account with optional authlib-injector skin delivery.
+///
+/// The base login remains offline. A non-default skin additionally starts a loopback Yggdrasil
+/// service for daemon launches and supplies authlib-injector as a Java agent.
+@NotNullByDefault
 public class OfflineAccount extends Account {
 
+    /// Provider used to locate the bundled or cached authlib-injector artifact.
     private final AuthlibInjectorArtifactProvider downloader;
+
+    /// Minecraft profile name exposed to the launched game.
     private final String profileName;
+
+    /// Stable Minecraft profile identifier exposed to the launched game.
     private final UUID profileID;
+
+    /// Optional custom skin configuration.
+    @Nullable
     private Skin skin;
 
+    /// Creates an offline account.
+    ///
+    /// @param accountID persistent launcher account identifier
+    /// @param downloader authlib-injector artifact provider
+    /// @param profileName nonblank Minecraft profile name
+    /// @param profileID Minecraft profile identifier
+    /// @param skin optional custom skin configuration
+    /// @throws IllegalArgumentException when the profile name is blank
     protected OfflineAccount(
             AccountID accountID,
             AuthlibInjectorArtifactProvider downloader,
             String profileName,
             UUID profileID,
-            Skin skin) {
+            @Nullable Skin skin) {
         super(accountID);
         this.downloader = requireNonNull(downloader);
         this.profileName = requireNonNull(profileName);
@@ -73,38 +87,67 @@ public class OfflineAccount extends Account {
         }
     }
 
+    /// Returns the authlib-injector artifact provider used by this account.
+    ///
+    /// @return artifact provider
     public AuthlibInjectorArtifactProvider getDownloader() {
         return downloader;
     }
 
+    /// Returns the Minecraft profile identifier.
+    ///
+    /// @return profile UUID
     @Override
     public UUID getProfileID() {
         return profileID;
     }
 
+    /// Returns the Minecraft profile name.
+    ///
+    /// @return profile name
     @Override
     public String getProfileName() {
         return profileName;
     }
 
-    public Skin getSkin() {
+    /// Returns the optional custom skin configuration.
+    ///
+    /// @return skin configuration, or null when the launcher default is used
+    public @Nullable Skin getSkin() {
         return skin;
     }
 
-    public void setSkin(Skin skin) {
+    /// Replaces the skin configuration and invalidates cached account authentication state.
+    ///
+    /// @param skin new skin configuration, or null to use the launcher default
+    public void setSkin(@Nullable Skin skin) {
         this.skin = skin;
         invalidate();
     }
 
-    protected boolean loadAuthlibInjector(Skin skin) {
+    /// Determines whether the selected skin requires authlib-injector at launch.
+    ///
+    /// @param skin selected skin configuration, or null
+    /// @return whether a non-default skin must be served to the game
+    protected boolean loadAuthlibInjector(@Nullable Skin skin) {
         return skin != null && skin.type() != Skin.Type.DEFAULT;
     }
 
+    /// Creates a random-token offline authentication result without skin delivery.
+    ///
+    /// @return offline authentication result
+    /// @throws AuthenticationException retained for the account authentication contract
     public AuthInfo logInWithoutSkin() throws AuthenticationException {
-        // Using "legacy" user type here because "mojang" user type may cause "invalid session token" or "disconnected" when connecting to a game server.
+        // The MSA user type avoids invalid-session failures on servers that reject Mojang sessions.
         return new AuthInfo(profileName, profileID, UUIDs.toCompactString(UUID.randomUUID()), AuthInfo.USER_TYPE_MSA, "{}");
     }
 
+    /// Authenticates offline and prepares authlib-injector support for non-default skins.
+    ///
+    /// Artifact lookup runs asynchronously but this method waits for it before returning.
+    ///
+    /// @return authentication result, optionally enhanced with skin launch arguments
+    /// @throws AuthenticationException when artifact lookup or result construction fails
     @Override
     public AuthInfo logIn() throws AuthenticationException {
         AuthInfo authInfo = logInWithoutSkin();
@@ -142,18 +185,33 @@ public class OfflineAccount extends Account {
         }
     }
 
+    /// Authentication result that serves one account skin through a loopback Yggdrasil endpoint.
+    @NotNullByDefault
     private class OfflineAuthInfo extends AuthInfo {
+        /// Authlib-injector Java-agent artifact used by the launched game.
         private final AuthlibInjectorArtifactInfo artifact;
+
+        /// Loopback skin service, or null before daemon launch arguments are requested.
+        @Nullable
         private YggdrasilServer server;
 
+        /// Wraps base offline authentication with authlib-injector launch support.
+        ///
+        /// @param authInfo base offline authentication result
+        /// @param artifact authlib-injector Java-agent artifact
         public OfflineAuthInfo(AuthInfo authInfo, AuthlibInjectorArtifactInfo artifact) {
             super(authInfo.getUsername(), authInfo.getUUID(), authInfo.getAccessToken(), USER_TYPE_MSA, authInfo.getUserProperties());
 
             this.artifact = artifact;
         }
 
+        /// Starts the loopback skin service and returns daemon-only Java-agent arguments.
+        ///
+        /// @param options effective launch options
+        /// @return Java-agent arguments, or null for a non-daemon launch
+        /// @throws IOException when the loopback service cannot start or initialize
         @Override
-        public Arguments getLaunchArguments(LaunchOptions options) throws IOException {
+        public @Nullable Arguments getLaunchArguments(LaunchOptions options) throws IOException {
             if (!options.isDaemon()) return null;
 
             server = new YggdrasilServer(0);
@@ -174,6 +232,9 @@ public class OfflineAccount extends Account {
             );
         }
 
+        /// Closes base authentication resources and stops the loopback skin service if started.
+        ///
+        /// @throws Exception when base cleanup or server shutdown fails
         @Override
         public void close() throws Exception {
             super.close();
@@ -183,11 +244,18 @@ public class OfflineAccount extends Account {
         }
     }
 
+    /// Reuses normal offline authentication when the launcher enters offline play mode.
+    ///
+    /// @return offline authentication result
+    /// @throws AuthenticationException when authentication setup fails
     @Override
     public AuthInfo playOffline() throws AuthenticationException {
         return logIn();
     }
 
+    /// Persists profile identity and optional skin configuration into account metadata.
+    ///
+    /// @param metadata destination account metadata
     @Override
     public void writeMetadata(JsonObject metadata) {
         super.writeMetadata(metadata);
@@ -202,11 +270,9 @@ public class OfflineAccount extends Account {
         }
     }
 
-    @Override
-    public ObjectBinding<Optional<Map<TextureType, Texture>>> getTextures() {
-        return super.getTextures();
-    }
-
+    /// Formats the persistent account and profile identity for diagnostics.
+    ///
+    /// @return diagnostic account representation
     @Override
     public String toString() {
         return new ToStringBuilder(this)

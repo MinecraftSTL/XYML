@@ -1,6 +1,6 @@
 /*
  * Hello Minecraft! Launcher
- * Copyright (C) 2025 huangyuhui <huanghongxun2008@126.com> and contributors
+ * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,174 +20,91 @@ package space.minecraftstl.xyml.theme;
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
-import javafx.beans.InvalidationListener;
-import javafx.beans.Observable;
-import javafx.beans.WeakListener;
-import javafx.beans.property.Property;
-import javafx.scene.control.ColorPicker;
-import javafx.scene.paint.Color;
-import space.minecraftstl.xyml.util.gson.JsonSerializable;
-import org.jetbrains.annotations.Contract;
-import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.util.gson.JsonSerializable;
 
 import java.io.IOException;
-import java.lang.ref.WeakReference;
 import java.util.List;
-import java.util.Objects;
+import java.util.Locale;
 
-/// @author Glavo
+/// Toolkit-neutral theme color specification used by persisted appearance settings and resolved themes.
+///
+/// The Swing theme manager consumes its own design tokens; this value carries the serialized color name or
+/// hexadecimal specification without loading a presentation-toolkit color object.
+///
+/// @param name canonical serialized name
+/// @param color canonical hexadecimal color value
 @JsonAdapter(ThemeColor.TypeAdapter.class)
 @JsonSerializable
-public record ThemeColor(@NotNull String name, @NotNull Color color) {
+@NotNullByDefault
+public record ThemeColor(String name, String color) {
+    /// Default launcher color.
+    public static final ThemeColor DEFAULT = new ThemeColor("blue", "#5C6BC0");
 
-    public static final ThemeColor DEFAULT = new ThemeColor("blue", Color.web("#5C6BC0"));
-
-    public static final List<ThemeColor> STANDARD_COLORS = List.of(
+    /// Built-in named color specifications accepted by current settings.
+    public static final @Unmodifiable List<ThemeColor> STANDARD_COLORS = List.of(
             DEFAULT,
-            new ThemeColor("darker_blue", Color.web("#283593")),
-            new ThemeColor("green", Color.web("#43A047")),
-            new ThemeColor("orange", Color.web("#E67E22")),
-            new ThemeColor("purple", Color.web("#9C27B0")),
-            new ThemeColor("red", Color.web("#B71C1C"))
-    );
+            new ThemeColor("darker_blue", "#283593"),
+            new ThemeColor("green", "#43A047"),
+            new ThemeColor("orange", "#E67E22"),
+            new ThemeColor("purple", "#9C27B0"),
+            new ThemeColor("red", "#B71C1C"));
 
-    public static String getColorDisplayName(Color c) {
-        return c != null ? String.format("#%02X%02X%02X",
-                Math.round(c.getRed() * 255.0D),
-                Math.round(c.getGreen() * 255.0D),
-                Math.round(c.getBlue() * 255.0D))
-                : null;
+    /// Creates a validated color specification.
+    public ThemeColor {
+        if (name.isBlank() || color.isBlank()) {
+            throw new IllegalArgumentException("Theme color fields must not be blank");
+        }
     }
 
-    public static String getColorDisplayNameWithOpacity(Color c, double opacity) {
-        return c != null ? String.format("#%02X%02X%02X%02X",
-                Math.round(c.getRed() * 255.0D),
-                Math.round(c.getGreen() * 255.0D),
-                Math.round(c.getBlue() * 255.0D),
-                Math.round(opacity * 255.0))
-                : null;
-    }
-
-    public static @Nullable ThemeColor of(String name) {
-        if (name == null)
+    /// Parses a named or hexadecimal color specification.
+    ///
+    /// @param value serialized value
+    /// @return parsed color, or null when malformed
+    public static @Nullable ThemeColor of(@Nullable String value) {
+        if (value == null || value.isBlank()) {
             return null;
-
-        if (!name.startsWith("#")) {
+        }
+        String normalized = value.trim();
+        if (!normalized.startsWith("#")) {
             for (ThemeColor color : STANDARD_COLORS) {
-                if (name.equalsIgnoreCase(color.name()))
+                if (normalized.equalsIgnoreCase(color.name())) {
                     return color;
-            }
-        }
-
-        try {
-            return new ThemeColor(name, Color.web(name));
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
-    }
-
-    @Contract("null -> null; !null -> !null")
-    public static ThemeColor of(Color color) {
-        return color != null ? new ThemeColor(getColorDisplayName(color), color) : null;
-    }
-
-    private static final class BidirectionalBinding implements InvalidationListener, WeakListener {
-        private final WeakReference<ColorPicker> colorPickerRef;
-        private final WeakReference<Property<ThemeColor>> propertyRef;
-        private final int hashCode;
-
-        private boolean updating = false;
-
-        private BidirectionalBinding(ColorPicker colorPicker, Property<ThemeColor> property) {
-            this.colorPickerRef = new WeakReference<>(colorPicker);
-            this.propertyRef = new WeakReference<>(property);
-            this.hashCode = System.identityHashCode(colorPicker) ^ System.identityHashCode(property);
-        }
-
-        @Override
-        public void invalidated(Observable sourceProperty) {
-            if (!updating) {
-                final ColorPicker colorPicker = colorPickerRef.get();
-                final Property<ThemeColor> property = propertyRef.get();
-
-                if (colorPicker == null || property == null) {
-                    if (colorPicker != null) {
-                        colorPicker.valueProperty().removeListener(this);
-                    }
-
-                    if (property != null) {
-                        property.removeListener(this);
-                    }
-                } else {
-                    updating = true;
-                    try {
-                        if (property == sourceProperty) {
-                            ThemeColor newValue = property.getValue();
-                            colorPicker.setValue(newValue != null ? newValue.color() : null);
-                        } else {
-                            Color newValue = colorPicker.getValue();
-                            property.setValue(newValue != null ? ThemeColor.of(newValue) : null);
-                        }
-                    } finally {
-                        updating = false;
-                    }
                 }
             }
+            return null;
         }
-
-        @Override
-        public boolean wasGarbageCollected() {
-            return colorPickerRef.get() == null || propertyRef.get() == null;
+        if (!normalized.matches("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")) {
+            return null;
         }
-
-        @Override
-        public int hashCode() {
-            return hashCode;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o)
-                return true;
-            if (!(o instanceof BidirectionalBinding that))
-                return false;
-
-            final ColorPicker colorPicker = this.colorPickerRef.get();
-            final Property<ThemeColor> property = this.propertyRef.get();
-
-            final ColorPicker thatColorPicker = that.colorPickerRef.get();
-            final Property<?> thatProperty = that.propertyRef.get();
-
-            if (colorPicker == null || property == null || thatColorPicker == null || thatProperty == null)
-                return false;
-
-            return colorPicker == thatColorPicker && property == thatProperty;
-        }
+        return new ThemeColor(normalized.toUpperCase(Locale.ROOT), normalized.toUpperCase(Locale.ROOT));
     }
 
-    public static void bindBidirectional(ColorPicker colorPicker, Property<ThemeColor> property) {
-        var binding = new BidirectionalBinding(colorPicker, property);
-
-        colorPicker.valueProperty().removeListener(binding);
-        property.removeListener(binding);
-
-        ThemeColor themeColor = property.getValue();
-        colorPicker.setValue(themeColor != null ? themeColor.color() : null);
-
-        colorPicker.valueProperty().addListener(binding);
-        property.addListener(binding);
+    /// Returns a canonical display value for a serialized color.
+    public static @Nullable String getColorDisplayName(@Nullable String value) {
+        @Nullable ThemeColor color = of(value);
+        return color == null ? null : color.color();
     }
 
+    /// Gson adapter using the current compact string representation.
+    @NotNullByDefault
     static final class TypeAdapter extends com.google.gson.TypeAdapter<ThemeColor> {
+        /// Writes one color value.
         @Override
-        public void write(JsonWriter out, ThemeColor value) throws IOException {
-            out.value(value.name());
+        public void write(JsonWriter out, @Nullable ThemeColor value) throws IOException {
+            if (value == null) {
+                out.nullValue();
+            } else {
+                out.value(value.name());
+            }
         }
 
+        /// Reads one color value.
         @Override
-        public ThemeColor read(JsonReader in) throws IOException {
-            return Objects.requireNonNullElse(of(in.nextString()), ThemeColor.DEFAULT);
+        public @Nullable ThemeColor read(JsonReader in) throws IOException {
+            return of(in.nextString());
         }
     }
 }

@@ -18,12 +18,6 @@
 package space.minecraftstl.xyml.setting;
 
 import com.google.gson.JsonObject;
-import javafx.beans.InvalidationListener;
-import javafx.beans.Observable;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
-import javafx.collections.ListChangeListener;
-import javafx.collections.ObservableList;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.auth.*;
 import space.minecraftstl.xyml.auth.authlibinjector.*;
@@ -34,49 +28,69 @@ import space.minecraftstl.xyml.auth.offline.OfflineAccount;
 import space.minecraftstl.xyml.auth.offline.OfflineAccountFactory;
 import space.minecraftstl.xyml.auth.yggdrasil.RemoteAuthenticationException;
 import space.minecraftstl.xyml.game.OAuthServer;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.collection.ObservableArrayList;
+import space.minecraftstl.xyml.observable.collection.ObservableList;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.JarUtils;
 import space.minecraftstl.xyml.util.skin.InvalidSkinException;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import javax.net.ssl.SSLException;
 import java.io.IOException;
+import java.net.URL;
 import java.nio.file.Paths;
 import java.util.*;
 
 import static java.util.stream.Collectors.toList;
-import static javafx.collections.FXCollections.observableArrayList;
 import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 import static space.minecraftstl.xyml.setting.SettingsManager.getAccountMetadataRecords;
 import static space.minecraftstl.xyml.setting.SettingsManager.getAuthlibInjectorServers;
 import static space.minecraftstl.xyml.setting.SettingsManager.getUserAccountMetadataRecords;
 import static space.minecraftstl.xyml.setting.SettingsManager.userSettings;
-import static space.minecraftstl.xyml.ui.FXUtils.onInvalidating;
 import static space.minecraftstl.xyml.util.Lang.immutableListOf;
 import static space.minecraftstl.xyml.util.Lang.mapOf;
 import static space.minecraftstl.xyml.util.Pair.pair;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * @author huangyuhui
- */
+/// Owns launcher account factories, persisted account state, and account-related error localization.
+///
+/// @author huangyuhui
+@NotNullByDefault
 public final class Accounts {
+    /// Prevents instantiation.
     private Accounts() {
     }
 
+    /// Supplies the bundled authlib-injector artifact to account factories.
     private static final AuthlibInjectorArtifactProvider AUTHLIB_INJECTOR_DOWNLOADER = createAuthlibInjectorArtifactProvider();
 
+    /// Receives Microsoft OAuth callbacks on the local callback server.
     public static final OAuthServer.Factory OAUTH_CALLBACK = new OAuthServer.Factory();
 
+    /// Creates offline accounts.
     public static final OfflineAccountFactory FACTORY_OFFLINE = new OfflineAccountFactory(AUTHLIB_INJECTOR_DOWNLOADER);
-    public static final AuthlibInjectorAccountFactory FACTORY_AUTHLIB_INJECTOR = new AuthlibInjectorAccountFactory(AUTHLIB_INJECTOR_DOWNLOADER, Accounts::getOrCreateAuthlibInjectorServer);
-    public static final MicrosoftAccountFactory FACTORY_MICROSOFT = new MicrosoftAccountFactory(new MicrosoftService(OAUTH_CALLBACK));
-    public static final List<AccountFactory<?>> FACTORIES = immutableListOf(FACTORY_OFFLINE, FACTORY_MICROSOFT, FACTORY_AUTHLIB_INJECTOR);
 
-    // ==== login type / account factory mapping ====
+    /// Creates authlib-injector accounts against configured authentication servers.
+    public static final AuthlibInjectorAccountFactory FACTORY_AUTHLIB_INJECTOR = new AuthlibInjectorAccountFactory(AUTHLIB_INJECTOR_DOWNLOADER, Accounts::getOrCreateAuthlibInjectorServer);
+
+    /// Creates Microsoft accounts through the local OAuth callback server.
+    public static final MicrosoftAccountFactory FACTORY_MICROSOFT = new MicrosoftAccountFactory(new MicrosoftService(OAUTH_CALLBACK));
+
+    /// Immutable account factories in launcher display order.
+    public static final @Unmodifiable List<AccountFactory<?>> FACTORIES =
+            immutableListOf(FACTORY_OFFLINE, FACTORY_MICROSOFT, FACTORY_AUTHLIB_INJECTOR);
+
+    /// Login-type identifiers indexed to their storage factories.
     private static final Map<String, AccountFactory<?>> type2factory = new HashMap<>();
+
+    /// Storage login-type identifiers indexed by their factories.
     private static final Map<AccountFactory<?>, String> factory2type = new HashMap<>();
 
     static {
@@ -87,8 +101,13 @@ public final class Accounts {
         type2factory.forEach((type, factory) -> factory2type.put(factory, type));
     }
 
+    /// Returns the persisted login-type identifier for an account factory.
+    ///
+    /// @param factory factory to identify
+    /// @return persisted login-type identifier
+    /// @throws IllegalArgumentException if the factory is not recognized
     public static String getLoginType(AccountFactory<?> factory) {
-        String type = factory2type.get(factory);
+        @Nullable String type = factory2type.get(factory);
         if (type != null) return type;
 
         if (factory instanceof BoundAuthlibInjectorAccountFactory) {
@@ -98,16 +117,30 @@ public final class Accounts {
         throw new IllegalArgumentException("Unrecognized account factory");
     }
 
+    /// Returns the account factory registered for a persisted login-type identifier.
+    ///
+    /// @param loginType persisted login-type identifier
+    /// @return registered account factory
+    /// @throws IllegalArgumentException if the identifier is not recognized
     public static AccountFactory<?> getAccountFactory(String loginType) {
         return Optional.ofNullable(type2factory.get(loginType))
                 .orElseThrow(() -> new IllegalArgumentException("Unrecognized login type"));
     }
 
+    /// Creates a factory bound to one authlib-injector server.
+    ///
+    /// @param server authentication server to bind
+    /// @return bound account factory
     public static BoundAuthlibInjectorAccountFactory getAccountFactoryByAuthlibInjectorServer(AuthlibInjectorServer server) {
         return new BoundAuthlibInjectorAccountFactory(AUTHLIB_INJECTOR_DOWNLOADER, server);
     }
     // ====
 
+    /// Returns the storage factory matching an instantiated account type.
+    ///
+    /// @param account account to inspect
+    /// @return matching account factory
+    /// @throws IllegalArgumentException if the account implementation is not recognized
     public static AccountFactory<?> getAccountFactory(Account account) {
         if (account instanceof OfflineAccount)
             return FACTORY_OFFLINE;
@@ -119,14 +152,25 @@ public final class Accounts {
             throw new IllegalArgumentException("Failed to determine account type: " + account);
     }
 
-    private static final ObservableList<Account> accounts = observableArrayList(account -> new Observable[]{account});
-    private static final ObjectProperty<Account> selectedAccount = new SimpleObjectProperty<>(Accounts.class, "selectedAccount");
+    /// Toolkit-neutral account state used by all new consumers.
+    private static final ObservableArrayList<Account> accountValues = new ObservableArrayList<>(
+            account -> List.of(account.changes()));
 
-    /**
-     * True if {@link #init()} hasn't been called.
-     */
+    /// Toolkit-neutral selected-account property used by all consumers.
+    private static final SimpleObjectProperty<@Nullable Account> selectedAccountValue = new SimpleObjectProperty<>(
+                    Accounts.class,
+                    "selectedAccount");
+
+    /// True if [#init()] has not been called.
     private static boolean initialized = false;
 
+    /// One-shot subscription that enables offline accounts after the first Microsoft account is added.
+    private static @Nullable Subscription offlineAccountSubscription;
+
+    /// Serializes public metadata and private credentials for one account.
+    ///
+    /// @param account account to serialize
+    /// @return separated account data
     private static SerializedAccount serializeAccount(Account account) {
         JsonObject metadata = new JsonObject();
         metadata.addProperty("type", getLoginType(getAccountFactory(account)));
@@ -134,27 +178,6 @@ public final class Accounts {
         JsonObject privateData = new JsonObject();
         account.writePrivateData(privateData);
         return new SerializedAccount(metadata, privateData);
-    }
-
-    /// Ensures account IDs are unique across local and shared account metadata records before accounts are instantiated.
-    private static AccountIDNormalization ensureUniqueAccountIDs() {
-        Set<String> usedAccountIDs = new HashSet<>();
-        boolean localChanged = LegacyConfigMigrator.assignAccountIDs(
-                SettingsManager.gameAccounts(),
-                usedAccountIDs,
-                false);
-        boolean sharedChanged = LegacyConfigMigrator.assignAccountIDs(
-                SettingsManager.userGameAccounts(),
-                usedAccountIDs,
-                true);
-        return new AccountIDNormalization(localChanged, sharedChanged);
-    }
-
-    /// Result of normalizing account IDs across loaded metadata stores.
-    ///
-    /// @param localChanged whether the per-workspace account metadata changed
-    /// @param sharedChanged whether the shared account metadata changed
-    private record AccountIDNormalization(boolean localChanged, boolean sharedChanged) {
     }
 
     /// Returns account IDs from metadata records.
@@ -182,6 +205,7 @@ public final class Accounts {
         }
     }
 
+    /// Rebuilds persisted account records after an initialized account-list change.
     private static void updateAccountMetadataRecords() {
         // don't update the underlying account records before data loading is completed
         // otherwise it might cause data loss
@@ -192,7 +216,7 @@ public final class Accounts {
         ArrayList<JsonObject> portableMetadata = new ArrayList<>();
         LinkedHashMap<AccountID, JsonObject> portablePrivateData = new LinkedHashMap<>();
 
-        for (Account account : accounts) {
+        for (Account account : accountValues) {
             SerializedAccount serialized = serializeAccount(account);
             if (account.isPortable()) {
                 portableMetadata.add(serialized.metadata());
@@ -222,16 +246,25 @@ public final class Accounts {
     }
 
     /// Returns whether the files containing the given account are read-only.
+    ///
+    /// @param account account whose backing files are inspected
+    /// @return whether either required file is read-only
     public static boolean isAccountFilesReadOnly(Account account) {
         return isAccountFilesReadOnly(account.isPortable());
     }
 
     /// Returns whether the given account may be removed from its current account files.
+    ///
+    /// @param account account to test
+    /// @return whether removal can be persisted
     public static boolean canRemoveAccount(Account account) {
         return !isAccountFilesReadOnly(account);
     }
 
     /// Returns whether the given account may be moved between local and user account files.
+    ///
+    /// @param account account to test
+    /// @return whether both account stores are writable
     public static boolean canMoveAccount(Account account) {
         return !SettingsManager.isGameAccountsReadOnly() && !SettingsManager.isUserGameAccountsReadOnly();
     }
@@ -250,6 +283,7 @@ public final class Accounts {
 
     /// Backs up and overwrites the account files containing the given account.
     ///
+    /// @param account account selecting the target account store
     /// @throws IOException if saving either file fails
     public static void forceOverwriteAccountFiles(Account account) throws IOException {
         forceOverwriteAccountFiles(account.isPortable());
@@ -267,8 +301,13 @@ public final class Accounts {
         }
     }
 
-    private static Account parseAccount(JsonObject record, boolean portable) {
-        AccountFactory<?> factory = type2factory.get(JsonUtils.getString(record, "type"));
+    /// Deserializes one persisted account record, logging and skipping invalid records.
+    ///
+    /// @param record persisted public metadata
+    /// @param portable whether private data is stored in the local account store
+    /// @return the account, or `null` when the record cannot be loaded
+    private static @Nullable Account parseAccount(JsonObject record, boolean portable) {
+        @Nullable AccountFactory<?> factory = type2factory.get(JsonUtils.getString(record, "type"));
         if (factory == null) {
             LOG.warning("Unrecognized account type: " + describeAccountRecord(record));
             return null;
@@ -287,17 +326,18 @@ public final class Accounts {
     ///
     /// @param metadata public metadata stored in `accounts.json`
     /// @param privateData private account data stored in account private data
+    @NotNullByDefault
     private record SerializedAccount(JsonObject metadata, JsonObject privateData) {
     }
 
     /// Returns a safe account record description for diagnostics.
     private static String describeAccountRecord(JsonObject record) {
-        AccountID accountID = Account.getAccountID(record);
+        @Nullable AccountID accountID = Account.getAccountID(record);
         if (accountID != null) {
             return accountID.toString();
         }
 
-        String type = JsonUtils.getString(record, "type");
+        @Nullable String type = JsonUtils.getString(record, "type");
         return type != null ? "{type=" + type + "}" : "<unknown>";
     }
 
@@ -306,37 +346,34 @@ public final class Accounts {
         if (initialized)
             throw new IllegalStateException("Already initialized");
 
-        AccountIDNormalization accountIDNormalization = ensureUniqueAccountIDs();
-        if (accountIDNormalization.localChanged()) {
-            SettingsManager.saveGameAccountMetadataRecords();
-        }
-        if (accountIDNormalization.sharedChanged()) {
-            SettingsManager.saveUserGameAccountMetadataRecords();
-        }
-
         // load accounts
-        Account selected = null;
+        @Nullable Account selected = null;
+        Set<AccountID> loadedAccountIDs = new HashSet<>();
         for (JsonObject record : getAccountMetadataRecords()) {
-            Account account = parseAccount(record, true);
-            if (account != null) {
+            @Nullable Account account = parseAccount(record, true);
+            if (account != null && loadedAccountIDs.add(account.getAccountID())) {
                 account.setPortable(true);
-                accounts.add(account);
+                accountValues.add(account);
                 if (JsonUtils.getBoolean(record, "selected", false)) {
                     selected = account;
                 }
+            } else if (account != null) {
+                LOG.warning("Skipping duplicate account ID: " + account.getAccountID());
             }
         }
 
         for (JsonObject record : getUserAccountMetadataRecords()) {
-            Account account = parseAccount(record, false);
-            if (account != null) {
-                accounts.add(account);
+            @Nullable Account account = parseAccount(record, false);
+            if (account != null && loadedAccountIDs.add(account.getAccountID())) {
+                accountValues.add(account);
+            } else if (account != null) {
+                LOG.warning("Skipping duplicate account ID: " + account.getAccountID());
             }
         }
 
-        AccountID selectedAccountID = settings().selectedAccountProperty().get();
+        @Nullable AccountID selectedAccountID = settings().selectedAccountProperty().get();
         if (selected == null && selectedAccountID != null) {
-            for (Account account : accounts) {
+            for (Account account : accountValues) {
                 if (account.getAccountID().equals(selectedAccountID)) {
                     selected = account;
                     break;
@@ -344,13 +381,13 @@ public final class Accounts {
             }
         }
 
-        if (selected == null && !accounts.isEmpty()) {
-            selected = accounts.get(0);
+        if (selected == null && !accountValues.isEmpty()) {
+            selected = accountValues.get(0);
         }
 
         if (!SettingsManager.isUserSettingsReadOnly()
                 && !SettingsManager.userSettings().enableOfflineAccountProperty().get())
-            for (Account account : accounts) {
+            for (Account account : accountValues) {
                 if (account instanceof MicrosoftAccount) {
                     UserSettings userSettings = userSettings();
                     userSettings.enableOfflineAccountProperty().set(true);
@@ -360,59 +397,59 @@ public final class Accounts {
 
         if (!SettingsManager.isUserSettingsReadOnly()
                 && !SettingsManager.userSettings().enableOfflineAccountProperty().get())
-            accounts.addListener(new ListChangeListener<Account>() {
-                @Override
-                public void onChanged(Change<? extends Account> change) {
-                    while (change.next()) {
-                        for (Account account : change.getAddedSubList()) {
-                            if (account instanceof MicrosoftAccount) {
-                                accounts.removeListener(this);
-                                UserSettings userSettings = userSettings();
-                                userSettings.enableOfflineAccountProperty().set(true);
-                                return;
-                            }
+            offlineAccountSubscription = accountValues.subscribe(change -> {
+                if (change.kind() != space.minecraftstl.xyml.observable.collection.ListChange.Kind.ADD) {
+                    return;
+                }
+                for (Account account : change.currentItems()) {
+                    if (account instanceof MicrosoftAccount) {
+                        UserSettings userSettings = userSettings();
+                        userSettings.enableOfflineAccountProperty().set(true);
+                        @Nullable Subscription subscription = offlineAccountSubscription;
+                        offlineAccountSubscription = null;
+                        if (subscription != null) {
+                            subscription.unsubscribe();
                         }
+                        return;
                     }
                 }
             });
 
-        selectedAccount.set(selected);
+        selectedAccountValue.setValue(selected);
 
-        InvalidationListener listener = o -> {
+        accountValues.subscribe(change -> {
             // this method first checks whether the current selection is valid
             // if it's valid, the underlying account records will be updated
             // otherwise, the first account will be selected as an alternative(or null if accounts is empty)
-            Account account = selectedAccount.get();
-            if (accounts.isEmpty()) {
+            @Nullable Account account = selectedAccountValue.getValue();
+            if (accountValues.isEmpty()) {
                 if (account == null) {
                     // valid
                 } else {
                     // the previously selected account is gone, we can only set it to null here
-                    selectedAccount.set(null);
+                    selectedAccountValue.setValue(null);
                 }
             } else {
-                if (accounts.contains(account)) {
+                if (accountValues.contains(account)) {
                     // valid
                 } else {
                     // the previously selected account is gone
-                    selectedAccount.set(accounts.get(0));
+                    selectedAccountValue.setValue(accountValues.get(0));
                 }
             }
-        };
-        selectedAccount.addListener(listener);
-        selectedAccount.addListener(onInvalidating(() -> {
-            Account account = selectedAccount.get();
+            updateAccountMetadataRecords();
+        });
+        selectedAccountValue.subscribe(change -> {
+            @Nullable Account account = selectedAccountValue.getValue();
             if (account != null)
                 settings().selectedAccountProperty().set(account.getAccountID());
             else
                 settings().selectedAccountProperty().set(null);
-        }));
-        accounts.addListener(listener);
-        accounts.addListener(onInvalidating(Accounts::updateAccountMetadataRecords));
+        });
 
         initialized = true;
 
-        getAuthlibInjectorServers().addListener(onInvalidating(Accounts::removeDanglingAuthlibInjectorAccounts));
+        getAuthlibInjectorServers().subscribe(change -> removeDanglingAuthlibInjectorAccounts());
 
         if (selected != null) {
             Account finalSelected = selected;
@@ -438,39 +475,56 @@ public final class Accounts {
         }
     }
 
+    /// Returns the toolkit-neutral account list used as the single source of truth.
+    ///
+    /// @return live mutable account list
     public static ObservableList<Account> getAccounts() {
-        return accounts;
+        return accountValues;
     }
 
-    public static Account getSelectedAccount() {
-        return selectedAccount.get();
+    /// Returns the selected account from the toolkit-neutral state model.
+    ///
+    /// @return selected account, or `null` when no account is available
+    public static @Nullable Account getSelectedAccount() {
+        return selectedAccountValue.getValue();
     }
 
-    public static void setSelectedAccount(Account selectedAccount) {
-        Accounts.selectedAccount.set(selectedAccount);
+    /// Replaces the selected account in the toolkit-neutral state model.
+    ///
+    /// @param selectedAccount account to select, or `null` to clear the selection
+    public static void setSelectedAccount(@Nullable Account selectedAccount) {
+        Accounts.selectedAccountValue.setValue(selectedAccount);
     }
 
-    public static ObjectProperty<Account> selectedAccountProperty() {
-        return selectedAccount;
+    /// Returns the toolkit-neutral selected-account property.
+    ///
+    /// @return live nullable selected-account property
+    public static ObjectProperty<@Nullable Account> selectedAccountProperty() {
+        return selectedAccountValue;
     }
 
-    // ==== authlib-injector ====
+    /// Creates the configured or bundled authlib-injector artifact provider.
     private static AuthlibInjectorArtifactProvider createAuthlibInjectorArtifactProvider() {
-        String authlibinjectorLocation = System.getProperty("hmcl.authlibinjector.location");
+        @Nullable String authlibinjectorLocation = System.getProperty("xyml.authlibinjector.location");
         if (authlibinjectorLocation != null) {
             LOG.info("Using specified authlib-injector: " + authlibinjectorLocation);
             return new SimpleAuthlibInjectorArtifactProvider(Paths.get(authlibinjectorLocation));
         }
 
-        String authlibInjectorVersion = JarUtils.getAttribute("hmcl.authlib-injector.version", null);
+        @Nullable String authlibInjectorVersion = JarUtils.getAttribute("xyml.authlib-injector.version", null);
         if (authlibInjectorVersion == null)
-            throw new AssertionError("Missing hmcl.authlib-injector.version");
+            throw new AssertionError("Missing xyml.authlib-injector.version");
 
         String authlibInjectorFileName = "authlib-injector-" + authlibInjectorVersion + ".jar";
-        return new AuthlibInjectorExtractor(Accounts.class.getResource("/assets/" + authlibInjectorFileName),
+        @Nullable URL embeddedArtifact = Accounts.class.getResource("/assets/" + authlibInjectorFileName);
+        return new AuthlibInjectorExtractor(embeddedArtifact,
                 Metadata.DEPENDENCIES_DIRECTORY.resolve("universal").resolve(authlibInjectorFileName));
     }
 
+    /// Returns an existing authentication server for a URL or adds a new one.
+    ///
+    /// @param url authlib-injector API URL
+    /// @return matching configured server
     private static AuthlibInjectorServer getOrCreateAuthlibInjectorServer(String url) {
         return getAuthlibInjectorServers().stream()
                 .filter(server -> url.equals(server.getUrl()))
@@ -482,34 +536,40 @@ public final class Accounts {
                 });
     }
 
-    /**
-     * After an {@link AuthlibInjectorServer} is removed, the associated accounts should also be removed.
-     * This method performs a check and removes the dangling accounts.
-     */
+    /// Removes writable authlib-injector accounts whose authentication server is no longer configured.
     private static void removeDanglingAuthlibInjectorAccounts() {
-        accounts.stream()
+        accountValues.stream()
                 .filter(AuthlibInjectorAccount.class::isInstance)
                 .map(AuthlibInjectorAccount.class::cast)
                 .filter(it -> !getAuthlibInjectorServers().contains(it.getServer()))
                 .filter(Accounts::canRemoveAccount)
                 .collect(toList())
-                .forEach(accounts::remove);
+                .forEach(accountValues::remove);
     }
     // ====
 
-    // ==== Login type name i18n ===
+    /// Localization keys indexed by account factory.
     private static final Map<AccountFactory<?>, String> unlocalizedLoginTypeNames = mapOf(
             pair(Accounts.FACTORY_OFFLINE, "account.methods.offline"),
             pair(Accounts.FACTORY_AUTHLIB_INJECTOR, "account.methods.authlib_injector"),
             pair(Accounts.FACTORY_MICROSOFT, "account.methods.microsoft"));
 
+    /// Returns the localized display name for an account factory.
+    ///
+    /// @param factory account factory to describe
+    /// @return localized login-method name
+    /// @throws IllegalArgumentException if the factory is not recognized
     public static String getLocalizedLoginTypeName(AccountFactory<?> factory) {
         return i18n(Optional.ofNullable(unlocalizedLoginTypeNames.get(factory))
                 .orElseThrow(() -> new IllegalArgumentException("Unrecognized account factory")));
     }
     // ====
 
-    public static String localizeErrorMessage(Exception exception) {
+    /// Converts an account exception into a localized user-facing message when possible.
+    ///
+    /// @param exception account operation failure
+    /// @return localized detail, or `null` when the underlying exception supplies no message
+    public static @Nullable String localizeErrorMessage(Exception exception) {
         if (exception instanceof NoCharacterException) {
             return i18n("account.failed.no_character");
         } else if (exception instanceof ServerDisconnectException) {
@@ -528,7 +588,7 @@ public final class Accounts {
             return i18n("account.failed.server_response_malformed");
         } else if (exception instanceof RemoteAuthenticationException) {
             RemoteAuthenticationException remoteException = (RemoteAuthenticationException) exception;
-            String remoteMessage = remoteException.getRemoteMessage();
+            @Nullable String remoteMessage = remoteException.getRemoteMessage();
             if ("ForbiddenOperationException".equals(remoteException.getRemoteName()) && remoteMessage != null) {
                 if (remoteMessage.contains("Invalid credentials")) {
                     return i18n("account.failed.invalid_credentials");

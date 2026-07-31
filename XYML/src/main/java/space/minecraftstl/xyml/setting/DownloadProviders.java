@@ -17,7 +17,6 @@
  */
 package space.minecraftstl.xyml.setting;
 
-import javafx.beans.InvalidationListener;
 import space.minecraftstl.xyml.download.*;
 import space.minecraftstl.xyml.task.DownloadException;
 import space.minecraftstl.xyml.task.FetchTask;
@@ -25,6 +24,9 @@ import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.i18n.I18n;
 import space.minecraftstl.xyml.util.i18n.LocaleUtils;
 import space.minecraftstl.xyml.util.io.ResponseCodeException;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import javax.net.ssl.SSLHandshakeException;
 import java.io.FileNotFoundException;
@@ -38,18 +40,27 @@ import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 import static space.minecraftstl.xyml.task.FetchTask.DEFAULT_CONCURRENCY;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
+/// Owns the launcher-wide download provider selection and download error localization.
+@NotNullByDefault
 public final class DownloadProviders {
+    /// Prevents instantiation.
     private DownloadProviders() {
     }
 
+    /// Stable delegating provider exposed to consumers while its selected backend changes.
     private static final DownloadProviderWrapper PROVIDER_WRAPPER;
 
+    /// Official Mojang download backend.
     private static final DownloadProvider MOJANG_PROVIDER;
+
+    /// BMCLAPI mirror download backend.
     private static final BMCLAPIDownloadProvider BMCLAPI_PROVIDER;
+
+    /// Initial locale-aware provider composition.
     private static final DownloadProvider DEFAULT_PROVIDER;
 
     static {
-        String bmclapiRoot = System.getProperty("hmcl.bmclapi.override", "https://bmclapi2.bangbang93.com");
+        String bmclapiRoot = System.getProperty("xyml.bmclapi.override", "https://bmclapi2.bangbang93.com");
         BMCLAPI_PROVIDER = new BMCLAPIDownloadProvider(bmclapiRoot);
         MOJANG_PROVIDER = new MojangDownloadProvider();
         DEFAULT_PROVIDER = createDownloadProvider(DownloadSource.DEFAULT, DownloadSource.DEFAULT);
@@ -58,34 +69,43 @@ public final class DownloadProviders {
 
     /// Initializes download provider settings and synchronizes download thread settings.
     public static void init() {
-        InvalidationListener onChangeDownloadThreads = observable -> {
+        Runnable onChangeDownloadThreads = () -> {
             FetchTask.setDownloadExecutorConcurrency(settings().autoDownloadThreadsProperty().get()
                     ? DEFAULT_CONCURRENCY
                     : settings().downloadThreadsProperty().get());
         };
-        settings().autoDownloadThreadsProperty().addListener(onChangeDownloadThreads);
-        settings().downloadThreadsProperty().addListener(onChangeDownloadThreads);
-        onChangeDownloadThreads.invalidated(null);
+        settings().autoDownloadThreadsProperty().subscribe(change -> onChangeDownloadThreads.run());
+        settings().downloadThreadsProperty().subscribe(change -> onChangeDownloadThreads.run());
+        onChangeDownloadThreads.run();
 
-        InvalidationListener onChangeDownloadSource = observable -> {
+        Runnable onChangeDownloadSource = () -> {
             PROVIDER_WRAPPER.setProvider(createDownloadProvider(
                     settings().versionListSourceProperty().get(),
                     settings().fileDownloadSourceProperty().get()));
         };
-        settings().versionListSourceProperty().addListener(onChangeDownloadSource);
-        settings().fileDownloadSourceProperty().addListener(onChangeDownloadSource);
-        onChangeDownloadSource.invalidated(null);
+        settings().versionListSourceProperty().subscribe(change -> onChangeDownloadSource.run());
+        settings().fileDownloadSourceProperty().subscribe(change -> onChangeDownloadSource.run());
+        onChangeDownloadSource.run();
     }
 
     /// Creates a download provider with independent version-list and file download preferences.
-    private static DownloadProvider createDownloadProvider(DownloadSource versionListSource, DownloadSource fileDownloadSource) {
+    ///
+    /// @param versionListSource preferred version-list source, or `null` to use the locale-aware default
+    /// @param fileDownloadSource preferred artifact source, or `null` to use the locale-aware default
+    /// @return provider with ordered fallbacks for both operations
+    private static DownloadProvider createDownloadProvider(
+            @Nullable DownloadSource versionListSource,
+            @Nullable DownloadSource fileDownloadSource) {
         return new AutoDownloadProvider(
                 getCandidates(versionListSource),
                 getCandidates(fileDownloadSource));
     }
 
     /// Returns provider candidates ordered by the given source preference.
-    private static List<DownloadProvider> getCandidates(DownloadSource source) {
+    ///
+    /// @param source preferred source, or `null` to use the locale-aware default
+    /// @return immutable provider candidates in attempt order
+    private static @Unmodifiable List<DownloadProvider> getCandidates(@Nullable DownloadSource source) {
         DownloadSource normalized = source != null ? source : DownloadSource.DEFAULT;
         return switch (normalized) {
             case DEFAULT -> LocaleUtils.IS_CHINA_MAINLAND
@@ -96,16 +116,20 @@ public final class DownloadProviders {
         };
     }
 
-    /**
-     * Get current primary preferred download provider
-     */
+    /// Returns the stable launcher-wide provider wrapper.
+    ///
+    /// @return provider wrapper delegating to the current preference
     public static DownloadProvider getDownloadProvider() {
         return PROVIDER_WRAPPER;
     }
 
+    /// Converts a download failure into a localized user-facing message and diagnostic detail.
+    ///
+    /// @param exception failure to describe
+    /// @return localized failure detail
     public static String localizeErrorMessage(Throwable exception) {
         if (exception instanceof DownloadException) {
-            URI uri = ((DownloadException) exception).getUri();
+            @Nullable URI uri = ((DownloadException) exception).getUri();
             if (exception.getCause() instanceof SocketTimeoutException) {
                 return i18n("install.failed.downloading.timeout", uri);
             } else if (exception.getCause() instanceof ResponseCodeException) {

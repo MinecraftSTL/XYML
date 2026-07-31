@@ -19,27 +19,24 @@ package space.minecraftstl.xyml.setting;
 
 import com.google.gson.*;
 import com.google.gson.annotations.JsonAdapter;
-import javafx.application.Platform;
-import javafx.beans.InvalidationListener;
-import javafx.beans.Observable;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.util.PortablePath;
 import space.minecraftstl.xyml.util.ToStringBuilder;
 import space.minecraftstl.xyml.util.i18n.LocalizedText;
-import space.minecraftstl.xyml.util.javafx.ObservableHelper;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Type;
 import java.util.Objects;
 
-import static space.minecraftstl.xyml.ui.FXUtils.onInvalidating;
 
 /// Persistent configuration for a game directory.
 @JsonAdapter(GameDirectory.Serializer.class)
 @NotNullByDefault
-public final class GameDirectory implements Observable {
+public final class GameDirectory {
     /// The stable game directory ID.
     private final GameDirectoryID id;
 
@@ -84,41 +81,14 @@ public final class GameDirectory implements Observable {
         this.name.set(name);
     }
 
-    /// The migrated legacy game settings preset ID, or `null` when this game directory uses the default preset.
-    private final ObjectProperty<@Nullable GameSettingsPresetID> legacyGameSettings;
-
-    /// Returns the migrated legacy game settings preset ID property.
-    public ObjectProperty<@Nullable GameSettingsPresetID> legacyGameSettingsProperty() {
-        return legacyGameSettings;
-    }
-
-    /// Returns the migrated legacy game settings preset ID, or `null` when this game directory uses the default preset.
-    public @Nullable GameSettingsPresetID getLegacyGameSettings() {
-        return legacyGameSettings.get();
-    }
-
-    /// Sets the migrated legacy game settings preset ID.
-    public void setLegacyGameSettings(@Nullable GameSettingsPresetID legacyGameSettings) {
-        this.legacyGameSettings.set(legacyGameSettings);
-    }
-
     /// Creates a game directory.
     public GameDirectory(GameDirectoryID id, @Nullable LocalizedText name, PortablePath path) {
-        this(id, name, path, null);
-    }
-
-    /// Creates a game directory.
-    public GameDirectory(
-            GameDirectoryID id,
-            @Nullable LocalizedText name,
-            PortablePath path,
-            @Nullable GameSettingsPresetID legacyGameSettings) {
         this.id = Objects.requireNonNull(id);
         this.name = new SimpleObjectProperty<>(this, "name", name);
         this.path = new SimpleObjectProperty<>(this, "path", Objects.requireNonNull(path));
-        this.legacyGameSettings = new SimpleObjectProperty<>(this, "legacyGameSettings", legacyGameSettings);
 
-        addPropertyChangedListener(onInvalidating(this::invalidate));
+        this.name.subscribe(change -> invalidate());
+        this.path.subscribe(change -> invalidate());
     }
 
     /// Returns a debug string containing the game directory path and display metadata.
@@ -130,35 +100,25 @@ public final class GameDirectory implements Observable {
                 .toString();
     }
 
-    /// Registers a listener that invalidates this game directory when any stored property changes.
-    private void addPropertyChangedListener(InvalidationListener listener) {
-        name.addListener(listener);
-        path.addListener(listener);
-        legacyGameSettings.addListener(listener);
+    /// Publishes one toolkit-neutral directory transition.
+    private final ValueChangeSupport<Long> changes = new ValueChangeSupport<>(this);
+
+    /// Monotonic directory revision used to publish equal object identity safely.
+    private long revision;
+
+    /// Registers a listener for directory property changes.
+    ///
+    /// @param listener directory transition listener
+    /// @return cancellable listener subscription
+    public Subscription subscribe(java.util.function.Consumer<GameDirectory> listener) {
+        Objects.requireNonNull(listener, "listener");
+        return changes.subscribe(change -> listener.accept(this));
     }
 
-    /// Helper that stores and dispatches invalidation listeners for this game directory.
-    private final ObservableHelper observableHelper = new ObservableHelper(this);
-
-    /// Adds an invalidation listener.
-    @Override
-    public void addListener(InvalidationListener listener) {
-        observableHelper.addListener(listener);
-    }
-
-    /// Removes an invalidation listener.
-    @Override
-    public void removeListener(InvalidationListener listener) {
-        observableHelper.removeListener(listener);
-    }
-
-    /// Notifies game directory observers on the JavaFX thread when the toolkit is available.
+    /// Notifies directory observers after one property changes.
     private void invalidate() {
-        try {
-            Platform.runLater(observableHelper::invalidate);
-        } catch (IllegalStateException e) {
-            observableHelper.invalidate();
-        }
+        long previous = revision;
+        changes.fireChange(previous, ++revision);
     }
 
     /// Serializes and deserializes game directories.
@@ -173,16 +133,12 @@ public final class GameDirectory implements Observable {
             JsonObject jsonObject = new JsonObject();
             jsonObject.add("id", context.serialize(src.getId(), GameDirectoryID.class));
             if (src.getName() != null) {
-                JsonElement name = context.serialize(src.getName(), LocalizedText.class);
+                @Nullable JsonElement name = context.serialize(src.getName(), LocalizedText.class);
                 if (name != null && !name.isJsonNull()) {
                     jsonObject.add("name", name);
                 }
             }
             jsonObject.add("path", context.serialize(src.getPath(), PortablePath.class));
-            if (src.getLegacyGameSettings() != null) {
-                jsonObject.add("legacyGameSettings", context.serialize(src.getLegacyGameSettings(), GameSettingsPresetID.class));
-            }
-
             return jsonObject;
         }
 
@@ -190,22 +146,19 @@ public final class GameDirectory implements Observable {
         @Override
         public @Nullable GameDirectory deserialize(@Nullable JsonElement json, Type typeOfT, JsonDeserializationContext context) throws JsonParseException {
             if (!(json instanceof JsonObject obj)) return null;
-            GameDirectoryID id = context.deserialize(obj.get("id"), GameDirectoryID.class);
+            @Nullable GameDirectoryID id = context.deserialize(obj.get("id"), GameDirectoryID.class);
             if (id == null) {
                 throw new JsonParseException("Game directory ID cannot be null");
             } else if (GameDirectoryID.NIL.equals(id)) {
                 throw new JsonParseException("Game directory ID cannot be nil");
             }
-            PortablePath path = context.deserialize(obj.get("path"), PortablePath.class);
+            @Nullable PortablePath path = context.deserialize(obj.get("path"), PortablePath.class);
             if (path == null) {
                 throw new JsonParseException("Game directory path cannot be null");
             }
             @Nullable LocalizedText name = context.deserialize(obj.get("name"), LocalizedText.class);
 
-            return new GameDirectory(id,
-                    name,
-                    path,
-                    context.deserialize(obj.get("legacyGameSettings"), GameSettingsPresetID.class));
+            return new GameDirectory(id, name, path);
         }
 
     }

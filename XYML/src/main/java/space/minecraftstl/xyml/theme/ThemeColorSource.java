@@ -27,37 +27,38 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Locale;
 import java.util.Objects;
 
-/// Describes how a theme-pack appearance chooses its Monet seed color.
+/// Describes how an appearance chooses its seed color without exposing renderer-specific color objects.
 @NotNullByDefault
-public sealed interface ThemeColorSource permits ThemeColorSource.Default, ThemeColorSource.Custom, ThemeColorSource.Wallpaper {
-    /// JSON member name for the source type.
+public sealed interface ThemeColorSource
+        permits ThemeColorSource.Default, ThemeColorSource.Custom, ThemeColorSource.Wallpaper {
+    /// JSON member naming an object color source.
     String FIELD_SOURCE = "source";
 
-    /// The launcher default color source.
+    /// Shared launcher-default color source.
     ThemeColorSource DEFAULT = new Default();
 
-    /// Creates a custom color source.
+    /// Creates a fixed color source.
     ///
-    /// @param color the custom color
-    /// @return the custom color source
+    /// @param color fixed color
+    /// @return custom source
     static ThemeColorSource custom(ThemeColor color) {
         return new Custom(color);
     }
 
-    /// Creates a wallpaper color source.
+    /// Creates a wallpaper-derived source.
     ///
-    /// @return the wallpaper color source
+    /// @return wallpaper source
     static ThemeColorSource wallpaper() {
         return new Wallpaper();
     }
 
-    /// Parses a color source from a manifest JSON value.
+    /// Parses the historical string or object representation.
     ///
-    /// @param element the JSON value
-    /// @return the parsed color source
-    /// @throws JsonParseException if the color source is malformed
+    /// @param element manifest value
+    /// @return parsed source
+    /// @throws JsonParseException when the representation is unsupported
     static ThemeColorSource fromJson(JsonElement element) throws JsonParseException {
-        Objects.requireNonNull(element);
+        Objects.requireNonNull(element, "element");
         if (element instanceof JsonPrimitive primitive && primitive.isString()) {
             String value = primitive.getAsString();
             if ("default".equals(value.trim().replace('-', '_').toLowerCase(Locale.ROOT))) {
@@ -72,43 +73,31 @@ public sealed interface ThemeColorSource permits ThemeColorSource.Default, Theme
         if (!(element instanceof JsonObject object)) {
             throw new JsonParseException("Theme color must be a string or object");
         }
-
         JsonElement sourceElement = object.get(FIELD_SOURCE);
-        if (sourceElement == null) {
-            throw new JsonParseException("Theme color source is missing required field: " + FIELD_SOURCE);
-        }
         if (!(sourceElement instanceof JsonPrimitive sourcePrimitive) || !sourcePrimitive.isString()) {
-            throw new JsonParseException("Theme color source field must be a string: " + FIELD_SOURCE);
+            throw new JsonParseException("Theme color source must contain a string source field");
         }
-        String source = sourcePrimitive.getAsString();
-        String normalized = source.trim().replace('-', '_').toUpperCase(Locale.ROOT);
-        if ("DEFAULT".equals(normalized)) {
-            return DEFAULT;
-        }
-        if ("WALLPAPER".equals(normalized)) {
-            return wallpaper();
-        }
-        throw new JsonParseException("Unsupported theme color source: " + source);
+        return switch (sourcePrimitive.getAsString().trim().replace('-', '_').toLowerCase(Locale.ROOT)) {
+            case "default" -> DEFAULT;
+            case "wallpaper" -> wallpaper();
+            default -> throw new JsonParseException("Unsupported theme color source: " + sourcePrimitive);
+        };
     }
 
-    /// Converts this color source to its JSON representation.
+    /// Converts the source to its manifest representation.
     ///
-    /// @return the color source JSON value
+    /// @return JSON representation
     JsonElement toJsonElement();
 
-    /// Returns the best available color without accessing wallpaper pixels.
+    /// Returns a deterministic fallback before wallpaper pixels are available.
     ///
-    /// @return the custom color or launcher default color
+    /// @return fixed or launcher-default color
     ThemeColor resolveFallback();
 
-    /// The launcher default color seed.
+    /// Launcher-default color source.
     @NotNullByDefault
     record Default() implements ThemeColorSource {
-        /// Creates a default color source.
-        public Default {
-        }
-
-        /// Converts this color source to its JSON representation.
+        /// Converts this source to JSON.
         @Override
         public JsonElement toJsonElement() {
             JsonObject object = new JsonObject();
@@ -116,46 +105,40 @@ public sealed interface ThemeColorSource permits ThemeColorSource.Default, Theme
             return object;
         }
 
-        /// Returns the launcher default seed color.
+        /// Returns the launcher default color.
         @Override
         public ThemeColor resolveFallback() {
             return ThemeColor.DEFAULT;
         }
     }
 
-    /// A fixed color seed supplied by the manifest.
+    /// Fixed manifest color source.
     ///
-    /// @param color the custom seed color
+    /// @param color fixed color
     @NotNullByDefault
     record Custom(ThemeColor color) implements ThemeColorSource {
-        /// Creates a custom color source.
-        ///
-        /// @param color the custom seed color
+        /// Validates the color.
         public Custom {
-            Objects.requireNonNull(color);
+            Objects.requireNonNull(color, "color");
         }
 
-        /// Converts this color source to its JSON representation.
+        /// Converts this source to JSON.
         @Override
         public JsonElement toJsonElement() {
             return new JsonPrimitive(color.name());
         }
 
-        /// Returns the custom seed color.
+        /// Returns the fixed color.
         @Override
         public ThemeColor resolveFallback() {
             return color;
         }
     }
 
-    /// A dynamic seed color extracted from the effective wallpaper.
+    /// Source whose final seed is extracted by the presentation layer from the effective wallpaper.
     @NotNullByDefault
     record Wallpaper() implements ThemeColorSource {
-        /// Creates a wallpaper color source.
-        public Wallpaper {
-        }
-
-        /// Converts this color source to its JSON representation.
+        /// Converts this source to JSON.
         @Override
         public JsonElement toJsonElement() {
             JsonObject object = new JsonObject();
@@ -163,7 +146,7 @@ public sealed interface ThemeColorSource permits ThemeColorSource.Default, Theme
             return object;
         }
 
-        /// Returns the launcher default color used before wallpaper pixels are available.
+        /// Returns the deterministic pre-extraction fallback.
         @Override
         public ThemeColor resolveFallback() {
             return ThemeColor.DEFAULT;

@@ -33,42 +33,40 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/// A simple JSON-object condition used by theme-pack overrides.
+/// AND-composed condition whose individual values may each declare an OR-set.
 ///
-/// A condition is an AND of all members. A string value requires equality, and
-/// an array value requires the context value to match any listed value. Unknown
-/// condition keys are accepted for forward compatibility, but they do not match
-/// contexts produced by this implementation.
+/// Unknown keys are retained for forward compatibility and cannot match the current context implementation.
 ///
 /// @param requirements normalized accepted values keyed by condition name
 @NotNullByDefault
 public record ThemeCondition(@Unmodifiable Map<String, @Unmodifiable Set<String>> requirements) {
-    /// Condition key for the effective light or dark mode.
+    /// Effective brightness condition key.
     static final String KEY_BRIGHTNESS = "brightness";
-
-    /// Condition key for the current operating system.
+    /// Current operating-system condition key.
     static final String KEY_OS = "os";
-
-    /// Condition key for the current UI language.
+    /// Current language condition key.
     static final String KEY_LANGUAGE = "language";
+    /// Maximum condition members accepted from one override.
+    private static final int MAXIMUM_MEMBER_COUNT = 32;
+    /// Maximum values accepted from one condition member.
+    private static final int MAXIMUM_VALUES_PER_MEMBER = 64;
+    /// Supported operating-system values.
+    private static final @Unmodifiable Set<String> SUPPORTED_OS_VALUES =
+            Set.of("windows", "macos", "linux", "freebsd", "unknown");
 
-    /// Supported operating system condition values.
-    private static final Set<String> SUPPORTED_OS_VALUES = Set.of("windows", "macos", "linux", "freebsd", "unknown");
-
-    /// Creates a condition from normalized accepted values.
-    ///
-    /// @param requirements normalized accepted values keyed by condition name
+    /// Creates an immutable normalized condition.
     public ThemeCondition {
-        Objects.requireNonNull(requirements);
-
+        Objects.requireNonNull(requirements, "requirements");
+        if (requirements.size() > MAXIMUM_MEMBER_COUNT) {
+            throw new IllegalArgumentException("Theme condition has too many members");
+        }
         LinkedHashMap<String, Set<String>> copy = new LinkedHashMap<>();
         for (Map.Entry<String, Set<String>> entry : requirements.entrySet()) {
             String key = normalizeKey(entry.getKey());
-            Set<String> values = entry.getValue();
-            if (values.isEmpty()) {
-                throw new IllegalArgumentException("Theme condition field has no accepted values: " + key);
+            Set<String> values = Objects.requireNonNull(entry.getValue(), "condition values");
+            if (values.isEmpty() || values.size() > MAXIMUM_VALUES_PER_MEMBER) {
+                throw new IllegalArgumentException("Theme condition value count is invalid: " + key);
             }
-
             LinkedHashSet<String> valueCopy = new LinkedHashSet<>();
             for (String value : values) {
                 valueCopy.add(normalizeValue(key, value));
@@ -78,14 +76,14 @@ public record ThemeCondition(@Unmodifiable Map<String, @Unmodifiable Set<String>
         requirements = Collections.unmodifiableMap(copy);
     }
 
-    /// Parses a theme condition from a JSON object.
+    /// Parses a condition object.
     ///
-    /// @param object the condition object
-    /// @return the parsed condition
-    /// @throws JsonParseException if the condition contains malformed values
-    public static ThemeCondition fromJson(JsonObject object) throws JsonParseException {
-        Objects.requireNonNull(object);
-
+    /// @param object condition object
+    /// @return parsed condition
+    public static ThemeCondition fromJson(JsonObject object) {
+        if (object.size() > MAXIMUM_MEMBER_COUNT) {
+            throw new JsonParseException("Theme condition has too many members");
+        }
         LinkedHashMap<String, Set<String>> requirements = new LinkedHashMap<>();
         for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
             String key = normalizeKey(entry.getKey());
@@ -94,13 +92,11 @@ public record ThemeCondition(@Unmodifiable Map<String, @Unmodifiable Set<String>
         return new ThemeCondition(requirements);
     }
 
-    /// Returns whether this condition matches the given resolution context.
+    /// Tests every member against one context.
     ///
-    /// @param context the context to test
-    /// @return `true` if every condition member matches the context
+    /// @param context resolution context
+    /// @return `true` when every member matches
     public boolean matches(ThemeResolveContext context) {
-        Objects.requireNonNull(context);
-
         for (Map.Entry<String, Set<String>> entry : requirements.entrySet()) {
             String value = context.conditionValue(entry.getKey());
             if (value == null || !entry.getValue().contains(value)) {
@@ -110,9 +106,9 @@ public record ThemeCondition(@Unmodifiable Map<String, @Unmodifiable Set<String>
         return true;
     }
 
-    /// Converts this condition to its JSON representation.
+    /// Converts this condition to JSON.
     ///
-    /// @return the JSON object representing this condition
+    /// @return condition object
     public JsonObject toJsonObject() {
         JsonObject object = new JsonObject();
         for (Map.Entry<String, Set<String>> entry : requirements.entrySet()) {
@@ -120,25 +116,22 @@ public record ThemeCondition(@Unmodifiable Map<String, @Unmodifiable Set<String>
                 object.addProperty(entry.getKey(), entry.getValue().iterator().next());
             } else {
                 JsonArray array = new JsonArray();
-                for (String value : entry.getValue()) {
-                    array.add(value);
-                }
+                entry.getValue().forEach(array::add);
                 object.add(entry.getKey(), array);
             }
         }
         return object;
     }
 
-    /// Reads one condition field value.
-    private static Set<String> readAcceptedValues(String key, JsonElement element) throws JsonParseException {
+    /// Reads one string or string-array requirement.
+    private static Set<String> readAcceptedValues(String key, JsonElement element) {
         LinkedHashSet<String> values = new LinkedHashSet<>();
         if (element instanceof JsonPrimitive primitive && primitive.isString()) {
             values.add(normalizeValue(key, primitive.getAsString()));
         } else if (element instanceof JsonArray array) {
-            if (array.isEmpty()) {
-                throw new JsonParseException("Theme condition array is empty: " + key);
+            if (array.isEmpty() || array.size() > MAXIMUM_VALUES_PER_MEMBER) {
+                throw new JsonParseException("Theme condition array size is invalid: " + key);
             }
-
             for (JsonElement item : array) {
                 if (!(item instanceof JsonPrimitive primitive) || !primitive.isString()) {
                     throw new JsonParseException("Theme condition array must contain strings: " + key);
@@ -151,40 +144,34 @@ public record ThemeCondition(@Unmodifiable Map<String, @Unmodifiable Set<String>
         return values;
     }
 
-    /// Normalizes and validates a condition key.
+    /// Normalizes one non-empty key.
     private static String normalizeKey(String key) {
-        Objects.requireNonNull(key);
-
-        String normalized = key.trim();
-        if (normalized.isEmpty()) {
-            throw new JsonParseException("Theme condition key is blank");
+        String normalized = Objects.requireNonNull(key, "key").trim();
+        if (normalized.isEmpty() || normalized.length() > 128) {
+            throw new JsonParseException("Theme condition key is blank or too long");
         }
         return normalized;
     }
 
-    /// Normalizes and validates one condition value.
+    /// Normalizes one value according to its known key.
     private static String normalizeValue(String key, String value) {
-        Objects.requireNonNull(key);
-        Objects.requireNonNull(value);
-
-        String trimmed = value.trim();
-        if (trimmed.isEmpty()) {
-            throw new JsonParseException("Empty theme condition value for " + key);
+        String trimmed = Objects.requireNonNull(value, "value").trim();
+        if (trimmed.isEmpty() || trimmed.length() > 256) {
+            throw new JsonParseException("Theme condition value is blank or too long: " + key);
         }
         String normalized = trimmed.toLowerCase(Locale.ROOT);
-
         return switch (key) {
-            case KEY_BRIGHTNESS -> switch (normalized) {
-                    case "light", "dark" -> normalized;
-                    default -> throw new JsonParseException("Unsupported brightness condition value: " + value);
-                };
+            case KEY_BRIGHTNESS -> {
+                ThemeBrightness.parse(normalized);
+                yield normalized;
+            }
             case KEY_OS -> normalizeOperatingSystemValue(normalized, value);
             case KEY_LANGUAGE -> normalized;
             default -> trimmed;
         };
     }
 
-    /// Normalizes an operating system condition value.
+    /// Normalizes operating-system aliases and rejects unsupported systems.
     private static String normalizeOperatingSystemValue(String normalized, String original) {
         String value = switch (normalized) {
             case "win", "windows" -> "windows";
@@ -194,11 +181,9 @@ public record ThemeCondition(@Unmodifiable Map<String, @Unmodifiable Set<String>
             case "unknown", "universal" -> "unknown";
             default -> normalized;
         };
-
         if (!SUPPORTED_OS_VALUES.contains(value)) {
             throw new JsonParseException("Unsupported os condition value: " + original);
         }
         return value;
     }
-
 }

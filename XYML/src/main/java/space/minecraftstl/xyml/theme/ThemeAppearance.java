@@ -21,69 +21,41 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonPrimitive;
-import org.glavo.monetfx.Brightness;
-import org.glavo.monetfx.ColorStyle;
-import org.glavo.monetfx.Contrast;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Locale;
 import java.util.Objects;
 
-import static space.minecraftstl.xyml.util.logging.Logger.LOG;
-
-/// Appearance values contributed by a theme or override.
+/// Optional appearance values contributed by a theme or one conditional override.
 ///
-/// All fields are optional so the same type can represent both a default appearance
-/// and a conditional patch.
-///
-/// @param color the color seed source, or `null` when inherited
-/// @param brightness the controlled brightness, or `null` when inherited by a patch or not controlled by a resolved appearance
-/// @param colorStyle the MonetFX color style, or `null` when inherited
-/// @param contrast the MonetFX contrast level, or `null` when inherited
-/// @param background the background settings, or `null` when inherited
-/// @param titleBar the title-bar settings, or `null` when inherited
-/// @param windowTransparent whether the launcher window should be transparent, or `null` when inherited
+/// @param color color source, or `null` when inherited
+/// @param brightness controlled brightness, or `null` when inherited
+/// @param colorStyle palette style, or `null` when inherited
+/// @param contrast contrast, or `null` when inherited
+/// @param background background patch, or `null` when inherited
+/// @param titleBar title-bar patch, or `null` when inherited
 @NotNullByDefault
 public record ThemeAppearance(
         @Nullable ThemeColorSource color,
-        @Nullable Brightness brightness,
-        @Nullable ColorStyle colorStyle,
-        @Nullable Contrast contrast,
+        @Nullable ThemeBrightness brightness,
+        @Nullable ThemeColorStyle colorStyle,
+        @Nullable ThemeContrast contrast,
         @Nullable ThemeBackgroundSettings background,
-        @Nullable ThemeTitleBar titleBar,
-        @Nullable Boolean windowTransparent) {
-
-    /// JSON member name for the color seed.
-    static final String FIELD_COLOR = "color";
-
-    /// JSON member name for the controlled launcher brightness.
-    static final String FIELD_BRIGHTNESS = "brightness";
-
-    /// JSON member name for the MonetFX color style.
-    static final String FIELD_COLOR_STYLE = "colorStyle";
-
-    /// JSON member name for the MonetFX contrast level.
-    static final String FIELD_CONTRAST = "contrast";
-
-    /// JSON member name for background settings.
-    static final String FIELD_BACKGROUND = "background";
-
-    /// JSON member name for title-bar settings.
-    static final String FIELD_TITLE_BAR = "titleBar";
-
-    /// JSON member name for window transparency.
-    static final String FIELD_WINDOW_TRANSPARENT = "windowTransparent";
-
-    /// Creates an appearance patch.
-    ///
-    /// @param color the color seed source, or `null` when inherited
-    /// @param brightness the controlled brightness, or `null` when inherited by a patch or not controlled by a resolved appearance
-    /// @param colorStyle the MonetFX color style, or `null` when inherited
-    /// @param contrast the MonetFX contrast level, or `null` when inherited
-    /// @param background the background settings, or `null` when inherited
-    /// @param titleBar the title-bar settings, or `null` when inherited
-    /// @param windowTransparent whether the launcher window should be transparent, or `null` when inherited
+        @Nullable ThemeTitleBar titleBar) {
+    /// JSON member naming the color source.
+    private static final String FIELD_COLOR = "color";
+    /// JSON member naming brightness.
+    private static final String FIELD_BRIGHTNESS = "brightness";
+    /// JSON member naming color style.
+    private static final String FIELD_COLOR_STYLE = "colorStyle";
+    /// JSON member naming contrast.
+    private static final String FIELD_CONTRAST = "contrast";
+    /// JSON member naming background settings.
+    private static final String FIELD_BACKGROUND = "background";
+    /// JSON member naming title-bar settings.
+    private static final String FIELD_TITLE_BAR = "titleBar";
+    /// Normalizes empty nested patches to inherited values.
     public ThemeAppearance {
         if (background != null && background.isEmpty()) {
             background = null;
@@ -93,81 +65,34 @@ public record ThemeAppearance(
         }
     }
 
-    /// Parses known appearance fields from a JSON object.
+    /// Parses known appearance members while ignoring malformed optional fields.
     ///
-    /// @param object the JSON object containing appearance fields
-    /// @return the parsed appearance patch
-    static ThemeAppearance fromJson(JsonObject object) throws JsonParseException {
-        Objects.requireNonNull(object);
-
+    /// @param object manifest object
+    /// @return parsed appearance patch
+    static ThemeAppearance fromJson(JsonObject object) {
         return new ThemeAppearance(
                 readColor(object),
                 readBrightness(object),
                 readColorStyle(object),
                 readContrast(object),
                 readBackground(object),
-                readTitleBar(object),
-                readWindowTransparent(object));
+                readTitleBar(object));
     }
 
-    /// Returns whether this appearance contains no concrete fields.
+    /// Returns whether every appearance value is inherited.
     ///
-    /// @return `true` when every appearance field is inherited
+    /// @return `true` for an empty patch
     public boolean isEmpty() {
-        return color == null
-                && brightness == null
-                && colorStyle == null
-                && contrast == null
-                && background == null
-                && titleBar == null
-                && windowTransparent == null;
+        return color == null && brightness == null && colorStyle == null && contrast == null
+                && background == null && titleBar == null;
     }
 
-    /// Adds this appearance patch's concrete fields to a JSON object.
+    /// Applies a newer appearance patch over this appearance.
     ///
-    /// @param object the target JSON object
-    void addToJsonObject(JsonObject object) {
-        Objects.requireNonNull(object);
-
-        if (color != null) {
-            object.add(FIELD_COLOR, color.toJsonElement());
-        }
-        if (brightness != null) {
-            object.addProperty(FIELD_BRIGHTNESS, toJsonBrightness(brightness));
-        }
-        if (colorStyle != null) {
-            object.addProperty(FIELD_COLOR_STYLE, colorStyle.name().toLowerCase(Locale.ROOT));
-        }
-        if (contrast != null && !contrast.equals(Contrast.DEFAULT)) {
-            addContrast(object, contrast);
-        }
-        if (background != null) {
-            object.add(FIELD_BACKGROUND, background.toJsonObject());
-        }
-        if (titleBar != null) {
-            object.add(FIELD_TITLE_BAR, titleBar.toJsonObject());
-        }
-        if (windowTransparent != null) {
-            object.addProperty(FIELD_WINDOW_TRANSPARENT, windowTransparent);
-        }
-    }
-
-    /// Converts this appearance patch to its JSON representation.
-    ///
-    /// @return the JSON object representing this appearance patch
-    public JsonObject toJsonObject() {
-        JsonObject object = new JsonObject();
-        addToJsonObject(object);
-        return object;
-    }
-
-    /// Applies the given patch over this appearance.
-    ///
-    /// @param patch the patch to apply
-    /// @return the merged appearance
+    /// @param patch newer patch
+    /// @return merged appearance
     public ThemeAppearance merge(ThemeAppearance patch) {
-        Objects.requireNonNull(patch);
-
+        Objects.requireNonNull(patch, "patch");
         return new ThemeAppearance(
                 patch.color != null ? patch.color : color,
                 patch.brightness != null ? patch.brightness : brightness,
@@ -178,26 +103,65 @@ public record ThemeAppearance(
                         : patch.background != null ? patch.background : background,
                 titleBar != null && patch.titleBar != null
                         ? titleBar.merge(patch.titleBar)
-                        : patch.titleBar != null ? patch.titleBar : titleBar,
-                patch.windowTransparent != null ? patch.windowTransparent : windowTransparent);
+                        : patch.titleBar != null ? patch.titleBar : titleBar);
     }
 
-    /// Converts this appearance to concrete launcher theme values.
+    /// Resolves renderer-independent concrete values using context brightness as the fallback.
     ///
-    /// @param context the resolution context that provides fallback brightness when this appearance does not control it
-    /// @return the concrete theme used by MonetFX
+    /// @param context resolution context
+    /// @return concrete theme values
     public ResolvedTheme toResolvedTheme(ThemeResolveContext context) {
-        Objects.requireNonNull(context);
-
-        ThemeColor resolvedColor = color != null ? color.resolveFallback() : ResolvedTheme.DEFAULT.primaryColorSeed();
-        Brightness resolvedBrightness = brightness != null ? brightness : context.brightness();
-        ColorStyle resolvedColorStyle = colorStyle != null ? colorStyle : ResolvedTheme.DEFAULT.colorStyle();
-        Contrast resolvedContrast = contrast != null ? contrast : Contrast.DEFAULT;
-
-        return new ResolvedTheme(resolvedColor, resolvedBrightness, resolvedColorStyle, resolvedContrast);
+        Objects.requireNonNull(context, "context");
+        return new ResolvedTheme(
+                color != null ? color.resolveFallback() : ResolvedTheme.DEFAULT.primaryColorSeed(),
+                brightness != null ? brightness : context.brightness(),
+                colorStyle != null ? colorStyle : ResolvedTheme.DEFAULT.colorStyle(),
+                contrast != null ? contrast : ThemeContrast.STANDARD);
     }
 
-    /// Reads the optional color field.
+    /// Converts this patch to JSON.
+    ///
+    /// @return appearance object
+    public JsonObject toJsonObject() {
+        JsonObject object = new JsonObject();
+        if (color != null) {
+            object.add(FIELD_COLOR, color.toJsonElement());
+        }
+        if (brightness != null) {
+            object.addProperty(FIELD_BRIGHTNESS, brightness.serializedName());
+        }
+        if (colorStyle != null) {
+            object.addProperty(FIELD_COLOR_STYLE, colorStyle.serializedName());
+        }
+        addContrast(object);
+        if (background != null) {
+            object.add(FIELD_BACKGROUND, background.toJsonObject());
+        }
+        if (titleBar != null) {
+            object.add(FIELD_TITLE_BAR, titleBar.toJsonObject());
+        }
+        return object;
+    }
+
+    /// Adds the canonical contrast form when one is present.
+    private void addContrast(JsonObject object) {
+        if (contrast == null) {
+            return;
+        }
+        if (contrast.equals(ThemeContrast.LOW)) {
+            object.addProperty(FIELD_CONTRAST, "low");
+        } else if (contrast.equals(ThemeContrast.STANDARD)) {
+            object.addProperty(FIELD_CONTRAST, "standard");
+        } else if (contrast.equals(ThemeContrast.MEDIUM)) {
+            object.addProperty(FIELD_CONTRAST, "medium");
+        } else if (contrast.equals(ThemeContrast.HIGH)) {
+            object.addProperty(FIELD_CONTRAST, "high");
+        } else {
+            object.addProperty(FIELD_CONTRAST, contrast.value());
+        }
+    }
+
+    /// Reads an optional color source.
     private static @Nullable ThemeColorSource readColor(JsonObject object) {
         JsonElement element = object.get(FIELD_COLOR);
         if (element == null) {
@@ -205,185 +169,88 @@ public record ThemeAppearance(
         }
         try {
             return ThemeColorSource.fromJson(element);
-        } catch (JsonParseException | IllegalArgumentException e) {
-            LOG.warning("Ignored invalid theme color: " + e.getMessage(), e);
+        } catch (JsonParseException | IllegalArgumentException ignored) {
             return null;
         }
     }
 
-    /// Reads the optional controlled brightness field.
-    private static @Nullable Brightness readBrightness(JsonObject object) {
+    /// Reads optional brightness.
+    private static @Nullable ThemeBrightness readBrightness(JsonObject object) {
+        @Nullable String value = readString(object, FIELD_BRIGHTNESS);
+        if (value == null) {
+            return null;
+        }
         try {
-            @Nullable String value = readString(object, FIELD_BRIGHTNESS);
-            if (value == null) {
-                return null;
-            }
-            return parseBrightness(value);
-        } catch (JsonParseException | IllegalArgumentException e) {
-            LOG.warning("Ignored invalid theme brightness: " + e.getMessage(), e);
+            return ThemeBrightness.parse(value);
+        } catch (IllegalArgumentException ignored) {
             return null;
         }
     }
 
-    /// Reads the optional color style field.
-    private static @Nullable ColorStyle readColorStyle(JsonObject object) {
+    /// Reads optional palette style.
+    private static @Nullable ThemeColorStyle readColorStyle(JsonObject object) {
+        @Nullable String value = readString(object, FIELD_COLOR_STYLE);
+        if (value == null) {
+            return null;
+        }
         try {
-            @Nullable String value = readString(object, FIELD_COLOR_STYLE);
-            if (value == null) {
-                return null;
-            }
-
-            String normalized = value.trim().replace('-', '_').replace(' ', '_').toUpperCase(Locale.ROOT);
-            if ("DEFAULT".equals(normalized)) {
-                return ColorStyle.DEFAULT;
-            }
-            return ColorStyle.valueOf(normalized);
-        } catch (JsonParseException | IllegalArgumentException e) {
-            LOG.warning("Ignored invalid theme colorStyle: " + e.getMessage(), e);
+            return ThemeColorStyle.parse(value);
+        } catch (IllegalArgumentException ignored) {
             return null;
         }
     }
 
-    /// Reads the optional contrast field.
-    private static @Nullable Contrast readContrast(JsonObject object) {
+    /// Reads optional contrast from a preset or number.
+    private static @Nullable ThemeContrast readContrast(JsonObject object) {
         JsonElement element = object.get(FIELD_CONTRAST);
-        if (element == null) {
-            return null;
-        }
         if (!(element instanceof JsonPrimitive primitive)) {
-            LOG.warning("Ignored invalid theme contrast: expected a string or number, got " + element);
             return null;
         }
-
         try {
             if (primitive.isNumber()) {
-                return readContrastValue(primitive.getAsDouble());
+                return new ThemeContrast(primitive.getAsDouble());
             }
             if (!primitive.isString()) {
-                LOG.warning("Ignored invalid theme contrast: expected a string or number, got " + element);
                 return null;
             }
-
-            String value = primitive.getAsString();
-            String normalized = value.trim().toLowerCase(Locale.ROOT);
-            return switch (normalized) {
-                case "low" -> Contrast.LOW;
-                case "standard" -> Contrast.DEFAULT;
-                case "medium" -> Contrast.MEDIUM;
-                case "high" -> Contrast.HIGH;
-                default -> {
-                    try {
-                        yield readContrastValue(Double.parseDouble(normalized));
-                    } catch (NumberFormatException e) {
-                        throw new JsonParseException("Invalid theme contrast: " + value, e);
-                    }
-                }
+            String value = primitive.getAsString().trim().toLowerCase(Locale.ROOT);
+            return switch (value) {
+                case "low" -> ThemeContrast.LOW;
+                case "standard" -> ThemeContrast.STANDARD;
+                case "medium" -> ThemeContrast.MEDIUM;
+                case "high" -> ThemeContrast.HIGH;
+                default -> new ThemeContrast(Double.parseDouble(value));
             };
-        } catch (JsonParseException | IllegalArgumentException e) {
-            LOG.warning("Ignored invalid theme contrast: " + e.getMessage(), e);
+        } catch (IllegalArgumentException ignored) {
             return null;
         }
     }
 
-    /// Reads the optional background object.
+    /// Reads an optional nested background patch.
     private static @Nullable ThemeBackgroundSettings readBackground(JsonObject object) {
         JsonElement element = object.get(FIELD_BACKGROUND);
-        if (element == null) {
-            return null;
-        }
-        if (!(element instanceof JsonObject background)) {
-            LOG.warning("Ignored invalid theme background: expected an object, got " + element);
+        if (!(element instanceof JsonObject backgroundObject)) {
             return null;
         }
         try {
-            return ThemeBackgroundSettings.fromJson(background);
-        } catch (JsonParseException | IllegalArgumentException e) {
-            LOG.warning("Ignored invalid theme background: " + e.getMessage(), e);
+            return ThemeBackgroundSettings.fromJson(backgroundObject);
+        } catch (JsonParseException | IllegalArgumentException ignored) {
             return null;
         }
     }
 
-    /// Reads the optional title-bar object.
+    /// Reads an optional nested title-bar patch.
     private static @Nullable ThemeTitleBar readTitleBar(JsonObject object) {
         JsonElement element = object.get(FIELD_TITLE_BAR);
-        if (element == null) {
-            return null;
-        }
-        if (!(element instanceof JsonObject titleBar)) {
-            LOG.warning("Ignored invalid theme titleBar: expected an object, got " + element);
-            return null;
-        }
-        try {
-            return ThemeTitleBar.fromJson(titleBar);
-        } catch (JsonParseException | IllegalArgumentException e) {
-            LOG.warning("Ignored invalid theme titleBar: " + e.getMessage(), e);
-            return null;
-        }
+        return element instanceof JsonObject titleBarObject ? ThemeTitleBar.fromJson(titleBarObject) : null;
     }
 
-    /// Reads the optional window transparency field.
-    private static @Nullable Boolean readWindowTransparent(JsonObject object) {
-        JsonElement element = object.get(FIELD_WINDOW_TRANSPARENT);
-        if (element == null) {
-            return null;
-        }
-        if (!(element instanceof JsonPrimitive primitive) || !primitive.isBoolean()) {
-            LOG.warning("Ignored invalid theme windowTransparent: expected a boolean, got " + element);
-            return null;
-        }
-        return primitive.getAsBoolean();
-    }
-
-    /// Reads an optional string field.
+    /// Reads an optional string.
     private static @Nullable String readString(JsonObject object, String field) {
         JsonElement element = object.get(field);
-        if (element == null) {
-            return null;
-        }
-        if (!(element instanceof JsonPrimitive primitive) || !primitive.isString()) {
-            throw new JsonParseException("Theme field must be a string: " + field);
-        }
-        return primitive.getAsString();
+        return element instanceof JsonPrimitive primitive && primitive.isString()
+                ? primitive.getAsString()
+                : null;
     }
 
-    /// Returns a validated contrast value.
-    private static Contrast readContrastValue(double value) {
-        try {
-            return Contrast.of(value);
-        } catch (IllegalArgumentException e) {
-            throw new JsonParseException("Theme contrast value must be between -1 and 1: " + value, e);
-        }
-    }
-
-    /// Adds a canonical contrast value to a JSON object.
-    private static void addContrast(JsonObject object, Contrast contrast) {
-        if (contrast.equals(Contrast.LOW)) {
-            object.addProperty(FIELD_CONTRAST, "low");
-        } else if (contrast.equals(Contrast.DEFAULT)) {
-            object.addProperty(FIELD_CONTRAST, "standard");
-        } else if (contrast.equals(Contrast.MEDIUM)) {
-            object.addProperty(FIELD_CONTRAST, "medium");
-        } else if (contrast.equals(Contrast.HIGH)) {
-            object.addProperty(FIELD_CONTRAST, "high");
-        } else {
-            object.addProperty(FIELD_CONTRAST, contrast.getValue());
-        }
-    }
-
-    /// Parses a serialized theme brightness value.
-    private static Brightness parseBrightness(String value) {
-        return switch (value.trim().toLowerCase(Locale.ROOT)) {
-            case "light" -> Brightness.LIGHT;
-            case "dark" -> Brightness.DARK;
-            default -> throw new IllegalArgumentException("Unsupported theme brightness: " + value);
-        };
-    }
-
-    /// Converts a controlled brightness value to its canonical JSON string.
-    private static String toJsonBrightness(Brightness brightness) {
-        return switch (brightness) {
-            case LIGHT -> "light";
-            case DARK -> "dark";
-        };
-    }
 }

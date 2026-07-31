@@ -18,6 +18,9 @@
 package space.minecraftstl.xyml.launch;
 
 import org.glavo.uuid.UUIDs;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.auth.AuthInfo;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.*;
@@ -29,7 +32,6 @@ import space.minecraftstl.xyml.util.io.Unzipper;
 import space.minecraftstl.xyml.util.platform.*;
 import space.minecraftstl.xyml.util.platform.macos.HomebrewUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
 import java.nio.charset.Charset;
@@ -45,27 +47,53 @@ import static space.minecraftstl.xyml.util.Lang.mapOf;
 import static space.minecraftstl.xyml.util.Pair.pair;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * @author huangyuhui
- */
+/// Builds and starts one Minecraft process and owns its complete monitor lifecycle.
+@NotNullByDefault
 public class DefaultLauncher extends Launcher {
 
+    /// Describes the loader and library capabilities of the selected game version.
     private final LibraryAnalyzer analyzer;
 
+    /// Creates a launcher without process-output monitoring.
+    ///
+    /// @param repository repository containing the selected instance
+    /// @param version selected game version
+    /// @param authInfo authenticated player data
+    /// @param options effective launch options
     public DefaultLauncher(GameRepository repository, Version version, AuthInfo authInfo, LaunchOptions options) {
         this(repository, version, authInfo, options, null);
     }
 
-    public DefaultLauncher(GameRepository repository, Version version, AuthInfo authInfo, LaunchOptions options, ProcessListener listener) {
+    /// Creates a launcher with an optional daemon process monitor.
+    ///
+    /// @param repository repository containing the selected instance
+    /// @param version selected game version
+    /// @param authInfo authenticated player data
+    /// @param options effective launch options
+    /// @param listener process listener, or `null` to inherit the launcher's input and output streams
+    public DefaultLauncher(GameRepository repository, Version version, AuthInfo authInfo, LaunchOptions options, @Nullable ProcessListener listener) {
         this(repository, version, authInfo, options, listener, true);
     }
 
-    public DefaultLauncher(GameRepository repository, Version version, AuthInfo authInfo, LaunchOptions options, ProcessListener listener, boolean daemon) {
+    /// Creates a launcher with explicit process-monitor thread behavior.
+    ///
+    /// @param repository repository containing the selected instance
+    /// @param version selected game version
+    /// @param authInfo authenticated player data
+    /// @param options effective launch options
+    /// @param listener process listener, or `null` to inherit the launcher's input and output streams
+    /// @param daemon whether process-monitor threads are daemon threads
+    public DefaultLauncher(GameRepository repository, Version version, AuthInfo authInfo, LaunchOptions options, @Nullable ProcessListener listener, boolean daemon) {
         super(repository, version, authInfo, options, listener, daemon);
 
         this.analyzer = LibraryAnalyzer.analyze(version, repository.getGameVersion(version).orElse(null));
     }
 
+    /// Builds the complete operating-system command and its native-library metadata.
+    ///
+    /// @param nativeFolder native-library directory selected for this launch
+    /// @return generated launch command and associated runtime metadata
+    /// @throws IOException if launch metadata or authentication arguments cannot be read
     private Command generateCommandLine(Path nativeFolder) throws IOException {
         CommandBuilder res = new CommandBuilder();
 
@@ -127,7 +155,7 @@ public class DefaultLauncher extends Launcher {
         res.addAllDefaultWithoutParsing(options.getJavaArguments());
 
         Charset encoding = OperatingSystem.NATIVE_CHARSET;
-        String fileEncoding = res.addDefault("-Dfile.encoding=", encoding.name());
+        @Nullable String fileEncoding = res.addDefault("-Dfile.encoding=", encoding.name());
         if (fileEncoding != null && !"-Dfile.encoding=COMPAT".equals(fileEncoding)) {
             try {
                 encoding = Charset.forName(fileEncoding.substring("-Dfile.encoding=".length()));
@@ -149,7 +177,7 @@ public class DefaultLauncher extends Launcher {
         res.addDefault("-Dcom.sun.jndi.rmi.object.trustURLCodebase=", "false");
         res.addDefault("-Dcom.sun.jndi.cosnaming.object.trustURLCodebase=", "false");
 
-        String formatMsgNoLookups = res.addDefault("-Dlog4j2.formatMsgNoLookups=", "true");
+        @Nullable String formatMsgNoLookups = res.addDefault("-Dlog4j2.formatMsgNoLookups=", "true");
         if (isUsingLog4j() && (options.isEnableDebugLogOutput() || !"-Dlog4j2.formatMsgNoLookups=false".equals(formatMsgNoLookups))) {
             res.addDefault("-Dlog4j.configurationFile=", FileUtils.getAbsolutePath(getLog4jConfigurationFile()));
         }
@@ -304,11 +332,11 @@ public class DefaultLauncher extends Launcher {
         // lwjgl assumes path to native libraries encoded by ASCII.
         // Here is a workaround for this issue: https://github.com/HMCL-dev/HMCL/issues/1141.
         String nativeFolderPath = FileUtils.getAbsolutePath(nativeFolder);
-        Path tempNativeFolder = null;
+        @Nullable Path tempNativeFolder = null;
         if ((OperatingSystem.CURRENT_OS == OperatingSystem.LINUX || OperatingSystem.CURRENT_OS == OperatingSystem.MACOS)
                 && !StringUtils.isASCII(nativeFolderPath)
                 && gameVersion.isPresent() && GameVersionNumber.compare(gameVersion.get(), "1.19") < 0) {
-            tempNativeFolder = Paths.get("/", "tmp", "hmcl-natives-" + UUID.randomUUID());
+            tempNativeFolder = Paths.get("/", "tmp", "xyml-natives-" + UUID.randomUUID());
             nativeFolderPath = tempNativeFolder + File.pathSeparator + nativeFolderPath;
         }
         configuration.put("${natives_directory}", nativeFolderPath);
@@ -343,7 +371,7 @@ public class DefaultLauncher extends Launcher {
         }
 
         res.addAll(Arguments.parseArguments(Objects.requireNonNullElseGet(jvmArguments, this::getDefaultJVMArguments), configuration));
-        Arguments argumentsFromAuthInfo = authInfo.getLaunchArguments(options);
+        @Nullable Arguments argumentsFromAuthInfo = authInfo.getLaunchArguments(options);
         if (argumentsFromAuthInfo != null && argumentsFromAuthInfo.jvm() != null && !argumentsFromAuthInfo.jvm().isEmpty())
             res.addAll(Arguments.parseArguments(argumentsFromAuthInfo.jvm(), configuration));
 
@@ -423,39 +451,55 @@ public class DefaultLauncher extends Launcher {
         return new Command(res, tempNativeFolder, javaNativeFolder, encoding);
     }
 
-    public Map<String, Boolean> getFeatures() {
+    /// Returns the immutable feature flags used to evaluate conditional game arguments.
+    ///
+    /// @return feature names mapped to their enabled state
+    public @Unmodifiable Map<String, Boolean> getFeatures() {
         return Collections.singletonMap(
                 "has_custom_resolution",
                 options.getHeight() != null && options.getHeight() != 0 && options.getWidth() != null && options.getWidth() != 0
         );
     }
 
+    /// Maps unsupported JVM arguments to predicates deciding whether each argument must be removed.
     private final Map<String, Supplier<Boolean>> forbiddens = mapOf(
             pair("-Xincgc", () -> options.getJava().getParsedVersion() >= 9)
     );
 
+    /// Returns the argument-removal rules applied after command generation.
+    ///
+    /// @return mutable map of exact JVM arguments to removal predicates
     protected Map<String, Supplier<Boolean>> getForbiddens() {
         return forbiddens;
     }
 
-    protected List<Argument> getDefaultJVMArguments() {
+    /// Returns the immutable fallback JVM arguments for versions without an arguments section.
+    ///
+    /// @return default JVM arguments
+    protected @Unmodifiable List<Argument> getDefaultJVMArguments() {
         return Arguments.DEFAULT_JVM_ARGUMENTS;
     }
 
-    protected List<Argument> getDefaultGameArguments() {
+    /// Returns the immutable fallback game arguments for legacy version metadata.
+    ///
+    /// @return default game arguments
+    protected @Unmodifiable List<Argument> getDefaultGameArguments() {
         return Arguments.DEFAULT_GAME_ARGUMENTS;
     }
 
-    /**
-     * Do something here.
-     * i.e.
-     * -Dminecraft.launcher.version=&lt;Your launcher name&gt;
-     * -Dminecraft.launcher.brand=&lt;Your launcher version&gt;
-     * -Dlog4j.configurationFile=&lt;Your custom log4j configuration&gt;
-     */
+    /// Extends the generated JVM argument list with launcher-specific defaults.
+    ///
+    /// Subclasses may add values such as the launcher brand, launcher version, or a custom Log4j
+    /// configuration. The default implementation does not add arguments.
+    ///
+    /// @param result command builder receiving launcher-specific JVM arguments
     protected void appendJvmArgs(CommandBuilder result) {
     }
 
+    /// Recreates the native-library directory from the selected version's native artifacts.
+    ///
+    /// @param destination directory receiving extracted native libraries
+    /// @throws NotDecompressingNativesException if a native artifact cannot be extracted
     public void decompressNatives(Path destination) throws NotDecompressingNativesException {
         LOG.info("Decompress native libraries to " + destination);
 
@@ -489,14 +533,23 @@ public class DefaultLauncher extends Launcher {
         }
     }
 
+    /// Tests whether the selected game version uses the launcher-provided Log4j configuration.
+    ///
+    /// @return `true` for Minecraft 1.7 and newer
     private boolean isUsingLog4j() {
         return GameVersionNumber.compare(repository.getGameVersion(version).orElse("1.7"), "1.7") >= 0;
     }
 
+    /// Returns the target path for the generated Log4j configuration.
+    ///
+    /// @return version-local `log4j2.xml` path
     public Path getLog4jConfigurationFile() {
         return repository.getVersionRoot(version.getId()).resolve("log4j2.xml");
     }
 
+    /// Copies the bundled, version-appropriate Log4j configuration into the instance.
+    ///
+    /// @throws IOException if the bundled resource cannot be copied
     public void extractLog4jConfigurationFile() throws IOException {
         Path targetFile = getLog4jConfigurationFile();
 
@@ -516,11 +569,14 @@ public class DefaultLauncher extends Launcher {
             }
         }
 
-        try (InputStream input = DefaultLauncher.class.getResourceAsStream(sourcePath)) {
+        try (@Nullable InputStream input = DefaultLauncher.class.getResourceAsStream(sourcePath)) {
             Files.copy(input, targetFile, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 
+    /// Builds the mutable placeholder map consumed while resolving launch arguments.
+    ///
+    /// @return placeholder names mapped to values for the selected account and instance
     protected Map<String, String> getConfigurations() {
         return mapOf(
                 // defined by Minecraft official launcher
@@ -542,7 +598,7 @@ public class DefaultLauncher extends Launcher {
                 pair("${primary_jar}", FileUtils.getAbsolutePath(repository.getVersionJar(version))),
                 pair("${language}", Locale.getDefault().toLanguageTag()),
 
-                // defined by HMCL
+                // Defined by XYML.
                 // libraries_directory stands for historical reasons here. We don't know the official launcher
                 // had already defined "library_directory" as the placeholder for path to ".minecraft/libraries"
                 // when we propose this placeholder.
@@ -554,6 +610,8 @@ public class DefaultLauncher extends Launcher {
     }
 
     /// Returns the native library directory selected by the launch options.
+    ///
+    /// @return configured custom directory or the repository's platform-specific default
     private Path getNativeFolder() {
         if (StringUtils.isBlank(options.getNativesDir())) {
             return repository.getNativeDirectory(version.getId(), options.getJava().getPlatform());
@@ -562,6 +620,11 @@ public class DefaultLauncher extends Launcher {
         return Path.of(options.getNativesDir());
     }
 
+    /// Starts the game process and, when configured, attaches process lifecycle monitors.
+    ///
+    /// @return managed handle for the newly started process
+    /// @throws IOException if command generation, setup, or process creation fails
+    /// @throws InterruptedException if a configured pre-launch command is interrupted
     @Override
     public ManagedProcess launch() throws IOException, InterruptedException {
         Path nativeFolder = getNativeFolder();
@@ -601,7 +664,7 @@ public class DefaultLauncher extends Launcher {
             if (listener == null) {
                 builder.inheritIO();
             }
-            Path appdata = options.getGameDir().toAbsolutePath().getParent();
+            @Nullable Path appdata = options.getGameDir().toAbsolutePath().getParent();
             if (appdata != null) builder.environment().put("APPDATA", appdata.toString());
 
             builder.environment().putAll(getEnvVars(nativeFolder));
@@ -616,6 +679,10 @@ public class DefaultLauncher extends Launcher {
         return p;
     }
 
+    /// Builds the mutable environment-variable map supplied to game and hook processes.
+    ///
+    /// @param nativeFolder native directory used to derive renderer-specific variables
+    /// @return environment variables describing the instance, loader, and renderer
     private Map<String, String> getEnvVars(Path nativeFolder) {
         String versionName = Optional.ofNullable(options.getVersionName()).orElse(version.getId());
 
@@ -711,6 +778,10 @@ public class DefaultLauncher extends Launcher {
         return env;
     }
 
+    /// Writes a standalone launch script for the current operating system and selected extension.
+    ///
+    /// @param scriptFile destination script path
+    /// @throws IOException if command generation, native setup, or script writing fails
     @Override
     public void makeLaunchScript(Path scriptFile) throws IOException {
         boolean isWindows = OperatingSystem.WINDOWS == OperatingSystem.CURRENT_OS;
@@ -728,7 +799,7 @@ public class DefaultLauncher extends Launcher {
         }
 
         final Command commandLine = generateCommandLine(nativeFolder);
-        final String command = usePowerShell ? null : commandLine.commandLine.toString();
+        final @Nullable String command = usePowerShell ? null : commandLine.commandLine.toString();
         Map<String, String> envVars = getEnvVars(nativeFolder);
 
         if (isWindows && !usePowerShell) {
@@ -769,7 +840,7 @@ public class DefaultLauncher extends Launcher {
             try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream, charset))) {
                 if (usePowerShell) {
                     if (isWindows) {
-                        Path appdata = options.getGameDir().toAbsolutePath().getParent();
+                        @Nullable Path appdata = options.getGameDir().toAbsolutePath().getParent();
                         if (appdata != null) {
                             writer.write("$Env:APPDATA=");
                             writer.write(CommandBuilder.pwshString(appdata.toString()));
@@ -815,7 +886,7 @@ public class DefaultLauncher extends Launcher {
                         writer.write("@echo off");
                         writer.newLine();
 
-                        Path appdata = options.getGameDir().toAbsolutePath().getParent();
+                        @Nullable Path appdata = options.getGameDir().toAbsolutePath().getParent();
                         if (appdata != null) {
                             writer.write("set APPDATA=" + appdata);
                             writer.newLine();
@@ -872,6 +943,13 @@ public class DefaultLauncher extends Launcher {
             throw new ExecutionPolicyLimitException();
     }
 
+    /// Starts standard-output, standard-error, and terminal process monitors.
+    ///
+    /// @param managedProcess process receiving monitor threads and captured log lines
+    /// @param nativeFolder native directory exposed to the post-exit command
+    /// @param processListener listener receiving process, log, exit, and monitor completion events
+    /// @param encoding character encoding used to decode process output
+    /// @param isDaemon whether all monitor threads are daemon threads
     private void startMonitors(ManagedProcess managedProcess, Path nativeFolder, ProcessListener processListener, Charset encoding, boolean isDaemon) {
         processListener.setProcess(managedProcess);
         Thread stdout = Lang.thread(new StreamPump(managedProcess.getProcess().getInputStream(), it -> {
@@ -884,7 +962,7 @@ public class DefaultLauncher extends Launcher {
             managedProcess.addLine(it);
         }, encoding), "stderr-pump", isDaemon);
         managedProcess.addRelatedThread(stderr);
-        managedProcess.addRelatedThread(Lang.thread(new ExitWaiter(managedProcess, Arrays.asList(stdout, stderr), (exitCode, exitType) -> {
+        Runnable exitWaiter = new ExitWaiter(managedProcess, Arrays.asList(stdout, stderr), (exitCode, exitType) -> {
             processListener.onExit(exitCode, exitType);
 
             if (StringUtils.isNotBlank(options.getPostExitCommand())) {
@@ -896,9 +974,52 @@ public class DefaultLauncher extends Launcher {
                     LOG.warning("An Exception happened while running exit command.", e);
                 }
             }
-        }), "exit-waiter", isDaemon));
+        });
+        managedProcess.addRelatedThread(Lang.thread(
+                () -> runMonitorLifecycle(exitWaiter, processListener),
+                "exit-waiter",
+                isDaemon));
     }
 
+    /// Runs one complete exit monitor and reports its terminal state exactly once to the listener.
+    ///
+    /// @param monitor complete exit-waiter operation, including the post-exit command
+    /// @param processListener listener receiving terminal monitor completion
+    static void runMonitorLifecycle(Runnable monitor, ProcessListener processListener) {
+        Objects.requireNonNull(monitor, "monitor");
+        Objects.requireNonNull(processListener, "processListener");
+        try {
+            monitor.run();
+        } catch (RuntimeException | Error monitorFailure) {
+            notifyMonitorComplete(processListener, monitorFailure);
+            throw monitorFailure;
+        }
+        processListener.onMonitorComplete(null);
+    }
+
+    /// Reports failed monitor completion without replacing the original monitor failure.
+    ///
+    /// @param processListener listener receiving terminal monitor completion
+    /// @param monitorFailure original monitor failure
+    private static void notifyMonitorComplete(
+            ProcessListener processListener,
+            Throwable monitorFailure) {
+        try {
+            processListener.onMonitorComplete(monitorFailure);
+        } catch (RuntimeException | Error notificationFailure) {
+            if (monitorFailure != notificationFailure) {
+                monitorFailure.addSuppressed(notificationFailure);
+            }
+        }
+    }
+
+    /// Contains one generated launch command and the filesystem metadata required to execute it.
+    ///
+    /// @param commandLine ordered command-line builder
+    /// @param tempNativeFolder temporary ASCII-only symbolic-link path, or `null` when not required
+    /// @param javaNativeFolder native directory supplied to the JVM
+    /// @param encoding encoding used for process output
+    @NotNullByDefault
     private record Command(
             CommandBuilder commandLine,
             @Nullable Path tempNativeFolder,

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.glavo.site/hmcl/instance-game-settings/1.0.0",
-  "title": "HMCL Instance Game Settings",
+  "$id": "https://raw.githubusercontent.com/MinecraftSTL/XYML/main/docs/schemas/instance-game-settings/1.0.0.json",
+  "title": "XYML Instance Game Settings",
   "allOf": [
     {
       "$ref": "#/$defs/gameSettings"
@@ -15,7 +15,7 @@
       "patternProperties": {
         "^\\$schema$": {
           "enum": [
-            "https://schemas.glavo.site/hmcl/instance-game-settings/1.0.0"
+            "https://raw.githubusercontent.com/MinecraftSTL/XYML/main/docs/schemas/instance-game-settings/1.0.0.json"
           ]
         }
       },

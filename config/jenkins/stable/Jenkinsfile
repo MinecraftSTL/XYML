@@ -2,12 +2,12 @@ pipeline {
     agent any
 
     environment {
-        HMCL_CI = '1'
+        XYML_CI = '1'
 
         VERSION_TYPE = 'stable'
         MICROSOFT_AUTH_ID = credentials('microsoft_auth_id')
         CURSEFORGE_API_KEY = credentials('curseforge_api_key')
-        HMCL_SIGNATURE_KEY = credentials('hmcl_signature_key')
+        XYML_SIGNATURE_KEY = credentials('xyml_signature_key')
     }
 
     stages {

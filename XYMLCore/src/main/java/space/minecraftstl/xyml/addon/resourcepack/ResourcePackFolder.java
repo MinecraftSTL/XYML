@@ -17,69 +17,82 @@
  */
 package space.minecraftstl.xyml.addon.resourcepack;
 
-import javafx.scene.image.Image;
-import space.minecraftstl.xyml.download.DownloadProvider;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.meta.PackMcMeta;
+import space.minecraftstl.xyml.download.DownloadProvider;
+import space.minecraftstl.xyml.image.EncodedImage;
 import space.minecraftstl.xyml.util.io.FileUtils;
-import org.jetbrains.annotations.Nullable;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Resource-pack directory with eagerly parsed metadata and a lazily loaded encoded icon.
+@NotNullByDefault
 final class ResourcePackFolder extends ResourcePackFile {
-    private final PackMcMeta meta;
-    private final @Nullable Image icon;
+    /// Parsed `pack.mcmeta`, or null after a parse failure.
+    private final @Nullable PackMcMeta meta;
 
-    public ResourcePackFolder(ResourcePackManager manager, Path path) {
+    /// Loads one resource-pack directory without constructing a UI-toolkit image.
+    ///
+    /// @param manager owning resource-pack manager
+    /// @param path directory containing `pack.mcmeta`
+    ResourcePackFolder(ResourcePackManager manager, Path path) {
         super(manager, path);
 
-        PackMcMeta meta = null;
+        @Nullable PackMcMeta parsedMeta = null;
         try {
-            meta = PackMcMeta.fromNonNullJsonFile(path.resolve("pack.mcmeta"));
-        } catch (Exception e) {
-            LOG.warning("Failed to parse resource pack meta", e);
+            parsedMeta = PackMcMeta.fromNonNullJsonFile(path.resolve("pack.mcmeta"));
+        } catch (Exception failure) {
+            LOG.warning("Failed to parse resource pack meta", failure);
         }
-        this.meta = meta;
+        meta = parsedMeta;
 
-        byte[] iconData = null;
-        Image iconTemp = null;
-        try {
-            iconData = Files.readAllBytes(path.resolve("pack.png"));
-        } catch (IOException e) {
-            LOG.warning("Failed to read resource pack icon", e);
-        }
-        if (iconData != null) {
-            try (ByteArrayInputStream inputStream = new ByteArrayInputStream(iconData)) {
-                iconTemp = new Image(inputStream, 64, 64, true, true);
-            } catch (Exception e) {
-                LOG.warning("Failed to load resource pack icon", e);
-            }
-        }
-        this.icon = iconTemp;
     }
 
+    /// Returns parsed directory metadata.
+    ///
+    /// @return parsed metadata, or null after failure
     @Override
-    public PackMcMeta getMeta() {
+    public @Nullable PackMcMeta getMeta() {
         return meta;
     }
 
+    /// Loads bounded encoded directory icon data on demand.
+    ///
+    /// @return encoded icon, or null when `pack.png` is absent
     @Override
-    public @Nullable Image getIcon() {
-        return icon;
+    public @Nullable EncodedImage loadIconData() throws IOException {
+        Path icon = file.resolve("pack.png");
+        if (!Files.isRegularFile(icon)) {
+            return null;
+        }
+        try (var input = Files.newInputStream(icon)) {
+            return EncodedImage.read(input, MAX_ICON_BYTES);
+        }
     }
 
+    /// Recursively deletes this resource-pack directory.
     @Override
     public void delete() throws IOException {
         FileUtils.deleteDirectory(file);
     }
 
+    /// Directory resource packs have no remotely identifiable update artifact.
+    ///
+    /// @param downloadProvider selected download provider
+    /// @param gameVersion owning game version
+    /// @param source remote source descriptor
+    /// @return always null
     @Override
-    public AddonUpdate checkUpdates(DownloadProvider downloadProvider, String gameVersion, RemoteAddon.Source source) {
+    public @Nullable AddonUpdate checkUpdates(
+            DownloadProvider downloadProvider,
+            String gameVersion,
+            RemoteAddon.Source source) {
         return null;
     }
 }

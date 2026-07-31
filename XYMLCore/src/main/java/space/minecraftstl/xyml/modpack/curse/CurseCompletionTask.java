@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.modpack.curse;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.DownloadProvider;
@@ -43,58 +44,52 @@ import java.util.stream.Stream;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * Complete the CurseForge version.
- *
- * @author huangyuhui
- */
+/// Completes missing metadata and files for an installed CurseForge modpack instance.
 public final class CurseCompletionTask extends Task<Void> {
 
     private final DefaultDependencyManager dependency;
     private final DefaultGameRepository repository;
     private final ModManager modManager;
-    private final String version;
-    private CurseManifest manifest;
+    /// Target installed instance identifier.
+    private final String instanceId;
+    private @Nullable CurseManifest manifest;
     private List<Task<?>> dependencies;
 
     private final AtomicBoolean allNameKnown = new AtomicBoolean(true);
     private final AtomicInteger finished = new AtomicInteger(0);
     private final AtomicBoolean notFound = new AtomicBoolean(false);
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager.
-     * @param version           the existent and physical version.
-     */
-    public CurseCompletionTask(DefaultDependencyManager dependencyManager, String version) {
-        this(dependencyManager, version, null);
+    /// Creates a completion task that loads the instance manifest from disk.
+    ///
+    /// @param dependencyManager dependency manager bound to the target repository
+    /// @param instanceId target installed instance identifier
+    public CurseCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+        this(dependencyManager, instanceId, null);
     }
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager.
-     * @param version           the existent and physical version.
-     * @param manifest          the CurseForgeModpack manifest.
-     */
-    public CurseCompletionTask(DefaultDependencyManager dependencyManager, String version, CurseManifest manifest) {
+    /// Creates a completion task with an optional prefetched CurseForge manifest.
+    ///
+    /// @param dependencyManager dependency manager bound to the target repository
+    /// @param instanceId target installed instance identifier
+    /// @param manifest prefetched CurseForge manifest, or `null` to load it from disk
+    public CurseCompletionTask(
+            DefaultDependencyManager dependencyManager, String instanceId, @Nullable CurseManifest manifest) {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
-        this.modManager = repository.getModManager(version);
-        this.version = version;
+        this.modManager = repository.getModManager(instanceId);
+        this.instanceId = instanceId;
         this.manifest = manifest;
 
         if (manifest == null)
             try {
-                Path manifestFile = repository.getVersionRoot(version).resolve("manifest.json");
+                Path manifestFile = repository.getVersionRoot(instanceId).resolve("manifest.json");
                 if (Files.exists(manifestFile))
                     this.manifest = JsonUtils.fromJsonFile(manifestFile, CurseManifest.class);
             } catch (Exception e) {
                 LOG.warning("Unable to read CurseForge modpack manifest.json", e);
             }
 
-        setStage("hmcl.modpack.download");
+        setStage("xyml.modpack.download");
     }
 
     @Override
@@ -112,7 +107,7 @@ public final class CurseCompletionTask extends Task<Void> {
         if (manifest == null)
             return;
 
-        Path root = repository.getVersionRoot(version);
+        Path root = repository.getVersionRoot(instanceId);
 
         // Because in China, Curse is too difficult to visit,
         // if failed, ignore it and retry next time.
@@ -157,7 +152,7 @@ public final class CurseCompletionTask extends Task<Void> {
                         var task = new FileDownloadTask(f.url(), path);
                         task.setCacheRepository(dependency.getCacheRepository());
                         task.setCaching(true);
-                        return Stream.of(task.withCounter("hmcl.modpack.download"));
+                        return Stream.of(task.withCounter("xyml.modpack.download"));
                     } catch (IOException e) {
                         LOG.warning("Could not query api.curseforge.com for mod: " + f.projectID() + ", " + f.fileID(), e);
                         return Stream.empty(); // Ignore this file.

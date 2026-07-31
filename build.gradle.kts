@@ -1,4 +1,3 @@
-import space.minecraftstl.xyml.gradle.ci.CheckUpdate
 import space.minecraftstl.xyml.gradle.docs.UpdateDocuments
 import space.minecraftstl.xyml.gradle.l10n.ParseLanguageSubtagRegistry
 
@@ -18,12 +17,11 @@ subprojects {
         plugin("checkstyle")
     }
 
-    repositories {
-        flatDir {
-            name = "libs"
-            dirs = setOf(rootProject.file("lib"))
-        }
+    configure<JavaPluginExtension> {
+        toolchain.languageVersion.set(JavaLanguageVersion.of(17))
+    }
 
+    repositories {
         System.getenv("MAVEN_CENTRAL_REPO").let { repo ->
             if (repo.isNullOrBlank())
                 mavenCentral()
@@ -76,8 +74,6 @@ subprojects {
     }
 }
 
-space.minecraftstl.xyml.gradle.javafx.JavaFXUtils.register(rootProject)
-
 defaultTasks("clean", "build")
 
 tasks.register<ParseLanguageSubtagRegistry>("parseLanguageSubtagRegistry") {
@@ -89,12 +85,4 @@ tasks.register<ParseLanguageSubtagRegistry>("parseLanguageSubtagRegistry") {
 
 tasks.register<UpdateDocuments>("updateDocuments") {
     documentsDir.set(layout.projectDirectory.dir("docs"))
-}
-
-tasks.register<CheckUpdate>("checkUpdateDev") {
-    uri.set("https://ci.huangyuhui.net/job/HMCL-nightly")
-}
-
-tasks.register<CheckUpdate>("checkUpdateStable") {
-    uri.set("https://ci.huangyuhui.net/job/HMCL-stable")
 }

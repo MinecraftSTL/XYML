@@ -17,29 +17,30 @@
  */
 package space.minecraftstl.xyml.util;
 
-import space.minecraftstl.xyml.upgrade.UpdateHandler;
-import space.minecraftstl.xyml.util.io.JarUtils;
+import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.upgrade.UpdateApplier;
 
 import java.io.IOException;
-import java.nio.file.Path;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Restarts the current launcher through the toolkit-neutral update process launcher.
+///
 /// @author Glavo
+@NotNullByDefault
 public final class Restarter {
-
     /// Restart the current application.
     public static void restartSelf() throws IOException {
-        LOG.info("Restarting HMCL");
-
-        Path thisJar = JarUtils.thisJarPath();
-        if (thisJar == null) {
-            throw new IOException("Failed to find current HMCL location");
+        LOG.info("Restarting XYML");
+        if (Metadata.PACKAGED) {
+            UpdateApplier.startPackagedApplication();
+        } else {
+            UpdateApplier.startJava(UpdateApplier.currentApplicationLocation());
         }
-
-        UpdateHandler.startJava(thisJar);
     }
 
+    /// Prevents construction of the restart utility.
     private Restarter() {
     }
 }

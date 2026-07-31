@@ -41,7 +41,7 @@ public final class Metadata {
     public static final String FULL_NAME = "xOyz Minecraft Launcher";
 
     /// Current build version, optionally overridden for diagnostics and development.
-    public static final String VERSION = System.getProperty("hmcl.version.override", JarUtils.getAttribute("hmcl.version", "@develop@"));
+    public static final String VERSION = System.getProperty("xyml.version.override", JarUtils.getAttribute("xyml.version", "@develop@"));
 
     /// Short product title containing the product name and current version.
     public static final String TITLE = NAME + " " + VERSION;
@@ -58,45 +58,50 @@ public final class Metadata {
     /// Java feature version recommended for running the launcher.
     public static final int RECOMMENDED_JAVA_VERSION = 21;
 
-    /// Upstream publication service retained for compatible downloads and updates.
-    public static final String PUBLISH_URL = "https://hmcl.huangyuhui.net";
+    /// Project homepage.
+    public static final String PUBLISH_URL = "https://github.com/MinecraftSTL/XYML";
 
-    /// Upstream launcher download page.
-    public static final String DOWNLOAD_URL = PUBLISH_URL + "/download";
+    /// Launcher release download page.
+    public static final String DOWNLOAD_URL = PUBLISH_URL + "/releases";
 
-    /// Update endpoint, optionally overridden for fork-specific update infrastructure.
-    public static final String HMCL_UPDATE_URL = System.getProperty("hmcl.update_source.override", PUBLISH_URL + "/api/update_link");
+    /// Update descriptor endpoint, optionally overridden for deployment-specific infrastructure.
+    public static final String XYML_UPDATE_URL = System.getProperty(
+            "xyml.update_source.override",
+            DOWNLOAD_URL + "/latest/download/xyml-update.json");
 
-    /// Upstream release page used when an automatic update cannot be applied.
-    public static final String MANUAL_UPDATE_URL = "https://github.com/HMCL-dev/HMCL/releases";
+    /// Release page used when an automatic update cannot be applied.
+    public static final String MANUAL_UPDATE_URL = DOWNLOAD_URL;
 
-    /// Upstream documentation root retained for feature and troubleshooting guidance.
-    public static final String DOCS_URL = "https://docs.hmcl.net";
+    /// Project documentation root.
+    public static final String DOCS_URL = PUBLISH_URL + "/tree/main/docs";
 
-    /// Upstream help page.
-    public static final String CONTACT_URL = DOCS_URL + "/help.html";
+    /// Project issue-reporting page.
+    public static final String CONTACT_URL = PUBLISH_URL + "/issues/new/choose";
 
-    /// Upstream changelog root.
-    public static final String CHANGELOG_URL = DOCS_URL + "/changelog/";
+    /// Project changelog and release page.
+    public static final String CHANGELOG_URL = DOWNLOAD_URL;
 
-    /// Upstream end-user license agreement page.
-    public static final String EULA_URL = DOCS_URL + "/eula/hmcl.html";
+    /// Project license page.
+    public static final String EULA_URL = PUBLISH_URL + "/blob/main/LICENSE";
 
-    /// Official user QQ group invitation link.
+    /// Official XYML user QQ group invitation link.
     public static final String GROUPS_URL = "https://qm.qq.com/cgi-bin/qm/qr?k=wz9sCQuIj4TiQBHUpeuBGM-pZ83f5ini&jump_from=webapi&authKey=VKucBpojFUOiDWF7OCbmvDI6Vfkjr+S1m4e7+unOBAuEfW/j1yXYTnf50c+z/NWs";
 
     /// Build channel embedded in the launcher artifact.
-    public static final String BUILD_CHANNEL = JarUtils.getAttribute("hmcl.version.type", "nightly");
+    public static final String BUILD_CHANNEL = JarUtils.getAttribute("xyml.version.type", "nightly");
 
     /// Environment variable that disables the confirmation for illegal offline usernames.
-    public static final String SKIP_OFFLINE_USERNAME_CHECK_ENVIRONMENT_VARIABLE = "HMCL_SKIP_OFFLINE_USERNAME_CHECK";
+    public static final String SKIP_OFFLINE_USERNAME_CHECK_ENVIRONMENT_VARIABLE = "XYML_SKIP_OFFLINE_USERNAME_CHECK";
 
     /// Whether the illegal offline username confirmation is disabled by the environment.
     public static final boolean SKIP_OFFLINE_USERNAME_CHECK =
             "true".equalsIgnoreCase(System.getenv(SKIP_OFFLINE_USERNAME_CHECK_ENVIRONMENT_VARIABLE));
 
     /// Source commit embedded in the launcher artifact, or `null` when unavailable.
-    public static final @Nullable String GITHUB_SHA = JarUtils.getAttribute("hmcl.version.hash", null);
+    public static final @Nullable String GITHUB_SHA = JarUtils.getAttribute("xyml.version.hash", null);
+
+    /// Whether this process was launched from an OS-native jpackage application image.
+    public static final boolean PACKAGED = Boolean.getBoolean("xyml.packaged");
 
     /// Normalized process working directory captured when the launcher starts.
     public static final Path CURRENT_DIRECTORY = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
@@ -104,42 +109,65 @@ public final class Metadata {
     /// Platform-default Minecraft working directory.
     public static final Path MINECRAFT_DIRECTORY = OperatingSystem.getWorkingDirectory("minecraft");
 
-    /// User-level launcher data directory; legacy HMCL environment names remain supported for compatibility.
-    public static final Path HMCL_USER_HOME;
+    /// User-level launcher data directory.
+    public static final Path XYML_USER_HOME;
 
-    /// Local launcher state directory; legacy HMCL environment names remain supported for compatibility.
-    public static final Path HMCL_LOCAL_HOME;
+    /// Local launcher state directory.
+    public static final Path XYML_LOCAL_HOME;
 
-    /// Shared launcher dependency directory; legacy HMCL environment names remain supported for compatibility.
+    /// Shared launcher dependency directory.
     public static final Path DEPENDENCIES_DIRECTORY;
 
     static {
-        // Preserve existing installations by continuing to resolve the established HMCL path overrides.
-        @Nullable String hmclHome = System.getProperty("hmcl.home", System.getenv("HMCL_USER_HOME"));
-        if (StringUtils.isBlank(hmclHome)) {
+        @Nullable String xymlHome = System.getProperty("xyml.home", System.getenv("XYML_USER_HOME"));
+        if (StringUtils.isBlank(xymlHome)) {
             if (OperatingSystem.CURRENT_OS.isLinuxOrBSD()) {
                 @Nullable String xdgData = System.getenv("XDG_DATA_HOME");
                 if (StringUtils.isNotBlank(xdgData)) {
-                    HMCL_USER_HOME = Path.of(xdgData, "hmcl").toAbsolutePath().normalize();
+                    XYML_USER_HOME = Path.of(xdgData, "xyml").toAbsolutePath().normalize();
                 } else {
-                    HMCL_USER_HOME = Path.of(System.getProperty("user.home"), ".local", "share", "hmcl").toAbsolutePath().normalize();
+                    XYML_USER_HOME = Path.of(System.getProperty("user.home"), ".local", "share", "xyml").toAbsolutePath().normalize();
                 }
             } else {
-                HMCL_USER_HOME = OperatingSystem.getWorkingDirectory("hmcl");
+                XYML_USER_HOME = OperatingSystem.getWorkingDirectory("xyml");
             }
         } else {
-            HMCL_USER_HOME = Path.of(hmclHome).toAbsolutePath().normalize();
+            XYML_USER_HOME = Path.of(xymlHome).toAbsolutePath().normalize();
         }
 
-        @Nullable String hmclCurrentDir = System.getProperty("hmcl.dir", System.getenv("HMCL_LOCAL_HOME"));
-        HMCL_LOCAL_HOME = StringUtils.isNotBlank(hmclCurrentDir)
-                ? Path.of(hmclCurrentDir).toAbsolutePath().normalize()
-                : CURRENT_DIRECTORY.resolve(".hmcl");
+        @Nullable String xymlCurrentDir = System.getProperty("xyml.dir", System.getenv("XYML_LOCAL_HOME"));
+        XYML_LOCAL_HOME = StringUtils.isNotBlank(xymlCurrentDir)
+                ? Path.of(xymlCurrentDir).toAbsolutePath().normalize()
+                : PACKAGED ? packagedLocalHome() : CURRENT_DIRECTORY.resolve(".xyml");
 
-        @Nullable String hmclDependencies = System.getProperty("hmcl.dependencies.dir", System.getenv("HMCL_DEPENDENCIES_DIR"));
-        DEPENDENCIES_DIRECTORY = StringUtils.isNotBlank(hmclDependencies)
-                ? Path.of(hmclDependencies).toAbsolutePath().normalize()
-                : HMCL_LOCAL_HOME.resolve("dependencies");
+        @Nullable String xymlDependencies = System.getProperty("xyml.dependencies.dir", System.getenv("XYML_DEPENDENCIES_DIR"));
+        DEPENDENCIES_DIRECTORY = StringUtils.isNotBlank(xymlDependencies)
+                ? Path.of(xymlDependencies).toAbsolutePath().normalize()
+                : XYML_LOCAL_HOME.resolve("dependencies");
+    }
+
+    /// Resolves writable cache and log storage for a native packaged application.
+    ///
+    /// @return normalized user-writable platform cache directory
+    private static Path packagedLocalHome() {
+        Path userHome = Path.of(System.getProperty("user.home", "."));
+        Path path = switch (OperatingSystem.CURRENT_OS) {
+            case WINDOWS -> {
+                @Nullable String localAppData = System.getenv("LOCALAPPDATA");
+                yield StringUtils.isNotBlank(localAppData)
+                        ? Path.of(localAppData, "XYML")
+                        : userHome.resolve("AppData").resolve("Local").resolve("XYML");
+            }
+            case MACOS -> userHome.resolve("Library").resolve("Caches").resolve("XYML");
+            case LINUX, FREEBSD -> {
+                @Nullable String xdgCache = System.getenv("XDG_CACHE_HOME");
+                yield StringUtils.isNotBlank(xdgCache)
+                        ? Path.of(xdgCache, "xyml")
+                        : userHome.resolve(".cache").resolve("xyml");
+            }
+            case UNKNOWN -> XYML_USER_HOME.resolve("cache");
+        };
+        return path.toAbsolutePath().normalize();
     }
 
     /// Returns whether the artifact belongs to the stable release channel.

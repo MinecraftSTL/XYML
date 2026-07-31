@@ -359,7 +359,7 @@ public final class LibraryAnalyzer implements Iterable<LibraryAnalyzer.LibraryMa
         private final String libraryId;
         private final String libraryVersion;
         /**
-         * If this version is installed by HMCL, instead of external process,
+         * If this version is installed by XYML, instead of an external process,
          * which means $.patches contains this library, structureClear is true.
          */
         private final LibraryStatus status;

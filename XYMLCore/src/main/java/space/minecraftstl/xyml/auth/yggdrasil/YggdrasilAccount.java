@@ -18,11 +18,13 @@
 package space.minecraftstl.xyml.auth.yggdrasil;
 
 import com.google.gson.JsonObject;
-import javafx.beans.binding.ObjectBinding;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.glavo.uuid.UUIDs;
 import space.minecraftstl.xyml.auth.*;
+import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.observable.property.MappedObservableValue;
+import space.minecraftstl.xyml.observable.property.ObservableValue;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
-import space.minecraftstl.xyml.util.javafx.BindingMapping;
 
 import java.nio.file.Path;
 import java.util.*;
@@ -30,15 +32,31 @@ import java.util.*;
 import static java.util.Objects.requireNonNull;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Account authenticated by a Yggdrasil-compatible service.
+@NotNullByDefault
 public abstract class YggdrasilAccount extends ClassicAccount {
 
+    /// Yggdrasil-compatible authentication service used by this account.
     protected final YggdrasilService service;
+
+    /// Stable selected profile ID.
     protected final UUID profileID;
+
+    /// Login name used to authenticate this account.
     protected final String loginName;
 
+    /// Whether the current session has passed local or remote validation.
     private boolean authenticated = false;
+
+    /// Current Yggdrasil session.
     private YggdrasilSession session;
 
+    /// Restores a persisted Yggdrasil account.
+    ///
+    /// @param accountID stable account entry ID
+    /// @param service Yggdrasil-compatible authentication service
+    /// @param loginName persisted login name
+    /// @param session persisted session
     protected YggdrasilAccount(AccountID accountID, YggdrasilService service, String loginName, YggdrasilSession session) {
         super(accountID);
         this.service = requireNonNull(service);
@@ -49,7 +67,18 @@ public abstract class YggdrasilAccount extends ClassicAccount {
         addProfilePropertiesListener();
     }
 
-    protected YggdrasilAccount(YggdrasilService service, String loginName, String password, CharacterSelector selector) throws AuthenticationException {
+    /// Creates and authenticates a new Yggdrasil account.
+    ///
+    /// @param service Yggdrasil-compatible authentication service
+    /// @param loginName login name
+    /// @param password account password
+    /// @param selector callback used when the service returns multiple profiles
+    /// @throws AuthenticationException if authentication or character selection fails
+    protected YggdrasilAccount(
+            YggdrasilService service,
+            String loginName,
+            String password,
+            CharacterSelector selector) throws AuthenticationException {
         super(AccountID.generate());
         this.service = requireNonNull(service);
         this.loginName = requireNonNull(loginName);
@@ -77,30 +106,46 @@ public abstract class YggdrasilAccount extends ClassicAccount {
         addProfilePropertiesListener();
     }
 
-    private ObjectBinding<Optional<CompleteGameProfile>> profilePropertiesBinding;
+    /// Quiet profile-cache value retained for this account's lifetime.
+    private ObservableValue<Optional<CompleteGameProfile>> profilePropertiesBinding;
+
+    /// Subscription that publishes cached profile changes through the account revision.
+    private Subscription profilePropertiesSubscription;
+
+    /// Attaches the account revision to cached profile-property changes.
     private void addProfilePropertiesListener() {
-        // binding() is thread-safe
-        // hold the binding so that it won't be garbage-collected
         profilePropertiesBinding = service.getProfileRepository().binding(profileID, true);
-        // and it's safe to add a listener to an ObjectBinding which does not have any listener attached before (maybe tricky)
-        profilePropertiesBinding.addListener((a, b, c) -> this.invalidate());
+        profilePropertiesSubscription = profilePropertiesBinding.subscribe(change -> invalidate());
     }
 
+    /// Returns the login name used by this account.
+    ///
+    /// @return login name
     @Override
     public String getLoginName() {
         return loginName;
     }
 
+    /// Returns the selected game profile name.
+    ///
+    /// @return selected profile name
     @Override
     public String getProfileName() {
         return session.getSelectedProfile().getName();
     }
 
+    /// Returns the selected game profile ID.
+    ///
+    /// @return selected profile ID
     @Override
     public UUID getProfileID() {
         return session.getSelectedProfile().getId();
     }
 
+    /// Logs in with the stored session, validating or refreshing it when necessary.
+    ///
+    /// @return authenticated launch information
+    /// @throws AuthenticationException if validation or refresh fails
     @Override
     public synchronized AuthInfo logIn() throws AuthenticationException {
         if (!authenticated || !session.hasProfileName()) {
@@ -135,6 +180,11 @@ public abstract class YggdrasilAccount extends ClassicAccount {
         return session.toAuthInfo();
     }
 
+    /// Reauthenticates with a password while preserving the selected profile.
+    ///
+    /// @param password account password
+    /// @return authenticated launch information
+    /// @throws AuthenticationException if authentication fails or the selected profile no longer exists
     @Override
     public synchronized AuthInfo logInWithPassword(String password) throws AuthenticationException {
         YggdrasilSession acquiredSession = service.authenticate(loginName, password, randomClientToken());
@@ -166,6 +216,10 @@ public abstract class YggdrasilAccount extends ClassicAccount {
         return session.toAuthInfo();
     }
 
+    /// Builds launch information from the cached session without contacting the service.
+    ///
+    /// @return cached launch information
+    /// @throws AuthenticationException if the cached profile name is unavailable
     @Override
     public AuthInfo playOffline() throws AuthenticationException {
         if (!session.hasProfileName()) {
@@ -175,6 +229,9 @@ public abstract class YggdrasilAccount extends ClassicAccount {
         return session.toAuthInfo();
     }
 
+    /// Writes public login and profile identity data into account metadata.
+    ///
+    /// @param metadata mutable metadata destination
     @Override
     public void writeMetadata(JsonObject metadata) {
         super.writeMetadata(metadata);
@@ -182,6 +239,9 @@ public abstract class YggdrasilAccount extends ClassicAccount {
         metadata.addProperty("profileID", profileID.toString());
     }
 
+    /// Writes the current session and cached profile properties into private account storage.
+    ///
+    /// @param privateData mutable private-data destination
     @Override
     public void writePrivateData(JsonObject privateData) {
         super.writePrivateData(privateData);
@@ -190,20 +250,30 @@ public abstract class YggdrasilAccount extends ClassicAccount {
                 privateData.add("profileProperties", JsonUtils.GSON.toJsonTree(profile.getProperties())));
     }
 
+    /// Returns the Yggdrasil-compatible authentication service used by this account.
+    ///
+    /// @return Yggdrasil-compatible authentication service
     public YggdrasilService getYggdrasilService() {
         return service;
     }
 
+    /// Invalidates authentication and cached complete-profile data.
     @Override
     public void clearCache() {
         authenticated = false;
         service.getProfileRepository().invalidate(profileID);
     }
 
+    /// Returns observable skin and cape textures from the cached complete profile.
+    ///
+    /// Malformed texture payloads are logged and exposed as an empty optional.
+    ///
+    /// @return observable optional texture map
     @Override
-    public ObjectBinding<Optional<Map<TextureType, Texture>>> getTextures() {
-        return BindingMapping.of(service.getProfileRepository().binding(getProfileID()))
-                .map(profile -> profile.flatMap(it -> {
+    public ObservableValue<Optional<Map<TextureType, Texture>>> getTextures() {
+        return MappedObservableValue.map(
+                service.getProfileRepository().binding(getProfileID()),
+                profile -> profile == null ? Optional.empty() : profile.flatMap(it -> {
                     try {
                         return YggdrasilService.getTextures(it);
                     } catch (ServerResponseMalformedException e) {
@@ -214,20 +284,35 @@ public abstract class YggdrasilAccount extends ClassicAccount {
 
     }
 
+    /// Reports that Yggdrasil accounts support skin uploads.
+    ///
+    /// @return always `true`
     @Override
     public boolean canUploadSkin() {
         return true;
     }
 
+    /// Uploads a skin through the Yggdrasil-compatible service.
+    ///
+    /// @param isSlim whether the skin uses the slim player model
+    /// @param file skin image file
+    /// @throws AuthenticationException if authentication or upload fails
+    /// @throws UnsupportedOperationException if the service does not support uploads
     @Override
     public void uploadSkin(boolean isSlim, Path file) throws AuthenticationException, UnsupportedOperationException {
         service.uploadSkin(profileID, session.getAccessToken(), isSlim, file);
     }
 
+    /// Generates a compact random client token for a fresh authentication request.
+    ///
+    /// @return compact random UUID
     private static String randomClientToken() {
         return UUIDs.toCompactString(UUID.randomUUID());
     }
 
+    /// Returns a diagnostic account description without credentials.
+    ///
+    /// @return account ID, profile ID, and login name
     @Override
     public String toString() {
         return "YggdrasilAccount[accountID=" + getAccountID() + ", profileID=" + profileID

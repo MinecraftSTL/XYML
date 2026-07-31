@@ -17,70 +17,72 @@
  */
 package space.minecraftstl.xyml.theme;
 
-import kala.compress.archivers.zip.ZipArchiveEntry;
-import kala.compress.archivers.zip.ZipArchiveReader;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
-import java.io.FilterInputStream;
+import java.io.ByteArrayInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
 import java.util.Objects;
 
-/// A readable resource contributed by a theme pack.
+/// Reopenable theme-pack asset source consumed only by background import or export work.
 @NotNullByDefault
 public sealed interface ThemePackResource
-        permits ThemePackResource.File, ThemePackResource.Zip, ThemePackResource.Builtin {
-    /// Returns a stable resource name used for display and extension detection.
+        permits ThemePackResource.File, ThemePackResource.ContainedFile,
+        ThemePackResource.Builtin, ThemePackResource.Bytes {
+    /// Returns the stable resource name used for diagnostics and format detection.
     ///
-    /// @return the resource name
+    /// @return resource name
     String name();
 
-    /// Opens a fresh input stream for this resource.
+    /// Opens a fresh resource stream.
     ///
-    /// @return a new stream for reading the resource content
-    /// @throws IOException if the resource cannot be opened
+    /// @return fresh input
+    /// @throws IOException when the source is unavailable or unsafe
     InputStream openStream() throws IOException;
 
-    /// Returns the backing file when this resource is a regular filesystem file.
+    /// Returns the direct backing file when present.
     ///
-    /// @return the backing file, or `null` when the resource is not a direct file
+    /// @return local file or `null`
     default @Nullable Path file() {
         return null;
     }
 
-    /// A resource stored as a regular filesystem file.
+    /// Direct local regular-file resource that refuses symbolic links.
     ///
-    /// @param path the resource file path
-    /// @param name the stable resource name
+    /// @param path source path
+    /// @param name stable resource name
     @NotNullByDefault
     record File(Path path, String name) implements ThemePackResource {
-        /// Creates a file-backed theme-pack resource named after its file name.
+        /// Creates a source named after its file.
         ///
-        /// @param path the resource file path
+        /// @param path source path
         public File(Path path) {
-            this(path, Objects.requireNonNull(path).getFileName().toString());
+            this(path, Objects.requireNonNull(path, "path").getFileName().toString());
         }
 
-        /// Creates a file-backed theme-pack resource.
-        ///
-        /// @param path the resource file path
-        /// @param name the stable resource name
+        /// Normalizes the source path and validates the display name.
         public File {
-            path = Objects.requireNonNull(path).toAbsolutePath().normalize();
-            name = Objects.requireNonNull(name).trim();
+            path = Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
+            name = Objects.requireNonNull(name, "name").trim();
             if (name.isEmpty()) {
                 throw new IllegalArgumentException("Theme-pack resource name is blank");
             }
         }
 
-        /// Opens the file.
+        /// Opens a no-follow regular file after repeating metadata checks.
         @Override
         public InputStream openStream() throws IOException {
-            return Files.newInputStream(path);
+            ThemePackIoSupport.requireBackgroundThread();
+            ThemePackIoSupport.requireNoSymbolicPath(path, false, "theme-pack resource");
+            return Files.newInputStream(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
         }
 
         /// Returns the backing file.
@@ -90,126 +92,100 @@ public sealed interface ThemePackResource
         }
     }
 
-    /// A resource stored as an entry inside a zip theme-pack file.
+    /// Regular file constrained below an installed theme-pack root.
     ///
-    /// @param zipFile   the zip theme-pack file
-    /// @param entryName the normalized zip entry name
+    /// Every path segment is checked without following links on every open so later filesystem mutation cannot turn
+    /// a previously validated installed pack into an escape path.
+    ///
+    /// @param root installed theme-pack root
+    /// @param entryName normalized asset entry name
     @NotNullByDefault
-    record Zip(Path zipFile, String entryName) implements ThemePackResource {
-        /// Creates a zip-entry theme-pack resource.
-        ///
-        /// @param zipFile   the zip theme-pack file
-        /// @param entryName the normalized zip entry name
-        public Zip {
-            zipFile = Objects.requireNonNull(zipFile).toAbsolutePath().normalize();
+    record ContainedFile(Path root, String entryName) implements ThemePackResource {
+        /// Normalizes the root and entry name.
+        public ContainedFile {
+            root = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
             entryName = ThemePackAsset.normalizeEntryName(entryName);
         }
 
-        /// Returns the zip entry name.
+        /// Returns the normalized asset entry name.
         @Override
         public String name() {
             return entryName;
         }
 
-        /// Opens the zip entry and closes the zip file when the returned stream is closed.
+        /// Opens the contained regular file after proving every existing segment is not linked.
         @Override
         public InputStream openStream() throws IOException {
-            ZipArchiveReader zip = new ZipArchiveReader(zipFile, StandardCharsets.UTF_8);
-            boolean success = false;
-            try {
-                ZipArchiveEntry entry = zip.getEntry(entryName);
-                if (entry == null || entry.isDirectory()) {
-                    throw new IOException("Theme-pack asset is missing: " + entryName);
-                }
-                InputStream input = zip.getInputStream(entry);
-                success = true;
-                return new ZipEntryInputStream(input, zip);
-            } finally {
-                if (!success) {
-                    zip.close();
-                }
+            ThemePackIoSupport.requireBackgroundThread();
+            ThemePackIoSupport.requireNoSymbolicPath(root, true, "installed theme-pack root");
+            Path file = root.resolve(entryName).toAbsolutePath().normalize();
+            if (!file.startsWith(root)) {
+                throw new IOException("Installed theme-pack asset escapes its root");
             }
+            ThemePackIoSupport.requireNoSymbolicPath(file, false, "installed theme-pack asset");
+            return Files.newInputStream(file, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
         }
+
+        /// Returns the normalized contained file path without asserting its current existence.
+        @Override
+        public Path file() {
+            return root.resolve(entryName).toAbsolutePath().normalize();
+        }
+
     }
 
-    /// A resource stored in launcher-bundled classpath resources.
+    /// Bundled classpath resource.
     ///
-    /// @param resourcePath the classpath resource path
-    /// @param entryName    the theme-pack entry name
+    /// @param resourcePath absolute classpath path
+    /// @param name stable resource name
     @NotNullByDefault
-    record Builtin(String resourcePath, String entryName) implements ThemePackResource {
-        /// Creates a classpath-backed theme-pack resource.
-        ///
-        /// @param resourcePath the classpath resource path
-        /// @param entryName    the theme-pack entry name
+    record Builtin(String resourcePath, String name) implements ThemePackResource {
+        /// Validates classpath and display names.
         public Builtin {
-            resourcePath = Objects.requireNonNull(resourcePath);
-            entryName = ThemePackAsset.normalizeEntryName(entryName);
+            resourcePath = Objects.requireNonNull(resourcePath, "resourcePath");
+            name = Objects.requireNonNull(name, "name").trim();
+            if (!resourcePath.startsWith("/") || name.isEmpty()) {
+                throw new IllegalArgumentException("Invalid bundled theme-pack resource");
+            }
         }
 
-        /// Returns the theme-pack entry name.
-        @Override
-        public String name() {
-            return entryName;
-        }
-
-        /// Opens the classpath resource.
+        /// Opens the bundled source.
         @Override
         public InputStream openStream() throws IOException {
+            ThemePackIoSupport.requireBackgroundThread();
             @Nullable InputStream input = ThemePackResource.class.getResourceAsStream(resourcePath);
             if (input == null) {
-                throw new IOException("Built-in theme-pack asset is missing: " + entryName);
+                throw new FileNotFoundException("Bundled theme-pack resource is missing: " + resourcePath);
             }
             return input;
         }
     }
 
-    /// An input stream that owns a zip file handle.
+    /// Immutable in-memory resource useful for generated exports and deterministic tests.
+    ///
+    /// @param data immutable bytes
+    /// @param name stable resource name
     @NotNullByDefault
-    final class ZipEntryInputStream extends FilterInputStream {
-        /// The zip file that must stay open while this stream is read.
-        private final ZipArchiveReader zipFile;
-
-        /// Whether this stream has already been closed.
-        private boolean closed;
-
-        /// Creates a zip-entry stream.
-        ///
-        /// @param input   the zip entry input stream
-        /// @param zipFile the owning zip file
-        private ZipEntryInputStream(InputStream input, ZipArchiveReader zipFile) {
-            super(input);
-            this.zipFile = Objects.requireNonNull(zipFile);
+    record Bytes(byte @Unmodifiable [] data, String name) implements ThemePackResource {
+        /// Defensively copies resource bytes.
+        public Bytes {
+            data = Arrays.copyOf(Objects.requireNonNull(data, "data"), data.length);
+            name = Objects.requireNonNull(name, "name").trim();
+            if (name.isEmpty()) {
+                throw new IllegalArgumentException("Theme-pack resource name is blank");
+            }
         }
 
-        /// Closes both the entry stream and the owning zip file.
+        /// Returns a defensive copy of the immutable bytes.
         @Override
-        public void close() throws IOException {
-            if (closed) {
-                return;
-            }
-            closed = true;
+        public byte @Unmodifiable [] data() {
+            return Arrays.copyOf(data, data.length);
+        }
 
-            @Nullable IOException exception = null;
-            try {
-                super.close();
-            } catch (IOException e) {
-                exception = e;
-            }
-
-            try {
-                zipFile.close();
-            } catch (IOException e) {
-                if (exception != null) {
-                    exception.addSuppressed(e);
-                } else {
-                    exception = e;
-                }
-            }
-
-            if (exception != null) {
-                throw exception;
-            }
+        /// Opens a stream over a private snapshot.
+        @Override
+        public InputStream openStream() {
+            return new ByteArrayInputStream(data);
         }
     }
 }

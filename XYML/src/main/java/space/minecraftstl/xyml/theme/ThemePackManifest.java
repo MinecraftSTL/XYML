@@ -17,36 +17,43 @@
  */
 package space.minecraftstl.xyml.theme;
 
-import com.google.gson.*;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonDeserializationContext;
+import com.google.gson.JsonDeserializer;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonPrimitive;
+import com.google.gson.JsonSerializationContext;
+import com.google.gson.JsonSerializer;
 import com.google.gson.annotations.JsonAdapter;
-import space.minecraftstl.xyml.util.gson.JsonSchema;
-import space.minecraftstl.xyml.util.gson.JsonSerializable;
-import space.minecraftstl.xyml.util.gson.JsonUtils;
-import space.minecraftstl.xyml.util.i18n.I18n;
-import space.minecraftstl.xyml.util.i18n.LocalizedText;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.util.gson.JsonSchema;
+import space.minecraftstl.xyml.util.gson.JsonSerializable;
+import space.minecraftstl.xyml.util.i18n.I18n;
+import space.minecraftstl.xyml.util.i18n.LocalizedText;
 
 import java.lang.reflect.Type;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Pattern;
 
-import static space.minecraftstl.xyml.util.logging.Logger.LOG;
-
-/// Parsed metadata and themes from a theme-pack manifest.
+/// Parsed metadata and selectable themes from one theme-pack manifest.
 ///
-/// @param id          the stable package identifier
-/// @param version     the package version string
-/// @param name        the localized display name
-/// @param authors     the package authors
-/// @param icon        the optional theme-pack relative icon path
-/// @param description the optional localized package description
-/// @param themes      selectable themes declared by the package
+/// @param id stable package identifier
+/// @param version package version string
+/// @param name localized package name
+/// @param authors package authors
+/// @param icon optional package icon asset
+/// @param description optional localized description
+/// @param themes selectable themes
 @NotNullByDefault
 @JsonSerializable
 @JsonAdapter(ThemePackManifest.Adapter.class)
@@ -58,28 +65,21 @@ public record ThemePackManifest(
         @Nullable String icon,
         @Nullable LocalizedText description,
         @Unmodifiable List<Theme> themes) {
-
-    /// JSON schema for the current manifest format.
+    /// Current compatible manifest schema.
     public static final JsonSchema CURRENT_SCHEMA =
             new JsonSchema("theme-pack", new JsonSchema.Version(1, 0, 0));
 
-    /// Package and theme ID format used by theme-pack manifests.
-    private static final Pattern PACKAGE_ID_PATTERN = Pattern.compile(
-            "[A-Za-z0-9][A-Za-z0-9_-]*(\\.[A-Za-z0-9][A-Za-z0-9_-]*)*"
-    );
+    /// Maximum selectable themes accepted from one manifest.
+    public static final int MAXIMUM_THEME_COUNT = 128;
 
-    /// Creates a theme-pack manifest.
-    ///
-    /// @param id          the stable package identifier
-    /// @param version     the package version string
-    /// @param name        the localized display name
-    /// @param authors     the package authors
-    /// @param icon        the optional theme-pack relative icon path
-    /// @param description the optional localized package description
-    /// @param themes      selectable themes declared by the package
+    /// Package and theme identifier grammar.
+    private static final Pattern PACKAGE_ID_PATTERN = Pattern.compile(
+            "[A-Za-z0-9][A-Za-z0-9_-]*(\\.[A-Za-z0-9][A-Za-z0-9_-]*)*");
+
+    /// Validates, normalizes, and copies all manifest values.
     public ThemePackManifest {
         id = requirePackageId(id);
-        version = requireNonBlank(version, "version");
+        version = requireNonBlank(version, "version", 256);
         name = requireLocalizedText(name, "name");
         authors = List.copyOf(authors);
         if (icon != null) {
@@ -89,272 +89,257 @@ public record ThemePackManifest(
             description = requireLocalizedText(description, "description");
         }
         themes = List.copyOf(themes);
-        if (themes.isEmpty()) {
-            throw new IllegalArgumentException("Theme pack must declare at least one theme");
+        if (themes.isEmpty() || themes.size() > MAXIMUM_THEME_COUNT) {
+            throw new IllegalArgumentException("Theme pack must declare a bounded non-empty theme list");
         }
         checkThemeIdentities(themes);
     }
 
+    /// Returns whether this manifest uses the unnamed single-theme representation.
+    ///
+    /// @return `true` for a simple pack
     public boolean isSimpleThemePack() {
-        if (themes.size() == 1) {
-            Theme theme = themes.get(0);
-            return theme.id() == null && theme.name() == null;
-        } else {
-            return false;
-        }
+        return themes.size() == 1 && themes.get(0).id() == null && themes.get(0).name() == null;
     }
 
-    /// Returns the package display name in the current locale.
+    /// Returns the localized package display name.
     ///
-    /// @return the localized display name, or the package ID when no localized text matches
+    /// @return localized name
     public String displayName() {
-        return Objects.requireNonNullElse(name.getText(I18n.getLocale().getCandidateLocales()), id);
+        return name.getText(I18n.getLocale().getCandidateLocales());
     }
 
-    /// Returns the package description in the current locale.
+    /// Returns the localized optional description.
     ///
-    /// @return the localized description, or `null` when no localized text matches
+    /// @return localized description or `null`
     public @Nullable String displayDescription() {
         return description != null ? description.getText(I18n.getLocale().getCandidateLocales()) : null;
     }
 
-    /// Returns the first theme with the given ID.
+    /// Finds a theme by its persisted reference component.
     ///
-    /// A `null` theme ID matches only a single-theme manifest.
-    ///
-    /// @param themeId the theme ID to find, or `null` for an unnamed single-theme manifest
-    /// @return the matching theme, or `null` when no theme matches
+    /// @param themeId explicit theme ID, or `null` for a single-theme pack
+    /// @return matching theme or `null`
     public @Nullable Theme findTheme(@Nullable String themeId) {
         if (themeId == null) {
             return themes.size() == 1 ? themes.get(0) : null;
         }
-
-        for (Theme theme : themes) {
-            if (themeId.equals(theme.id())) {
-                return theme;
-            }
-        }
-        return null;
+        return themes.stream().filter(theme -> themeId.equals(theme.id())).findFirst().orElse(null);
     }
 
-    /// Reads the required theme declaration.
-    private static List<Theme> readThemes(JsonObject object) {
-        boolean hasSingleTheme = object.has("theme");
-        boolean hasMultipleThemes = object.has("themes");
-        if (hasSingleTheme == hasMultipleThemes) {
+    /// Returns every normalized theme-pack asset referenced by this manifest.
+    ///
+    /// @return immutable reference set in declaration order
+    public @Unmodifiable Set<String> referencedAssets() {
+        LinkedHashSet<String> assets = new LinkedHashSet<>();
+        if (icon != null) {
+            assets.add(icon);
+        }
+        for (Theme theme : themes) {
+            if (theme.icon() != null) {
+                assets.add(theme.icon());
+            }
+            collectAppearanceAssets(theme.appearance(), assets);
+            for (ThemeOverride override : theme.overrides()) {
+                collectAppearanceAssets(override.appearance(), assets);
+            }
+        }
+        return Collections.unmodifiableSet(assets);
+    }
+
+    /// Converts this manifest to its canonical JSON object.
+    ///
+    /// @return manifest object
+    public JsonObject toJsonObject() {
+        JsonObject object = new JsonObject();
+        object.addProperty(JsonSchema.PROPERTY_SCHEMA, CURRENT_SCHEMA.url());
+        object.addProperty("id", id);
+        object.addProperty("version", version);
+        object.add("name", name.toJsonElement());
+        if (!authors.isEmpty()) {
+            object.add("authors", ThemePackAuthor.toJson(authors));
+        }
+        if (description != null) {
+            object.add("description", description.toJsonElement());
+        }
+        if (icon != null) {
+            object.addProperty("icon", icon);
+        }
+        if (isSimpleThemePack()) {
+            object.add("theme", themes.get(0).toJsonObject());
+        } else {
+            JsonArray array = new JsonArray();
+            themes.forEach(theme -> array.add(theme.toJsonObject()));
+            object.add("themes", array);
+        }
+        return object;
+    }
+
+    /// Adds one appearance's local image source to a reference set.
+    private static void collectAppearanceAssets(ThemeAppearance appearance, Set<String> assets) {
+        @Nullable ThemeBackgroundSettings background = appearance.background();
+        if (background != null && background.source() instanceof ThemeBackground.Image image) {
+            assets.add(image.path());
+        }
+    }
+
+    /// Reads exactly one of the single-theme or multi-theme declarations.
+    private static @Unmodifiable List<Theme> readThemes(JsonObject object) {
+        boolean hasSingle = object.has("theme");
+        boolean hasMultiple = object.has("themes");
+        if (hasSingle == hasMultiple) {
             throw new JsonParseException("Theme-pack manifest must declare exactly one of theme or themes");
         }
-
-        if (hasSingleTheme) {
-            JsonElement element = object.get("theme");
-            if (!(element instanceof JsonObject themeObject)) {
+        if (hasSingle) {
+            if (!(object.get("theme") instanceof JsonObject themeObject)) {
                 throw new JsonParseException("Theme-pack theme must be an object");
             }
             return List.of(Theme.fromJson(themeObject, false));
         }
-
-        JsonElement element = object.get("themes");
-        if (!(element instanceof JsonArray array)) {
-            throw new JsonParseException("Theme-pack manifest is missing themes array");
+        if (!(object.get("themes") instanceof JsonArray array)
+                || array.isEmpty()
+                || array.size() > MAXIMUM_THEME_COUNT) {
+            throw new JsonParseException("Theme-pack themes must be a bounded non-empty array");
         }
-        if (array.isEmpty()) {
-            throw new JsonParseException("Theme-pack themes array must declare at least one theme");
-        }
-
-        ArrayList<Theme> themes = new ArrayList<>(array.size());
+        List<Theme> themes = new ArrayList<>(array.size());
         for (JsonElement item : array) {
             if (!(item instanceof JsonObject themeObject)) {
                 throw new JsonParseException("Theme-pack theme must be an object");
             }
             themes.add(Theme.fromJson(themeObject, true));
         }
-        return themes;
+        return List.copyOf(themes);
     }
 
-    /// Checks that theme IDs and names are present whenever the manifest needs them for disambiguation.
-    private static void checkThemeIdentities(List<Theme> themes) {
+    /// Rejects missing or duplicate identities in multi-theme packs.
+    private static void checkThemeIdentities(@Unmodifiable List<Theme> themes) {
         if (themes.size() <= 1) {
             return;
         }
-
+        Set<String> ids = new LinkedHashSet<>();
         for (Theme theme : themes) {
-            if (theme.id() == null) {
-                throw new IllegalArgumentException("Theme ID is required when a theme pack declares multiple themes");
+            if (theme.id() == null || theme.name() == null) {
+                throw new IllegalArgumentException("Multi-theme packs require every theme ID and name");
             }
-            if (theme.name() == null) {
-                throw new IllegalArgumentException("Theme name is required when a theme pack declares multiple themes");
+            if (!ids.add(theme.id())) {
+                throw new IllegalArgumentException("Duplicate theme ID: " + theme.id());
             }
         }
     }
 
-    /// Reads a required string member.
-    private static String requireMemberString(JsonObject object, String fieldName) {
-        JsonElement element = object.get(fieldName);
-        if (element == null) {
-            throw new JsonParseException("Theme-pack manifest is missing " + fieldName);
-        }
+    /// Reads one required string member.
+    private static String requireMemberString(JsonObject object, String field) {
+        JsonElement element = object.get(field);
         if (!(element instanceof JsonPrimitive primitive) || !primitive.isString()) {
-            throw new JsonParseException("Theme-pack manifest field must be a string: " + fieldName);
+            throw new JsonParseException("Theme-pack manifest is missing string field: " + field);
         }
-        return requireNonBlank(primitive.getAsString(), fieldName);
+        return requireNonBlank(primitive.getAsString(), field, 256);
     }
 
-    /// Parses a localized text value.
-    static LocalizedText parseLocalizedText(JsonElement element, String field) {
-        if (element instanceof JsonPrimitive primitive && primitive.isString()) {
-            return LocalizedText.plain(requireNonBlank(primitive.getAsString(), field));
-        }
-        if (element instanceof JsonObject localizedObject) {
-            if (localizedObject.isEmpty()) {
-                throw new JsonParseException("Localized text field is empty: " + field);
-            }
-
-            LinkedHashMap<String, String> localizedValues = new LinkedHashMap<>();
-            for (Map.Entry<String, JsonElement> entry : localizedObject.entrySet()) {
-                JsonElement value = entry.getValue();
-                if (!(value instanceof JsonPrimitive primitive) || !primitive.isString()) {
-                    throw new JsonParseException("Localized text values must be strings: " + field);
-                }
-                localizedValues.put(
-                        requireNonBlank(entry.getKey(), field),
-                        requireNonBlank(primitive.getAsString(), field));
-            }
-            return new LocalizedText(localizedValues);
-        }
-        throw new JsonParseException("Theme-pack localized text must be a string or object: " + field);
-    }
-
-    /// Returns a validated localized text value.
+    /// Validates non-empty localized text.
     static LocalizedText requireLocalizedText(LocalizedText value, String field) {
-        Objects.requireNonNull(value);
-
-        JsonElement element = JsonUtils.GSON.toJsonTree(value, LocalizedText.class);
-        return parseLocalizedText(element, field);
-    }
-
-    /// Returns a non-blank string value.
-    private static String requireNonBlank(String value, String field) {
-        String trimmed = value.trim();
-        if (trimmed.isEmpty()) {
-            throw new IllegalArgumentException("Theme-pack manifest field is blank: " + field);
+        Objects.requireNonNull(value, field);
+        if (value.mayBeEmpty()) {
+            throw new IllegalArgumentException("Theme-pack localized text is empty: " + field);
         }
-        return trimmed;
+        return value;
     }
 
-    /// Returns a package ID matching the theme-pack ID format.
+    /// Validates a package identifier.
     static String requirePackageId(String value) {
-        return requireId(value, "id", "Theme-pack manifest ID must follow package ID format: ");
+        return requireId(value, "manifest id");
     }
 
-    /// Returns a theme ID matching the theme-pack ID format.
+    /// Validates a theme identifier.
     static String requireThemeId(String value) {
-        return requireId(value, "theme id", "Theme ID must follow package ID format: ");
+        return requireId(value, "theme id");
     }
 
-    /// Returns an ID matching the theme-pack ID format.
-    private static String requireId(String value, String field, String messagePrefix) {
-        String id = requireNonBlank(value, field);
+    /// Validates one bounded package-format identifier.
+    private static String requireId(String value, String field) {
+        String id = requireNonBlank(value, field, 160);
         if (!PACKAGE_ID_PATTERN.matcher(id).matches()) {
-            throw new IllegalArgumentException(messagePrefix + value);
+            throw new IllegalArgumentException("Invalid theme-pack " + field + ": " + value);
         }
         return id;
     }
 
-    static final class Adapter implements JsonSerializer<@Nullable ThemePackManifest>,
-            JsonDeserializer<@Nullable ThemePackManifest> {
+    /// Validates one bounded non-empty string.
+    private static String requireNonBlank(String value, String field, int maximumLength) {
+        String trimmed = Objects.requireNonNull(value, field).trim();
+        if (trimmed.isEmpty() || trimmed.length() > maximumLength) {
+            throw new IllegalArgumentException("Theme-pack field is blank or too long: " + field);
+        }
+        return trimmed;
+    }
 
+    /// Gson adapter for the stable manifest representation.
+    @NotNullByDefault
+    public static final class Adapter implements JsonSerializer<@Nullable ThemePackManifest>,
+            JsonDeserializer<@Nullable ThemePackManifest> {
+        /// Parses a compatible current-major manifest.
         @Override
         public @Nullable ThemePackManifest deserialize(
-                @Nullable JsonElement json, Type typeOfT, JsonDeserializationContext context) throws JsonParseException {
+                @Nullable JsonElement json,
+                Type typeOfT,
+                JsonDeserializationContext context) {
             if (json == null || json instanceof JsonNull) {
                 return null;
             }
-
             if (!(json instanceof JsonObject object)) {
-                throw new JsonParseException("Theme-pack manifest is not a JsonObject");
+                throw new JsonParseException("Theme-pack manifest must be an object");
             }
-
-            if (!JsonSchema.check(object, CURRENT_SCHEMA).readable()) {
-                throw new JsonParseException("Unsupported theme-pack schema: " + object.get(JsonSchema.PROPERTY_SCHEMA));
+            JsonSchema.CompatibilityResult compatibility = JsonSchema.check(object, CURRENT_SCHEMA);
+            if (!compatibility.allowSave()) {
+                throw new JsonParseException("Unsupported or read-only theme-pack schema: "
+                        + object.get(JsonSchema.PROPERTY_SCHEMA));
             }
-
-            String id = requireMemberString(object, "id");
-            String version = requireMemberString(object, "version");
-
-            LocalizedText name = context.deserialize(object.get("name"), LocalizedText.class);
+            LocalizedText name = LocalizedText.fromJson(object.get("name"));
             if (name == null) {
                 throw new JsonParseException("Theme-pack manifest is missing name");
             }
-
-            @Nullable LocalizedText description;
-            try {
-                description = context.deserialize(object.get("description"), LocalizedText.class);
-                if (description != null) {
-                    description = requireLocalizedText(description, "description");
-                }
-            } catch (JsonParseException | IllegalArgumentException e) {
-                LOG.warning("Ignored invalid theme-pack description", e);
-                description = null;
-            }
-
-            List<ThemePackAuthor> authors;
-            try {
-                authors = ThemePackAuthor.parseAuthors(object.get("authors"));
-            } catch (JsonParseException | IllegalArgumentException e) {
-                LOG.warning("Ignored invalid theme-pack authors", e);
-                authors = List.of();
-            }
-
-            @Nullable String icon = JsonUtils.getString(object, "icon");
-            if (icon != null) {
-                try {
-                    icon = ThemePackAsset.normalizeEntryName(icon);
-                } catch (IllegalArgumentException e) {
-                    LOG.warning("Ignored invalid theme-pack icon: " + icon, e);
-                    icon = null;
-                }
-            }
-
+            @Nullable LocalizedText description = optionalLocalizedText(object.get("description"));
+            @Nullable String icon = optionalAsset(object, "icon");
             return new ThemePackManifest(
-                    id,
-                    version,
+                    requireMemberString(object, "id"),
+                    requireMemberString(object, "version"),
                     name,
-                    authors,
+                    ThemePackAuthor.parseAuthors(object.get("authors")),
                     icon,
                     description,
                     readThemes(object));
         }
 
+        /// Serializes one manifest in canonical form.
         @Override
-        public JsonElement serialize(@Nullable ThemePackManifest src, Type typeOfSrc, JsonSerializationContext context) {
-            if (src == null) {
-                return JsonNull.INSTANCE;
-            }
+        public JsonElement serialize(
+                @Nullable ThemePackManifest source,
+                Type typeOfSource,
+                JsonSerializationContext context) {
+            return source != null ? source.toJsonObject() : JsonNull.INSTANCE;
+        }
 
-            JsonObject object = new JsonObject();
-            object.addProperty(JsonSchema.PROPERTY_SCHEMA, CURRENT_SCHEMA.url());
-            object.addProperty("id", src.id);
-            object.addProperty("version", src.version);
-            object.add("name", src.name.toJsonElement());
-            object.add("authors", ThemePackAuthor.toJson(src.authors));
+        /// Reads a valid optional localized text value.
+        private static @Nullable LocalizedText optionalLocalizedText(@Nullable JsonElement element) {
+            try {
+                @Nullable LocalizedText text = LocalizedText.fromJson(element);
+                return text == null || text.mayBeEmpty() ? null : text;
+            } catch (JsonParseException | IllegalArgumentException ignored) {
+                return null;
+            }
+        }
 
-            if (src.description != null) {
-                object.add("description", src.description.toJsonElement());
+        /// Reads a valid optional asset path.
+        private static @Nullable String optionalAsset(JsonObject object, String field) {
+            JsonElement element = object.get(field);
+            if (!(element instanceof JsonPrimitive primitive) || !primitive.isString()) {
+                return null;
             }
-            if (src.icon != null) {
-                object.addProperty("icon", src.icon);
+            try {
+                return ThemePackAsset.normalizeEntryName(primitive.getAsString());
+            } catch (IllegalArgumentException ignored) {
+                return null;
             }
-
-            if (src.isSimpleThemePack()) {
-                object.add("theme", src.themes.get(0).toJsonObject());
-            } else {
-                JsonArray themeArray = new JsonArray();
-                for (Theme theme : src.themes) {
-                    themeArray.add(theme.toJsonObject());
-                }
-                object.add("themes", themeArray);
-            }
-            return object;
         }
     }
 }

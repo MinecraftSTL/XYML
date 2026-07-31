@@ -19,10 +19,10 @@ package space.minecraftstl.xyml.setting;
 
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableList;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorServer;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
@@ -34,7 +34,7 @@ import java.util.Objects;
 /// Stores per-workspace authlib-injector authentication servers.
 ///
 /// The JSON representation is saved as `config/authlib-injector-servers.json`
-/// under the current HMCL directory.
+/// under the current XYML directory.
 ///
 /// @author Glavo
 @JsonAdapter(AuthlibInjectorServerList.Adapter.class)
@@ -50,7 +50,7 @@ public final class AuthlibInjectorServerList extends ObservableSetting implement
 
     /// Creates an empty authlib-injector server list.
     public AuthlibInjectorServerList() {
-        tracker.markDirty(schema);
+        markDirty(schema);
         register();
     }
 
@@ -122,7 +122,7 @@ public final class AuthlibInjectorServerList extends ObservableSetting implement
     /// Authlib-injector authentication servers available for account login.
     @SerializedName("servers")
     private final ObservableList<AuthlibInjectorServer> servers =
-            FXCollections.observableArrayList();
+            ObservableCollections.observableList();
 
     /// Returns authlib-injector authentication servers available for account login.
     public ObservableList<AuthlibInjectorServer> getServers() {
@@ -130,6 +130,7 @@ public final class AuthlibInjectorServerList extends ObservableSetting implement
     }
 
     /// JSON adapter for [AuthlibInjectorServerList].
+    @NotNullByDefault
     public static final class Adapter extends ObservableSetting.Adapter<AuthlibInjectorServerList> {
         /// Creates an empty authlib-injector server list for deserialization.
         @Override

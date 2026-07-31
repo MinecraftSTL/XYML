@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.modpack.server;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
@@ -39,28 +40,42 @@ import java.util.stream.Collectors;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Completes updates and missing files for an installed server modpack instance.
 public class ServerModpackCompletionTask extends Task<Void> {
 
     private final DefaultDependencyManager dependencyManager;
     private final DefaultGameRepository repository;
-    private final String version;
-    private ModpackConfiguration<ServerModpackManifest> manifest;
-    private GetTask dependent;
-    private ServerModpackManifest remoteManifest;
+    /// Target installed instance identifier.
+    private final String instanceId;
+    private @Nullable ModpackConfiguration<ServerModpackManifest> manifest;
+    private @Nullable GetTask dependent;
+    private @Nullable ServerModpackManifest remoteManifest;
     private final List<Task<?>> dependencies = new ArrayList<>();
 
-    public ServerModpackCompletionTask(DefaultDependencyManager dependencyManager, String version) {
-        this(dependencyManager, version, null);
+    /// Creates a completion task that loads the instance configuration from disk.
+    ///
+    /// @param dependencyManager dependency manager bound to the target repository
+    /// @param instanceId target installed instance identifier
+    public ServerModpackCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+        this(dependencyManager, instanceId, null);
     }
 
-    public ServerModpackCompletionTask(DefaultDependencyManager dependencyManager, String version, ModpackConfiguration<ServerModpackManifest> manifest) {
+    /// Creates a completion task with an optional prefetched server-modpack configuration.
+    ///
+    /// @param dependencyManager dependency manager bound to the target repository
+    /// @param instanceId target installed instance identifier
+    /// @param manifest prefetched configuration, or `null` to load it from disk
+    public ServerModpackCompletionTask(
+            DefaultDependencyManager dependencyManager,
+            String instanceId,
+            @Nullable ModpackConfiguration<ServerModpackManifest> manifest) {
         this.dependencyManager = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
-        this.version = version;
+        this.instanceId = instanceId;
 
         if (manifest == null) {
             try {
-                Path manifestFile = repository.getModpackConfiguration(version);
+                Path manifestFile = repository.getModpackConfiguration(instanceId);
                 if (Files.exists(manifestFile)) {
                     this.manifest = JsonUtils.fromJsonFile(manifestFile, ModpackConfiguration.typeOf(ServerModpackManifest.class));
                 }
@@ -71,7 +86,7 @@ public class ServerModpackCompletionTask extends Task<Void> {
             this.manifest = manifest;
         }
 
-        setStage("hmcl.modpack.download");
+        setStage("xyml.modpack.download");
     }
 
     @Override
@@ -112,7 +127,7 @@ public class ServerModpackCompletionTask extends Task<Void> {
         Map<String, String> oldAddons = toMap(manifest.getManifest().getAddons());
         Map<String, String> newAddons = toMap(remoteManifest.getAddons());
         if (!Objects.equals(oldAddons, newAddons)) {
-            GameBuilder builder = dependencyManager.gameBuilder().name(version);
+            GameBuilder builder = dependencyManager.gameBuilder().name(instanceId);
             for (ServerModpackManifest.Addon addon : remoteManifest.getAddons()) {
                 builder.version(addon.getId(), addon.getVersion());
             }
@@ -120,7 +135,7 @@ public class ServerModpackCompletionTask extends Task<Void> {
             dependencies.add(builder.buildAsync());
         }
 
-        Path rootPath = repository.getVersionRoot(version).toAbsolutePath().normalize();
+        Path rootPath = repository.getVersionRoot(instanceId).toAbsolutePath().normalize();
         Map<String, ModpackConfiguration.FileInformation> files = manifest.getManifest().getFiles().stream()
                 .collect(Collectors.toMap(ModpackConfiguration.FileInformation::getPath,
                         Function.identity()));
@@ -128,7 +143,7 @@ public class ServerModpackCompletionTask extends Task<Void> {
         Set<String> remoteFiles = remoteManifest.getFiles().stream().map(ModpackConfiguration.FileInformation::getPath)
                 .collect(Collectors.toSet());
 
-        Path runDirectory = repository.getRunDirectory(version).toAbsolutePath().normalize();
+        Path runDirectory = repository.getRunDirectory(instanceId).toAbsolutePath().normalize();
         Path modsDirectory = runDirectory.resolve("mods");
 
         int total = 0;
@@ -169,7 +184,7 @@ public class ServerModpackCompletionTask extends Task<Void> {
                         remoteManifest.getFileApi() + "/overrides/" + file.getPath(),
                         actualPath,
                         new FileDownloadTask.IntegrityCheck("SHA-1", file.getHash()))
-                        .withCounter("hmcl.modpack.download"));
+                        .withCounter("xyml.modpack.download"));
             }
         }
 
@@ -192,7 +207,7 @@ public class ServerModpackCompletionTask extends Task<Void> {
     @Override
     public void postExecute() throws Exception {
         if (manifest == null || StringUtils.isBlank(manifest.getManifest().getFileApi())) return;
-        Path manifestFile = repository.getModpackConfiguration(version);
+        Path manifestFile = repository.getModpackConfiguration(instanceId);
         Files.createDirectories(manifestFile.getParent());
         JsonUtils.writeToJsonFile(manifestFile, new ModpackConfiguration<>(remoteManifest, this.manifest.getType(), this.manifest.getName(), this.manifest.getVersion(), remoteManifest.getFiles()));
     }

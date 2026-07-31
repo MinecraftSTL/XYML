@@ -20,9 +20,16 @@ package space.minecraftstl.xyml.setting;
 import com.google.gson.*;
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.property.*;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableSet;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableSet;
+import space.minecraftstl.xyml.observable.property.BooleanProperty;
+import space.minecraftstl.xyml.observable.property.IntegerProperty;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleBooleanProperty;
+import space.minecraftstl.xyml.observable.property.SimpleIntegerProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleStringProperty;
+import space.minecraftstl.xyml.observable.property.StringProperty;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
@@ -33,6 +40,8 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 
 /// Stores launcher settings shared by all workspaces for the current user.
+///
+/// Persistent properties and collections use XYMLCore toolkit-neutral observable types.
 @NotNullByDefault
 @JsonAdapter(UserSettings.Adapter.class)
 @JsonSerializable
@@ -51,7 +60,7 @@ public final class UserSettings extends ObservableSetting implements JsonSchemaS
 
     /// Creates empty user settings with default values.
     public UserSettings() {
-        tracker.markDirty(schema);
+        markDirty(schema);
         register();
     }
 
@@ -72,7 +81,7 @@ public final class UserSettings extends ObservableSetting implements JsonSchemaS
     /// Returns the schema used by this user settings file.
     @Override
     public JsonSchema getSchema() {
-        return schema.get();
+        return Objects.requireNonNull(schema.get());
     }
 
     /// Sets the schema used by this user settings file.
@@ -124,23 +133,23 @@ public final class UserSettings extends ObservableSetting implements JsonSchemaS
     @SerializedName("enableOfflineAccount")
     private final BooleanProperty enableOfflineAccount = new SimpleBooleanProperty(false);
 
-    /// Returns the offline account enablement property.
+    /// Returns the toolkit-neutral offline account enablement property.
     public BooleanProperty enableOfflineAccountProperty() {
         return enableOfflineAccount;
     }
 
-    /// The JavaFX font antialiasing mode override.
+    /// The font antialiasing mode override.
     @SerializedName("fontAntiAliasing")
     private final StringProperty fontAntiAliasing = new SimpleStringProperty();
 
-    /// Returns the JavaFX font antialiasing mode override property.
+    /// Returns the toolkit-neutral font antialiasing mode override property.
     public StringProperty fontAntiAliasingProperty() {
         return fontAntiAliasing;
     }
 
     /// User-added Java executable paths.
     @SerializedName("userJava")
-    private final ObservableSet<String> userJava = FXCollections.observableSet(new LinkedHashSet<>());
+    private final ObservableSet<String> userJava = ObservableCollections.observableSet();
 
     /// Returns user-added Java executable paths.
     public ObservableSet<String> getUserJava() {
@@ -149,7 +158,7 @@ public final class UserSettings extends ObservableSetting implements JsonSchemaS
 
     /// Disabled Java executable paths.
     @SerializedName("disabledJava")
-    private final ObservableSet<String> disabledJava = FXCollections.observableSet(new LinkedHashSet<>());
+    private final ObservableSet<String> disabledJava = ObservableCollections.observableSet();
 
     /// Returns disabled Java executable paths.
     public ObservableSet<String> getDisabledJava() {
@@ -157,6 +166,7 @@ public final class UserSettings extends ObservableSetting implements JsonSchemaS
     }
 
     /// Gson adapter for observable user settings.
+    @NotNullByDefault
     static final class Adapter extends ObservableSetting.Adapter<UserSettings> {
         /// Creates an empty user settings instance during deserialization.
         @Override

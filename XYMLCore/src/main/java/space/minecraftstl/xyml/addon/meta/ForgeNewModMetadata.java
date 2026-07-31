@@ -295,7 +295,7 @@ public final class ForgeNewModMetadata {
             throw new IOException("Missing embedded mods");
         }
 
-        Path tempFile = Files.createTempFile("hmcl-", ".zip");
+        Path tempFile = Files.createTempFile("xyml-", ".zip");
         try {
             for (ZipArchiveEntry embeddedModFile : embeddedModFiles) {
                 tree.extractTo(embeddedModFile, tempFile);

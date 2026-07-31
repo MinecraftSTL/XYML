@@ -22,8 +22,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.google.gson.stream.JsonWriter;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
@@ -31,12 +32,11 @@ import space.minecraftstl.xyml.game.GameJavaVersion;
 import space.minecraftstl.xyml.game.JavaVersionConstraint;
 import space.minecraftstl.xyml.game.Version;
 import space.minecraftstl.xyml.setting.SettingsManager;
+import space.minecraftstl.xyml.observable.property.ObservableValue;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
-import space.minecraftstl.xyml.ui.FXUtils;
 import space.minecraftstl.xyml.util.CacheRepository;
 import space.minecraftstl.xyml.util.DigestUtils;
-import space.minecraftstl.xyml.util.FXThread;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
@@ -46,7 +46,6 @@ import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.platform.UnsupportedPlatformException;
 import space.minecraftstl.xyml.util.platform.windows.WinReg;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -56,22 +55,22 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
-import java.util.concurrent.CountDownLatch;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * @author Glavo
- */
+/// Discovers, validates, installs, and selects Java runtimes for game launches.
+@NotNullByDefault
 public final class JavaManager {
 
+    /// Prevents instantiation of this process-wide runtime manager.
     private JavaManager() {
     }
 
-    private static final String[] KNOWN_VENDOR_DIRECTORIES = {
+    /// Common Java vendor directory names searched below Windows Program Files roots.
+    private static final String @Unmodifiable [] KNOWN_VENDOR_DIRECTORIES = {
             "Java",
             "BellSoft",
             "AdoptOpenJDK",
@@ -81,10 +80,17 @@ public final class JavaManager {
             "Semeru"
     };
 
-    public static final XYMLJavaRepository REPOSITORY = new XYMLJavaRepository(Metadata.HMCL_USER_HOME.resolve("java"));
-    public static final XYMLJavaRepository LOCAL_REPOSITORY = new XYMLJavaRepository(Metadata.HMCL_LOCAL_HOME.resolve("java"));
+    /// User-scoped repository for launcher-managed Java runtimes.
+    public static final XYMLJavaRepository REPOSITORY = new XYMLJavaRepository(Metadata.XYML_USER_HOME.resolve("java"));
 
-    public static String getMojangJavaPlatform(Platform platform) {
+    /// Launcher-local repository for portable managed Java runtimes.
+    public static final XYMLJavaRepository LOCAL_REPOSITORY = new XYMLJavaRepository(Metadata.XYML_LOCAL_HOME.resolve("java"));
+
+    /// Maps a supported platform to Mojang's runtime directory identifier.
+    ///
+    /// @param platform target platform
+    /// @return Mojang platform identifier, or `null` when unsupported
+    public static @Nullable String getMojangJavaPlatform(Platform platform) {
         if (platform.getOperatingSystem() == OperatingSystem.WINDOWS) {
             if (Architecture.SYSTEM_ARCH == Architecture.X86) {
                 return "windows-x86";
@@ -110,14 +116,26 @@ public final class JavaManager {
         return null;
     }
 
+    /// Resolves the standard Java executable below a Java home directory.
+    ///
+    /// @param javaHome Java home directory
+    /// @return platform-specific Java executable path
     public static Path getExecutable(Path javaHome) {
         return javaHome.resolve("bin").resolve(OperatingSystem.CURRENT_OS.getJavaExecutable());
     }
 
+    /// Resolves the Java executable inside Mojang's legacy macOS bundle layout.
+    ///
+    /// @param javaHome directory containing the `jre.bundle`
+    /// @return bundled Java executable path
     public static Path getMacExecutable(Path javaHome) {
         return javaHome.resolve("jre.bundle/Contents/Home/bin/java");
     }
 
+    /// Returns whether a Java runtime platform can execute on the current system.
+    ///
+    /// @param platform runtime platform
+    /// @return whether the operating system and architecture are compatible
     public static boolean isCompatible(Platform platform) {
         if (platform.getOperatingSystem() != OperatingSystem.CURRENT_OS)
             return false;
@@ -157,42 +175,39 @@ public final class JavaManager {
         return false;
     }
 
-    private static volatile Map<Path, JavaRuntime> allJava;
-    private static final CountDownLatch LATCH = new CountDownLatch(1);
+    /// Toolkit-neutral state and observable snapshots for discovered runtimes.
+    private static final JavaRuntimeRegistry JAVA_RUNTIMES = new JavaRuntimeRegistry();
 
-    private static final ObjectProperty<Collection<JavaRuntime>> allJavaProperty = new SimpleObjectProperty<>();
-
-    private static Map<Path, JavaRuntime> getAllJavaMap() throws InterruptedException {
-        Map<Path, JavaRuntime> map = allJava;
-        if (map == null) {
-            LATCH.await();
-            map = allJava;
-        }
-        return map;
-    }
-
-    private static void updateAllJavaProperty(Map<Path, JavaRuntime> javaRuntimes) {
-        JavaRuntime[] array = javaRuntimes.values().toArray(new JavaRuntime[0]);
-        Arrays.sort(array);
-        allJavaProperty.set(Arrays.asList(array));
-    }
-
+    /// Returns whether initial Java runtime discovery has completed.
     public static boolean isInitialized() {
-        return allJava != null;
+        return JAVA_RUNTIMES.isInitialized();
     }
 
-    public static Collection<JavaRuntime> getAllJava() throws InterruptedException {
-        return getAllJavaMap().values();
+    /// Waits for initial discovery and returns the sorted immutable runtime snapshot.
+    ///
+    /// @return current sorted immutable runtimes
+    /// @throws InterruptedException if the caller is interrupted before initialization
+    public static @Unmodifiable List<JavaRuntime> getAllJava() throws InterruptedException {
+        return JAVA_RUNTIMES.awaitRuntimes();
     }
 
-    public static ObjectProperty<Collection<JavaRuntime>> getAllJavaProperty() {
-        return allJavaProperty;
+    /// Returns the toolkit-neutral observable runtime snapshot.
+    ///
+    /// @return process-wide runtime snapshot observable
+    public static ObservableValue<JavaRuntimeSnapshot> getAllJavaSnapshotObservable() {
+        return JAVA_RUNTIMES.snapshotProperty();
     }
 
+    /// Resolves and probes one Java executable, using the registry snapshot when available.
+    ///
+    /// @param executable Java executable path
+    /// @return discovered runtime metadata
+    /// @throws IOException if the executable cannot be resolved or probed
+    /// @throws InterruptedException if runtime initialization is interrupted
     public static JavaRuntime getJava(Path executable) throws IOException, InterruptedException {
         executable = executable.toRealPath();
 
-        JavaRuntime javaRuntime = getAllJavaMap().get(executable);
+        @Nullable JavaRuntime javaRuntime = JAVA_RUNTIMES.awaitRuntime(executable);
         if (javaRuntime != null) {
             return javaRuntime;
         }
@@ -201,51 +216,71 @@ public final class JavaManager {
         return JavaRuntime.of(executable, info, false);
     }
 
+    /// Starts a background rescan of all potential Java runtime locations.
     public static void refresh() {
-        Task.supplyAsync(() -> searchPotentialJavaExecutables(false)).whenComplete(Schedulers.javafx(), (result, exception) -> {
-            if (result != null) {
-                LATCH.await();
-                allJava = result;
-                updateAllJavaProperty(result);
+        Task.runAsync(() -> {
+            JavaRuntimeRegistry.RefreshTicket ticket = JAVA_RUNTIMES.beginRefresh();
+            try {
+                JAVA_RUNTIMES.completeRefresh(ticket, searchPotentialJavaExecutables(false));
+            } finally {
+                JAVA_RUNTIMES.cancelRefresh(ticket);
             }
         }).start();
     }
 
+    /// Creates a task that validates and registers a user-selected Java executable.
+    ///
+    /// @param binary Java executable path
+    /// @return registration task yielding the discovered runtime
     public static Task<JavaRuntime> getAddJavaTask(Path binary) {
         return Task.supplyAsync("Get Java", () -> JavaManager.getJava(binary))
-                .thenApplyAsync(Schedulers.javafx(), javaRuntime -> {
+                .thenApplyAsync(Schedulers.ui(), javaRuntime -> {
                     if (!JavaManager.isCompatible(javaRuntime.getPlatform())) {
                         throw new UnsupportedPlatformException("Incompatible platform: " + javaRuntime.getPlatform());
                     }
 
                     String pathString = javaRuntime.getBinary().toString();
 
-                    if (!SettingsManager.isUserSettingsReadOnly()) {
-                        SettingsManager.userSettings().getDisabledJava().remove(pathString);
-                        if (SettingsManager.userSettings().getUserJava().add(pathString)) {
-                            addJava(javaRuntime);
-                        }
+                    if (SettingsManager.registerUserJavaPath(pathString)) {
+                        addJava(javaRuntime);
                     }
                     return javaRuntime;
                 });
     }
 
+    /// Creates a task that downloads and registers a managed Java runtime.
+    ///
+    /// @param downloadProvider artifact download provider
+    /// @param platform target platform
+    /// @param gameJavaVersion requested game Java component
+    /// @return download and registration task
     public static Task<JavaRuntime> getDownloadJavaTask(DownloadProvider downloadProvider, Platform platform, GameJavaVersion gameJavaVersion) {
         return REPOSITORY.getDownloadJavaTask(downloadProvider, platform, gameJavaVersion)
-                .thenApplyAsync(Schedulers.javafx(), java -> {
+                .thenApplyAsync(Schedulers.ui(), java -> {
                     addJava(java);
                     return java;
                 });
     }
 
+    /// Creates a task that installs and registers Java from an existing archive.
+    ///
+    /// @param platform target platform
+    /// @param name managed runtime name
+    /// @param update runtime metadata
+    /// @param archiveFile downloaded runtime archive
+    /// @return installation and registration task
     public static Task<JavaRuntime> getInstallJavaTask(Platform platform, String name, Map<String, Object> update, Path archiveFile) {
         return REPOSITORY.getInstallJavaTask(platform, name, update, archiveFile)
-                .thenApplyAsync(Schedulers.javafx(), java -> {
+                .thenApplyAsync(Schedulers.ui(), java -> {
                     addJava(java);
                     return java;
                 });
     }
 
+    /// Creates a task that unregisters and deletes a launcher-managed Java runtime.
+    ///
+    /// @param java managed runtime
+    /// @return uninstall task, or an already-completed task when the runtime is outside the repository
     public static Task<Void> getUninstallJavaTask(JavaRuntime java) {
         assert java.isManaged();
 
@@ -261,48 +296,45 @@ public final class JavaManager {
 
         Path relativized = platformRoot.relativize(java.getBinary());
         if (relativized.getNameCount() > 1) {
-            FXUtils.runInFX(() -> {
-                try {
-                    removeJava(java);
-                } catch (InterruptedException e) {
-                    throw new AssertionError("Unreachable code", e);
-                }
-            });
-
             String name = relativized.getName(0).toString();
-            return REPOSITORY.getUninstallJavaTask(java.getPlatform(), name);
+            return Task.composeAsync(() -> {
+                removeJava(java);
+                return REPOSITORY.getUninstallJavaTask(java.getPlatform(), name);
+            });
         } else {
             return Task.completed(null);
         }
     }
 
-    @FXThread
+    /// Adds a runtime to the observable registry.
+    ///
+    /// @param java runtime to add
+    /// @throws InterruptedException if registry initialization is interrupted
     public static void addJava(JavaRuntime java) throws InterruptedException {
-        Map<Path, JavaRuntime> oldMap = getAllJavaMap();
-        if (!oldMap.containsKey(java.getBinary())) {
-            HashMap<Path, JavaRuntime> newMap = new HashMap<>(oldMap);
-            newMap.put(java.getBinary(), java);
-            allJava = newMap;
-            updateAllJavaProperty(newMap);
-        }
+        JAVA_RUNTIMES.add(java);
     }
 
-    @FXThread
+    /// Removes a runtime from the observable registry.
+    ///
+    /// @param java runtime to remove
+    /// @throws InterruptedException if registry initialization is interrupted
     public static void removeJava(JavaRuntime java) throws InterruptedException {
         removeJava(java.getBinary());
     }
 
-    @FXThread
+    /// Removes the runtime registered at a canonical executable path.
+    ///
+    /// @param realPath canonical Java executable path
+    /// @throws InterruptedException if registry initialization is interrupted
     public static void removeJava(Path realPath) throws InterruptedException {
-        Map<Path, JavaRuntime> oldMap = getAllJavaMap();
-        if (oldMap.containsKey(realPath)) {
-            HashMap<Path, JavaRuntime> newMap = new HashMap<>(oldMap);
-            newMap.remove(realPath);
-            allJava = newMap;
-            updateAllJavaProperty(newMap);
-        }
+        JAVA_RUNTIMES.remove(realPath);
     }
 
+    /// Chooses the newer patch level nearest the recommended major Java version.
+    ///
+    /// @param java1 current candidate, or `null` when no candidate exists
+    /// @param java2 new candidate
+    /// @return preferred candidate
     private static JavaRuntime chooseJava(@Nullable JavaRuntime java1, JavaRuntime java2) {
         if (java1 == null)
             return java2;
@@ -314,21 +346,33 @@ public final class JavaManager {
             return java1.getVersionNumber().compareTo(java2.getVersionNumber()) >= 0 ? java1 : java2;
     }
 
+    /// Selects a compatible Java runtime for a game from the process-wide registry.
+    ///
+    /// @param gameVersion parsed game version, or `null` when unknown
+    /// @param version complete version metadata, or `null` when unavailable
+    /// @return preferred runtime, or `null` when no compatible runtime exists
+    /// @throws InterruptedException if runtime initialization is interrupted
     @Nullable
-    public static JavaRuntime findSuitableJava(GameVersionNumber gameVersion, Version version) throws InterruptedException {
+    public static JavaRuntime findSuitableJava(@Nullable GameVersionNumber gameVersion, @Nullable Version version) throws InterruptedException {
         return findSuitableJava(getAllJava(), gameVersion, version);
     }
 
+    /// Selects a compatible Java runtime for a game from explicit candidates.
+    ///
+    /// @param javaRuntimes candidate runtimes
+    /// @param gameVersion parsed game version, or `null` when unknown
+    /// @param version complete version metadata, or `null` when unavailable
+    /// @return preferred runtime, or `null` when no compatible runtime exists
     @Nullable
-    public static JavaRuntime findSuitableJava(Collection<JavaRuntime> javaRuntimes, GameVersionNumber gameVersion, Version version) {
-        LibraryAnalyzer analyzer = version != null ? LibraryAnalyzer.analyze(version, gameVersion != null ? gameVersion.toString() : null) : null;
+    public static JavaRuntime findSuitableJava(Collection<JavaRuntime> javaRuntimes, @Nullable GameVersionNumber gameVersion, @Nullable Version version) {
+        @Nullable LibraryAnalyzer analyzer = version != null ? LibraryAnalyzer.analyze(version, gameVersion != null ? gameVersion.toString() : null) : null;
 
         boolean forceX86 = Architecture.SYSTEM_ARCH == Architecture.ARM64
                 && (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS || OperatingSystem.CURRENT_OS == OperatingSystem.MACOS)
                 && (gameVersion == null || gameVersion.compareTo("1.6") < 0);
 
-        JavaRuntime mandatory = null;
-        JavaRuntime suggested = null;
+        @Nullable JavaRuntime mandatory = null;
+        @Nullable JavaRuntime suggested = null;
         for (JavaRuntime java : javaRuntimes) {
             if (forceX86) {
                 if (!java.getArchitecture().isX86())
@@ -364,17 +408,18 @@ public final class JavaManager {
         return suggested != null ? suggested : mandatory;
     }
 
+    /// Performs initial synchronous runtime discovery and publishes the first registry snapshot.
     public static void initialize() {
         Map<Path, JavaRuntime> allJava = searchPotentialJavaExecutables(true);
-        JavaManager.allJava = allJava;
-        LATCH.countDown();
-        FXUtils.runInFX(() -> updateAllJavaProperty(allJava));
+        JAVA_RUNTIMES.initialize(allJava);
     }
 
-    // search java
-
+    /// Searches managed repositories, operating-system locations, environment paths, and user entries.
+    ///
+    /// @param useCache whether valid cached runtime metadata may avoid probing executables
+    /// @return runtimes indexed by canonical executable path
     private static Map<Path, JavaRuntime> searchPotentialJavaExecutables(boolean useCache) {
-        Searcher searcher = new Searcher(Metadata.HMCL_USER_HOME.resolve("javaCache.json"));
+        Searcher searcher = new Searcher(Metadata.XYML_USER_HOME.resolve("javaCache.json"));
         if (useCache)
             searcher.loadCache();
 
@@ -449,7 +494,7 @@ public final class JavaManager {
 
         // Search in PATH.
         if (System.getenv("PATH") != null) {
-            String[] paths = System.getenv("PATH").split(File.pathSeparator);
+            String @Unmodifiable [] paths = System.getenv("PATH").split(File.pathSeparator);
             for (String path : paths) {
                 // https://github.com/HMCL-dev/HMCL/issues/4079
                 // https://github.com/Meloong-Git/PCL/issues/4261
@@ -465,8 +510,8 @@ public final class JavaManager {
             }
         }
 
-        if (System.getenv("HMCL_JRES") != null) {
-            String[] paths = System.getenv("HMCL_JRES").split(File.pathSeparator);
+        if (System.getenv("XYML_JRES") != null) {
+            String @Unmodifiable [] paths = System.getenv("XYML_JRES").split(File.pathSeparator);
             for (String path : paths) {
                 try {
                     searcher.tryAddJavaHome(Path.of(path));
@@ -477,7 +522,7 @@ public final class JavaManager {
 
         searcher.searchAllJavaInDirectory(Path.of(System.getProperty("user.home"), ".jdks"));
 
-        for (String javaPath : SettingsManager.userSettings().getUserJava()) {
+        for (String javaPath : SettingsManager.getUserJavaPathsSnapshot()) {
             try {
                 searcher.tryAddJavaExecutable(Path.of(javaPath));
             } catch (InvalidPathException e) {
@@ -485,11 +530,15 @@ public final class JavaManager {
             }
         }
 
-        JavaRuntime currentJava = JavaRuntime.CURRENT_JAVA;
-        if (currentJava != null
-                && !searcher.javaRuntimes.containsKey(currentJava.getBinary())
-                && !SettingsManager.userSettings().getDisabledJava().contains(currentJava.getBinary().toString())) {
-            searcher.addResult(currentJava.getBinary(), currentJava);
+        @Nullable JavaRuntime currentJava = JavaRuntime.CURRENT_JAVA;
+        if (currentJava != null) {
+            if (Metadata.PACKAGED) {
+                // A jlink image contains only launcher modules and cannot run arbitrary Minecraft versions.
+                searcher.javaRuntimes.remove(currentJava.getBinary());
+            } else if (!searcher.javaRuntimes.containsKey(currentJava.getBinary())
+                    && !SettingsManager.isUserJavaPathDisabled(currentJava.getBinary().toString())) {
+                searcher.addResult(currentJava.getBinary(), currentJava);
+            }
         }
 
         searcher.saveCache();
@@ -505,38 +554,63 @@ public final class JavaManager {
         return searcher.javaRuntimes;
     }
 
+    /// Mutable accumulator that discovers runtimes and maintains the executable metadata cache.
+    @NotNullByDefault
     private static final class Searcher {
+        /// JSON cache file used across launcher runs.
         private final Path cacheFile;
+
+        /// Successfully discovered runtimes indexed by canonical executable path.
         final Map<Path, JavaRuntime> javaRuntimes = new HashMap<>();
+
+        /// Cached executable metadata indexed by canonical executable path.
         private final LinkedHashMap<Path, JavaInfoCache> caches = new LinkedHashMap<>();
+
+        /// Executables that failed probing during this search.
         private final Set<Path> failed = new HashSet<>();
+
+        /// Whether the persistent cache must be rewritten after discovery.
         private boolean needRefreshCache = false;
 
+        /// Creates a runtime search accumulator.
+        ///
+        /// @param cacheFile persistent executable metadata cache
         Searcher(Path cacheFile) {
             this.cacheFile = cacheFile;
         }
 
+        /// Pattern for supported major and optional minor cache schema versions.
         private static final Pattern CACHE_VERSION_PATTERN = Pattern.compile("(?<major>\\d+)(?:\\.(?<minor>\\d+))?");
+
+        /// Cache schema major version; mismatches invalidate the cache.
         private static final int CACHE_MAJOR_VERSION = 0;
+
+        /// Minimum readable cache schema minor version.
         private static final int CACHE_MINOR_VERSION = 0;
 
+        /// Cached metadata for one canonical Java executable.
+        ///
+        /// @param key fingerprint of executable and runtime library files
+        /// @param info probed Java metadata
+        @NotNullByDefault
         private record JavaInfoCache(String key, JavaInfo info) {
         }
 
+        /// Loads valid cached runtime metadata and marks stale data for replacement.
         void loadCache() {
             if (Files.notExists(cacheFile))
                 return;
 
             try {
-                JsonObject jsonFile = JsonUtils.fromJsonFile(cacheFile, JsonObject.class);
-                JsonElement fileVersion = jsonFile.get("version");
+                @Nullable JsonObject jsonFile = JsonUtils.fromJsonFile(cacheFile, JsonObject.class);
+                @Nullable JsonElement fileVersion = Objects.requireNonNull(jsonFile).get("version");
 
                 Matcher matcher;
                 if (fileVersion instanceof JsonPrimitive version
                         && (matcher = CACHE_VERSION_PATTERN.matcher(version.getAsString())).matches()) {
                     int major = Integer.parseInt(matcher.group("major"));
 
-                    String minorString = matcher.group("minor");
+                    @Nullable String minorString = matcher.group("minor");
                     int minor = minorString != null ? Integer.parseInt(minorString) : 0;
 
                     if (major != CACHE_MAJOR_VERSION || minor < CACHE_MINOR_VERSION)
@@ -544,9 +618,9 @@ public final class JavaManager {
                 } else
                     throw new IOException("Invalid version JSON: " + fileVersion);
 
-                JsonArray cachesArray = jsonFile.getAsJsonArray("caches");
+                @Nullable JsonArray cachesArray = jsonFile.getAsJsonArray("caches");
 
-                for (JsonElement element : cachesArray) {
+                for (JsonElement element : Objects.requireNonNull(cachesArray)) {
                     try {
                         var obj = (JsonObject) element;
 
@@ -574,6 +648,7 @@ public final class JavaManager {
             }
         }
 
+        /// Writes the refreshed executable metadata cache when discovery changed it.
         void saveCache() {
             if (!needRefreshCache)
                 return;
@@ -616,15 +691,19 @@ public final class JavaManager {
             }
         }
 
+        /// Creates a stable fingerprint for a Java executable and its runtime files.
+        ///
+        /// @param realPath canonical Java executable path
+        /// @return cache fingerprint, or `null` when the runtime layout cannot be fingerprinted
         private static @Nullable String createCacheKey(Path realPath) {
-            Path binDir = realPath.getParent();
+            @Nullable Path binDir = realPath.getParent();
             if (binDir == null || !FileUtils.getName(binDir).equals("bin"))
                 return null;
 
             if (Files.isRegularFile(realPath.resolveSibling("ikvm.properties")))
                 return null;
 
-            Path javaHome = binDir.getParent();
+            @Nullable Path javaHome = binDir.getParent();
             if (javaHome == null)
                 return null;
 
@@ -633,8 +712,8 @@ public final class JavaManager {
                 return null;
 
             BasicFileAttributes launcherAttributes;
-            String releaseHash = null;
-            BasicFileAttributes coreLibsAttributes = null;
+            @Nullable String releaseHash = null;
+            @Nullable BasicFileAttributes coreLibsAttributes = null;
 
             try {
                 launcherAttributes = Files.readAttributes(realPath, BasicFileAttributes.class);
@@ -673,18 +752,32 @@ public final class JavaManager {
             return joiner.toString();
         }
 
+        /// Adds a prevalidated runtime to the search result.
+        ///
+        /// @param realPath canonical Java executable path
+        /// @param javaRuntime runtime metadata
         void addResult(Path realPath, JavaRuntime javaRuntime) {
             javaRuntimes.put(realPath, javaRuntime);
         }
 
+        /// Probes the standard Java executable below a Java home directory.
+        ///
+        /// @param javaHome Java home directory
         void tryAddJavaHome(Path javaHome) {
             tryAddJavaExecutable(getExecutable(javaHome));
         }
 
+        /// Probes an unmanaged Java executable.
+        ///
+        /// @param executable candidate executable path
         void tryAddJavaExecutable(Path executable) {
             tryAddJavaExecutable(executable, false);
         }
 
+        /// Adds a compatible runtime from cache or by probing its executable.
+        ///
+        /// @param executable candidate executable path
+        /// @param isManaged whether the launcher owns the runtime installation
         void tryAddJavaExecutable(Path executable, boolean isManaged) {
             try {
                 executable = executable.toRealPath();
@@ -694,13 +787,13 @@ public final class JavaManager {
 
             if (javaRuntimes.containsKey(executable)
                     || failed.contains(executable)
-                    || SettingsManager.userSettings().getDisabledJava().contains(executable.toString())) {
+                    || SettingsManager.isUserJavaPathDisabled(executable.toString())) {
                 return;
             }
 
-            String cacheKey = createCacheKey(executable);
+            @Nullable String cacheKey = createCacheKey(executable);
             if (cacheKey != null) {
-                JavaInfoCache cache = caches.get(executable);
+                @Nullable JavaInfoCache cache = caches.get(executable);
                 if (cache != null) {
                     if (isCompatible(cache.info().getPlatform()) && cacheKey.equals(cache.key())) {
                         javaRuntimes.put(executable, JavaRuntime.of(executable, cache.info(), isManaged));
@@ -731,6 +824,11 @@ public final class JavaManager {
             javaRuntimes.put(executable, JavaRuntime.of(executable, info, isManaged));
         }
 
+        /// Discovers a Mojang runtime component after optionally checking its file manifest.
+        ///
+        /// @param platform Mojang platform identifier
+        /// @param component runtime component root
+        /// @param verify whether every manifest entry must exist
         void tryAddJavaInComponentDir(String platform, Path component, boolean verify) {
             Path sha1File = component.resolve(platform).resolve(component.getFileName() + ".sha1");
             if (!Files.isRegularFile(sha1File))
@@ -740,7 +838,7 @@ public final class JavaManager {
 
             if (verify) {
                 try (BufferedReader reader = Files.newBufferedReader(sha1File)) {
-                    String line;
+                    @Nullable String line;
                     while ((line = reader.readLine()) != null) {
                         if (line.isEmpty()) continue;
 
@@ -772,6 +870,9 @@ public final class JavaManager {
             tryAddJavaHome(dir);
         }
 
+        /// Adds every managed runtime compatible with a platform from both repositories.
+        ///
+        /// @param platform target platform
         void searchAllJavaInRepository(Platform platform) {
             for (Path java : REPOSITORY.getAllJava(platform)) {
                 tryAddJavaExecutable(java, true);
@@ -788,6 +889,10 @@ public final class JavaManager {
             }
         }
 
+        /// Searches Mojang launcher runtime components for all compatible architectures.
+        ///
+        /// @param directory Mojang runtime root
+        /// @param verify whether component manifests must be verified
         void searchAllOfficialJava(Path directory, boolean verify) {
             if (!Files.isDirectory(directory))
                 return;
@@ -795,7 +900,7 @@ public final class JavaManager {
             // $HOME/Library/Application Support/minecraft/runtime/java-runtime-beta/mac-os/java-runtime-beta/jre.bundle/Contents/Home
             // $HOME/.minecraft/runtime/java-runtime-beta/linux/java-runtime-beta
 
-            String javaPlatform = getMojangJavaPlatform(Platform.SYSTEM_PLATFORM);
+            @Nullable String javaPlatform = getMojangJavaPlatform(Platform.SYSTEM_PLATFORM);
             if (javaPlatform != null) {
                 searchAllOfficialJava(directory, javaPlatform, verify);
             }
@@ -816,6 +921,11 @@ public final class JavaManager {
             }
         }
 
+        /// Searches every component below a Mojang runtime root for one platform identifier.
+        ///
+        /// @param directory Mojang runtime root
+        /// @param platform Mojang platform identifier
+        /// @param verify whether component manifests must be verified
         void searchAllOfficialJava(Path directory, String platform, boolean verify) {
             try (DirectoryStream<Path> dir = Files.newDirectoryStream(directory)) {
                 // component can be jre-legacy, java-runtime-alpha, java-runtime-beta, java-runtime-gamma or any other being added in the future.
@@ -827,6 +937,9 @@ public final class JavaManager {
             }
         }
 
+        /// Probes each direct child of a directory as a Java home.
+        ///
+        /// @param directory directory containing Java installations
         void searchAllJavaInDirectory(Path directory) {
             if (!Files.isDirectory(directory)) {
                 return;
@@ -841,6 +954,10 @@ public final class JavaManager {
             }
         }
 
+        /// Searches known vendor directories below a Windows Program Files root.
+        ///
+        /// @param env environment variable naming the root
+        /// @param defaultValue fallback root when the environment variable is absent
         void searchJavaInProgramFiles(String env, String defaultValue) {
             String programFiles = Lang.requireNonNullElse(System.getenv(env), defaultValue);
             Path path;
@@ -855,6 +972,9 @@ public final class JavaManager {
             }
         }
 
+        /// Searches macOS Java Virtual Machines bundles below a directory.
+        ///
+        /// @param directory directory containing JDK or JRE bundles
         void searchJavaInMacJavaVirtualMachines(Path directory) {
             if (!Files.isDirectory(directory)) {
                 return;
@@ -869,9 +989,12 @@ public final class JavaManager {
             }
         }
 
-        // ==== Windows Registry Support ====
+        /// Searches MSI-managed Java homes registered below a Windows registry key.
+        ///
+        /// @param hkey registry hive
+        /// @param location JavaSoft registry location
         void queryJavaInRegistryKey(WinReg.HKEY hkey, String location) {
-            WinReg reg = WinReg.INSTANCE;
+            @Nullable WinReg reg = WinReg.INSTANCE;
             if (reg == null)
                 return;
 

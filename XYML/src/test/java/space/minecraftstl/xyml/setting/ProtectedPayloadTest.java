@@ -129,14 +129,14 @@ public final class ProtectedPayloadTest {
                 ProtectedPayload.ProtectionMode.OBFUSCATED_V1.id().getBytes(StandardCharsets.UTF_8));
 
         assertArrayEquals(new byte[]{
-                (byte) 0x3c, (byte) 0xd8, (byte) 0xa2, (byte) 0x22,
-                (byte) 0x11, (byte) 0xd2, (byte) 0x8d, (byte) 0x89,
-                (byte) 0xb4, (byte) 0xf7, (byte) 0xd9, (byte) 0xb0,
-                (byte) 0x65, (byte) 0xbc, (byte) 0x14, (byte) 0x8a,
-                (byte) 0x6e, (byte) 0xb0, (byte) 0xa9, (byte) 0x4d,
-                (byte) 0xeb, (byte) 0x93, (byte) 0x99, (byte) 0x6f,
-                (byte) 0x84, (byte) 0x07, (byte) 0x5a, (byte) 0x9e,
-                (byte) 0xbd, (byte) 0xc8, (byte) 0xd1, (byte) 0xeb
+                (byte) 0x16, (byte) 0xb3, (byte) 0x75, (byte) 0x36,
+                (byte) 0xc2, (byte) 0x30, (byte) 0x22, (byte) 0x9b,
+                (byte) 0xe4, (byte) 0x33, (byte) 0xfa, (byte) 0xb3,
+                (byte) 0x20, (byte) 0xdf, (byte) 0xf3, (byte) 0x9d,
+                (byte) 0x76, (byte) 0x06, (byte) 0xba, (byte) 0x58,
+                (byte) 0x37, (byte) 0x22, (byte) 0xe4, (byte) 0xa7,
+                (byte) 0xb7, (byte) 0xdc, (byte) 0x76, (byte) 0x8e,
+                (byte) 0x88, (byte) 0xc3, (byte) 0xc7, (byte) 0x77
         }, key);
     }
 

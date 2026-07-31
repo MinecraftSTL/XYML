@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.game;
 
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.io.IOUtils;
 import space.minecraftstl.xyml.util.io.Zipper;
@@ -41,14 +42,23 @@ public final class LogExporter {
     private LogExporter() {
     }
 
+    /// Exports launcher logs and the target instance's resolved version-manifest chain.
+    ///
+    /// @param zipFile destination archive
+    /// @param gameRepository repository containing the target instance
+    /// @param instanceId target installed instance identifier
+    /// @param logs Minecraft process log text
+    /// @param launchScript launch command text with sensitive tokens filtered before export
+    /// @param logMatcher optional matcher used to select files from each log directory
+    /// @return future completed after the archive has been written
     public static CompletableFuture<Void> exportLogs(
-            Path zipFile, DefaultGameRepository gameRepository, String versionId, String logs, String launchScript,
-            PathMatcher logMatcher) {
-        Path runDirectory = gameRepository.getRunDirectory(versionId);
+            Path zipFile, DefaultGameRepository gameRepository, String instanceId, String logs, String launchScript,
+            @Nullable PathMatcher logMatcher) {
+        Path runDirectory = gameRepository.getRunDirectory(instanceId);
         Path baseDirectory = gameRepository.getBaseDirectory();
         List<String> versions = new ArrayList<>();
 
-        String currentVersionId = versionId;
+        String currentVersionId = instanceId;
         HashSet<String> resolvedSoFar = new HashSet<>();
         while (true) {
             if (resolvedSoFar.contains(currentVersionId)) break;
@@ -70,7 +80,7 @@ public final class LogExporter {
                 processLogs(runDirectory, "*.log", "runDirectory", zipper, logMatcher);
                 processLogs(runDirectory.resolve("crash-reports"), "*.txt", "crash-reports", zipper, logMatcher);
 
-                zipper.putTextFile(LOG.getLogs(), "hmcl.log");
+                zipper.putTextFile(LOG.getLogs(), "xyml.log");
                 zipper.putTextFile(logs, "minecraft.log");
                 zipper.putTextFile(Logger.filterForbiddenToken(launchScript), OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS ? "launch.bat" : "launch.sh");
 
@@ -86,7 +96,8 @@ public final class LogExporter {
         });
     }
 
-    private static void processLogs(Path directory, String fileExtension, String logDirectory, Zipper zipper, PathMatcher logMatcher) {
+    private static void processLogs(
+            Path directory, String fileExtension, String logDirectory, Zipper zipper, @Nullable PathMatcher logMatcher) {
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory, fileExtension)) {
             for (Path file : stream) {
                 if (Files.isRegularFile(file)) {

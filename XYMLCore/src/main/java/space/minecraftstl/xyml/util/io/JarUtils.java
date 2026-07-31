@@ -59,7 +59,7 @@ public final class JarUtils {
         }
 
         if (entryPointClass != null) {
-            InputStream input = entryPointClass.getResourceAsStream("/assets/hmcl.properties");
+            InputStream input = entryPointClass.getResourceAsStream("/assets/xyml.properties");
             if (input != null) {
                 try (var reader = new InputStreamReader(input, StandardCharsets.UTF_8)) {
                     properties.load(reader);

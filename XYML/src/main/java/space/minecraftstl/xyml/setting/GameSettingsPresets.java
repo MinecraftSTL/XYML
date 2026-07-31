@@ -19,22 +19,22 @@ package space.minecraftstl.xyml.setting;
 
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.Observable;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleObjectProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
+import space.minecraftstl.xyml.observable.collection.ObservableCollections;
+import space.minecraftstl.xyml.observable.collection.ObservableList;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.ObservableSetting;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
 import java.util.Objects;
 
 /// Stores reusable game settings presets independently from the main config file.
 ///
-/// The JSON representation is saved as `config/game-settings.json` under the current HMCL
+/// The JSON representation is saved as `config/game-settings.json` under the current XYML
 /// directory.
 ///
 /// @author Glavo
@@ -48,7 +48,7 @@ public final class GameSettingsPresets extends ObservableSetting implements Json
 
     /// Creates an empty game settings preset store.
     public GameSettingsPresets() {
-        tracker.markDirty(schema);
+        markDirty(schema);
         register();
     }
 
@@ -72,7 +72,7 @@ public final class GameSettingsPresets extends ObservableSetting implements Json
 
     /// Returns the schema used by this game settings preset store file.
     public JsonSchema getSchema() {
-        return schema.get();
+        return Objects.requireNonNull(schema.get(), "schema");
     }
 
     /// Sets the schema used by this game settings preset store file.
@@ -113,7 +113,7 @@ public final class GameSettingsPresets extends ObservableSetting implements Json
     /// Reusable game setting presets.
     @SerializedName("presets")
     private final ObservableList<GameSettings.Preset> presets =
-            FXCollections.observableArrayList(setting -> new Observable[] { setting });
+            ObservableCollections.observableList(setting -> List.of(setting.changes()));
 
     /// Returns the reusable game setting presets.
     public ObservableList<GameSettings.Preset> getPresets() {
@@ -134,7 +134,7 @@ public final class GameSettingsPresets extends ObservableSetting implements Json
         mainLoop:
         for (int index = 1; ; index++) {
             for (GameSettings.Preset setting : getPresets()) {
-                Integer autoNameNumber = setting.autoNameNumberProperty().getValue();
+                @Nullable Integer autoNameNumber = setting.autoNameNumberProperty().getValue();
                 if ((autoNameNumber != null && autoNameNumber == index)) {
                     continue mainLoop;
                 }
@@ -159,6 +159,7 @@ public final class GameSettingsPresets extends ObservableSetting implements Json
     }
 
     /// JSON adapter for [GameSettingsPresets].
+    @NotNullByDefault
     public static final class Adapter extends ObservableSetting.Adapter<GameSettingsPresets> {
         /// Creates an empty preset store for deserialization.
         @Override

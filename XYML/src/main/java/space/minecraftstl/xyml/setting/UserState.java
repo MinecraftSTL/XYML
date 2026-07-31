@@ -20,14 +20,14 @@ package space.minecraftstl.xyml.setting;
 import com.google.gson.JsonParseException;
 import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
-import javafx.beans.property.IntegerProperty;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.SimpleIntegerProperty;
-import javafx.beans.property.SimpleObjectProperty;
 import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.gson.ObservableSetting;
+import space.minecraftstl.xyml.observable.property.IntegerProperty;
+import space.minecraftstl.xyml.observable.property.ObjectProperty;
+import space.minecraftstl.xyml.observable.property.SimpleIntegerProperty;
+import space.minecraftstl.xyml.observable.property.SimpleObjectProperty;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -52,7 +52,7 @@ public final class UserState extends ObservableSetting implements JsonSchemaSett
 
     /// Creates empty user state with default values.
     public UserState() {
-        tracker.markDirty(schema);
+        markDirty(schema);
         register();
     }
 
@@ -73,7 +73,7 @@ public final class UserState extends ObservableSetting implements JsonSchemaSett
     /// Returns the schema used by this user state file.
     @Override
     public JsonSchema getSchema() {
-        return schema.get();
+        return Objects.requireNonNull(schema.get());
     }
 
     /// Sets the schema used by this user state file.
@@ -140,6 +140,7 @@ public final class UserState extends ObservableSetting implements JsonSchemaSett
     }
 
     /// Gson adapter for observable user state.
+    @NotNullByDefault
     static final class Adapter extends ObservableSetting.Adapter<UserState> {
         /// Creates an empty user state instance during deserialization.
         @Override

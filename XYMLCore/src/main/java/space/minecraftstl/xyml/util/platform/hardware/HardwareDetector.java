@@ -26,7 +26,7 @@ import java.util.List;
  * @author Glavo
  */
 public class HardwareDetector {
-    private static final boolean USE_FAST_FETCH = "true".equalsIgnoreCase(System.getProperty("hmcl.hardware.fastfetch", "true"));
+    private static final boolean USE_FAST_FETCH = "true".equalsIgnoreCase(System.getProperty("xyml.hardware.fastfetch", "true"));
 
     public @Nullable CentralProcessor detectCentralProcessor() {
         return USE_FAST_FETCH ? FastFetchUtils.detectCentralProcessor() : null;

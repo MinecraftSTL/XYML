@@ -40,7 +40,7 @@ import java.util.UUID;
 /// JSON serialization and deserialization.
 ///
 /// Two pre-configured [Gson] instances are exposed:
-/// - [GSON] — pretty-printing instance with all standard HMCL type adapters registered.
+/// - [GSON] — pretty-printing instance with all standard XYML type adapters registered.
 /// - [UGLY_GSON] — compact (non-pretty) instance with the same adapter set minus
 ///   complex-map-key serialization and the built-in type adapters for [java.time.Instant],
 ///   [java.util.UUID] and [java.nio.file.Path].
@@ -657,7 +657,7 @@ public final class JsonUtils {
     /// Callers may further customize the returned builder before calling
     /// [GsonBuilder#create()].
     ///
-    /// @return a new [GsonBuilder] with the default HMCL JSON configuration
+    /// @return a new [GsonBuilder] with the default XYML JSON configuration
     public static GsonBuilder defaultGsonBuilder() {
         return new GsonBuilder()
                 .enableComplexMapKeySerialization()

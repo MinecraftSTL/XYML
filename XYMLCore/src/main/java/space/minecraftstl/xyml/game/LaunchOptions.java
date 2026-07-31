@@ -225,7 +225,7 @@ public class LaunchOptions implements Serializable {
         return postExitCommand;
     }
 
-    /// Whether native libraries are supplied and managed outside HMCL.
+    /// Whether native libraries are supplied and managed outside XYML.
     public boolean isUseCustomNatives() {
         return useCustomNatives;
     }

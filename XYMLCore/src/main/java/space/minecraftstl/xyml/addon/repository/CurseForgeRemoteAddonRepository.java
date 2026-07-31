@@ -54,7 +54,7 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
     private static final String PREFIX = "https://api.curseforge.com";
     private static final Semaphore SEMAPHORE = new Semaphore(16);
 
-    public static final String API_KEY = System.getProperty("hmcl.curseforge.apikey", JarUtils.getAttribute("hmcl.curseforge.apikey", ""));
+    public static final String API_KEY = System.getProperty("xyml.curseforge.apikey", JarUtils.getAttribute("xyml.curseforge.apikey", ""));
 
     private static final int WORD_PERFECT_MATCH_WEIGHT = 5;
 
