@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.auth.AuthInfo;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.launch.DefaultGameLaunchService;
 import space.minecraftstl.xyml.game.launch.GameLaunchService;
 import space.minecraftstl.xyml.game.launch.LaunchRequest;
@@ -65,7 +66,8 @@ public final class SwingApplicationCommandOwnerTest {
         SwingApplicationCommandOwner owner =
                 new SwingApplicationCommandOwner(service, () -> { });
         try {
-            LaunchRequest request = new LaunchRequest("account-id", "directory-id", "instance-id");
+            LaunchRequest request = new LaunchRequest(
+                    "account-id", "directory-id", new GameInstanceID("instance-id"));
 
             LaunchSession returned = owner.commands().launchCommand().launch(request);
 
@@ -106,7 +108,10 @@ public final class SwingApplicationCommandOwnerTest {
         IllegalStateException failure = assertThrows(
                 IllegalStateException.class,
                 () -> commands.launchCommand().launch(
-                        new LaunchRequest("account-id", "directory-id", "closed-instance")));
+                        new LaunchRequest(
+                                "account-id",
+                                "directory-id",
+                                new GameInstanceID("closed-instance"))));
 
         assertSame(service.closedFailure(), failure);
         assertEquals(1, service.closeCalls());
@@ -227,7 +232,7 @@ public final class SwingApplicationCommandOwnerTest {
         ownerReference.set(owner);
 
         LaunchSession session = owner.commands().launchCommand().launch(
-                new LaunchRequest("account", "directory", "instance"));
+                new LaunchRequest("account", "directory", new GameInstanceID("instance")));
 
         assertSame(process, session.completion().toCompletableFuture().get(5L, TimeUnit.SECONDS));
         assertEquals(LaunchStatus.PROCESS_CREATED, session.status());
@@ -236,7 +241,10 @@ public final class SwingApplicationCommandOwnerTest {
         assertThrows(
                 IllegalStateException.class,
                 () -> owner.commands().launchCommand().launch(
-                        new LaunchRequest("account", "directory", "another-instance")));
+                        new LaunchRequest(
+                                "account",
+                                "directory",
+                                new GameInstanceID("another-instance"))));
         assertEquals(LaunchStatus.PROCESS_CREATED, session.status());
     }
 

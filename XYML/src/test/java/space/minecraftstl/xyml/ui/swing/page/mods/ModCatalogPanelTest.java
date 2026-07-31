@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -170,7 +171,7 @@ public final class ModCatalogPanelTest {
         SwingUtilities.invokeAndWait(() -> {
             ModCatalogPanel panel = new ModCatalogPanel(
                     repository,
-                    "test-instance",
+                    new GameInstanceID("test-instance"),
                     executor,
                     STRINGS,
                     STATUS_STRINGS,

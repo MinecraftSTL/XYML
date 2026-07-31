@@ -358,7 +358,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             ModCatalogPanel panel = new ModCatalogPanel(
                     new DefaultModCatalogModel(
                             repository,
-                            instanceId.id(),
+                            instanceId,
                             executor,
                             modDependencies.statusStrings()),
                     modDependencies.strings(),
@@ -370,7 +370,7 @@ public final class DefaultInstanceManagementView extends JPanel implements Insta
             ResourcePackCatalogPanel panel = new ResourcePackCatalogPanel(
                     new DefaultResourcePackCatalogModel(
                             repository,
-                            instanceId.id(),
+                            instanceId,
                             executor,
                             resourcePackDependencies.statusStrings()),
                     resourcePackDependencies.strings(),

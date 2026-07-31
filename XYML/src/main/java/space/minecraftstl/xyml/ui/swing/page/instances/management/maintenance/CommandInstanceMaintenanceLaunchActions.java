@@ -123,7 +123,7 @@ public final class CommandInstanceMaintenanceLaunchActions implements InstanceMa
         return new LaunchRequest(
                 account.getAccountID().toString(),
                 repository.getGameDirectory().getId().toString(),
-                instanceId.id());
+                instanceId);
     }
 
     /// Rejects missing stable identities without rewriting them.

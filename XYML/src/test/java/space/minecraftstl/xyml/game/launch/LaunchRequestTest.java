@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.game.launch;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -32,7 +33,8 @@ final class LaunchRequestTest {
     /// The three-identifier constructor describes an ordinary launch with no optional mode.
     @Test
     void ordinaryConstructorLeavesOptionalModesDisabled() {
-        LaunchRequest request = new LaunchRequest("account", "directory", "instance");
+        LaunchRequest request = new LaunchRequest(
+                "account", "directory", new GameInstanceID("instance"));
 
         assertNull(request.quickPlaySingleplayer());
         assertFalse(request.testMode());
@@ -44,7 +46,7 @@ final class LaunchRequestTest {
         LaunchRequest request = new LaunchRequest(
                 "account",
                 "directory",
-                "instance",
+                new GameInstanceID("instance"),
                 "World Folder");
 
         assertEquals("World Folder", request.quickPlaySingleplayer());
@@ -56,13 +58,15 @@ final class LaunchRequestTest {
     void rejectsBlankSingleplayerWorldFolder() {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new LaunchRequest("account", "directory", "instance", "  "));
+                () -> new LaunchRequest(
+                        "account", "directory", new GameInstanceID("instance"), "  "));
     }
 
     /// The test factory enables only test-game policy and leaves quick play absent.
     @Test
     void createsExplicitTestGameRequest() {
-        LaunchRequest request = LaunchRequest.test("account", "directory", "instance");
+        LaunchRequest request = LaunchRequest.test(
+                "account", "directory", new GameInstanceID("instance"));
 
         assertNull(request.quickPlaySingleplayer());
         assertTrue(request.testMode());
@@ -73,6 +77,11 @@ final class LaunchRequestTest {
     void rejectsCombinedQuickPlayAndTestMode() {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new LaunchRequest("account", "directory", "instance", "World Folder", true));
+                () -> new LaunchRequest(
+                        "account",
+                        "directory",
+                        new GameInstanceID("instance"),
+                        "World Folder",
+                        true));
     }
 }

@@ -313,7 +313,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                     .orElseThrow(() -> new IllegalArgumentException("Unknown account: " + accountId));
             GameDirectoryID gameDirectoryId = GameDirectoryID.parse(request.gameDirectoryId());
             XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
-            GameInstanceID instanceId = new GameInstanceID(request.instanceId());
+            GameInstanceID instanceId = request.instanceId();
             if (!repository.isLoaded() || !repository.hasInstance(instanceId)) {
                 throw new IllegalArgumentException(
                         "Unknown instance " + request.instanceId() + " in " + gameDirectoryId);
@@ -367,7 +367,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                     .orElseThrow(() -> new IllegalArgumentException("Unknown account: " + accountId));
             GameDirectoryID gameDirectoryId = GameDirectoryID.parse(capturedRequest.gameDirectoryId());
             XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
-            GameInstanceID instanceId = new GameInstanceID(capturedRequest.instanceId());
+            GameInstanceID instanceId = capturedRequest.instanceId();
             if (!repository.isLoaded() || !repository.hasInstance(instanceId)) {
                 throw new IllegalArgumentException(
                         "Unknown instance " + capturedRequest.instanceId() + " in " + gameDirectoryId);
@@ -421,7 +421,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
         LaunchRequest capturedRequest = Objects.requireNonNull(request, "request");
         if (capturedRequest.quickPlaySingleplayer() != null
                 && !World.supportQuickPlay(GameVersionNumber.asGameVersion(
-                        targetRepository.getGameVersion(new GameInstanceID(capturedRequest.instanceId()))))) {
+                        targetRepository.getGameVersion(capturedRequest.instanceId())))) {
             throw new IllegalArgumentException("Single-player quick play requires Minecraft 1.20 or newer");
         }
     }

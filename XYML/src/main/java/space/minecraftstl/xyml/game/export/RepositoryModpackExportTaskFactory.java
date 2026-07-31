@@ -91,7 +91,7 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
                     throw new FileAlreadyExistsException(output.toString());
                 }
 
-                GameInstanceID instanceId = new GameInstanceID(requestSnapshot.instanceId());
+                GameInstanceID instanceId = requestSnapshot.instanceId();
                 Path runDirectory = Objects.requireNonNull(
                         runDirectoryResolver.resolve(instanceId),
                         "run directory");

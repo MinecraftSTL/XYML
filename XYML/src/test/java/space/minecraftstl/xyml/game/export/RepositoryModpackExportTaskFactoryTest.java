@@ -159,7 +159,7 @@ public final class RepositoryModpackExportTaskFactoryTest {
             String selectedPath) {
         return new ModpackExportRequest(
                 format,
-                "instance",
+                new GameInstanceID("instance"),
                 ModpackExportMetadata.minimal("Pack", "1.0"),
                 ModpackExportFileSelection.of(List.of(selectedPath)),
                 output);
