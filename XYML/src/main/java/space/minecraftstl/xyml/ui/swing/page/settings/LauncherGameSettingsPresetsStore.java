@@ -71,6 +71,12 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
     /// Whether this adapter has detached from the process-wide launcher settings.
     private boolean closed;
 
+    /// Whether one command is changing multiple observable preset properties.
+    private boolean batchingMutation;
+
+    /// Whether a source event was suppressed until the current command finishes.
+    private boolean snapshotRefreshPending;
+
     /// Creates an adapter for the currently loaded process-wide settings model.
     ///
     /// @return adapter over the loaded game-settings preset document
@@ -197,7 +203,7 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
         });
     }
 
-    /// Applies the supported reusable game-setting fields to an existing preset.
+    /// Applies every reusable game-setting field to an existing preset.
     ///
     /// @param editor validated values from the Swing editor
     /// @return completion with the resulting snapshot
@@ -206,15 +212,55 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
         GameSettingsPresetEditor values = Objects.requireNonNull(editor, "editor");
         return mutate(() -> {
             GameSettings.Preset preset = requirePreset(values.id());
-            preset.autoMemoryProperty().setValue(values.autoMemory());
-            preset.minMemoryProperty().setValue(values.minMemoryMiB());
-            preset.maxMemoryProperty().setValue(values.maxMemoryMiB());
-            preset.javaTypeProperty().setValue(values.javaType());
-            preset.customJavaVersionProperty().setValue(values.customJavaVersion());
-            preset.customJavaPathProperty().setValue(values.customJavaPath());
-            preset.jvmOptionsProperty().setValue(values.jvmOptions());
-            preset.noJVMOptionsProperty().setValue(values.noJvmOptions());
-            preset.launcherVisibilityProperty().setValue(values.launcherVisibility());
+            preset.autoMemoryProperty().setValue(values.memory().automatic());
+            preset.maxMemoryProperty().setValue(values.memory().maximumMiB());
+
+            preset.javaTypeProperty().setValue(values.javaRuntime().type());
+            preset.customJavaVersionProperty().setValue(values.javaRuntime().customVersion());
+            preset.customJavaPathProperty().setValue(values.javaRuntime().customPath());
+            preset.detectedJavaProperty().setValue(values.javaRuntime().detectedJava());
+
+            preset.windowTypeProperty().setValue(values.window().type());
+            preset.widthProperty().setValue(values.window().width());
+            preset.heightProperty().setValue(values.window().height());
+
+            preset.launcherVisibilityProperty().setValue(values.launcher().visibility());
+            preset.allowAutoAgentProperty().setValue(values.launcher().allowAutoAgent());
+            preset.disableAutoGameOptionsProperty().setValue(values.launcher().disableAutoGameOptions());
+            preset.showLogsProperty().setValue(values.launcher().showLogs());
+            preset.enableDebugLogOutputProperty().setValue(values.launcher().debugLog());
+            preset.notCheckGameProperty().setValue(values.launcher().notCheckGame());
+
+            preset.quickPlayProperty().setValue(values.quickPlay().type());
+            preset.quickPlayMultiplayerProperty().setValue(values.quickPlay().multiplayer());
+            preset.quickPlaySingleplayerProperty().setValue(values.quickPlay().singleplayer());
+            preset.quickPlayRealmsProperty().setValue(values.quickPlay().realms());
+
+            preset.runningDirectoryProperty().setValue(values.launchOptions().runningDirectory());
+            preset.gameArgumentsProperty().setValue(values.launchOptions().gameArguments());
+            preset.environmentVariablesProperty().setValue(values.launchOptions().environmentVariables());
+            preset.processPriorityProperty().setValue(values.launchOptions().priority());
+
+            preset.noJVMOptionsProperty().setValue(values.jvm().noOptions());
+            preset.noOptimizingJVMOptionsProperty().setValue(values.jvm().noOptimizingOptions());
+            preset.notCheckJVMProperty().setValue(values.jvm().notCheckJvm());
+            preset.jvmOptionsProperty().setValue(values.jvm().options());
+            preset.minMemoryProperty().setValue(values.jvm().minimumMemoryMiB());
+            preset.permSizeProperty().setValue(values.jvm().permanentGenerationMiB());
+
+            preset.preLaunchCommandProperty().setValue(values.commands().preLaunch());
+            preset.commandWrapperProperty().setValue(values.commands().wrapper());
+            preset.postExitCommandProperty().setValue(values.commands().postExit());
+
+            preset.graphicsBackendProperty().setValue(values.graphics().backend());
+            preset.openGLRendererProperty().setValue(values.graphics().openGlRenderer());
+            preset.vulkanRendererProperty().setValue(values.graphics().vulkanRenderer());
+
+            preset.useCustomNativesProperty().setValue(values.nativeLibraries().customDirectoryEnabled());
+            preset.nativesDirectoryProperty().setValue(values.nativeLibraries().directory());
+            preset.notPatchNativesProperty().setValue(values.nativeLibraries().patchingDisabled());
+            preset.useNativeGLFWProperty().setValue(values.nativeLibraries().nativeGlfw());
+            preset.useNativeOpenALProperty().setValue(values.nativeLibraries().nativeOpenAl());
             preset.defaultIsolationTypeProperty().setValue(values.defaultIsolationType());
             return snapshot();
         });
@@ -249,10 +295,37 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
             if (SettingsManager.isGameSettingsReadOnly()) {
                 throw new IllegalStateException("Game settings preset file is read-only");
             }
-            return CompletableFuture.completedFuture(Objects.requireNonNull(mutation.get(), "mutation result"));
+            synchronized (snapshotLock) {
+                batchingMutation = true;
+                snapshotRefreshPending = false;
+            }
+            try {
+                Objects.requireNonNull(mutation.get(), "mutation result");
+            } finally {
+                finishMutationBatch();
+            }
+            return CompletableFuture.completedFuture(snapshot());
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
+    }
+
+    /// Ends one command batch and publishes exactly one complete replacement snapshot when any source changed.
+    private void finishMutationBatch() {
+        GameSettingsPresetsSnapshot previous;
+        GameSettingsPresetsSnapshot next;
+        synchronized (snapshotLock) {
+            batchingMutation = false;
+            if (!snapshotRefreshPending || closed) {
+                snapshotRefreshPending = false;
+                return;
+            }
+            snapshotRefreshPending = false;
+            previous = currentSnapshot;
+            next = createSnapshot(previous.revision() + 1L);
+            currentSnapshot = next;
+        }
+        snapshots.fireChange(previous, next);
     }
 
     /// Returns one existing preset or fails the requested command without modifying unrelated presets.
@@ -307,6 +380,10 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
             if (closed) {
                 return;
             }
+            if (batchingMutation) {
+                snapshotRefreshPending = true;
+                return;
+            }
             previous = currentSnapshot;
             next = createSnapshot(previous.revision() + 1L);
             currentSnapshot = next;
@@ -347,16 +424,59 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
                 customName,
                 source.autoNameNumberProperty().getValue(),
                 id.equals(defaultId),
-                source.autoMemoryProperty().getValue(),
-                source.minMemoryProperty().getValue(),
-                source.maxMemoryProperty().getValue(),
-                source.javaTypeProperty().getValue(),
-                source.customJavaVersionProperty().getValue(),
-                source.customJavaPathProperty().getValue(),
-                source.jvmOptionsProperty().getValue(),
-                source.noJVMOptionsProperty().getValue(),
-                source.launcherVisibilityProperty().getValue(),
-                source.defaultIsolationTypeProperty().getValue());
+                new GameSettingsPresetEditor(
+                        id,
+                        new GameSettingsPresetEditor.MemorySettings(
+                                source.autoMemoryProperty().getValue(),
+                                source.maxMemoryProperty().getValue()),
+                        new GameSettingsPresetEditor.JavaRuntimeSettings(
+                                source.javaTypeProperty().getValue(),
+                                source.customJavaVersionProperty().getValue(),
+                                source.customJavaPathProperty().getValue(),
+                                source.detectedJavaProperty().getValue()),
+                        new GameSettingsPresetEditor.WindowSettings(
+                                source.windowTypeProperty().getValue(),
+                                source.widthProperty().getValue(),
+                                source.heightProperty().getValue()),
+                        new GameSettingsPresetEditor.LauncherSettings(
+                                source.launcherVisibilityProperty().getValue(),
+                                source.allowAutoAgentProperty().getValue(),
+                                source.disableAutoGameOptionsProperty().getValue(),
+                                source.showLogsProperty().getValue(),
+                                source.enableDebugLogOutputProperty().getValue(),
+                                source.notCheckGameProperty().getValue()),
+                        new GameSettingsPresetEditor.QuickPlaySettings(
+                                source.quickPlayProperty().getValue(),
+                                source.quickPlayMultiplayerProperty().getValue(),
+                                source.quickPlaySingleplayerProperty().getValue(),
+                                source.quickPlayRealmsProperty().getValue()),
+                        new GameSettingsPresetEditor.LaunchOptionsSettings(
+                                source.runningDirectoryProperty().getValue(),
+                                source.gameArgumentsProperty().getValue(),
+                                source.environmentVariablesProperty().getValue(),
+                                source.processPriorityProperty().getValue()),
+                        new GameSettingsPresetEditor.JvmSettings(
+                                source.noJVMOptionsProperty().getValue(),
+                                source.noOptimizingJVMOptionsProperty().getValue(),
+                                source.notCheckJVMProperty().getValue(),
+                                source.jvmOptionsProperty().getValue(),
+                                source.minMemoryProperty().getValue(),
+                                source.permSizeProperty().getValue()),
+                        new GameSettingsPresetEditor.CommandSettings(
+                                source.preLaunchCommandProperty().getValue(),
+                                source.commandWrapperProperty().getValue(),
+                                source.postExitCommandProperty().getValue()),
+                        new GameSettingsPresetEditor.GraphicsSettings(
+                                source.graphicsBackendProperty().getValue(),
+                                source.openGLRendererProperty().getValue(),
+                                source.vulkanRendererProperty().getValue()),
+                        new GameSettingsPresetEditor.NativeLibrarySettings(
+                                source.useCustomNativesProperty().getValue(),
+                                source.nativesDirectoryProperty().getValue(),
+                                source.notPatchNativesProperty().getValue(),
+                                source.useNativeGLFWProperty().getValue(),
+                                source.useNativeOpenALProperty().getValue()),
+                        source.defaultIsolationTypeProperty().getValue()));
     }
 
     /// Returns the localized visible name used to compare and render presets.

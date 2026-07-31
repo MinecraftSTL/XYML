@@ -24,16 +24,18 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.setting.DefaultIsolationType;
 import space.minecraftstl.xyml.setting.GameSettingsPresetID;
-import space.minecraftstl.xyml.setting.JavaVersionType;
-import space.minecraftstl.xyml.setting.LauncherVisibility;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.GameSettingsEditorPresentation;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsPanel;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSnapshot;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsStore;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -41,8 +43,6 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
-import javax.swing.JTextArea;
-import javax.swing.JTextField;
 import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 import javax.swing.ScrollPaneConstants;
@@ -50,6 +50,7 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Font;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Supplier;
 
@@ -86,33 +87,11 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
     /// Shows the selected preset's display name above editable values.
     private final JLabel selectedNameLabel = new JLabel();
 
-    /// Selects automatic or manually bounded memory allocation.
-    private final JCheckBox autoMemoryBox = new JCheckBox(i18n("settings.memory.auto_allocate"));
+    /// Mutable snapshot source used by the shared complete game-settings editor.
+    private final PresetEditorSurfaceStore editorSurfaceStore;
 
-    /// Optional lower heap bound in MiB.
-    private final JTextField minMemoryField = new JTextField();
-
-    /// Optional upper heap bound in MiB.
-    private final JTextField maxMemoryField = new JTextField();
-
-    /// Selects Java runtime resolution policy.
-    private final JComboBox<JavaVersionType> javaTypeBox = new JComboBox<>(JavaVersionType.values());
-
-    /// User-entered Java major-version selector used by the VERSION policy.
-    private final JTextField customJavaVersionField = new JTextField();
-
-    /// User-entered Java executable path used by the CUSTOM policy.
-    private final JTextField customJavaPathField = new JTextField();
-
-    /// User-entered JVM arguments passed in addition to launcher-generated options.
-    private final JTextArea jvmOptionsArea = new JTextArea(5, 24);
-
-    /// Disables launcher-generated JVM arguments when selected.
-    private final JCheckBox noJvmOptionsBox = new JCheckBox(i18n("settings.advanced.no_jvm_args"));
-
-    /// Selects launcher-window behavior after a game process starts.
-    private final JComboBox<LauncherVisibility> launcherVisibilityBox =
-            new JComboBox<>(LauncherVisibility.values());
+    /// Complete game-settings editor reused without instance inheritance controls.
+    private final InstanceGameSettingsPanel gameSettingsEditor;
 
     /// Selects the default isolation strategy for future game instances.
     private final JComboBox<DefaultIsolationType> isolationTypeBox = new JComboBox<>(DefaultIsolationType.values());
@@ -159,12 +138,37 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
     ///
     /// @param store presentation and persistence source
     public GameSettingsPresetsPanel(GameSettingsPresetsStore store) {
+        this(store, new JavaManagerRuntimeManagementService());
+    }
+
+    /// Creates a preset editor with explicit local-Java discovery for deterministic UI tests.
+    ///
+    /// @param store presentation and persistence source
+    /// @param javaRuntimeService local Java discovery source used by the shared complete editor
+    GameSettingsPresetsPanel(
+            GameSettingsPresetsStore store,
+            JavaRuntimeManagementService javaRuntimeService) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.store = Objects.requireNonNull(store, "store");
+        JavaRuntimeManagementService runtimeService = Objects.requireNonNull(
+                javaRuntimeService,
+                "javaRuntimeService");
+        GameSettingsPresetsSnapshot initialSnapshot = store.snapshot();
+        if (initialSnapshot.presets().isEmpty()) {
+            throw new IllegalArgumentException("At least one game settings preset must be available");
+        }
+        GameSettingsPresetSnapshot initialPreset = initialSnapshot.presets().get(0);
+        editorSurfaceStore = new PresetEditorSurfaceStore(
+                initialPreset.editor().toEditorSnapshot(initialSnapshot.writable()));
+        gameSettingsEditor = new InstanceGameSettingsPanel(
+                editorSurfaceStore,
+                runtimeService,
+                CompletableFuture.completedFuture(GameVersionNumber.unknown()),
+                GameSettingsEditorPresentation.GLOBAL_PRESET);
         configureComponents();
         storeSubscription = store.subscribe(this::storeSnapshotChanged);
-        applySnapshot(store.snapshot());
+        applySnapshot(initialSnapshot);
     }
 
     /// Returns the immutable state currently rendered by this panel.
@@ -190,6 +194,7 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
             if (!closed) {
                 closed = true;
                 storeSubscription.unsubscribe();
+                gameSettingsEditor.close();
                 store.close();
                 updateControlAvailability();
             }
@@ -232,23 +237,8 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
 
         selectedNameLabel.setName("gameSettingsPresetName");
         selectedNameLabel.setFont(selectedNameLabel.getFont().deriveFont(Font.BOLD, 18.0F));
-        minMemoryField.setName("gameSettingsPresetMinMemory");
-        maxMemoryField.setName("gameSettingsPresetMaxMemory");
-        javaTypeBox.setName("gameSettingsPresetJavaType");
-        javaTypeBox.setRenderer(javaTypeRenderer());
-        customJavaVersionField.setName("gameSettingsPresetJavaVersion");
-        customJavaPathField.setName("gameSettingsPresetJavaPath");
-        jvmOptionsArea.setName("gameSettingsPresetJvmOptions");
-        jvmOptionsArea.setLineWrap(true);
-        jvmOptionsArea.setWrapStyleWord(true);
-        noJvmOptionsBox.setName("gameSettingsPresetNoJvmOptions");
-        launcherVisibilityBox.setName("gameSettingsPresetLauncherVisibility");
-        launcherVisibilityBox.setRenderer(launcherVisibilityRenderer());
         isolationTypeBox.setName("gameSettingsPresetIsolation");
         isolationTypeBox.setRenderer(isolationRenderer());
-        autoMemoryBox.setName("gameSettingsPresetAutoMemory");
-        autoMemoryBox.addActionListener(event -> updateMemoryControlAvailability());
-        javaTypeBox.addActionListener(event -> updateJavaControlAvailability());
     }
 
     /// Creates the page heading and preset-management toolbar.
@@ -278,41 +268,25 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         listScrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         SwingTransparency.revealBackgroundThroughScrollPane(listScrollPane);
         split.add(listScrollPane, "grow, push");
-        split.add(createEditorScrollPane(), "grow, push");
+        split.add(createEditorPanel(), "grow, push");
         return split;
     }
 
-    /// Creates a scrollable editor so JVM options and small displays remain usable.
+    /// Creates the complete shared settings editor plus preset-only isolation and save controls.
     ///
-    /// @return configured editor scroll pane
-    private JScrollPane createEditorScrollPane() {
+    /// @return configured global-preset editor panel
+    private JPanel createEditorPanel() {
         JPanel editor = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 1",
+                "insets 0, fill, wrap 1",
                 "[grow,fill]",
-                "[]12[]8[]8[]12[]8[]8[]12[]8[]8[]"));
+                "[]8[]8[]8[grow,fill]8[]"));
         editor.setOpaque(false);
         editor.add(selectedNameLabel, "growx");
-        editor.add(new JSeparator(), "growx");
-        editor.add(autoMemoryBox, "growx");
-        editor.add(createFieldRow(i18n("settings.memory.lower_bound") + " (MiB)", minMemoryField), "growx");
-        editor.add(createFieldRow(i18n("settings.memory.manual_allocate") + " (MiB)", maxMemoryField), "growx");
-        editor.add(new JSeparator(), "growx");
-        editor.add(createFieldRow(i18n("settings.game.java_directory"), javaTypeBox), "growx");
-        editor.add(createFieldRow(i18n("settings.game.java_directory.version"), customJavaVersionField), "growx");
-        editor.add(createFieldRow(i18n("settings.custom"), customJavaPathField), "growx");
-        editor.add(new JSeparator(), "growx");
-        editor.add(createFieldRow(i18n("settings.advanced.jvm_args"), new JScrollPane(jvmOptionsArea)), "growx, growy");
-        editor.add(noJvmOptionsBox, "growx");
-        editor.add(createFieldRow(i18n("settings.advanced.launcher_visible"), launcherVisibilityBox), "growx");
         editor.add(createFieldRow(i18n("settings.game.default_isolation"), isolationTypeBox), "growx");
+        editor.add(new JSeparator(), "growx");
+        editor.add(gameSettingsEditor, "grow, push");
         editor.add(saveButton, "alignx right");
-
-        JScrollPane scrollPane = new JScrollPane(editor);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder());
-        scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
-        SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
-        return scrollPane;
+        return editor;
     }
 
     /// Creates one compact two-column label and editor row.
@@ -342,25 +316,11 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         };
     }
 
-    /// Creates a renderer for all Java policies supported by the underlying settings API.
-    ///
-    /// @return Java policy combo-box renderer
-    private static ListCellRenderer<JavaVersionType> javaTypeRenderer() {
-        return (list, value, index, selected, focus) -> comboRenderer(list, javaTypeText(value), selected);
-    }
-
     /// Creates a renderer for default isolation strategies.
     ///
     /// @return isolation strategy combo-box renderer
     private static ListCellRenderer<DefaultIsolationType> isolationRenderer() {
         return (list, value, index, selected, focus) -> comboRenderer(list, isolationText(value), selected);
-    }
-
-    /// Creates a renderer for launcher visibility behavior.
-    ///
-    /// @return launcher visibility combo-box renderer
-    private static ListCellRenderer<LauncherVisibility> launcherVisibilityRenderer() {
-        return (list, value, index, selected, focus) -> comboRenderer(list, launcherVisibilityText(value), selected);
     }
 
     /// Creates a list-style label whose solid surface is limited to the active selection.
@@ -383,23 +343,6 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         return label;
     }
 
-    /// Converts a Java policy to its concise user-facing label.
-    ///
-    /// @param type policy to display, or null while a renderer initializes
-    /// @return visible policy label
-    private static String javaTypeText(@Nullable JavaVersionType type) {
-        if (type == JavaVersionType.AUTO) {
-            return i18n("settings.game.java_directory.auto");
-        }
-        if (type == JavaVersionType.VERSION) {
-            return i18n("settings.game.java_directory.version");
-        }
-        if (type == JavaVersionType.CUSTOM) {
-            return i18n("settings.custom");
-        }
-        return "Detected Java";
-    }
-
     /// Converts an isolation strategy to its localized user-facing label.
     ///
     /// @param type strategy to display, or null while a renderer initializes
@@ -412,22 +355,6 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
             return i18n("settings.game.default_isolation.never");
         }
         return i18n("settings.game.default_isolation.modded");
-    }
-
-    /// Converts a launcher visibility behavior to its localized user-facing label.
-    ///
-    /// @param visibility behavior to display, or null while a renderer initializes
-    /// @return visible behavior label
-    private static String launcherVisibilityText(@Nullable LauncherVisibility visibility) {
-        if (visibility == null) {
-            return "";
-        }
-        return switch (visibility) {
-            case CLOSE -> i18n("settings.advanced.launcher_visibility.close");
-            case HIDE -> i18n("settings.advanced.launcher_visibility.hide");
-            case KEEP -> i18n("settings.advanced.launcher_visibility.keep");
-            case HIDE_AND_REOPEN -> i18n("settings.advanced.launcher_visibility.hide_and_reopen");
-        };
     }
 
     /// Prompts for an optional custom name and starts asynchronous creation.
@@ -491,72 +418,29 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         }
     }
 
-    /// Validates supported editor controls and starts an asynchronous save command.
+    /// Validates the complete editor surface and starts an asynchronous save command.
     private void saveSelectedPreset() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable GameSettingsPresetSnapshot selected = presetList.getSelectedValue();
         if (selected == null) {
             return;
         }
-        @Nullable Integer minMemory = parseOptionalMemory(minMemoryField.getText());
-        @Nullable Integer maxMemory = parseOptionalMemory(maxMemoryField.getText());
-        if (containsInvalidMemory(minMemoryField.getText(), minMemory)
-                || containsInvalidMemory(maxMemoryField.getText(), maxMemory)
-                || (!autoMemoryBox.isSelected() && maxMemory == null)) {
-            statusLabel.setText(i18n("input.number"));
-            return;
-        }
-        @Nullable JavaVersionType javaType = (JavaVersionType) javaTypeBox.getSelectedItem();
-        @Nullable LauncherVisibility launcherVisibility =
-                (LauncherVisibility) launcherVisibilityBox.getSelectedItem();
         @Nullable DefaultIsolationType isolationType = (DefaultIsolationType) isolationTypeBox.getSelectedItem();
-        if (javaType == null || launcherVisibility == null || isolationType == null) {
+        if (isolationType == null) {
             statusLabel.setText(i18n("message.failed"));
             return;
         }
         try {
-            GameSettingsPresetEditor editor = new GameSettingsPresetEditor(
-                    selected.id(),
-                    autoMemoryBox.isSelected(),
-                    minMemory,
-                    maxMemory,
-                    javaType,
-                    customJavaVersionField.getText().trim(),
-                    customJavaPathField.getText().trim(),
-                    jvmOptionsArea.getText(),
-                    noJvmOptionsBox.isSelected(),
-                    launcherVisibility,
-                    isolationType);
+            GameSettingsPresetEditor editor = GameSettingsPresetEditor.fromEditorSnapshot(
+                    selected.editor(),
+                    isolationType,
+                    gameSettingsEditor.editedSnapshot());
             beginMutation(() -> store.updatePreset(editor), selected.id(), false);
-        } catch (IllegalArgumentException failure) {
-            statusLabel.setText(i18n("input.number"));
+        } catch (IllegalArgumentException | IllegalStateException failure) {
+            statusLabel.setText(i18n(
+                    "swing.instance_settings.save_failed",
+                    Objects.requireNonNullElse(failure.getMessage(), i18n("message.failed"))));
         }
-    }
-
-    /// Parses an optional non-negative memory value from a user-facing text field.
-    ///
-    /// @param text raw text value
-    /// @return parsed MiB value, or null for a blank or malformed field
-    private static @Nullable Integer parseOptionalMemory(String text) {
-        String normalized = Objects.requireNonNull(text, "text").trim();
-        if (normalized.isEmpty()) {
-            return null;
-        }
-        try {
-            int value = Integer.parseInt(normalized);
-            return value >= 0 ? value : null;
-        } catch (NumberFormatException exception) {
-            return null;
-        }
-    }
-
-    /// Determines whether a non-blank memory field failed numeric validation.
-    ///
-    /// @param raw raw user-entered text
-    /// @param parsed parsed memory value, or null
-    /// @return whether validation failed
-    private static boolean containsInvalidMemory(String raw, @Nullable Integer parsed) {
-        return !Objects.requireNonNull(raw, "raw").trim().isEmpty() && parsed == null;
     }
 
     /// Starts a store command without waiting for its completion on the EDT.
@@ -692,63 +576,19 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         try {
             if (preset == null) {
                 selectedNameLabel.setText("");
-                autoMemoryBox.setSelected(true);
-                minMemoryField.setText("");
-                maxMemoryField.setText("");
-                javaTypeBox.setSelectedItem(JavaVersionType.AUTO);
-                customJavaVersionField.setText("");
-                customJavaPathField.setText("");
-                jvmOptionsArea.setText("");
-                noJvmOptionsBox.setSelected(false);
-                launcherVisibilityBox.setSelectedItem(LauncherVisibility.HIDE);
                 isolationTypeBox.setSelectedItem(DefaultIsolationType.MODDED);
             } else {
                 selectedNameLabel.setText(preset.displayName());
-                autoMemoryBox.setSelected(preset.autoMemory());
-                minMemoryField.setText(numberText(preset.minMemoryMiB()));
-                maxMemoryField.setText(numberText(preset.maxMemoryMiB()));
-                javaTypeBox.setSelectedItem(preset.javaType());
-                customJavaVersionField.setText(preset.customJavaVersion());
-                customJavaPathField.setText(preset.customJavaPath());
-                jvmOptionsArea.setText(preset.jvmOptions());
-                noJvmOptionsBox.setSelected(preset.noJvmOptions());
-                launcherVisibilityBox.setSelectedItem(preset.launcherVisibility());
-                isolationTypeBox.setSelectedItem(preset.defaultIsolationType());
+                @Nullable GameSettingsPresetsSnapshot snapshot = displayedSnapshot;
+                boolean writable = snapshot != null && snapshot.writable() && !closed && !mutationPending;
+                editorSurfaceStore.replace(preset.editor().toEditorSnapshot(writable));
+                gameSettingsEditor.reloadFromStore();
+                isolationTypeBox.setSelectedItem(preset.editor().defaultIsolationType());
             }
-            updateMemoryControlAvailability();
-            updateJavaControlAvailability();
         } finally {
             applyingSnapshot = wasApplying;
         }
         updateControlAvailability();
-    }
-
-    /// Converts a nullable numeric setting to editable text.
-    ///
-    /// @param value configured value, or null
-    /// @return decimal text or an empty optional field
-    private static String numberText(@Nullable Integer value) {
-        return value == null ? "" : Integer.toString(value);
-    }
-
-    /// Enables manual memory controls only when manual allocation is selected and edits are allowed.
-    private void updateMemoryControlAvailability() {
-        @Nullable GameSettingsPresetsSnapshot snapshot = displayedSnapshot;
-        boolean editable = snapshot != null && snapshot.writable() && !closed && !mutationPending
-                && presetList.getSelectedValue() != null;
-        boolean manual = !autoMemoryBox.isSelected();
-        minMemoryField.setEnabled(editable && manual);
-        maxMemoryField.setEnabled(editable && manual);
-    }
-
-    /// Enables policy-specific Java text fields only when the selected policy needs them.
-    private void updateJavaControlAvailability() {
-        @Nullable GameSettingsPresetsSnapshot snapshot = displayedSnapshot;
-        boolean editable = snapshot != null && snapshot.writable() && !closed && !mutationPending
-                && presetList.getSelectedValue() != null;
-        @Nullable JavaVersionType type = (JavaVersionType) javaTypeBox.getSelectedItem();
-        customJavaVersionField.setEnabled(editable && type == JavaVersionType.VERSION);
-        customJavaPathField.setEnabled(editable && type == JavaVersionType.CUSTOM);
     }
 
     /// Enables or disables action and editor controls for the current writable, selected, and pending states.
@@ -757,18 +597,54 @@ public final class GameSettingsPresetsPanel extends JPanel implements AutoClosea
         @Nullable GameSettingsPresetSnapshot selected = presetList.getSelectedValue();
         boolean writable = snapshot != null && snapshot.writable() && !closed && !mutationPending;
         boolean hasSelection = selected != null;
+        presetList.setEnabled(!closed && !mutationPending);
         createButton.setEnabled(writable);
         renameButton.setEnabled(writable && hasSelection);
         deleteButton.setEnabled(writable && hasSelection && snapshot != null && snapshot.presets().size() > 1);
         defaultButton.setEnabled(writable && hasSelection && !selected.defaultPreset());
-        autoMemoryBox.setEnabled(writable && hasSelection);
-        javaTypeBox.setEnabled(writable && hasSelection);
-        jvmOptionsArea.setEnabled(writable && hasSelection);
-        noJvmOptionsBox.setEnabled(writable && hasSelection);
-        launcherVisibilityBox.setEnabled(writable && hasSelection);
         isolationTypeBox.setEnabled(writable && hasSelection);
         saveButton.setEnabled(writable && hasSelection);
-        updateMemoryControlAvailability();
-        updateJavaControlAvailability();
+        gameSettingsEditor.setInteractionEnabled(!closed && !mutationPending && hasSelection);
+    }
+
+    /// Mutable in-memory source that lets the complete instance editor render direct global-preset values.
+    ///
+    /// Persistence remains owned by [GameSettingsPresetsStore]; the embedded editor footer is hidden and therefore
+    /// never calls [#save(InstanceGameSettingsSnapshot)].
+    @NotNullByDefault
+    private static final class PresetEditorSurfaceStore implements InstanceGameSettingsStore {
+        /// Snapshot returned to the embedded complete settings editor.
+        private InstanceGameSettingsSnapshot snapshot;
+
+        /// Creates a surface store with one complete preset snapshot.
+        ///
+        /// @param snapshot initial complete direct-value snapshot
+        private PresetEditorSurfaceStore(InstanceGameSettingsSnapshot snapshot) {
+            this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
+        }
+
+        /// Returns the currently selected global preset as complete editor values.
+        ///
+        /// @return current complete editor snapshot
+        @Override
+        public InstanceGameSettingsSnapshot snapshot() {
+            return snapshot;
+        }
+
+        /// Rejects direct persistence because the owning panel coordinates asynchronous preset mutations.
+        ///
+        /// @param snapshot ignored edited values
+        @Override
+        public void save(InstanceGameSettingsSnapshot snapshot) {
+            Objects.requireNonNull(snapshot, "snapshot");
+            throw new UnsupportedOperationException("Embedded preset editor does not persist directly");
+        }
+
+        /// Changes which immutable global preset the embedded editor represents.
+        ///
+        /// @param snapshot replacement complete direct-value snapshot
+        private void replace(InstanceGameSettingsSnapshot snapshot) {
+            this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
+        }
     }
 }

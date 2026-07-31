@@ -39,9 +39,7 @@ import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaManagerRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementSnapshot;
-import space.minecraftstl.xyml.util.ServerAddress;
 import space.minecraftstl.xyml.util.i18n.I18n;
-import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import javax.swing.BorderFactory;
@@ -61,13 +59,9 @@ import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ListCellRenderer;
 import javax.swing.ScrollPaneConstants;
-import javax.swing.event.PopupMenuEvent;
-import javax.swing.event.PopupMenuListener;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Font;
-import java.nio.file.InvalidPathException;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -93,6 +87,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// First game version that exposes explicit graphics-backend selection.
     private static final GameVersionNumber GRAPHICS_BACKEND_VERSION =
             GameVersionNumber.asGameVersion("26.2-snapshot-2");
+
+    /// Presentation contract controlling inheritance and outer page chrome.
+    private final GameSettingsEditorPresentation presentation;
 
     /// Backing store that owns durable values and inheritance markers.
     private final InstanceGameSettingsStore store;
@@ -308,6 +305,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// Prevents programmatic snapshot application from acting like user edits.
     private boolean applyingSnapshot;
 
+    /// Allows an owning asynchronous workflow to freeze the complete editor without closing it.
+    private boolean interactionEnabled = true;
+
     /// Prevents interaction after lifecycle cleanup.
     private boolean closed;
 
@@ -347,7 +347,25 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         this(
                 new RepositoryInstanceGameSettingsStore(repository, instanceId),
                 new JavaManagerRuntimeManagementService(),
-                loadGameVersion(repository, instanceId, executor));
+                loadGameVersion(repository, instanceId, executor),
+                GameSettingsEditorPresentation.INSTANCE);
+    }
+
+    /// Creates an editor over an explicit store for either instance or embedded global-preset presentation.
+    ///
+    /// Global-preset callers own persistence and therefore use [#editedSnapshot()] with a store whose snapshot can
+    /// be replaced before [#reloadFromStore()] is invoked.
+    ///
+    /// @param store backing store for complete setting values
+    /// @param presentation instance or embedded global-preset presentation
+    public InstanceGameSettingsPanel(
+            InstanceGameSettingsStore store,
+            GameSettingsEditorPresentation presentation) {
+        this(
+                store,
+                new JavaManagerRuntimeManagementService(),
+                CompletableFuture.completedFuture(GameVersionNumber.unknown()),
+                presentation);
     }
 
     /// Creates a settings panel with an explicit store for deterministic UI testing.
@@ -357,7 +375,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         this(
                 store,
                 new JavaManagerRuntimeManagementService(),
-                CompletableFuture.completedFuture(GameVersionNumber.unknown()));
+                CompletableFuture.completedFuture(GameVersionNumber.unknown()),
+                GameSettingsEditorPresentation.INSTANCE);
     }
 
     /// Creates a settings panel with explicit persistence and local-Java services for focused tests.
@@ -370,7 +389,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         this(
                 store,
                 javaRuntimeService,
-                CompletableFuture.completedFuture(GameVersionNumber.unknown()));
+                CompletableFuture.completedFuture(GameVersionNumber.unknown()),
+                GameSettingsEditorPresentation.INSTANCE);
     }
 
     /// Creates a settings panel with explicit persistence, local-Java, and version services for focused tests.
@@ -382,10 +402,25 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             InstanceGameSettingsStore store,
             JavaRuntimeManagementService javaRuntimeService,
             CompletionStage<GameVersionNumber> gameVersionStage) {
+        this(store, javaRuntimeService, gameVersionStage, GameSettingsEditorPresentation.INSTANCE);
+    }
+
+    /// Creates a settings panel with explicit persistence, local-Java, version, and presentation services.
+    ///
+    /// @param store backing store for effective values and persistence
+    /// @param javaRuntimeService non-blocking local Java discovery service
+    /// @param gameVersionStage asynchronous instance game-version result
+    /// @param presentation instance or embedded global-preset presentation
+    public InstanceGameSettingsPanel(
+            InstanceGameSettingsStore store,
+            JavaRuntimeManagementService javaRuntimeService,
+            CompletionStage<GameVersionNumber> gameVersionStage,
+            GameSettingsEditorPresentation presentation) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.store = Objects.requireNonNull(store, "store");
         this.javaRuntimeService = Objects.requireNonNull(javaRuntimeService, "javaRuntimeService");
+        this.presentation = Objects.requireNonNull(presentation, "presentation");
         configureComponents();
         javaRuntimeSubscription = javaRuntimeService.subscribe(change -> javaRuntimeSnapshotChanged());
         applySnapshot(store.snapshot());
@@ -420,29 +455,58 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         return Objects.requireNonNull(displayedSnapshot, "initial game settings snapshot was not applied");
     }
 
+    /// Replaces the rendered controls with the latest snapshot supplied by the backing store.
+    ///
+    /// Embedded global-preset editors call this after changing which preset their store represents.
+    public void reloadFromStore() {
+        reloadSnapshot();
+    }
+
+    /// Enables or freezes every editor control while preserving the current draft values.
+    ///
+    /// @param enabled whether users may interact with the editor
+    public void setInteractionEnabled(boolean enabled) {
+        EdtDispatcher.requireEventDispatchThread();
+        interactionEnabled = enabled && !closed;
+        updateEditingAvailability();
+    }
+
     /// Releases this panel and prevents further persistence requests.
     @Override
     public void close() {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             if (!closed) {
                 closed = true;
+                interactionEnabled = false;
                 javaRuntimeSubscription.unsubscribe();
-                setInteractiveControlsEnabled(false);
+                updateEditingAvailability();
             }
         });
     }
 
     /// Builds the heading, tabs, footer, renderers, and control interactions.
     private void configureComponents() {
-        setName("instanceGameSettings");
+        setName(presentation == GameSettingsEditorPresentation.INSTANCE
+                ? "instanceGameSettings"
+                : "globalGameSettingsPresetEditor");
         setOpaque(false);
-        add(createHeader(), BorderLayout.NORTH);
+        if (presentation == GameSettingsEditorPresentation.INSTANCE) {
+            add(createHeader(), BorderLayout.NORTH);
+        }
         add(createSettingsTabs(), BorderLayout.CENTER);
-        add(createFooter(), BorderLayout.SOUTH);
+        if (presentation == GameSettingsEditorPresentation.INSTANCE) {
+            add(createFooter(), BorderLayout.SOUTH);
+        }
 
         configureChoiceRenderers();
         configureLazyChoices();
         configureControlInteractions();
+        if (presentation == GameSettingsEditorPresentation.GLOBAL_PRESET) {
+            for (InheritedControl<? extends JComponent> control : allControls()) {
+                control.overrideBox().setSelected(true);
+                control.overrideBox().setVisible(false);
+            }
+        }
     }
 
     /// Creates the page heading.
@@ -463,7 +527,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     ///
     /// @return configured tabbed surface
     private JTabbedPane createSettingsTabs() {
-        settingsTabs.setName("instanceGameSettingsTabs");
+        settingsTabs.setName(presentation == GameSettingsEditorPresentation.INSTANCE
+                ? "instanceGameSettingsTabs"
+                : "globalGameSettingsPresetTabs");
         SwingTransparency.revealBackgroundThroughTabs(settingsTabs);
         settingsTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         settingsTabs.addTab(i18n("settings.game"), createScrollableTab(createGameSettingsTab()));
@@ -718,8 +784,15 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Reads every editor and validates user-controlled values before storage.
     ///
+    /// This is the persistence boundary used by embedded global-preset presentation; it never mutates the backing
+    /// store by itself.
+    ///
     /// @return complete edited snapshot
-    private InstanceGameSettingsSnapshot editedSnapshot() {
+    public InstanceGameSettingsSnapshot editedSnapshot() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            throw new IllegalStateException("Game settings editor is closed");
+        }
         InstanceGameSettingsSnapshot current = displayedSnapshot();
 
         int maximumMemory = editedRequiredInteger(
@@ -736,6 +809,13 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         String javaPath = editedText(javaPathControl, current.javaRuntime().customPath());
         GameSettings.DetectedJava detectedJava = editedDetectedJava(current.javaRuntime().detectedJava());
         validateJavaSettings(javaType, javaVersion, javaPath, detectedJava);
+        if (javaType == JavaVersionType.CUSTOM) {
+            GameSettingsEditorValidation.validatePath(
+                    javaTypeControl.overrideBox().isSelected()
+                            || javaPathControl.overrideBox().isSelected(),
+                    javaPathControl.editor().getText(),
+                    "custom Java path");
+        }
 
         double windowWidth = editedRequiredDouble(
                 windowWidthControl,
@@ -745,10 +825,29 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 windowHeightControl,
                 current.window().height(),
                 "Window height");
-        validatePathOverride(runningDirectoryControl, "game working directory");
-        validatePathOverride(javaPathControl, "custom Java path");
-        validatePathOverride(nativesDirectoryControl, "native library directory");
-        validateQuickPlayTargets();
+        GameSettingsEditorValidation.validatePath(
+                runningDirectoryControl.overrideBox().isSelected(),
+                runningDirectoryControl.editor().getText(),
+                "game working directory");
+        boolean useCustomNatives = editedBoolean(
+                useCustomNativesControl,
+                current.nativeLibraries().customDirectoryEnabled());
+        if (useCustomNatives) {
+            GameSettingsEditorValidation.validatePath(
+                    nativesDirectoryControl.overrideBox().isSelected(),
+                    nativesDirectoryControl.editor().getText(),
+                    "native library directory");
+        }
+        QuickPlayType quickPlayType = editedChoice(
+                quickPlayTypeControl,
+                current.quickPlay().type(),
+                "Quick Play type");
+        GameSettingsEditorValidation.validateQuickPlayTargets(
+                quickPlayType,
+                quickPlayMultiplayerControl.overrideBox().isSelected(),
+                quickPlayMultiplayerControl.editor().getText(),
+                quickPlaySingleplayerControl.overrideBox().isSelected(),
+                quickPlaySingleplayerControl.editor().getText());
 
         @Nullable Integer minimumMemory = editedOptionalInteger(
                 minimumMemoryControl,
@@ -919,44 +1018,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         if ((localType || detectedJavaControl.overrideBox().isSelected()) && type == JavaVersionType.DETECTED
                 && detectedJava.isEmpty()) {
             throw new IllegalArgumentException("Select a detected Java runtime");
-        }
-    }
-
-    /// Validates locally overridden Quick Play targets.
-    private void validateQuickPlayTargets() {
-        String multiplayer = quickPlayMultiplayerControl.editor().getText().trim();
-        if (quickPlayMultiplayerControl.overrideBox().isSelected() && !multiplayer.isEmpty()) {
-            try {
-                ServerAddress.parse(multiplayer);
-            } catch (RuntimeException exception) {
-                throw new IllegalArgumentException("Invalid multiplayer server address", exception);
-            }
-        }
-
-        String singleplayer = quickPlaySingleplayerControl.editor().getText().trim();
-        if (quickPlaySingleplayerControl.overrideBox().isSelected()
-                && !singleplayer.isEmpty()
-                && !FileUtils.isNameValid(singleplayer)) {
-            throw new IllegalArgumentException("Invalid singleplayer world name");
-        }
-    }
-
-    /// Validates a local path editor without requiring that the future target already exists.
-    ///
-    /// @param control inherited path control
-    /// @param fieldName user-facing field name for validation errors
-    private static void validatePathOverride(InheritedControl<JTextField> control, String fieldName) {
-        if (!control.overrideBox().isSelected()) {
-            return;
-        }
-        String rawPath = control.editor().getText().trim();
-        if (rawPath.isEmpty()) {
-            return;
-        }
-        try {
-            Path.of(rawPath);
-        } catch (InvalidPathException exception) {
-            throw new IllegalArgumentException("Invalid " + Objects.requireNonNull(fieldName, "fieldName"), exception);
         }
     }
 
@@ -1208,6 +1269,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             applyCommandSettings(snapshot.commands());
             applyGraphicsSettings(snapshot.graphics());
             applyNativeSettings(snapshot.nativeLibraries());
+            if (presentation == GameSettingsEditorPresentation.GLOBAL_PRESET) {
+                for (InheritedControl<? extends JComponent> control : allControls()) {
+                    control.overrideBox().setSelected(true);
+                }
+            }
             statusLabel.setText("");
             updateAllOverrideTooltips();
             updateEditingAvailability();
@@ -1299,6 +1365,14 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private void applyGraphicsCompatibility(GameVersionNumber gameVersion) {
         EdtDispatcher.requireEventDispatchThread();
         GameVersionNumber version = Objects.requireNonNull(gameVersion, "gameVersion");
+        if (presentation == GameSettingsEditorPresentation.GLOBAL_PRESET) {
+            graphicsBackendRow.setVisible(true);
+            openGlRendererRow.setVisible(true);
+            vulkanRendererRow.setVisible(true);
+            revalidate();
+            repaint();
+            return;
+        }
         graphicsBackendRow.setVisible(version.compareTo(GRAPHICS_BACKEND_VERSION) >= 0);
         openGlRendererRow.setVisible(GraphicsAPI.OPENGL.isSupported(version));
         vulkanRendererRow.setVisible(GraphicsAPI.VULKAN.isSupported(version));
@@ -1325,9 +1399,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private void updateEditingAvailability() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable InstanceGameSettingsSnapshot snapshot = displayedSnapshot;
-        boolean writable = !closed && snapshot != null && snapshot.writable();
+        boolean writable = interactionEnabled && !closed && snapshot != null && snapshot.writable();
         for (InheritedControl<? extends JComponent> control : allControls()) {
-            control.overrideBox().setEnabled(writable);
+            control.overrideBox().setEnabled(
+                    writable && presentation == GameSettingsEditorPresentation.INSTANCE);
             control.editor().setEnabled(writable && control.overrideBox().isSelected());
         }
 
@@ -1372,24 +1447,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 nativesDirectoryControl.editor().isEnabled() && useCustomNatives);
 
         saveButton.setEnabled(writable);
-        reloadButton.setEnabled(!closed);
-        settingsTabs.setEnabled(!closed);
+        reloadButton.setEnabled(interactionEnabled && !closed);
+        settingsTabs.setEnabled(interactionEnabled && !closed);
         if (!applyingSnapshot && snapshot != null && !snapshot.writable()) {
             statusLabel.setText(i18n("settings.game.instance_settings.unsupported"));
         }
-    }
-
-    /// Enables or disables every persistence-oriented control during lifecycle changes.
-    ///
-    /// @param enabled whether controls may remain interactive
-    private void setInteractiveControlsEnabled(boolean enabled) {
-        for (InheritedControl<? extends JComponent> control : allControls()) {
-            control.overrideBox().setEnabled(enabled);
-            control.editor().setEnabled(enabled);
-        }
-        saveButton.setEnabled(enabled);
-        reloadButton.setEnabled(enabled);
-        settingsTabs.setEnabled(enabled);
     }
 
     /// Applies one durable detected-Java value without enumerating local runtimes on the EDT.
@@ -1914,52 +1976,4 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         }
     }
 
-    /// Display value for one detected Java reference.
-    ///
-    /// @param value persisted Java runtime reference
-    /// @param label visible runtime description
-    @NotNullByDefault
-    private record DetectedJavaChoice(GameSettings.DetectedJava value, String label) {
-        /// Rejects missing detected Java choice values.
-        private DetectedJavaChoice {
-            Objects.requireNonNull(value, "value");
-            Objects.requireNonNull(label, "label");
-        }
-
-        /// Returns the visible combo-box label.
-        @Override
-        public String toString() {
-            return label;
-        }
-    }
-
-    /// Popup listener that runs one callback only when a combo popup opens.
-    @NotNullByDefault
-    private static final class PopupOpeningListener implements PopupMenuListener {
-        /// Operation invoked immediately before popup choices become visible.
-        private final Runnable operation;
-
-        /// Creates a popup-opening listener.
-        ///
-        /// @param operation operation invoked when the popup opens
-        private PopupOpeningListener(Runnable operation) {
-            this.operation = Objects.requireNonNull(operation, "operation");
-        }
-
-        /// Runs the configured popup-opening operation.
-        @Override
-        public void popupMenuWillBecomeVisible(PopupMenuEvent event) {
-            operation.run();
-        }
-
-        /// Performs no work when the popup closes.
-        @Override
-        public void popupMenuWillBecomeInvisible(PopupMenuEvent event) {
-        }
-
-        /// Performs no work when popup display is canceled.
-        @Override
-        public void popupMenuCanceled(PopupMenuEvent event) {
-        }
-    }
 }
