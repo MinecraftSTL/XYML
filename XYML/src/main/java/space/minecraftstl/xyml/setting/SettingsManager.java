@@ -43,6 +43,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
@@ -62,9 +63,21 @@ public final class SettingsManager {
 
     /// Saves deferred launcher state changes.
     public static void savePendingChanges() {
-        if (launcherState != null && launcherState.isSavable() && launcherState.isSavePending()) {
-            launcherState.setSavePending(false);
-            STATE_FILE.save(launcherState);
+        if (launcherState != null) {
+            savePendingChanges(launcherState, STATE_FILE::save);
+        }
+    }
+
+    /// Saves one deferred launcher-state snapshot and clears its pending marker only after queuing succeeds.
+    ///
+    /// @param state detached launcher state to inspect
+    /// @param saveOperation operation that serializes and queues the state for persistence
+    static void savePendingChanges(LauncherState state, Consumer<LauncherState> saveOperation) {
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(saveOperation, "saveOperation");
+        if (state.isSavable() && state.isSavePending()) {
+            saveOperation.accept(state);
+            state.setSavePending(false);
         }
     }
 

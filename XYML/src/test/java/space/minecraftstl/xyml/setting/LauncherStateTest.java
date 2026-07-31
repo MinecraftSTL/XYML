@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -58,5 +59,23 @@ public final class LauncherStateTest {
         assertTrue(state.shouldSaveImmediately(state.schemaProperty()));
         assertTrue(state.shouldSaveImmediately(state.promptedVersionProperty()));
         assertTrue(state.shouldSaveImmediately(state.getShownTips()));
+    }
+
+    /// Retains pending state when serialization or queueing fails, then clears it after a successful retry.
+    @Test
+    public void clearsPendingMarkerOnlyAfterSaveIsQueued() {
+        LauncherState state = new LauncherState();
+        state.setSavePending(true);
+
+        assertThrows(IllegalStateException.class, () -> SettingsManager.savePendingChanges(state, ignored -> {
+            throw new IllegalStateException("save failure");
+        }));
+        assertTrue(state.isSavePending());
+
+        AtomicBoolean saved = new AtomicBoolean();
+        SettingsManager.savePendingChanges(state, ignored -> saved.set(true));
+
+        assertTrue(saved.get());
+        assertFalse(state.isSavePending());
     }
 }
