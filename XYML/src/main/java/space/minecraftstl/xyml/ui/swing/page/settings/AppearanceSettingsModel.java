@@ -51,6 +51,11 @@ public interface AppearanceSettingsModel {
     /// @param enabled whether animation should remain enabled
     void setAnimationsEnabled(boolean enabled);
 
+    /// Persists a complete theme-color source and palette-style configuration.
+    ///
+    /// @param themeColor complete replacement theme-color settings
+    void setThemeColorAppearance(ThemeColorAppearanceSettings themeColor);
+
     /// Persists a complete background configuration in one model transition.
     ///
     /// @param background complete replacement background settings

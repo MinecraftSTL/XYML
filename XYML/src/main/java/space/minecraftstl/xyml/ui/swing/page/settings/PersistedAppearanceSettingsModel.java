@@ -143,6 +143,15 @@ public final class PersistedAppearanceSettingsModel
         store.setAnimationsDisabled(!enabled);
     }
 
+    /// Persists one validated complete theme-color configuration.
+    ///
+    /// @param themeColor complete replacement theme-color settings
+    @Override
+    public void setThemeColorAppearance(ThemeColorAppearanceSettings themeColor) {
+        requireWritable();
+        store.setThemeColorAppearance(Objects.requireNonNull(themeColor, "themeColor"));
+    }
+
     /// Persists one validated complete background configuration.
     ///
     /// @param background complete replacement background settings
@@ -191,6 +200,7 @@ public final class PersistedAppearanceSettingsModel
                 raw.maximumCornerRadius(),
                 raw.cornerRadiusStep(),
                 !raw.animationsDisabled(),
+                raw.themeColor(),
                 raw.background(),
                 raw.writable());
     }

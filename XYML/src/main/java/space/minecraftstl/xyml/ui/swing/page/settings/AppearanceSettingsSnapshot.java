@@ -32,6 +32,7 @@ import java.util.Objects;
 /// @param maximumCornerRadius largest supported corner radius
 /// @param cornerRadiusStep supported radius increment
 /// @param animationsEnabled whether non-essential launcher animation is enabled
+/// @param themeColor complete launcher theme-color source and palette-style controls
 /// @param background complete effective launcher-background setting controls
 /// @param writable whether the current settings store accepts changes
 @NotNullByDefault
@@ -42,12 +43,45 @@ public record AppearanceSettingsSnapshot(
         int maximumCornerRadius,
         int cornerRadiusStep,
         boolean animationsEnabled,
+        ThemeColorAppearanceSettings themeColor,
         BackgroundAppearanceSettings background,
         boolean writable) {
+
+    /// Creates a snapshot for callers that do not customize theme colors.
+    ///
+    /// @param brightnessPreference theme, system, light, or dark preference
+    /// @param cornerRadius current component corner radius
+    /// @param minimumCornerRadius smallest supported corner radius
+    /// @param maximumCornerRadius largest supported corner radius
+    /// @param cornerRadiusStep supported radius increment
+    /// @param animationsEnabled whether non-essential launcher animation is enabled
+    /// @param background complete launcher-background setting controls
+    /// @param writable whether the current settings store accepts changes
+    public AppearanceSettingsSnapshot(
+            ThemeBrightnessPreference brightnessPreference,
+            int cornerRadius,
+            int minimumCornerRadius,
+            int maximumCornerRadius,
+            int cornerRadiusStep,
+            boolean animationsEnabled,
+            BackgroundAppearanceSettings background,
+            boolean writable) {
+        this(
+                brightnessPreference,
+                cornerRadius,
+                minimumCornerRadius,
+                maximumCornerRadius,
+                cornerRadiusStep,
+                animationsEnabled,
+                ThemeColorAppearanceSettings.defaults(),
+                background,
+                writable);
+    }
 
     /// Validates one appearance settings snapshot.
     public AppearanceSettingsSnapshot {
         Objects.requireNonNull(brightnessPreference, "brightnessPreference");
+        Objects.requireNonNull(themeColor, "themeColor");
         Objects.requireNonNull(background, "background");
         if (minimumCornerRadius < 0) {
             throw new IllegalArgumentException("minimumCornerRadius must not be negative");

@@ -25,9 +25,11 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
+import space.minecraftstl.xyml.setting.ThemeColorType;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
+import space.minecraftstl.xyml.theme.ThemeColor;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -83,6 +85,8 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
         propertySubscriptions.add(settings.themeBrightnessModeProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.cornerRadiusProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.animationDisabledProperty().subscribe(change -> requestSnapshotRefresh()));
+        propertySubscriptions.add(settings.themeColorTypeProperty().subscribe(change -> requestSnapshotRefresh()));
+        propertySubscriptions.add(settings.customThemeColorProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.backgroundTypeProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.builtinBackgroundIdProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.customBackgroundImagePathProperty().subscribe(change -> requestSnapshotRefresh()));
@@ -161,6 +165,20 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
         });
     }
 
+    /// Queues one complete theme-color write on the launcher state event thread.
+    ///
+    /// @param themeColor complete replacement theme-color settings
+    @Override
+    public void setThemeColorAppearance(ThemeColorAppearanceSettings themeColor) {
+        ThemeColorAppearanceSettings replacement = Objects.requireNonNull(themeColor, "themeColor");
+        requireOpen();
+        execute(() -> {
+            if (!closed.get()) {
+                writeThemeColorAppearance(replacement);
+            }
+        });
+    }
+
     /// Queues one complete background setting write on the launcher state event thread.
     ///
     /// @param background complete replacement background settings
@@ -232,6 +250,30 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
         }
     }
 
+    /// Writes the custom theme color and matching override key before publishing one replacement snapshot.
+    ///
+    /// @param themeColor complete validated theme-color settings
+    private void writeThemeColorAppearance(ThemeColorAppearanceSettings themeColor) {
+        requireEventThread();
+        batchingAppearanceWrite = true;
+        snapshotRefreshPending = false;
+        try {
+            settings.customThemeColorProperty().set(themeColor.customColor());
+            if (themeColor.overridden()) {
+                settings.themeColorTypeProperty().set(ThemeColorType.CUSTOM);
+            }
+            setOverrideMembership(
+                    LauncherSettings.THEME_APPEARANCE_COLOR,
+                    themeColor.overridden());
+        } finally {
+            batchingAppearanceWrite = false;
+        }
+        if (snapshotRefreshPending) {
+            snapshotRefreshPending = false;
+            refreshSnapshot();
+        }
+    }
+
     /// Writes every background property and matching override key before publishing one replacement snapshot.
     ///
     /// @param background complete validated background settings
@@ -286,6 +328,12 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
                 settings.backgroundTypeProperty().get(),
                 BackgroundType.DEFAULT);
         double opacity = Math.max(0.0, Math.min(1.0, settings.backgroundOpacityProperty().get()));
+        boolean customThemeColorOverridden = settings.getThemeAppearanceOverrides().contains(
+                LauncherSettings.THEME_APPEARANCE_COLOR)
+                && settings.themeColorTypeProperty().get() == ThemeColorType.CUSTOM;
+        ThemeColorAppearanceSettings themeColor = new ThemeColorAppearanceSettings(
+                Objects.requireNonNullElse(settings.customThemeColorProperty().get(), ThemeColor.DEFAULT),
+                customThemeColorOverridden);
         BackgroundAppearanceSettings background = new BackgroundAppearanceSettings(
                 backgroundType,
                 Objects.requireNonNullElse(
@@ -310,6 +358,7 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
                 LauncherSettings.MAXIMUM_CORNER_RADIUS,
                 LauncherSettings.CORNER_RADIUS_STEP,
                 settings.animationDisabledProperty().get(),
+                themeColor,
                 background,
                 writableSupplier.getAsBoolean(),
                 settings.getThemeAppearanceOverrides().contains(

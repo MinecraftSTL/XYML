@@ -30,6 +30,7 @@ import java.util.Objects;
 /// @param maximumCornerRadius maximum supported radius
 /// @param cornerRadiusStep supported radius increment
 /// @param animationsDisabled whether non-essential motion is disabled
+/// @param themeColor complete persisted launcher theme-color values
 /// @param background complete persisted launcher-background values
 /// @param writable whether this store accepts changes
 /// @param themeBrightnessOverridden whether brightness overrides the selected theme
@@ -41,12 +42,48 @@ public record StoredAppearanceSettings(
         int maximumCornerRadius,
         int cornerRadiusStep,
         boolean animationsDisabled,
+        ThemeColorAppearanceSettings themeColor,
         BackgroundAppearanceSettings background,
         boolean writable,
         boolean themeBrightnessOverridden) {
+    /// Creates raw appearance values for callers that do not customize theme colors.
+    ///
+    /// @param themeBrightnessValue persisted brightness identifier
+    /// @param cornerRadius current component radius
+    /// @param minimumCornerRadius minimum supported radius
+    /// @param maximumCornerRadius maximum supported radius
+    /// @param cornerRadiusStep supported radius increment
+    /// @param animationsDisabled whether non-essential motion is disabled
+    /// @param background complete persisted launcher-background values
+    /// @param writable whether this store accepts changes
+    /// @param themeBrightnessOverridden whether brightness overrides the selected theme
+    public StoredAppearanceSettings(
+            String themeBrightnessValue,
+            int cornerRadius,
+            int minimumCornerRadius,
+            int maximumCornerRadius,
+            int cornerRadiusStep,
+            boolean animationsDisabled,
+            BackgroundAppearanceSettings background,
+            boolean writable,
+            boolean themeBrightnessOverridden) {
+        this(
+                themeBrightnessValue,
+                cornerRadius,
+                minimumCornerRadius,
+                maximumCornerRadius,
+                cornerRadiusStep,
+                animationsDisabled,
+                ThemeColorAppearanceSettings.defaults(),
+                background,
+                writable,
+                themeBrightnessOverridden);
+    }
+
     /// Validates one raw settings snapshot.
     public StoredAppearanceSettings {
         Objects.requireNonNull(themeBrightnessValue, "themeBrightnessValue");
+        Objects.requireNonNull(themeColor, "themeColor");
         Objects.requireNonNull(background, "background");
         if (minimumCornerRadius < 0) {
             throw new IllegalArgumentException("Minimum corner radius cannot be negative");

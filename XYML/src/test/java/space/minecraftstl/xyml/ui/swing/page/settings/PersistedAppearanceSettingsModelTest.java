@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
+import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
@@ -106,6 +107,10 @@ public final class PersistedAppearanceSettingsModelTest {
         model.setThemeBrightnessPreference(ThemeBrightnessPreference.DARK);
         model.setCornerRadius(14);
         model.setAnimationsEnabled(true);
+        ThemeColorAppearanceSettings replacementThemeColor = new ThemeColorAppearanceSettings(
+                Objects.requireNonNull(ThemeColor.of("#123456")),
+                true);
+        model.setThemeColorAppearance(replacementThemeColor);
         BackgroundAppearanceSettings replacementBackground = new BackgroundAppearanceSettings(
                 BackgroundType.PAINT,
                 BuiltinBackground.FALLBACK.id(),
@@ -128,9 +133,10 @@ public final class PersistedAppearanceSettingsModelTest {
                         model.snapshot().brightnessPreference()),
                 () -> assertEquals(14, model.snapshot().cornerRadius()),
                 () -> assertTrue(model.snapshot().animationsEnabled()),
+                () -> assertEquals(replacementThemeColor, model.snapshot().themeColor()),
                 () -> assertEquals(replacementBackground, model.snapshot().background()),
-                () -> assertEquals(5, applied.size()),
-                () -> assertEquals(4, published.size()));
+                () -> assertEquals(6, applied.size()),
+                () -> assertEquals(5, published.size()));
         listener.unsubscribe();
         model.close();
     }
@@ -155,6 +161,8 @@ public final class PersistedAppearanceSettingsModelTest {
                         () -> readOnly.setCornerRadius(8)),
                 () -> assertThrows(IllegalStateException.class,
                         () -> readOnly.setAnimationsEnabled(false)),
+                () -> assertThrows(IllegalStateException.class,
+                        () -> readOnly.setThemeColorAppearance(ThemeColorAppearanceSettings.defaults())),
                 () -> assertThrows(IllegalStateException.class,
                         () -> readOnly.setBackgroundAppearance(background())));
         readOnly.close();
@@ -298,6 +306,7 @@ public final class PersistedAppearanceSettingsModelTest {
                     current.maximumCornerRadius(),
                     current.cornerRadiusStep(),
                     current.animationsDisabled(),
+                    current.themeColor(),
                     current.background(),
                     current.writable(),
                     value != null));
@@ -313,6 +322,7 @@ public final class PersistedAppearanceSettingsModelTest {
                     current.maximumCornerRadius(),
                     current.cornerRadiusStep(),
                     current.animationsDisabled(),
+                    current.themeColor(),
                     current.background(),
                     current.writable(),
                     current.themeBrightnessOverridden()));
@@ -328,6 +338,23 @@ public final class PersistedAppearanceSettingsModelTest {
                     current.maximumCornerRadius(),
                     current.cornerRadiusStep(),
                     disabled,
+                    current.themeColor(),
+                    current.background(),
+                    current.writable(),
+                    current.themeBrightnessOverridden()));
+        }
+
+        /// Replaces the complete persisted theme-color state.
+        @Override
+        public void setThemeColorAppearance(ThemeColorAppearanceSettings themeColor) {
+            publish(new StoredAppearanceSettings(
+                    current.themeBrightnessValue(),
+                    current.cornerRadius(),
+                    current.minimumCornerRadius(),
+                    current.maximumCornerRadius(),
+                    current.cornerRadiusStep(),
+                    current.animationsDisabled(),
+                    Objects.requireNonNull(themeColor, "themeColor"),
                     current.background(),
                     current.writable(),
                     current.themeBrightnessOverridden()));
@@ -343,6 +370,7 @@ public final class PersistedAppearanceSettingsModelTest {
                     current.maximumCornerRadius(),
                     current.cornerRadiusStep(),
                     current.animationsDisabled(),
+                    current.themeColor(),
                     Objects.requireNonNull(background, "background"),
                     current.writable(),
                     current.themeBrightnessOverridden()));

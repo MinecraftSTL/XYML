@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
+import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.AbstractButton;
@@ -349,6 +350,77 @@ public final class AppearanceSettingsPanelTest {
         });
     }
 
+    /// A custom launcher theme color and its selected-theme override persist as complete replacements.
+    @Test
+    public void commitsCompleteThemeColorControlsAtomically() {
+        FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                ThemeBrightnessPreference.SYSTEM, 6, true, true));
+        AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
+
+        onEventDispatchThread(() -> {
+            findComponent(panel, "appearanceThemeColorOverridden", AbstractButton.class).doClick();
+            JTextField customColor = findComponent(
+                    panel, "appearanceCustomThemeColor", JTextField.class);
+            customColor.setText("#2E7D32");
+            customColor.postActionEvent();
+
+            ThemeColorAppearanceSettings replacement = model.snapshot().themeColor();
+            assertAll(
+                    () -> assertEquals("#2E7D32", replacement.customColor().color()),
+                    () -> assertTrue(replacement.overridden()),
+                    () -> assertEquals(replacement, panel.displayedThemeColor()),
+                    () -> assertTrue(model.themeColorWriteCount() >= 2));
+            panel.close();
+        });
+    }
+
+    /// Editing a neighboring theme-color control preserves the persisted name of an unchanged standard seed.
+    @Test
+    public void preservesUnchangedNamedThemeColor() {
+        FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                ThemeBrightnessPreference.SYSTEM, 6, true, true));
+        AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
+
+        onEventDispatchThread(() -> {
+            findComponent(panel, "appearanceThemeColorOverridden", AbstractButton.class).doClick();
+
+            ThemeColor customColor = model.snapshot().themeColor().customColor();
+            assertAll(
+                    () -> assertEquals(ThemeColor.DEFAULT.name(), customColor.name()),
+                    () -> assertEquals(ThemeColor.DEFAULT.color(), customColor.color()));
+            panel.close();
+        });
+    }
+
+    /// Disabling a custom-color override remains possible while the inactive text field contains invalid text.
+    @Test
+    public void invalidCustomColorDoesNotBlockReturningToThemeColor() {
+        AppearanceSettingsSnapshot initial = new AppearanceSettingsSnapshot(
+                ThemeBrightnessPreference.SYSTEM,
+                6,
+                0,
+                18,
+                3,
+                true,
+                new ThemeColorAppearanceSettings(ThemeColor.DEFAULT, true),
+                defaultBackground(),
+                true);
+        FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(initial);
+        AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
+
+        onEventDispatchThread(() -> {
+            JTextField customColor = findComponent(panel, "appearanceCustomThemeColor", JTextField.class);
+            customColor.setText("not-a-color");
+            customColor.postActionEvent();
+            findComponent(panel, "appearanceThemeColorOverridden", AbstractButton.class).doClick();
+
+            assertAll(
+                    () -> assertFalse(model.snapshot().themeColor().overridden()),
+                    () -> assertEquals(ThemeColor.DEFAULT, model.snapshot().themeColor().customColor()));
+            panel.close();
+        });
+    }
+
     /// The complete settings surface paints visible structure at a constrained desktop size.
     @Test
     public void paintsNonBlankResponsiveSurface() {
@@ -534,6 +606,9 @@ public final class AppearanceSettingsPanelTest {
         /// Number of complete background replacement calls received from the panel.
         private int backgroundWrites;
 
+        /// Number of complete theme-color replacement calls received from the panel.
+        private int themeColorWrites;
+
         /// Creates a fake model with initial settings.
         ///
         /// @param initialSnapshot initial state
@@ -564,6 +639,7 @@ public final class AppearanceSettingsPanelTest {
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     value.animationsEnabled(),
+                    value.themeColor(),
                     value.background(),
                     value.writable()));
         }
@@ -579,6 +655,7 @@ public final class AppearanceSettingsPanelTest {
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     value.animationsEnabled(),
+                    value.themeColor(),
                     value.background(),
                     value.writable()));
         }
@@ -594,6 +671,26 @@ public final class AppearanceSettingsPanelTest {
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     enabled,
+                    value.themeColor(),
+                    value.background(),
+                    value.writable()));
+        }
+
+        /// Replaces the complete theme-color configuration in one published snapshot.
+        ///
+        /// @param themeColor complete replacement theme-color settings
+        @Override
+        public void setThemeColorAppearance(ThemeColorAppearanceSettings themeColor) {
+            AppearanceSettingsSnapshot value = snapshot();
+            themeColorWrites++;
+            publish(new AppearanceSettingsSnapshot(
+                    value.brightnessPreference(),
+                    value.cornerRadius(),
+                    value.minimumCornerRadius(),
+                    value.maximumCornerRadius(),
+                    value.cornerRadiusStep(),
+                    value.animationsEnabled(),
+                    Objects.requireNonNull(themeColor, "themeColor"),
                     value.background(),
                     value.writable()));
         }
@@ -612,6 +709,7 @@ public final class AppearanceSettingsPanelTest {
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     value.animationsEnabled(),
+                    value.themeColor(),
                     Objects.requireNonNull(background, "background"),
                     value.writable()));
         }
@@ -621,6 +719,13 @@ public final class AppearanceSettingsPanelTest {
         /// @return background replacement count
         private int backgroundWriteCount() {
             return backgroundWrites;
+        }
+
+        /// Returns the number of complete theme-color writes accepted by this fake.
+        ///
+        /// @return theme-color replacement count
+        private int themeColorWriteCount() {
+            return themeColorWrites;
         }
 
         /// Publishes one replacement snapshot on the calling thread.

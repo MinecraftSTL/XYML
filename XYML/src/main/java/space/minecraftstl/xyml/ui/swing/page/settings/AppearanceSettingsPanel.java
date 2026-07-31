@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
+import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
@@ -64,6 +65,8 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Function;
+
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Renders complete appearance preferences and persists every background edit as one immutable replacement.
 ///
@@ -105,6 +108,15 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
 
     /// Binary persisted animation preference.
     private final JCheckBox animationsEnabled = new JCheckBox();
+
+    /// Whether launcher theme-color values override the selected theme pack.
+    private final JCheckBox themeColorOverridden = new JCheckBox();
+
+    /// Directly editable custom launcher accent seed.
+    private final JTextField customThemeColorField = new JTextField();
+
+    /// Color swatch opening the launcher accent chooser.
+    private final JButton customThemeColorButton = new JButton();
 
     /// Whether launcher background-source values override the selected theme.
     private final JCheckBox backgroundSourceOverridden = new JCheckBox();
@@ -245,6 +257,14 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         return backgroundFromControls();
     }
 
+    /// Returns the complete theme-color values currently represented by controls.
+    ///
+    /// @return immutable theme-color settings assembled from every color control
+    public ThemeColorAppearanceSettings displayedThemeColor() {
+        EdtDispatcher.requireEventDispatchThread();
+        return themeColorFromControls();
+    }
+
     /// Attaches the restart status row beneath the corner-radius slider.
     ///
     /// The appearance page owns the attached row after this call. Its callback first disables appearance controls,
@@ -314,6 +334,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// Builds the stable unframed settings layout.
     private void configureComponents() {
         setOpaque(false);
+        configureThemeColorControls();
         configureBackgroundControls();
 
         JLabel heading = new JLabel(strings.pageTitle());
@@ -322,6 +343,13 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         add(heading, "gapbottom 18");
 
         add(createThemeRow(), "gapbottom 12");
+        add(new JSeparator(), "growx, gapbottom 12");
+        add(createFullWidthToggleRow(themeColorOverridden), "gapbottom 4");
+        add(createColorFieldRow(
+                        i18n("settings.launcher.theme_color"),
+                        customThemeColorField,
+                        customThemeColorButton),
+                "gapbottom 12");
         add(new JSeparator(), "growx, gapbottom 12");
         add(createRadiusRow(), "gapbottom 12");
         add(new JSeparator(), "growx, gapbottom 12");
@@ -348,6 +376,26 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
             add(new JSeparator(), "growx, gapbottom 12");
             add(themePackManagementPanel, "grow, hmin 320");
         }
+    }
+
+    /// Configures custom theme-color names and atomic listeners.
+    private void configureThemeColorControls() {
+        themeColorOverridden.setName("appearanceThemeColorOverridden");
+        themeColorOverridden.setText(i18n("swing.appearance.theme_color.override"));
+        customThemeColorField.setName("appearanceCustomThemeColor");
+        customThemeColorField.putClientProperty("JTextField.placeholderText", "#RRGGBB");
+        configureColorButton(customThemeColorButton, "appearanceCustomThemeColorChooser");
+
+        themeColorOverridden.addActionListener(event -> themeColorControlChanged());
+        customThemeColorField.addActionListener(event -> commitThemeColor());
+        customThemeColorField.addFocusListener(new FocusAdapter() {
+            /// Commits a valid custom seed when direct editing finishes.
+            @Override
+            public void focusLost(FocusEvent event) {
+                commitThemeColor();
+            }
+        });
+        customThemeColorButton.addActionListener(event -> chooseThemeColor());
     }
 
     /// Configures background control models, localized renderers, names, and atomic listeners.
@@ -685,6 +733,76 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         }
     }
 
+    /// Opens the native color chooser and commits a canonical custom launcher accent seed.
+    private void chooseThemeColor() {
+        Color initial = Objects.requireNonNullElse(
+                parseDisplayColor(customThemeColorField.getText()),
+                Color.decode(ThemeColor.DEFAULT.color()));
+        @Nullable Color selected = JColorChooser.showDialog(
+                this,
+                backgroundStrings.chooseColorLabel(),
+                initial);
+        if (selected != null) {
+            customThemeColorField.setText(String.format(
+                    Locale.ROOT,
+                    "#%02X%02X%02X",
+                    selected.getRed(),
+                    selected.getGreen(),
+                    selected.getBlue()));
+            commitThemeColor();
+        }
+    }
+
+    /// Handles a theme-color control whose value changes dependent enabled states.
+    private void themeColorControlChanged() {
+        if (!applyingSnapshot) {
+            setThemeColorControlsEnabled(displayedSnapshot().writable());
+            commitThemeColor();
+        }
+    }
+
+    /// Persists all theme-color controls through one model call when they form a valid replacement.
+    private void commitThemeColor() {
+        if (applyingSnapshot || closed) {
+            return;
+        }
+        try {
+            ThemeColorAppearanceSettings replacement = themeColorFromControls();
+            customThemeColorField.putClientProperty("JComponent.outline", null);
+            updateThemeColorSwatch(replacement.customColor());
+            @Nullable AppearanceSettingsSnapshot snapshot = displayedSnapshot;
+            if (snapshot == null || !replacement.equals(snapshot.themeColor())) {
+                model.setThemeColorAppearance(replacement);
+            }
+        } catch (IllegalArgumentException exception) {
+            customThemeColorField.putClientProperty("JComponent.outline", "error");
+        }
+    }
+
+    /// Constructs a validated complete theme-color setting from current controls.
+    ///
+    /// @return immutable replacement preserving the last valid custom value while inheritance is selected
+    private ThemeColorAppearanceSettings themeColorFromControls() {
+        String customColorText = customThemeColorField.getText().trim();
+        @Nullable AppearanceSettingsSnapshot snapshot = displayedSnapshot;
+        @Nullable ThemeColor displayedCustomColor = snapshot == null
+                ? null
+                : snapshot.themeColor().customColor();
+        @Nullable ThemeColor customColor = displayedCustomColor != null
+                && displayedCustomColor.color().equalsIgnoreCase(customColorText)
+                ? displayedCustomColor
+                : ThemeColor.of(customColorText);
+        if (customColor == null && !themeColorOverridden.isSelected() && displayedCustomColor != null) {
+            customColor = displayedCustomColor;
+        }
+        if (customColor == null) {
+            throw new IllegalArgumentException("Custom theme color must be a named or hexadecimal color");
+        }
+        return new ThemeColorAppearanceSettings(
+                customColor,
+                themeColorOverridden.isSelected());
+    }
+
     /// Handles a control that changes both persistence content and dependent enabled states.
     private void backgroundControlChanged() {
         if (!applyingSnapshot) {
@@ -785,6 +903,12 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
             }
             animationsEnabled.setSelected(snapshot.animationsEnabled());
 
+            ThemeColorAppearanceSettings themeColor = snapshot.themeColor();
+            themeColorOverridden.setSelected(themeColor.overridden());
+            customThemeColorField.setText(themeColor.customColor().color());
+            customThemeColorField.putClientProperty("JComponent.outline", null);
+            updateThemeColorSwatch(themeColor.customColor());
+
             BackgroundAppearanceSettings background = snapshot.background();
             backgroundSourceOverridden.setSelected(background.sourceOverridden());
             backgroundTypeBox.setSelectedItem(background.type());
@@ -817,7 +941,18 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         }
         cornerRadiusSlider.setEnabled(interactive);
         animationsEnabled.setEnabled(interactive);
+        setThemeColorControlsEnabled(interactive);
         setBackgroundControlsEnabled(interactive);
+    }
+
+    /// Applies selected-theme override dependencies to theme-color controls.
+    ///
+    /// @param writable whether the store accepts changes
+    private void setThemeColorControlsEnabled(boolean writable) {
+        themeColorOverridden.setEnabled(writable);
+        boolean colorActive = writable && themeColorOverridden.isSelected();
+        customThemeColorField.setEnabled(colorActive);
+        customThemeColorButton.setEnabled(colorActive);
     }
 
     /// Applies source and theme-override dependencies to background controls.
@@ -849,6 +984,13 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// Updates the background color chooser button from its corresponding text value.
     private void updatePaintSwatches() {
         updatePaintSwatch(customPaintButton, customPaintField.getText());
+    }
+
+    /// Updates the launcher theme-color chooser button from one validated custom seed.
+    ///
+    /// @param color current custom theme color
+    private void updateThemeColorSwatch(ThemeColor color) {
+        updatePaintSwatch(customThemeColorButton, Objects.requireNonNull(color, "color").color());
     }
 
     /// Updates one swatch without rejecting expressions supported only by the renderer.

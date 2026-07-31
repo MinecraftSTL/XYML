@@ -79,4 +79,22 @@ public final class LauncherAppearanceSettingsTest {
         assertFalse(normalized.has("backgroundFallbackPaint"));
         assertFalse(normalized.has("backgroundLoadPolicy"));
     }
+
+    /// Loading settings retires color-source overrides that the Swing runtime cannot render faithfully.
+    @Test
+    public void removesUnsupportedThemeColorSourceOverrides() {
+        for (ThemeColorType type : ThemeColorType.values()) {
+            LauncherSettings settings = new LauncherSettings();
+            settings.themeColorTypeProperty().set(type);
+            settings.getThemeAppearanceOverrides().add(LauncherSettings.THEME_APPEARANCE_COLOR);
+
+            JsonObject serialized = LauncherSettings.SETTINGS_GSON.toJsonTree(settings).getAsJsonObject();
+            LauncherSettings restored = Objects.requireNonNull(LauncherSettings.fromJson(serialized));
+
+            assertEquals(
+                    type == ThemeColorType.CUSTOM,
+                    restored.getThemeAppearanceOverrides().contains(LauncherSettings.THEME_APPEARANCE_COLOR),
+                    type.name());
+        }
+    }
 }

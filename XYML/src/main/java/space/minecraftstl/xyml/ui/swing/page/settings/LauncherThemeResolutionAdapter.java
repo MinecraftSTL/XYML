@@ -40,10 +40,7 @@ public final class LauncherThemeResolutionAdapter {
     private LauncherThemeResolutionAdapter() {
     }
 
-    /// Captures a request with the launcher default as the deterministic fallback for a system accent.
-    ///
-    /// This overload is suitable on platforms where an accent-color detector is unavailable. Callers with a
-    /// platform accent should use {@link #snapshot(LauncherSettings, ThemeResolveContext, ThemeColorSource)}.
+    /// Captures selected-theme and supported user-override values on the Swing EDT.
     ///
     /// @param settings thread-confined loaded launcher settings
     /// @param context current theme resolution context
@@ -51,30 +48,16 @@ public final class LauncherThemeResolutionAdapter {
     public static ThemeResolutionRequest snapshot(
             LauncherSettings settings,
             ThemeResolveContext context) {
-        return snapshot(settings, context, ThemeColorSource.DEFAULT);
-    }
-
-    /// Captures selected-theme and user-override values on the Swing EDT.
-    ///
-    /// @param settings thread-confined loaded launcher settings
-    /// @param context current theme resolution context
-    /// @param systemColorSource color source used when the user explicitly follows the operating-system accent
-    /// @return immutable request safe to pass to background or Swing threads
-    public static ThemeResolutionRequest snapshot(
-            LauncherSettings settings,
-            ThemeResolveContext context,
-            ThemeColorSource systemColorSource) {
         requireEventThread();
         Objects.requireNonNull(settings, "settings");
         Objects.requireNonNull(context, "context");
-        Objects.requireNonNull(systemColorSource, "systemColorSource");
 
         boolean brightnessOverridden = settings.getThemeAppearanceOverrides().contains(
                 LauncherSettings.THEME_APPEARANCE_BRIGHTNESS_MODE);
         ThemeBrightnessPreference brightness = ThemeBrightnessPreference.fromSetting(
                 brightnessOverridden,
                 settings.themeBrightnessModeProperty().get());
-        @Nullable ThemeColorSource color = colorOverride(settings, systemColorSource);
+        @Nullable ThemeColorSource color = colorOverride(settings);
         @Nullable ThemeColorStyle colorStyle = colorStyleOverride(settings);
         return new ThemeResolutionRequest(
                 settings.getSelectedThemeOrDefault(),
@@ -82,28 +65,27 @@ public final class LauncherThemeResolutionAdapter {
                 new ThemeUserAppearanceOverrides(brightness, color, colorStyle, null));
     }
 
-    /// Resolves the configured color source only when the corresponding appearance key is overridden.
+    /// Resolves a custom color only when the corresponding appearance key is overridden.
+    ///
+    /// Historical default, system, and wallpaper overrides are ignored because the Swing runtime does not provide
+    /// faithful implementations for those sources. They therefore inherit the selected theme instead of rendering
+    /// a misleading fallback color.
     ///
     /// @param settings loaded launcher settings
-    /// @param systemColorSource platform accent source
     /// @return explicit color source, or `null` to inherit the selected theme
-    private static @Nullable ThemeColorSource colorOverride(
-            LauncherSettings settings,
-            ThemeColorSource systemColorSource) {
+    private static @Nullable ThemeColorSource colorOverride(LauncherSettings settings) {
         if (!settings.getThemeAppearanceOverrides().contains(LauncherSettings.THEME_APPEARANCE_COLOR)) {
             return null;
         }
         ThemeColorType colorType = Objects.requireNonNullElse(
                 settings.themeColorTypeProperty().get(),
                 ThemeColorType.DEFAULT);
-        return switch (colorType) {
-            case DEFAULT -> ThemeColorSource.DEFAULT;
-            case SYSTEM -> systemColorSource;
-            case CUSTOM -> ThemeColorSource.custom(Objects.requireNonNullElse(
-                    settings.customThemeColorProperty().get(),
-                    ThemeColor.DEFAULT));
-            case BACKGROUND -> ThemeColorSource.wallpaper();
-        };
+        if (colorType != ThemeColorType.CUSTOM) {
+            return null;
+        }
+        return ThemeColorSource.custom(Objects.requireNonNullElse(
+                settings.customThemeColorProperty().get(),
+                ThemeColor.DEFAULT));
     }
 
     /// Parses the persisted style only when the corresponding appearance key is overridden.

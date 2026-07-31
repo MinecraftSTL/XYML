@@ -51,6 +51,11 @@ public interface AppearanceSettingsStore {
     /// @param disabled whether animation is disabled
     void setAnimationsDisabled(boolean disabled);
 
+    /// Persists theme-color source, custom seed, style, and override membership atomically.
+    ///
+    /// @param themeColor complete replacement theme-color settings
+    void setThemeColorAppearance(ThemeColorAppearanceSettings themeColor);
+
     /// Persists every background field and its selected-theme override membership atomically.
     ///
     /// @param background complete replacement background settings

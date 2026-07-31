@@ -42,6 +42,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests launcher-setting adaptation and atomic four-state brightness persistence.
@@ -112,6 +113,62 @@ public final class LauncherThemeResolutionAdapterTest {
                 () -> assertEquals(2, transitions.get()));
         store.close();
         EdtDispatcher.executeAndWait(() -> { });
+    }
+
+    /// A custom theme-color replacement updates the live seed and color override in one published transition.
+    @Test
+    public void persistsThemeColorAppearanceAtomically() {
+        AtomicReference<@Nullable LauncherAppearanceStore> storeReference = new AtomicReference<>();
+        AtomicReference<@Nullable LauncherSettings> settingsReference = new AtomicReference<>();
+        AtomicInteger transitions = new AtomicInteger();
+        ThemeColorAppearanceSettings replacement = new ThemeColorAppearanceSettings(
+                Objects.requireNonNull(ThemeColor.of("#147D64")),
+                true);
+
+        EdtDispatcher.executeAndWait(() -> {
+            LauncherSettings settings = new LauncherSettings();
+            settings.themeColorStyleProperty().set("future-style");
+            settings.getThemeAppearanceOverrides().add(LauncherSettings.THEME_APPEARANCE_COLOR_STYLE);
+            LauncherAppearanceStore store = new LauncherAppearanceStore(settings, () -> true);
+            store.subscribe(change -> transitions.incrementAndGet());
+            settingsReference.set(settings);
+            storeReference.set(store);
+            store.setThemeColorAppearance(replacement);
+        });
+
+        LauncherAppearanceStore store = Objects.requireNonNull(storeReference.get());
+        LauncherSettings settings = Objects.requireNonNull(settingsReference.get());
+        assertAll(
+                () -> assertEquals(replacement, store.snapshot().themeColor()),
+                () -> assertEquals(ThemeColorType.CUSTOM, settings.themeColorTypeProperty().get()),
+                () -> assertEquals(replacement.customColor(), settings.customThemeColorProperty().get()),
+                () -> assertEquals("future-style", settings.themeColorStyleProperty().get()),
+                () -> assertTrue(settings.getThemeAppearanceOverrides().contains(
+                        LauncherSettings.THEME_APPEARANCE_COLOR)),
+                () -> assertTrue(settings.getThemeAppearanceOverrides().contains(
+                        LauncherSettings.THEME_APPEARANCE_COLOR_STYLE)),
+                () -> assertEquals(1, transitions.get()));
+        store.close();
+        EdtDispatcher.executeAndWait(() -> { });
+    }
+
+    /// Unsupported historical color sources inherit the selected theme in both the editor and runtime request.
+    @Test
+    public void unsupportedThemeColorSourcesInheritSelectedTheme() {
+        EdtDispatcher.executeAndWait(() -> {
+            LauncherSettings settings = new LauncherSettings();
+            settings.themeColorTypeProperty().set(ThemeColorType.SYSTEM);
+            settings.getThemeAppearanceOverrides().add(LauncherSettings.THEME_APPEARANCE_COLOR);
+            LauncherAppearanceStore store = new LauncherAppearanceStore(settings, () -> true);
+
+            ThemeResolutionRequest request = LauncherThemeResolutionAdapter.snapshot(
+                    settings,
+                    new ThemeResolveContext(ThemeBrightness.LIGHT, "windows", "zh"));
+
+            assertFalse(store.snapshot().themeColor().overridden());
+            assertNull(request.userOverrides().color());
+            store.close();
+        });
     }
 
     /// A complete background replacement updates every property and override key in one published transition.

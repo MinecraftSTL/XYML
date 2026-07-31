@@ -126,6 +126,9 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         normalized.remove("backgroundLoadPolicy");
         LauncherSettings settings = SETTINGS_GSON.fromJson(normalized, LauncherSettings.class);
         settings.getThemeAppearanceOverrides().remove("windowTransparent");
+        if (settings.themeColorTypeProperty().get() != ThemeColorType.CUSTOM) {
+            settings.getThemeAppearanceOverrides().remove(THEME_APPEARANCE_COLOR);
+        }
         return settings;
     }
 

@@ -38,6 +38,7 @@ import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.BackgroundAppearanceSettings;
+import space.minecraftstl.xyml.ui.swing.page.settings.ThemeColorAppearanceSettings;
 
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
@@ -252,10 +253,14 @@ public final class ThemePackManagementPanelTest {
         Rectangle animations = bounds(
                 appearancePanel,
                 findNamed(appearancePanel, "appearanceAnimations", JComponent.class));
+        Rectangle themeColor = bounds(
+                appearancePanel,
+                findNamed(appearancePanel, "appearanceCustomThemeColor", JComponent.class));
         Rectangle search = bounds(
                 appearancePanel,
                 findNamed(themePanel, "themePacksSearch", JComponent.class));
         Rectangle list = bounds(appearancePanel, themePanel.choiceList());
+        assertTrue(themeColor.y + themeColor.height <= animations.y);
         assertFalse(animations.intersects(search));
         assertTrue(search.y >= animations.y + animations.height);
         assertTrue(list.y >= search.y + search.height);
@@ -275,7 +280,9 @@ public final class ThemePackManagementPanelTest {
             graphics.dispose();
         }
         assertTrue(distinctColors(image).size() > 20);
-        assertTrue((image.getRGB(460, 410) >>> 24) != 0);
+        assertTrue((image.getRGB(
+                themeColor.x + themeColor.width / 2,
+                themeColor.y + themeColor.height / 2) >>> 24) != 0);
         return image;
     }
 
@@ -627,6 +634,13 @@ public final class ThemePackManagementPanelTest {
         /// Rejects unexpected animation writes from the noninteractive visual test.
         @Override
         public void setAnimationsEnabled(boolean enabled) {
+            throw new UnsupportedOperationException("Static visual model does not accept writes");
+        }
+
+        /// Rejects unexpected theme-color writes from the noninteractive visual test.
+        @Override
+        public void setThemeColorAppearance(ThemeColorAppearanceSettings themeColor) {
+            Objects.requireNonNull(themeColor, "themeColor");
             throw new UnsupportedOperationException("Static visual model does not accept writes");
         }
 
