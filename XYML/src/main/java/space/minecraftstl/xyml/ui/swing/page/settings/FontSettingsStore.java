@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
+import space.minecraftstl.xyml.ui.swing.FontAntialiasingMode;
 
 /// Owns reads and writes for launcher-wide font preferences split across core and per-user settings.
 @NotNullByDefault

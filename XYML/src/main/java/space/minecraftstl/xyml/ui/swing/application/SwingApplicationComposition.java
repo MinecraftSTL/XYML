@@ -43,6 +43,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
+import space.minecraftstl.xyml.ui.swing.SwingLauncherFontManager;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
@@ -214,7 +215,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 rawAppearance.brightnessPreference(),
                 new SwingDesignTokens(rawAppearance.cornerRadius()),
                 systemThemeDetector);
-        themeManager.updateDefaultFontFamily(SettingsManager.settings().launcherFontFamilyProperty().get());
+        themeManager.updateDefaultFontFamily(SwingLauncherFontManager.effectiveLauncherFontFamily(
+                SettingsManager.settings().launcherFontFamilyProperty().get()));
         SwingAnimator animator = new SwingAnimator(
                 rawAppearance.animationsDisabled() ? MotionPolicy.OFF : MotionPolicy.FULL,
                 animationFrameDelayMillis);
@@ -485,7 +487,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
         try {
             return SettingsCenterPanel.createForCurrentSettings(
                     appearancePanel,
-                    themeManager::updateDefaultFontFamily);
+                    family -> themeManager.updateDefaultFontFamily(
+                            SwingLauncherFontManager.effectiveLauncherFontFamily(family)));
         } catch (RuntimeException | Error failure) {
             appearancePanel.close();
             throw failure;

@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -25,6 +26,7 @@ import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.FontAntialiasingMode;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
@@ -80,7 +82,7 @@ final class FontSettingsPanel extends JPanel implements AutoCloseable {
     private final JComboBox<String> launcherFontBox = new JComboBox<>();
 
     /// Resets the launcher UI family to the look-and-feel default.
-    private final JButton resetLauncherFontButton = new JButton(i18n("button.reset"));
+    private final JButton resetLauncherFontButton = new JButton();
 
     /// Immediate launcher-family preview using the product name.
     private final JLabel launcherFontPreview = new JLabel(Metadata.FULL_NAME);
@@ -89,7 +91,7 @@ final class FontSettingsPanel extends JPanel implements AutoCloseable {
     private final JComboBox<String> logFontBox = new JComboBox<>();
 
     /// Resets the game-log family to the platform monospaced family.
-    private final JButton resetLogFontButton = new JButton(i18n("button.reset"));
+    private final JButton resetLogFontButton = new JButton();
 
     /// Positive game-log font-size editor.
     private final JSpinner logFontSizeSpinner = new JSpinner(
@@ -240,9 +242,9 @@ final class FontSettingsPanel extends JPanel implements AutoCloseable {
         configureFamilyControl(logFontBox, "fontSettingsLogFamily");
         configureAntialiasingControl();
 
-        resetLauncherFontButton.setName("fontSettingsLauncherReset");
+        configureResetButton(resetLauncherFontButton, "fontSettingsLauncherReset");
         resetLauncherFontButton.addActionListener(event -> launcherFontBox.setSelectedItem(DEFAULT_FAMILY));
-        resetLogFontButton.setName("fontSettingsLogReset");
+        configureResetButton(resetLogFontButton, "fontSettingsLogReset");
         resetLogFontButton.addActionListener(event -> logFontBox.setSelectedItem(DEFAULT_FAMILY));
 
         logFontSizeSpinner.setName("fontSettingsLogSize");
@@ -610,8 +612,20 @@ final class FontSettingsPanel extends JPanel implements AutoCloseable {
         row.setOpaque(false);
         row.add(new JLabel(Objects.requireNonNull(labelText, "labelText")), "aligny center");
         row.add(Objects.requireNonNull(box, "box"), "growx");
-        row.add(Objects.requireNonNull(resetButton, "resetButton"));
+        row.add(Objects.requireNonNull(resetButton, "resetButton"), "w 36!, h 36!");
         return row;
+    }
+
+    /// Configures one compact restore icon with localized tooltip and accessibility text.
+    ///
+    /// @param button reset action button
+    /// @param name stable component name
+    private static void configureResetButton(JButton button, String name) {
+        JButton validatedButton = Objects.requireNonNull(button, "button");
+        validatedButton.setName(Objects.requireNonNull(name, "name"));
+        validatedButton.setIcon(new FlatSVGIcon("assets/swing/icons/restore.svg", 18, 18));
+        validatedButton.setToolTipText(i18n("button.reset"));
+        validatedButton.getAccessibleContext().setAccessibleName(i18n("button.reset"));
     }
 
     /// Renders each installed family using itself while retaining selection colors.

@@ -19,7 +19,6 @@ package space.minecraftstl.xyml.ui.swing;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.ui.swing.page.settings.FontAntialiasingMode;
 
 import java.util.Properties;
 
