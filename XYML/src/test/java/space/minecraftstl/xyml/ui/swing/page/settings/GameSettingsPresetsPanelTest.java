@@ -307,7 +307,7 @@ public final class GameSettingsPresetsPanelTest {
         setBoolean(panel, "instanceGameSettingsAutomaticMemory", false);
         setText(panel, "instanceGameSettingsMaximumMemory", "6144");
 
-        setChoice(panel, "instanceGameSettingsJavaMode", JavaVersionType.CUSTOM);
+        setJavaMode(panel, JavaVersionType.CUSTOM);
         setText(panel, "instanceGameSettingsJavaVersion", "23");
         setText(panel, "instanceGameSettingsJavaPath", "C:/Java/23/bin/java.exe");
 
@@ -435,6 +435,17 @@ public final class GameSettingsPresetsPanelTest {
     /// @param value desired text
     private static void setTextArea(GameSettingsPresetsPanel panel, String name, String value) {
         findComponent(panel, name, JTextArea.class).setText(Objects.requireNonNull(value, "value"));
+    }
+
+    /// Selects one highlighted Java strategy.
+    ///
+    /// @param panel containing panel
+    /// @param mode desired Java strategy
+    private static void setJavaMode(GameSettingsPresetsPanel panel, JavaVersionType mode) {
+        findComponent(
+                panel,
+                "instanceGameSettingsJavaMode" + Objects.requireNonNull(mode, "mode").name(),
+                AbstractButton.class).doClick();
     }
 
     /// Selects one combo-box value.
