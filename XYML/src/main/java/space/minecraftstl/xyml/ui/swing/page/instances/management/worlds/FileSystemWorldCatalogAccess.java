@@ -205,6 +205,64 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
         signal.throwIfCancelled();
     }
 
+    /// Reopens, lock-checks, and writes one current world's editable detail values.
+    ///
+    /// @param world selected current row
+    /// @param update validated submitted values
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when the row is stale, locked, malformed, or cannot be written
+    @Override
+    public void updateDetails(
+            WorldCatalogItem world,
+            WorldDetailsUpdate update,
+            LoadCancellation cancellation) throws IOException {
+        WorldCatalogItem selectedWorld = requireReadableWorld(world);
+        WorldDetailsUpdate requested = Objects.requireNonNull(update, "update");
+        LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");
+        signal.throwIfCancelled();
+        World sourceWorld = new World(selectedWorld.path());
+        signal.throwIfCancelled();
+        WorldCatalogDetailsCodec.apply(sourceWorld, requested);
+        signal.throwIfCancelled();
+    }
+
+    /// Reopens and replaces one current world's icon after exact PNG validation.
+    ///
+    /// @param world selected current row
+    /// @param source selected icon source
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when the row is locked or the source is not a 64-by-64 PNG
+    @Override
+    public void replaceIcon(
+            WorldCatalogItem world,
+            Path source,
+            LoadCancellation cancellation) throws IOException {
+        WorldCatalogItem selectedWorld = requireReadableWorld(world);
+        Path selectedSource = Objects.requireNonNull(source, "source").toAbsolutePath().normalize();
+        LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");
+        signal.throwIfCancelled();
+        World sourceWorld = new World(selectedWorld.path());
+        signal.throwIfCancelled();
+        WorldCatalogDetailsCodec.replaceIcon(sourceWorld, selectedSource);
+        signal.throwIfCancelled();
+    }
+
+    /// Reopens and removes one current unlocked world's icon.
+    ///
+    /// @param world selected current row
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when the row is locked or icon deletion fails
+    @Override
+    public void resetIcon(WorldCatalogItem world, LoadCancellation cancellation) throws IOException {
+        WorldCatalogItem selectedWorld = requireReadableWorld(world);
+        LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");
+        signal.throwIfCancelled();
+        World sourceWorld = new World(selectedWorld.path());
+        signal.throwIfCancelled();
+        WorldCatalogDetailsCodec.resetIcon(sourceWorld);
+        signal.throwIfCancelled();
+    }
+
     /// Reopens and copies one current readable world after enforcing a direct, absent sibling target.
     ///
     /// @param world selected current row

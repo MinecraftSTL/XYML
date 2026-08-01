@@ -248,6 +248,17 @@ public final class World {
         return levelData;
     }
 
+    /// Returns the exact level-data source used by this world.
+    ///
+    /// Directory worlds return either `level.dat` or the supported `special_level.dat` fallback.
+    /// Archive-backed paths are valid only while the constructor's temporary file system remains
+    /// open, so callers should use this method only for directory worlds that they own.
+    ///
+    /// @return exact level-data path
+    public Path getLevelDataPath() {
+        return levelDataPath;
+    }
+
     /// Returns normalized world-generation settings when present.
     ///
     /// @return mutable normalized settings, or `null` when unavailable

@@ -23,6 +23,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.nbt.SwingNBTEditorLauncher;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
 import javax.swing.JFileChooser;
@@ -55,6 +56,9 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
 
     /// Caller-owned executor for filesystem and platform desktop work.
     private final Executor executor;
+
+    /// Lazily created modeless editor dedicated to direct world level-data paths.
+    private @Nullable SwingNBTEditorLauncher levelDataEditor;
 
     /// Creates the production interaction implementation.
     ///
@@ -195,6 +199,43 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
         return destination;
     }
 
+    /// Shows a PNG-only chooser for one selected world's custom icon.
+    ///
+    /// @param owner dialog owner
+    /// @param world selected loaded world
+    /// @return normalized candidate path, or null after cancellation
+    @Override
+    public @Nullable Path chooseWorldIcon(Component owner, WorldCatalogItem world) {
+        EdtDispatcher.requireEventDispatchThread();
+        WorldCatalogItem selectedWorld = Objects.requireNonNull(world, "world");
+        JFileChooser chooser = new EditablePathChooser(selectedWorld.path().toFile());
+        chooser.setDialogTitle(i18n("world.icon.choose.title"));
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setMultiSelectionEnabled(false);
+        chooser.setAcceptAllFileFilterUsed(false);
+        chooser.setFileFilter(new FileNameExtensionFilter(i18n("extension.png"), "png"));
+        chooser.setSelectedFile(new File("icon.png"));
+        if (chooser.showOpenDialog(Objects.requireNonNull(owner, "owner")) != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        @Nullable File selected = chooser.getSelectedFile();
+        return selected == null ? null : selected.toPath().toAbsolutePath().normalize();
+    }
+
+    /// Opens one exact world level-data file without invoking the settings file chooser.
+    ///
+    /// @param owner component used to resolve the launcher frame
+    /// @param levelDataPath exact level-data source
+    @Override
+    public void openLevelData(Component owner, Path levelDataPath) {
+        EdtDispatcher.requireEventDispatchThread();
+        Component checkedOwner = Objects.requireNonNull(owner, "owner");
+        if (levelDataEditor == null) {
+            levelDataEditor = SwingNBTEditorLauncher.createForDirectPaths(checkedOwner, executor);
+        }
+        levelDataEditor.open(Objects.requireNonNull(levelDataPath, "levelDataPath"));
+    }
+
     /// Shows a platform-aware standalone launch-script save chooser on the EDT.
     ///
     /// @param owner dialog owner
@@ -282,6 +323,16 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
                 Objects.requireNonNull(detail, "detail"),
                 Objects.requireNonNull(title, "title"),
                 JOptionPane.ERROR_MESSAGE);
+    }
+
+    /// Closes the lazily owned modeless level-data editor, if any.
+    @Override
+    public void close() {
+        @Nullable SwingNBTEditorLauncher editor = levelDataEditor;
+        levelDataEditor = null;
+        if (editor != null) {
+            editor.close();
+        }
     }
 
     /// Opens one directory outside the EDT and completes the caller future.
