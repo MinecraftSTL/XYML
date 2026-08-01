@@ -77,6 +77,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Factory for the selected-version FileDownloadTask and ModpackHelper installation chain.
     private final RemoteModpackInstallLauncher installLauncher;
 
+    /// Fixed existing update target, or null when the user is creating a new instance.
+    private final @Nullable GameInstanceID fixedInstanceId;
+
     /// Caller-owned worker executor for search and selected-project version resolution.
     private final Executor workerExecutor;
 
@@ -216,7 +219,34 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 strings,
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                null);
+    }
+
+    /// Creates a production repository catalog fixed to one existing modpack instance.
+    ///
+    /// @param fixedInstanceId existing instance that receives the selected remote version
+    /// @param installLauncher update-task factory bound to the same repository and instance
+    /// @param strings visible update-catalog text
+    /// @param taskProgressStrings localized task-progress controls and lifecycle text
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative progress animation duration
+    public RemoteModpackCatalogPanel(
+            GameInstanceID fixedInstanceId,
+            RemoteModpackInstallLauncher installLauncher,
+            RemoteModpackCatalogStrings strings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration) {
+        this(
+                new CoreRemoteModpackCatalogBackend(),
+                installLauncher,
+                Schedulers.io(),
+                strings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                Objects.requireNonNull(fixedInstanceId, "fixedInstanceId"));
     }
 
     /// Creates a catalog with explicit Core and task boundaries for focused headless verification.
@@ -239,6 +269,36 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
+        this(
+                backend,
+                installLauncher,
+                workerExecutor,
+                strings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                null);
+    }
+
+    /// Creates a catalog with optional fixed-instance update semantics.
+    ///
+    /// @param backend blocking source gateway used after explicit user commands
+    /// @param installLauncher selected-version task factory
+    /// @param workerExecutor background executor for source calls
+    /// @param strings visible catalog text
+    /// @param taskProgressStrings localized task-progress controls and lifecycle text
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative progress animation duration
+    /// @param fixedInstanceId existing update target, or null for new-instance installation
+    RemoteModpackCatalogPanel(
+            RemoteModpackCatalogBackend backend,
+            RemoteModpackInstallLauncher installLauncher,
+            Executor workerExecutor,
+            RemoteModpackCatalogStrings strings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            @Nullable GameInstanceID fixedInstanceId) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
@@ -246,6 +306,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         EdtDispatcher.requireEventDispatchThread();
         this.backend = Objects.requireNonNull(backend, "backend");
         this.installLauncher = Objects.requireNonNull(installLauncher, "installLauncher");
+        this.fixedInstanceId = fixedInstanceId;
         this.workerExecutor = Objects.requireNonNull(workerExecutor, "workerExecutor");
         this.strings = Objects.requireNonNull(strings, "strings");
         TaskProgressStrings resolvedTaskProgressStrings = Objects.requireNonNull(
@@ -451,8 +512,13 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         instanceNameLabel.setLabelFor(instanceNameField);
         installBand.add(instanceNameLabel);
         instanceNameField.setName("remoteModpackInstanceName");
-        SwingTextFields.showClearButton(instanceNameField);
-        instanceNameField.getDocument().addDocumentListener(instanceNameListener);
+        if (fixedInstanceId == null) {
+            SwingTextFields.showClearButton(instanceNameField);
+            instanceNameField.getDocument().addDocumentListener(instanceNameListener);
+        } else {
+            instanceNameField.setText(fixedInstanceId.id());
+            instanceNameField.setEditable(false);
+        }
         installBand.add(instanceNameField, "growx, h 40!");
         installButton.setName("remoteModpackInstall");
         installButton.setText(strings.installAction());
@@ -834,7 +900,11 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         @Nullable RemoteModpackCatalogItem item = selectedItem;
         @Nullable RemoteAddon.Version version = (RemoteAddon.Version) versionBox.getSelectedItem();
         String instanceName = instanceNameField.getText().trim();
-        if (item == null || version == null || !XYMLGameRepository.isValidInstanceId(instanceName)) {
+        @Nullable GameInstanceID targetInstance = fixedInstanceId;
+        if (targetInstance == null && XYMLGameRepository.isValidInstanceId(instanceName)) {
+            targetInstance = new GameInstanceID(instanceName);
+        }
+        if (item == null || version == null || targetInstance == null) {
             setStatus(strings.invalidInstanceNameStatus());
             updateControls();
             return;
@@ -847,7 +917,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             task = installLauncher.createInstallTask(new RemoteModpackInstallRequest(
                     item,
                     version,
-                    new GameInstanceID(instanceName)));
+                    targetInstance));
         } catch (IOException | RuntimeException preparationFailure) {
             LOG.warning("Failed to prepare a selected remote modpack installation", preparationFailure);
             setStatus(strings.installFailedStatus());
@@ -958,6 +1028,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// @param item selected project supplying a stable slug suggestion
     private void suggestInstanceName(RemoteModpackCatalogItem item) {
         EdtDispatcher.requireEventDispatchThread();
+        if (fixedInstanceId != null) {
+            return;
+        }
         String existing = instanceNameField.getText().trim();
         @Nullable String previousSuggestion = suggestedInstanceName;
         String suggestion = item.suggestedInstanceName();
@@ -1037,7 +1110,8 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 && !versionLoading
                 && selectedItem != null
                 && versionBox.getSelectedItem() != null
-                && XYMLGameRepository.isValidInstanceId(instanceNameField.getText().trim()));
+                && (fixedInstanceId != null
+                        || XYMLGameRepository.isValidInstanceId(instanceNameField.getText().trim())));
     }
 
     /// Updates visible lifecycle feedback and its accessible tooltip on the EDT.
@@ -1071,7 +1145,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         }
         searchField.getDocument().removeDocumentListener(criteriaListener);
         gameVersionField.getDocument().removeDocumentListener(criteriaListener);
-        instanceNameField.getDocument().removeDocumentListener(instanceNameListener);
+        if (fixedInstanceId == null) {
+            instanceNameField.getDocument().removeDocumentListener(instanceNameListener);
+        }
         choiceList.getChoiceModel().removeListDataListener(listDataListener);
         choiceList.close();
         progressHost.close();

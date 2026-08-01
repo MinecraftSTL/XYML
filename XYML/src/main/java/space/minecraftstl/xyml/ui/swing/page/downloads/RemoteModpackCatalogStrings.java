@@ -176,4 +176,37 @@ public record RemoteModpackCatalogStrings(
                 i18n("download.failed.refresh"),
                 i18n("download.failed.refresh"));
     }
+
+    /// Returns catalog text for updating one fixed existing instance from a repository version.
+    ///
+    /// @return immutable update-catalog text for the active launcher locale
+    public static RemoteModpackCatalogStrings launcherUpdateLocalized() {
+        RemoteModpackCatalogStrings base = launcherLocalized();
+        return new RemoteModpackCatalogStrings(
+                i18n("instance.update"),
+                base.sourceLabel(),
+                base.searchLabel(),
+                base.gameVersionLabel(),
+                base.filterStrings(),
+                base.instanceNameLabel(),
+                base.versionLabel(),
+                base.searchAction(),
+                base.previousPageAction(),
+                base.nextPageAction(),
+                i18n("instance.update"),
+                i18n("modpack.choose.repository"),
+                base.loadingStatus(),
+                base.loadingVersionsStatus(),
+                base.noVersionsStatus(),
+                base.noResultsStatus(),
+                base.sourceUnavailableStatus(),
+                base.viewportUnavailableStatus(),
+                base.invalidInstanceNameStatus(),
+                i18n("modpack.update"),
+                i18n("modpack.update"),
+                base.installSucceededStatus(),
+                base.installFailedStatus(),
+                base.searchFailedStatus(),
+                base.versionLoadFailedStatus());
+    }
 }

@@ -34,6 +34,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// @param exportScriptAction standalone script command
 /// @param updateModpackAction local modpack update command
 /// @param updateModpackUrlAction remote modpack update command
+/// @param updateModpackRepositoryAction repository modpack update command
 /// @param redownloadAssetsAction forced asset repair command
 /// @param removeAssetsAction shared asset removal command
 /// @param removeLibrariesAction shared library removal command
@@ -59,6 +60,7 @@ public record InstanceMaintenanceStrings(
         String exportScriptAction,
         String updateModpackAction,
         String updateModpackUrlAction,
+        String updateModpackRepositoryAction,
         String redownloadAssetsAction,
         String removeAssetsAction,
         String removeLibrariesAction,
@@ -84,6 +86,7 @@ public record InstanceMaintenanceStrings(
         requireNonBlank(exportScriptAction, "exportScriptAction");
         requireNonBlank(updateModpackAction, "updateModpackAction");
         requireNonBlank(updateModpackUrlAction, "updateModpackUrlAction");
+        requireNonBlank(updateModpackRepositoryAction, "updateModpackRepositoryAction");
         requireNonBlank(redownloadAssetsAction, "redownloadAssetsAction");
         requireNonBlank(removeAssetsAction, "removeAssetsAction");
         requireNonBlank(removeLibrariesAction, "removeLibrariesAction");
@@ -114,6 +117,7 @@ public record InstanceMaintenanceStrings(
                 i18n("instance.launch_script"),
                 i18n("instance.update"),
                 i18n("modpack.choose.remote"),
+                i18n("modpack.choose.repository"),
                 i18n("instance.manage.redownload_assets_index"),
                 i18n("instance.manage.remove_assets"),
                 i18n("instance.manage.remove_libraries"),
@@ -144,6 +148,7 @@ public record InstanceMaintenanceStrings(
                 "Export launch script",
                 "Update modpack",
                 "Update modpack from URL",
+                "Update modpack from repository",
                 "Update game assets",
                 "Delete all assets",
                 "Delete all libraries",

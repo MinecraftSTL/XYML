@@ -251,6 +251,7 @@ final class InstanceMaintenancePanelTest {
                     "instanceMaintenanceExportScript",
                     "instanceMaintenanceUpdateModpack",
                     "instanceMaintenanceUpdateModpackUrl",
+                    "instanceMaintenanceUpdateModpackRepository",
                     "instanceMaintenanceRedownloadAssets",
                     "instanceMaintenanceRemoveAssets",
                     "instanceMaintenanceRemoveLibraries",

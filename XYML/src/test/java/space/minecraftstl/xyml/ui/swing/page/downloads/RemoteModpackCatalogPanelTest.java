@@ -37,6 +37,7 @@ import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -182,6 +183,58 @@ final class RemoteModpackCatalogPanelTest {
             assertEquals(addon, request.item().addon());
             assertEquals(version, request.version());
             assertEquals(new GameInstanceID("fixture-pack"), request.instanceId());
+        } finally {
+            @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Keeps an existing update target read-only and hands that exact identifier to the selected-version task.
+    @Test
+    void fixedInstanceModeDoesNotSuggestOrCreateAnotherDestination() throws Exception {
+        GameInstanceID fixedInstanceId = new GameInstanceID("installed-pack");
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        RecordingInstallLauncher installLauncher = new RecordingInstallLauncher();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteModpackCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new RemoteModpackCatalogPanel(
+                    backend,
+                    installLauncher,
+                    executor,
+                    RemoteModpackCatalogStrings.english(),
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO,
+                    fixedInstanceId)));
+            RemoteModpackCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                prepareViewport(panel.choiceList());
+                JTextField instanceName = findNamed(
+                        panel,
+                        "remoteModpackInstanceName",
+                        JTextField.class);
+                assertEquals(fixedInstanceId.id(), instanceName.getText());
+                assertFalse(instanceName.isEditable());
+                assertFalse(Boolean.TRUE.equals(instanceName.getClientProperty("JTextField.showClearButton")));
+                findNamed(panel, "remoteModpackSearchAction", JButton.class).doClick();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> panel.choiceList().getList().setSelectedIndex(0));
+            awaitBackgroundWork(executor);
+            EdtDispatcher.executeAndWait(() -> findNamed(
+                    panel,
+                    "remoteModpackInstall",
+                    JButton.class).doClick());
+            drainEdt();
+
+            assertEquals(fixedInstanceId, Objects.requireNonNull(installLauncher.request.get()).instanceId());
         } finally {
             @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
             if (panel != null) {
