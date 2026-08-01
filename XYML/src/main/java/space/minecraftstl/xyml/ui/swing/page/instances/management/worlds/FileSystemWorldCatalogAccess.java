@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.game.WorldArchiveImporter;
 import space.minecraftstl.xyml.game.WorldLockedException;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -39,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 /// Real repository and Core World API adapter for one managed instance's `saves` directory.
@@ -65,6 +67,16 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
     FileSystemWorldCatalogAccess(GameRepository repository, GameInstanceID instanceId) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
+    }
+
+    /// Resolves and normalizes the managed instance game version without enumerating saves.
+    ///
+    /// @return normalized current game version, or empty when the repository cannot resolve it
+    @Override
+    public Optional<String> instanceGameVersion() {
+        return repository.getGameVersion(instanceId)
+                .map(GameVersionNumber::asGameVersion)
+                .map(GameVersionNumber::toString);
     }
 
     /// Resolves the instance run directory and appends the conventional `saves` segment.

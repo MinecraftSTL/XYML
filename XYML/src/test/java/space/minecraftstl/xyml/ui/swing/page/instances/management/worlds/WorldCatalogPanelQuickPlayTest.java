@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.util.platform.ManagedProcess;
 
 import javax.imageio.ImageIO;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -117,10 +118,18 @@ final class WorldCatalogPanelQuickPlayTest {
 
             JButton quickPlay = findNamed(panel, "worldsQuickPlay", JButton.class);
             JButton launchScript = findNamed(panel, "worldsLaunchScript", JButton.class);
+            JButton chunkBase = findNamed(panel, "worldsChunkBase", JButton.class);
+            JCheckBox showAll = findNamed(panel, "worldsShowAll", JCheckBox.class);
             JLabel directory = findNamed(panel, "worldsDirectory", JLabel.class);
             JLabel path = findNamed(panel, "worldsPath", JLabel.class);
             assertNotNull(quickPlay.getIcon());
             assertNotNull(launchScript.getIcon());
+            assertNotNull(chunkBase.getIcon());
+            assertTrue(chunkBase.isEnabled());
+            assertTrue(showAll.isVisible());
+            assertFalse(showAll.isSelected());
+            showAll.doClick();
+            assertTrue(model.showAll());
             assertEquals("World Folder", directory.getText());
             assertEquals(worldPath.toString(), path.getText());
             assertTrue(directory.getWidth() > 50, directory.getBounds().toString());
@@ -392,11 +401,38 @@ final class WorldCatalogPanelQuickPlayTest {
                 true,
                 false);
 
+        /// Mutable Show All state used to verify panel-to-model wiring.
+        private boolean showAll;
+
         /// Creates one immediate model.
         ///
         /// @param world exact world row
         private ImmediateWorldCatalogModel(WorldCatalogItem world) {
             this.world = Objects.requireNonNull(world, "world");
+        }
+
+        /// Exposes version filtering so the production checkbox is visible in the fixture.
+        ///
+        /// @return true
+        @Override
+        public boolean supportsVersionFiltering() {
+            return true;
+        }
+
+        /// Returns the state last selected through the panel checkbox.
+        ///
+        /// @return current Show All state
+        @Override
+        public boolean showAll() {
+            return showAll;
+        }
+
+        /// Records the state selected through the panel checkbox.
+        ///
+        /// @param replacement whether every world should be visible
+        @Override
+        public void setShowAll(boolean replacement) {
+            showAll = replacement;
         }
 
         /// Returns the stable ready snapshot.
@@ -538,6 +574,16 @@ final class WorldCatalogPanelQuickPlayTest {
         /// Completes desktop requests immediately because they are outside this test.
         @Override
         public CompletionStage<@Nullable Void> openDirectory(Path directory) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        /// Completes an unused Chunk Base request immediately.
+        ///
+        /// @param world selected world
+        /// @param tool selected destination
+        /// @return completed nullable-void stage
+        @Override
+        public CompletionStage<@Nullable Void> openChunkBase(WorldCatalogItem world, ChunkBaseTool tool) {
             return CompletableFuture.completedFuture(null);
         }
 

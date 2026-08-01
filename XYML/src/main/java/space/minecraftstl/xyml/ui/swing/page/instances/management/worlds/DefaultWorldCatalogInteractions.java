@@ -21,6 +21,7 @@ import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
@@ -32,6 +33,7 @@ import java.awt.Component;
 import java.awt.Desktop;
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
@@ -249,6 +251,24 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
         return result;
     }
 
+    /// Reopens selected world metadata and schedules a browser launch outside the EDT.
+    ///
+    /// @param world selected readable world
+    /// @param tool requested Chunk Base destination
+    /// @return nullable-void asynchronous browser completion
+    @Override
+    public CompletionStage<@Nullable Void> openChunkBase(WorldCatalogItem world, ChunkBaseTool tool) {
+        WorldCatalogItem selectedWorld = Objects.requireNonNull(world, "world");
+        ChunkBaseTool selectedTool = Objects.requireNonNull(tool, "tool");
+        CompletableFuture<@Nullable Void> result = new CompletableFuture<>();
+        try {
+            executor.execute(() -> openChunkBaseOnExecutor(selectedWorld, selectedTool, result));
+        } catch (RuntimeException failure) {
+            result.completeExceptionally(failure);
+        }
+        return result;
+    }
+
     /// Displays one native failure dialog on the EDT.
     ///
     /// @param owner dialog owner
@@ -282,6 +302,38 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
                 throw new UnsupportedOperationException(i18n("swing.world_catalog.desktop_open_unsupported"));
             }
             desktop.open(directory.toFile());
+            result.complete(null);
+        } catch (IOException | RuntimeException failure) {
+            result.completeExceptionally(failure);
+        }
+    }
+
+    /// Reads the selected world seed, builds its Chunk Base URI, and opens the system browser.
+    ///
+    /// @param world selected readable row
+    /// @param tool requested Chunk Base destination
+    /// @param result externally visible completion
+    private static void openChunkBaseOnExecutor(
+            WorldCatalogItem world,
+            ChunkBaseTool tool,
+            CompletableFuture<@Nullable Void> result) {
+        try {
+            requireBackgroundThread();
+            World loadedWorld = new World(world.path());
+            final URI destination;
+            try {
+                destination = ChunkBaseWorldTools.createUri(loadedWorld, tool);
+            } catch (IllegalArgumentException failure) {
+                throw new IllegalArgumentException(i18n("swing.world_catalog.chunkbase_unavailable"), failure);
+            }
+            if (!Desktop.isDesktopSupported()) {
+                throw new UnsupportedOperationException(i18n("swing.world_catalog.browser_unavailable"));
+            }
+            Desktop desktop = Desktop.getDesktop();
+            if (!desktop.isSupported(Desktop.Action.BROWSE)) {
+                throw new UnsupportedOperationException(i18n("swing.world_catalog.browser_unavailable"));
+            }
+            desktop.browse(destination);
             result.complete(null);
         } catch (IOException | RuntimeException failure) {
             result.completeExceptionally(failure);

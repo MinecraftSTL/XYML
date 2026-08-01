@@ -81,6 +81,13 @@ public interface WorldCatalogInteractions {
     /// @return nullable-void desktop completion
     CompletionStage<@Nullable Void> openDirectory(Path directory);
 
+    /// Reopens one selected world and browses to the requested Chunk Base application off the EDT.
+    ///
+    /// @param world selected readable world
+    /// @param tool requested Chunk Base destination
+    /// @return nullable-void browser completion
+    CompletionStage<@Nullable Void> openChunkBase(WorldCatalogItem world, ChunkBaseTool tool);
+
     /// Shows one user-visible operation failure on the EDT.
     ///
     /// @param owner dialog owner

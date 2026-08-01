@@ -31,6 +31,8 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -133,6 +135,70 @@ final class DefaultWorldCatalogModelTest {
         }
     }
 
+    /// Current-version filtering scans only until the requested visible matches and learns the exact end lazily.
+    @Test
+    void incrementallyFiltersCurrentVersionAndRestoresShowAll() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        RecordingAccess access = new RecordingAccess(
+                temporaryDirectory,
+                List.of("1.20.1", "1.19.4", "", "1.20.1", "1.18.2"),
+                "1.20.1");
+        DefaultWorldCatalogModel model = new DefaultWorldCatalogModel(
+                access,
+                executor,
+                WorldCatalogStrings.english(),
+                false,
+                true);
+        try {
+            CompletableFuture<WorldCatalogSnapshot> ready = nextReadySnapshot(model);
+            model.loadIfNeeded();
+            WorldCatalogSnapshot readySnapshot = ready.get(5, TimeUnit.SECONDS);
+            assertEquals(5, readySnapshot.itemCount().orElseThrow());
+            assertTrue(model.supportsVersionFiltering());
+            assertFalse(model.showAll());
+            assertEquals(OptionalInt.empty(), model.exactItemCount());
+
+            ChoicePage<WorldCatalogItem> firstPage = model.load(
+                            IndexRange.ofLength(0, 2),
+                            new LoadCancellation())
+                    .toCompletableFuture()
+                    .get(5, TimeUnit.SECONDS);
+            assertEquals(List.of(access.directories().get(0), access.directories().get(2)),
+                    firstPage.items().stream().map(WorldCatalogItem::path).toList());
+            assertEquals(access.directories().subList(0, 3), access.materializedDirectories());
+            assertEquals(OptionalInt.empty(), firstPage.exactItemCount());
+
+            ChoicePage<WorldCatalogItem> lastPage = model.load(
+                            IndexRange.ofLength(2, 2),
+                            new LoadCancellation())
+                    .toCompletableFuture()
+                    .get(5, TimeUnit.SECONDS);
+            assertEquals(new IndexRange(2, 3), lastPage.range());
+            assertEquals(List.of(access.directories().get(3)),
+                    lastPage.items().stream().map(WorldCatalogItem::path).toList());
+            assertEquals(OptionalInt.of(3), lastPage.exactItemCount());
+            assertEquals(OptionalInt.of(3), model.exactItemCount());
+            assertEquals(access.directories(), access.materializedDirectories());
+
+            long filteredRevision = model.snapshot().contentRevision();
+            model.setShowAll(true);
+            assertTrue(model.showAll());
+            assertTrue(model.snapshot().contentRevision() > filteredRevision);
+            assertEquals(OptionalInt.of(5), model.exactItemCount());
+            ChoicePage<WorldCatalogItem> unfilteredPage = model.load(
+                            IndexRange.ofLength(3, 2),
+                            new LoadCancellation())
+                    .toCompletableFuture()
+                    .get(5, TimeUnit.SECONDS);
+            assertEquals(access.directories().subList(3, 5),
+                    unfilteredPage.items().stream().map(WorldCatalogItem::path).toList());
+        } finally {
+            model.close();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Subscribes to the next ready state without retaining the registration after completion.
     ///
     /// @param model model whose next terminal refresh is observed
@@ -154,6 +220,12 @@ final class DefaultWorldCatalogModelTest {
     private static final class RecordingAccess implements WorldCatalogAccess {
         /// Fixed shallow source used by every refresh.
         private final @Unmodifiable List<Path> directories;
+
+        /// Recorded game-version text by shallow source index; an empty string represents unknown.
+        private final @Unmodifiable List<String> gameVersions;
+
+        /// Current managed-instance version returned during a background refresh.
+        private final Optional<String> instanceGameVersion;
 
         /// Direct-child index invocation count.
         private final AtomicInteger indexCalls = new AtomicInteger();
@@ -178,14 +250,44 @@ final class DefaultWorldCatalogModelTest {
         /// @param root absolute temporary root
         /// @param count non-negative source size
         private RecordingAccess(Path root, int count) {
-            if (count < 0) {
-                throw new IllegalArgumentException("count must not be negative");
-            }
-            List<Path> createdDirectories = new ArrayList<>(count);
-            for (int index = 0; index < count; index++) {
+            this(root, unknownVersions(count), null);
+        }
+
+        /// Creates a source with explicit per-world and managed-instance versions.
+        ///
+        /// @param root absolute temporary root
+        /// @param gameVersions per-world versions; an empty string represents unknown
+        /// @param instanceGameVersion managed-instance version, or null when unknown
+        private RecordingAccess(
+                Path root,
+                @Unmodifiable List<String> gameVersions,
+                @Nullable String instanceGameVersion) {
+            this.gameVersions = List.copyOf(gameVersions);
+            this.instanceGameVersion = Optional.ofNullable(instanceGameVersion);
+            List<Path> createdDirectories = new ArrayList<>(gameVersions.size());
+            for (int index = 0; index < gameVersions.size(); index++) {
                 createdDirectories.add(root.resolve("world-" + index).toAbsolutePath().normalize());
             }
             directories = List.copyOf(createdDirectories);
+        }
+
+        /// Creates non-null unknown-version markers for a source of the requested size.
+        ///
+        /// @param count non-negative source size
+        /// @return immutable empty version markers
+        private static @Unmodifiable List<String> unknownVersions(int count) {
+            if (count < 0) {
+                throw new IllegalArgumentException("count must not be negative");
+            }
+            return java.util.Collections.nCopies(count, "");
+        }
+
+        /// Returns the configured current managed-instance version.
+        ///
+        /// @return configured current version, or empty
+        @Override
+        public Optional<String> instanceGameVersion() {
+            return instanceGameVersion;
         }
 
         /// Returns a stable fake saves directory without performing any I/O.
@@ -221,12 +323,14 @@ final class DefaultWorldCatalogModelTest {
             synchronized (materializedDirectories) {
                 materializedDirectories.add(normalizedDirectory);
             }
+            int sourceIndex = directories.indexOf(normalizedDirectory);
+            String recordedVersion = gameVersions.get(sourceIndex);
             return new WorldCatalogItem(
                     normalizedDirectory,
                     normalizedDirectory.getFileName().toString(),
                     normalizedDirectory.getFileName().toString(),
                     0L,
-                    null,
+                    recordedVersion.isBlank() ? null : recordedVersion,
                     false,
                     null);
         }
