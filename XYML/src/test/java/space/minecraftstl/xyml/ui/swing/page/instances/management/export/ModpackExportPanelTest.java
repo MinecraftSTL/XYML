@@ -22,11 +22,14 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.game.export.ModpackExportFormat;
+import space.minecraftstl.xyml.game.export.ModpackExportRequest;
 import space.minecraftstl.xyml.game.export.ModpackExportTaskFactory;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -34,6 +37,7 @@ import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
+import javax.swing.JTextArea;
 import javax.swing.JTree;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
@@ -120,6 +124,7 @@ final class ModpackExportPanelTest {
             JButton chooseOutputButton = findNamed(panel, "modpackExportChooseOutput", JButton.class);
             assertEquals(4, formatBox.getItemCount());
             assertFalse(exportButton.isEnabled());
+            formatBox.setSelectedItem(ModpackExportFormat.MODRINTH);
             versionField.setText("1.0.0");
             assertFalse(exportButton.isEnabled());
             chooseOutputButton.doClick();
@@ -230,7 +235,7 @@ final class ModpackExportPanelTest {
             JScrollPane scroll = findNamed(panel, "modpackExportMetadataScroll", JScrollPane.class);
             assertTrue(
                     scroll.getVerticalScrollBar().getMaximum()
-                            <= scroll.getVerticalScrollBar().getVisibleAmount());
+                            > scroll.getVerticalScrollBar().getVisibleAmount());
 
             panel.setSize(800, 300);
             panel.invalidate();
@@ -261,11 +266,101 @@ final class ModpackExportPanelTest {
             layoutRecursively(panel);
             assertTrue(
                     scroll.getVerticalScrollBar().getMaximum()
-                            <= scroll.getVerticalScrollBar().getVisibleAmount());
+                            > scroll.getVerticalScrollBar().getVisibleAmount());
             panel.close();
         });
         assertNotNull(panelReference.get());
         assertEquals(0, executor.pendingCount());
+    }
+
+    /// Restores format-specific advanced fields and forwards exact MCBBS metadata to the task request.
+    @Test
+    void capturesFormatSpecificAdvancedMetadata() throws Exception {
+        Files.writeString(runDirectory.resolve("selected.txt"), "selected");
+        QueuedExecutor executor = new QueuedExecutor();
+        AtomicReference<@Nullable ModpackExportRequest> requestReference = new AtomicReference<>();
+        AtomicReference<@Nullable ModpackExportPanel> panelReference = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            ModpackExportPanel panel = new ModpackExportPanel(
+                    ignored -> runDirectory,
+                    new GameInstanceID("instance"),
+                    request -> {
+                        requestReference.set(request);
+                        throw new IllegalStateException("captured request");
+                    },
+                    fixedOutputChooser(runDirectory.resolve("bundle")),
+                    executor,
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO);
+            panelReference.set(panel);
+            panel.activate();
+        });
+        executor.runNext();
+
+        EdtDispatcher.executeAndWait(() -> {
+            ModpackExportPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+            JComboBox<?> format = findNamed(panel, "modpackExportFormat", JComboBox.class);
+            JTextField author = findNamed(panel, "modpackExportAuthor", JTextField.class);
+            JTextField fileApi = findNamed(panel, "modpackExportFileApi", JTextField.class);
+            JTextField projectUrl = findNamed(panel, "modpackExportProjectUrl", JTextField.class);
+            JTextField launchArguments = findNamed(panel, "modpackExportLaunchArguments", JTextField.class);
+            JTextField javaArguments = findNamed(panel, "modpackExportJavaArguments", JTextField.class);
+            JTextField authlibServer = findNamed(
+                    panel,
+                    "modpackExportAuthlibInjectorServer",
+                    JTextField.class);
+            JTextField origin = findNamed(panel, "modpackExportMcbbsOrigin", JTextField.class);
+
+            format.setSelectedItem(ModpackExportFormat.MODRINTH);
+            assertFalse(author.isVisible());
+            assertFalse(fileApi.isVisible());
+            format.setSelectedItem(ModpackExportFormat.SERVER);
+            assertTrue(author.isVisible());
+            assertTrue(fileApi.isVisible());
+            assertFalse(projectUrl.isVisible());
+            format.setSelectedItem(ModpackExportFormat.MCBBS);
+            assertTrue(projectUrl.isVisible());
+            assertTrue(launchArguments.isVisible());
+            assertTrue(javaArguments.isVisible());
+            assertTrue(authlibServer.isVisible());
+            assertTrue(origin.isVisible());
+
+            JTree tree = findNamed(panel, "modpackExportFiles", JTree.class);
+            DefaultMutableTreeNode root = (DefaultMutableTreeNode) tree.getModel().getRoot();
+            tree.setSelectionPath(new TreePath(childNamed(root, "selected.txt").getPath()));
+            findNamed(panel, "modpackExportVersion", JTextField.class).setText("2.0.0");
+            findNamed(panel, "modpackExportChooseOutput", JButton.class).doClick();
+            JButton export = findNamed(panel, "modpackExportStart", JButton.class);
+            assertFalse(export.isEnabled());
+
+            author.setText("Example Author");
+            fileApi.setText("https://example.invalid/files/");
+            projectUrl.setText("https://example.invalid/project");
+            launchArguments.setText("--demo value");
+            javaArguments.setText("-Ddemo=true");
+            authlibServer.setText("https://auth.example.invalid");
+            origin.setText("12345");
+            findNamed(panel, "modpackExportDescription", JTextArea.class).setText("Description");
+            findNamed(panel, "modpackExportForceUpdate", JCheckBox.class).setSelected(true);
+            assertTrue(export.isEnabled());
+            export.doClick();
+        });
+
+        ModpackExportRequest request = Objects.requireNonNull(requestReference.get(), "captured request");
+        assertEquals(ModpackExportFormat.MCBBS, request.format());
+        assertEquals("Example Author", request.metadata().author());
+        assertEquals("Description", request.metadata().description());
+        assertEquals("https://example.invalid/files/", request.metadata().fileApi());
+        assertEquals("https://example.invalid/project", request.metadata().url());
+        assertEquals("--demo value", request.metadata().launchArguments());
+        assertEquals("-Ddemo=true", request.metadata().javaArguments());
+        assertEquals("https://auth.example.invalid", request.metadata().authlibInjectorServer());
+        assertTrue(request.metadata().forceUpdate());
+        assertEquals(1, request.metadata().origins().size());
+        assertEquals("mcbbs", request.metadata().origins().get(0).getType());
+        assertEquals(12345, request.metadata().origins().get(0).getId());
+        Objects.requireNonNull(panelReference.get(), "panel").close();
     }
 
     /// Recursively lays out one detached Swing component tree for geometry assertions.

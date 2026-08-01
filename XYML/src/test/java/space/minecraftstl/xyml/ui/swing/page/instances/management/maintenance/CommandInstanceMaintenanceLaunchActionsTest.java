@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.launch.LaunchRequest;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
@@ -40,7 +41,8 @@ final class CommandInstanceMaintenanceLaunchActionsTest {
     /// Marks only process launch as test mode while preserving every captured stable identifier.
     @Test
     void testLaunchUsesExplicitTestModeRequest() {
-        LaunchRequest ordinary = new LaunchRequest("account", "directory", "instance");
+        LaunchRequest ordinary = new LaunchRequest(
+                "account", "directory", new GameInstanceID("instance"));
         AtomicReference<@Nullable LaunchRequest> launched = new AtomicReference<>();
         IllegalStateException sentinel = new IllegalStateException("stop after capture");
         CommandInstanceMaintenanceLaunchActions actions = new CommandInstanceMaintenanceLaunchActions(
@@ -67,7 +69,8 @@ final class CommandInstanceMaintenanceLaunchActionsTest {
     /// Keeps script generation on the ordinary request path and returns the exact command completion.
     @Test
     void scriptExportUsesOrdinaryRequestAndExactDestination() {
-        LaunchRequest ordinary = new LaunchRequest("account", "directory", "instance");
+        LaunchRequest ordinary = new LaunchRequest(
+                "account", "directory", new GameInstanceID("instance"));
         Path destination = Path.of("build", "maintenance-test", "launch.ps1").toAbsolutePath().normalize();
         AtomicReference<@Nullable LaunchRequest> exportedRequest = new AtomicReference<>();
         AtomicReference<@Nullable Path> exportedPath = new AtomicReference<>();

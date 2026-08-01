@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.task.Task;
 
+import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
 import java.util.concurrent.CompletionStage;
@@ -41,6 +42,12 @@ public interface InstanceMaintenanceService {
     /// @param charset archive entry-name charset
     /// @return stopped update and refresh task yielding the new snapshot
     Task<InstanceMaintenanceSnapshot> updateModpack(Path archive, Charset charset);
+
+    /// Creates a stopped update task for a remote archive or server manifest.
+    ///
+    /// @param source direct HTTP or HTTPS update source
+    /// @return update and repository-refresh task yielding the latest local snapshot
+    Task<InstanceMaintenanceSnapshot> updateModpack(URI source);
 
     /// Creates a stopped task that forcibly refreshes the selected instance's asset index and objects.
     ///

@@ -61,6 +61,7 @@ import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Standalone Swing catalog for discovering and installing remote CurseForge or Modrinth modpacks.
@@ -75,6 +76,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
 
     /// Factory for the selected-version FileDownloadTask and ModpackHelper installation chain.
     private final RemoteModpackInstallLauncher installLauncher;
+
+    /// Fixed existing update target, or null when the user is creating a new instance.
+    private final @Nullable GameInstanceID fixedInstanceId;
 
     /// Caller-owned worker executor for search and selected-project version resolution.
     private final Executor workerExecutor;
@@ -116,11 +120,17 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Explicit first-page source query command.
     private final JButton searchButton = new JButton();
 
+    /// Direct first server-page navigation command for the completed query.
+    private final JButton firstPageButton = new JButton();
+
     /// Explicit previous server page command.
     private final JButton previousPageButton = new JButton();
 
     /// Explicit next server page command.
     private final JButton nextPageButton = new JButton();
+
+    /// Direct last server-page navigation command for the completed query.
+    private final JButton lastPageButton = new JButton();
 
     /// Selected-version installation command.
     private final JButton installButton = new JButton();
@@ -209,7 +219,34 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 strings,
                 taskProgressStrings,
                 animator,
-                progressAnimationDuration);
+                progressAnimationDuration,
+                null);
+    }
+
+    /// Creates a production repository catalog fixed to one existing modpack instance.
+    ///
+    /// @param fixedInstanceId existing instance that receives the selected remote version
+    /// @param installLauncher update-task factory bound to the same repository and instance
+    /// @param strings visible update-catalog text
+    /// @param taskProgressStrings localized task-progress controls and lifecycle text
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative progress animation duration
+    public RemoteModpackCatalogPanel(
+            GameInstanceID fixedInstanceId,
+            RemoteModpackInstallLauncher installLauncher,
+            RemoteModpackCatalogStrings strings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration) {
+        this(
+                new CoreRemoteModpackCatalogBackend(),
+                installLauncher,
+                Schedulers.io(),
+                strings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                Objects.requireNonNull(fixedInstanceId, "fixedInstanceId"));
     }
 
     /// Creates a catalog with explicit Core and task boundaries for focused headless verification.
@@ -232,6 +269,36 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
+        this(
+                backend,
+                installLauncher,
+                workerExecutor,
+                strings,
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration,
+                null);
+    }
+
+    /// Creates a catalog with optional fixed-instance update semantics.
+    ///
+    /// @param backend blocking source gateway used after explicit user commands
+    /// @param installLauncher selected-version task factory
+    /// @param workerExecutor background executor for source calls
+    /// @param strings visible catalog text
+    /// @param taskProgressStrings localized task-progress controls and lifecycle text
+    /// @param animator optional shared determinate-progress animator
+    /// @param progressAnimationDuration non-negative progress animation duration
+    /// @param fixedInstanceId existing update target, or null for new-instance installation
+    RemoteModpackCatalogPanel(
+            RemoteModpackCatalogBackend backend,
+            RemoteModpackInstallLauncher installLauncher,
+            Executor workerExecutor,
+            RemoteModpackCatalogStrings strings,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration,
+            @Nullable GameInstanceID fixedInstanceId) {
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
@@ -239,6 +306,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         EdtDispatcher.requireEventDispatchThread();
         this.backend = Objects.requireNonNull(backend, "backend");
         this.installLauncher = Objects.requireNonNull(installLauncher, "installLauncher");
+        this.fixedInstanceId = fixedInstanceId;
         this.workerExecutor = Objects.requireNonNull(workerExecutor, "workerExecutor");
         this.strings = Objects.requireNonNull(strings, "strings");
         TaskProgressStrings resolvedTaskProgressStrings = Objects.requireNonNull(
@@ -387,12 +455,16 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
 
         JPanel pageBand = new JPanel(new MigLayout(
                 "insets 0, fill",
-                "[grow,fill][120!]8[120!]",
+                "[grow,fill][120!]8[120!]8[120!]8[120!]",
                 "[40!]"));
         pageBand.setName("remoteModpackPageBand");
         pageBand.setOpaque(false);
         pageBand.add(new JLabel(), "growx");
 
+        firstPageButton.setName("remoteModpackFirstPage");
+        firstPageButton.setText(i18n("search.first_page"));
+        firstPageButton.addActionListener(event -> submitBoundaryPage(false));
+        pageBand.add(firstPageButton, "grow, h 40!");
         previousPageButton.setName("remoteModpackPreviousPage");
         previousPageButton.setText(strings.previousPageAction());
         previousPageButton.addActionListener(event -> submitRelativePage(-1));
@@ -401,6 +473,10 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         nextPageButton.setText(strings.nextPageAction());
         nextPageButton.addActionListener(event -> submitRelativePage(1));
         pageBand.add(nextPageButton, "grow, h 40!");
+        lastPageButton.setName("remoteModpackLastPage");
+        lastPageButton.setText(i18n("search.last_page"));
+        lastPageButton.addActionListener(event -> submitBoundaryPage(true));
+        pageBand.add(lastPageButton, "grow, h 40!");
         filterBand.add(pageBand, "growx");
         add(filterBand, "growx");
 
@@ -436,8 +512,13 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         instanceNameLabel.setLabelFor(instanceNameField);
         installBand.add(instanceNameLabel);
         instanceNameField.setName("remoteModpackInstanceName");
-        SwingTextFields.showClearButton(instanceNameField);
-        instanceNameField.getDocument().addDocumentListener(instanceNameListener);
+        if (fixedInstanceId == null) {
+            SwingTextFields.showClearButton(instanceNameField);
+            instanceNameField.getDocument().addDocumentListener(instanceNameListener);
+        } else {
+            instanceNameField.setText(fixedInstanceId.id());
+            instanceNameField.setEditable(false);
+        }
         installBand.add(instanceNameField, "growx, h 40!");
         installButton.setName("remoteModpackInstall");
         installButton.setText(strings.installAction());
@@ -596,18 +677,39 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         submitSearch(0);
     }
 
+    /// Starts direct first- or last-page navigation for the last completed query.
+    ///
+    /// @param lastPage true to request the last page, or false to request the first page
+    private void submitBoundaryPage(boolean lastPage) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable RemoteModpackCatalogPage page = displayedPage;
+        if (page == null) {
+            return;
+        }
+        submitCompletedQueryPage(lastPage ? page.totalPages() - 1 : 0);
+    }
+
     /// Starts a user-requested adjacent page query based on the last completed query filters.
     ///
     /// @param direction negative one for previous and positive one for next
     private void submitRelativePage(int direction) {
         EdtDispatcher.requireEventDispatchThread();
-        @Nullable RemoteModpackCatalogQuery previousQuery = completedQuery;
         @Nullable RemoteModpackCatalogPage previousPage = displayedPage;
-        if (previousQuery == null || previousPage == null || catalogLoading || activeExecutor != null) {
+        if (previousPage == null) {
             return;
         }
-        int pageOffset = previousPage.pageOffset() + direction;
-        if (pageOffset < 0 || pageOffset >= previousPage.totalPages()) {
+        submitCompletedQueryPage(previousPage.pageOffset() + direction);
+    }
+
+    /// Validates and starts an exact page request against the last completed query criteria.
+    ///
+    /// @param pageOffset zero-based server page to request
+    private void submitCompletedQueryPage(int pageOffset) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable RemoteModpackCatalogQuery previousQuery = completedQuery;
+        @Nullable RemoteModpackCatalogPage previousPage = displayedPage;
+        if (previousQuery == null || previousPage == null || catalogLoading || activeExecutor != null
+                || pageOffset < 0 || pageOffset >= previousPage.totalPages()) {
             return;
         }
         submitSearch(pageOffset);
@@ -798,7 +900,11 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         @Nullable RemoteModpackCatalogItem item = selectedItem;
         @Nullable RemoteAddon.Version version = (RemoteAddon.Version) versionBox.getSelectedItem();
         String instanceName = instanceNameField.getText().trim();
-        if (item == null || version == null || !XYMLGameRepository.isValidInstanceId(instanceName)) {
+        @Nullable GameInstanceID targetInstance = fixedInstanceId;
+        if (targetInstance == null && XYMLGameRepository.isValidInstanceId(instanceName)) {
+            targetInstance = new GameInstanceID(instanceName);
+        }
+        if (item == null || version == null || targetInstance == null) {
             setStatus(strings.invalidInstanceNameStatus());
             updateControls();
             return;
@@ -811,7 +917,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             task = installLauncher.createInstallTask(new RemoteModpackInstallRequest(
                     item,
                     version,
-                    new GameInstanceID(instanceName)));
+                    targetInstance));
         } catch (IOException | RuntimeException preparationFailure) {
             LOG.warning("Failed to prepare a selected remote modpack installation", preparationFailure);
             setStatus(strings.installFailedStatus());
@@ -922,6 +1028,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// @param item selected project supplying a stable slug suggestion
     private void suggestInstanceName(RemoteModpackCatalogItem item) {
         EdtDispatcher.requireEventDispatchThread();
+        if (fixedInstanceId != null) {
+            return;
+        }
         String existing = instanceNameField.getText().trim();
         @Nullable String previousSuggestion = suggestedInstanceName;
         String suggestion = item.suggestedInstanceName();
@@ -989,8 +1098,10 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
 
         @Nullable RemoteModpackCatalogPage page = displayedPage;
         boolean pageButtonsEnabled = inputsEnabled && !catalogLoading && page != null;
+        firstPageButton.setEnabled(pageButtonsEnabled && page.pageOffset() > 0);
         previousPageButton.setEnabled(pageButtonsEnabled && page.pageOffset() > 0);
         nextPageButton.setEnabled(pageButtonsEnabled && page.pageOffset() + 1 < page.totalPages());
+        lastPageButton.setEnabled(pageButtonsEnabled && page.pageOffset() + 1 < page.totalPages());
 
         versionBox.setEnabled(inputsEnabled && selectedItem != null && !versionLoading && versionBox.getItemCount() > 0);
         instanceNameField.setEnabled(inputsEnabled);
@@ -999,7 +1110,8 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 && !versionLoading
                 && selectedItem != null
                 && versionBox.getSelectedItem() != null
-                && XYMLGameRepository.isValidInstanceId(instanceNameField.getText().trim()));
+                && (fixedInstanceId != null
+                        || XYMLGameRepository.isValidInstanceId(instanceNameField.getText().trim())));
     }
 
     /// Updates visible lifecycle feedback and its accessible tooltip on the EDT.
@@ -1033,7 +1145,9 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         }
         searchField.getDocument().removeDocumentListener(criteriaListener);
         gameVersionField.getDocument().removeDocumentListener(criteriaListener);
-        instanceNameField.getDocument().removeDocumentListener(instanceNameListener);
+        if (fixedInstanceId == null) {
+            instanceNameField.getDocument().removeDocumentListener(instanceNameListener);
+        }
         choiceList.getChoiceModel().removeListDataListener(listDataListener);
         choiceList.close();
         progressHost.close();
@@ -1045,8 +1159,10 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         versionBox.setEnabled(false);
         instanceNameField.setEnabled(false);
         searchButton.setEnabled(false);
+        firstPageButton.setEnabled(false);
         previousPageButton.setEnabled(false);
         nextPageButton.setEnabled(false);
+        lastPageButton.setEnabled(false);
         installButton.setEnabled(false);
     }
 

@@ -311,7 +311,7 @@ public final class ResourcePackCatalogPanelTest {
 
             ResourcePackCatalogItem selected = rows.get(1);
             assertAll(
-                    () -> assertEquals(ListSelectionModelValue.SINGLE, selectionMode(list)),
+                    () -> assertEquals(ListSelectionModelValue.MULTIPLE, selectionMode(list)),
                     () -> assertEquals(STRINGS.pageTitle(),
                             list.getAccessibleContext().getAccessibleName()),
                     () -> assertEquals(visibleRows * 2, requested.length()),
@@ -522,8 +522,8 @@ public final class ResourcePackCatalogPanelTest {
     /// @return stable test selection value
     private static ListSelectionModelValue selectionMode(
             JList<ChoiceListEntry<ResourcePackCatalogItem>> list) {
-        return list.getSelectionMode() == javax.swing.ListSelectionModel.SINGLE_SELECTION
-                ? ListSelectionModelValue.SINGLE
+        return list.getSelectionMode() == javax.swing.ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
+                ? ListSelectionModelValue.MULTIPLE
                 : ListSelectionModelValue.OTHER;
     }
 
@@ -665,8 +665,8 @@ public final class ResourcePackCatalogPanelTest {
     /// Test-only normalized list selection modes.
     @NotNullByDefault
     private enum ListSelectionModelValue {
-        /// Single selection is configured.
-        SINGLE,
+        /// Multiple interval selection is configured.
+        MULTIPLE,
 
         /// Any unexpected selection mode.
         OTHER
@@ -695,11 +695,25 @@ public final class ResourcePackCatalogPanelTest {
             return false;
         }
 
+        /// Rejects the unused selected-batch enable confirmation.
+        @Override
+        public boolean confirmEnableSelected(Component owner, int selectedCount) {
+            Objects.requireNonNull(owner, "owner");
+            return false;
+        }
+
         /// Rejects the unused permanent-delete confirmation.
         @Override
         public boolean confirmDelete(Component owner, ResourcePackCatalogItem target) {
             Objects.requireNonNull(owner, "owner");
             Objects.requireNonNull(target, "target");
+            return false;
+        }
+
+        /// Rejects the unused selected-batch deletion confirmation.
+        @Override
+        public boolean confirmDeleteSelected(Component owner, int selectedCount) {
+            Objects.requireNonNull(owner, "owner");
             return false;
         }
 
@@ -834,6 +848,12 @@ public final class ResourcePackCatalogPanelTest {
                 throw failure;
             }
             return current.get();
+        }
+
+        /// Returns current fake shallow paths in row order.
+        @Override
+        public @Unmodifiable List<Path> indexedPaths() {
+            return rows.stream().map(ResourcePackCatalogItem::path).toList();
         }
 
         /// Registers one fake snapshot listener.

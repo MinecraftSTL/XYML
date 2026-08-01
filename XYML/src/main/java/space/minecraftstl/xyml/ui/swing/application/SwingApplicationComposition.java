@@ -214,6 +214,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 rawAppearance.brightnessPreference(),
                 new SwingDesignTokens(rawAppearance.cornerRadius()),
                 systemThemeDetector);
+        themeManager.updateDefaultFontFamily(SettingsManager.settings().launcherFontFamilyProperty().get());
         SwingAnimator animator = new SwingAnimator(
                 rawAppearance.animationsDisabled() ? MotionPolicy.OFF : MotionPolicy.FULL,
                 animationFrameDelayMillis);
@@ -482,7 +483,9 @@ public final class SwingApplicationComposition implements AutoCloseable {
             throw failure;
         }
         try {
-            return SettingsCenterPanel.createForCurrentSettings(appearancePanel);
+            return SettingsCenterPanel.createForCurrentSettings(
+                    appearancePanel,
+                    themeManager::updateDefaultFontFamily);
         } catch (RuntimeException | Error failure) {
             appearancePanel.close();
             throw failure;
@@ -550,13 +553,13 @@ public final class SwingApplicationComposition implements AutoCloseable {
                             worldFolder -> commands.launchCommand().launch(new LaunchRequest(
                                     bindings.homeStore().snapshot().accountId(),
                                     bindings.repository().getGameDirectory().getId().toString(),
-                                    instanceId.id(),
+                                    instanceId,
                                     worldFolder)),
                             (worldFolder, destination) -> commands.launchScriptExportCommand().export(
                                     new LaunchRequest(
                                             bindings.homeStore().snapshot().accountId(),
                                             bindings.repository().getGameDirectory().getId().toString(),
-                                            instanceId.id(),
+                                            instanceId,
                                             worldFolder),
                                     destination));
                     InstanceMaintenanceLaunchActions maintenanceLaunchActions =

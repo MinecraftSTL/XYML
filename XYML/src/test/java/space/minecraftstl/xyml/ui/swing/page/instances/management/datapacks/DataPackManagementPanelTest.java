@@ -21,6 +21,7 @@ import org.glavo.nbt.io.NBTCodec;
 import org.glavo.nbt.tag.CompoundTag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
@@ -40,6 +41,7 @@ import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCa
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JSplitPane;
+import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -94,7 +96,6 @@ final class DataPackManagementPanelTest {
         RecordingInteractions interactions = new RecordingInteractions(archive);
         ExecutorService executor = Executors.newSingleThreadExecutor();
         AtomicReference<@Nullable DataPackManagementPanel> panelReference = new AtomicReference<>();
-        AtomicReference<@Nullable Path> deletedPath = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> panelReference.set(new DataPackManagementPanel(
                     model,
@@ -134,20 +135,55 @@ final class DataPackManagementPanelTest {
             drainEdt();
 
             EdtDispatcher.executeAndWait(() -> {
-                panel.dataPackChoiceList().getList().setSelectedIndex(0);
-                @Nullable DataPack.Pack selected = panel.dataPackChoiceList().getSelectedValue();
-                assertNotNull(selected);
-                deletedPath.set(selected.getPath());
+                JTextField search = findNamed(panel, "dataPacksSearch", JTextField.class);
+                JButton clearSearch = findNamed(panel, "dataPacksSearchClear", JButton.class);
+                JButton selectAll = findNamed(panel, "dataPacksSelectAll", JButton.class);
+                JButton disable = findNamed(panel, "dataPacksDisable", JButton.class);
                 JButton deleteButton = findNamed(panel, "dataPacksDelete", JButton.class);
+                assertNotNull(search);
+                assertNotNull(clearSearch);
+                assertNotNull(selectAll);
+                assertNotNull(disable);
                 assertNotNull(deleteButton);
+
+                search.setText("IMPORTED");
+                search.postActionEvent();
+                assertEquals(OptionalInt.of(1), panel.dataPackChoiceList().getChoiceModel().exactItemCount());
+                search.setText("regex:^existing$");
+                search.postActionEvent();
+                assertEquals(OptionalInt.of(1), panel.dataPackChoiceList().getChoiceModel().exactItemCount());
+                search.setText("regex:[");
+                search.postActionEvent();
+                assertEquals(OptionalInt.of(0), panel.dataPackChoiceList().getChoiceModel().exactItemCount());
+                assertTrue(clearSearch.isEnabled());
+                clearSearch.doClick();
+                assertEquals(OptionalInt.of(2), panel.dataPackChoiceList().getChoiceModel().exactItemCount());
+
+                selectAll.doClick();
+                assertEquals(2, panel.dataPackChoiceList().getList().getSelectedIndices().length);
+                assertTrue(disable.isEnabled());
+                disable.doClick();
+            });
+            awaitBackgroundWork(executor);
+
+            assertTrue(Files.isRegularFile(dataPacksDirectory.resolve("existing/pack.mcmeta.disabled")));
+            assertTrue(Files.isRegularFile(dataPacksDirectory.resolve("imported.zip.disabled")));
+            EdtDispatcher.executeAndWait(() -> {
+                JButton selectAll = findNamed(panel, "dataPacksSelectAll", JButton.class);
+                JButton deleteButton = findNamed(panel, "dataPacksDelete", JButton.class);
+                assertNotNull(selectAll);
+                assertNotNull(deleteButton);
+                assertEquals(OptionalInt.of(2), panel.dataPackChoiceList().getChoiceModel().exactItemCount());
+                selectAll.doClick();
                 assertTrue(deleteButton.isEnabled());
                 deleteButton.doClick();
             });
             awaitBackgroundWork(executor);
 
-            assertFalse(Files.exists(Objects.requireNonNull(deletedPath.get())));
+            assertFalse(Files.exists(dataPacksDirectory.resolve("existing")));
+            assertFalse(Files.exists(dataPacksDirectory.resolve("imported.zip.disabled")));
             EdtDispatcher.executeAndWait(() ->
-                    assertEquals(OptionalInt.of(1), panel.dataPackChoiceList().getChoiceModel().exactItemCount()));
+                    assertEquals(OptionalInt.of(0), panel.dataPackChoiceList().getChoiceModel().exactItemCount()));
         } finally {
             @Nullable DataPackManagementPanel panel = panelReference.get();
             if (panel != null) {
@@ -474,10 +510,10 @@ final class DataPackManagementPanelTest {
         /// Always accepts deletion so the test exercises the true Core filesystem mutation.
         ///
         /// @param owner unused dialog owner
-        /// @param dataPack unused selected data pack
+        /// @param dataPacks unused selected data packs
         /// @return true
         @Override
-        public boolean confirmDelete(Component owner, DataPack.Pack dataPack) {
+        public boolean confirmDelete(Component owner, @Unmodifiable List<DataPack.Pack> dataPacks) {
             return true;
         }
 

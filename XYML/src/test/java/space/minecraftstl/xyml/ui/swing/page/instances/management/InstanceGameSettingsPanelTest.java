@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.setting.GameSettings;
+import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
@@ -63,6 +64,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -95,7 +97,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsJavaVersion", JTextField.class).setText("21");
                 clickOverride(panel, "instanceGameSettingsJvmOptions");
                 findNamed(panel, "instanceGameSettingsJvmOptions", JTextArea.class).setText("-XX:+UseG1GC");
-                clickOverride(panel, "instanceGameSettingsRunningDirectory");
+                findNamed(panel, "instanceGameSettingsIsolation", JCheckBox.class).doClick();
                 findNamed(panel, "instanceGameSettingsRunningDirectory", JTextField.class).setText("instance-run");
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
@@ -118,6 +120,168 @@ final class InstanceGameSettingsPanelTest {
         } finally {
             closePanel(panelReference);
         }
+    }
+
+    /// Persists explicit isolation as an empty local running directory and restores inheritance when disabled.
+    @Test
+    void exposesExplicitIsolationControl() {
+        RecordingStore store = new RecordingStore(snapshotWithRunningDirectory(false, "shared-run"));
+        AtomicInteger workingDirectoryChanges = new AtomicInteger();
+        AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = createPanel(store, workingDirectoryChanges::incrementAndGet);
+                panelReference.set(panel);
+                JCheckBox isolation = findNamed(panel, "instanceGameSettingsIsolation", JCheckBox.class);
+                JTextField runningDirectory =
+                        findNamed(panel, "instanceGameSettingsRunningDirectory", JTextField.class);
+                JButton browse = findNamed(panel, "instanceGameSettingsRunningDirectoryBrowse", JButton.class);
+
+                assertFalse(isolation.isSelected());
+                assertFalse(runningDirectory.isEnabled());
+                assertFalse(browse.isEnabled());
+
+                isolation.doClick();
+
+                assertTrue(isolation.isSelected());
+                assertTrue(runningDirectory.isEnabled());
+                assertTrue(browse.isEnabled());
+                assertEquals("", runningDirectory.getText());
+                findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
+            });
+
+            assertTrue(store.snapshot().launchOptions().runningDirectoryOverridden());
+            assertEquals("", store.snapshot().launchOptions().runningDirectory());
+            assertEquals(1, workingDirectoryChanges.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+                findNamed(panel, "instanceGameSettingsIsolation", JCheckBox.class).doClick();
+                findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
+            });
+
+            assertFalse(store.snapshot().launchOptions().runningDirectoryOverridden());
+            assertEquals(2, workingDirectoryChanges.get());
+        } finally {
+            closePanel(panelReference);
+        }
+    }
+
+    /// Keeps modpack isolation selected and prevents edits without mutating the stored override state.
+    ///
+    /// @param forcedRoot forced instance root displayed by the page
+    @Test
+    void forcesIsolationForModpackInstances(@TempDir Path forcedRoot) {
+        RecordingStore store = new RecordingStore(
+                snapshotWithRunningDirectory(false, "shared-run"),
+                forcedRoot.toString());
+        AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = createPanel(store);
+                panelReference.set(panel);
+
+                JCheckBox isolation = findNamed(panel, "instanceGameSettingsIsolation", JCheckBox.class);
+                JTextField runningDirectory =
+                        findNamed(panel, "instanceGameSettingsRunningDirectory", JTextField.class);
+                assertTrue(isolation.isSelected());
+                assertFalse(isolation.isEnabled());
+                assertFalse(runningDirectory.isEnabled());
+                assertEquals(forcedRoot.toString(), runningDirectory.getText());
+
+                findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
+            });
+
+            assertFalse(store.snapshot().launchOptions().runningDirectoryOverridden());
+            assertEquals("shared-run", store.snapshot().launchOptions().runningDirectory());
+        } finally {
+            closePanel(panelReference);
+        }
+    }
+
+    /// Resolves inherited values immediately when the instance selects another global preset.
+    @Test
+    void previewsAndPersistsSelectedParentPreset() {
+        GameSettingsPresetID selectedId = GameSettingsPresetID.generate();
+        InstanceGameSettingsSnapshot initial = withParentPreset(
+                snapshot(),
+                new InstanceGameSettingsSnapshot.ParentPresetSettings(
+                        null,
+                        List.of(
+                                new InstanceGameSettingsParentPreset(null, "Default"),
+                                new InstanceGameSettingsParentPreset(selectedId, "Performance"))));
+        RecordingStore store = new RecordingStore(initial);
+        store.previewer = candidate -> withMaximumMemory(candidate, 8192);
+        AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = createPanel(store);
+                panelReference.set(panel);
+                JComboBox<?> parentPreset = findNamed(
+                        panel,
+                        "instanceGameSettingsParentPreset",
+                        JComboBox.class);
+
+                parentPreset.setSelectedIndex(1);
+
+                assertEquals(1, store.previewCount.get());
+                assertEquals(
+                        "8192",
+                        findNamed(panel, "instanceGameSettingsMaximumMemory", JTextField.class).getText());
+                findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
+            });
+
+            assertEquals(selectedId, store.snapshot().parentPreset().selectedId());
+            assertEquals(1, store.saveCount.get());
+        } finally {
+            closePanel(panelReference);
+        }
+    }
+
+    /// Keeps custom Java paths directly editable while writing a chosen executable into the same field.
+    @Test
+    void choosesCustomJavaExecutableIntoEditablePath() {
+        Path selectedPath = Path.of("runtime", "bin", "java");
+        EdtDispatcher.executeAndWait(() -> {
+            JCheckBox override = new JCheckBox();
+            JTextField path = new JTextField();
+            JPanel row = new JPanel();
+            InstanceJavaPathControls controls = new InstanceJavaPathControls(
+                    override,
+                    path,
+                    () -> selectedPath);
+            controls.addRow(row, "Java executable");
+            controls.updateAvailability(true);
+
+            findNamed(row, "instanceGameSettingsJavaPathBrowse", JButton.class).doClick();
+
+            assertTrue(path.isEditable());
+            assertEquals(selectedPath.toAbsolutePath().normalize().toString(), path.getText());
+        });
+    }
+
+    /// Requires explicit consent before invoking backup-and-overwrite recovery for read-only settings.
+    @Test
+    void confirmsReadOnlySettingsRecovery() {
+        RecordingStore store = new RecordingStore(withWritable(snapshot(), false));
+        store.forceOverwriteAvailable = true;
+        AtomicInteger reloads = new AtomicInteger();
+        EdtDispatcher.executeAndWait(() -> {
+            InstanceGameSettingsFooterControls footer = new InstanceGameSettingsFooterControls(
+                    store,
+                    () -> { },
+                    reloads::incrementAndGet,
+                    () -> true);
+            footer.updateAvailability(false, true);
+
+            findNamed(
+                    footer.component(),
+                    "instanceGameSettingsForceOverwrite",
+                    JButton.class).doClick();
+        });
+
+        assertEquals(1, store.forceOverwriteCount.get());
+        assertEquals(1, reloads.get());
     }
 
     /// Ensures all 40 model properties have both a visible editor and an independent override checkbox.
@@ -528,6 +692,7 @@ final class InstanceGameSettingsPanelTest {
         InstanceGameSettingsSnapshot base = snapshot();
         InstanceGameSettingsSnapshot precise = new InstanceGameSettingsSnapshot(
                 base.writable(),
+                base.parentPreset(),
                 base.memory(),
                 base.javaRuntime(),
                 new InstanceGameSettingsSnapshot.WindowSettings(
@@ -593,6 +758,7 @@ final class InstanceGameSettingsPanelTest {
     private static InstanceGameSettingsSnapshot snapshot() {
         return new InstanceGameSettingsSnapshot(
                 true,
+                new InstanceGameSettingsSnapshot.ParentPresetSettings(null, List.of()),
                 new InstanceGameSettingsSnapshot.MemorySettings(false, true, false, 4096),
                 new InstanceGameSettingsSnapshot.JavaRuntimeSettings(
                         false,
@@ -682,6 +848,7 @@ final class InstanceGameSettingsPanelTest {
         InstanceGameSettingsSnapshot base = snapshot();
         return new InstanceGameSettingsSnapshot(
                 base.writable(),
+                base.parentPreset(),
                 base.memory(),
                 base.javaRuntime(),
                 base.window(),
@@ -718,6 +885,112 @@ final class InstanceGameSettingsPanelTest {
                         "  echo post  "),
                 base.graphics(),
                 base.nativeLibraries());
+    }
+
+    /// Creates a snapshot with an explicit effective running directory and inheritance state.
+    ///
+    /// @param overridden whether the instance owns the running-directory setting
+    /// @param runningDirectory effective running-directory text
+    /// @return complete settings snapshot with the requested launch option
+    private static InstanceGameSettingsSnapshot snapshotWithRunningDirectory(
+            boolean overridden,
+            String runningDirectory) {
+        InstanceGameSettingsSnapshot base = snapshot();
+        return new InstanceGameSettingsSnapshot(
+                base.writable(),
+                base.parentPreset(),
+                base.memory(),
+                base.javaRuntime(),
+                base.window(),
+                base.launcher(),
+                base.quickPlay(),
+                new InstanceGameSettingsSnapshot.LaunchOptionsSettings(
+                        overridden,
+                        Objects.requireNonNull(runningDirectory, "runningDirectory"),
+                        false,
+                        "",
+                        false,
+                        "",
+                        false,
+                        ProcessPriority.NORMAL),
+                base.jvm(),
+                base.commands(),
+                base.graphics(),
+                base.nativeLibraries());
+    }
+
+    /// Copies a snapshot with a different parent-preset selection and choice list.
+    ///
+    /// @param source source snapshot
+    /// @param parentPreset replacement parent-preset state
+    /// @return copied snapshot
+    private static InstanceGameSettingsSnapshot withParentPreset(
+            InstanceGameSettingsSnapshot source,
+            InstanceGameSettingsSnapshot.ParentPresetSettings parentPreset) {
+        return new InstanceGameSettingsSnapshot(
+                source.writable(),
+                parentPreset,
+                source.memory(),
+                source.javaRuntime(),
+                source.window(),
+                source.launcher(),
+                source.quickPlay(),
+                source.launchOptions(),
+                source.jvm(),
+                source.commands(),
+                source.graphics(),
+                source.nativeLibraries());
+    }
+
+    /// Copies a snapshot with a different effective inherited maximum memory.
+    ///
+    /// @param source source snapshot
+    /// @param maximumMiB replacement effective maximum memory
+    /// @return copied snapshot
+    private static InstanceGameSettingsSnapshot withMaximumMemory(
+            InstanceGameSettingsSnapshot source,
+            int maximumMiB) {
+        InstanceGameSettingsSnapshot.MemorySettings memory = source.memory();
+        return new InstanceGameSettingsSnapshot(
+                source.writable(),
+                source.parentPreset(),
+                new InstanceGameSettingsSnapshot.MemorySettings(
+                        memory.automaticOverridden(),
+                        memory.automatic(),
+                        memory.maximumOverridden(),
+                        maximumMiB),
+                source.javaRuntime(),
+                source.window(),
+                source.launcher(),
+                source.quickPlay(),
+                source.launchOptions(),
+                source.jvm(),
+                source.commands(),
+                source.graphics(),
+                source.nativeLibraries());
+    }
+
+    /// Copies a snapshot with a different writable state.
+    ///
+    /// @param source source snapshot
+    /// @param writable replacement writable state
+    /// @return copied snapshot
+    private static InstanceGameSettingsSnapshot withWritable(
+            InstanceGameSettingsSnapshot source,
+            boolean writable) {
+        return new InstanceGameSettingsSnapshot(
+                writable,
+                source.parentPreset(),
+                source.memory(),
+                source.javaRuntime(),
+                source.window(),
+                source.launcher(),
+                source.quickPlay(),
+                source.launchOptions(),
+                source.jvm(),
+                source.commands(),
+                source.graphics(),
+                source.nativeLibraries());
     }
 
     /// Creates a panel isolated from process-wide Java runtime and user-settings state.
@@ -965,17 +1238,61 @@ final class InstanceGameSettingsPanelTest {
         /// Number of calls that crossed the UI persistence boundary.
         private final AtomicInteger saveCount = new AtomicInteger();
 
+        /// Number of unsaved parent-preset preview requests.
+        private final AtomicInteger previewCount = new AtomicInteger();
+
+        /// Number of confirmed backup-and-overwrite requests.
+        private final AtomicInteger forceOverwriteCount = new AtomicInteger();
+
+        /// Preview transformation used by focused parent-preset tests.
+        private Function<InstanceGameSettingsSnapshot, InstanceGameSettingsSnapshot> previewer = Function.identity();
+
+        /// Whether the test store exposes read-only recovery.
+        private boolean forceOverwriteAvailable;
+
+        /// Forced running directory returned to the editor, or `null` for configurable isolation.
+        private final @Nullable String forcedRunningDirectory;
+
         /// Creates a deterministic store with one initial snapshot.
         ///
         /// @param initialSnapshot initial effective values and override flags
         private RecordingStore(InstanceGameSettingsSnapshot initialSnapshot) {
+            this(initialSnapshot, null);
+        }
+
+        /// Creates a deterministic store with optional forced modpack isolation.
+        ///
+        /// @param initialSnapshot initial effective values and override flags
+        /// @param forcedRunningDirectory forced instance root, or `null` for configurable isolation
+        private RecordingStore(
+                InstanceGameSettingsSnapshot initialSnapshot,
+                @Nullable String forcedRunningDirectory) {
             storedSnapshot = Objects.requireNonNull(initialSnapshot, "initialSnapshot");
+            this.forcedRunningDirectory = forcedRunningDirectory;
+        }
+
+        /// Returns the forced test directory when this store represents a modpack.
+        ///
+        /// @return forced directory, or `null` for normal instances
+        @Override
+        public @Nullable String forcedRunningDirectory() {
+            return forcedRunningDirectory;
         }
 
         /// Returns the latest recorded snapshot.
         @Override
         public InstanceGameSettingsSnapshot snapshot() {
             return storedSnapshot;
+        }
+
+        /// Resolves one unsaved parent-preset candidate through the configured test transformation.
+        ///
+        /// @param candidate complete unsaved state
+        /// @return transformed preview state
+        @Override
+        public InstanceGameSettingsSnapshot preview(InstanceGameSettingsSnapshot candidate) {
+            previewCount.incrementAndGet();
+            return previewer.apply(Objects.requireNonNull(candidate, "candidate"));
         }
 
         /// Records a full instance-settings write.
@@ -985,6 +1302,24 @@ final class InstanceGameSettingsPanelTest {
         public void save(InstanceGameSettingsSnapshot snapshot) {
             storedSnapshot = Objects.requireNonNull(snapshot, "snapshot");
             saveCount.incrementAndGet();
+        }
+
+        /// Returns whether the focused store permits recovery.
+        ///
+        /// @return configured recovery availability
+        @Override
+        public boolean canForceOverwrite() {
+            return forceOverwriteAvailable;
+        }
+
+        /// Records one confirmed backup-and-overwrite request and makes the snapshot writable.
+        @Override
+        public void forceOverwrite() {
+            if (!forceOverwriteAvailable) {
+                throw new IllegalStateException("Recovery is unavailable");
+            }
+            forceOverwriteCount.incrementAndGet();
+            storedSnapshot = withWritable(storedSnapshot, true);
         }
     }
 

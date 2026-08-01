@@ -30,6 +30,28 @@ import java.util.concurrent.CompletionStage;
 /// Supplies one lazily indexed instance-world catalog to a viewport-driven Swing list.
 @NotNullByDefault
 public interface WorldCatalogModel extends ViewportChoiceDataSource<WorldCatalogItem>, AutoCloseable {
+    /// Returns whether this model can filter worlds against the managed instance game version.
+    ///
+    /// @return whether the Show All control is available
+    default boolean supportsVersionFiltering() {
+        return false;
+    }
+
+    /// Returns whether worlds from every recorded game version are currently visible.
+    ///
+    /// @return true for an unfiltered catalog
+    default boolean showAll() {
+        return true;
+    }
+
+    /// Changes whether every world or only current-version and unknown-version worlds are visible.
+    ///
+    /// Implementations without version filtering ignore this command.
+    ///
+    /// @param showAll whether every indexed world should be visible
+    default void setShowAll(boolean showAll) {
+    }
+
     /// Returns the current immutable index and mutation state without blocking.
     ///
     /// @return latest catalog snapshot
@@ -70,6 +92,44 @@ public interface WorldCatalogModel extends ViewportChoiceDataSource<WorldCatalog
     /// @param world exact current materialized row
     /// @return terminal catalog state
     CompletionStage<WorldCatalogSnapshot> deleteWorld(WorldCatalogItem world);
+
+    /// Writes one selected world's supported detail fields and refreshes the catalog afterward.
+    ///
+    /// @param world exact current materialized row
+    /// @param update validated form values
+    /// @return terminal catalog state
+    default CompletionStage<WorldCatalogSnapshot> updateWorldDetails(
+            WorldCatalogItem world,
+            WorldDetailsUpdate update) {
+        Objects.requireNonNull(world, "world");
+        Objects.requireNonNull(update, "update");
+        return CompletableFuture.failedFuture(
+                new UnsupportedOperationException("World detail editing is unavailable"));
+    }
+
+    /// Replaces one selected world's icon with an exact 64-by-64 PNG.
+    ///
+    /// @param world exact current materialized row
+    /// @param source selected local PNG
+    /// @return terminal catalog state
+    default CompletionStage<WorldCatalogSnapshot> replaceWorldIcon(
+            WorldCatalogItem world,
+            Path source) {
+        Objects.requireNonNull(world, "world");
+        Objects.requireNonNull(source, "source");
+        return CompletableFuture.failedFuture(
+                new UnsupportedOperationException("World icon editing is unavailable"));
+    }
+
+    /// Removes one selected world's custom icon and refreshes the catalog afterward.
+    ///
+    /// @param world exact current materialized row
+    /// @return terminal catalog state
+    default CompletionStage<WorldCatalogSnapshot> resetWorldIcon(WorldCatalogItem world) {
+        Objects.requireNonNull(world, "world");
+        return CompletableFuture.failedFuture(
+                new UnsupportedOperationException("World icon reset is unavailable"));
+    }
 
     /// Copies one current readable world under a user-selected sibling name.
     ///

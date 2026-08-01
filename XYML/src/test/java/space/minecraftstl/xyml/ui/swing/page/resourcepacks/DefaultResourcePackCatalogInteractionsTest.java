@@ -56,6 +56,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Headless tests for resource-pack dialogs, immutable selections, and off-EDT local integration.
 @NotNullByDefault
@@ -166,6 +167,46 @@ public final class DefaultResourcePackCatalogInteractionsTest {
                 () -> assertTrue(deleteCall.onEventDispatchThread()));
     }
 
+    /// Selected-path batches use the legacy localized warnings without requiring row metadata.
+    @Test
+    public void configuresBatchConfirmations() {
+        FakeDialogActions dialogs = new FakeDialogActions();
+        dialogs.confirmResult = JOptionPane.YES_OPTION;
+        DefaultResourcePackCatalogInteractions interactions = interactions(
+                Runnable::run, dialogs, new FakeDesktopActions(), new FakeFileActions());
+        JPanel owner = valueOnEventDispatchThread(JPanel::new);
+
+        boolean enableAccepted = valueOnEventDispatchThread(
+                () -> interactions.confirmEnableSelected(owner, 3));
+        boolean deleteAccepted = valueOnEventDispatchThread(
+                () -> interactions.confirmDeleteSelected(owner, 2));
+        ConfirmDialogCall enableCall = dialogs.confirmCalls.get(0);
+        ConfirmDialogCall deleteCall = dialogs.confirmCalls.get(1);
+
+        assertAll(
+                () -> assertTrue(enableAccepted),
+                () -> assertTrue(deleteAccepted),
+                () -> assertSame(owner, enableCall.owner()),
+                () -> assertEquals(i18n("resourcepack.warning.manipulate"), enableCall.message()),
+                () -> assertEquals(i18n("message.warning"), enableCall.title()),
+                () -> assertEquals(JOptionPane.YES_NO_OPTION, enableCall.optionType()),
+                () -> assertEquals(JOptionPane.WARNING_MESSAGE, enableCall.messageType()),
+                () -> assertTrue(enableCall.onEventDispatchThread()),
+                () -> assertSame(owner, deleteCall.owner()),
+                () -> assertEquals(i18n("button.remove.confirm"), deleteCall.message()),
+                () -> assertEquals(i18n("button.remove"), deleteCall.title()),
+                () -> assertEquals(JOptionPane.YES_NO_OPTION, deleteCall.optionType()),
+                () -> assertEquals(JOptionPane.WARNING_MESSAGE, deleteCall.messageType()),
+                () -> assertTrue(deleteCall.onEventDispatchThread()));
+
+        onEventDispatchThread(() -> assertAll(
+                () -> assertThrows(IllegalArgumentException.class,
+                        () -> interactions.confirmEnableSelected(owner, 0)),
+                () -> assertThrows(IllegalArgumentException.class,
+                        () -> interactions.confirmDeleteSelected(owner, -1))));
+        assertEquals(2, dialogs.confirmCalls.size());
+    }
+
     /// A compatible target is rejected before an incompatible-enable dialog can be shown.
     @Test
     public void rejectsCompatibleTargetFromIncompatibleConfirmation() {
@@ -206,7 +247,11 @@ public final class DefaultResourcePackCatalogInteractionsTest {
                 () -> assertThrows(IllegalStateException.class,
                         () -> interactions.confirmEnableIncompatible(owner, target)),
                 () -> assertThrows(IllegalStateException.class,
+                        () -> interactions.confirmEnableSelected(owner, 1)),
+                () -> assertThrows(IllegalStateException.class,
                         () -> interactions.confirmDelete(owner, target)),
+                () -> assertThrows(IllegalStateException.class,
+                        () -> interactions.confirmDeleteSelected(owner, 1)),
                 () -> assertThrows(IllegalStateException.class,
                         () -> interactions.showFailure(owner, "title", "detail")),
                 () -> assertEquals(0, dialogs.totalCalls()));

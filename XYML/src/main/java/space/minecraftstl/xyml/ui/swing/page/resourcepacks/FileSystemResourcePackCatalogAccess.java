@@ -85,7 +85,7 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
     ///
     /// @param repository repository containing the managed instance
     /// @param instanceId stable non-blank repository instance identifier
-    FileSystemResourcePackCatalogAccess(GameRepository repository, String instanceId) {
+    FileSystemResourcePackCatalogAccess(GameRepository repository, GameInstanceID instanceId) {
         this(repository, instanceId, () -> { });
     }
 
@@ -96,17 +96,13 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
     /// @param beforeStagingCopy hook after private staging creation and before copying
     FileSystemResourcePackCatalogAccess(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Runnable beforeStagingCopy) {
         Objects.requireNonNull(repository, "repository");
         Objects.requireNonNull(instanceId, "instanceId");
-        if (instanceId.isBlank()) {
-            throw new IllegalArgumentException("instanceId must not be blank");
-        }
-        GameInstanceID typedInstanceId = new GameInstanceID(instanceId);
-        manager = new ResourcePackManager(repository, typedInstanceId);
+        manager = new ResourcePackManager(repository, instanceId);
         directory = manager.getDirectory().toAbsolutePath().normalize();
-        optionsFile = repository.getRunDirectory(typedInstanceId)
+        optionsFile = repository.getRunDirectory(instanceId)
                 .resolve("options.txt")
                 .toAbsolutePath()
                 .normalize();

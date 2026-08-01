@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.Component;
+import java.net.URI;
 import java.nio.file.Path;
 
 /// Separates native file selection and confirmation dialogs from maintenance task ownership.
@@ -31,6 +32,12 @@ public interface InstanceMaintenanceInteractions {
     /// @param owner native dialog owner
     /// @return selected `.zip` or `.mrpack` archive, or null after cancellation
     @Nullable Path chooseModpackArchive(Component owner);
+
+    /// Prompts for one direct HTTP or HTTPS modpack source.
+    ///
+    /// @param owner native dialog owner
+    /// @return validated remote archive or server-manifest URI, or null after cancellation
+    @Nullable URI chooseModpackUri(Component owner);
 
     /// Chooses a standalone launch-script destination.
     ///

@@ -19,10 +19,12 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.datapacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
 
 import java.awt.Component;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.CompletionStage;
 
 /// Owns native chooser, confirmation, desktop, and error-dialog work outside the data-pack panel.
@@ -38,12 +40,12 @@ public interface DataPackManagementInteractions {
     /// @return selected ZIP path, or `null` when the chooser is cancelled
     @Nullable Path chooseDataPackArchive(Component owner, Path initialDirectory);
 
-    /// Confirms permanent deletion of one selected data pack.
+    /// Confirms permanent deletion of all selected data packs in one destructive action.
     ///
     /// @param owner dialog owner
-    /// @param dataPack selected durable data-pack entry
+    /// @param dataPacks selected durable data-pack entries
     /// @return whether the user explicitly accepted deletion
-    boolean confirmDelete(Component owner, DataPack.Pack dataPack);
+    boolean confirmDelete(Component owner, @Unmodifiable List<DataPack.Pack> dataPacks);
 
     /// Schedules creation and platform opening of one local directory outside the EDT.
     ///

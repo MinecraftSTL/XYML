@@ -195,7 +195,7 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
             request = new LaunchRequest(
                     currentSelection.accountId(),
                     currentSelection.gameDirectoryId(),
-                    currentSelection.instanceId());
+                    Objects.requireNonNull(currentSelection.instanceId(), "selected instance"));
             startingTransition = replaceSnapshotLocked(map(currentSelection));
         }
 
@@ -240,7 +240,7 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
             request = new LaunchRequest(
                     currentSelection.accountId(),
                     currentSelection.gameDirectoryId(),
-                    currentSelection.instanceId());
+                    Objects.requireNonNull(currentSelection.instanceId(), "selected instance"));
             startingTransition = replaceSnapshotLocked(map(currentSelection));
         }
 
@@ -510,7 +510,7 @@ public final class LauncherHomeModel implements HomeModel, AutoCloseable {
     /// @return mapped home state
     private HomeSnapshot map(HomeSelectionState selection) {
         boolean hasAccount = !selection.accountId().isBlank();
-        boolean hasInstance = !selection.gameDirectoryId().isBlank() && !selection.instanceId().isBlank();
+        boolean hasInstance = !selection.gameDirectoryId().isBlank() && selection.instanceId() != null;
         boolean preparingLaunch = launchInvocationPending
                 || currentLaunchSession != null && currentLaunchSession.status() == LaunchStatus.PREPARING;
         boolean preparing = preparingLaunch || launchScriptExportPending;

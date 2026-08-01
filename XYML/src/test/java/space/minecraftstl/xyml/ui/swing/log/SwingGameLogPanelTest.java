@@ -30,6 +30,7 @@ import javax.swing.Action;
 import javax.swing.JTextArea;
 import javax.swing.ScrollPaneConstants;
 import java.awt.Component;
+import java.awt.Font;
 import java.awt.event.ActionEvent;
 import java.nio.file.Path;
 import java.util.List;
@@ -118,6 +119,33 @@ class SwingGameLogPanelTest {
             assertEquals(
                     ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
                     panel.horizontalScrollBarPolicy());
+        });
+    }
+
+    /// The configured game-log font is shared by the list and its wrapped row renderer.
+    @Test
+    void configuredFontControlsListAndRenderer() {
+        EdtDispatcher.executeAndWait(() -> {
+            Font configured = new Font(Font.SERIF, Font.PLAIN, 1).deriveFont(17.5F);
+            SwingGameLogPanel panel = new SwingGameLogPanel(
+                    new BoundedGameLogBuffer(new CircularArrayList<>(), 10),
+                    new RecordingActions(),
+                    Runnable::run,
+                    ignored -> { },
+                    ignored -> { },
+                    configured);
+            panel.append(log("font", Log4jLevel.INFO));
+
+            JTextArea rendered = assertInstanceOf(
+                    JTextArea.class,
+                    panel.logList().getCellRenderer().getListCellRendererComponent(
+                            panel.logList(),
+                            panel.logList().getModel().getElementAt(0),
+                            0,
+                            false,
+                            false));
+            assertEquals(configured, panel.logList().getFont());
+            assertEquals(configured, rendered.getFont());
         });
     }
 

@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.game.export;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import java.nio.file.Path;
 import java.util.Objects;
@@ -32,7 +33,7 @@ import java.util.Objects;
 @NotNullByDefault
 public record ModpackExportRequest(
         ModpackExportFormat format,
-        String instanceId,
+        GameInstanceID instanceId,
         ModpackExportMetadata metadata,
         ModpackExportFileSelection fileSelection,
         Path outputFile) {
@@ -40,7 +41,7 @@ public record ModpackExportRequest(
     /// Validates object components and normalizes the destination to an absolute path.
     public ModpackExportRequest {
         format = Objects.requireNonNull(format, "format");
-        instanceId = requireNonBlank(instanceId, "instanceId");
+        instanceId = Objects.requireNonNull(instanceId, "instanceId");
         metadata = Objects.requireNonNull(metadata, "metadata");
         fileSelection = Objects.requireNonNull(fileSelection, "fileSelection");
         outputFile = Objects.requireNonNull(outputFile, "outputFile").toAbsolutePath().normalize();
@@ -49,16 +50,4 @@ public record ModpackExportRequest(
         }
     }
 
-    /// Requires one non-null, non-blank identifier.
-    ///
-    /// @param value candidate value
-    /// @param fieldName diagnostic field name
-    /// @return original non-blank value
-    private static String requireNonBlank(String value, String fieldName) {
-        Objects.requireNonNull(value, fieldName);
-        if (value.isBlank()) {
-            throw new IllegalArgumentException(fieldName + " must not be blank");
-        }
-        return value;
-    }
 }

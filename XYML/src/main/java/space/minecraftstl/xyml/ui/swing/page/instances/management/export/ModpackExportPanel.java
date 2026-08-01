@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.game.export.ModpackExportMetadata;
 import space.minecraftstl.xyml.game.export.ModpackExportRequest;
 import space.minecraftstl.xyml.game.export.ModpackExportTaskFactory;
 import space.minecraftstl.xyml.game.export.RepositoryModpackExportTaskFactory;
+import space.minecraftstl.xyml.modpack.mcbbs.McbbsModpackManifest;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
@@ -39,6 +40,7 @@ import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
@@ -79,6 +81,7 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -138,6 +141,45 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
     /// Optional exported author metadata.
     private final JTextField authorField = new JTextField();
 
+    /// Label paired with author metadata and hidden for formats that do not consume it.
+    private final JLabel authorLabel = new JLabel(i18n("archive.author"));
+
+    /// Optional server file API, required by the MCBBS format.
+    private final JTextField fileApiField = new JTextField();
+
+    /// Label paired with the format-specific server file API.
+    private final JLabel fileApiLabel = new JLabel(i18n("modpack.file_api"));
+
+    /// Optional official project URL consumed by the MCBBS format.
+    private final JTextField projectUrlField = new JTextField();
+
+    /// Label paired with the official project URL.
+    private final JLabel projectUrlLabel = new JLabel(i18n("modpack.origin.url"));
+
+    /// Optional game arguments embedded by formats that support them.
+    private final JTextField launchArgumentsField = new JTextField();
+
+    /// Label paired with exported game arguments.
+    private final JLabel launchArgumentsLabel = new JLabel(i18n("settings.advanced.minecraft_arguments"));
+
+    /// Optional JVM arguments embedded by formats that support them.
+    private final JTextField javaArgumentsField = new JTextField();
+
+    /// Label paired with exported JVM arguments.
+    private final JLabel javaArgumentsLabel = new JLabel(i18n("settings.advanced.jvm_args"));
+
+    /// Optional authlib-injector server URL embedded by the MCBBS format.
+    private final JTextField authlibInjectorServerField = new JTextField();
+
+    /// Label paired with the authlib-injector server URL.
+    private final JLabel authlibInjectorServerLabel = new JLabel(i18n("account.injector.server"));
+
+    /// Optional numeric MCBBS post identifier used as exported origin metadata.
+    private final JTextField mcbbsOriginField = new JTextField();
+
+    /// Label paired with the optional MCBBS post identifier.
+    private final JLabel mcbbsOriginLabel = new JLabel(i18n("modpack.origin.mcbbs.prompt"));
+
     /// Optional exported description metadata.
     private final JTextArea descriptionArea = new JTextArea(4, 24);
 
@@ -146,6 +188,9 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
 
     /// Optional minimum heap size represented as zero when no minimum is requested.
     private final JSpinner minimumMemorySpinner = new JSpinner(new SpinnerNumberModel(0, 0, Integer.MAX_VALUE, 128));
+
+    /// Label paired with the format-specific minimum heap field.
+    private final JLabel minimumMemoryLabel = new JLabel(i18n("settings.memory.lower_bound") + " (MiB)");
 
     /// Read-only display of the user-chosen archive target, or empty before selection.
     private final JTextField outputField = new JTextField();
@@ -312,6 +357,13 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         versionField.setName("modpackExportVersion");
         versionField.getDocument().addDocumentListener(metadataListener);
         authorField.setName("modpackExportAuthor");
+        fileApiField.setName("modpackExportFileApi");
+        projectUrlField.setName("modpackExportProjectUrl");
+        launchArgumentsField.setName("modpackExportLaunchArguments");
+        javaArgumentsField.setName("modpackExportJavaArguments");
+        authlibInjectorServerField.setName("modpackExportAuthlibInjectorServer");
+        mcbbsOriginField.setName("modpackExportMcbbsOrigin");
+        addMetadataListeners();
         descriptionArea.setName("modpackExportDescription");
         descriptionArea.setLineWrap(true);
         descriptionArea.setWrapStyleWord(true);
@@ -319,6 +371,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         outputField.setEditable(false);
         forceUpdateCheck.setName("modpackExportForceUpdate");
         minimumMemorySpinner.setName("modpackExportMinimumMemory");
+        minimumMemorySpinner.addChangeListener(event -> updateControls());
         exportButton.setName("modpackExportStart");
         exportButton.addActionListener(event -> startExport());
         configureIconButton(
@@ -342,6 +395,22 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
                 javax.swing.tree.TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION);
         fileTree.addTreeWillExpandListener(expansionListener);
         fileTree.addTreeSelectionListener(selectionListener);
+        formatChanged();
+    }
+
+    /// Adds eligibility listeners and clear buttons to every single-line metadata input.
+    private void addMetadataListeners() {
+        for (JTextField field : List.of(
+                authorField,
+                fileApiField,
+                projectUrlField,
+                launchArgumentsField,
+                javaArgumentsField,
+                authlibInjectorServerField,
+                mcbbsOriginField)) {
+            field.getDocument().addDocumentListener(metadataListener);
+            SwingTextFields.showClearButton(field);
+        }
     }
 
     /// Creates the unframed title row and fixed-size refresh command.
@@ -413,12 +482,14 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         addLabeledField(metadata, i18n("modpack.wizard.step.3"), formatBox, "h 40!");
         addLabeledField(metadata, i18n("modpack.name"), nameField, "h 40!");
         addLabeledField(metadata, i18n("archive.version"), versionField, "h 40!");
-        addLabeledField(metadata, i18n("about.author"), authorField, "h 40!");
-        addLabeledField(
-                metadata,
-                i18n("settings.memory.lower_bound") + " (MiB)",
-                minimumMemorySpinner,
-                "h 40!");
+        addLabeledField(metadata, authorLabel, authorField, "h 40!");
+        addLabeledField(metadata, fileApiLabel, fileApiField, "h 40!");
+        addLabeledField(metadata, projectUrlLabel, projectUrlField, "h 40!");
+        addLabeledField(metadata, launchArgumentsLabel, launchArgumentsField, "h 40!");
+        addLabeledField(metadata, javaArgumentsLabel, javaArgumentsField, "h 40!");
+        addLabeledField(metadata, authlibInjectorServerLabel, authlibInjectorServerField, "h 40!");
+        addLabeledField(metadata, mcbbsOriginLabel, mcbbsOriginField, "h 40!");
+        addLabeledField(metadata, minimumMemoryLabel, minimumMemorySpinner, "h 40!");
         metadata.add(new JLabel(i18n("modpack.description")));
         JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
         descriptionScroll.setName("modpackExportDescriptionScroll");
@@ -455,8 +526,29 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
             String labelText,
             JComponent field,
             String constraints) {
-        panel.add(new JLabel(Objects.requireNonNull(labelText, "labelText")));
-        panel.add(Objects.requireNonNull(field, "field"), Objects.requireNonNull(constraints, "constraints"));
+        addLabeledField(
+                panel,
+                new JLabel(Objects.requireNonNull(labelText, "labelText")),
+                field,
+                constraints);
+    }
+
+    /// Adds one reusable label and form control row to the metadata grid.
+    ///
+    /// @param panel metadata grid receiving the row
+    /// @param label label paired with the input
+    /// @param field input component paired with the label
+    /// @param constraints MigLayout constraints for the input component
+    private static void addLabeledField(
+            JPanel panel,
+            JLabel label,
+            JComponent field,
+            String constraints) {
+        JLabel fieldLabel = Objects.requireNonNull(label, "label");
+        JComponent input = Objects.requireNonNull(field, "field");
+        fieldLabel.setLabelFor(input);
+        panel.add(fieldLabel);
+        panel.add(input, Objects.requireNonNull(constraints, "constraints"));
     }
 
     /// Creates concise request feedback and a task-owned progress surface.
@@ -730,6 +822,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
     /// Rewrites an existing chosen target's conventional suffix after the user changes export format.
     private void formatChanged() {
         EdtDispatcher.requireEventDispatchThread();
+        updateFormatControlVisibility();
         @Nullable Path selectedOutput = outputFile;
         if (selectedOutput != null && activeExecutor == null && !closed.get()) {
             Path adjustedOutput = ensureFormatSuffix(selectedOutput, selectedFormat());
@@ -737,6 +830,39 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
             outputField.setText(adjustedOutput.toString());
         }
         updateControls();
+    }
+
+    /// Shows only metadata consumed by the selected exporter format.
+    private void updateFormatControlVisibility() {
+        ModpackExportFormat format = selectedFormat();
+        boolean mcbbs = format == ModpackExportFormat.MCBBS;
+        boolean author = mcbbs
+                || format == ModpackExportFormat.MULTIMC
+                || format == ModpackExportFormat.SERVER;
+        setMetadataRowVisible(authorLabel, authorField, author);
+        setMetadataRowVisible(fileApiLabel, fileApiField, mcbbs || format == ModpackExportFormat.SERVER);
+        setMetadataRowVisible(projectUrlLabel, projectUrlField, mcbbs);
+        setMetadataRowVisible(launchArgumentsLabel, launchArgumentsField, mcbbs);
+        setMetadataRowVisible(javaArgumentsLabel, javaArgumentsField, mcbbs);
+        setMetadataRowVisible(authlibInjectorServerLabel, authlibInjectorServerField, mcbbs);
+        setMetadataRowVisible(mcbbsOriginLabel, mcbbsOriginField, mcbbs);
+        setMetadataRowVisible(
+                minimumMemoryLabel,
+                minimumMemorySpinner,
+                mcbbs || format == ModpackExportFormat.MULTIMC);
+        forceUpdateCheck.setVisible(mcbbs);
+        authorField.getParent().revalidate();
+        authorField.getParent().repaint();
+    }
+
+    /// Changes one metadata row's visibility without disturbing grid alignment.
+    ///
+    /// @param label paired field label
+    /// @param field paired input control
+    /// @param visible whether the selected format consumes the field
+    private static void setMetadataRowVisible(JLabel label, JComponent field, boolean visible) {
+        Objects.requireNonNull(label, "label").setVisible(visible);
+        Objects.requireNonNull(field, "field").setVisible(visible);
     }
 
     /// Validates visible request fields, creates an immutable core request, and starts its task presentation.
@@ -762,7 +888,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         try {
             request = new ModpackExportRequest(
                     selectedFormat(),
-                    instanceId.id(),
+                    instanceId,
                     createMetadata(),
                     ModpackExportFileSelection.of(selectedPaths),
                     selectedOutput);
@@ -809,23 +935,32 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
     ///
     /// @return validated immutable metadata for one export task
     private ModpackExportMetadata createMetadata() {
+        ModpackExportFormat format = selectedFormat();
+        boolean mcbbs = format == ModpackExportFormat.MCBBS;
+        boolean usesAuthor = mcbbs
+                || format == ModpackExportFormat.MULTIMC
+                || format == ModpackExportFormat.SERVER;
         String name = nameField.getText().trim();
         String version = versionField.getText().trim();
         Number minimumMemory = (Number) minimumMemorySpinner.getValue();
+        String origin = mcbbsOriginField.getText().trim();
+        @Unmodifiable List<McbbsModpackManifest.Origin> origins = origin.isEmpty()
+                ? List.of()
+                : List.of(new McbbsModpackManifest.Origin("mcbbs", Integer.parseInt(origin)));
         return new ModpackExportMetadata(
                 name,
                 version,
-                authorField.getText().trim(),
+                usesAuthor ? authorField.getText().trim() : "",
                 descriptionArea.getText(),
-                "",
-                "",
-                forceUpdateCheck.isSelected(),
-                minimumMemory.intValue(),
+                mcbbs || format == ModpackExportFormat.SERVER ? fileApiField.getText().trim() : "",
+                mcbbs ? projectUrlField.getText().trim() : "",
+                mcbbs && forceUpdateCheck.isSelected(),
+                mcbbs || format == ModpackExportFormat.MULTIMC ? minimumMemory.intValue() : 0,
                 List.of(),
-                "",
-                "",
-                "",
-                List.of());
+                mcbbs ? launchArgumentsField.getText() : "",
+                mcbbs ? javaArgumentsField.getText() : "",
+                mcbbs ? authlibInjectorServerField.getText().trim() : "",
+                mcbbs ? origins : List.of());
     }
 
     /// Publishes the terminal archive result and restores editable local controls.
@@ -920,6 +1055,12 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         nameField.setEnabled(inputsEnabled);
         versionField.setEnabled(inputsEnabled);
         authorField.setEnabled(inputsEnabled);
+        fileApiField.setEnabled(inputsEnabled);
+        projectUrlField.setEnabled(inputsEnabled);
+        launchArgumentsField.setEnabled(inputsEnabled);
+        javaArgumentsField.setEnabled(inputsEnabled);
+        authlibInjectorServerField.setEnabled(inputsEnabled);
+        mcbbsOriginField.setEnabled(inputsEnabled);
         descriptionArea.setEnabled(inputsEnabled);
         forceUpdateCheck.setEnabled(inputsEnabled);
         minimumMemorySpinner.setEnabled(inputsEnabled);
@@ -938,8 +1079,74 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
                 && !rootLoading
                 && !nameField.getText().trim().isEmpty()
                 && !versionField.getText().trim().isEmpty()
+                && isFormatMetadataValid()
                 && outputFile != null
                 && !selectedRelativePaths().isEmpty();
+    }
+
+    /// Validates only fields consumed by the selected export format.
+    ///
+    /// @return whether required fields and optional URL or numeric values are well formed
+    private boolean isFormatMetadataValid() {
+        ModpackExportFormat format = selectedFormat();
+        if (format == ModpackExportFormat.MODRINTH) {
+            return true;
+        }
+        if (authorField.getText().trim().isEmpty()) {
+            return false;
+        }
+        if (format == ModpackExportFormat.MULTIMC) {
+            return true;
+        }
+        String fileApi = fileApiField.getText().trim();
+        if (format == ModpackExportFormat.MCBBS && fileApi.isEmpty()) {
+            return false;
+        }
+        if (!fileApi.isEmpty() && !isHttpUrl(fileApi)) {
+            return false;
+        }
+        return format != ModpackExportFormat.MCBBS
+                || (isOptionalHttpUrl(projectUrlField.getText().trim())
+                && isOptionalHttpUrl(authlibInjectorServerField.getText().trim())
+                && isOptionalPositiveInteger(mcbbsOriginField.getText().trim()));
+    }
+
+    /// Accepts an empty optional URL or a complete HTTP(S) URL.
+    ///
+    /// @param value trimmed optional value
+    /// @return whether the value is empty or valid
+    private static boolean isOptionalHttpUrl(String value) {
+        return value.isEmpty() || isHttpUrl(value);
+    }
+
+    /// Validates a complete HTTP(S) URL without contacting its host.
+    ///
+    /// @param value non-empty candidate
+    /// @return whether the URI has a supported scheme and host
+    private static boolean isHttpUrl(String value) {
+        try {
+            URI uri = URI.create(Objects.requireNonNull(value, "value"));
+            String scheme = uri.getScheme();
+            return ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                    && uri.getHost() != null;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    /// Accepts an empty origin or a positive decimal post identifier.
+    ///
+    /// @param value trimmed optional value
+    /// @return whether the value is empty or a positive integer
+    private static boolean isOptionalPositiveInteger(String value) {
+        if (value.isEmpty()) {
+            return true;
+        }
+        try {
+            return Integer.parseInt(value) > 0;
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
     }
 
     /// Updates only export eligibility after selection changes without replacing status feedback.
@@ -1049,10 +1256,26 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         fileTree.removeTreeSelectionListener(selectionListener);
         nameField.getDocument().removeDocumentListener(metadataListener);
         versionField.getDocument().removeDocumentListener(metadataListener);
+        for (JTextField field : List.of(
+                authorField,
+                fileApiField,
+                projectUrlField,
+                launchArgumentsField,
+                javaArgumentsField,
+                authlibInjectorServerField,
+                mcbbsOriginField)) {
+            field.getDocument().removeDocumentListener(metadataListener);
+        }
         formatBox.setEnabled(false);
         nameField.setEnabled(false);
         versionField.setEnabled(false);
         authorField.setEnabled(false);
+        fileApiField.setEnabled(false);
+        projectUrlField.setEnabled(false);
+        launchArgumentsField.setEnabled(false);
+        javaArgumentsField.setEnabled(false);
+        authlibInjectorServerField.setEnabled(false);
+        mcbbsOriginField.setEnabled(false);
         descriptionArea.setEnabled(false);
         forceUpdateCheck.setEnabled(false);
         minimumMemorySpinner.setEnabled(false);

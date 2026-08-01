@@ -22,8 +22,15 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameSettings;
+import space.minecraftstl.xyml.setting.SettingsManager;
+import space.minecraftstl.xyml.util.i18n.I18n;
+import space.minecraftstl.xyml.util.i18n.LocalizedText;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
+
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Adapts repository-owned instance settings to the complete Swing settings snapshot contract.
 @NotNullByDefault
@@ -43,6 +50,16 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
     }
 
+    /// Returns the instance root when an installed modpack requires an isolated working directory.
+    ///
+    /// @return absolute instance-root text, or `null` for configurable instances
+    @Override
+    public @Nullable String forcedRunningDirectory() {
+        return repository.isModpack(instanceId)
+                ? repository.getInstanceRoot(instanceId).toAbsolutePath().normalize().toString()
+                : null;
+    }
+
     /// Reads all effective values together with each property's independent local inheritance state.
     ///
     /// @return current complete settings snapshot
@@ -51,8 +68,30 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
         @Nullable GameSettings.Instance instance = repository.getInstanceGameSettings(instanceId);
         return InstanceGameSettingsMapper.snapshot(
                 repository.hasInstance(instanceId) && !repository.isInstanceGameSettingsReadOnly(instanceId),
+                parentPresetSettings(instance),
                 instance,
                 repository.getEffectiveGameSettings(instanceId));
+    }
+
+    /// Resolves unsaved local values against the candidate parent preset without mutating repository state.
+    ///
+    /// @param candidate complete unsaved editor state
+    /// @return effective preview retaining every candidate override
+    @Override
+    public InstanceGameSettingsSnapshot preview(InstanceGameSettingsSnapshot candidate) {
+        InstanceGameSettingsSnapshot checkedCandidate = Objects.requireNonNull(candidate, "candidate");
+        GameSettings.Instance previewInstance = new GameSettings.Instance();
+        InstanceGameSettingsMapper.apply(previewInstance, checkedCandidate);
+        GameSettings.Effective effective = GameSettings.resolve(
+                repository.getParentGameSettings(previewInstance),
+                previewInstance);
+        return InstanceGameSettingsMapper.snapshot(
+                checkedCandidate.writable(),
+                new InstanceGameSettingsSnapshot.ParentPresetSettings(
+                        checkedCandidate.parentPreset().selectedId(),
+                        parentPresetChoices()),
+                previewInstance,
+                effective);
     }
 
     /// Persists a complete snapshot without merging unrelated override markers.
@@ -72,6 +111,68 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
 
         InstanceGameSettingsMapper.apply(settings, snapshot);
         repository.saveGameSettings(instanceId);
+    }
+
+    /// Returns whether the represented instance has a loaded settings object that can be recovered.
+    ///
+    /// @return whether backup-and-overwrite recovery is available
+    @Override
+    public boolean canForceOverwrite() {
+        return repository.hasInstance(instanceId) && repository.getInstanceGameSettings(instanceId) != null;
+    }
+
+    /// Backs up and overwrites the represented instance settings through the repository recovery API.
+    @Override
+    public void forceOverwrite() {
+        if (!canForceOverwrite()) {
+            throw new IllegalStateException("Instance game settings are unavailable");
+        }
+        repository.forceOverwriteInstanceGameSettings(instanceId);
+    }
+
+    /// Builds the durable parent-preset state for one loaded instance settings object.
+    ///
+    /// @param instance loaded instance settings, or `null` when no local file exists
+    /// @return selected ID and localized available choices
+    private static InstanceGameSettingsSnapshot.ParentPresetSettings parentPresetSettings(
+            @Nullable GameSettings.Instance instance) {
+        return new InstanceGameSettingsSnapshot.ParentPresetSettings(
+                instance == null ? null : instance.parentProperty().getValue(),
+                parentPresetChoices());
+    }
+
+    /// Builds the default fallback followed by all currently configured global presets.
+    ///
+    /// @return immutable localized preset choices
+    private static List<InstanceGameSettingsParentPreset> parentPresetChoices() {
+        List<InstanceGameSettingsParentPreset> choices = new ArrayList<>();
+        choices.add(new InstanceGameSettingsParentPreset(
+                null,
+                i18n("settings.type.global.preset.default")));
+        for (GameSettings.Preset preset : SettingsManager.gameSettingsPresets().getPresets()) {
+            choices.add(new InstanceGameSettingsParentPreset(
+                    preset.idProperty().getValue(),
+                    presetDisplayName(preset)));
+        }
+        return List.copyOf(choices);
+    }
+
+    /// Returns the localized visible name of one configured global preset.
+    ///
+    /// @param preset source preset
+    /// @return non-blank display name
+    private static String presetDisplayName(GameSettings.Preset preset) {
+        @Nullable LocalizedText localizedName = preset.nameProperty().getValue();
+        @Nullable String customName = localizedName == null
+                ? null
+                : localizedName.getText(I18n.getLocale().getCandidateLocales());
+        if (customName != null && !customName.isBlank()) {
+            return customName;
+        }
+        @Nullable Integer autoNameNumber = preset.autoNameNumberProperty().getValue();
+        return autoNameNumber == null
+                ? preset.idProperty().getValue().toString()
+                : i18n("settings.type.global.preset.auto_name", autoNameNumber);
     }
 
     /// Rejects a blank identifier before it can address a repository directory.
