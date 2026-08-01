@@ -563,7 +563,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     }
 
     /// Creates the page heading.
-    ///
     /// @return unframed heading panel
     private static JPanel createHeader() {
         JPanel header = new JPanel(new BorderLayout());
@@ -577,7 +576,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     }
 
     /// Creates all six settings tabs.
-    ///
     /// @return configured tabbed surface
     private JTabbedPane createSettingsTabs() {
         settingsTabs.setName(presentation == GameSettingsEditorPresentation.INSTANCE
@@ -599,7 +597,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     }
 
     /// Creates the game, Java, window, Quick Play, and general launch settings tab.
-    ///
     /// @return game settings content
     private JPanel createGameSettingsTab() {
         JPanel content = tabContent("instanceGameSettingsGameTab");
@@ -614,6 +611,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         JPanel memory = sectionPanel("instanceGameSettingsMemory", i18n("settings.memory"));
         addControlRow(memory, i18n("settings.memory.auto_allocate"), automaticMemoryControl);
         addControlRow(memory, i18n("settings.memory.manual_allocate"), maximumMemoryControl);
+        memory.add(new InstanceMemoryAllocationControls(
+                automaticMemoryControl.editor(), maximumMemoryControl.editor()).component(), "skip 1, span 2, growx");
         content.add(memory, "growx");
         content.add(new JSeparator(), "growx");
 
@@ -627,6 +626,12 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
         JPanel window = sectionPanel("instanceGameSettingsWindow", i18n("settings.game.window_type"));
         addControlRow(window, i18n("settings.game.window_type"), windowTypeControl);
+        window.add(new InstanceWindowSizeControls(
+                windowWidthControl.overrideBox(),
+                windowHeightControl.overrideBox(),
+                windowWidthControl.editor(),
+                windowHeightControl.editor(),
+                windowTypeControl.editor()).component(), "span 3, growx");
         addControlRow(window, i18n("settings.game.window_width"), windowWidthControl);
         addControlRow(window, i18n("settings.game.window_height"), windowHeightControl);
         content.add(window, "growx");
@@ -652,7 +657,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     }
 
     /// Creates launcher behavior and diagnostics controls.
-    ///
     /// @return launcher settings content
     private JPanel createLauncherSettingsTab() {
         JPanel content = tabContent("instanceGameSettingsLauncherTab");
@@ -671,7 +675,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     }
 
     /// Creates JVM validation, argument, and compatibility controls.
-    ///
     /// @return JVM settings content
     private JPanel createJvmSettingsTab() {
         JPanel content = tabContent("instanceGameSettingsJvmTab");
@@ -693,7 +696,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     }
 
     /// Creates custom command-hook controls.
-    ///
     /// @return command settings content
     private JPanel createCommandSettingsTab() {
         JPanel content = tabContent("instanceGameSettingsCommandsTab");
