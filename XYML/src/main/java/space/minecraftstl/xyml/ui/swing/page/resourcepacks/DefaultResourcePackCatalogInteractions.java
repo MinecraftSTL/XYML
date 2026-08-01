@@ -41,6 +41,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Default Swing dialog, AWT desktop, and NIO implementation for resource-pack catalog actions.
 ///
 /// The caller owns the injected executor. Dialog methods reject calls outside the event-dispatch
@@ -138,6 +140,20 @@ public final class DefaultResourcePackCatalogInteractions implements ResourcePac
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
     }
 
+    /// Confirms enabling one selected path batch without loading off-screen metadata.
+    @Override
+    public boolean confirmEnableSelected(Component owner, int selectedCount) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        requirePositiveSelectionCount(selectedCount);
+        return dialogActions.showConfirmDialog(
+                owner,
+                i18n("resourcepack.warning.manipulate"),
+                i18n("message.warning"),
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
     /// Confirms permanent deletion of one pack on the event-dispatch thread.
     @Override
     public boolean confirmDelete(Component owner, ResourcePackCatalogItem target) {
@@ -149,6 +165,20 @@ public final class DefaultResourcePackCatalogInteractions implements ResourcePac
                 owner,
                 message,
                 strings.deleteAction(),
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /// Confirms permanently deleting one selected path batch.
+    @Override
+    public boolean confirmDeleteSelected(Component owner, int selectedCount) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        requirePositiveSelectionCount(selectedCount);
+        return dialogActions.showConfirmDialog(
+                owner,
+                i18n("button.remove.confirm"),
+                i18n("button.remove"),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
     }
@@ -195,6 +225,15 @@ public final class DefaultResourcePackCatalogInteractions implements ResourcePac
         Objects.requireNonNull(title, "title");
         Objects.requireNonNull(detail, "detail");
         dialogActions.showMessageDialog(owner, detail, title, JOptionPane.ERROR_MESSAGE);
+    }
+
+    /// Rejects empty or negative batch confirmations.
+    ///
+    /// @param selectedCount selected path count
+    private static void requirePositiveSelectionCount(int selectedCount) {
+        if (selectedCount <= 0) {
+            throw new IllegalArgumentException("selectedCount must be positive");
+        }
     }
 
     /// Performs one reveal attempt on the injected executor and preserves its terminal error.

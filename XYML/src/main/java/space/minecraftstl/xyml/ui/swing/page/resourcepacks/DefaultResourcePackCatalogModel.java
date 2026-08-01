@@ -232,6 +232,14 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
         return state.snapshot();
     }
 
+    /// Returns the immutable current shallow path index without parsing row metadata.
+    ///
+    /// @return immutable indexed paths, or an empty list before indexing succeeds
+    @Override
+    public @Unmodifiable List<Path> indexedPaths() {
+        return state.content().paths();
+    }
+
     /// Registers a listener whose first eligible transition is committed after this call.
     ///
     /// Unsubscription synchronously crosses the slot's delivery gate, so no callback can begin or
