@@ -21,8 +21,9 @@ import space.minecraftstl.xyml.util.SwingUtils;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.setting.SambaException;
 import space.minecraftstl.xyml.setting.SettingsManager;
+import space.minecraftstl.xyml.ui.swing.FontAntialiasingMode;
 import space.minecraftstl.xyml.ui.swing.SwingFontAntialiasing;
-import space.minecraftstl.xyml.ui.swing.page.settings.FontAntialiasingMode;
+import space.minecraftstl.xyml.ui.swing.SwingLauncherFontManager;
 import space.minecraftstl.xyml.ui.swing.startup.SwingStartupSafetyDialogs;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.JarUtils;
@@ -82,13 +83,14 @@ public final class EntryPoint {
 
         SwingFontAntialiasing.applyAtStartup(FontAntialiasingMode.fromPersistedValue(
                 SettingsManager.userSettings().fontAntiAliasingProperty().get()));
-        checkWine();
-
         if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS) {
             System.getProperties().putIfAbsent("apple.awt.application.appearance", "system");
-            if (!isInsideMacAppBundle())
-                initIcon();
         }
+        SwingLauncherFontManager.initialize();
+        checkWine();
+
+        if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS && !isInsideMacAppBundle())
+            initIcon();
 
         Launcher.main(args);
     }
