@@ -23,9 +23,8 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
 
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
+import javax.swing.JComponent;
 import javax.swing.JFileChooser;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import java.awt.BorderLayout;
@@ -36,12 +35,9 @@ import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
-/// Adds an editable custom Java executable field and native file-selection command to one inherited row.
+/// Combines an editable custom Java executable field with a native file-selection command.
 @NotNullByDefault
 final class InstanceJavaPathControls {
-    /// Durable local-override marker shared with the settings snapshot.
-    private final JCheckBox overrideBox;
-
     /// Editable Java executable path shared with the settings snapshot.
     private final JTextField pathField;
 
@@ -52,44 +48,38 @@ final class InstanceJavaPathControls {
     private final JButton browseButton = new JButton(
             new FlatSVGIcon("assets/swing/icons/folder-open.svg", 16, 16));
 
+    /// Transparent row editor containing direct text input and browsing.
+    private final JPanel component = new JPanel(new BorderLayout(6, 0));
+
     /// Creates production controls with an editable native file chooser.
     ///
-    /// @param overrideBox durable local-override marker
     /// @param pathField editable Java executable path
-    InstanceJavaPathControls(JCheckBox overrideBox, JTextField pathField) {
-        this(overrideBox, pathField, null);
+    InstanceJavaPathControls(JTextField pathField) {
+        this(pathField, null);
     }
 
     /// Creates controls with an optional deterministic chooser for focused tests.
     ///
-    /// @param overrideBox durable local-override marker
     /// @param pathField editable Java executable path
     /// @param pathChooser chooser supplier, or `null` for the production dialog
     InstanceJavaPathControls(
-            JCheckBox overrideBox,
             JTextField pathField,
             @Nullable Supplier<@Nullable Path> pathChooser) {
-        this.overrideBox = Objects.requireNonNull(overrideBox, "overrideBox");
         this.pathField = Objects.requireNonNull(pathField, "pathField");
         this.pathChooser = pathChooser == null ? this::chooseJavaExecutable : pathChooser;
         browseButton.setName("instanceGameSettingsJavaPathBrowse");
         browseButton.setToolTipText(i18n("settings.game.java_directory.choose"));
         browseButton.addActionListener(event -> applySelectedPath());
+        component.setOpaque(false);
+        component.add(pathField, BorderLayout.CENTER);
+        component.add(browseButton, BorderLayout.EAST);
     }
 
-    /// Adds the inherited Java path and chooser to one three-column settings section.
+    /// Returns the aligned path editor and browse command.
     ///
-    /// @param section target settings section
-    /// @param labelText localized path label
-    void addRow(JPanel section, String labelText) {
-        JPanel checkedSection = Objects.requireNonNull(section, "section");
-        checkedSection.add(overrideBox, "aligny center");
-        checkedSection.add(new JLabel(Objects.requireNonNull(labelText, "labelText")), "aligny center");
-        JPanel editor = new JPanel(new BorderLayout(6, 0));
-        editor.setOpaque(false);
-        editor.add(pathField, BorderLayout.CENTER);
-        editor.add(browseButton, BorderLayout.EAST);
-        checkedSection.add(editor, "growx");
+    /// @return transparent combined path editor
+    JComponent component() {
+        return component;
     }
 
     /// Mirrors the path field's resolved editor availability to the chooser button.
