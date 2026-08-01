@@ -26,11 +26,15 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Predicate;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 /// In-memory immutable data-pack snapshot exposed through the shared sparse viewport-list protocol.
 ///
@@ -39,11 +43,20 @@ import java.util.concurrent.CompletionStage;
 /// renderer value for every installed pack at selection time.
 @NotNullByDefault
 final class DataPackViewportDataSource implements ViewportChoiceDataSource<DataPack.Pack> {
+    /// Prefix selecting the legacy case-insensitive regular-expression search mode.
+    private static final String REGEX_PREFIX = "regex:";
+
     /// Lock pairing a complete immutable data-pack snapshot with its source revision.
     private final Object stateLock = new Object();
 
-    /// Latest immutable snapshot produced by the selected world's DataPack API.
+    /// Complete immutable snapshot produced by the selected world's DataPack API.
+    private @Unmodifiable List<DataPack.Pack> allPacks = List.of();
+
+    /// Latest immutable snapshot matching [#searchQuery].
     private @Unmodifiable List<DataPack.Pack> packs = List.of();
+
+    /// Current search query, including the optional legacy-compatible `regex:` prefix.
+    private String searchQuery = "";
 
     /// Monotonic content identity used to discard old viewport completions after reselection.
     private long revision;
@@ -54,8 +67,35 @@ final class DataPackViewportDataSource implements ViewportChoiceDataSource<DataP
     void replacePacks(List<? extends DataPack.Pack> updatedPacks) {
         @Unmodifiable List<DataPack.Pack> snapshot = List.copyOf(Objects.requireNonNull(updatedPacks, "updatedPacks"));
         synchronized (stateLock) {
-            packs = snapshot;
+            allPacks = snapshot;
+            packs = filteredPacks(snapshot, searchQuery);
             revision++;
+        }
+    }
+
+    /// Applies a case-insensitive or `regex:` search to the complete selected-world snapshot.
+    ///
+    /// @param query user-entered search query
+    void setSearchQuery(String query) {
+        String checkedQuery = Objects.requireNonNull(query, "query");
+        synchronized (stateLock) {
+            searchQuery = checkedQuery;
+            packs = filteredPacks(allPacks, checkedQuery);
+            revision++;
+        }
+    }
+
+    /// Resolves selected filtered-list indexes without requiring every lazy row to be materialized.
+    ///
+    /// @param selectedIndices filtered-list indexes selected by Swing
+    /// @return immutable selected loaded values in index order
+    @Unmodifiable List<DataPack.Pack> selectedPacks(int[] selectedIndices) {
+        Objects.requireNonNull(selectedIndices, "selectedIndices");
+        synchronized (stateLock) {
+            return java.util.Arrays.stream(selectedIndices)
+                    .filter(index -> index >= 0 && index < packs.size())
+                    .mapToObj(packs::get)
+                    .toList();
         }
     }
 
@@ -105,5 +145,42 @@ final class DataPackViewportDataSource implements ViewportChoiceDataSource<DataP
                 OptionalInt.of(snapshot.size()),
                 effectiveRange.endExclusive() == snapshot.size());
         return CompletableFuture.completedFuture(page);
+    }
+
+    /// Builds one immutable filtered snapshot using the legacy data-pack search semantics.
+    ///
+    /// @param source complete immutable data-pack snapshot
+    /// @param query plain substring or `regex:` query
+    /// @return immutable matching snapshot
+    private static @Unmodifiable List<DataPack.Pack> filteredPacks(
+            List<DataPack.Pack> source,
+            String query) {
+        String checkedQuery = Objects.requireNonNull(query, "query");
+        if (checkedQuery.isBlank()) {
+            return List.copyOf(source);
+        }
+        Predicate<String> matcher = searchMatcher(checkedQuery);
+        return source.stream()
+                .filter(pack -> matcher.test(pack.getId()) || matcher.test(pack.getDescription().toString()))
+                .toList();
+    }
+
+    /// Creates a text matcher for a plain case-insensitive substring or `regex:` expression.
+    ///
+    /// @param query non-blank search query
+    /// @return matcher that rejects every value when a regular expression is invalid
+    private static Predicate<String> searchMatcher(String query) {
+        if (query.startsWith(REGEX_PREFIX)) {
+            try {
+                Pattern pattern = Pattern.compile(
+                        query.substring(REGEX_PREFIX.length()),
+                        Pattern.CASE_INSENSITIVE);
+                return value -> value != null && pattern.matcher(value).find();
+            } catch (PatternSyntaxException failure) {
+                return value -> false;
+            }
+        }
+        String normalized = query.toLowerCase(Locale.ROOT);
+        return value -> value != null && value.toLowerCase(Locale.ROOT).contains(normalized);
     }
 }

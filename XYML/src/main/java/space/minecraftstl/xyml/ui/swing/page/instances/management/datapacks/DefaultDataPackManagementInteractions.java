@@ -21,6 +21,7 @@ import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
@@ -33,6 +34,7 @@ import java.awt.Desktop;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -85,15 +87,22 @@ public final class DefaultDataPackManagementInteractions implements DataPackMana
     /// Shows the destructive confirmation dialog on the EDT.
     ///
     /// @param owner dialog owner
-    /// @param dataPack selected data-pack entry
+    /// @param dataPacks selected data-pack entries
     /// @return whether the user explicitly accepted deletion
     @Override
-    public boolean confirmDelete(Component owner, DataPack.Pack dataPack) {
+    public boolean confirmDelete(Component owner, @Unmodifiable List<DataPack.Pack> dataPacks) {
         EdtDispatcher.requireEventDispatchThread();
-        DataPack.Pack selected = Objects.requireNonNull(dataPack, "dataPack");
+        @Unmodifiable List<DataPack.Pack> selected = List.copyOf(
+                Objects.requireNonNull(dataPacks, "dataPacks"));
+        if (selected.isEmpty()) {
+            return false;
+        }
+        String message = selected.size() == 1
+                ? strings.deleteConfirmationFormat().formatted(selected.get(0).getId())
+                : i18n("button.remove.confirm");
         return JOptionPane.showConfirmDialog(
                 Objects.requireNonNull(owner, "owner"),
-                strings.deleteConfirmationFormat().formatted(selected.getId()),
+                message,
                 strings.deleteDialogTitle(),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
