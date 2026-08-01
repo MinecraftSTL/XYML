@@ -196,6 +196,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private final InheritedControl<JTextField> runningDirectoryControl =
             inheritedControl("instanceGameSettingsRunningDirectory", new JTextField());
 
+    /// Explicit isolation switch and editable directory chooser sharing the running-directory controls.
+    private final InstanceIsolationControls isolationControls;
+
     /// Additional Minecraft arguments setting.
     private final InheritedControl<JTextField> gameArgumentsControl =
             inheritedControl("instanceGameSettingsGameArguments", new JTextField());
@@ -458,6 +461,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.store = Objects.requireNonNull(store, "store");
+        isolationControls = new InstanceIsolationControls(
+                store.forcedRunningDirectory(),
+                runningDirectoryControl.overrideBox(),
+                runningDirectoryControl.editor(),
+                this::updateEditingAvailability);
         this.javaRuntimeService = Objects.requireNonNull(javaRuntimeService, "javaRuntimeService");
         this.presentation = Objects.requireNonNull(presentation, "presentation");
         this.workingDirectoryChanged = Objects.requireNonNull(
@@ -593,6 +601,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private JPanel createGameSettingsTab() {
         JPanel content = tabContent("instanceGameSettingsGameTab");
 
+        if (presentation == GameSettingsEditorPresentation.INSTANCE) {
+            content.add(isolationControls.createIsolationRow(), "growx");
+            content.add(new JSeparator(), "growx");
+        }
+
         JPanel memory = sectionPanel("instanceGameSettingsMemory", i18n("settings.memory"));
         addControlRow(memory, i18n("settings.memory.auto_allocate"), automaticMemoryControl);
         addControlRow(memory, i18n("settings.memory.manual_allocate"), maximumMemoryControl);
@@ -625,7 +638,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         JPanel launch = sectionPanel(
                 "instanceGameSettingsLaunchOptions",
                 i18n("settings.advanced.launch_options"));
-        addControlRow(launch, i18n("settings.game.running_directory"), runningDirectoryControl);
+        isolationControls.addRunningDirectoryRow(launch, presentation == GameSettingsEditorPresentation.GLOBAL_PRESET);
         addControlRow(launch, i18n("settings.advanced.minecraft_arguments"), gameArgumentsControl);
         addControlRow(launch, i18n("settings.advanced.environment_variables"), environmentVariablesControl);
         addControlRow(launch, i18n("settings.advanced.process_priority"), processPriorityControl);
@@ -1052,8 +1065,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private InstanceGameSettingsSnapshot.LaunchOptionsSettings editedLaunchOptions(
             InstanceGameSettingsSnapshot.LaunchOptionsSettings current) {
         return new InstanceGameSettingsSnapshot.LaunchOptionsSettings(
-                runningDirectoryControl.overrideBox().isSelected(),
-                editedText(runningDirectoryControl, current.runningDirectory()),
+                isolationControls.editedOverridden(current.runningDirectoryOverridden()),
+                isolationControls.editedDirectory(current.runningDirectory()),
                 gameArgumentsControl.overrideBox().isSelected(),
                 editedRawText(gameArgumentsControl, current.gameArguments()),
                 environmentVariablesControl.overrideBox().isSelected(),
@@ -1300,7 +1313,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Applies general launch-option controls.
     private void applyLaunchOptions(InstanceGameSettingsSnapshot.LaunchOptionsSettings values) {
-        applyText(runningDirectoryControl, values.runningDirectoryOverridden(), values.runningDirectory());
+        isolationControls.apply(values.runningDirectoryOverridden(), values.runningDirectory());
         applyText(gameArgumentsControl, values.gameArgumentsOverridden(), values.gameArguments());
         applyText(environmentVariablesControl, values.environmentOverridden(), values.environmentVariables());
         applyChoice(processPriorityControl, values.priorityOverridden(), values.priority());
@@ -1400,6 +1413,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                     writable && presentation == GameSettingsEditorPresentation.INSTANCE);
             control.editor().setEnabled(writable && control.overrideBox().isSelected());
         }
+        isolationControls.updateAvailability(writable, presentation == GameSettingsEditorPresentation.INSTANCE);
 
         boolean automaticMemory = snapshot != null
                 && editedBoolean(automaticMemoryControl, snapshot.memory().automatic());

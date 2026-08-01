@@ -95,7 +95,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsJavaVersion", JTextField.class).setText("21");
                 clickOverride(panel, "instanceGameSettingsJvmOptions");
                 findNamed(panel, "instanceGameSettingsJvmOptions", JTextArea.class).setText("-XX:+UseG1GC");
-                clickOverride(panel, "instanceGameSettingsRunningDirectory");
+                findNamed(panel, "instanceGameSettingsIsolation", JCheckBox.class).doClick();
                 findNamed(panel, "instanceGameSettingsRunningDirectory", JTextField.class).setText("instance-run");
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
@@ -115,6 +115,83 @@ final class InstanceGameSettingsPanelTest {
             assertTrue(saved.launchOptions().runningDirectoryOverridden());
             assertEquals("instance-run", saved.launchOptions().runningDirectory());
             assertEquals(1, workingDirectoryChanges.get());
+        } finally {
+            closePanel(panelReference);
+        }
+    }
+
+    /// Persists explicit isolation as an empty local running directory and restores inheritance when disabled.
+    @Test
+    void exposesExplicitIsolationControl() {
+        RecordingStore store = new RecordingStore(snapshotWithRunningDirectory(false, "shared-run"));
+        AtomicInteger workingDirectoryChanges = new AtomicInteger();
+        AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = createPanel(store, workingDirectoryChanges::incrementAndGet);
+                panelReference.set(panel);
+                JCheckBox isolation = findNamed(panel, "instanceGameSettingsIsolation", JCheckBox.class);
+                JTextField runningDirectory =
+                        findNamed(panel, "instanceGameSettingsRunningDirectory", JTextField.class);
+                JButton browse = findNamed(panel, "instanceGameSettingsRunningDirectoryBrowse", JButton.class);
+
+                assertFalse(isolation.isSelected());
+                assertFalse(runningDirectory.isEnabled());
+                assertFalse(browse.isEnabled());
+
+                isolation.doClick();
+
+                assertTrue(isolation.isSelected());
+                assertTrue(runningDirectory.isEnabled());
+                assertTrue(browse.isEnabled());
+                assertEquals("", runningDirectory.getText());
+                findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
+            });
+
+            assertTrue(store.snapshot().launchOptions().runningDirectoryOverridden());
+            assertEquals("", store.snapshot().launchOptions().runningDirectory());
+            assertEquals(1, workingDirectoryChanges.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+                findNamed(panel, "instanceGameSettingsIsolation", JCheckBox.class).doClick();
+                findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
+            });
+
+            assertFalse(store.snapshot().launchOptions().runningDirectoryOverridden());
+            assertEquals(2, workingDirectoryChanges.get());
+        } finally {
+            closePanel(panelReference);
+        }
+    }
+
+    /// Keeps modpack isolation selected and prevents edits without mutating the stored override state.
+    ///
+    /// @param forcedRoot forced instance root displayed by the page
+    @Test
+    void forcesIsolationForModpackInstances(@TempDir Path forcedRoot) {
+        RecordingStore store = new RecordingStore(
+                snapshotWithRunningDirectory(false, "shared-run"),
+                forcedRoot.toString());
+        AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = createPanel(store);
+                panelReference.set(panel);
+
+                JCheckBox isolation = findNamed(panel, "instanceGameSettingsIsolation", JCheckBox.class);
+                JTextField runningDirectory =
+                        findNamed(panel, "instanceGameSettingsRunningDirectory", JTextField.class);
+                assertTrue(isolation.isSelected());
+                assertFalse(isolation.isEnabled());
+                assertFalse(runningDirectory.isEnabled());
+                assertEquals(forcedRoot.toString(), runningDirectory.getText());
+
+                findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
+            });
+
+            assertFalse(store.snapshot().launchOptions().runningDirectoryOverridden());
+            assertEquals("shared-run", store.snapshot().launchOptions().runningDirectory());
         } finally {
             closePanel(panelReference);
         }
@@ -720,6 +797,37 @@ final class InstanceGameSettingsPanelTest {
                 base.nativeLibraries());
     }
 
+    /// Creates a snapshot with an explicit effective running directory and inheritance state.
+    ///
+    /// @param overridden whether the instance owns the running-directory setting
+    /// @param runningDirectory effective running-directory text
+    /// @return complete settings snapshot with the requested launch option
+    private static InstanceGameSettingsSnapshot snapshotWithRunningDirectory(
+            boolean overridden,
+            String runningDirectory) {
+        InstanceGameSettingsSnapshot base = snapshot();
+        return new InstanceGameSettingsSnapshot(
+                base.writable(),
+                base.memory(),
+                base.javaRuntime(),
+                base.window(),
+                base.launcher(),
+                base.quickPlay(),
+                new InstanceGameSettingsSnapshot.LaunchOptionsSettings(
+                        overridden,
+                        Objects.requireNonNull(runningDirectory, "runningDirectory"),
+                        false,
+                        "",
+                        false,
+                        "",
+                        false,
+                        ProcessPriority.NORMAL),
+                base.jvm(),
+                base.commands(),
+                base.graphics(),
+                base.nativeLibraries());
+    }
+
     /// Creates a panel isolated from process-wide Java runtime and user-settings state.
     ///
     /// @param store deterministic game-settings store
@@ -965,11 +1073,33 @@ final class InstanceGameSettingsPanelTest {
         /// Number of calls that crossed the UI persistence boundary.
         private final AtomicInteger saveCount = new AtomicInteger();
 
+        /// Forced running directory returned to the editor, or `null` for configurable isolation.
+        private final @Nullable String forcedRunningDirectory;
+
         /// Creates a deterministic store with one initial snapshot.
         ///
         /// @param initialSnapshot initial effective values and override flags
         private RecordingStore(InstanceGameSettingsSnapshot initialSnapshot) {
+            this(initialSnapshot, null);
+        }
+
+        /// Creates a deterministic store with optional forced modpack isolation.
+        ///
+        /// @param initialSnapshot initial effective values and override flags
+        /// @param forcedRunningDirectory forced instance root, or `null` for configurable isolation
+        private RecordingStore(
+                InstanceGameSettingsSnapshot initialSnapshot,
+                @Nullable String forcedRunningDirectory) {
             storedSnapshot = Objects.requireNonNull(initialSnapshot, "initialSnapshot");
+            this.forcedRunningDirectory = forcedRunningDirectory;
+        }
+
+        /// Returns the forced test directory when this store represents a modpack.
+        ///
+        /// @return forced directory, or `null` for normal instances
+        @Override
+        public @Nullable String forcedRunningDirectory() {
+            return forcedRunningDirectory;
         }
 
         /// Returns the latest recorded snapshot.
