@@ -87,6 +87,17 @@ public interface WorldCatalogInteractions extends AutoCloseable {
         Objects.requireNonNull(levelDataPath, "levelDataPath");
     }
 
+    /// Copies one world-detail value through the desktop clipboard boundary.
+    ///
+    /// Implementations without clipboard integration may retain the no-op default.
+    ///
+    /// @param owner interaction owner
+    /// @param text exact text to copy
+    default void copyText(Component owner, String text) {
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(text, "text");
+    }
+
     /// Chooses a local standalone launch-script destination for one world.
     ///
     /// @param owner dialog owner

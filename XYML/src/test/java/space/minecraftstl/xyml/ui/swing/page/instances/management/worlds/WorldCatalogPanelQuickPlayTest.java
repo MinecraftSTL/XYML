@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -37,6 +38,7 @@ import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
@@ -46,6 +48,7 @@ import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.lang.reflect.Proxy;
@@ -312,7 +315,10 @@ final class WorldCatalogPanelQuickPlayTest {
             panel.choiceList().refreshLoadPlan();
             panel.choiceList().getList().setSelectedIndex(0);
 
-            assertEquals("123456", findNamed(panel, "worldsSeed", JLabel.class).getText());
+            JPasswordField seed = findNamed(panel, "worldsSeed", JPasswordField.class);
+            assertEquals("123456", new String(seed.getPassword()));
+            assertTrue(seed.getEchoChar() != 0);
+            assertEquals("showRevealButton: true", seed.getClientProperty(FlatClientProperties.STYLE));
             assertEquals("(10, 70, -5)", findNamed(panel, "worldsSpawn", JLabel.class).getText());
             assertNotNull(findNamed(panel, "worldsIcon", JLabel.class).getIcon());
             JTextField name = findNamed(panel, "worldsWorldName", JTextField.class);
@@ -327,6 +333,17 @@ final class WorldCatalogPanelQuickPlayTest {
             JTextField xp = findNamed(panel, "worldsPlayerXpLevel", JTextField.class);
             assertTrue(name.isEnabled());
             assertTrue(health.isEnabled());
+            seed.dispatchEvent(new MouseEvent(
+                    seed,
+                    MouseEvent.MOUSE_CLICKED,
+                    1L,
+                    0,
+                    1,
+                    1,
+                    2,
+                    false,
+                    MouseEvent.BUTTON1));
+            assertEquals("123456", interactions.copiedText());
 
             name.setText("Renamed World");
             cheats.setSelected(true);
@@ -725,6 +742,9 @@ final class WorldCatalogPanelQuickPlayTest {
         /// Exact level-data path most recently opened.
         private @Nullable Path openedLevelData;
 
+        /// Exact world-detail text most recently copied.
+        private @Nullable String copiedText;
+
         /// Whether panel closure released this interaction boundary.
         private boolean closed;
 
@@ -777,6 +797,12 @@ final class WorldCatalogPanelQuickPlayTest {
             openedLevelData = Objects.requireNonNull(levelDataPath, "levelDataPath")
                     .toAbsolutePath()
                     .normalize();
+        }
+
+        /// Records exact copied world-detail text.
+        @Override
+        public void copyText(Component owner, String text) {
+            copiedText = Objects.requireNonNull(text, "text");
         }
 
         /// Returns the configured local script destination.
@@ -845,6 +871,13 @@ final class WorldCatalogPanelQuickPlayTest {
         /// @return opened path, or null before editing
         private @Nullable Path openedLevelData() {
             return openedLevelData;
+        }
+
+        /// Returns the exact copied world-detail text.
+        ///
+        /// @return copied text, or null before copying
+        private @Nullable String copiedText() {
+            return copiedText;
         }
 
         /// Returns whether panel closure released the boundary.

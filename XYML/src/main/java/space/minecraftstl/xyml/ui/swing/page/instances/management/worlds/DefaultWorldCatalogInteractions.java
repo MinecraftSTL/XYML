@@ -32,6 +32,8 @@ import javax.swing.SwingUtilities;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.Component;
 import java.awt.Desktop;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
@@ -234,6 +236,19 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
             levelDataEditor = SwingNBTEditorLauncher.createForDirectPaths(checkedOwner, executor);
         }
         levelDataEditor.open(Objects.requireNonNull(levelDataPath, "levelDataPath"));
+    }
+
+    /// Copies one world-detail value on the EDT.
+    ///
+    /// @param owner interaction owner
+    /// @param text exact text to copy
+    @Override
+    public void copyText(Component owner, String text) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                new StringSelection(Objects.requireNonNull(text, "text")),
+                null);
     }
 
     /// Shows a platform-aware standalone launch-script save chooser on the EDT.
