@@ -19,15 +19,18 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GraphicsAPI;
 import space.minecraftstl.xyml.game.ProcessPriority;
 import space.minecraftstl.xyml.game.QuickPlayType;
 import space.minecraftstl.xyml.game.Renderer;
 import space.minecraftstl.xyml.setting.GameSettings;
+import space.minecraftstl.xyml.setting.GameSettingsPresetID;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
 
+import java.util.List;
 import java.util.Objects;
 
 /// Immutable editable state for one instance's complete inherited game-settings surface.
@@ -36,6 +39,7 @@ import java.util.Objects;
 /// per serialized property key. Grouping controls visually must never merge those durable flags.
 ///
 /// @param writable whether the backing instance settings file accepts changes
+/// @param parentPreset parent global game-settings preset selection
 /// @param memory memory-allocation values and override states
 /// @param javaRuntime Java selection values and override states
 /// @param window game-window mode and resolution values
@@ -49,6 +53,7 @@ import java.util.Objects;
 @NotNullByDefault
 public record InstanceGameSettingsSnapshot(
         boolean writable,
+        ParentPresetSettings parentPreset,
         MemorySettings memory,
         JavaRuntimeSettings javaRuntime,
         WindowSettings window,
@@ -61,6 +66,7 @@ public record InstanceGameSettingsSnapshot(
         NativeLibrarySettings nativeLibraries) {
     /// Rejects missing setting groups before the snapshot reaches Swing controls or persistence.
     public InstanceGameSettingsSnapshot {
+        Objects.requireNonNull(parentPreset, "parentPreset");
         Objects.requireNonNull(memory, "memory");
         Objects.requireNonNull(javaRuntime, "javaRuntime");
         Objects.requireNonNull(window, "window");
@@ -71,6 +77,20 @@ public record InstanceGameSettingsSnapshot(
         Objects.requireNonNull(commands, "commands");
         Objects.requireNonNull(graphics, "graphics");
         Objects.requireNonNull(nativeLibraries, "nativeLibraries");
+    }
+
+    /// Parent global game-settings preset selection for an instance-specific settings file.
+    ///
+    /// @param selectedId selected parent preset ID, or `null` for the launcher's default preset
+    /// @param choices selectable parent presets, including the default fallback entry
+    @NotNullByDefault
+    public record ParentPresetSettings(
+            @Nullable GameSettingsPresetID selectedId,
+            @Unmodifiable List<InstanceGameSettingsParentPreset> choices) {
+        /// Defensively copies the available preset choices.
+        public ParentPresetSettings {
+            choices = List.copyOf(Objects.requireNonNull(choices, "choices"));
+        }
     }
 
     /// Memory-allocation values with independent automatic and maximum-memory inheritance.

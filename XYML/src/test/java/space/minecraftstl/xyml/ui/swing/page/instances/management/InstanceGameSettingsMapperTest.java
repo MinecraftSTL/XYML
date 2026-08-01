@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
 
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -52,6 +53,7 @@ final class InstanceGameSettingsMapperTest {
 
         assertEquals(expected, InstanceGameSettingsMapper.snapshot(
                 true,
+                expected.parentPreset(),
                 instance,
                 GameSettings.resolve(preset, instance)));
         assertEquals(allOverrideKeys(), instance.getOverrideProperties());
@@ -77,6 +79,7 @@ final class InstanceGameSettingsMapperTest {
         assertEquals("native-bin", instance.nativesDirectoryProperty().getValue());
         InstanceGameSettingsSnapshot inherited = InstanceGameSettingsMapper.snapshot(
                 true,
+                new InstanceGameSettingsSnapshot.ParentPresetSettings(null, List.of()),
                 instance,
                 GameSettings.resolve(preset, instance));
         assertFalse(inherited.memory().anyOverridden());
@@ -121,6 +124,32 @@ final class InstanceGameSettingsMapperTest {
         assertThrows(IllegalArgumentException.class, () -> InstanceGameSettingsMapper.apply(instance, localDetected));
     }
 
+    /// Persists the selected global parent preset independently from inheritable override markers.
+    @Test
+    void persistsParentPresetSelection() {
+        GameSettingsPresetID parentId = GameSettingsPresetID.generate();
+        InstanceGameSettingsSnapshot source = snapshot(false);
+        InstanceGameSettingsSnapshot selected = new InstanceGameSettingsSnapshot(
+                source.writable(),
+                new InstanceGameSettingsSnapshot.ParentPresetSettings(parentId, List.of()),
+                source.memory(),
+                source.javaRuntime(),
+                source.window(),
+                source.launcher(),
+                source.quickPlay(),
+                source.launchOptions(),
+                source.jvm(),
+                source.commands(),
+                source.graphics(),
+                source.nativeLibraries());
+        GameSettings.Instance instance = new GameSettings.Instance();
+
+        InstanceGameSettingsMapper.apply(instance, selected);
+
+        assertEquals(parentId, instance.parentProperty().getValue());
+        assertTrue(instance.getOverrideProperties().isEmpty());
+    }
+
     /// Creates a complete snapshot whose values are stable while all override flags share one requested state.
     ///
     /// @param overridden whether every property should be local
@@ -128,6 +157,7 @@ final class InstanceGameSettingsMapperTest {
     private static InstanceGameSettingsSnapshot snapshot(boolean overridden) {
         return new InstanceGameSettingsSnapshot(
                 true,
+                new InstanceGameSettingsSnapshot.ParentPresetSettings(null, List.of()),
                 new InstanceGameSettingsSnapshot.MemorySettings(overridden, false, overridden, 8192),
                 new InstanceGameSettingsSnapshot.JavaRuntimeSettings(
                         overridden,
@@ -226,6 +256,7 @@ final class InstanceGameSettingsMapperTest {
             InstanceGameSettingsSnapshot.JavaRuntimeSettings javaRuntime) {
         return new InstanceGameSettingsSnapshot(
                 source.writable(),
+                source.parentPreset(),
                 source.memory(),
                 javaRuntime,
                 source.window(),
