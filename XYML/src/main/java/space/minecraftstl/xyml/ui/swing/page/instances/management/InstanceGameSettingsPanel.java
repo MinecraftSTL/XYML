@@ -130,6 +130,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private final InheritedControl<JTextField> javaPathControl =
             inheritedControl("instanceGameSettingsJavaPath", new JTextField());
 
+    /// Editable custom Java executable path and file-selection command.
+    private final InstanceJavaPathControls javaPathControls;
+
     /// Persisted detected Java runtime reference setting.
     private final InheritedControl<JComboBox<DetectedJavaChoice>> detectedJavaControl = inheritedControl(
             "instanceGameSettingsDetectedJava",
@@ -456,6 +459,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.store = Objects.requireNonNull(store, "store");
+        javaPathControls = new InstanceJavaPathControls(javaPathControl.overrideBox(), javaPathControl.editor());
         isolationControls = new InstanceIsolationControls(
                 store.forcedRunningDirectory(),
                 runningDirectoryControl.overrideBox(),
@@ -616,7 +620,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         JPanel java = sectionPanel("instanceGameSettingsJava", i18n("settings.game.java_directory"));
         addControlRow(java, i18n("settings.game.java_directory"), javaTypeControl);
         addControlRow(java, i18n("settings.game.java_directory.version"), javaVersionControl);
-        addControlRow(java, i18n("settings.custom"), javaPathControl);
+        javaPathControls.addRow(java, i18n("settings.custom"));
         addControlRow(java, i18n("settings.game.java_directory.choose"), detectedJavaControl);
         content.add(java, "growx");
         content.add(new JSeparator(), "growx");
@@ -1431,6 +1435,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         javaVersionControl.editor().setEnabled(
                 javaVersionControl.editor().isEnabled() && javaType == JavaVersionType.VERSION);
         javaPathControl.editor().setEnabled(javaPathControl.editor().isEnabled() && javaType == JavaVersionType.CUSTOM);
+        javaPathControls.updateAvailability(javaPathControl.editor().isEnabled());
         detectedJavaControl.editor().setEnabled(
                 detectedJavaControl.editor().isEnabled() && javaType == JavaVersionType.DETECTED);
 

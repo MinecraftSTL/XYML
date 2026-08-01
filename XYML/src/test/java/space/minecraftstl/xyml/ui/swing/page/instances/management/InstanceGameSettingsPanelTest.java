@@ -238,6 +238,28 @@ final class InstanceGameSettingsPanelTest {
         }
     }
 
+    /// Keeps custom Java paths directly editable while writing a chosen executable into the same field.
+    @Test
+    void choosesCustomJavaExecutableIntoEditablePath() {
+        Path selectedPath = Path.of("runtime", "bin", "java");
+        EdtDispatcher.executeAndWait(() -> {
+            JCheckBox override = new JCheckBox();
+            JTextField path = new JTextField();
+            JPanel row = new JPanel();
+            InstanceJavaPathControls controls = new InstanceJavaPathControls(
+                    override,
+                    path,
+                    () -> selectedPath);
+            controls.addRow(row, "Java executable");
+            controls.updateAvailability(true);
+
+            findNamed(row, "instanceGameSettingsJavaPathBrowse", JButton.class).doClick();
+
+            assertTrue(path.isEditable());
+            assertEquals(selectedPath.toAbsolutePath().normalize().toString(), path.getText());
+        });
+    }
+
     /// Requires explicit consent before invoking backup-and-overwrite recovery for read-only settings.
     @Test
     void confirmsReadOnlySettingsRecovery() {
