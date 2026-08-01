@@ -314,7 +314,9 @@ public final class LocalModFile extends LocalAddonFile implements Comparable<Loc
         if (repository == null) return null;
         Optional<RemoteAddon.Version> currentVersion = repository.getRemoteVersionByLocalFile(file);
         if (currentVersion.isEmpty()) return null;
-        @Unmodifiable List<RemoteAddon.Version> remoteVersions = repository.getRemoteVersionsById(downloadProvider, currentVersion.get().modid())
+        @Unmodifiable List<RemoteAddon.Version> remoteVersions = repository.getRemoteVersionsById(
+                downloadProvider,
+                currentVersion.get().projectId())
                 .filter(version -> version.gameVersions().contains(gameVersion))
                 .filter(version -> version.loaders().contains(getModLoaderType()))
                 .filter(version -> version.datePublished().compareTo(currentVersion.get().datePublished()) > 0)

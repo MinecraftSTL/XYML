@@ -573,29 +573,29 @@ final class RemoteModpackCatalogPanelTest {
 
     /// Provides the unused Core add-on data contract required to build a realistic fixture result.
     @NotNullByDefault
-    private static final class FixtureAddonData implements RemoteAddon.IMod {
+    private static final class FixtureAddonData implements RemoteAddon.IAddon {
         /// Rejects dependency resolution because the focused catalog test supplies versions through its backend boundary.
         ///
-        /// @param modRepository unused source repository
+        /// @param repo unused source repository
         /// @param downloadProvider unused Core download provider
         /// @return never returns normally
         /// @throws IOException always because dependencies are outside this fixture's scope
         @Override
         public List<RemoteAddon> loadDependencies(
-                RemoteAddonRepository modRepository,
+                RemoteAddonRepository repo,
                 DownloadProvider downloadProvider) throws IOException {
             throw new IOException("Fixture dependencies are outside the catalog-panel test");
         }
 
         /// Rejects direct Core version resolution because the injected backend owns fixture versions.
         ///
-        /// @param modRepository unused source repository
+        /// @param repo unused source repository
         /// @param downloadProvider unused Core download provider
         /// @return never returns normally
         /// @throws IOException always because versions are supplied by RecordingBackend
         @Override
         public Stream<RemoteAddon.Version> loadVersions(
-                RemoteAddonRepository modRepository,
+                RemoteAddonRepository repo,
                 DownloadProvider downloadProvider) throws IOException {
             throw new IOException("Fixture versions are supplied by RecordingBackend");
         }
