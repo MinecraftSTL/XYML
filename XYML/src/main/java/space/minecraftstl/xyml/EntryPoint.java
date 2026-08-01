@@ -21,6 +21,8 @@ import space.minecraftstl.xyml.util.SwingUtils;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.setting.SambaException;
 import space.minecraftstl.xyml.setting.SettingsManager;
+import space.minecraftstl.xyml.ui.swing.SwingFontAntialiasing;
+import space.minecraftstl.xyml.ui.swing.page.settings.FontAntialiasingMode;
 import space.minecraftstl.xyml.ui.swing.startup.SwingStartupSafetyDialogs;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.JarUtils;
@@ -63,14 +65,6 @@ public final class EntryPoint {
         LOG.start(Metadata.XYML_LOCAL_HOME.resolve("logs"));
 
         setupAwtVmOptions();
-        checkWine();
-
-        if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS) {
-            System.getProperties().putIfAbsent("apple.awt.application.appearance", "system");
-            if (!isInsideMacAppBundle())
-                initIcon();
-        }
-
         enableUnsafeMemoryAccess();
 
         try {
@@ -84,6 +78,16 @@ public final class EntryPoint {
                     "fatal.config_loading_failure",
                     SettingsManager.localConfigDirectory()));
             exit(1);
+        }
+
+        SwingFontAntialiasing.applyAtStartup(FontAntialiasingMode.fromPersistedValue(
+                SettingsManager.userSettings().fontAntiAliasingProperty().get()));
+        checkWine();
+
+        if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS) {
+            System.getProperties().putIfAbsent("apple.awt.application.appearance", "system");
+            if (!isInsideMacAppBundle())
+                initIcon();
         }
 
         Launcher.main(args);

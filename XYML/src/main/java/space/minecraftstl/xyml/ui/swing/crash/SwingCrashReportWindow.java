@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.countly.CrashReport;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -93,6 +94,7 @@ public final class SwingCrashReportWindow {
         details.setEditable(false);
         details.setCaretPosition(0);
         details.setFont(new Font(Font.MONOSPACED, Font.PLAIN, details.getFont().getSize()));
+        SwingThemeManager.preserveExplicitFontFamily(details);
         content.add(new JScrollPane(details), BorderLayout.CENTER);
 
         JButton contact = new JButton(i18n("launcher.contact"));

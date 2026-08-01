@@ -115,6 +115,30 @@ public final class SettingsRestartPanelTest {
         });
     }
 
+    /// Font antialiasing rows track restart state independently from other settings baselines.
+    @Test
+    public void tracksFontAntialiasingBaseline() {
+        RecordingRestartCommand command = new RecordingRestartCommand();
+        SettingsRestartPanel panel = onEventDispatchThread(
+                () -> new SettingsRestartPanel(STRINGS, command, active -> { }));
+
+        onEventDispatchThread(() -> {
+            JButton restart = findComponent(panel, "settingsRestartAction", JButton.class);
+            panel.updateFontAntialiasing(FontAntialiasingMode.AUTO);
+            assertFalse(panel.isRestartRequired());
+            assertFalse(restart.isEnabled());
+
+            panel.updateFontAntialiasing(FontAntialiasingMode.LCD);
+            assertTrue(panel.isRestartRequired());
+            assertTrue(restart.isEnabled());
+
+            panel.updateFontAntialiasing(FontAntialiasingMode.AUTO);
+            assertFalse(panel.isRestartRequired());
+            assertFalse(restart.isEnabled());
+            panel.close();
+        });
+    }
+
     /// A failed injected command restores the restart action and never invokes a real process launcher.
     @Test
     public void exposesProgressAndAllowsRetryAfterFailure() {
