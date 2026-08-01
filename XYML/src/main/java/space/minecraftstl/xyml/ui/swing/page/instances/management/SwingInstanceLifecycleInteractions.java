@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 
@@ -53,9 +54,9 @@ final class SwingInstanceLifecycleInteractions implements InstanceLifecycleInter
     /// @param sourceId current instance identifier
     /// @return raw entered destination, or `null` after cancellation
     @Override
-    public @Nullable String requestRename(Component owner, String sourceId) {
+    public @Nullable String requestRename(Component owner, GameInstanceID sourceId) {
         EdtDispatcher.requireEventDispatchThread();
-        String source = Objects.requireNonNull(sourceId, "sourceId");
+        String source = Objects.requireNonNull(sourceId, "sourceId").id();
         @Nullable Object value = JOptionPane.showInputDialog(
                 Objects.requireNonNull(owner, "owner"),
                 strings.renamePrompt(),
@@ -73,9 +74,9 @@ final class SwingInstanceLifecycleInteractions implements InstanceLifecycleInter
     /// @param sourceId current instance identifier
     /// @return confirmed duplicate request, or `null` after cancellation
     @Override
-    public @Nullable InstanceLifecycleDuplicateRequest requestDuplicate(Component owner, String sourceId) {
+    public @Nullable InstanceLifecycleDuplicateRequest requestDuplicate(Component owner, GameInstanceID sourceId) {
         EdtDispatcher.requireEventDispatchThread();
-        String source = Objects.requireNonNull(sourceId, "sourceId");
+        String source = Objects.requireNonNull(sourceId, "sourceId").id();
         JTextField destinationField = new JTextField(source + "-copy", 24);
         destinationField.setName("instanceLifecycleDuplicateDestination");
         SwingTextFields.showClearButton(destinationField);
@@ -108,9 +109,9 @@ final class SwingInstanceLifecycleInteractions implements InstanceLifecycleInter
     /// @param sourceId current instance identifier
     /// @return whether deletion was approved
     @Override
-    public boolean confirmDelete(Component owner, String sourceId) {
+    public boolean confirmDelete(Component owner, GameInstanceID sourceId) {
         EdtDispatcher.requireEventDispatchThread();
-        String source = Objects.requireNonNull(sourceId, "sourceId");
+        String source = Objects.requireNonNull(sourceId, "sourceId").id();
         return JOptionPane.showConfirmDialog(
                 Objects.requireNonNull(owner, "owner"),
                 strings.deleteConfirmation().formatted(source),

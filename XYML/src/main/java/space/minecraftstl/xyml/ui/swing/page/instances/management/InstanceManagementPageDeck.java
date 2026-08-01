@@ -26,6 +26,7 @@ import javax.swing.JPanel;
 import java.awt.CardLayout;
 import java.awt.Dimension;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
@@ -149,6 +150,51 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
     int loadedPageCount() {
         EdtDispatcher.requireEventDispatchThread();
         return loadedPages.size();
+    }
+
+    /// Releases cached non-visible pages whose backing instance directories changed.
+    ///
+    /// The visible page cannot be invalidated because removing the selected card would leave navigation and content
+    /// state inconsistent. Unloaded destinations are accepted and require no work.
+    ///
+    /// @param pages available non-visible destinations to invalidate
+    void invalidatePages(Collection<InstanceManagementPageId> pages) {
+        EdtDispatcher.requireEventDispatchThread();
+        ensureOpen();
+        EnumMap<InstanceManagementPageId, Boolean> targets = new EnumMap<>(InstanceManagementPageId.class);
+        for (InstanceManagementPageId page : Objects.requireNonNull(pages, "pages")) {
+            targets.put(requireAvailable(page), Boolean.TRUE);
+        }
+        @Nullable InstanceManagementPageId current = selectedPage;
+        if (current != null && targets.containsKey(current)) {
+            throw new IllegalArgumentException("Cannot invalidate the visible page: " + current);
+        }
+
+        @Nullable Throwable firstFailure = null;
+        for (int index = creationOrder.size() - 1; index >= 0; index--) {
+            InstanceManagementPageId pageId = creationOrder.get(index);
+            if (!targets.containsKey(pageId)) {
+                continue;
+            }
+            creationOrder.remove(index);
+            @Nullable InstanceManagementPage page = loadedPages.remove(pageId);
+            if (page == null) {
+                continue;
+            }
+            remove(page.component());
+            try {
+                page.close();
+            } catch (RuntimeException | Error failure) {
+                if (firstFailure == null) {
+                    firstFailure = failure;
+                } else if (firstFailure != failure) {
+                    firstFailure.addSuppressed(failure);
+                }
+            }
+        }
+        revalidate();
+        repaint();
+        rethrow(firstFailure);
     }
 
     /// Releases every loaded page once and clears the component tree.

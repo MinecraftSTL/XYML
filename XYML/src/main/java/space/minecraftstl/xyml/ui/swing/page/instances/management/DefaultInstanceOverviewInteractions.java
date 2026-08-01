@@ -17,11 +17,12 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.setting.InstanceIconType;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JFileChooser;
@@ -101,7 +102,7 @@ public final class DefaultInstanceOverviewInteractions implements InstanceOvervi
     @Override
     public @Nullable InstanceIconChoice chooseInstanceIcon(
             Component owner,
-            InstanceIconType currentIconType,
+            GameInstanceIconType currentIconType,
             boolean hasCustomIcon,
             Path initialDirectory) {
         EdtDispatcher.requireEventDispatchThread();
@@ -119,10 +120,10 @@ public final class DefaultInstanceOverviewInteractions implements InstanceOvervi
     /// @param instanceId stable instance identifier
     /// @return whether deletion was confirmed
     @Override
-    public boolean confirmDeleteIcon(Component owner, String instanceId) {
+    public boolean confirmDeleteIcon(Component owner, GameInstanceID instanceId) {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(owner, "owner");
-        String id = requireNonBlank(instanceId, "instanceId");
+        GameInstanceID id = Objects.requireNonNull(instanceId, "instanceId");
         return JOptionPane.showConfirmDialog(
                 owner,
                 strings.deleteIconConfirmationFormat().formatted(id),

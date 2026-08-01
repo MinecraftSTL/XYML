@@ -21,6 +21,7 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -49,7 +50,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 @NotNullByDefault
 final class InstanceWorkspaceSummaryPanel extends JPanel implements AutoCloseable {
     /// Stable repository instance identifier represented by this summary.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Borrowed launcher selection and launch-state model.
     private final HomeModel homeModel;
@@ -90,7 +91,7 @@ final class InstanceWorkspaceSummaryPanel extends JPanel implements AutoCloseabl
     /// @param moreCommand command showing the known-directory menu from its invoking button
     InstanceWorkspaceSummaryPanel(
             HomeModel homeModel,
-            String instanceId,
+            GameInstanceID instanceId,
             Runnable refreshCommand,
             Runnable openFolderCommand,
             Consumer<Component> moreCommand) {
@@ -100,7 +101,7 @@ final class InstanceWorkspaceSummaryPanel extends JPanel implements AutoCloseabl
                 "[30!]2[24!]"));
         EdtDispatcher.requireEventDispatchThread();
         this.homeModel = Objects.requireNonNull(homeModel, "homeModel");
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
         configureComponents(
                 Objects.requireNonNull(refreshCommand, "refreshCommand"),
                 Objects.requireNonNull(openFolderCommand, "openFolderCommand"),
@@ -171,7 +172,7 @@ final class InstanceWorkspaceSummaryPanel extends JPanel implements AutoCloseabl
         add(iconLabel, "cell 0 0 1 2, w 56!, h 56!");
 
         nameLabel.setName("instanceWorkspaceName");
-        nameLabel.setText(instanceId);
+        nameLabel.setText(instanceId.id());
         nameLabel.setFont(nameLabel.getFont().deriveFont(Font.BOLD, 24.0F));
         add(nameLabel, "cell 1 0, growx");
 
@@ -237,7 +238,7 @@ final class InstanceWorkspaceSummaryPanel extends JPanel implements AutoCloseabl
     private void applyHomeSnapshot(HomeSnapshot snapshot) {
         EdtDispatcher.requireEventDispatchThread();
         HomeSnapshot state = Objects.requireNonNull(snapshot, "snapshot");
-        nameLabel.setText(state.instanceName().isBlank() ? instanceId : state.instanceName());
+        nameLabel.setText(state.instanceName().isBlank() ? instanceId.id() : state.instanceName());
         nameLabel.setToolTipText(nameLabel.getText());
         statusLabel.setText(state.statusText());
         statusLabel.setToolTipText(state.statusText());

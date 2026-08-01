@@ -530,6 +530,9 @@ public final class GameVersionCatalogPanelTest {
             instanceName.setText("my-instance");
             list.setSelectedIndex(2);
             assertEquals("my-instance", instanceName.getText());
+            findButton(panel, "gameVersionsResetInstanceName").doClick();
+            assertEquals("version-2", instanceName.getText());
+            instanceName.setText("my-instance");
 
             findButton(panel, "gameVersionsInstall").doClick();
             assertAll(
@@ -812,6 +815,33 @@ public final class GameVersionCatalogPanelTest {
             panel.close();
         });
         service.close();
+    }
+
+    /// Builds restored instance names from primary loader kinds while ignoring API companion entries.
+    @Test
+    public void derivesDefaultInstanceNameFromSelectedLoaders() {
+        assertEquals(
+                "1.21.1-Forge-Fabric",
+                GameVersionCatalogPanel.defaultInstanceName(
+                        "1.21.1",
+                        List.of(
+                                remoteVersion("forge", "47.3.0"),
+                                remoteVersion("fabric-api", "0.100.0"),
+                                remoteVersion("fabric", "0.16.0"))));
+    }
+
+    /// Creates one loader version with a stable patch identifier for name suggestion tests.
+    ///
+    /// @param libraryId loader patch identifier
+    /// @param version loader self version
+    /// @return remote loader version
+    private static RemoteVersion remoteVersion(String libraryId, String version) {
+        return new RemoteVersion(
+                libraryId,
+                "1.21.1",
+                version,
+                Instant.EPOCH,
+                List.of());
     }
 
     /// Waits for either normal or exceptional installation completion.

@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserActionStrings;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
@@ -141,10 +142,10 @@ public final class SchematicInstanceManagementViewTest {
 
         SchematicInstanceManagementView view = onEventDispatchThread(() ->
                 new SchematicInstanceManagementView(
-                        "alpha",
+                        new GameInstanceID("alpha"),
                         instanceId -> {
                             resolutionOnEdt.set(SwingUtilities.isEventDispatchThread());
-                            assertEquals("alpha", instanceId);
+                            assertEquals(new GameInstanceID("alpha"), instanceId);
                             return resolvedRoot;
                         },
                         executor,
@@ -157,7 +158,7 @@ public final class SchematicInstanceManagementViewTest {
                         }));
 
         onEventDispatchThread(() -> assertAll(
-                () -> assertEquals("alpha", view.instanceId()),
+                () -> assertEquals(new GameInstanceID("alpha"), view.instanceId()),
                 () -> assertSame(view, view.component()),
                 () -> assertTrue(findComponent(view, "schematicInstanceLoading").isVisible()),
                 () -> assertNull(findOptionalComponent(view, "schematicInstanceBrowser")),
@@ -201,7 +202,7 @@ public final class SchematicInstanceManagementViewTest {
         Path resolvedRoot = Path.of("retry", "schematics").toAbsolutePath().normalize();
         SchematicInstanceManagementView view = onEventDispatchThread(() ->
                 new SchematicInstanceManagementView(
-                        "beta",
+                        new GameInstanceID("beta"),
                         instanceId -> {
                             if (attempts.incrementAndGet() == 1) {
                                 throw new IOException("repository unavailable");
@@ -251,7 +252,7 @@ public final class SchematicInstanceManagementViewTest {
         QueuedExecutor executor = new QueuedExecutor();
         SchematicInstanceManagementView view = onEventDispatchThread(() ->
                 new SchematicInstanceManagementView(
-                        "gamma",
+                        new GameInstanceID("gamma"),
                         instanceId -> Path.of("gamma", "schematics"),
                         executor,
                         MANAGEMENT_STRINGS,
@@ -292,7 +293,7 @@ public final class SchematicInstanceManagementViewTest {
         AtomicBoolean resolutionOnEdt = new AtomicBoolean(true);
         SchematicInstanceManagementView view = onEventDispatchThread(() ->
                 new SchematicInstanceManagementView(
-                        "delta",
+                        new GameInstanceID("delta"),
                         instanceId -> {
                             resolutionOnEdt.set(SwingUtilities.isEventDispatchThread());
                             resolutionEntered.countDown();

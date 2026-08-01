@@ -64,6 +64,7 @@ final class SwingNBTEditorInteractions implements NBTEditorInteractions {
         chooser.setAcceptAllFileFilterUsed(false);
         chooser.setFileFilter(new FileNameExtensionFilter(
                 strings.fileFilter(),
+                "nbt",
                 "dat",
                 "dat_old",
                 "mca",

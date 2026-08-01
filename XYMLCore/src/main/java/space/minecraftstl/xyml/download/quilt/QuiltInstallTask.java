@@ -24,8 +24,9 @@ import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.UnsupportedInstallationException;
 import space.minecraftstl.xyml.game.Arguments;
 import space.minecraftstl.xyml.game.Artifact;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.game.Library;
-import space.minecraftstl.xyml.game.Version;
 import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
@@ -41,17 +42,17 @@ import static space.minecraftstl.xyml.download.UnsupportedInstallationException.
  *
  * @author huangyuhui
  */
-public final class QuiltInstallTask extends Task<Version> {
+public final class QuiltInstallTask extends Task<GameInstancePatch> {
 
     private final DefaultDependencyManager dependencyManager;
-    private final Version version;
+    private final GameInstanceManifest manifest;
     private final QuiltRemoteVersion remote;
     private final GetTask launchMetaTask;
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    public QuiltInstallTask(DefaultDependencyManager dependencyManager, Version version, QuiltRemoteVersion remoteVersion) {
+    public QuiltInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, QuiltRemoteVersion remoteVersion) {
         this.dependencyManager = dependencyManager;
-        this.version = version;
+        this.manifest = manifest;
         this.remote = remoteVersion;
 
         launchMetaTask = new GetTask(dependencyManager.getDownloadProvider().injectURLsWithCandidates(remoteVersion.getUrls()));
@@ -65,7 +66,7 @@ public final class QuiltInstallTask extends Task<Version> {
 
     @Override
     public void preExecute() throws Exception {
-        if (!Objects.equals("net.minecraft.client.main.Main", version.resolve(dependencyManager.getGameRepository()).getMainClass()))
+        if (!Objects.equals("net.minecraft.client.main.Main", manifest.resolve(dependencyManager.getGameRepository()).mainClass()))
             throw new UnsupportedInstallationException(FABRIC_NOT_COMPATIBLE_WITH_FORGE);
     }
 
@@ -88,15 +89,11 @@ public final class QuiltInstallTask extends Task<Version> {
     public void execute() {
         setResult(getPatch(JsonUtils.GSON.fromJson(launchMetaTask.getResult(), QuiltInfo.class), remote.getSelfVersion()));
 
-        dependencies.add(dependencyManager.checkLibraryCompletionAsync(getResult(), true));
+        dependencies.add(new space.minecraftstl.xyml.download.game.GameLibrariesTask(dependencyManager, manifest, true, getResult().getLibraries()));
     }
 
-    /// Creates the Quilt version patch described by the metadata response.
-    ///
-    /// @param quiltInfo the metadata returned by Quilt Meta
-    /// @param loaderVersion the Quilt Loader version
-    /// @return the version patch to install
-    static Version getPatch(QuiltInfo quiltInfo, String loaderVersion) {
+    /// Creates the Quilt patch represented by the installer metadata.
+    private static GameInstancePatch getPatch(QuiltInfo quiltInfo, String loaderVersion) {
         JsonObject launcherMeta = quiltInfo.launcherMeta;
         Arguments arguments = new Arguments();
 
@@ -129,7 +126,7 @@ public final class QuiltInstallTask extends Task<Version> {
         }
         libraries.add(new Library(Artifact.fromDescriptor(quiltInfo.loader.maven), getMavenRepositoryByGroup(quiltInfo.loader.maven), null));
 
-        return new Version(LibraryAnalyzer.LibraryType.QUILT.getPatchId(), loaderVersion, Version.PRIORITY_LOADER, arguments, mainClass, libraries);
+        return new GameInstancePatch(LibraryAnalyzer.LibraryType.QUILT.getPatchId(), loaderVersion, GameInstancePatch.PRIORITY_LOADER, arguments, mainClass, libraries);
     }
 
     private static String getMavenRepositoryByGroup(String maven) {

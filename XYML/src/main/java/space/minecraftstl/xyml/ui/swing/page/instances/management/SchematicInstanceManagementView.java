@@ -21,6 +21,7 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.schematics.DefaultSchematicBrowserModel;
 import space.minecraftstl.xyml.ui.swing.page.schematics.SchematicBrowserInteractions;
@@ -62,7 +63,7 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
     private static final String BROWSER_CARD = "browser";
 
     /// Stable repository instance identifier represented by this view.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Potentially blocking schematic-root resolver.
     private final SchematicDirectoryResolver directoryResolver;
@@ -128,7 +129,7 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
     /// @param browserInteractions explicit browser dialog and desktop boundary
     /// @param returnCommand coordinator command returning to the instance list
     public SchematicInstanceManagementView(
-            String instanceId,
+            GameInstanceID instanceId,
             SchematicDirectoryResolver directoryResolver,
             Executor executor,
             SchematicInstanceManagementStrings strings,
@@ -157,7 +158,7 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
     /// @param returnCommand coordinator command returning to the instance list
     /// @param showReturnToolbar whether this view owns the top-level return toolbar
     SchematicInstanceManagementView(
-            String instanceId,
+            GameInstanceID instanceId,
             SchematicDirectoryResolver directoryResolver,
             Executor executor,
             SchematicInstanceManagementStrings strings,
@@ -170,7 +171,7 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
                 "[grow,fill]",
                 showReturnToolbar ? "[]12[grow,fill]" : "[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
         this.directoryResolver = Objects.requireNonNull(directoryResolver, "directoryResolver");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.strings = Objects.requireNonNull(strings, "strings");
@@ -189,7 +190,7 @@ public final class SchematicInstanceManagementView extends JPanel implements Ins
     ///
     /// @return stable instance identifier
     @Override
-    public String instanceId() {
+    public GameInstanceID instanceId() {
         return instanceId;
     }
 

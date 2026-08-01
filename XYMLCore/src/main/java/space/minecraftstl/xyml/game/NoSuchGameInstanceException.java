@@ -1,6 +1,6 @@
 /*
  * Hello Minecraft! Launcher
- * Copyright (C) 2020  huangyuhui <huanghongxun2008@126.com> and contributors
+ * Copyright (C) 2026 huangyuhui <huanghongxun2008@126.com> and contributors
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,20 +17,24 @@
  */
 package space.minecraftstl.xyml.game;
 
-/**
- *
- * @author huangyuhui
- */
-public final class VersionNotFoundException extends RuntimeException {
+import org.jetbrains.annotations.NotNullByDefault;
 
-    public VersionNotFoundException() {
+/// Indicates that a requested installed game instance is absent from a repository snapshot.
+@NotNullByDefault
+public class NoSuchGameInstanceException extends RuntimeException {
+    /// Missing instance identifier.
+    private final GameInstanceID id;
+
+    /// Creates an exception for the missing identifier.
+    ///
+    /// @param id missing instance identifier
+    public NoSuchGameInstanceException(GameInstanceID id) {
+        super(id.id());
+        this.id = id;
     }
 
-    public VersionNotFoundException(String message) {
-        super(message);
-    }
-
-    public VersionNotFoundException(String message, Throwable cause) {
-        super(message, cause);
+    /// Returns the missing instance identifier.
+    public GameInstanceID getId() {
+        return id;
     }
 }

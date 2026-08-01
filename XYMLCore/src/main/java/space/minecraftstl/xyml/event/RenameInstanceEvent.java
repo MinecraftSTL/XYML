@@ -17,42 +17,41 @@
  */
 package space.minecraftstl.xyml.event;
 
-import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.util.ToStringBuilder;
+import org.jetbrains.annotations.NotNullByDefault;
 
 /// Fired before an installed game instance is renamed.
 ///
 /// Listeners may deny the event to cancel the rename.
-///
-/// @author huangyuhui
 @NotNullByDefault
 public final class RenameInstanceEvent extends Event {
 
     /// Current instance identifier.
-    private final String fromInstanceId;
+    private final GameInstanceID from;
 
     /// Requested destination instance identifier.
-    private final String toInstanceId;
+    private final GameInstanceID to;
 
     /// Creates an instance-rename event.
     ///
     /// @param source repository renaming the instance
-    /// @param fromInstanceId current instance identifier
-    /// @param toInstanceId requested destination instance identifier
-    public RenameInstanceEvent(Object source, String fromInstanceId, String toInstanceId) {
+    /// @param from current instance identifier
+    /// @param to requested destination instance identifier
+    public RenameInstanceEvent(Object source, GameInstanceID from, GameInstanceID to) {
         super(source);
-        this.fromInstanceId = fromInstanceId;
-        this.toInstanceId = toInstanceId;
+        this.from = from;
+        this.to = to;
     }
 
     /// Returns the current instance identifier.
-    public String getFromInstanceId() {
-        return fromInstanceId;
+    public GameInstanceID getFrom() {
+        return from;
     }
 
     /// Returns the requested destination instance identifier.
-    public String getToInstanceId() {
-        return toInstanceId;
+    public GameInstanceID getTo() {
+        return to;
     }
 
     /// Returns whether listeners may allow or deny this event.
@@ -66,8 +65,8 @@ public final class RenameInstanceEvent extends Event {
     public String toString() {
         return new ToStringBuilder(this)
                 .append("source", source)
-                .append("fromInstanceId", fromInstanceId)
-                .append("toInstanceId", toInstanceId)
+                .append("from", from)
+                .append("to", to)
                 .toString();
     }
 }

@@ -19,17 +19,15 @@ package space.minecraftstl.xyml.event;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Fired before an installed-instance repository starts refreshing its instance list.
+/// Fired before installed game instances in a `.minecraft` folder are loaded.
 ///
-/// Listeners may deny the event to cancel the refresh.
+/// This event is fired on the [space.minecraftstl.xyml.event.EventBus#EVENT_BUS]
 ///
 /// @author huangyuhui
 @NotNullByDefault
 public final class RefreshingInstancesEvent extends Event {
 
-    /// Creates an instance-refresh-start event.
-    ///
-    /// @param source repository starting the refresh
+    /// Constructor.
     public RefreshingInstancesEvent(Object source) {
         super(source);
     }

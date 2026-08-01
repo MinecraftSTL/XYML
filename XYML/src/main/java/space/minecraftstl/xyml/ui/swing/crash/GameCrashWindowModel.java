@@ -23,9 +23,9 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.game.Log;
-import space.minecraftstl.xyml.game.Version;
 import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.platform.Architecture;
@@ -77,23 +77,23 @@ final class GameCrashWindowModel {
     ///
     /// @param exitType classified process-exit outcome
     /// @param repository repository owning the launched instance
-    /// @param version launched version
+    /// @param manifest launched game-instance manifest
     /// @param launchOptions resolved launch configuration
     /// @param capturedLogs captured in-memory process-output entries
     /// @return immutable display and analysis model
     static GameCrashWindowModel fromLaunch(
             ProcessListener.ExitType exitType,
             DefaultGameRepository repository,
-            Version version,
+            GameInstanceManifest manifest,
             LaunchOptions launchOptions,
             List<Log> capturedLogs) {
         Objects.requireNonNull(repository, "repository");
-        Objects.requireNonNull(version, "version");
+        Objects.requireNonNull(manifest, "manifest");
         Objects.requireNonNull(launchOptions, "launchOptions");
 
         List<Detail> details = new ArrayList<>();
         details.add(new Detail(i18n("launcher"), Metadata.VERSION));
-        details.add(new Detail(i18n("game.instance"), version.getId()));
+        details.add(new Detail(i18n("game.instance"), manifest.id().toString()));
         details.add(new Detail(
                 i18n("settings.physical_memory"),
                 MEGABYTES.formatBytes(SystemInfo.getTotalMemorySize())));
@@ -108,8 +108,8 @@ final class GameCrashWindowModel {
                 Lang.requireNonNullElse(OperatingSystem.OS_RELEASE_NAME, OperatingSystem.SYSTEM_NAME)));
         details.add(new Detail(i18n("system.architecture"), Architecture.SYSTEM_ARCH.getDisplayName()));
 
-        @Nullable String gameVersion = repository.getGameVersion(version).orElse(null);
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(version, gameVersion);
+        @Nullable String gameVersion = repository.getGameVersion(manifest).orElse(null);
+        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(manifest, gameVersion);
         for (LibraryAnalyzer.LibraryType type : LibraryAnalyzer.LibraryType.values()) {
             if (!type.getPatchId().isEmpty()) {
                 analyzer.getVersion(type).ifPresent(loaderVersion -> details.add(new Detail(
@@ -125,7 +125,7 @@ final class GameCrashWindowModel {
                 i18n("settings.game.java_directory"),
                 launchOptions.getJava().getBinary().toAbsolutePath().toString()));
 
-        Path latestLog = repository.getRunDirectory(version.getId()).resolve("logs/latest.log");
+        Path latestLog = repository.getRunDirectory(manifest.id()).resolve("logs/latest.log");
         return new GameCrashWindowModel(exitType, details, capturedLogs, latestLog);
     }
 

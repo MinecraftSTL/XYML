@@ -29,9 +29,12 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
+import space.minecraftstl.xyml.theme.ResolvedTheme;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeReference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingBackgroundSource;
+import space.minecraftstl.xyml.ui.swing.SwingWindowAppearanceRequest;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceBackgroundStrings;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsPanel;
@@ -80,6 +83,61 @@ public final class ThemePackManagementPanelTest {
     /// Temporary installed paths and fallback screenshot directory.
     @TempDir
     private Path temporaryDirectory;
+
+    /// The optional toolbar command exports through the worker and reports one successful archive.
+    @Test
+    public void exportsCurrentThemeThroughInjectedToolbarCommand() {
+        @Unmodifiable List<ThemePackItem> items = items(1);
+        ManualExecutor worker = new ManualExecutor();
+        RecordingInteractions interactions = new RecordingInteractions(
+                temporaryDirectory.resolve("toolbar-export.xyml-theme"));
+        ThemePackManagementModel model = new ThemePackManagementModel(
+                new ImmediateBackend(items),
+                new RecordingApplication(),
+                Runnable::run,
+                items.get(0).reference());
+        CurrentThemePackExportService exportService = new CurrentThemePackExportService(
+                () -> new CurrentThemePackAppearance(
+                        ResolvedTheme.DEFAULT,
+                        new SwingWindowAppearanceRequest(
+                                new SwingBackgroundSource.ThemeColorFill(),
+                                0.8,
+                                NetworkBackgroundImageCachePolicy.DISABLED,
+                                false)),
+                () -> "SelectedPlayer",
+                () -> "Unknown",
+                worker);
+        ThemePackManagementPanel panel = onEdt(() -> new ThemePackManagementPanel(
+                model,
+                ThemePackManagementStrings.english(),
+                interactions,
+                worker,
+                exportService));
+        worker.runAll();
+        flushEdt();
+
+        onEdt(() -> {
+            AbstractButton export = findNamed(panel, "themePacksExport", AbstractButton.class);
+            assertTrue(export.isEnabled());
+            export.doClick();
+            assertFalse(export.isEnabled());
+            assertFalse(Files.exists(temporaryDirectory.resolve("toolbar-export.xyml-theme")));
+        });
+        worker.runAll();
+        flushEdt();
+
+        onEdt(() -> {
+            Path output = temporaryDirectory.resolve("toolbar-export.xyml-theme")
+                    .toAbsolutePath()
+                    .normalize();
+            assertTrue(Files.isRegularFile(output));
+            assertEquals(output, interactions.successfulExport);
+            assertEquals("SelectedPlayer", Objects.requireNonNull(interactions.exportDefaults).author());
+            assertTrue(findNamed(panel, "themePacksExport", AbstractButton.class).isEnabled());
+            assertEquals(null, interactions.exportFailure);
+            panel.close();
+        });
+    }
 
     /// The panel loads only its measured viewport, filters locally, and applies the exact selected reference.
     @Test
@@ -563,6 +621,30 @@ public final class ThemePackManagementPanelTest {
     /// Dialog and desktop fake with no external side effects.
     @NotNullByDefault
     private static final class RecordingInteractions implements ThemePackManagementInteractions {
+        /// Optional target returned by the export chooser fake.
+        private final @Nullable Path exportTarget;
+
+        /// Defaults most recently supplied to the export chooser.
+        private @Nullable ThemePackExportDefaults exportDefaults;
+
+        /// Successfully published archive most recently reported by the panel.
+        private @Nullable Path successfulExport;
+
+        /// Export failure most recently reported by the panel.
+        private @Nullable Throwable exportFailure;
+
+        /// Creates interactions that cancel current-theme export.
+        private RecordingInteractions() {
+            this(null);
+        }
+
+        /// Creates interactions that confirm export to one target.
+        ///
+        /// @param exportTarget output returned by the chooser, or `null` to cancel
+        private RecordingInteractions(@Nullable Path exportTarget) {
+            this.exportTarget = exportTarget;
+        }
+
         /// Cancels archive selection.
         @Override
         public @Nullable Path chooseImportArchive(Component owner) {
@@ -579,6 +661,47 @@ public final class ThemePackManagementPanelTest {
         @Override
         public CompletionStage<@Nullable Void> revealInstalledDirectory(Path directory) {
             return CompletableFuture.completedFuture(null);
+        }
+
+        /// Returns a complete request when this fake has an export target.
+        ///
+        /// @param owner dialog owner
+        /// @param defaults generated export defaults
+        /// @return confirmed request or `null`
+        @Override
+        public @Nullable ThemePackExportRequest chooseThemePackExport(
+                Component owner,
+                ThemePackExportDefaults defaults) {
+            Objects.requireNonNull(owner, "owner");
+            exportDefaults = Objects.requireNonNull(defaults, "defaults");
+            return exportTarget == null
+                    ? null
+                    : new ThemePackExportRequest(
+                            defaults.packId(),
+                            defaults.name(),
+                            defaults.version(),
+                            defaults.author(),
+                            exportTarget);
+        }
+
+        /// Records one success callback.
+        ///
+        /// @param owner dialog owner
+        /// @param outputFile published archive
+        @Override
+        public void showThemePackExportSuccess(Component owner, Path outputFile) {
+            Objects.requireNonNull(owner, "owner");
+            successfulExport = Objects.requireNonNull(outputFile, "outputFile");
+        }
+
+        /// Records one failure callback.
+        ///
+        /// @param owner dialog owner
+        /// @param failure export failure
+        @Override
+        public void showThemePackExportFailure(Component owner, Throwable failure) {
+            Objects.requireNonNull(owner, "owner");
+            exportFailure = Objects.requireNonNull(failure, "failure");
         }
     }
 

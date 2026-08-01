@@ -22,6 +22,7 @@ import com.google.common.jimfs.Jimfs;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.collection.ListChange;
 import space.minecraftstl.xyml.observable.collection.ObservableList;
@@ -312,9 +313,9 @@ public final class GameDirectoriesTest {
         }
     }
 
-    /// Tests that new isolated installing instances resolve content directories under the version root before metadata is saved.
+    /// Tests that new isolated installs resolve content directories under the instance root before a manifest is saved.
     @Test
-    public void newIsolatedInstallingInstanceUsesVersionRootBeforeVersionExists(@TempDir Path tempDirectory)
+    public void newIsolatedInstallingInstanceUsesInstanceRootBeforeManifestExists(@TempDir Path tempDirectory)
             throws ReflectiveOperationException {
         GameSettingsPresetID defaultPresetId =
                 GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174002");
@@ -335,15 +336,15 @@ public final class GameDirectoriesTest {
                      new GameDirectoryEnvironment(localDirectories, userDirectories, presets)) {
             settings().defaultGameSettingsPresetProperty().set(defaultPresetId);
             XYMLGameRepository repository = new XYMLGameRepository(gameDirectory);
-            String id = "1.21.11-fabric";
+            GameInstanceID id = new GameInstanceID("1.21.11-fabric");
 
-            assertFalse(repository.hasVersion(id));
+            assertFalse(repository.hasInstance(id));
             assertEquals(repository.getBaseDirectory(), repository.getRunDirectory(id));
 
             repository.applyDefaultIsolationSettingForNewInstance(id, true);
 
-            assertEquals(repository.getVersionRoot(id), repository.getRunDirectory(id));
-            assertEquals(repository.getVersionRoot(id).resolve("mods"), repository.getModsDirectory(id));
+            assertEquals(repository.getInstanceRoot(id), repository.getRunDirectory(id));
+            assertEquals(repository.getInstanceRoot(id).resolve("mods"), repository.getModsDirectory(id));
 
             assertTrue(repository.removeInstanceFromDisk(id));
             assertEquals(repository.getBaseDirectory(), repository.getRunDirectory(id));

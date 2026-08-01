@@ -20,7 +20,9 @@ package space.minecraftstl.xyml.ui.swing.application;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.Metadata;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.install.DefaultGameInstallService;
 import space.minecraftstl.xyml.game.install.GameInstallService;
@@ -28,12 +30,14 @@ import space.minecraftstl.xyml.game.install.RepositoryGameInstallTaskFactory;
 import space.minecraftstl.xyml.game.launch.LaunchRequest;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.setting.DownloadProviders;
+import space.minecraftstl.xyml.setting.Accounts;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.theme.BuiltinThemePackCatalog;
 import space.minecraftstl.xyml.theme.LocalThemePackRepository;
+import space.minecraftstl.xyml.theme.ResolvedTheme;
 import space.minecraftstl.xyml.theme.ThemeReference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
@@ -78,6 +82,8 @@ import space.minecraftstl.xyml.ui.swing.page.settings.PersistedAppearanceSetting
 import space.minecraftstl.xyml.ui.swing.page.settings.SettingsCenterPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.StoredAppearanceSettings;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.SwingThemePackManagementInteractions;
+import space.minecraftstl.xyml.ui.swing.page.settings.theme.CurrentThemePackAppearance;
+import space.minecraftstl.xyml.ui.swing.page.settings.theme.CurrentThemePackExportService;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemeRuntimeController;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementModel;
 import space.minecraftstl.xyml.ui.swing.page.settings.theme.ThemePackManagementModelFactory;
@@ -304,7 +310,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         }
 
         @Unmodifiable Map<ShellPageId, ShellPageFactory<? extends JComponent>> pageFactories =
-                createPageFactories(models, presentation, animator);
+                createPageFactories(models, presentation, animator, themeManager);
         final SwingApplicationWindow createdWindow;
         try {
             createdWindow = Objects.requireNonNull(
@@ -401,7 +407,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
     private static @Unmodifiable Map<ShellPageId, ShellPageFactory<? extends JComponent>> createPageFactories(
             SwingApplicationPageModels models,
             SwingApplicationPresentation presentation,
-            SwingAnimator animator) {
+            SwingAnimator animator,
+            SwingThemeManager themeManager) {
         EnumMap<ShellPageId, ShellPageFactory<? extends JComponent>> factories =
                 new EnumMap<>(ShellPageId.class);
         factories.put(ShellPageId.INSTANCES, () -> new InstancesPanel(
@@ -421,7 +428,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
         factories.put(ShellPageId.ACCOUNTS, () -> new AccountsPanel(models.accounts(), presentation.accounts()));
         factories.put(
                 ShellPageId.SETTINGS,
-                () -> createSettingsPage(models, presentation));
+                () -> createSettingsPage(models, presentation, themeManager));
         return Map.copyOf(factories);
     }
 
@@ -432,8 +439,10 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @return fully owned settings center
     private static SettingsCenterPanel createSettingsPage(
             SwingApplicationPageModels models,
-            SwingApplicationPresentation presentation) {
+            SwingApplicationPresentation presentation,
+            SwingThemeManager themeManager) {
         EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(themeManager, "themeManager");
         @Nullable ThemePackManagementModel themePackModel = models.createThemePackManagementModel();
         @Nullable ThemePackManagementPanel themePackPanel = null;
         if (themePackModel != null) {
@@ -441,11 +450,19 @@ public final class SwingApplicationComposition implements AutoCloseable {
                     ? ThemePackManagementStrings.simplifiedChinese()
                     : ThemePackManagementStrings.english();
             try {
+                CurrentThemePackExportService exportService = new CurrentThemePackExportService(
+                        () -> new CurrentThemePackAppearance(
+                                Objects.requireNonNullElse(themeManager.resolvedTheme(), ResolvedTheme.DEFAULT),
+                                themeManager.windowAppearance()),
+                        SwingApplicationComposition::selectedAccountName,
+                        () -> I18n.i18n("message.unknown"),
+                        Schedulers.io());
                 themePackPanel = new ThemePackManagementPanel(
                         themePackModel,
                         strings,
                         new SwingThemePackManagementInteractions(strings, Schedulers.io()),
-                        Schedulers.io());
+                        Schedulers.io(),
+                        exportService);
             } catch (RuntimeException | Error failure) {
                 themePackModel.close();
                 throw failure;
@@ -470,6 +487,15 @@ public final class SwingApplicationComposition implements AutoCloseable {
             appearancePanel.close();
             throw failure;
         }
+    }
+
+    /// Returns the currently selected account profile name for export metadata on the launcher state thread.
+    ///
+    /// @return selected profile name, or `null` when no account is selected
+    private static @Nullable String selectedAccountName() {
+        LauncherStateDispatcher.requireEventThread();
+        @Nullable Account account = Accounts.getSelectedAccount();
+        return account == null ? null : account.getProfileName();
     }
 
     /// Creates production collaborators and records service-before-model-before-store cleanup order.
@@ -524,13 +550,13 @@ public final class SwingApplicationComposition implements AutoCloseable {
                             worldFolder -> commands.launchCommand().launch(new LaunchRequest(
                                     bindings.homeStore().snapshot().accountId(),
                                     bindings.repository().getGameDirectory().getId().toString(),
-                                    instanceId,
+                                    instanceId.id(),
                                     worldFolder)),
                             (worldFolder, destination) -> commands.launchScriptExportCommand().export(
                                     new LaunchRequest(
                                             bindings.homeStore().snapshot().accountId(),
                                             bindings.repository().getGameDirectory().getId().toString(),
-                                            instanceId,
+                                            instanceId.id(),
                                             worldFolder),
                                     destination));
                     InstanceMaintenanceLaunchActions maintenanceLaunchActions =
@@ -612,7 +638,7 @@ public final class SwingApplicationComposition implements AutoCloseable {
     /// @param instanceId stable selected repository identifier
     private static void openInstanceManagement(
             InstanceManagementCoordinator management,
-            String instanceId) {
+            GameInstanceID instanceId) {
         Objects.requireNonNull(management, "management");
         Objects.requireNonNull(instanceId, "instanceId");
         management.open(instanceId).whenComplete(

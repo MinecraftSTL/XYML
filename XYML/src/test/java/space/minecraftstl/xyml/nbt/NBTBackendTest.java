@@ -62,9 +62,10 @@ final class NBTBackendTest {
     void detectsSupportedFileFamiliesWithoutTouchingTheFilesystem() {
         assertEquals(NBTFileType.TAG, NBTFileType.detect(Path.of("level.dat")));
         assertEquals(NBTFileType.TAG, NBTFileType.detect(Path.of("level.DAT_OLD")));
+        assertEquals(NBTFileType.TAG, NBTFileType.detect(Path.of("structure.nbt")));
         assertEquals(NBTFileType.ANVIL, NBTFileType.detect(Path.of("r.0.0.MCA")));
         assertEquals(NBTFileType.REGION, NBTFileType.detect(Path.of("r.0.0.mcr")));
-        assertNull(NBTFileType.detect(Path.of("level.nbt")));
+        assertNull(NBTFileType.detect(Path.of("level.txt")));
         assertFalse(NBTFileType.supports(Path.of("level")));
     }
 

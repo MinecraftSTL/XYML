@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.backups;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.game.WorldLockedException;
@@ -73,7 +74,7 @@ public final class FileSystemWorldBackupCatalog implements WorldBackupCatalog {
     /// @param repository repository containing the managed instance
     /// @param instanceId stable managed instance identifier
     /// @param executor caller-owned background executor
-    public FileSystemWorldBackupCatalog(GameRepository repository, String instanceId, Executor executor) {
+    public FileSystemWorldBackupCatalog(GameRepository repository, GameInstanceID instanceId, Executor executor) {
         this(
                 Objects.requireNonNull(repository, "repository")
                         .getRunDirectory(Objects.requireNonNull(instanceId, "instanceId")),

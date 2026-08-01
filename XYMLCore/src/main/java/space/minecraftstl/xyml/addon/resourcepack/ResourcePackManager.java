@@ -18,9 +18,15 @@
 package space.minecraftstl.xyml.addon.resourcepack;
 
 import com.google.gson.annotations.SerializedName;
-import space.minecraftstl.xyml.game.GameRepository;
+import kala.encdet.EncodingDetector;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.meta.PackMcMeta;
+import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.util.Pair;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
@@ -30,12 +36,10 @@ import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.tree.ZipFileTree;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionRange;
-import org.jetbrains.annotations.Contract;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
@@ -216,41 +220,55 @@ public final class ResourcePackManager extends LocalAddonManager<ResourcePackFil
     private @Nullable PackMcMeta.PackVersion requiredVersion;
     private boolean supportsNewOptionsFormat;
 
+    /// Encoding detected while reading the current options file, or null before the first read.
+    private @Nullable Charset optionsFileEncoding;
+
     private boolean loaded = false;
 
-    public ResourcePackManager(GameRepository repository, String id) {
-        super(repository, id);
-        this.resourcePackDirectory = this.repository.getResourcePackDirectory(this.id);
-        this.optionsFile = repository.getRunDirectory(id).resolve("options.txt");
+    public ResourcePackManager(GameRepository repository, GameInstanceID instanceId) {
+        super(repository, instanceId);
+        this.resourcePackDirectory = this.repository.getResourcePackDirectory(this.instanceId);
+        this.optionsFile = repository.getRunDirectory(instanceId).resolve("options.txt");
     }
 
+    /// Reads options with web-compatible encoding detection while retaining the detected encoding for writes.
     @NotNull
     private Map<String, String> loadOptions() {
         getMinecraftVersion();
         Map<String, String> options = new LinkedHashMap<>();
         if (!Files.isRegularFile(optionsFile)) return options;
-        try (var stream = Files.lines(optionsFile, StandardCharsets.UTF_8)) {
-            stream.forEach(s -> {
-                if (StringUtils.isNotBlank(s)) {
-                    var entry = s.split(":", 2);
-                    if (entry.length == 2) {
-                        options.put(entry[0], entry[1]);
-                    }
-                }
-            });
-        } catch (IOException e) {
+        byte[] bytes;
+        try {
+            bytes = Files.readAllBytes(optionsFile);
+        } catch (IOException | UncheckedIOException e) {
             LOG.warning("Failed to read instance options file", e);
+            return options;
         }
+
+        @Nullable EncodingDetector.Encoding bestEncoding = EncodingDetector.MODERN_WEB.detect(bytes).bestEncoding();
+        @Nullable Charset approximateCharset = bestEncoding == null ? null : bestEncoding.approximateCharset();
+        optionsFileEncoding = bestEncoding == EncodingDetector.Encoding.ASCII || approximateCharset == null
+                ? StandardCharsets.UTF_8
+                : approximateCharset;
+        new String(bytes, optionsFileEncoding).lines().forEach(s -> {
+            if (StringUtils.isNotBlank(s)) {
+                var entry = s.split(":", 2);
+                if (entry.length == 2) {
+                    options.put(entry[0], entry[1]);
+                }
+            }
+        });
         return options;
     }
 
+    /// Persists options with the encoding detected during the corresponding read.
     private void saveOptions(@NotNull Map<String, String> options) {
+        StringBuilder sb = new StringBuilder();
+        for (var entry : options.entrySet()) {
+            sb.append(entry.getKey()).append(":").append(entry.getValue()).append(System.lineSeparator());
+        }
         try {
-            StringBuilder sb = new StringBuilder();
-            for (var entry : options.entrySet()) {
-                sb.append(entry.getKey()).append(":").append(entry.getValue()).append(System.lineSeparator());
-            }
-            FileUtils.saveSafely(optionsFile, sb.toString());
+            FileUtils.saveSafely(optionsFile, sb.toString(), optionsFileEncoding);
         } catch (IOException e) {
             LOG.warning("Failed to save instance options file", e);
         }
@@ -262,7 +280,7 @@ public final class ResourcePackManager extends LocalAddonManager<ResourcePackFil
             lock.lock();
             try {
                 if (minecraftVersion == null) {
-                    minecraftVersion = GameVersionNumber.asGameVersion(repository.getGameVersion(id));
+                    minecraftVersion = GameVersionNumber.asGameVersion(repository.getGameVersion(instanceId));
                     supportsNewOptionsFormat = isMcVersionSupportsNewOptionsFormat(minecraftVersion);
                 }
             } finally {
@@ -277,7 +295,8 @@ public final class ResourcePackManager extends LocalAddonManager<ResourcePackFil
         if (requiredVersion == null) {
             lock.lock();
             try {
-                if (requiredVersion == null) requiredVersion = getPackVersion(getMinecraftVersion(), repository.getVersionJar(id));
+                if (requiredVersion == null)
+                    requiredVersion = getPackVersion(getMinecraftVersion(), repository.getInstanceJar(instanceId));
             } finally {
                 lock.unlock();
             }

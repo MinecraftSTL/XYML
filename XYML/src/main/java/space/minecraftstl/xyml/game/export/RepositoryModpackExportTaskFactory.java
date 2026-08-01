@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.game.export;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.modpack.ModpackExportInfo;
 import space.minecraftstl.xyml.modpack.mcbbs.McbbsModpackExportTask;
@@ -41,7 +42,7 @@ import java.util.Objects;
 
 /// Adapts immutable Swing export requests to the four existing repository-backed core exporters.
 ///
-/// Export data is always read from [XYMLGameRepository#getRunDirectory(String)]. Each core task writes
+/// Export data is always read from [XYMLGameRepository#getRunDirectory(GameInstanceID)]. Each core task writes
 /// a temporary archive beside the requested destination. A completed archive is published through a
 /// no-replace hard link when supported, with a same-directory no-replace move as the compatibility path.
 @NotNullByDefault
@@ -90,8 +91,9 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
                     throw new FileAlreadyExistsException(output.toString());
                 }
 
+                GameInstanceID instanceId = new GameInstanceID(requestSnapshot.instanceId());
                 Path runDirectory = Objects.requireNonNull(
-                        runDirectoryResolver.resolve(requestSnapshot.instanceId()),
+                        runDirectoryResolver.resolve(instanceId),
                         "run directory");
                 @Unmodifiable List<String> whitelist =
                         requestSnapshot.fileSelection().expand(runDirectory);
@@ -110,7 +112,7 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
                             requestSnapshot.format());
                     coreTaskCreator.create(
                                     requestSnapshot.format(),
-                                    requestSnapshot.instanceId(),
+                                    instanceId,
                                     exportInfo,
                                     whitelist,
                                     temporary)
@@ -192,7 +194,7 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
         ///
         /// @param instanceId selected repository instance
         /// @return effective run directory
-        Path resolve(String instanceId);
+        Path resolve(GameInstanceID instanceId);
     }
 
     /// Creates one stopped core export task.
@@ -209,7 +211,7 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
         /// @return stopped format-specific core task
         Task<?> create(
                 ModpackExportFormat format,
-                String instanceId,
+                GameInstanceID instanceId,
                 ModpackExportInfo exportInfo,
                 @Unmodifiable List<String> whitelist,
                 Path temporaryOutput);
@@ -239,7 +241,7 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
         @Override
         public Task<?> create(
                 ModpackExportFormat format,
-                String instanceId,
+                GameInstanceID instanceId,
                 ModpackExportInfo exportInfo,
                 @Unmodifiable List<String> whitelist,
                 Path temporaryOutput) {
@@ -274,7 +276,7 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
         /// @param exportInfo isolated mutable export metadata
         /// @return MultiMC configuration written beside the manifest
         private MultiMCInstanceConfiguration createMultiMCConfiguration(
-                String instanceId,
+                GameInstanceID instanceId,
                 ModpackExportInfo exportInfo) {
             GameSettings.Effective setting = repository.getEffectiveGameSettings(instanceId);
             return new MultiMCInstanceConfiguration(

@@ -22,9 +22,9 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.game.Log;
-import space.minecraftstl.xyml.game.Version;
 import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.util.StringUtils;
@@ -147,7 +147,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// @param process completed managed game process
     /// @param exitType classified abnormal exit type
     /// @param repository repository owning the launched instance
-    /// @param version launched version
+    /// @param manifest launched game-instance manifest
     /// @param launchOptions resolved launch configuration
     /// @param logs current captured process-output history, copied before asynchronous work starts
     /// @param showGameLogs action opening or raising the Swing game-log window
@@ -156,7 +156,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             ManagedProcess process,
             ProcessListener.ExitType exitType,
             DefaultGameRepository repository,
-            Version version,
+            GameInstanceManifest manifest,
             LaunchOptions launchOptions,
             List<Log> logs,
             Runnable showGameLogs) {
@@ -164,14 +164,13 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         GameCrashWindowModel model = GameCrashWindowModel.fromLaunch(
                 exitType,
                 repository,
-                version,
+                manifest,
                 launchOptions,
                 copiedLogs);
         ExecutorService worker = newWorker();
         GameCrashWindowActions actions = new DefaultGameCrashWindowActions(
                 process,
                 repository,
-                version,
                 launchOptions,
                 copiedLogs,
                 showGameLogs,

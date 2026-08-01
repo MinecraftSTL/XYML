@@ -80,7 +80,7 @@ public final class LauncherHelper {
     private final Account account;
 
     /// Stable instance identifier selected for this helper.
-    private final String selectedInstance;
+    private final GameInstanceID selectedInstanceId;
 
     /// Effective settings captured for the selected instance.
     private final GameSettings.Effective setting;
@@ -111,22 +111,22 @@ public final class LauncherHelper {
     ///
     /// @param repository repository containing the selected instance
     /// @param account account used for launch authentication
-    /// @param selectedInstance stable selected instance identifier
+    /// @param selectedInstanceId stable selected instance identifier
     /// @param launchInteraction production launch-decision presenter
     /// @param accountReauthentication production credential-expiry recovery service
     public LauncherHelper(
             XYMLGameRepository repository,
             Account account,
-            String selectedInstance,
+            GameInstanceID selectedInstanceId,
             LaunchInteraction launchInteraction,
             AccountReauthentication accountReauthentication) {
         this.repository = Objects.requireNonNull(repository);
         this.account = Objects.requireNonNull(account);
-        this.selectedInstance = Objects.requireNonNull(selectedInstance);
+        this.selectedInstanceId = Objects.requireNonNull(selectedInstanceId);
         this.productionInteractions = new ProductionInteractions(
                 launchInteraction,
                 accountReauthentication);
-        this.setting = repository.getEffectiveGameSettings(selectedInstance);
+        this.setting = repository.getEffectiveGameSettings(selectedInstanceId);
         this.launcherVisibility = setting.getInheritable(GameSettings::launcherVisibilityProperty);
         this.showLogs = setting.getInheritable(GameSettings::showLogsProperty);
         this.logLineLimit = Log.getLogLines();
@@ -175,14 +175,14 @@ public final class LauncherHelper {
     /// Builds a stopped task for the production Swing launch service.
     ///
     /// Construction retains synchronous metadata normalization and analysis performed by
-    /// [MaintainTask#maintain(XYMLGameRepository, Version)] and [#checkGameState(XYMLGameRepository,
-    /// GameSettings.Effective, Version)]. The returned task owns the remaining preparation, process creation,
+    /// [MaintainTask#maintain(GameRepository, GameInstanceManifest)] and [#checkGameState(XYMLGameRepository,
+    /// GameSettings.Effective, GameInstanceManifest)]. The returned task owns the remaining preparation, process creation,
     /// process registration, and process lifecycle monitoring. This method does not start an executor; callers must
     /// invoke it away from the Swing event-dispatch thread.
     ///
     /// @return not-yet-started task whose successful result is the actual managed game process
     public Task<ManagedProcess> createLaunchTask() {
-        LOG.info("Launching game instance: " + selectedInstance);
+        LOG.info("Launching game instance: " + selectedInstanceId);
         return createGameLaunchTask();
     }
 
@@ -196,7 +196,7 @@ public final class LauncherHelper {
     /// @return not-yet-started task that completes with the normalized written script path
     public Task<Path> createLaunchScriptTask(Path scriptFile) {
         Path destination = Objects.requireNonNull(scriptFile, "scriptFile").toAbsolutePath().normalize();
-        LOG.info("Creating launch script for game instance: " + selectedInstance);
+        LOG.info("Creating launch script for game instance: " + selectedInstanceId);
         return applyLaunchProgressPolicy(
                 createLaunchPreparation(true).thenComposeAsync((@Nullable XYMLGameLauncher launcher) ->
                         Task.supplyAsync(() -> {
@@ -224,28 +224,37 @@ public final class LauncherHelper {
         PROCESSES.removeIf(it -> it.get() == null);
 
         DefaultDependencyManager dependencyManager = repository.getDependency();
-        AtomicReference<Version> version = new AtomicReference<>(MaintainTask.maintain(repository, repository.getResolvedVersion(selectedInstance)));
-        Optional<String> gameVersion = repository.getGameVersion(version.get());
-        boolean integrityCheck = repository.unmarkInstanceLaunchedAbnormally(selectedInstance);
+        AtomicReference<GameInstanceManifest> manifest = new AtomicReference<>(MaintainTask.maintain(
+                repository,
+                repository.getResolvedInstanceManifest(selectedInstanceId).launchManifest()));
+        Optional<String> gameVersion = repository.getGameVersion(manifest.get());
+        boolean integrityCheck = repository.unmarkInstanceLaunchedAbnormally(selectedInstanceId);
         List<String> javaAgents = new ArrayList<>(0);
         List<String> javaArguments = new ArrayList<>(0);
 
         AtomicReference<@Nullable JavaRuntime> javaVersionRef = new AtomicReference<>();
 
-        Task<XYMLGameLauncher> launcherTask = checkGameState(repository, setting, version.get())
+        Task<XYMLGameLauncher> launcherTask = checkGameState(repository, setting, manifest.get())
                 .thenComposeAsync((@Nullable JavaRuntime java) -> {
                     javaVersionRef.set(Objects.requireNonNull(java));
-                    version.set(NativePatcher.patchNative(repository, version.get(), gameVersion.orElse(null), java, setting, javaArguments));
+                    manifest.set(NativePatcher.patchNative(
+                            repository,
+                            manifest.get(),
+                            gameVersion.orElse(null),
+                            java,
+                            setting,
+                            javaArguments));
                     if (setting.getInheritable(GameSettings::notCheckGameProperty))
                         return null;
                     return Task.allOf(
-                            dependencyManager.checkGameCompletionAsync(version.get(), integrityCheck),
+                            dependencyManager.checkGameCompletionAsync(manifest.get(), integrityCheck),
                             Task.composeAsync(() -> {
                                 try {
-                                    ModpackConfiguration<?> configuration = ModpackHelper.readModpackConfiguration(repository.getModpackConfiguration(selectedInstance));
+                                    ModpackConfiguration<?> configuration = ModpackHelper.readModpackConfiguration(
+                                            repository.getModpackConfiguration(selectedInstanceId));
                                     @Nullable ModpackProvider provider = ModpackHelper.getProviderByType(configuration.getType());
                                     if (provider == null) return null;
-                                    else return provider.createCompletionTask(dependencyManager, selectedInstance);
+                                    else return provider.createCompletionTask(dependencyManager, selectedInstanceId);
                                 } catch (IOException e) {
                                     return null;
                                 }
@@ -262,7 +271,7 @@ public final class LauncherHelper {
                                         OperatingSystem.SYSTEM_VERSION);
                                 if (lib == null)
                                     return null;
-                                Path file = dependencyManager.getGameRepository().getLibraryFile(version.get(), lib);
+                                Path file = dependencyManager.getGameRepository().getLibraryFile(manifest.get(), lib);
                                 if (file.toAbsolutePath().toString().indexOf('=') >= 0) {
                                     LOG.warning("Invalid character '=' in the libraries directory path, unable to attach software renderer loader");
                                     return null;
@@ -270,7 +279,7 @@ public final class LauncherHelper {
 
                                 String agent = FileUtils.getAbsolutePath(file) + "=" + renderer.mesaDriverName();
 
-                                if (GameLibrariesTask.shouldDownloadLibrary(repository, version.get(), lib, integrityCheck)) {
+                                if (GameLibrariesTask.shouldDownloadLibrary(repository, manifest.get(), lib, integrityCheck)) {
                                     return new LibraryDownloadTask(dependencyManager, file, lib)
                                             .thenRunAsync(() -> javaAgents.add(agent));
                                 } else {
@@ -280,14 +289,16 @@ public final class LauncherHelper {
                             })
                     );
                 }).withStage("launch.state.dependencies")
-                .thenComposeAsync(() -> gameVersion.map(s -> new GameVerificationFixTask(dependencyManager, s, version.get())).orElse(null))
+                .thenComposeAsync(() -> gameVersion
+                        .map(value -> new GameVerificationFixTask(dependencyManager, value, manifest.get()))
+                        .orElse(null))
                 .thenComposeAsync(() -> {
                     if (setting.getInheritable(GameSettings::allowAutoAgentProperty)
                             || setting.getInheritable(GameSettings::noJVMOptionsProperty)
                             || setting.getInheritable(GameSettings::noOptimizingJVMOptionsProperty)
                             || Boolean.TRUE.equals(state().getShownTips().get(LWJGL_3_4_1_TIP))
                             || !NativePatcher.needPatchMemoryUtil(
-                                    version.get(),
+                                    manifest.get(),
                                     Objects.requireNonNull(javaVersionRef.get(), "selected Java runtime").getParsedVersion())) {
                         return Task.completed(null);
                     }
@@ -320,7 +331,7 @@ public final class LauncherHelper {
                 .thenComposeAsync(() -> logIn(account).withStage("launch.state.logging_in"))
                 .thenComposeAsync((@Nullable AuthInfo authInfo) -> Task.supplyAsync(() -> {
                     LaunchOptions.Builder launchOptionsBuilder = repository.getLaunchOptions(
-                            selectedInstance,
+                            selectedInstanceId,
                             Objects.requireNonNull(javaVersionRef.get(), "selected Java runtime"),
                             repository.getBaseDirectory(),
                             javaAgents,
@@ -335,16 +346,17 @@ public final class LauncherHelper {
 
                     LaunchOptions launchOptions = launchOptionsBuilder.create();
 
-                    LOG.info("Here's the structure of game mod directory:\n" + FileUtils.printFileStructure(repository.getModsDirectory(selectedInstance), 10));
+                    LOG.info("Here's the structure of game mod directory:\n"
+                            + FileUtils.printFileStructure(repository.getModsDirectory(selectedInstanceId), 10));
 
                     return new XYMLGameLauncher(
                             repository,
-                            version.get(),
+                            manifest.get(),
                             authInfo,
                             launchOptions,
                             launcherVisibility == LauncherVisibility.CLOSE
                                     ? null // Unnecessary to start listening to game process output when close launcher immediately after game launched.
-                                    : new XYMLProcessListener(repository, version.get(), authInfo, launchOptions)
+                                    : new XYMLProcessListener(repository, manifest.get(), authInfo, launchOptions)
                     );
                 }));
         return launcherTask;
@@ -608,18 +620,20 @@ public final class LauncherHelper {
     ///
     /// @param repository repository supplying game metadata and dependencies
     /// @param setting effective launch settings
-    /// @param version resolved version to inspect
+    /// @param manifest resolved instance manifest to inspect
     /// @return stopped task that produces an accepted Java runtime
     private Task<JavaRuntime> checkGameState(
             XYMLGameRepository repository,
             GameSettings.Effective setting,
-            Version version) {
-        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(version, repository.getGameVersion(version).orElse(null));
+            GameInstanceManifest manifest) {
+        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(
+                manifest,
+                repository.getGameVersion(manifest).orElse(null));
         GameVersionNumber gameVersion = GameVersionNumber.asGameVersion(analyzer.getVersion(LibraryAnalyzer.LibraryType.MINECRAFT));
 
         Task<@Nullable JavaRuntime> getJavaTask = Task.supplyAsync(() -> {
             try {
-                return setting.getJava(gameVersion, version);
+                return setting.getJava(gameVersion, manifest);
             } catch (InterruptedException e) {
                 throw new CancellationException();
             }
@@ -670,7 +684,7 @@ public final class LauncherHelper {
                     }
 
                     if (targetJavaVersion == null)
-                        targetJavaVersion = version.getJavaVersion();
+                        targetJavaVersion = manifest.javaVersion();
                 }
 
                 if (targetJavaVersion != null && supportedVersions.contains(targetJavaVersion)) {
@@ -686,8 +700,8 @@ public final class LauncherHelper {
 
                 if (java != null) {
                     for (JavaVersionConstraint constraint : JavaVersionConstraint.ALL) {
-                        if (constraint.appliesToVersion(gameVersion, version, java, analyzer)) {
-                            if (!constraint.checkJava(gameVersion, version, java, analyzer)) {
+                        if (constraint.appliesToVersion(gameVersion, manifest, java, analyzer)) {
+                            if (!constraint.checkJava(gameVersion, manifest, java, analyzer)) {
                                 if (constraint.isMandatory()) {
                                     violatedMandatoryConstraints.add(constraint);
                                 } else {
@@ -699,7 +713,7 @@ public final class LauncherHelper {
                 }
 
                 if (java == null || !violatedMandatoryConstraints.isEmpty()) {
-                    @Nullable JavaRuntime suggestedJava = JavaManager.findSuitableJava(gameVersion, version);
+                    @Nullable JavaRuntime suggestedJava = JavaManager.findSuitableJava(gameVersion, manifest);
                     if (suggestedJava != null) {
                         return chooseProductionRecommendedJava(suggestedJava);
                     } else if (java == null) {
@@ -716,7 +730,7 @@ public final class LauncherHelper {
                                     ? GameJavaVersion.getCleanroomJavaVersion(cleanroomVersion)
                                     : GameJavaVersion.JAVA_21;
                         } else if (violatedMandatoryConstraints.contains(JavaVersionConstraint.GAME_JSON))
-                            gameJavaVersion = version.getJavaVersion();
+                            gameJavaVersion = manifest.javaVersion();
                         else if (violatedMandatoryConstraints.contains(JavaVersionConstraint.VANILLA))
                             gameJavaVersion = GameJavaVersion.getMinimumJavaVersion(gameVersion);
                         else
@@ -838,14 +852,16 @@ public final class LauncherHelper {
 
                 // Forge 2760~2773 will crash game with LiteLoader.
                 boolean hasForge2760 = forgeVersion != null && (forgeVersion.compareTo("1.12.2-14.23.5.2760") >= 0) && (forgeVersion.compareTo("1.12.2-14.23.5.2773") < 0);
-                boolean hasLiteLoader = version.getLibraries().stream().anyMatch(it -> it.is("com.mumfrey", "liteloader"));
+                boolean hasLiteLoader = manifest.getLibraries().stream()
+                        .anyMatch(it -> it.is("com.mumfrey", "liteloader"));
                 if (hasForge2760 && hasLiteLoader && gameVersion.compareTo("1.12.2") == 0) {
                     suggestions.add(i18n("launch.advice.forge2760_liteloader"));
                 }
 
                 // OptiFine 1.14.4 is not compatible with Forge 28.2.2 and later versions.
                 boolean hasForge28_2_2 = forgeVersion != null && (forgeVersion.compareTo("1.14.4-28.2.2") >= 0);
-                boolean hasOptiFine = version.getLibraries().stream().anyMatch(it -> it.is("optifine", "OptiFine"));
+                boolean hasOptiFine = manifest.getLibraries().stream()
+                        .anyMatch(it -> it.is("optifine", "OptiFine"));
                 if (hasForge28_2_2 && hasOptiFine && gameVersion.compareTo("1.14.4") == 0) {
                     suggestions.add(i18n("launch.advice.forge28_2_2_optifine"));
                 }
@@ -981,11 +997,11 @@ public final class LauncherHelper {
         /// Serializes launch-detection and bounded-log updates.
         private final ReentrantLock lock = new ReentrantLock();
 
-        /// Repository owning the launched version.
+        /// Repository owning the launched instance.
         private final XYMLGameRepository repository;
 
-        /// Resolved launched version.
-        private final Version version;
+        /// Resolved launched instance manifest.
+        private final GameInstanceManifest manifest;
 
         /// Immutable launch options used to diagnose a crash.
         private final LaunchOptions launchOptions;
@@ -1010,17 +1026,17 @@ public final class LauncherHelper {
 
         /// Creates a listener dedicated to one prepared launch.
         ///
-        /// @param repository repository owning the launched version
-        /// @param version resolved launched version
+        /// @param repository repository owning the launched instance
+        /// @param manifest resolved launched instance manifest
         /// @param authInfo authentication data, or null when the launcher permits an unauthenticated launch
         /// @param launchOptions immutable launch configuration
         public XYMLProcessListener(
                 XYMLGameRepository repository,
-                Version version,
+                GameInstanceManifest manifest,
                 @Nullable AuthInfo authInfo,
                 LaunchOptions launchOptions) {
             this.repository = repository;
-            this.version = version;
+            this.manifest = manifest;
             this.launchOptions = launchOptions;
             this.forbiddenAccessToken = authInfo != null ? authInfo.getAccessToken() : null;
             this.logs = new CircularArrayList<>(logLineLimit + 1);
@@ -1162,12 +1178,12 @@ public final class LauncherHelper {
                 return;
 
             if (exitType != ExitType.NORMAL) {
-                repository.markInstanceLaunchedAbnormally(version.getId());
+                repository.markInstanceLaunchedAbnormally(manifest.id());
                 SwingGameCrashWindow.open(
                         Objects.requireNonNull(process, "managed process"),
                         exitType,
                         repository,
-                        version,
+                        manifest,
                         launchOptions,
                         logs,
                         this::showCrashLogs);

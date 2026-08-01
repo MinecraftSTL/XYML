@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JButton;
@@ -56,7 +57,7 @@ final class InstanceLifecyclePanelTest {
         AtomicReference<@Nullable InstanceLifecyclePanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> panelReference.set(new InstanceLifecyclePanel(
-                    "source",
+                    new GameInstanceID("source"),
                     service,
                     executor,
                     InstanceLifecycleStrings.english(),
@@ -74,9 +75,11 @@ final class InstanceLifecyclePanelTest {
             });
             awaitBackgroundWork(executor);
 
-            assertEquals(new RenameCall("source", "renamed"), service.renameCall.get());
+            assertEquals(
+                    new RenameCall(new GameInstanceID("source"), new GameInstanceID("renamed")),
+                    service.renameCall.get());
             assertFalse(service.mutationRanOnEdt.get());
-            assertEquals("renamed", service.reconciledSelection.get());
+            assertEquals(new GameInstanceID("renamed"), service.reconciledSelection.get());
             assertTrue(service.reconciledOnEdt.get());
             assertEquals(1, completed.get());
             assertNull(interactions.failureDetail.get());
@@ -98,7 +101,7 @@ final class InstanceLifecyclePanelTest {
         AtomicReference<@Nullable InstanceLifecyclePanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> panelReference.set(new InstanceLifecyclePanel(
-                    "source",
+                    new GameInstanceID("source"),
                     service,
                     executor,
                     InstanceLifecycleStrings.english(),
@@ -115,9 +118,11 @@ final class InstanceLifecyclePanelTest {
             });
             awaitBackgroundWork(executor);
 
-            assertEquals(new DuplicateCall("source", "copy", true), service.duplicateCall.get());
+            assertEquals(
+                    new DuplicateCall(new GameInstanceID("source"), new GameInstanceID("copy"), true),
+                    service.duplicateCall.get());
             assertFalse(service.mutationRanOnEdt.get());
-            assertEquals("copy", service.reconciledSelection.get());
+            assertEquals(new GameInstanceID("copy"), service.reconciledSelection.get());
             assertEquals(1, completed.get());
         } finally {
             closePanel(panelReference.get());
@@ -136,7 +141,7 @@ final class InstanceLifecyclePanelTest {
         AtomicReference<@Nullable InstanceLifecyclePanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> panelReference.set(new InstanceLifecyclePanel(
-                    "source",
+                    new GameInstanceID("source"),
                     service,
                     executor,
                     InstanceLifecycleStrings.english(),
@@ -186,7 +191,7 @@ final class InstanceLifecyclePanelTest {
         AtomicReference<@Nullable InstanceLifecyclePanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> panelReference.set(new InstanceLifecyclePanel(
-                    "source",
+                    new GameInstanceID("source"),
                     service,
                     executor,
                     InstanceLifecycleStrings.english(),
@@ -271,7 +276,7 @@ final class InstanceLifecyclePanelTest {
         private final AtomicBoolean mutationRanOnEdt = new AtomicBoolean();
 
         /// Reconciled preferred selection, or `null` after deletion.
-        private final AtomicReference<@Nullable String> reconciledSelection = new AtomicReference<>();
+        private final AtomicReference<@Nullable GameInstanceID> reconciledSelection = new AtomicReference<>();
 
         /// Whether selection reconciliation correctly returned to the EDT.
         private final AtomicBoolean reconciledOnEdt = new AtomicBoolean();
@@ -291,7 +296,7 @@ final class InstanceLifecyclePanelTest {
         /// @param destinationId destination identifier
         /// @throws IOException never thrown by this deterministic test implementation
         @Override
-        public void rename(String sourceId, String destinationId) throws IOException {
+        public void rename(GameInstanceID sourceId, GameInstanceID destinationId) throws IOException {
             mutationRanOnEdt.compareAndSet(false, SwingUtilities.isEventDispatchThread());
             renameCall.set(new RenameCall(sourceId, destinationId));
         }
@@ -303,7 +308,10 @@ final class InstanceLifecyclePanelTest {
         /// @param copySaves whether worlds should be copied
         /// @throws IOException never thrown by this deterministic test implementation
         @Override
-        public void duplicate(String sourceId, String destinationId, boolean copySaves) throws IOException {
+        public void duplicate(
+                GameInstanceID sourceId,
+                GameInstanceID destinationId,
+                boolean copySaves) throws IOException {
             mutationRanOnEdt.compareAndSet(false, SwingUtilities.isEventDispatchThread());
             duplicateCall.set(new DuplicateCall(sourceId, destinationId, copySaves));
         }
@@ -313,7 +321,7 @@ final class InstanceLifecyclePanelTest {
         /// @param sourceId source identifier
         /// @throws IOException never thrown by this deterministic test implementation
         @Override
-        public void delete(String sourceId) throws IOException {
+        public void delete(GameInstanceID sourceId) throws IOException {
             mutationRanOnEdt.compareAndSet(false, SwingUtilities.isEventDispatchThread());
             deleteCount.incrementAndGet();
         }
@@ -322,7 +330,7 @@ final class InstanceLifecyclePanelTest {
         ///
         /// @param preferredId preferred selection, or `null` after deletion
         @Override
-        public void reconcileSelection(@Nullable String preferredId) {
+        public void reconcileSelection(@Nullable GameInstanceID preferredId) {
             reconciledOnEdt.set(SwingUtilities.isEventDispatchThread());
             reconciledSelection.set(preferredId);
         }
@@ -349,7 +357,7 @@ final class InstanceLifecyclePanelTest {
         /// @param sourceId unused source identifier
         /// @return configured destination, or `null`
         @Override
-        public @Nullable String requestRename(Component owner, String sourceId) {
+        public @Nullable String requestRename(Component owner, GameInstanceID sourceId) {
             return renameDestination.get();
         }
 
@@ -359,7 +367,9 @@ final class InstanceLifecyclePanelTest {
         /// @param sourceId unused source identifier
         /// @return configured duplicate request, or `null`
         @Override
-        public @Nullable InstanceLifecycleDuplicateRequest requestDuplicate(Component owner, String sourceId) {
+        public @Nullable InstanceLifecycleDuplicateRequest requestDuplicate(
+                Component owner,
+                GameInstanceID sourceId) {
             return duplicateRequest.get();
         }
 
@@ -369,7 +379,7 @@ final class InstanceLifecyclePanelTest {
         /// @param sourceId unused source identifier
         /// @return configured deletion approval
         @Override
-        public boolean confirmDelete(Component owner, String sourceId) {
+        public boolean confirmDelete(Component owner, GameInstanceID sourceId) {
             return deleteApproved.get();
         }
 
@@ -389,7 +399,7 @@ final class InstanceLifecyclePanelTest {
     /// @param sourceId source identifier
     /// @param destinationId destination identifier
     @NotNullByDefault
-    private record RenameCall(String sourceId, String destinationId) {
+    private record RenameCall(GameInstanceID sourceId, GameInstanceID destinationId) {
     }
 
     /// Immutable recorded duplicate invocation.
@@ -398,6 +408,6 @@ final class InstanceLifecyclePanelTest {
     /// @param destinationId destination identifier
     /// @param copySaves whether worlds are copied
     @NotNullByDefault
-    private record DuplicateCall(String sourceId, String destinationId, boolean copySaves) {
+    private record DuplicateCall(GameInstanceID sourceId, GameInstanceID destinationId, boolean copySaves) {
     }
 }

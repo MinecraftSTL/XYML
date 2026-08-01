@@ -21,9 +21,10 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
-import space.minecraftstl.xyml.setting.InstanceIconType;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.ImageIcon;
@@ -63,7 +64,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     private final @Nullable InstanceIconStore iconStore;
 
     /// Stable identifier of the instance represented by this panel.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Caller-owned executor for repository and filesystem work.
     private final Executor executor;
@@ -121,7 +122,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @param repository repository containing the managed instance
     /// @param instanceId stable non-blank instance identifier
     /// @param executor caller-owned executor for repository and desktop operations
-    public InstanceOverviewPanel(GameRepository repository, String instanceId, Executor executor) {
+    public InstanceOverviewPanel(GameRepository repository, GameInstanceID instanceId, Executor executor) {
         this(repository, instanceId, executor, ignored -> { });
     }
 
@@ -133,7 +134,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @param summarySink borrowed EDT sink for successfully applied overview state
     InstanceOverviewPanel(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             Consumer<InstanceOverviewSummary> summarySink) {
         this(repository, instanceId, executor, InstanceOverviewStrings.localized(), summarySink);
@@ -147,7 +148,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @param strings current-locale visible text
     private InstanceOverviewPanel(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             InstanceOverviewStrings strings,
             Consumer<InstanceOverviewSummary> summarySink) {
@@ -169,7 +170,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @param interactions Swing and desktop interaction boundary
     InstanceOverviewPanel(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             InstanceOverviewStrings strings,
             InstanceOverviewInteractions interactions) {
@@ -186,7 +187,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @param summarySink borrowed EDT sink for successfully applied overview state
     private InstanceOverviewPanel(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             InstanceOverviewStrings strings,
             InstanceOverviewInteractions interactions,
@@ -211,7 +212,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @param iconStore persistent icon boundary, or `null` when unsupported
     InstanceOverviewPanel(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             InstanceOverviewStrings strings,
             InstanceOverviewInteractions interactions,
@@ -230,7 +231,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @param summarySink borrowed EDT sink for successfully applied overview state
     private InstanceOverviewPanel(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             InstanceOverviewStrings strings,
             InstanceOverviewInteractions interactions,
@@ -244,7 +245,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         this.repository = Objects.requireNonNull(repository, "repository");
         this.xymlRepository = this.repository instanceof XYMLGameRepository candidate ? candidate : null;
         this.iconStore = iconStore;
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
@@ -414,7 +415,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @param repository candidate repository
     /// @param instanceId target instance identifier
     /// @return repository-backed icon store, or `null` when icons are unsupported
-    private static @Nullable InstanceIconStore createIconStore(GameRepository repository, String instanceId) {
+    private static @Nullable InstanceIconStore createIconStore(GameRepository repository, GameInstanceID instanceId) {
         if (repository instanceof XYMLGameRepository xymlRepository) {
             return new RepositoryInstanceIconStore(xymlRepository, instanceId);
         }
@@ -446,7 +447,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         try {
             requireBackgroundThread();
             if (refreshRepository) {
-                repository.refreshInstances();
+                repository.refresh();
                 @Nullable XYMLGameRepository localXymlRepository = xymlRepository;
                 if (localXymlRepository != null) {
                     localXymlRepository.refreshSelectedInstance();
@@ -463,7 +464,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     ///
     /// @return resolved instance paths, persisted icon identity, and decoded 40-pixel preview
     private InstanceSnapshot readSnapshot() {
-        Path instanceRoot = Objects.requireNonNull(repository.getVersionRoot(instanceId), "instance root")
+        Path instanceRoot = Objects.requireNonNull(repository.getInstanceRoot(instanceId), "instance root")
                 .toAbsolutePath()
                 .normalize();
         Path gameDirectory = Objects.requireNonNull(repository.getRunDirectory(instanceId), "game directory")
@@ -473,7 +474,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         @Nullable InstanceIconStore localIconStore = iconStore;
         InstanceIconStore.Snapshot iconState = localIconStore != null
                 ? localIconStore.load()
-                : new InstanceIconStore.Snapshot(InstanceIconType.DEFAULT, null);
+                : new InstanceIconStore.Snapshot(GameInstanceIconType.DEFAULT, null);
         if (localIconStore != null) {
             InstanceIconImages.preloadBuiltIns();
         }

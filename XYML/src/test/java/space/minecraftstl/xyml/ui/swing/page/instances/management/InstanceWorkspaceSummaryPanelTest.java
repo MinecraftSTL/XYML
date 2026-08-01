@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
@@ -69,7 +70,7 @@ final class InstanceWorkspaceSummaryPanelTest {
         try {
             EdtDispatcher.executeAndWait(() -> panelReference.set(new InstanceWorkspaceSummaryPanel(
                     homeModel,
-                    "instance",
+                    new GameInstanceID("instance"),
                     refreshes::incrementAndGet,
                     folderOpens::incrementAndGet,
                     menuInvoker::set)));
@@ -91,7 +92,7 @@ final class InstanceWorkspaceSummaryPanelTest {
 
                 ImageIcon icon = new ImageIcon(new BufferedImage(40, 40, BufferedImage.TYPE_INT_ARGB));
                 panel.applyOverviewSummary(new InstanceOverviewSummary(
-                        "instance",
+                        new GameInstanceID("instance"),
                         "1.21.1",
                         temporaryDirectory.resolve("versions/instance"),
                         temporaryDirectory.resolve("game"),

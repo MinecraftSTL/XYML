@@ -21,6 +21,7 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
@@ -74,7 +75,7 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 @NotNullByDefault
 public final class InstanceInstallerPanel extends JPanel implements AutoCloseable {
     /// Stable existing instance whose Core installer state this panel presents.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Asynchronous snapshot and stopped-task boundary for the managed instance.
     private final InstanceInstallerManagementService service;
@@ -163,7 +164,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     /// @param progressAnimationDuration non-negative determinate-progress animation duration
     public InstanceInstallerPanel(
             XYMLGameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
@@ -190,7 +191,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     /// @param animator optional shared progress animator
     /// @param progressAnimationDuration non-negative determinate-progress animation duration
     InstanceInstallerPanel(
-            String instanceId,
+            GameInstanceID instanceId,
             InstanceInstallerManagementService service,
             LoaderSelectionWizardPanel loaderWizard,
             InstanceInstallerInteractions interactions,
@@ -199,7 +200,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
             Duration progressAnimationDuration) {
         super(new BorderLayout(0, 10));
         EdtDispatcher.requireEventDispatchThread();
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
         this.service = Objects.requireNonNull(service, "service");
         this.loaderWizard = Objects.requireNonNull(loaderWizard, "loaderWizard");
         this.interactions = Objects.requireNonNull(interactions, "interactions");

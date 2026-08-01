@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.download.DownloadProvider;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
@@ -180,7 +181,7 @@ final class RemoteModpackCatalogPanelTest {
             assertNotNull(request);
             assertEquals(addon, request.item().addon());
             assertEquals(version, request.version());
-            assertEquals("fixture-pack", request.instanceName());
+            assertEquals(new GameInstanceID("fixture-pack"), request.instanceId());
         } finally {
             @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
             if (panel != null) {

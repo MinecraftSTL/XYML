@@ -21,12 +21,14 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import kala.encdet.EncodingDetector;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.LocalAddonFile;
 import space.minecraftstl.xyml.addon.resourcepack.ResourcePackFile;
 import space.minecraftstl.xyml.addon.resourcepack.ResourcePackManager;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.util.StringUtils;
@@ -35,6 +37,7 @@ import space.minecraftstl.xyml.util.io.FileUtils;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileVisitResult;
@@ -55,7 +58,7 @@ import java.util.concurrent.CancellationException;
 
 /// Serialized file-system access for one managed resource-pack directory.
 ///
-/// A process-wide gate serializes shallow scans, viewport parsing, strict options persistence,
+/// A process-wide gate serializes shallow scans, viewport parsing, encoding-preserving options persistence,
 /// staging imports, and deletion, including repositories that alias storage through links or mounts.
 @NotNullByDefault
 final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAccess {
@@ -72,7 +75,7 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
     /// Direct resource-pack directory used by the shallow index.
     private final Path directory;
 
-    /// Instance options file persisted with strict UTF-8 error propagation.
+    /// Instance options file persisted with its detected source encoding.
     private final Path optionsFile;
 
     /// Test hook invoked inside the shared gate after staging creation and before source copying.
@@ -100,9 +103,10 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
         if (instanceId.isBlank()) {
             throw new IllegalArgumentException("instanceId must not be blank");
         }
-        manager = new ResourcePackManager(repository, instanceId);
+        GameInstanceID typedInstanceId = new GameInstanceID(instanceId);
+        manager = new ResourcePackManager(repository, typedInstanceId);
         directory = manager.getDirectory().toAbsolutePath().normalize();
-        optionsFile = repository.getRunDirectory(instanceId)
+        optionsFile = repository.getRunDirectory(typedInstanceId)
                 .resolve("options.txt")
                 .toAbsolutePath()
                 .normalize();
@@ -571,25 +575,40 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
     /// Reads and parses the two resource-pack option lists without swallowing failures.
     ///
     /// @return immutable line-preserving options state
-    /// @throws IOException when UTF-8 input or list JSON is invalid
+    /// @throws IOException when input or list JSON is invalid
     private OptionsState readOptionsState() throws IOException {
         OptionsDocument document;
+        Charset encoding;
         if (!Files.exists(optionsFile)) {
             document = OptionsDocument.empty();
+            encoding = StandardCharsets.UTF_8;
         } else {
             if (!Files.isRegularFile(optionsFile)) {
                 throw new IOException("Instance options path is not a regular file: " + optionsFile);
             }
-            document = OptionsDocument.parse(Files.readString(
-                    optionsFile,
-                    StandardCharsets.UTF_8));
+            byte[] bytes = Files.readAllBytes(optionsFile);
+            encoding = detectOptionsEncoding(bytes);
+            document = OptionsDocument.parse(new String(bytes, encoding));
         }
         return new OptionsState(
                 document,
                 parsePackList(document.value("resourcePacks"), "resourcePacks"),
                 parsePackList(
                         document.value("incompatibleResourcePacks"),
-                        "incompatibleResourcePacks"));
+                        "incompatibleResourcePacks"),
+                encoding);
+    }
+
+    /// Selects a writable Java charset from the detector while treating pure ASCII as UTF-8.
+    ///
+    /// @param bytes complete options file bytes
+    /// @return detected approximate charset or UTF-8 when detection is inconclusive
+    private static Charset detectOptionsEncoding(byte[] bytes) {
+        @Nullable EncodingDetector.Encoding detected = EncodingDetector.MODERN_WEB.detect(bytes).bestEncoding();
+        @Nullable Charset approximate = detected == null ? null : detected.approximateCharset();
+        return detected == EncodingDetector.Encoding.ASCII || approximate == null
+                ? StandardCharsets.UTF_8
+                : approximate;
     }
 
     /// Parses one strict JSON string list while rejecting malformed or null entries.
@@ -653,7 +672,7 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
             removePack(resourcePacks, name);
             removePack(incompatiblePacks, name);
         }
-        return new OptionsState(source.document(), resourcePacks, incompatiblePacks);
+        return new OptionsState(source.document(), resourcePacks, incompatiblePacks, source.encoding());
     }
 
     /// Returns a copy with both option identifiers removed without parsing pack metadata.
@@ -666,7 +685,7 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
         List<String> incompatiblePacks = new ArrayList<>(source.incompatibleResourcePacks());
         removePack(resourcePacks, fileName);
         removePack(incompatiblePacks, fileName);
-        return new OptionsState(source.document(), resourcePacks, incompatiblePacks);
+        return new OptionsState(source.document(), resourcePacks, incompatiblePacks, source.encoding());
     }
 
     /// Returns whether one pack is semantically enabled by both strict option lists.
@@ -709,14 +728,14 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
     /// Persists both resource-pack lists while preserving every unrelated option line.
     ///
     /// @param state immutable replacement options state
-    /// @throws IOException when safe UTF-8 persistence fails
+    /// @throws IOException when safe encoding-preserving persistence fails
     private void saveOptionsState(OptionsState state) throws IOException {
         OptionsDocument replacement = state.document()
                 .withValue("resourcePacks", StringUtils.serializeStringList(state.resourcePacks()))
                 .withValue(
                         "incompatibleResourcePacks",
                         StringUtils.serializeStringList(state.incompatibleResourcePacks()));
-        byte[] bytes = replacement.render().getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = replacement.render().getBytes(state.encoding());
         FileUtils.saveSafely(optionsFile, output -> output.write(bytes));
     }
 
@@ -844,20 +863,23 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
     /// @param document original line-preserving document
     /// @param resourcePacks enabled pack identifiers
     /// @param incompatibleResourcePacks acknowledged incompatible identifiers
+    /// @param encoding detected source encoding retained for persistence
     @NotNullByDefault
     private record OptionsState(
             OptionsDocument document,
             @Unmodifiable List<String> resourcePacks,
-            @Unmodifiable List<String> incompatibleResourcePacks) {
+            @Unmodifiable List<String> incompatibleResourcePacks,
+            Charset encoding) {
         /// Freezes semantic option lists.
         private OptionsState {
             Objects.requireNonNull(document, "document");
             resourcePacks = List.copyOf(resourcePacks);
             incompatibleResourcePacks = List.copyOf(incompatibleResourcePacks);
+            Objects.requireNonNull(encoding, "encoding");
         }
     }
 
-    /// UTF-8 options text split into raw lines with exact line terminators.
+    /// Decoded options text split into raw lines with exact line terminators.
     ///
     /// @param lines immutable raw option lines
     @NotNullByDefault
@@ -876,7 +898,7 @@ final class FileSystemResourcePackCatalogAccess implements ResourcePackCatalogAc
 
         /// Parses text without normalizing unknown lines or line terminators.
         ///
-        /// @param text complete UTF-8 options text
+        /// @param text complete decoded options text
         /// @return line-preserving document
         private static OptionsDocument parse(String text) {
             Objects.requireNonNull(text, "text");

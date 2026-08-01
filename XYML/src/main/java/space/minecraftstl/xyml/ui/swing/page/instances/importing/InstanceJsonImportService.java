@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.importing;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 
 import java.nio.file.Path;
@@ -32,5 +33,5 @@ public interface InstanceJsonImportService {
     /// @param source local Minecraft version JSON path
     /// @param instanceId validated destination instance ID
     /// @return task that parses, downloads, saves, refreshes, and selects the imported instance
-    Task<@Nullable Void> createImportTask(Path source, String instanceId);
+    Task<@Nullable Void> createImportTask(Path source, GameInstanceID instanceId);
 }

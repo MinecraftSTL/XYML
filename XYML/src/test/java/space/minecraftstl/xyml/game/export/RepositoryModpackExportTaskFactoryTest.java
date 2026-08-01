@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModpackExportInfo;
 import space.minecraftstl.xyml.task.Task;
 
@@ -53,7 +54,7 @@ public final class RepositoryModpackExportTaskFactoryTest {
         RecordingCoreTaskCreator creator = new RecordingCoreTaskCreator(false);
         RepositoryModpackExportTaskFactory factory = new RepositoryModpackExportTaskFactory(
                 instanceId -> {
-                    assertEquals("instance", instanceId);
+                    assertEquals(new GameInstanceID("instance"), instanceId);
                     return runDirectory;
                 },
                 creator);
@@ -201,11 +202,11 @@ public final class RepositoryModpackExportTaskFactoryTest {
         @Override
         public Task<?> create(
                 ModpackExportFormat format,
-                String instanceId,
+                GameInstanceID instanceId,
                 ModpackExportInfo exportInfo,
                 @Unmodifiable List<String> whitelist,
                 Path temporaryOutput) {
-            assertEquals("instance", instanceId);
+            assertEquals(new GameInstanceID("instance"), instanceId);
             lastFormat = format;
             lastInfo = exportInfo;
             lastWhitelist = List.copyOf(whitelist);

@@ -156,7 +156,7 @@ final class FilteredInstancesDataSource implements ViewportChoiceDataSource<Inst
         List<String> matches = new ArrayList<>(sourceEntries.size());
         for (InstanceSearchEntry entry : sourceEntries) {
             if (predicate.test(entry)) {
-                matches.add(entry.stableId());
+                matches.add(entry.stableId().id());
             }
         }
         @Unmodifiable List<String> visibleIds = List.copyOf(matches);
@@ -186,14 +186,14 @@ final class FilteredInstancesDataSource implements ViewportChoiceDataSource<Inst
                         searchText.substring(REGEX_PREFIX.length()),
                         Pattern.CASE_INSENSITIVE);
                 return entry -> pattern.matcher(entry.displayName()).find()
-                        || pattern.matcher(entry.stableId()).find();
+                        || pattern.matcher(entry.stableId().id()).find();
             } catch (PatternSyntaxException failure) {
                 return ignored -> false;
             }
         }
         String normalized = searchText.toLowerCase(Locale.ROOT);
         return entry -> entry.displayName().toLowerCase(Locale.ROOT).contains(normalized)
-                || entry.stableId().toLowerCase(Locale.ROOT).contains(normalized);
+                || entry.stableId().id().toLowerCase(Locale.ROOT).contains(normalized);
     }
 
     /// Extracts stable identifiers from one immutable source-ordered search index.
@@ -203,7 +203,7 @@ final class FilteredInstancesDataSource implements ViewportChoiceDataSource<Inst
     private static @Unmodifiable List<String> stableIds(@Unmodifiable List<InstanceSearchEntry> entries) {
         List<String> identifiers = new ArrayList<>(entries.size());
         for (InstanceSearchEntry entry : entries) {
-            identifiers.add(entry.stableId());
+            identifiers.add(entry.stableId().id());
         }
         return List.copyOf(identifiers);
     }

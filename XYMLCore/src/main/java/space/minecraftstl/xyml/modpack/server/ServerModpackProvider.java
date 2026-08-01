@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.modpack.server;
 import com.google.gson.JsonParseException;
 import kala.compress.archivers.zip.ZipArchiveReader;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.MismatchedModpackTypeException;
 import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackProvider;
@@ -41,16 +42,16 @@ public final class ServerModpackProvider implements ModpackProvider {
     }
 
     @Override
-    public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+    public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
         return new ServerModpackCompletionTask(dependencyManager, instanceId);
     }
 
     @Override
-    public Task<?> createUpdateTask(DefaultDependencyManager dependencyManager, String name, Path zipFile, Modpack modpack) throws MismatchedModpackTypeException {
+    public Task<?> createUpdateTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId, Path zipFile, Modpack modpack) throws MismatchedModpackTypeException {
         if (!(modpack.getManifest() instanceof ServerModpackManifest serverModpackManifest))
             throw new MismatchedModpackTypeException(getName(), modpack.getManifest().getProvider().getName());
 
-        return new ModpackUpdateTask(dependencyManager.getGameRepository(), name, new ServerModpackLocalInstallTask(dependencyManager, zipFile, modpack, serverModpackManifest, name));
+        return new ModpackUpdateTask(dependencyManager.getGameRepository(), instanceId, new ServerModpackLocalInstallTask(dependencyManager, zipFile, modpack, serverModpackManifest, instanceId));
     }
 
     @Override

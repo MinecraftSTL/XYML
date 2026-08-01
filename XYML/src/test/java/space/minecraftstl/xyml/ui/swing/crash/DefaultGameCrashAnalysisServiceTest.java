@@ -23,6 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
 import space.minecraftstl.xyml.game.Log;
 
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -46,7 +47,10 @@ class DefaultGameCrashAnalysisServiceTest {
     @Test
     void latestLogWinsDuplicateRuleAndRetainsCapturedRules() throws Exception {
         Path latestLog = temporaryDirectory.resolve("latest.log");
-        Files.writeString(latestLog, "persisted marker java.lang.OutOfMemoryError");
+        String persistedMarker = "持久日志标记：游戏实例加载失败，需要检查内存配置和启动参数。".repeat(20);
+        Files.write(
+                latestLog,
+                (persistedMarker + " java.lang.OutOfMemoryError").getBytes(Charset.forName("GB18030")));
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             DefaultGameCrashAnalysisService service = new DefaultGameCrashAnalysisService(executor);
@@ -63,7 +67,7 @@ class DefaultGameCrashAnalysisServiceTest {
                     .filter(result -> result.rule() == CrashReportAnalyzer.Rule.OUT_OF_MEMORY)
                     .findFirst()
                     .orElseThrow();
-            assertTrue(outOfMemory.log().contains("persisted marker"));
+            assertTrue(outOfMemory.log().contains(persistedMarker));
             assertTrue(analysis.results().stream()
                     .anyMatch(result -> result.rule() == CrashReportAnalyzer.Rule.OPENGL_NOT_SUPPORTED));
         } finally {

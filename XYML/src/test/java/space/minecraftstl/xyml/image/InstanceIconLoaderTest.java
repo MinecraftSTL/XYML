@@ -22,7 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import space.minecraftstl.xyml.setting.InstanceIconType;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 
 import javax.imageio.ImageIO;
 import java.awt.EventQueue;
@@ -82,7 +82,7 @@ public final class InstanceIconLoaderTest {
     /// Every configured icon resolves to its packaged `@2x` raster and normalizes to visible 40-by-40 data.
     @Test
     public void coversEveryBundledHighResolutionResource() {
-        for (InstanceIconType iconType : InstanceIconType.values()) {
+        for (GameInstanceIconType iconType : GameInstanceIconType.values()) {
             String resourcePath = InstanceIconLoader.bundledResourcePath(iconType);
             assertTrue(resourcePath.endsWith("@2x.png"), resourcePath);
             assertNotNull(InstanceIconLoader.class.getResource(resourcePath), resourcePath);
@@ -101,7 +101,7 @@ public final class InstanceIconLoaderTest {
         try {
             @Unmodifiable List<CompletableFuture<InstanceIconData>> loads = IntStream.range(0, 32)
                     .mapToObj(ignored -> CompletableFuture.supplyAsync(
-                            () -> InstanceIconLoader.loadBuiltIn(InstanceIconType.CHEST),
+                            () -> InstanceIconLoader.loadBuiltIn(GameInstanceIconType.CHEST),
                             executor))
                     .toList();
             CompletableFuture.allOf(loads.toArray(CompletableFuture[]::new)).join();
@@ -109,7 +109,7 @@ public final class InstanceIconLoaderTest {
             for (CompletableFuture<InstanceIconData> load : loads) {
                 assertSame(first, load.join());
             }
-            assertSame(first, InstanceIconLoader.loadBuiltIn(InstanceIconType.CHEST));
+            assertSame(first, InstanceIconLoader.loadBuiltIn(GameInstanceIconType.CHEST));
         } finally {
             executor.shutdownNow();
         }
@@ -122,13 +122,13 @@ public final class InstanceIconLoaderTest {
         Path customIcon = directory.resolve("custom.png");
         writeSolidPng(customIcon, 20, 10, OPAQUE_RED);
 
-        InstanceIconData data = InstanceIconLoader.load(InstanceIconType.FORGE, customIcon);
-        InstanceIconData reloaded = InstanceIconLoader.load(InstanceIconType.FORGE, customIcon);
+        InstanceIconData data = InstanceIconLoader.load(GameInstanceIconType.FORGE, customIcon);
+        InstanceIconData reloaded = InstanceIconLoader.load(GameInstanceIconType.FORGE, customIcon);
 
         assertEquals(0, data.argbAt(20, 5));
         assertEquals(OPAQUE_RED, data.argbAt(20, 20));
         assertEquals(0, data.argbAt(20, 35));
-        assertNotEquals(InstanceIconLoader.loadBuiltIn(InstanceIconType.DEFAULT), data);
+        assertNotEquals(InstanceIconLoader.loadBuiltIn(GameInstanceIconType.DEFAULT), data);
         assertEquals(data, reloaded);
         assertNotSame(data, reloaded);
     }
@@ -137,16 +137,16 @@ public final class InstanceIconLoaderTest {
     @Test
     public void fallsBackForMalformedNonRegularAndOversizedFiles() throws IOException {
         Path directory = Objects.requireNonNull(temporaryDirectory, "temporaryDirectory");
-        InstanceIconData expectedDefault = InstanceIconLoader.loadBuiltIn(InstanceIconType.DEFAULT);
+        InstanceIconData expectedDefault = InstanceIconLoader.loadBuiltIn(GameInstanceIconType.DEFAULT);
         Path corrupt = directory.resolve("corrupt.png");
         Files.write(corrupt, new byte[]{1, 2, 3, 4});
         Path oversized = directory.resolve("oversized.png");
         Files.write(oversized, new byte[InstanceIconLoader.MAXIMUM_ENCODED_BYTES + 1]);
         Path nonRegular = Files.createDirectory(directory.resolve("directory.png"));
 
-        assertEquals(expectedDefault, InstanceIconLoader.load(InstanceIconType.FORGE, corrupt));
-        assertEquals(expectedDefault, InstanceIconLoader.load(InstanceIconType.FORGE, oversized));
-        assertEquals(expectedDefault, InstanceIconLoader.load(InstanceIconType.FORGE, nonRegular));
+        assertEquals(expectedDefault, InstanceIconLoader.load(GameInstanceIconType.FORGE, corrupt));
+        assertEquals(expectedDefault, InstanceIconLoader.load(GameInstanceIconType.FORGE, oversized));
+        assertEquals(expectedDefault, InstanceIconLoader.load(GameInstanceIconType.FORGE, nonRegular));
     }
 
     /// No-follow attributes reject links and invalid file kinds while accepting the exact encoded byte ceiling.
@@ -177,28 +177,28 @@ public final class InstanceIconLoaderTest {
     @Test
     public void rejectsDimensionAndPixelLimitsBeforeDecode() throws IOException {
         Path directory = Objects.requireNonNull(temporaryDirectory, "temporaryDirectory");
-        InstanceIconData expectedDefault = InstanceIconLoader.loadBuiltIn(InstanceIconType.DEFAULT);
+        InstanceIconData expectedDefault = InstanceIconLoader.loadBuiltIn(GameInstanceIconType.DEFAULT);
         Path excessiveEdge = directory.resolve("edge.bmp");
         writeBmpHeader(excessiveEdge, InstanceIconLoader.MAXIMUM_SOURCE_EDGE + 1, 1);
         Path excessivePixels = directory.resolve("pixels.bmp");
         writeBmpHeader(excessivePixels, 4_097, 4_097);
 
-        assertEquals(expectedDefault, InstanceIconLoader.load(InstanceIconType.FORGE, excessiveEdge));
-        assertEquals(expectedDefault, InstanceIconLoader.load(InstanceIconType.FORGE, excessivePixels));
+        assertEquals(expectedDefault, InstanceIconLoader.load(GameInstanceIconType.FORGE, excessiveEdge));
+        assertEquals(expectedDefault, InstanceIconLoader.load(GameInstanceIconType.FORGE, excessivePixels));
     }
 
     /// Blocking icon I/O and decoding fail immediately when accidentally invoked on the EDT.
     @Test
     public void rejectsLoadingOnEventDispatchThread() throws Exception {
-        InstanceIconLoader.loadBuiltIn(InstanceIconType.DEFAULT);
+        InstanceIconLoader.loadBuiltIn(GameInstanceIconType.DEFAULT);
         EventQueue.invokeAndWait(() -> {
             assertTrue(EventQueue.isDispatchThread());
             assertThrows(
                     IllegalStateException.class,
-                    () -> InstanceIconLoader.loadBuiltIn(InstanceIconType.DEFAULT));
+                    () -> InstanceIconLoader.loadBuiltIn(GameInstanceIconType.DEFAULT));
             assertThrows(
                     IllegalStateException.class,
-                    () -> InstanceIconLoader.load(InstanceIconType.DEFAULT, null));
+                    () -> InstanceIconLoader.load(GameInstanceIconType.DEFAULT, null));
         });
     }
 

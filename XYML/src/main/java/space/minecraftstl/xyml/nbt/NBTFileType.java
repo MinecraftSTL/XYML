@@ -29,7 +29,7 @@ import java.util.Objects;
 @NotNullByDefault
 public enum NBTFileType {
     /// A standalone NBT tag, whose bytes may be raw, GZIP-compressed, or LZ4-compressed.
-    TAG("dat", "dat_old"),
+    TAG("nbt", "dat", "dat_old"),
 
     /// A modern Anvil chunk-region file.
     ANVIL("mca"),

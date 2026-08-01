@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.download.DownloadProvider;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
@@ -557,7 +558,7 @@ final class RemoteAddonCatalogPanelTest {
     private static RemoteAddonInstallTarget fixtureTarget() {
         return new RemoteAddonInstallTarget(
                 RemoteAddonCatalogKind.MOD,
-                "fixture-instance",
+                new GameInstanceID("fixture-instance"),
                 Path.of("build", "fixture-mods"));
     }
 

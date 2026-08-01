@@ -19,7 +19,7 @@ package space.minecraftstl.xyml.download.forge;
 
 import com.google.gson.JsonParseException;
 import com.google.gson.annotations.SerializedName;
-import space.minecraftstl.xyml.game.Version;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.util.Immutable;
 import space.minecraftstl.xyml.util.gson.Validation;
 
@@ -34,9 +34,9 @@ public final class ForgeInstallProfile implements Validation {
     private final ForgeInstall install;
 
     @SerializedName("versionInfo")
-    private final Version versionInfo;
+    private final GameInstanceManifest versionInfo;
 
-    public ForgeInstallProfile(ForgeInstall install, Version versionInfo) {
+    public ForgeInstallProfile(ForgeInstall install, GameInstanceManifest versionInfo) {
         this.install = install;
         this.versionInfo = versionInfo;
     }
@@ -45,7 +45,7 @@ public final class ForgeInstallProfile implements Validation {
         return install;
     }
 
-    public Version getVersionInfo() {
+    public GameInstanceManifest getVersionInfo() {
         return versionInfo;
     }
 
