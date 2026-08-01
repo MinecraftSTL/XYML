@@ -260,13 +260,99 @@ final class RemoteModpackCatalogPanelTest {
         }
     }
 
+    /// Jumps directly between the remote modpack result boundaries and synchronizes navigation state.
+    @Test
+    void jumpsDirectlyBetweenFirstAndLastProviderPages() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteModpackCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new RemoteModpackCatalogPanel(
+                    backend,
+                    request -> Task.completed(null),
+                    executor,
+                    RemoteModpackCatalogStrings.english(),
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO)));
+            RemoteModpackCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                prepareViewport(panel.choiceList());
+                JButton search = findNamed(panel, "remoteModpackSearchAction", JButton.class);
+                assertNotNull(search);
+                search.doClick();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JButton first = findNamed(panel, "remoteModpackFirstPage", JButton.class);
+                JButton previous = findNamed(panel, "remoteModpackPreviousPage", JButton.class);
+                JButton next = findNamed(panel, "remoteModpackNextPage", JButton.class);
+                JButton last = findNamed(panel, "remoteModpackLastPage", JButton.class);
+                assertNotNull(first);
+                assertNotNull(previous);
+                assertNotNull(next);
+                assertNotNull(last);
+                assertAll(
+                        () -> assertFalse(first.isEnabled()),
+                        () -> assertFalse(previous.isEnabled()),
+                        () -> assertTrue(next.isEnabled()),
+                        () -> assertTrue(last.isEnabled()));
+                last.doClick();
+            });
+            awaitBackgroundWork(executor);
+            RemoteModpackCatalogQuery lastPageQuery = backend.lastQuery.get();
+            assertNotNull(lastPageQuery);
+            assertEquals(4, lastPageQuery.pageOffset());
+
+            EdtDispatcher.executeAndWait(() -> {
+                JButton first = findNamed(panel, "remoteModpackFirstPage", JButton.class);
+                JButton previous = findNamed(panel, "remoteModpackPreviousPage", JButton.class);
+                JButton next = findNamed(panel, "remoteModpackNextPage", JButton.class);
+                JButton last = findNamed(panel, "remoteModpackLastPage", JButton.class);
+                assertNotNull(first);
+                assertNotNull(previous);
+                assertNotNull(next);
+                assertNotNull(last);
+                assertAll(
+                        () -> assertTrue(first.isEnabled()),
+                        () -> assertTrue(previous.isEnabled()),
+                        () -> assertFalse(next.isEnabled()),
+                        () -> assertFalse(last.isEnabled()));
+                prepareViewport(panel.choiceList(), 240);
+                first.doClick();
+            });
+            awaitBackgroundWork(executor);
+            RemoteModpackCatalogQuery firstPageQuery = backend.lastQuery.get();
+            assertNotNull(firstPageQuery);
+            assertEquals(0, firstPageQuery.pageOffset());
+            assertEquals(3, backend.searchRequests.get());
+        } finally {
+            @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Gives a detached sparse list actual result geometry without triggering a network operation.
     ///
     /// @param choiceList detached result list to measure and request
     private static void prepareViewport(ViewportChoiceList<?> choiceList) {
-        choiceList.setSize(480, 180);
-        choiceList.getViewport().setExtentSize(new Dimension(480, 160));
-        choiceList.getList().setSize(480, 160);
+        prepareViewport(choiceList, 160);
+    }
+
+    /// Gives a detached sparse list explicit result geometry without triggering a network operation.
+    ///
+    /// @param choiceList detached result list to measure and request
+    /// @param visibleHeight result viewport height in pixels
+    private static void prepareViewport(ViewportChoiceList<?> choiceList, int visibleHeight) {
+        choiceList.setSize(480, visibleHeight + 20);
+        choiceList.getViewport().setExtentSize(new Dimension(480, visibleHeight));
+        choiceList.getList().setSize(480, visibleHeight);
         choiceList.refreshLoadPlan();
     }
 
@@ -392,7 +478,7 @@ final class RemoteModpackCatalogPanelTest {
                     List.of(child)));
         }
 
-        /// Records and returns a single exact source result page.
+        /// Records and returns a five-page source result so every pagination command is testable.
         ///
         /// @param query user-triggered search query
         /// @return one-page fixture result
@@ -400,7 +486,7 @@ final class RemoteModpackCatalogPanelTest {
         public RemoteModpackCatalogPage search(RemoteModpackCatalogQuery query) {
             lastQuery.set(Objects.requireNonNull(query, "query"));
             searchRequests.incrementAndGet();
-            return new RemoteModpackCatalogPage(List.of(item), query.pageOffset(), 1);
+            return new RemoteModpackCatalogPage(List.of(item), query.pageOffset(), 5);
         }
 
         /// Records and returns the selected fixture project's one installable version.
