@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.download.java.JavaPackageType;
 import space.minecraftstl.xyml.download.java.disco.DiscoJavaDistribution;
 import space.minecraftstl.xyml.download.java.disco.DiscoJavaRemoteVersion;
 import space.minecraftstl.xyml.game.GameJavaVersion;
+import space.minecraftstl.xyml.java.JavaInfo;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
@@ -618,17 +619,28 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         return field;
     }
 
-    /// Renders one active runtime's version and vendor using the list's active colors.
+    /// Renders one active runtime's vendor, package type, version, and architecture.
     ///
     /// @param list source list
     /// @param runtime rendered runtime, or null while the list initializes
     /// @param selected whether this runtime is selected
     /// @return configured list renderer label
     private static JLabel runtimeRenderer(JList<?> list, @Nullable JavaRuntime runtime, boolean selected) {
-        String text = runtime == null
-                ? ""
-                : runtime.getVersion() + " - " + displayText(runtime.getVendor());
-        return listLabel(list, text, selected);
+        return listLabel(list, runtimeDisplayText(runtime), selected);
+    }
+
+    /// Formats the compact identity shown for one active Java runtime.
+    ///
+    /// @param runtime runtime to describe, or null while the list initializes
+    /// @return vendor, package type, version, and architecture, or an empty string
+    static String runtimeDisplayText(@Nullable JavaRuntime runtime) {
+        if (runtime == null) {
+            return "";
+        }
+        String vendor = displayText(JavaInfo.normalizeVendor(runtime.getVendor()));
+        String packageType = runtime.isJDK() ? "JDK" : "JRE";
+        return vendor + " " + packageType + " " + runtime.getVersion()
+                + " - " + runtime.getArchitecture().getDisplayName();
     }
 
     /// Renders one disabled runtime's configured path.
