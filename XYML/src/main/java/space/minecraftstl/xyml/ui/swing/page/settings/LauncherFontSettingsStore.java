@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.setting.UserSettings;
+import space.minecraftstl.xyml.ui.swing.FontAntialiasingMode;
 
 import java.util.ArrayList;
 import java.util.List;

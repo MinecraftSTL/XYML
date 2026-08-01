@@ -15,14 +15,14 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.page.settings;
+package space.minecraftstl.xyml.ui.swing;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Locale;
 
-/// Supported launcher text antialiasing preferences and their persisted legacy identifiers.
+/// Supported launcher text antialiasing preferences and their persisted identifiers.
 @NotNullByDefault
 public enum FontAntialiasingMode {
     /// Lets AWT choose the platform text-rendering strategy.
@@ -34,12 +34,12 @@ public enum FontAntialiasingMode {
     /// Requests grayscale text rendering.
     GRAY("gray");
 
-    /// Legacy-compatible persisted identifier, or `null` for automatic selection.
+    /// Persisted identifier, or `null` for automatic selection.
     private final @Nullable String persistedValue;
 
     /// Creates one mode from its persisted identifier.
     ///
-    /// @param persistedValue legacy-compatible identifier, or `null` for automatic selection
+    /// @param persistedValue identifier, or `null` for automatic selection
     FontAntialiasingMode(@Nullable String persistedValue) {
         this.persistedValue = persistedValue;
     }

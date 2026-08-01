@@ -26,7 +26,7 @@ import java.awt.Font;
 
 /// Resolves persisted game-log font settings to an AWT font without external resources.
 @NotNullByDefault
-final class SwingLogFontPreferences {
+public final class SwingLogFontPreferences {
     /// Legacy game-log font-size fallback.
     private static final float DEFAULT_FONT_SIZE = 12.0F;
 
@@ -47,7 +47,7 @@ final class SwingLogFontPreferences {
     /// Reads loaded settings or returns the legacy default during pre-configuration test construction.
     ///
     /// @return configured font when settings are loaded, otherwise the default monospaced font
-    static Font currentOrDefault() {
+    public static Font currentOrDefault() {
         try {
             return current();
         } catch (IllegalStateException settingsNotLoaded) {
