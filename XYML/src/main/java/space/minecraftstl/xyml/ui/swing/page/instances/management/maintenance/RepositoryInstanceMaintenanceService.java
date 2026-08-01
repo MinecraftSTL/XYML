@@ -18,19 +18,26 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.download.game.GameAssetDownloadTask;
 import space.minecraftstl.xyml.game.ModpackHelper;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
+import space.minecraftstl.xyml.modpack.server.ServerModpackManifest;
+import space.minecraftstl.xyml.task.FileDownloadTask;
+import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -112,6 +119,47 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
         });
     }
 
+    /// Downloads a direct archive or reads a server manifest before applying the established provider update.
+    ///
+    /// @param source direct HTTP or HTTPS update source
+    /// @return stopped remote update, repository-refresh, and snapshot task
+    @Override
+    public Task<InstanceMaintenanceSnapshot> updateModpack(URI source) {
+        URI updateSource = requireHttpSource(source);
+        return Task.composeAsync(ioExecutor, () -> {
+            requireExistingInstance();
+            if (!repository.isModpack(instanceId)) {
+                throw new IllegalStateException("The selected instance is not an updateable modpack");
+            }
+            ModpackConfiguration<?> configuration = ModpackHelper.readModpackConfiguration(
+                    repository.getModpackConfiguration(instanceId));
+            if (isServerManifestSource(updateSource)) {
+                return new GetTask(updateSource)
+                        .thenGetJsonAsync(ServerModpackManifest.class)
+                        .thenComposeAsync(ioExecutor, manifest -> ModpackHelper.getUpdateTask(
+                                repository,
+                                Objects.requireNonNull(manifest, "remote server manifest"),
+                                StandardCharsets.UTF_8,
+                                instanceId,
+                                configuration))
+                        .thenComposeAsync(ioExecutor, this::snapshotTask);
+            }
+
+            Path temporaryArchive = Files.createTempFile("xyml-modpack-update-", ".zip");
+            FileDownloadTask downloadTask = new FileDownloadTask(updateSource, temporaryArchive);
+            downloadTask.addIntegrityCheckHandler(FileDownloadTask.ZIP_INTEGRITY_CHECK_HANDLER);
+            return downloadTask
+                    .thenComposeAsync(ioExecutor, ignored -> ModpackHelper.getUpdateTask(
+                            repository,
+                            temporaryArchive,
+                            StandardCharsets.UTF_8,
+                            instanceId,
+                            configuration))
+                    .whenComplete(ioExecutor, failure -> Files.deleteIfExists(temporaryArchive))
+                    .thenComposeAsync(ioExecutor, this::snapshotTask);
+        });
+    }
+
     /// Uses Core's forced-index asset task and rereads local state on completion.
     ///
     /// @return stopped asset repair and snapshot task
@@ -126,6 +174,33 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
                     true);
             return download.thenComposeAsync(ioExecutor, this::snapshotTask);
         });
+    }
+
+    /// Validates and normalizes one supported remote update source without contacting it.
+    ///
+    /// @param source requested source
+    /// @return normalized absolute HTTP(S) URI
+    private static URI requireHttpSource(URI source) {
+        URI normalized = Objects.requireNonNull(source, "source").normalize();
+        @Nullable String scheme = normalized.getScheme();
+        @Nullable String host = normalized.getHost();
+        if (scheme == null || host == null || host.isBlank()) {
+            throw new IllegalArgumentException("Remote modpack source must be an absolute HTTP(S) URI");
+        }
+        String normalizedScheme = scheme.toLowerCase(Locale.ROOT);
+        if (!"http".equals(normalizedScheme) && !"https".equals(normalizedScheme)) {
+            throw new IllegalArgumentException("Remote modpack source must use HTTP or HTTPS");
+        }
+        return normalized;
+    }
+
+    /// Returns whether a source points to the server-modpack manifest form.
+    ///
+    /// @param source validated remote source
+    /// @return whether the source must be parsed as JSON rather than downloaded as an archive
+    private static boolean isServerManifestSource(URI source) {
+        @Nullable String path = Objects.requireNonNull(source, "source").getPath();
+        return path != null && path.toLowerCase(Locale.ROOT).endsWith("/server-manifest.json");
     }
 
     /// Deletes repository-wide assets plus the fixed instance's legacy resources directory.
