@@ -43,6 +43,16 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
     }
 
+    /// Returns the instance root when an installed modpack requires an isolated working directory.
+    ///
+    /// @return absolute instance-root text, or `null` for configurable instances
+    @Override
+    public @Nullable String forcedRunningDirectory() {
+        return repository.isModpack(instanceId)
+                ? repository.getInstanceRoot(instanceId).toAbsolutePath().normalize().toString()
+                : null;
+    }
+
     /// Reads all effective values together with each property's independent local inheritance state.
     ///
     /// @return current complete settings snapshot

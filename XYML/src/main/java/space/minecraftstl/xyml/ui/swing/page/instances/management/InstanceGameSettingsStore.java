@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 /// Reads and persists the complete editable launch-settings surface for one game instance.
 ///
@@ -25,6 +26,13 @@ import org.jetbrains.annotations.NotNullByDefault;
 /// Swing page deliberately receives only snapshots so it does not need direct access to observable model properties.
 @NotNullByDefault
 public interface InstanceGameSettingsStore {
+    /// Returns the forced instance directory for content whose format requires isolation.
+    ///
+    /// @return forced working-directory text, or `null` when users may configure isolation
+    default @Nullable String forcedRunningDirectory() {
+        return null;
+    }
+
     /// Returns the latest effective values and local-override state.
     ///
     /// @return current editable settings snapshot
