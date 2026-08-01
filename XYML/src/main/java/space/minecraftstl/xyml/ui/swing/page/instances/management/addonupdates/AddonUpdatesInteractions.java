@@ -19,15 +19,33 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.addonupdates;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.awt.Component;
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.CompletionStage;
 
 /// Owns native desktop effects outside installed add-on update scan logic.
 @NotNullByDefault
 interface AddonUpdatesInteractions {
+    /// Lets the user choose an exact new CSV destination with an editable directory path.
+    ///
+    /// @param owner dialog owner
+    /// @param suggestedName collision-resistant suggested file name
+    /// @return normalized destination, or `null` when cancelled or already occupied
+    @Nullable Path chooseExportFile(Component owner, String suggestedName);
+
+    /// Writes one immutable update snapshot outside the EDT without replacing an existing file.
+    ///
+    /// @param destination exact new CSV destination
+    /// @param rows immutable actionable update rows
+    /// @return nullable-void export completion
+    CompletionStage<@Nullable Void> exportUpdateList(
+            Path destination,
+            @Unmodifiable List<AddonUpdateExportRow> rows);
+
     /// Opens the exact remote project page outside the EDT.
     ///
     /// @param sourcePage validated project page URI

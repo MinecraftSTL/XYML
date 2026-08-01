@@ -60,7 +60,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies opt-in scanning, exact checked updates, task single-flight behavior, and real navigation actions.
+/// Verifies opt-in scanning, result export, exact checked updates, and real navigation actions.
 @NotNullByDefault
 final class AddonUpdatesPanelTest {
     /// Does not discover local files or contact a source until the user presses Check updates.
@@ -87,9 +87,11 @@ final class AddonUpdatesPanelTest {
             EdtDispatcher.executeAndWait(() -> {
                 JTable table = panel.resultsTable();
                 JButton check = findNamed(panel, "addonUpdatesCheck", JButton.class);
+                JButton export = findNamed(panel, "addonUpdatesExport", JButton.class);
                 JButton source = findNamed(panel, "addonUpdatesOpenSource", JButton.class);
                 JButton local = findNamed(panel, "addonUpdatesRevealLocal", JButton.class);
                 assertNotNull(check);
+                assertNotNull(export);
                 assertNotNull(source);
                 assertNotNull(local);
                 assertEquals(0, table.getRowCount());
@@ -98,6 +100,7 @@ final class AddonUpdatesPanelTest {
                 assertEquals("Show local file", local.getAccessibleContext().getAccessibleName());
                 assertFalse(source.isEnabled());
                 assertFalse(local.isEnabled());
+                assertFalse(export.isEnabled());
                 check.doClick();
             });
             awaitBackgroundWork(executor);
@@ -109,12 +112,16 @@ final class AddonUpdatesPanelTest {
                         findNamed(panel, "addonUpdatesOpenSource", JButton.class));
                 JButton local = Objects.requireNonNull(
                         findNamed(panel, "addonUpdatesRevealLocal", JButton.class));
+                JButton export = Objects.requireNonNull(
+                        findNamed(panel, "addonUpdatesExport", JButton.class));
                 assertEquals(2, table.getRowCount());
                 assertEquals(Boolean.TRUE, table.getValueAt(0, 0));
                 assertEquals("example.jar", table.getValueAt(0, 1));
                 assertEquals("1.0.0", table.getValueAt(0, 2));
                 assertEquals("1.1.0", table.getValueAt(0, 3));
                 assertEquals("Modrinth", table.getValueAt(0, 4));
+                assertTrue(export.isEnabled());
+                export.doClick();
                 table.setRowSelectionInterval(0, 0);
                 assertTrue(source.isEnabled());
                 assertTrue(local.isEnabled());
@@ -128,6 +135,14 @@ final class AddonUpdatesPanelTest {
             assertEquals(URI.create("https://modrinth.com/mod/example"), interactions.openedSource.get());
             assertEquals(Path.of("test-addons", "example.jar").toAbsolutePath().normalize(),
                     interactions.revealedLocalFile.get());
+            assertTrue(Objects.requireNonNull(interactions.suggestedExportName.get())
+                    .matches("xyml-addon-update-list-\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}\\.csv"));
+            assertEquals(interactions.exportDestination, interactions.exportedDestination.get());
+            assertEquals(List.of(new AddonUpdateExportRow(
+                    "example.jar",
+                    "1.0.0",
+                    "1.1.0",
+                    "Modrinth")), interactions.exportedRows.get());
             assertNull(interactions.failureDetail.get());
             assertEquals(0, applicationService.applyCalls.get());
         } finally {
@@ -695,6 +710,21 @@ final class AddonUpdatesPanelTest {
     /// Native-interaction substitute recording page commands without opening desktop applications.
     @NotNullByDefault
     private static final class RecordingInteractions implements AddonUpdatesInteractions {
+        /// Deterministic destination returned by the fake save chooser.
+        private final Path exportDestination = Path.of("test-exports", "updates.csv")
+                .toAbsolutePath()
+                .normalize();
+
+        /// Last suggested export file name, or `null` before chooser use.
+        private final AtomicReference<@Nullable String> suggestedExportName = new AtomicReference<>();
+
+        /// Last requested export destination, or `null` before export use.
+        private final AtomicReference<@Nullable Path> exportedDestination = new AtomicReference<>();
+
+        /// Last immutable exported row snapshot.
+        private final AtomicReference<@Unmodifiable List<AddonUpdateExportRow>> exportedRows =
+                new AtomicReference<>(List.of());
+
         /// Last requested remote source page, or `null` before command use.
         private final AtomicReference<@Nullable URI> openedSource = new AtomicReference<>();
 
@@ -703,6 +733,31 @@ final class AddonUpdatesPanelTest {
 
         /// Last dialog failure detail, or `null` after successful commands.
         private final AtomicReference<@Nullable String> failureDetail = new AtomicReference<>();
+
+        /// Records the suggested name and chooses one deterministic destination.
+        ///
+        /// @param owner unused dialog owner
+        /// @param suggestedName suggested collision-resistant file name
+        /// @return deterministic export destination
+        @Override
+        public Path chooseExportFile(Component owner, String suggestedName) {
+            suggestedExportName.set(suggestedName);
+            return exportDestination;
+        }
+
+        /// Records one immutable update export without file-system work.
+        ///
+        /// @param destination exact export destination
+        /// @param rows immutable actionable rows
+        /// @return already-completed successful export stage
+        @Override
+        public CompletionStage<@Nullable Void> exportUpdateList(
+                Path destination,
+                @Unmodifiable List<AddonUpdateExportRow> rows) {
+            exportedDestination.set(destination);
+            exportedRows.set(List.copyOf(rows));
+            return CompletableFuture.completedFuture(null);
+        }
 
         /// Records one requested project page.
         ///
