@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -40,11 +41,13 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import javax.swing.event.ListSelectionEvent;
@@ -53,6 +56,8 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.nio.file.Path;
 import java.time.DateTimeException;
 import java.time.Duration;
@@ -165,8 +170,8 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Removes the selected world's custom icon.
     private final JButton resetIconButton = new JButton();
 
-    /// Selected world seed.
-    private final JLabel seedValue = new JLabel();
+    /// Selected world seed, masked by default with FlatLaf's built-in reveal control.
+    private final JPasswordField seedValue = new JPasswordField(18);
 
     /// Selected world spawn position.
     private final JLabel worldSpawnValue = new JLabel();
@@ -473,7 +478,20 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         addDetailRow(details, strings.directoryNameLabel(), directoryValue, "worldsDirectory");
         addDetailRow(details, strings.pathLabel(), pathValue, "worldsPath");
         addDetailRow(details, strings.gameVersionLabel(), gameVersionValue, "worldsGameVersion");
-        addDetailRow(details, i18n("world.info.random_seed"), seedValue, "worldsSeed");
+        seedValue.setName("worldsSeed");
+        seedValue.setEditable(false);
+        seedValue.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, strings.unavailableValue());
+        seedValue.putClientProperty(FlatClientProperties.STYLE, "showRevealButton: true");
+        seedValue.addMouseListener(new MouseAdapter() {
+            /// Copies the exact selected seed on a primary-button double click.
+            @Override
+            public void mouseClicked(MouseEvent event) {
+                if (event.getClickCount() == 2 && SwingUtilities.isLeftMouseButton(event)) {
+                    copySelectedSeed();
+                }
+            }
+        });
+        addDetailComponentRow(details, i18n("world.info.random_seed"), seedValue);
         addDetailRow(details, i18n("world.info.spawn"), worldSpawnValue, "worldsSpawn");
         addDetailRow(details, strings.lastPlayedLabel(), lastPlayedValue, "worldsLastPlayed");
         addDetailRow(details, i18n("world.info.time"), playedTimeValue, "worldsPlayedTime");
@@ -846,7 +864,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 : new ImageIcon(Base64.getDecoder().decode(Objects.requireNonNull(details.iconPngBase64()))));
         worldNameField.setText(world == null ? "" : world.worldName());
         seedValue.setText(details == null || details.seed() == null
-                ? strings.unavailableValue()
+                ? ""
                 : Long.toString(Objects.requireNonNull(details.seed())));
         worldSpawnValue.setText(optionalDetail(details == null ? null : details.worldSpawn()));
         playedTimeValue.setText(details == null || details.playedTimeTicks() == null
@@ -896,6 +914,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         exportButton.setEnabled(mutableSelection);
         deleteButton.setEnabled(mutableSelection);
         worldNameField.setEnabled(editableDetails);
+        seedValue.setEnabled(usableSelection && details != null && details.seed() != null);
         changeIconButton.setEnabled(editableDetails);
         resetIconButton.setEnabled(mutableSelection && details != null && details.hasIcon());
         saveDetailsButton.setEnabled(editableDetails);
@@ -1155,6 +1174,20 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
             } catch (RuntimeException failure) {
                 showFailure(failure);
             }
+        }
+    }
+
+    /// Copies the exact selected seed without exposing it through the model or persistent state.
+    private void copySelectedSeed() {
+        @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
+        @Nullable WorldCatalogDetails details = selected == null ? null : selected.details();
+        if (closed.get() || details == null || details.seed() == null) {
+            return;
+        }
+        try {
+            interactions.copyText(this, Long.toString(Objects.requireNonNull(details.seed())));
+        } catch (RuntimeException failure) {
+            showFailure(failure);
         }
     }
 
@@ -1490,6 +1523,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         exportButton.setEnabled(false);
         deleteButton.setEnabled(false);
         worldNameField.setEnabled(false);
+        seedValue.setEnabled(false);
         changeIconButton.setEnabled(false);
         resetIconButton.setEnabled(false);
         allowCheatsCheckBox.setEnabled(false);
