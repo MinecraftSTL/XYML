@@ -48,6 +48,7 @@ import javax.swing.ScrollPaneConstants;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -92,6 +93,9 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
 
     /// Applies a local archive to an installed modpack.
     private final JButton updateModpackButton = new JButton();
+
+    /// Applies a remote archive or server manifest to an installed modpack.
+    private final JButton updateModpackUrlButton = new JButton();
 
     /// Forcibly refreshes the selected instance's assets.
     private final JButton redownloadAssetsButton = new JButton();
@@ -334,6 +338,12 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         strings.updateModpackAction(),
                         this::updateModpack),
                 configureAction(
+                        updateModpackUrlButton,
+                        "instanceMaintenanceUpdateModpackUrl",
+                        "assets/swing/icons/nav-downloads.svg",
+                        strings.updateModpackUrlAction(),
+                        this::updateModpackFromUrl),
+                configureAction(
                         redownloadAssetsButton,
                         "instanceMaintenanceRedownloadAssets",
                         "assets/swing/icons/refresh.svg",
@@ -494,6 +504,9 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         updateModpackButton.setToolTipText(snapshot.modpack()
                 ? strings.updateModpackAction()
                 : strings.updateUnavailableStatus());
+        updateModpackUrlButton.setToolTipText(snapshot.modpack()
+                ? strings.updateModpackUrlAction()
+                : strings.updateUnavailableStatus());
     }
 
     /// Opens a local archive chooser and starts a provider-validated update task.
@@ -508,6 +521,21 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
             startTask(
                     () -> service.updateModpack(archive, StandardCharsets.UTF_8),
                     strings.updateModpackAction());
+        }
+    }
+
+    /// Prompts for a remote archive or server manifest and starts its provider-validated update task.
+    private void updateModpackFromUrl() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable InstanceMaintenanceSnapshot snapshot = displayedSnapshot;
+        if (!isReady() || snapshot == null || !snapshot.modpack()) {
+            return;
+        }
+        @Nullable URI source = interactions.chooseModpackUri(this);
+        if (source != null) {
+            startTask(
+                    () -> service.updateModpack(source),
+                    strings.updateModpackUrlAction());
         }
     }
 
@@ -813,6 +841,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         testLaunchButton.setEnabled(ready);
         exportScriptButton.setEnabled(ready);
         updateModpackButton.setEnabled(ready && snapshot != null && snapshot.modpack());
+        updateModpackUrlButton.setEnabled(ready && snapshot != null && snapshot.modpack());
         redownloadAssetsButton.setEnabled(ready);
         removeAssetsButton.setEnabled(ready && snapshot != null && snapshot.assetsPresent());
         removeLibrariesButton.setEnabled(ready && snapshot != null && snapshot.librariesPresent());
