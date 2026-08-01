@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.auth.offline.OfflineAccountFactory;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.log.SwingLogFontPreferences;
 
 import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
@@ -145,6 +146,11 @@ public final class SwingAccountCreationDialog extends JDialog
 
     /// User-visible status text.
     private final JLabel status = new JLabel(" ");
+
+    /// Large copyable Microsoft device code using the configured log font family.
+    private final MicrosoftDeviceCodeButton microsoftDeviceCode = new MicrosoftDeviceCodeButton(
+            SwingLogFontPreferences.currentOrDefault(),
+            SwingAccountCreationDialog::copyToClipboard);
 
     /// Starts authentication for the current form.
     private final JButton login = new JButton(i18n("account.login"));
@@ -290,6 +296,7 @@ public final class SwingAccountCreationDialog extends JDialog
     public void onProgress(AccountCreationNotice notice) {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(notice, "notice");
+        microsoftDeviceCode.clearCode();
         switch (notice.kind()) {
             case AUTHENTICATING -> status.setText(nonBlankOr(
                     notice.detail(),
@@ -304,7 +311,8 @@ public final class SwingAccountCreationDialog extends JDialog
                 String location = Objects.requireNonNull(notice.location(), "verification location");
                 String code = Objects.requireNonNull(notice.code(), "device code");
                 status.setText("<html>" + i18n("account.methods.microsoft.methods.device")
-                        + "<br>" + location + "<br>" + code + "</html>");
+                        + "<br>" + location + "</html>");
+                microsoftDeviceCode.showCode(code);
                 copyToClipboard(code);
                 openExternalLocation(location);
             }
@@ -330,6 +338,7 @@ public final class SwingAccountCreationDialog extends JDialog
         operation.set(null);
         if (!closed.get()) {
             status.setText(" ");
+            microsoftDeviceCode.clearCode();
             setBusy(false);
         }
     }
@@ -344,6 +353,7 @@ public final class SwingAccountCreationDialog extends JDialog
         LOG.warning("Native Swing account creation failed", failure);
         if (!closed.get()) {
             status.setText("<html>" + localizedMessage.replace("\n", "<br>") + "</html>");
+            microsoftDeviceCode.clearCode();
             setBusy(false);
         }
     }
@@ -393,7 +403,7 @@ public final class SwingAccountCreationDialog extends JDialog
         JPanel root = new JPanel(new MigLayout(
                 "insets 20, fill",
                 "[grow,fill]",
-                "[][grow,fill][][pref!]"));
+                "[][grow,fill][][][pref!]"));
         SwingTransparency.revealBackgroundThroughTabs(methodTabs);
         for (AccountCreationMethod method : displayedMethods) {
             methodTabs.addTab(methodTitle(method), switch (method) {
@@ -416,6 +426,7 @@ public final class SwingAccountCreationDialog extends JDialog
         status.setVerticalAlignment(SwingConstants.TOP);
         status.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
         root.add(status, "growx, wrap");
+        root.add(microsoftDeviceCode, "alignx center, wrap");
 
         JPanel actions = new JPanel(new MigLayout("insets 0", "[grow][]8[]", "[]"));
         actions.add(new JLabel(), "growx");

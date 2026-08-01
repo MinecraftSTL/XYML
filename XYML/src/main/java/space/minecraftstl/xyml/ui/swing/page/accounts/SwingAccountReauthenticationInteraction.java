@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.log.SwingLogFontPreferences;
 
 import javax.swing.JButton;
 import javax.swing.JDialog;
@@ -69,6 +70,9 @@ final class SwingAccountReauthenticationInteraction implements AccountReauthenti
 
     /// Status label owned by the current OAuth dialog.
     private final AtomicReference<@Nullable JLabel> oauthStatus = new AtomicReference<>();
+
+    /// Copyable device-code action owned by the current OAuth dialog.
+    private final AtomicReference<@Nullable MicrosoftDeviceCodeButton> oauthDeviceCode = new AtomicReference<>();
 
     /// Button reopening the latest OAuth location.
     private final AtomicReference<@Nullable JButton> oauthOpenButton = new AtomicReference<>();
@@ -160,6 +164,10 @@ final class SwingAccountReauthenticationInteraction implements AccountReauthenti
             return;
         }
         JLabel status = ensureOAuthDialog(target);
+        MicrosoftDeviceCodeButton deviceCode = Objects.requireNonNull(
+                oauthDeviceCode.get(),
+                "OAuth device-code action");
+        deviceCode.clearCode();
         switch (notice.kind()) {
             case AUTHENTICATING -> status.setText(i18n("account.methods.microsoft.logging_in"));
             case BROWSER_AUTHORIZATION -> {
@@ -174,7 +182,8 @@ final class SwingAccountReauthenticationInteraction implements AccountReauthenti
                 String code = Objects.requireNonNull(notice.code(), "device code");
                 updateOAuthActions(location, code);
                 status.setText("<html>" + i18n("account.methods.microsoft.methods.device")
-                        + "<br>" + location + "<br><b>" + code + "</b></html>");
+                        + "<br>" + location + "</html>");
+                deviceCode.showCode(code);
                 copyToClipboard(code);
                 openExternalLocation(location);
             }
@@ -209,6 +218,7 @@ final class SwingAccountReauthenticationInteraction implements AccountReauthenti
             }
             @Nullable JDialog progress = oauthDialog.getAndSet(null);
             oauthStatus.set(null);
+            oauthDeviceCode.set(null);
             oauthOpenButton.set(null);
             oauthCopyButton.set(null);
             oauthLocation.set(null);
@@ -272,7 +282,10 @@ final class SwingAccountReauthenticationInteraction implements AccountReauthenti
                 JDialog.ModalityType.MODELESS);
         dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         JLabel status = new JLabel(i18n("account.methods.microsoft.logging_in"), SwingConstants.CENTER);
-        status.setPreferredSize(new Dimension(460, 130));
+        status.setPreferredSize(new Dimension(460, 100));
+        MicrosoftDeviceCodeButton deviceCode = new MicrosoftDeviceCodeButton(
+                SwingLogFontPreferences.currentOrDefault(),
+                SwingAccountReauthenticationInteraction::copyToClipboard);
         JButton cancel = new JButton(i18n("button.cancel"));
         cancel.addActionListener(event -> cancellationCommand.run());
         JButton open = new JButton(i18n("account.methods.microsoft.methods.browser"));
@@ -299,8 +312,12 @@ final class SwingAccountReauthenticationInteraction implements AccountReauthenti
         actions.add(copy);
         actions.add(new JLabel(), "growx");
         actions.add(cancel);
-        JPanel root = new JPanel(new MigLayout("insets 18, fill", "[grow,fill]", "[grow,fill][]"));
+        JPanel root = new JPanel(new MigLayout(
+                "insets 18, fill",
+                "[grow,fill]",
+                "[grow,fill][][pref!]"));
         root.add(status, "grow, wrap");
+        root.add(deviceCode, "alignx center, wrap");
         root.add(actions, "growx");
         dialog.setContentPane(root);
         dialog.addWindowListener(new WindowAdapter() {
@@ -315,6 +332,7 @@ final class SwingAccountReauthenticationInteraction implements AccountReauthenti
             public void windowClosed(WindowEvent event) {
                 if (oauthDialog.compareAndSet(dialog, null)) {
                     oauthStatus.compareAndSet(status, null);
+                    oauthDeviceCode.compareAndSet(deviceCode, null);
                     cancellationCommand.run();
                 }
             }
@@ -326,6 +344,7 @@ final class SwingAccountReauthenticationInteraction implements AccountReauthenti
             return Objects.requireNonNull(oauthStatus.get(), "OAuth progress label");
         }
         oauthStatus.set(status);
+        oauthDeviceCode.set(deviceCode);
         oauthOpenButton.set(open);
         oauthCopyButton.set(copy);
         dialog.setVisible(true);
