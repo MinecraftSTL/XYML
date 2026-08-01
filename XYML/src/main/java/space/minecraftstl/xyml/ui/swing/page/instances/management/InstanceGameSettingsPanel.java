@@ -781,6 +781,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 updateEditingAvailability();
             });
         }
+        InstanceMemorySelectionController.install(automaticMemoryControl, maximumMemoryControl);
         automaticMemoryControl.editor().addActionListener(event -> updateEditingAvailability());
         javaTypeControl.editor().addActionListener(event -> updateEditingAvailability());
         quickPlayTypeControl.editor().addActionListener(event -> updateEditingAvailability());
@@ -1981,20 +1982,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// Returns the lowercase localization suffix for one enum value.
     private static String enumKey(Enum<?> value) {
         return Objects.requireNonNull(value, "value").name().toLowerCase(Locale.ROOT);
-    }
-
-    /// One value editor paired with its independent instance-override checkbox.
-    ///
-    /// @param overrideBox local-override checkbox
-    /// @param editor effective value editor
-    /// @param <T> editor component type
-    @NotNullByDefault
-    private record InheritedControl<T extends JComponent>(JCheckBox overrideBox, T editor) {
-        /// Rejects missing components.
-        private InheritedControl {
-            Objects.requireNonNull(overrideBox, "overrideBox");
-            Objects.requireNonNull(editor, "editor");
-        }
     }
 
 }
