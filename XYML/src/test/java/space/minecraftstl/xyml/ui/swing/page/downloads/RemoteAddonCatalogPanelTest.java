@@ -39,6 +39,7 @@ import javax.swing.JList;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.Insets;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -100,6 +101,8 @@ final class RemoteAddonCatalogPanelTest {
                 assertFalse(list.isOpaque());
                 assertFalse(unselectedOpaque);
                 assertTrue(selectedOpaque);
+                Insets listInsets = list.getBorder().getBorderInsets(list);
+                assertEquals(9, listInsets.bottom);
             });
         } finally {
             @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
