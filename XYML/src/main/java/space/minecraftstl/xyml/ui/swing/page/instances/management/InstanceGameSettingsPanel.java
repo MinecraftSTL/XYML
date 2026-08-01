@@ -60,6 +60,7 @@ import javax.swing.ListCellRenderer;
 import javax.swing.ScrollPaneConstants;
 import java.awt.BorderLayout;
 import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.Font;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -78,10 +79,8 @@ import static space.minecraftstl.xyml.ui.swing.page.instances.management.Instanc
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsValueCodec.parseRequiredDouble;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsValueCodec.parseRequiredInteger;
 
-/// Edits the complete inherited launch-settings surface for one managed game instance.
-///
-/// Each property has an independent local-override checkbox. Expensive local runtime and renderer choices are loaded
-/// only when their combo boxes are opened, keeping the instance page responsive on slower machines.
+/// Edits the complete launch-settings surface using radio modes for memory and Java plus per-property overrides.
+/// Expensive runtime and renderer choices load only when opened, keeping the instance page responsive.
 @NotNullByDefault
 public final class InstanceGameSettingsPanel extends JPanel implements AutoCloseable {
     /// Largest manually accepted heap allocation in MiB.
@@ -109,13 +108,14 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// Tabbed grouping for the complete settings surface.
     private final JTabbedPane settingsTabs = new JTabbedPane();
 
-    /// Automatic memory allocation setting.
-    private final InheritedControl<JCheckBox> automaticMemoryControl =
-            inheritedControl("instanceGameSettingsAutomaticMemory", new JCheckBox());
+    /// Inherited, automatic, and manual memory-allocation choices.
+    private final InstanceMemoryModeSelector memoryModeSelector;
 
-    /// Maximum heap allocation setting.
-    private final InheritedControl<JTextField> maximumMemoryControl =
-            inheritedControl("instanceGameSettingsMaximumMemory", new JTextField());
+    /// Manual maximum heap allocation editor.
+    private final JTextField maximumMemoryField = new JTextField();
+
+    /// Manual allocation slider and physical-memory summary.
+    private final InstanceMemoryAllocationControls memoryAllocationControls;
 
     /// Java selection strategy setting.
     private final InstanceJavaModeSelector javaModeSelector;
@@ -454,6 +454,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         EdtDispatcher.requireEventDispatchThread();
         this.store = Objects.requireNonNull(store, "store");
         this.presentation = Objects.requireNonNull(presentation, "presentation");
+        memoryModeSelector = new InstanceMemoryModeSelector(
+                this.presentation == GameSettingsEditorPresentation.INSTANCE);
+        maximumMemoryField.setName("instanceGameSettingsMaximumMemory");
+        memoryAllocationControls = new InstanceMemoryAllocationControls(memoryModeSelector, maximumMemoryField);
         javaModeSelector = new InstanceJavaModeSelector(this.presentation == GameSettingsEditorPresentation.INSTANCE);
         javaVersionField.setName("instanceGameSettingsJavaVersion");
         javaPathField.setName("instanceGameSettingsJavaPath");
@@ -607,10 +611,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         }
 
         JPanel memory = sectionPanel("instanceGameSettingsMemory", i18n("settings.memory"));
-        addBooleanControlRow(memory, i18n("settings.memory.auto_allocate"), automaticMemoryControl);
-        addControlRow(memory, i18n("settings.memory.manual_allocate"), maximumMemoryControl);
-        memory.add(new InstanceMemoryAllocationControls(
-                automaticMemoryControl.editor(), maximumMemoryControl.editor()).component(), "skip 1, span 2, growx");
+        memoryModeSelector.addRows(memory, maximumMemoryField);
+        memory.add(memoryAllocationControls.component(), "skip 1, span 2, growx");
         content.add(memory, "growx");
         content.add(new JSeparator(), "growx");
 
@@ -782,8 +784,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 updateEditingAvailability();
             });
         }
-        InstanceMemorySelectionController.install(automaticMemoryControl, maximumMemoryControl);
-        automaticMemoryControl.editor().addActionListener(event -> updateEditingAvailability());
+        memoryModeSelector.addSelectionListener(this::updateEditingAvailability);
         javaModeSelector.addSelectionListener(this::updateEditingAvailability);
         quickPlayTypeControl.editor().addActionListener(event -> updateEditingAvailability());
         noJvmOptionsControl.editor().addActionListener(event -> updateEditingAvailability());
@@ -878,12 +879,19 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         }
         InstanceGameSettingsSnapshot current = displayedSnapshot();
 
-        int maximumMemory = editedRequiredInteger(
-                maximumMemoryControl,
-                current.memory().maximumMiB(),
-                "Maximum memory",
-                1,
-                MAXIMUM_MEMORY_MIB);
+        boolean memoryModeOverridden = !memoryModeSelector.isInherited();
+        boolean automaticMemory = memoryModeOverridden
+                ? memoryModeSelector.isAutomatic()
+                : current.memory().automatic();
+        boolean maximumMemoryOverridden = memoryModeOverridden
+                && (presentation == GameSettingsEditorPresentation.GLOBAL_PRESET || !automaticMemory);
+        int maximumMemory = maximumMemoryOverridden && !automaticMemory
+                ? parseRequiredInteger(
+                        maximumMemoryField.getText(),
+                        "Maximum memory",
+                        1,
+                        MAXIMUM_MEMORY_MIB)
+                : current.memory().maximumMiB();
         boolean javaTypeOverridden = !javaModeSelector.isInherited();
         JavaVersionType javaType = javaTypeOverridden
                 ? javaModeSelector.selectedMode()
@@ -959,9 +967,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 current.writable(),
                 parentPresetControls.edited(current.parentPreset()),
                 new InstanceGameSettingsSnapshot.MemorySettings(
-                        automaticMemoryControl.overrideBox().isSelected(),
-                        editedBoolean(automaticMemoryControl, current.memory().automatic()),
-                        maximumMemoryControl.overrideBox().isSelected(),
+                        memoryModeOverridden,
+                        automaticMemory,
+                        maximumMemoryOverridden,
                         maximumMemory),
                 new InstanceGameSettingsSnapshot.JavaRuntimeSettings(
                         javaTypeOverridden,
@@ -1250,14 +1258,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         try {
             displayedSnapshot = snapshot;
             parentPresetControls.apply(snapshot.parentPreset());
-            applyBoolean(
-                    automaticMemoryControl,
-                    snapshot.memory().automaticOverridden(),
+            memoryModeSelector.apply(
+                    snapshot.memory().automaticOverridden() || snapshot.memory().maximumOverridden(),
                     snapshot.memory().automatic());
-            applyText(
-                    maximumMemoryControl,
-                    snapshot.memory().maximumOverridden(),
-                    Integer.toString(snapshot.memory().maximumMiB()));
+            maximumMemoryField.setText(Integer.toString(snapshot.memory().maximumMiB()));
+            memoryAllocationControls.applyInheritedAutomatic(snapshot.memory().automatic());
             javaModeSelector.apply(
                     snapshot.javaRuntime().typeOverridden()
                             || snapshot.javaRuntime().customVersionOverridden()
@@ -1425,10 +1430,12 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 writable,
                 presentation == GameSettingsEditorPresentation.INSTANCE);
 
-        boolean automaticMemory = snapshot != null
-                && editedBoolean(automaticMemoryControl, snapshot.memory().automatic());
-        maximumMemoryControl.editor().setEnabled(
-                maximumMemoryControl.editor().isEnabled() && !automaticMemory);
+        memoryModeSelector.setEnabled(writable);
+        boolean localMemorySettings = snapshot != null && !memoryModeSelector.isInherited();
+        boolean automaticMemory = localMemorySettings
+                ? memoryModeSelector.isAutomatic()
+                : snapshot == null || snapshot.memory().automatic();
+        maximumMemoryField.setEnabled(writable && localMemorySettings && !automaticMemory);
         javaModeSelector.setEnabled(writable);
         boolean localJavaSettings = snapshot != null && !javaModeSelector.isInherited();
         JavaVersionType javaType = localJavaSettings
@@ -1704,8 +1711,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// @return immutable control list
     private @Unmodifiable List<InheritedControl<? extends JComponent>> allControls() {
         return List.of(
-                automaticMemoryControl,
-                maximumMemoryControl,
                 windowTypeControl,
                 windowWidthControl,
                 windowHeightControl,
@@ -1770,9 +1775,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// @param name stable component name
     /// @return configured tab content
     private static JPanel tabContent(String name) {
-        JPanel content = new JPanel(new MigLayout("insets 16 20 20 20, fillx, wrap 1", "[grow,fill]", "[]14[]"));
+        JPanel content = new ViewportTrackingPanel(
+                new MigLayout("insets 16 20 20 20, fillx, wrap 1", "[grow,fill]", "[]14[]"));
         content.setName(Objects.requireNonNull(name, "name"));
-        content.setOpaque(false);
         return content;
     }
 
@@ -1817,13 +1822,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             String name,
             String labelText,
             InheritedControl<? extends JComponent> control) {
-        JPanel row = new JPanel(new MigLayout(
-                "insets 0, fillx",
-                "[26!,center][280!,fill][grow,fill]",
-                "[]"));
+        JPanel row = new InstanceSettingsControlRow(
+                labelText,
+                control.overrideBox(),
+                control.editor());
         row.setName(Objects.requireNonNull(name, "name"));
-        row.setOpaque(false);
-        addControlRow(row, labelText, control);
         return row;
     }
 
@@ -1836,14 +1839,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             JPanel section,
             String labelText,
             InheritedControl<? extends JComponent> control) {
-        String validatedLabel = Objects.requireNonNull(labelText, "labelText");
-        section.add(control.overrideBox(), "aligny center");
-        JLabel label = new JLabel(validatedLabel);
-        label.setLabelFor(control.editor());
-        label.setName(control.editor().getName() + "Label");
-        control.overrideBox().getAccessibleContext().setAccessibleName(validatedLabel);
-        section.add(label, "aligny center");
-        section.add(control.editor(), "growx");
+        section.add(new InstanceSettingsControlRow(
+                labelText,
+                control.overrideBox(),
+                control.editor()), "span 3, growx");
     }
 
     /// Adds one inherited boolean editor whose visible text belongs to the value checkbox.
@@ -1874,15 +1873,15 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             String labelText,
             InheritedControl<JTextArea> control) {
         String validatedLabel = Objects.requireNonNull(labelText, "labelText");
-        section.add(control.overrideBox(), "aligny top");
-        JLabel label = new JLabel(validatedLabel);
-        label.setLabelFor(control.editor());
-        label.setName(control.editor().getName() + "Label");
-        control.overrideBox().getAccessibleContext().setAccessibleName(validatedLabel);
-        section.add(label, "aligny top");
         JScrollPane scrollPane = new JScrollPane(control.editor());
         scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
-        section.add(scrollPane, "growx, h 88!");
+        scrollPane.setPreferredSize(new Dimension(180, 88));
+        scrollPane.setMinimumSize(new Dimension(80, 88));
+        section.add(new InstanceSettingsControlRow(
+                validatedLabel,
+                control.overrideBox(),
+                control.editor(),
+                scrollPane), "span 3, growx");
     }
 
     /// Applies one boolean value and override state.

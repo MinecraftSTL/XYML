@@ -24,9 +24,9 @@ import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.util.platform.hardware.PhysicalMemoryStatus;
 
-import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JRadioButton;
 import javax.swing.JSlider;
 import javax.swing.JTextField;
 import java.awt.Component;
@@ -49,11 +49,12 @@ final class InstanceMemoryAllocationControlsTest {
         AtomicReference<@Nullable JComponent> componentReference = new AtomicReference<>();
         AtomicReference<@Nullable JTextField> maximumReference = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> {
-            JCheckBox automatic = new JCheckBox();
+            InstanceMemoryModeSelector selector = new InstanceMemoryModeSelector(false);
+            selector.manualButton().doClick();
             JTextField maximum = new JTextField("4096");
             maximum.setEnabled(true);
             InstanceMemoryAllocationControls controls = new InstanceMemoryAllocationControls(
-                    automatic,
+                    selector,
                     maximum,
                     () -> new PhysicalMemoryStatus(8L * gibibyte, 4L * gibibyte),
                     Runnable::run);
@@ -94,25 +95,28 @@ final class InstanceMemoryAllocationControlsTest {
     @Test
     void followsAutomaticModeAndEditorAvailability() {
         long gibibyte = 1_024L * 1_024L * 1_024L;
-        AtomicReference<@Nullable JCheckBox> automaticReference = new AtomicReference<>();
+        AtomicReference<@Nullable JRadioButton> automaticReference = new AtomicReference<>();
+        AtomicReference<@Nullable InstanceMemoryModeSelector> selectorReference = new AtomicReference<>();
         AtomicReference<@Nullable JTextField> maximumReference = new AtomicReference<>();
         AtomicReference<@Nullable JComponent> componentReference = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> {
-            JCheckBox automatic = new JCheckBox();
+            InstanceMemoryModeSelector selector = new InstanceMemoryModeSelector(false);
             JTextField maximum = new JTextField("4096");
             InstanceMemoryAllocationControls controls = new InstanceMemoryAllocationControls(
-                    automatic,
+                    selector,
                     maximum,
                     () -> new PhysicalMemoryStatus(8L * gibibyte, 4L * gibibyte),
                     Runnable::run);
-            automaticReference.set(automatic);
+            automaticReference.set(selector.automaticButton());
+            selectorReference.set(selector);
             maximumReference.set(maximum);
             componentReference.set(controls.component());
             controls.requestMemoryStatus();
         });
 
         EdtDispatcher.executeAndWait(() -> {
-            JCheckBox automatic = Objects.requireNonNull(automaticReference.get(), "automatic");
+            JRadioButton automatic = Objects.requireNonNull(automaticReference.get(), "automatic");
+            InstanceMemoryModeSelector selector = Objects.requireNonNull(selectorReference.get(), "selector");
             JTextField maximum = Objects.requireNonNull(maximumReference.get(), "maximum");
             JComponent component = Objects.requireNonNull(componentReference.get(), "component");
             JSlider slider = findNamed(
@@ -124,8 +128,15 @@ final class InstanceMemoryAllocationControlsTest {
                     "instanceGameSettingsAllocatedMemory",
                     JLabel.class);
 
-            automatic.doClick();
             long automaticBytes = XYMLGameRepository.getAutoAllocatedMemory(4L * gibibyte);
+            assertEquals(i18n(
+                    "settings.memory.allocate",
+                    automaticBytes / (double) gibibyte), allocated.getText());
+            selector.manualButton().doClick();
+            assertFalse(automatic.isSelected());
+            assertEquals(i18n("settings.memory.allocate", 4.0D), allocated.getText());
+            automatic.doClick();
+            assertTrue(automatic.isSelected());
             assertEquals(i18n(
                     "settings.memory.allocate",
                     automaticBytes / (double) gibibyte), allocated.getText());
@@ -134,6 +145,41 @@ final class InstanceMemoryAllocationControlsTest {
             assertFalse(slider.isEnabled());
             maximum.setEnabled(true);
             assertTrue(slider.isEnabled());
+        });
+    }
+
+    /// Uses the inherited effective automatic mode even though its local radio button is not selected.
+    @Test
+    void followsInheritedAutomaticMode() {
+        long gibibyte = 1_024L * 1_024L * 1_024L;
+        AtomicReference<@Nullable InstanceMemoryModeSelector> selectorReference = new AtomicReference<>();
+        AtomicReference<@Nullable JComponent> componentReference = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            InstanceMemoryModeSelector selector = new InstanceMemoryModeSelector(true);
+            JTextField maximum = new JTextField("4096");
+            InstanceMemoryAllocationControls controls = new InstanceMemoryAllocationControls(
+                    selector,
+                    maximum,
+                    () -> new PhysicalMemoryStatus(8L * gibibyte, 4L * gibibyte),
+                    Runnable::run);
+            controls.applyInheritedAutomatic(true);
+            selectorReference.set(selector);
+            componentReference.set(controls.component());
+            controls.requestMemoryStatus();
+        });
+
+        EdtDispatcher.executeAndWait(() -> {
+            InstanceMemoryModeSelector selector = Objects.requireNonNull(selectorReference.get(), "selector");
+            JLabel allocated = findNamed(
+                    Objects.requireNonNull(componentReference.get(), "component"),
+                    "instanceGameSettingsAllocatedMemory",
+                    JLabel.class);
+            long automaticBytes = XYMLGameRepository.getAutoAllocatedMemory(4L * gibibyte);
+            assertTrue(selector.isInherited());
+            assertFalse(selector.automaticButton().isSelected());
+            assertEquals(i18n(
+                    "settings.memory.allocate",
+                    automaticBytes / (double) gibibyte), allocated.getText());
         });
     }
 
