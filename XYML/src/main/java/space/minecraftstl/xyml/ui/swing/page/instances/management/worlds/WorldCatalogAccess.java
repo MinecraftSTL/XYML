@@ -85,6 +85,43 @@ interface WorldCatalogAccess {
     /// @throws IOException when Core cannot delete the world
     void delete(WorldCatalogItem world, LoadCancellation cancellation) throws IOException;
 
+    /// Writes one selected world's editable details and keeps the mutation on the background side.
+    ///
+    /// Implementations that do not support detail editing may retain the default failure.
+    ///
+    /// @param world current readable world row
+    /// @param update validated form values
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when Core cannot write the world
+    default void updateDetails(
+            WorldCatalogItem world,
+            WorldDetailsUpdate update,
+            LoadCancellation cancellation) throws IOException {
+        throw new UnsupportedOperationException("World detail editing is unavailable");
+    }
+
+    /// Replaces one selected world's exact 64-by-64 PNG icon.
+    ///
+    /// @param world current readable world row
+    /// @param source selected PNG source
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when validation or replacement fails
+    default void replaceIcon(
+            WorldCatalogItem world,
+            Path source,
+            LoadCancellation cancellation) throws IOException {
+        throw new UnsupportedOperationException("World icon editing is unavailable");
+    }
+
+    /// Removes one selected world's custom icon.
+    ///
+    /// @param world current readable world row
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when deletion fails
+    default void resetIcon(WorldCatalogItem world, LoadCancellation cancellation) throws IOException {
+        throw new UnsupportedOperationException("World icon reset is unavailable");
+    }
+
     /// Copies one validated, unlocked current world beside its source.
     ///
     /// Implementations that do not support mutation may retain this default failure.

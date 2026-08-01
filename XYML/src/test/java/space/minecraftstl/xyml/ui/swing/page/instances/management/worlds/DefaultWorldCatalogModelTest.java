@@ -135,6 +135,50 @@ final class DefaultWorldCatalogModelTest {
         }
     }
 
+    /// Detail and icon writes remain serialized and never materialize unrelated world rows.
+    @Test
+    void delegatesDetailsAndIconMutationsForOnlyTheSelectedRow() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        RecordingAccess access = new RecordingAccess(temporaryDirectory, 8);
+        DefaultWorldCatalogModel model = new DefaultWorldCatalogModel(
+                access,
+                executor,
+                WorldCatalogStrings.english());
+        try {
+            CompletableFuture<WorldCatalogSnapshot> ready = nextReadySnapshot(model);
+            model.loadIfNeeded();
+            ready.get(5, TimeUnit.SECONDS);
+            WorldCatalogItem selected = model.load(
+                            IndexRange.ofLength(3, 1),
+                            new LoadCancellation())
+                    .toCompletableFuture()
+                    .get(5, TimeUnit.SECONDS)
+                    .items()
+                    .get(0);
+            WorldDetailsUpdate update = new WorldDetailsUpdate(
+                    "Renamed",
+                    new WorldCatalogDetails.WorldSettings(true, false, null, null),
+                    null);
+            Path icon = temporaryDirectory.resolve("icon.png");
+
+            model.updateWorldDetails(selected, update).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            model.replaceWorldIcon(selected, icon).toCompletableFuture().get(5, TimeUnit.SECONDS);
+            model.resetWorldIcon(selected).toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+            assertEquals(selected, access.updatedWorld());
+            assertEquals(update, access.detailsUpdate());
+            assertEquals(selected, access.iconWorld());
+            assertEquals(icon.toAbsolutePath().normalize(), access.iconSource());
+            assertEquals(selected, access.resetIconWorld());
+            assertEquals(4, access.indexCalls());
+            assertEquals(List.of(selected.path()), access.materializedDirectories());
+        } finally {
+            model.close();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Current-version filtering scans only until the requested visible matches and learns the exact end lazily.
     @Test
     void incrementallyFiltersCurrentVersionAndRestoresShowAll() throws Exception {
@@ -244,6 +288,21 @@ final class DefaultWorldCatalogModelTest {
 
         /// Export path most recently delegated, or null before an export.
         private volatile @Nullable Path exportedArchive;
+
+        /// World most recently delegated to detail editing.
+        private volatile @Nullable WorldCatalogItem updatedWorld;
+
+        /// Detail values most recently delegated.
+        private volatile @Nullable WorldDetailsUpdate detailsUpdate;
+
+        /// World most recently delegated to icon replacement.
+        private volatile @Nullable WorldCatalogItem iconWorld;
+
+        /// Icon source most recently delegated.
+        private volatile @Nullable Path iconSource;
+
+        /// World most recently delegated to icon reset.
+        private volatile @Nullable WorldCatalogItem resetIconWorld;
 
         /// Creates a source with deterministic ordered world directory paths.
         ///
@@ -368,6 +427,46 @@ final class DefaultWorldCatalogModelTest {
             cancellation.throwIfCancelled();
         }
 
+        /// Records one synthetic detail update.
+        ///
+        /// @param world selected synthetic row
+        /// @param update submitted values
+        /// @param cancellation cooperative cancellation signal
+        @Override
+        public void updateDetails(
+                WorldCatalogItem world,
+                WorldDetailsUpdate update,
+                LoadCancellation cancellation) {
+            cancellation.throwIfCancelled();
+            updatedWorld = world;
+            detailsUpdate = update;
+        }
+
+        /// Records one synthetic icon replacement.
+        ///
+        /// @param world selected synthetic row
+        /// @param source requested source
+        /// @param cancellation cooperative cancellation signal
+        @Override
+        public void replaceIcon(
+                WorldCatalogItem world,
+                Path source,
+                LoadCancellation cancellation) {
+            cancellation.throwIfCancelled();
+            iconWorld = world;
+            iconSource = source;
+        }
+
+        /// Records one synthetic icon reset.
+        ///
+        /// @param world selected synthetic row
+        /// @param cancellation cooperative cancellation signal
+        @Override
+        public void resetIcon(WorldCatalogItem world, LoadCancellation cancellation) {
+            cancellation.throwIfCancelled();
+            resetIconWorld = world;
+        }
+
         /// Records one synthetic copy delegation.
         ///
         /// @param world selected synthetic row
@@ -447,6 +546,41 @@ final class DefaultWorldCatalogModelTest {
         /// @return archive path, or null before export
         private @Nullable Path exportedArchive() {
             return exportedArchive;
+        }
+
+        /// Returns the most recently detail-edited row.
+        ///
+        /// @return edited row, or null before editing
+        private @Nullable WorldCatalogItem updatedWorld() {
+            return updatedWorld;
+        }
+
+        /// Returns the most recently submitted detail values.
+        ///
+        /// @return submitted update, or null before editing
+        private @Nullable WorldDetailsUpdate detailsUpdate() {
+            return detailsUpdate;
+        }
+
+        /// Returns the most recently icon-edited row.
+        ///
+        /// @return icon row, or null before replacement
+        private @Nullable WorldCatalogItem iconWorld() {
+            return iconWorld;
+        }
+
+        /// Returns the most recently selected icon source.
+        ///
+        /// @return icon source, or null before replacement
+        private @Nullable Path iconSource() {
+            return iconSource;
+        }
+
+        /// Returns the most recently icon-reset row.
+        ///
+        /// @return reset row, or null before reset
+        private @Nullable WorldCatalogItem resetIconWorld() {
+            return resetIconWorld;
         }
     }
 }

@@ -93,6 +93,44 @@ public interface WorldCatalogModel extends ViewportChoiceDataSource<WorldCatalog
     /// @return terminal catalog state
     CompletionStage<WorldCatalogSnapshot> deleteWorld(WorldCatalogItem world);
 
+    /// Writes one selected world's supported detail fields and refreshes the catalog afterward.
+    ///
+    /// @param world exact current materialized row
+    /// @param update validated form values
+    /// @return terminal catalog state
+    default CompletionStage<WorldCatalogSnapshot> updateWorldDetails(
+            WorldCatalogItem world,
+            WorldDetailsUpdate update) {
+        Objects.requireNonNull(world, "world");
+        Objects.requireNonNull(update, "update");
+        return CompletableFuture.failedFuture(
+                new UnsupportedOperationException("World detail editing is unavailable"));
+    }
+
+    /// Replaces one selected world's icon with an exact 64-by-64 PNG.
+    ///
+    /// @param world exact current materialized row
+    /// @param source selected local PNG
+    /// @return terminal catalog state
+    default CompletionStage<WorldCatalogSnapshot> replaceWorldIcon(
+            WorldCatalogItem world,
+            Path source) {
+        Objects.requireNonNull(world, "world");
+        Objects.requireNonNull(source, "source");
+        return CompletableFuture.failedFuture(
+                new UnsupportedOperationException("World icon editing is unavailable"));
+    }
+
+    /// Removes one selected world's custom icon and refreshes the catalog afterward.
+    ///
+    /// @param world exact current materialized row
+    /// @return terminal catalog state
+    default CompletionStage<WorldCatalogSnapshot> resetWorldIcon(WorldCatalogItem world) {
+        Objects.requireNonNull(world, "world");
+        return CompletableFuture.failedFuture(
+                new UnsupportedOperationException("World icon reset is unavailable"));
+    }
+
     /// Copies one current readable world under a user-selected sibling name.
     ///
     /// @param world exact current materialized row

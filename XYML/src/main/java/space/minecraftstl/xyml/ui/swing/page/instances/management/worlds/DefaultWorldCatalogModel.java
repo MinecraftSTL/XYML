@@ -45,6 +45,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Asynchronous instance-world catalog with a shallow path index and incremental NBT parsing.
 ///
 /// Opening the World tab enumerates direct child directories and publishes their exact count. It
@@ -338,6 +340,70 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
         return startMutation(
                 strings.deletingText(),
                 (source, cancellation) -> source.delete(selectedWorld, cancellation),
+                selectedWorld);
+    }
+
+    /// Starts one serialized detail write followed by a fresh shallow index.
+    ///
+    /// @param world exact materialized current row
+    /// @param update validated form values
+    /// @return terminal catalog snapshot
+    @Override
+    public CompletionStage<WorldCatalogSnapshot> updateWorldDetails(
+            WorldCatalogItem world,
+            WorldDetailsUpdate update) {
+        WorldCatalogItem selectedWorld;
+        WorldDetailsUpdate requested;
+        try {
+            selectedWorld = Objects.requireNonNull(world, "world");
+            requested = Objects.requireNonNull(update, "update");
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+        return startMutation(
+                i18n("button.save"),
+                (source, cancellation) -> source.updateDetails(selectedWorld, requested, cancellation),
+                selectedWorld);
+    }
+
+    /// Starts one serialized exact-PNG icon replacement followed by a fresh shallow index.
+    ///
+    /// @param world exact materialized current row
+    /// @param source selected local PNG
+    /// @return terminal catalog snapshot
+    @Override
+    public CompletionStage<WorldCatalogSnapshot> replaceWorldIcon(
+            WorldCatalogItem world,
+            Path source) {
+        WorldCatalogItem selectedWorld;
+        Path selectedSource;
+        try {
+            selectedWorld = Objects.requireNonNull(world, "world");
+            selectedSource = Objects.requireNonNull(source, "source").toAbsolutePath().normalize();
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+        return startMutation(
+                i18n("world.icon.change"),
+                (access, cancellation) -> access.replaceIcon(selectedWorld, selectedSource, cancellation),
+                selectedWorld);
+    }
+
+    /// Starts one serialized world-icon reset followed by a fresh shallow index.
+    ///
+    /// @param world exact materialized current row
+    /// @return terminal catalog snapshot
+    @Override
+    public CompletionStage<WorldCatalogSnapshot> resetWorldIcon(WorldCatalogItem world) {
+        WorldCatalogItem selectedWorld;
+        try {
+            selectedWorld = Objects.requireNonNull(world, "world");
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+        return startMutation(
+                i18n("button.reset"),
+                (source, cancellation) -> source.resetIcon(selectedWorld, cancellation),
                 selectedWorld);
     }
 
