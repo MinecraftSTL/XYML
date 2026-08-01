@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.ui.swing.FontAntialiasingMode;
 
 import java.util.Objects;
 
