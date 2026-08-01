@@ -38,8 +38,32 @@ public interface InstanceGameSettingsStore {
     /// @return current editable settings snapshot
     InstanceGameSettingsSnapshot snapshot();
 
+    /// Resolves a candidate snapshot against its selected parent preset without persisting it.
+    ///
+    /// Implementations that do not support parent presets may return the candidate unchanged.
+    ///
+    /// @param candidate complete unsaved editor state
+    /// @return effective preview retaining the candidate's local overrides
+    default InstanceGameSettingsSnapshot preview(InstanceGameSettingsSnapshot candidate) {
+        return candidate;
+    }
+
     /// Persists one complete edited snapshot for the represented instance.
     ///
     /// @param snapshot validated values and inheritance choices to persist
     void save(InstanceGameSettingsSnapshot snapshot);
+
+    /// Returns whether a newer read-only settings file can be backed up and overwritten.
+    ///
+    /// @return whether recovery is available
+    default boolean canForceOverwrite() {
+        return false;
+    }
+
+    /// Backs up and overwrites a read-only settings file with the currently loaded representation.
+    ///
+    /// @throws IllegalStateException when this store cannot recover a read-only file
+    default void forceOverwrite() {
+        throw new IllegalStateException("Instance game settings cannot be overwritten");
+    }
 }

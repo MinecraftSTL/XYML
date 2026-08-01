@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSnapshot;
 
+import java.util.List;
 import java.util.Objects;
 
 /// Contains every directly persisted field of one reusable game-settings preset.
@@ -87,6 +88,7 @@ public record GameSettingsPresetEditor(
     public InstanceGameSettingsSnapshot toEditorSnapshot(boolean writable) {
         return new InstanceGameSettingsSnapshot(
                 writable,
+                new InstanceGameSettingsSnapshot.ParentPresetSettings(null, List.of()),
                 new InstanceGameSettingsSnapshot.MemorySettings(
                         true,
                         memory.automatic(),

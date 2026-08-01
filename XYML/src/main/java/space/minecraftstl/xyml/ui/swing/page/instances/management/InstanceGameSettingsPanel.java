@@ -17,7 +17,6 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
-import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -46,7 +45,6 @@ import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import javax.swing.BorderFactory;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.DefaultListCellRenderer;
-import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
@@ -199,6 +197,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// Explicit isolation switch and editable directory chooser sharing the running-directory controls.
     private final InstanceIsolationControls isolationControls;
 
+    /// Parent global game-settings preset selector and preview control.
+    private final InstanceParentPresetControls parentPresetControls = new InstanceParentPresetControls();
+
     /// Additional Minecraft arguments setting.
     private final InheritedControl<JTextField> gameArgumentsControl =
             inheritedControl("instanceGameSettingsGameArguments", new JTextField());
@@ -301,14 +302,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private final InheritedControl<JCheckBox> nativeOpenAlControl =
             inheritedControl("instanceGameSettingsUseNativeOpenAl", new JCheckBox());
 
-    /// Commits validated controls through the store.
-    private final JButton saveButton = new JButton(i18n("button.save"));
-
-    /// Reloads all controls from durable settings.
-    private final JButton reloadButton = new JButton(i18n("button.refresh"));
-
-    /// Displays concise save, reload, validation, and read-only state.
-    private final JLabel statusLabel = new JLabel();
+    /// Status, persistence, reload, and read-only recovery footer.
+    private final InstanceGameSettingsFooterControls footerControls;
 
     /// Snapshot currently represented by the controls, or `null` during construction only.
     private @Nullable InstanceGameSettingsSnapshot displayedSnapshot;
@@ -466,6 +461,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 runningDirectoryControl.overrideBox(),
                 runningDirectoryControl.editor(),
                 this::updateEditingAvailability);
+        footerControls = new InstanceGameSettingsFooterControls(
+                store,
+                this::saveEditedSnapshot,
+                this::reloadSnapshot);
         this.javaRuntimeService = Objects.requireNonNull(javaRuntimeService, "javaRuntimeService");
         this.presentation = Objects.requireNonNull(presentation, "presentation");
         this.workingDirectoryChanged = Objects.requireNonNull(
@@ -545,7 +544,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         }
         add(createSettingsTabs(), BorderLayout.CENTER);
         if (presentation == GameSettingsEditorPresentation.INSTANCE) {
-            add(createFooter(), BorderLayout.SOUTH);
+            add(footerControls.component(), BorderLayout.SOUTH);
         }
 
         configureChoiceRenderers();
@@ -602,6 +601,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         JPanel content = tabContent("instanceGameSettingsGameTab");
 
         if (presentation == GameSettingsEditorPresentation.INSTANCE) {
+            content.add(parentPresetControls.createRow(), "growx");
+            content.add(new JSeparator(), "growx");
             content.add(isolationControls.createIsolationRow(), "growx");
             content.add(new JSeparator(), "growx");
         }
@@ -735,22 +736,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         return content;
     }
 
-    /// Creates the status and command footer.
-    ///
-    /// @return configured footer panel
-    private JPanel createFooter() {
-        JPanel footer = new JPanel(new MigLayout("insets 10 20 14 20, fillx", "[grow,fill][]8[]", "[]"));
-        footer.setOpaque(false);
-        statusLabel.setName("instanceGameSettingsStatus");
-        reloadButton.setName("instanceGameSettingsReload");
-        reloadButton.setIcon(new FlatSVGIcon("assets/swing/icons/refresh.svg", 18, 18));
-        saveButton.setName("instanceGameSettingsSave");
-        footer.add(statusLabel, "growx");
-        footer.add(reloadButton);
-        footer.add(saveButton);
-        return footer;
-    }
-
     /// Configures localized display text for enum and renderer choices.
     private void configureChoiceRenderers() {
         installRenderer(javaTypeControl.editor(), InstanceGameSettingsPanel::javaTypeName);
@@ -796,8 +781,24 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         noJvmOptionsControl.editor().addActionListener(event -> updateEditingAvailability());
         graphicsBackendControl.editor().addActionListener(event -> updateEditingAvailability());
         useCustomNativesControl.editor().addActionListener(event -> updateEditingAvailability());
-        saveButton.addActionListener(event -> saveEditedSnapshot());
-        reloadButton.addActionListener(event -> reloadSnapshot());
+        parentPresetControls.addSelectionListener(this::previewParentPreset);
+    }
+
+    /// Resolves unsaved local overrides against the newly selected parent preset.
+    private void previewParentPreset() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (applyingSnapshot || closed || presentation != GameSettingsEditorPresentation.INSTANCE) {
+            return;
+        }
+        try {
+            applySnapshot(store.preview(editedSnapshot()));
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            footerControls.setStatus(i18n(
+                    "swing.instance_settings.reload_failed",
+                    Objects.requireNonNullElse(
+                            exception.getMessage(),
+                            i18n("swing.instance_settings.unavailable"))));
+        }
     }
 
     /// Persists the currently edited values or presents one concise validation failure.
@@ -811,12 +812,12 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             store.save(editedSnapshot());
             InstanceGameSettingsSnapshot saved = store.snapshot();
             applySnapshot(saved);
-            statusLabel.setText(i18n("message.success"));
+            footerControls.setStatus(i18n("message.success"));
             if (workingDirectoryChanged(previous, saved)) {
                 workingDirectoryChanged.run();
             }
         } catch (IllegalArgumentException | IllegalStateException exception) {
-            statusLabel.setText(i18n(
+            footerControls.setStatus(i18n(
                     "swing.instance_settings.save_failed",
                     Objects.requireNonNullElse(
                             exception.getMessage(),
@@ -846,9 +847,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         }
         try {
             applySnapshot(store.snapshot());
-            statusLabel.setText(i18n("message.success"));
+            footerControls.setStatus(i18n("message.success"));
         } catch (IllegalStateException exception) {
-            statusLabel.setText(i18n(
+            footerControls.setStatus(i18n(
                     "swing.instance_settings.reload_failed",
                     Objects.requireNonNullElse(
                             exception.getMessage(),
@@ -941,6 +942,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
         return new InstanceGameSettingsSnapshot(
                 current.writable(),
+                parentPresetControls.edited(current.parentPreset()),
                 new InstanceGameSettingsSnapshot.MemorySettings(
                         automaticMemoryControl.overrideBox().isSelected(),
                         editedBoolean(automaticMemoryControl, current.memory().automatic()),
@@ -1241,6 +1243,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         applyingSnapshot = true;
         try {
             displayedSnapshot = snapshot;
+            parentPresetControls.apply(snapshot.parentPreset());
             applyBoolean(
                     automaticMemoryControl,
                     snapshot.memory().automaticOverridden(),
@@ -1282,7 +1285,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                     control.overrideBox().setSelected(true);
                 }
             }
-            statusLabel.setText("");
+            footerControls.setStatus("");
             updateAllOverrideTooltips();
             updateEditingAvailability();
         } finally {
@@ -1414,6 +1417,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             control.editor().setEnabled(writable && control.overrideBox().isSelected());
         }
         isolationControls.updateAvailability(writable, presentation == GameSettingsEditorPresentation.INSTANCE);
+        parentPresetControls.updateAvailability(
+                writable,
+                presentation == GameSettingsEditorPresentation.INSTANCE);
 
         boolean automaticMemory = snapshot != null
                 && editedBoolean(automaticMemoryControl, snapshot.memory().automatic());
@@ -1455,11 +1461,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         nativesDirectoryControl.editor().setEnabled(
                 nativesDirectoryControl.editor().isEnabled() && useCustomNatives);
 
-        saveButton.setEnabled(writable);
-        reloadButton.setEnabled(interactionEnabled && !closed);
+        footerControls.updateAvailability(writable, interactionEnabled && !closed);
         settingsTabs.setEnabled(interactionEnabled && !closed);
         if (!applyingSnapshot && snapshot != null && !snapshot.writable()) {
-            statusLabel.setText(i18n("settings.game.instance_settings.unsupported"));
+            footerControls.setStatus(i18n("settings.game.instance_settings.unsupported"));
         }
     }
 
