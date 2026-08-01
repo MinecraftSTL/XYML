@@ -49,6 +49,7 @@ import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JSlider;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
@@ -568,6 +569,58 @@ final class InstanceGameSettingsPanelTest {
                 assertTrue(status.getText().startsWith(i18n("swing.instance_settings.save_failed", "")));
             });
             assertEquals(0, store.saveCount.get());
+        } finally {
+            closePanel(panelReference);
+        }
+    }
+
+    /// Selecting a local manual heap value also disables inherited automatic allocation for this instance.
+    @Test
+    void selectingManualMemoryOverrideEnablesEditing() {
+        RecordingStore store = new RecordingStore(snapshot());
+        AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = createPanel(store);
+                panelReference.set(panel);
+                JCheckBox automaticOverride = findNamed(
+                        panel,
+                        "instanceGameSettingsAutomaticMemoryOverride",
+                        JCheckBox.class);
+                JCheckBox automatic = findNamed(
+                        panel,
+                        "instanceGameSettingsAutomaticMemory",
+                        JCheckBox.class);
+                JTextField maximum = findNamed(
+                        panel,
+                        "instanceGameSettingsMaximumMemory",
+                        JTextField.class);
+                JSlider slider = findNamed(
+                        panel,
+                        "instanceGameSettingsMaximumMemorySlider",
+                        JSlider.class);
+
+                assertFalse(automaticOverride.isSelected());
+                assertTrue(automatic.isSelected());
+                assertFalse(maximum.isEnabled());
+                assertFalse(slider.isEnabled());
+
+                clickOverride(panel, "instanceGameSettingsMaximumMemory");
+
+                assertTrue(automaticOverride.isSelected());
+                assertFalse(automatic.isSelected());
+                assertTrue(maximum.isEnabled());
+                assertTrue(slider.isEnabled());
+                maximum.setText("6144");
+                findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
+            });
+
+            assertEquals(1, store.saveCount.get());
+            InstanceGameSettingsSnapshot.MemorySettings memory = store.snapshot().memory();
+            assertTrue(memory.automaticOverridden());
+            assertFalse(memory.automatic());
+            assertTrue(memory.maximumOverridden());
+            assertEquals(6144, memory.maximumMiB());
         } finally {
             closePanel(panelReference);
         }
