@@ -25,6 +25,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
@@ -40,8 +41,11 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.KeyStroke;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import javax.swing.event.ListSelectionEvent;
@@ -58,10 +62,14 @@ import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Function;
 import java.util.function.Supplier;
+
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Presents an installed-resource-pack catalog without performing source I/O in Swing code.
 ///
@@ -116,8 +124,26 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Stable normalized directory managed by this catalog.
     private final Path resourcePackDirectory;
 
-    /// Viewport-measured single-choice list.
+    /// Search-filtered path source that preserves viewport-only metadata resolution.
+    private final FilteredResourcePackCatalogDataSource filteredDataSource;
+
+    /// Viewport-measured multi-choice list.
     private final ViewportChoiceList<ResourcePackCatalogItem> choiceList;
+
+    /// Editable shallow file-name search.
+    private final JTextField searchField;
+
+    /// Selects every logical row in the current filtered path index.
+    private final JButton selectAllButton;
+
+    /// Enables every selected stable resource-pack path.
+    private final JButton enableSelectedButton;
+
+    /// Disables every selected stable resource-pack path.
+    private final JButton disableSelectedButton;
+
+    /// Permanently deletes every selected stable resource-pack path.
+    private final JButton deleteSelectedButton;
 
     /// Cards representing every catalog lifecycle and content state.
     private final JPanel contentCards;
@@ -185,6 +211,9 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Delegates a user selection only after its sparse row has loaded.
     private final ListSelectionListener selectionListener;
 
+    /// Applies shallow file-name filtering after search document changes.
+    private final DocumentListener searchListener;
+
     /// Starts the catalog only when this page becomes the actually showing card.
     private final HierarchyListener showingListener;
 
@@ -238,7 +267,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// Whether one create-and-open-directory command remains outstanding.
     private boolean openDirectoryPending;
 
-    /// Creates a read-only resource-pack catalog panel on the Swing event dispatch thread.
+    /// Creates an interactive resource-pack catalog panel on the Swing event dispatch thread.
     ///
     /// @param model owned toolkit-neutral lazy catalog model
     /// @param strings localized catalog controls, states, and detail labels
@@ -266,12 +295,17 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             setLayout(new MigLayout(
                     "insets 0, fill, wrap 1",
                     "[grow,fill]",
-                    "[]12[grow,fill]8[]"));
+                    "[]8[]12[grow,fill]8[]"));
             contentCards = new JPanel(new CardLayout());
             refreshButton = new JButton();
             retryButton = new JButton();
             importButton = new JButton();
             openDirectoryButton = new JButton();
+            searchField = new JTextField();
+            selectAllButton = new JButton();
+            enableSelectedButton = new JButton();
+            disableSelectedButton = new JButton();
+            deleteSelectedButton = new JButton();
             enabledToggle = new JCheckBox();
             revealButton = new JButton();
             deleteButton = new JButton();
@@ -288,8 +322,10 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             enabledValue = new JLabel();
             listDataListener = createListDataListener();
             selectionListener = this::selectionChanged;
+            searchListener = createSearchListener();
             showingListener = this::showingChanged;
-            acquiredChoiceList = new ViewportChoiceList<>(model, ResourcePackCatalogItem::displayText);
+            filteredDataSource = new FilteredResourcePackCatalogDataSource(this.model);
+            acquiredChoiceList = new ViewportChoiceList<>(filteredDataSource, ResourcePackCatalogItem::displayText);
             choiceList = acquiredChoiceList;
             catalogSplit = new ResponsiveCatalogSplitPane(choiceList, createDetailsPanel());
             configureComponents();
@@ -432,6 +468,8 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         headingBand.add(refreshButton, "w 40!, h 40!");
         add(headingBand, "growx");
 
+        add(createCatalogToolbar(), "growx");
+
         configureChoiceList();
 
         idleText.setText(strings.idleText());
@@ -473,7 +511,123 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         addHierarchyListener(showingListener);
     }
 
-    /// Configures single-choice selection and sparse-row observation.
+    /// Creates shallow search and logical multi-selection batch commands.
+    ///
+    /// @return transparent catalog toolbar
+    private JComponent createCatalogToolbar() {
+        JPanel toolbar = new JPanel(new MigLayout(
+                "insets 0, fillx",
+                "[][grow,fill]12[]8[]8[]8[]",
+                "[40!]"));
+        toolbar.setName("resourcePacksCatalogToolbar");
+        toolbar.setOpaque(false);
+
+        JLabel searchLabel = new JLabel(i18n("search"));
+        searchLabel.setLabelFor(searchField);
+        toolbar.add(searchLabel);
+        searchField.setName("resourcePacksSearch");
+        SwingTextFields.showClearButton(searchField);
+        searchField.getAccessibleContext().setAccessibleName(i18n("search"));
+        searchField.getDocument().addDocumentListener(searchListener);
+        toolbar.add(searchField, "growx, h 40!");
+
+        configureTextButton(
+                selectAllButton,
+                "resourcePacksSelectAll",
+                i18n("button.select_all"),
+                this::selectAllResourcePacks);
+        toolbar.add(selectAllButton, "h 40!");
+        configureTextButton(
+                enableSelectedButton,
+                "resourcePacksEnableSelected",
+                i18n("button.enable"),
+                () -> setSelectedResourcePacksEnabled(true));
+        toolbar.add(enableSelectedButton, "h 40!");
+        configureTextButton(
+                disableSelectedButton,
+                "resourcePacksDisableSelected",
+                i18n("button.disable"),
+                () -> setSelectedResourcePacksEnabled(false));
+        toolbar.add(disableSelectedButton, "h 40!");
+        configureTextButton(
+                deleteSelectedButton,
+                "resourcePacksDeleteSelected",
+                i18n("button.remove"),
+                this::confirmAndDeleteSelectedResourcePacks);
+        toolbar.add(deleteSelectedButton, "h 40!");
+        return toolbar;
+    }
+
+    /// Configures one localized text command with matching accessibility text.
+    ///
+    /// @param button command button
+    /// @param name stable component name
+    /// @param text localized visible text
+    /// @param action EDT command
+    private static void configureTextButton(
+            JButton button,
+            String name,
+            String text,
+            Runnable action) {
+        button.setName(Objects.requireNonNull(name, "name"));
+        button.setText(Objects.requireNonNull(text, "text"));
+        button.setToolTipText(text);
+        button.getAccessibleContext().setAccessibleName(text);
+        button.getAccessibleContext().setAccessibleDescription(text);
+        Runnable checkedAction = Objects.requireNonNull(action, "action");
+        button.addActionListener(event -> checkedAction.run());
+    }
+
+    /// Creates the search document listener after the filtered source is initialized.
+    ///
+    /// @return document listener applying every lightweight file-name query change
+    private DocumentListener createSearchListener() {
+        return new DocumentListener() {
+            /// Applies inserted search text.
+            @Override
+            public void insertUpdate(DocumentEvent event) {
+                searchChanged();
+            }
+
+            /// Applies removed search text.
+            @Override
+            public void removeUpdate(DocumentEvent event) {
+                searchChanged();
+            }
+
+            /// Applies attribute changes as ordinary search changes.
+            @Override
+            public void changedUpdate(DocumentEvent event) {
+                searchChanged();
+            }
+        };
+    }
+
+    /// Applies a shallow file-name query and invalidates only filtered viewport state.
+    private void searchChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!isOpen() || !searchField.isEnabled()
+                || !filteredDataSource.setSearchQuery(searchField.getText())) {
+            return;
+        }
+        applyingSnapshot = true;
+        try {
+            pendingUserSelectionIndex = NO_PENDING_SELECTION;
+            choiceList.getList().clearSelection();
+            choiceList.reloadData();
+            showNoSelection();
+        } finally {
+            applyingSnapshot = false;
+        }
+        ResourcePackCatalogSnapshot current = model.snapshot();
+        if (current.selectedIndex().isPresent()
+                && current.writeStatus() != ResourcePackCatalogWriteStatus.BUSY) {
+            model.clearSelection();
+        }
+        applySnapshot(model.snapshot());
+    }
+
+    /// Configures multi-choice selection and sparse-row observation.
     private void configureChoiceList() {
         choiceList.setName("resourcePacksList");
         SwingTransparency.revealBackgroundThroughScrollPane(choiceList);
@@ -481,7 +635,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         list.setName("resourcePacksListView");
         list.setOpaque(false);
         list.getAccessibleContext().setAccessibleName(strings.pageTitle());
-        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         list.addListSelectionListener(selectionListener);
         list.getInputMap(JComponent.WHEN_FOCUSED).put(
                 KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0),
@@ -665,6 +819,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         applyingSnapshot = true;
         try {
             if (contentChanged) {
+                filteredDataSource.replaceIndex(model.indexedPaths());
                 pendingUserSelectionIndex = NO_PENDING_SELECTION;
                 choiceList.getList().clearSelection();
                 choiceList.reloadData();
@@ -678,12 +833,19 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         failedText.setText(failureText(snapshot.statusText()));
         failedText.setCaretPosition(0);
         failedText.setToolTipText(snapshot.statusText());
+        emptyText.setText(searchField.getText().isBlank()
+                ? strings.emptyText()
+                : i18n("search.no_results_found"));
         ((CardLayout) contentCards.getLayout()).show(contentCards, selectContentCard(snapshot));
 
         boolean listEnabled = snapshot.status() == ResourcePackCatalogStatus.READY
-                && snapshot.listEnabled();
+                && snapshot.listEnabled()
+                && filteredDataSource.exactItemCount().orElse(0) > 0;
         choiceList.setEnabled(listEnabled);
         choiceList.getList().setEnabled(listEnabled);
+        searchField.setEnabled(snapshot.status() == ResourcePackCatalogStatus.READY
+                && snapshot.writeStatus() != ResourcePackCatalogWriteStatus.BUSY
+                && !writePending);
         String refreshName = snapshot.status() == ResourcePackCatalogStatus.LOADING
                 ? strings.refreshingAction()
                 : strings.refreshAction();
@@ -704,22 +866,37 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
 
     /// Restores the model-selected row without delegating it back as a user command.
     ///
-    /// @param selectedIndex selected indexed path, or empty for no selection
+    /// @param selectedIndex selected source-index path, or empty for no selection
     private void restoreSelection(OptionalInt selectedIndex) {
-        int targetIndex = selectedIndex.orElse(-1);
-        if (targetIndex >= choiceList.getChoiceModel().getSize()) {
-            targetIndex = -1;
+        @Nullable Path selectedPath = indexedPath(selectedIndex);
+        int targetIndex = selectedPath == null ? -1 : filteredDataSource.indexOf(selectedPath);
+        JList<ChoiceListEntry<ResourcePackCatalogItem>> list = choiceList.getList();
+        if (targetIndex >= 0 && list.getSelectedIndices().length > 1 && list.isSelectedIndex(targetIndex)) {
+            return;
         }
-        if (choiceList.getList().getSelectedIndex() == targetIndex) {
+        if (list.getSelectedIndex() == targetIndex) {
             return;
         }
 
         pendingUserSelectionIndex = NO_PENDING_SELECTION;
-        choiceList.getList().setSelectedIndex(targetIndex);
+        list.setSelectedIndex(targetIndex);
         if (targetIndex >= 0) {
-            choiceList.getList().ensureIndexIsVisible(targetIndex);
+            list.ensureIndexIsVisible(targetIndex);
         }
         choiceList.refreshLoadPlan();
+    }
+
+    /// Resolves one source-index selection into its stable shallow path.
+    ///
+    /// @param selectedIndex source selected index
+    /// @return stable path, or null when absent or stale
+    private @Nullable Path indexedPath(OptionalInt selectedIndex) {
+        if (selectedIndex.isEmpty()) {
+            return null;
+        }
+        @Unmodifiable List<Path> paths = model.indexedPaths();
+        int index = selectedIndex.getAsInt();
+        return index >= 0 && index < paths.size() ? paths.get(index) : null;
     }
 
     /// Reconciles placeholder completion with pending selection and details.
@@ -761,7 +938,8 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             return;
         }
         pendingUserSelectionIndex = NO_PENDING_SELECTION;
-        if (current.selectedIndex().orElse(-1) != selectedIndex) {
+        @Nullable Path currentSelectedPath = indexedPath(current.selectedIndex());
+        if (!selected.path().equals(currentSelectedPath)) {
             model.selectResourcePack(selected.path());
         }
     }
@@ -855,6 +1033,110 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             return;
         }
         startWrite(() -> model.importResourcePacks(selectedSources));
+    }
+
+    /// Selects every logical row in the current filtered path index without loading off-screen rows.
+    private void selectAllResourcePacks() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (currentWritableSnapshot() == null) {
+            return;
+        }
+        int itemCount = filteredDataSource.exactItemCount().orElse(0);
+        if (itemCount > 0) {
+            choiceList.getList().setSelectionInterval(0, itemCount - 1);
+        }
+        updateSelectionDetails();
+    }
+
+    /// Enables or disables every selected stable path as one panel-owned operation chain.
+    ///
+    /// @param enabled desired enabled state
+    private void setSelectedResourcePacksEnabled(boolean enabled) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable ResourcePackCatalogSnapshot snapshot = currentWritableSnapshot();
+        @Unmodifiable List<Path> selectedPaths = selectedResourcePackPaths();
+        if (snapshot == null || selectedPaths.isEmpty()) {
+            return;
+        }
+        long expectedRevision = snapshot.contentRevision();
+        if (enabled) {
+            final boolean confirmed;
+            try {
+                confirmed = interactions.confirmEnableSelected(this, selectedPaths.size());
+            } catch (RuntimeException failure) {
+                showOperationFailure(failure);
+                return;
+            }
+            if (!confirmed) {
+                return;
+            }
+        }
+        if (!isBatchSelectionCurrent(expectedRevision, selectedPaths)) {
+            return;
+        }
+        startWrite(() -> applySequentially(
+                selectedPaths,
+                enabled ? model::enableResourcePack : model::disableResourcePack));
+    }
+
+    /// Confirms and permanently deletes every selected stable path.
+    private void confirmAndDeleteSelectedResourcePacks() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable ResourcePackCatalogSnapshot snapshot = currentWritableSnapshot();
+        @Unmodifiable List<Path> selectedPaths = selectedResourcePackPaths();
+        if (snapshot == null || selectedPaths.isEmpty()) {
+            return;
+        }
+        long expectedRevision = snapshot.contentRevision();
+        final boolean confirmed;
+        try {
+            confirmed = interactions.confirmDeleteSelected(this, selectedPaths.size());
+        } catch (RuntimeException failure) {
+            showOperationFailure(failure);
+            return;
+        }
+        if (confirmed && isBatchSelectionCurrent(expectedRevision, selectedPaths)) {
+            startWrite(() -> applySequentially(selectedPaths, model::deleteResourcePack));
+        }
+    }
+
+    /// Captures selected filtered indexes as immutable stable paths without loading row metadata.
+    ///
+    /// @return immutable selected paths in visible index order
+    private @Unmodifiable List<Path> selectedResourcePackPaths() {
+        return filteredDataSource.selectedPaths(choiceList.getList().getSelectedIndices());
+    }
+
+    /// Checks that a modal batch confirmation still owns the same exact selected path set.
+    ///
+    /// @param expectedRevision captured source revision
+    /// @param expectedPaths captured selected paths
+    /// @return whether the same writable selection remains current
+    private boolean isBatchSelectionCurrent(
+            long expectedRevision,
+            @Unmodifiable List<Path> expectedPaths) {
+        @Nullable ResourcePackCatalogSnapshot current = currentWritableSnapshot();
+        return current != null
+                && current.contentRevision() == expectedRevision
+                && selectedResourcePackPaths().equals(expectedPaths);
+    }
+
+    /// Applies stable path mutations serially through the model's existing one-write gate.
+    ///
+    /// @param paths immutable mutation targets
+    /// @param mutation one-path model mutation
+    /// @return completion after every requested mutation
+    private CompletionStage<ResourcePackCatalogSnapshot> applySequentially(
+            @Unmodifiable List<Path> paths,
+            Function<Path, CompletionStage<ResourcePackCatalogSnapshot>> mutation) {
+        CompletionStage<ResourcePackCatalogSnapshot> completion =
+                CompletableFuture.completedFuture(model.snapshot());
+        for (Path path : paths) {
+            completion = completion.thenCompose(ignored -> Objects.requireNonNull(
+                    mutation.apply(path),
+                    "resource-pack batch mutation returned null"));
+        }
+        return completion;
     }
 
     /// Toggles the selected pack through the model after compatibility confirmation when required.
@@ -1101,10 +1383,18 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     private void updateActionAvailability(@Nullable ResourcePackCatalogItem selected) {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable ResourcePackCatalogSnapshot writable = currentWritableSnapshot();
+        int selectedCount = choiceList.getList().getSelectedIndices().length;
+        int visibleCount = filteredDataSource.exactItemCount().orElse(0);
         boolean selectedCurrent = writable != null
+                && selectedCount == 1
                 && selected != null
                 && isSelectedActionCurrent(writable.contentRevision(), selected.path());
         importButton.setEnabled(writable != null);
+        searchField.setEnabled(writable != null);
+        selectAllButton.setEnabled(writable != null && visibleCount > 0 && selectedCount < visibleCount);
+        enableSelectedButton.setEnabled(writable != null && selectedCount > 0);
+        disableSelectedButton.setEnabled(writable != null && selectedCount > 0);
+        deleteSelectedButton.setEnabled(writable != null && selectedCount > 0);
         enabledToggle.setEnabled(selectedCurrent);
         revealButton.setEnabled(selectedCurrent && !revealPending);
         deleteButton.setEnabled(selectedCurrent);
@@ -1161,18 +1451,19 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     /// @return exact loaded target, or null
     private @Nullable ResourcePackCatalogItem selectedActionTarget(
             @Nullable ResourcePackCatalogSnapshot snapshot) {
-        if (snapshot == null || snapshot.selectedIndex().isEmpty()) {
-            return null;
-        }
-        int selectedIndex = choiceList.getList().getSelectedIndex();
-        if (selectedIndex != snapshot.selectedIndex().getAsInt()) {
+        if (snapshot == null
+                || snapshot.selectedIndex().isEmpty()
+                || choiceList.getList().getSelectedIndices().length != 1) {
             return null;
         }
         @Nullable ResourcePackCatalogItem selected = choiceList.getSelectedValue();
         ResourcePackCatalogSnapshot current = model.snapshot();
+        @Nullable Path snapshotSelectedPath = indexedPath(snapshot.selectedIndex());
+        @Nullable Path currentSelectedPath = indexedPath(current.selectedIndex());
         return selected != null
                 && current.contentRevision() == snapshot.contentRevision()
-                && current.selectedIndex().orElse(-1) == selectedIndex
+                && selected.path().equals(snapshotSelectedPath)
+                && selected.path().equals(currentSelectedPath)
                 ? selected
                 : null;
     }
@@ -1219,11 +1510,19 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
             failure = attemptCleanup(
                     failure,
                     () -> choiceList.getList().removeListSelectionListener(selectionListener));
+            failure = attemptCleanup(
+                    failure,
+                    () -> searchField.getDocument().removeDocumentListener(searchListener));
             failure = attemptCleanup(failure, () -> removeHierarchyListener(showingListener));
             failure = attemptCleanup(failure, () -> refreshButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> retryButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> importButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> openDirectoryButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> searchField.setEnabled(false));
+            failure = attemptCleanup(failure, () -> selectAllButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> enableSelectedButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> disableSelectedButton.setEnabled(false));
+            failure = attemptCleanup(failure, () -> deleteSelectedButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> enabledToggle.setEnabled(false));
             failure = attemptCleanup(failure, () -> revealButton.setEnabled(false));
             failure = attemptCleanup(failure, () -> deleteButton.setEnabled(false));
@@ -1246,13 +1545,13 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
     ///
     /// @param snapshot current catalog state
     /// @return stable card identifier
-    private static String selectContentCard(ResourcePackCatalogSnapshot snapshot) {
+    private String selectContentCard(ResourcePackCatalogSnapshot snapshot) {
         return switch (snapshot.status()) {
             case IDLE -> IDLE_CARD;
             case LOADING -> LOADING_CARD;
             case FAILED -> FAILED_CARD;
             case UNSUPPORTED -> UNSUPPORTED_CARD;
-            case READY -> snapshot.itemCount().orElse(0) == 0 ? EMPTY_CARD : LIST_CARD;
+            case READY -> filteredDataSource.exactItemCount().orElse(0) == 0 ? EMPTY_CARD : LIST_CARD;
         };
     }
 

@@ -46,12 +46,29 @@ public interface ResourcePackCatalogInteractions {
     /// @return whether enabling was explicitly confirmed
     boolean confirmEnableIncompatible(Component owner, ResourcePackCatalogItem target);
 
+    /// Confirms enabling a selected resource-pack batch on the event-dispatch thread.
+    ///
+    /// The batch warning is intentionally generic because selected off-screen rows remain shallow
+    /// paths and are not parsed merely to decide whether the confirmation should be shown.
+    ///
+    /// @param owner dialog owner
+    /// @param selectedCount positive selected path count
+    /// @return whether batch enabling was explicitly confirmed
+    boolean confirmEnableSelected(Component owner, int selectedCount);
+
     /// Confirms permanently deleting one installed resource pack on the event-dispatch thread.
     ///
     /// @param owner dialog owner
     /// @param target exact pack proposed for deletion
     /// @return whether permanent deletion was explicitly confirmed
     boolean confirmDelete(Component owner, ResourcePackCatalogItem target);
+
+    /// Confirms permanently deleting a selected resource-pack batch on the event-dispatch thread.
+    ///
+    /// @param owner dialog owner
+    /// @param selectedCount positive selected path count
+    /// @return whether batch deletion was explicitly confirmed
+    boolean confirmDeleteSelected(Component owner, int selectedCount);
 
     /// Schedules revealing one installed resource pack through platform desktop integration.
     ///
