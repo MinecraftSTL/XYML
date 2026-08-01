@@ -59,6 +59,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests complete global-preset editing, selection, and default-preset commands in the Swing settings page.
@@ -298,6 +299,28 @@ public final class GameSettingsPresetsPanelTest {
                     () -> assertTrue(override.isSelected(), editorName),
                     () -> assertFalse(override.isVisible(), editorName));
         }
+        for (JavaVersionType mode : List.of(
+                JavaVersionType.AUTO,
+                JavaVersionType.VERSION,
+                JavaVersionType.CUSTOM,
+                JavaVersionType.DETECTED)) {
+            AbstractButton button = findComponent(
+                    panel,
+                    "instanceGameSettingsJavaMode" + mode.name(),
+                    AbstractButton.class);
+            assertNull(button.getClientProperty("JButton.buttonType"), mode.name());
+        }
+        assertNull(findOptionalComponent(
+                panel,
+                "instanceGameSettingsJavaModeInherit",
+                AbstractButton.class));
+        for (String editorName : List.of(
+                "instanceGameSettingsJavaVersion",
+                "instanceGameSettingsJavaPath",
+                "instanceGameSettingsDetectedJava")) {
+            assertNotNull(findComponent(panel, editorName, Component.class), editorName);
+            assertNull(findOptionalComponent(panel, editorName + "Override", JCheckBox.class), editorName);
+        }
     }
 
     /// Writes valid non-default values to every complete global-preset settings group.
@@ -367,10 +390,6 @@ public final class GameSettingsPresetsPanelTest {
         return List.of(
                 "instanceGameSettingsAutomaticMemory",
                 "instanceGameSettingsMaximumMemory",
-                "instanceGameSettingsJavaMode",
-                "instanceGameSettingsJavaVersion",
-                "instanceGameSettingsJavaPath",
-                "instanceGameSettingsDetectedJava",
                 "instanceGameSettingsWindowType",
                 "instanceGameSettingsWindowWidth",
                 "instanceGameSettingsWindowHeight",

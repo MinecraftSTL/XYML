@@ -49,6 +49,7 @@ import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JRadioButton;
 import javax.swing.JSlider;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
@@ -70,6 +71,7 @@ import java.util.function.Function;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
@@ -92,7 +94,6 @@ final class InstanceGameSettingsPanelTest {
                 clickOverride(panel, "instanceGameSettingsMaximumMemory");
                 findNamed(panel, "instanceGameSettingsMaximumMemory", JTextField.class).setText("6144");
                 overrideJavaMode(panel, JavaVersionType.VERSION);
-                clickOverride(panel, "instanceGameSettingsJavaVersion");
                 findNamed(panel, "instanceGameSettingsJavaVersion", JTextField.class).setText("21");
                 clickOverride(panel, "instanceGameSettingsJvmOptions");
                 findNamed(panel, "instanceGameSettingsJvmOptions", JTextArea.class).setText("-XX:+UseG1GC");
@@ -109,6 +110,8 @@ final class InstanceGameSettingsPanelTest {
             assertEquals(6144, saved.memory().maximumMiB());
             assertTrue(saved.javaRuntime().typeOverridden());
             assertTrue(saved.javaRuntime().customVersionOverridden());
+            assertFalse(saved.javaRuntime().customPathOverridden());
+            assertFalse(saved.javaRuntime().detectedJavaOverridden());
             assertEquals(JavaVersionType.VERSION, saved.javaRuntime().type());
             assertEquals("21", saved.javaRuntime().customVersion());
             assertTrue(saved.jvm().optionsOverridden());
@@ -242,17 +245,13 @@ final class InstanceGameSettingsPanelTest {
     void choosesCustomJavaExecutableIntoEditablePath() {
         Path selectedPath = Path.of("runtime", "bin", "java");
         EdtDispatcher.executeAndWait(() -> {
-            JCheckBox override = new JCheckBox();
             JTextField path = new JTextField();
-            JPanel row = new JPanel();
             InstanceJavaPathControls controls = new InstanceJavaPathControls(
-                    override,
                     path,
                     () -> selectedPath);
-            controls.addRow(row, "Java executable");
             controls.updateAvailability(true);
 
-            findNamed(row, "instanceGameSettingsJavaPathBrowse", JButton.class).doClick();
+            findNamed(controls.component(), "instanceGameSettingsJavaPathBrowse", JButton.class).doClick();
 
             assertTrue(path.isEditable());
             assertEquals(selectedPath.toAbsolutePath().normalize().toString(), path.getText());
@@ -283,7 +282,7 @@ final class InstanceGameSettingsPanelTest {
         assertEquals(1, reloads.get());
     }
 
-    /// Ensures all 40 model properties have both a visible editor and an independent override checkbox.
+    /// Ensures inherited properties expose overrides while Java uses explicit radio rows without old checkboxes.
     @Test
     void exposesCompleteSettingsSurface() {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
@@ -297,7 +296,141 @@ final class InstanceGameSettingsPanelTest {
                     assertNotNull(findNamed(panel, editorName, JComponent.class), editorName);
                     assertNotNull(findNamed(panel, editorName + "Override", JCheckBox.class), editorName);
                 }
+                for (JavaVersionType mode : InstanceJavaModeSelector.displayOrder()) {
+                    assertNotNull(findNamed(
+                            panel,
+                            "instanceGameSettingsJavaMode" + mode.name(),
+                            JRadioButton.class));
+                }
+                assertNotNull(findNamed(
+                        panel,
+                        "instanceGameSettingsJavaModeInherit",
+                        JRadioButton.class));
+                for (String javaEditor : javaEditorNames()) {
+                    assertNotNull(findNamed(panel, javaEditor, JComponent.class), javaEditor);
+                    assertNull(findNamedNullable(panel, javaEditor + "Override", JCheckBox.class), javaEditor);
+                }
             });
+        } finally {
+            closePanel(panelReference);
+        }
+    }
+
+    /// Keeps the inheritance control visually separate from the labeled automatic-memory value.
+    @Test
+    void labelsTheAutomaticMemoryValueCheckbox() {
+        AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = createPanel(new RecordingStore(snapshot()));
+                panelReference.set(panel);
+                JCheckBox override = findNamed(
+                        panel,
+                        "instanceGameSettingsAutomaticMemoryOverride",
+                        JCheckBox.class);
+                JCheckBox value = findNamed(
+                        panel,
+                        "instanceGameSettingsAutomaticMemory",
+                        JCheckBox.class);
+                String label = i18n("settings.memory.auto_allocate");
+
+                assertEquals("", Objects.toString(override.getText(), ""));
+                assertEquals(label, value.getText());
+                assertEquals(label, override.getAccessibleContext().getAccessibleName());
+                assertEquals(label, value.getAccessibleContext().getAccessibleName());
+            });
+        } finally {
+            closePanel(panelReference);
+        }
+    }
+
+    /// Keeps advanced text editors to the right of their complete localized labels.
+    @Test
+    void alignsAdvancedEditorsAfterTheirLabels() {
+        AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = createPanel(new RecordingStore(snapshot()));
+                panelReference.set(panel);
+                JPanel commands = findNamed(panel, "instanceGameSettingsCommands", JPanel.class);
+                commands.setSize(900, 240);
+                commands.doLayout();
+
+                JLabel label = findNamed(
+                        commands,
+                        "instanceGameSettingsPreLaunchCommandLabel",
+                        JLabel.class);
+                JTextField editor = findNamed(
+                        commands,
+                        "instanceGameSettingsPreLaunchCommand",
+                        JTextField.class);
+                assertTrue(label.getX() + label.getWidth() <= editor.getX());
+                assertTrue(editor.getX() >= 300);
+            });
+        } finally {
+            closePanel(panelReference);
+        }
+    }
+
+    /// Enables only the payload editor owned by the selected local Java strategy.
+    @Test
+    void enablesOnlyTheSelectedJavaModePayload() {
+        AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = createPanel(new RecordingStore(snapshot()));
+                panelReference.set(panel);
+                JTextField version = findNamed(panel, "instanceGameSettingsJavaVersion", JTextField.class);
+                JTextField path = findNamed(panel, "instanceGameSettingsJavaPath", JTextField.class);
+                JComboBox<?> detected = findNamed(panel, "instanceGameSettingsDetectedJava", JComboBox.class);
+
+                for (JavaVersionType mode : InstanceJavaModeSelector.displayOrder()) {
+                    overrideJavaMode(panel, mode);
+                    assertEquals(mode == JavaVersionType.VERSION, version.isEnabled(), mode.name());
+                    assertEquals(mode == JavaVersionType.CUSTOM, path.isEnabled(), mode.name());
+                    assertEquals(mode == JavaVersionType.DETECTED, detected.isEnabled(), mode.name());
+                }
+            });
+        } finally {
+            closePanel(panelReference);
+        }
+    }
+
+    /// Converts a payload-only Java override to the equivalent local radio mode without losing its value.
+    @Test
+    void preservesPayloadOnlyJavaOverrides() {
+        InstanceGameSettingsSnapshot.JavaRuntimeSettings javaRuntime =
+                new InstanceGameSettingsSnapshot.JavaRuntimeSettings(
+                        false,
+                        JavaVersionType.CUSTOM,
+                        false,
+                        "",
+                        true,
+                        "C:/Java/21/bin/java.exe",
+                        false,
+                        GameSettings.DetectedJava.EMPTY);
+        RecordingStore store = new RecordingStore(snapshotWithJavaRuntime(javaRuntime));
+        AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = createPanel(store);
+                panelReference.set(panel);
+                assertTrue(findNamed(
+                        panel,
+                        "instanceGameSettingsJavaModeCUSTOM",
+                        JRadioButton.class).isSelected());
+                assertFalse(findNamed(
+                        panel,
+                        "instanceGameSettingsJavaModeInherit",
+                        JRadioButton.class).isSelected());
+                findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
+            });
+
+            InstanceGameSettingsSnapshot.JavaRuntimeSettings saved = store.snapshot().javaRuntime();
+            assertTrue(saved.typeOverridden());
+            assertTrue(saved.customPathOverridden());
+            assertEquals(JavaVersionType.CUSTOM, saved.type());
+            assertEquals("C:/Java/21/bin/java.exe", saved.customPath());
         } finally {
             closePanel(panelReference);
         }
@@ -638,29 +771,23 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsMaximumMemory", JTextField.class).setText("not-a-number");
                 clickOverride(panel, "instanceGameSettingsMaximumMemory");
 
+                JRadioButton inheritance = findNamed(
+                        panel,
+                        "instanceGameSettingsJavaModeInherit",
+                        JRadioButton.class);
+                assertTrue(inheritance.isSelected());
                 overrideJavaMode(panel, JavaVersionType.CUSTOM);
-                JCheckBox javaModeOverride = findNamed(
-                        panel,
-                        "instanceGameSettingsJavaModeOverride",
-                        JCheckBox.class);
-                InstanceJavaModeSelector javaMode = findNamed(
-                        panel,
-                        "instanceGameSettingsJavaMode",
-                        InstanceJavaModeSelector.class);
-                assertTrue(javaModeOverride.isSelected());
-                assertTrue(javaMode.isEnabled());
+                assertFalse(inheritance.isSelected());
                 for (JavaVersionType mode : InstanceJavaModeSelector.displayOrder()) {
-                    assertTrue(javaMode.button(mode).isEnabled());
+                    assertTrue(findNamed(
+                            panel,
+                            "instanceGameSettingsJavaMode" + mode.name(),
+                            JRadioButton.class).isEnabled());
                 }
-                clickOverride(panel, "instanceGameSettingsJavaPath");
                 JTextField javaPath = findNamed(panel, "instanceGameSettingsJavaPath", JTextField.class);
                 assertTrue(javaPath.isEnabled());
-                clickOverride(panel, "instanceGameSettingsJavaMode");
-                assertFalse(javaModeOverride.isSelected());
-                assertFalse(javaMode.isEnabled());
-                for (JavaVersionType mode : InstanceJavaModeSelector.displayOrder()) {
-                    assertFalse(javaMode.button(mode).isEnabled());
-                }
+                inheritance.doClick();
+                assertTrue(inheritance.isSelected());
                 assertFalse(javaPath.isEnabled());
 
                 clickOverride(panel, "instanceGameSettingsWindowType");
@@ -737,7 +864,7 @@ final class InstanceGameSettingsPanelTest {
                 InstanceGameSettingsPanel panel = createPanel(store);
                 panelReference.set(panel);
                 overrideJavaMode(panel, JavaVersionType.VERSION);
-                overrideText(panel, "instanceGameSettingsJavaVersion", " 21 ");
+                findNamed(panel, "instanceGameSettingsJavaVersion", JTextField.class).setText(" 21 ");
                 overrideChoice(panel, "instanceGameSettingsQuickPlayMode", QuickPlayType.MULTIPLAYER);
                 overrideText(panel, "instanceGameSettingsQuickPlayMultiplayer", " localhost:25565 ");
                 overrideText(panel, "instanceGameSettingsRunningDirectory", " instance-run ");
@@ -954,6 +1081,28 @@ final class InstanceGameSettingsPanelTest {
                 base.nativeLibraries());
     }
 
+    /// Creates one snapshot with an explicit Java-runtime settings group.
+    ///
+    /// @param javaRuntime replacement Java-runtime settings
+    /// @return complete settings snapshot with the requested Java settings
+    private static InstanceGameSettingsSnapshot snapshotWithJavaRuntime(
+            InstanceGameSettingsSnapshot.JavaRuntimeSettings javaRuntime) {
+        InstanceGameSettingsSnapshot base = snapshot();
+        return new InstanceGameSettingsSnapshot(
+                base.writable(),
+                base.parentPreset(),
+                base.memory(),
+                Objects.requireNonNull(javaRuntime, "javaRuntime"),
+                base.window(),
+                base.launcher(),
+                base.quickPlay(),
+                base.launchOptions(),
+                base.jvm(),
+                base.commands(),
+                base.graphics(),
+                base.nativeLibraries());
+    }
+
     /// Creates a snapshot with an explicit effective running directory and inheritance state.
     ///
     /// @param overridden whether the instance owns the running-directory setting
@@ -1091,10 +1240,6 @@ final class InstanceGameSettingsPanelTest {
         return List.of(
                 "instanceGameSettingsAutomaticMemory",
                 "instanceGameSettingsMaximumMemory",
-                "instanceGameSettingsJavaMode",
-                "instanceGameSettingsJavaVersion",
-                "instanceGameSettingsJavaPath",
-                "instanceGameSettingsDetectedJava",
                 "instanceGameSettingsWindowType",
                 "instanceGameSettingsWindowWidth",
                 "instanceGameSettingsWindowHeight",
@@ -1129,6 +1274,16 @@ final class InstanceGameSettingsPanelTest {
                 "instanceGameSettingsDisableNativePatching",
                 "instanceGameSettingsUseNativeGlfw",
                 "instanceGameSettingsUseNativeOpenAl");
+    }
+
+    /// Returns Java payload editors whose applicability is controlled by radio rows instead of override boxes.
+    ///
+    /// @return immutable Java editor-name list
+    private static @Unmodifiable List<String> javaEditorNames() {
+        return List.of(
+                "instanceGameSettingsJavaVersion",
+                "instanceGameSettingsJavaPath",
+                "instanceGameSettingsDetectedJava");
     }
 
     /// Clicks one local-override checkbox.
@@ -1167,10 +1322,10 @@ final class InstanceGameSettingsPanelTest {
     /// @param panel settings panel
     /// @param mode desired Java strategy
     private static void overrideJavaMode(InstanceGameSettingsPanel panel, JavaVersionType mode) {
-        clickOverride(panel, "instanceGameSettingsJavaMode");
-        findNamed(panel, "instanceGameSettingsJavaMode", InstanceJavaModeSelector.class)
-                .button(Objects.requireNonNull(mode, "mode"))
-                .doClick();
+        findNamed(
+                panel,
+                "instanceGameSettingsJavaMode" + Objects.requireNonNull(mode, "mode").name(),
+                JRadioButton.class).doClick();
     }
 
     /// Enables one override and selects a combo value.
