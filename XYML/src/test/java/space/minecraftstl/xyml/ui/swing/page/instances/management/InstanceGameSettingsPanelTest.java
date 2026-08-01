@@ -91,9 +91,7 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsAutomaticMemory", JCheckBox.class).doClick();
                 clickOverride(panel, "instanceGameSettingsMaximumMemory");
                 findNamed(panel, "instanceGameSettingsMaximumMemory", JTextField.class).setText("6144");
-                clickOverride(panel, "instanceGameSettingsJavaMode");
-                findNamed(panel, "instanceGameSettingsJavaMode", JComboBox.class)
-                        .setSelectedItem(JavaVersionType.VERSION);
+                overrideJavaMode(panel, JavaVersionType.VERSION);
                 clickOverride(panel, "instanceGameSettingsJavaVersion");
                 findNamed(panel, "instanceGameSettingsJavaVersion", JTextField.class).setText("21");
                 clickOverride(panel, "instanceGameSettingsJvmOptions");
@@ -640,13 +638,29 @@ final class InstanceGameSettingsPanelTest {
                 findNamed(panel, "instanceGameSettingsMaximumMemory", JTextField.class).setText("not-a-number");
                 clickOverride(panel, "instanceGameSettingsMaximumMemory");
 
-                clickOverride(panel, "instanceGameSettingsJavaMode");
-                findNamed(panel, "instanceGameSettingsJavaMode", JComboBox.class)
-                        .setSelectedItem(JavaVersionType.CUSTOM);
+                overrideJavaMode(panel, JavaVersionType.CUSTOM);
+                JCheckBox javaModeOverride = findNamed(
+                        panel,
+                        "instanceGameSettingsJavaModeOverride",
+                        JCheckBox.class);
+                InstanceJavaModeSelector javaMode = findNamed(
+                        panel,
+                        "instanceGameSettingsJavaMode",
+                        InstanceJavaModeSelector.class);
+                assertTrue(javaModeOverride.isSelected());
+                assertTrue(javaMode.isEnabled());
+                for (JavaVersionType mode : InstanceJavaModeSelector.displayOrder()) {
+                    assertTrue(javaMode.button(mode).isEnabled());
+                }
                 clickOverride(panel, "instanceGameSettingsJavaPath");
                 JTextField javaPath = findNamed(panel, "instanceGameSettingsJavaPath", JTextField.class);
                 assertTrue(javaPath.isEnabled());
                 clickOverride(panel, "instanceGameSettingsJavaMode");
+                assertFalse(javaModeOverride.isSelected());
+                assertFalse(javaMode.isEnabled());
+                for (JavaVersionType mode : InstanceJavaModeSelector.displayOrder()) {
+                    assertFalse(javaMode.button(mode).isEnabled());
+                }
                 assertFalse(javaPath.isEnabled());
 
                 clickOverride(panel, "instanceGameSettingsWindowType");
@@ -722,7 +736,7 @@ final class InstanceGameSettingsPanelTest {
             EdtDispatcher.executeAndWait(() -> {
                 InstanceGameSettingsPanel panel = createPanel(store);
                 panelReference.set(panel);
-                overrideChoice(panel, "instanceGameSettingsJavaMode", JavaVersionType.VERSION);
+                overrideJavaMode(panel, JavaVersionType.VERSION);
                 overrideText(panel, "instanceGameSettingsJavaVersion", " 21 ");
                 overrideChoice(panel, "instanceGameSettingsQuickPlayMode", QuickPlayType.MULTIPLAYER);
                 overrideText(panel, "instanceGameSettingsQuickPlayMultiplayer", " localhost:25565 ");
@@ -1146,6 +1160,17 @@ final class InstanceGameSettingsPanelTest {
         if (editor.isSelected() != value) {
             editor.doClick();
         }
+    }
+
+    /// Enables the Java-strategy override and selects one highlighted mode.
+    ///
+    /// @param panel settings panel
+    /// @param mode desired Java strategy
+    private static void overrideJavaMode(InstanceGameSettingsPanel panel, JavaVersionType mode) {
+        clickOverride(panel, "instanceGameSettingsJavaMode");
+        findNamed(panel, "instanceGameSettingsJavaMode", InstanceJavaModeSelector.class)
+                .button(Objects.requireNonNull(mode, "mode"))
+                .doClick();
     }
 
     /// Enables one override and selects a combo value.

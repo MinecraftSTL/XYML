@@ -118,9 +118,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             inheritedControl("instanceGameSettingsMaximumMemory", new JTextField());
 
     /// Java selection strategy setting.
-    private final InheritedControl<JComboBox<JavaVersionType>> javaTypeControl = inheritedControl(
+    private final InheritedControl<InstanceJavaModeSelector> javaTypeControl = inheritedControl(
             "instanceGameSettingsJavaMode",
-            new JComboBox<>(JavaVersionType.values()));
+            new InstanceJavaModeSelector());
 
     /// Requested Java major version setting.
     private final InheritedControl<JTextField> javaVersionControl =
@@ -744,7 +744,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Configures localized display text for enum and renderer choices.
     private void configureChoiceRenderers() {
-        installRenderer(javaTypeControl.editor(), InstanceGameSettingsPanel::javaTypeName);
         installRenderer(windowTypeControl.editor(), InstanceGameSettingsPanel::windowTypeName);
         installRenderer(
                 launcherVisibilityControl.editor(),
@@ -783,7 +782,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         }
         InstanceMemorySelectionController.install(automaticMemoryControl, maximumMemoryControl);
         automaticMemoryControl.editor().addActionListener(event -> updateEditingAvailability());
-        javaTypeControl.editor().addActionListener(event -> updateEditingAvailability());
+        javaTypeControl.editor().addSelectionListener(this::updateEditingAvailability);
         quickPlayTypeControl.editor().addActionListener(event -> updateEditingAvailability());
         noJvmOptionsControl.editor().addActionListener(event -> updateEditingAvailability());
         graphicsBackendControl.editor().addActionListener(event -> updateEditingAvailability());
@@ -883,10 +882,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 "Maximum memory",
                 1,
                 MAXIMUM_MEMORY_MIB);
-        JavaVersionType javaType = editedChoice(
-                javaTypeControl,
-                current.javaRuntime().type(),
-                "Java strategy");
+        JavaVersionType javaType = javaTypeControl.overrideBox().isSelected()
+                ? javaTypeControl.editor().selectedMode()
+                : current.javaRuntime().type();
         String javaVersion = editedText(javaVersionControl, current.javaRuntime().customVersion());
         String javaPath = editedText(javaPathControl, current.javaRuntime().customPath());
         GameSettings.DetectedJava detectedJava = editedDetectedJava(current.javaRuntime().detectedJava());
@@ -1259,7 +1257,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                     maximumMemoryControl,
                     snapshot.memory().maximumOverridden(),
                     Integer.toString(snapshot.memory().maximumMiB()));
-            applyChoice(javaTypeControl, snapshot.javaRuntime().typeOverridden(), snapshot.javaRuntime().type());
+            javaTypeControl.overrideBox().setSelected(snapshot.javaRuntime().typeOverridden());
+            javaTypeControl.editor().setSelectedMode(snapshot.javaRuntime().type());
             applyText(
                     javaVersionControl,
                     snapshot.javaRuntime().customVersionOverridden(),
@@ -1432,9 +1431,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 && editedBoolean(automaticMemoryControl, snapshot.memory().automatic());
         maximumMemoryControl.editor().setEnabled(
                 maximumMemoryControl.editor().isEnabled() && !automaticMemory);
-        JavaVersionType javaType = snapshot == null
-                ? JavaVersionType.AUTO
-                : effectiveChoice(javaTypeControl, snapshot.javaRuntime().type());
+        JavaVersionType javaType = snapshot == null || !javaTypeControl.overrideBox().isSelected()
+                ? snapshot == null ? JavaVersionType.AUTO : snapshot.javaRuntime().type()
+                : javaTypeControl.editor().selectedMode();
         javaVersionControl.editor().setEnabled(
                 javaVersionControl.editor().isEnabled() && javaType == JavaVersionType.VERSION);
         javaPathControl.editor().setEnabled(javaPathControl.editor().isEnabled() && javaType == JavaVersionType.CUSTOM);
@@ -1951,16 +1950,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             return component;
         };
         comboBox.setRenderer(renderer);
-    }
-
-    /// Returns a localized Java strategy name.
-    private static String javaTypeName(JavaVersionType value) {
-        return switch (value) {
-            case AUTO -> i18n("settings.game.java_directory.auto");
-            case VERSION -> i18n("settings.game.java_directory.version");
-            case DETECTED -> i18n("settings.game.java_directory.choose");
-            case CUSTOM -> i18n("settings.custom");
-        };
     }
 
     /// Returns a localized game-window mode name.
