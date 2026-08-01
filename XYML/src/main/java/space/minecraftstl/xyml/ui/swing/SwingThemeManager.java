@@ -32,8 +32,15 @@ import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeColor;
 
 import javax.swing.Icon;
+import javax.swing.JComponent;
 import javax.swing.LookAndFeel;
 import javax.swing.UIManager;
+import javax.swing.plaf.FontUIResource;
+import javax.swing.plaf.UIResource;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Font;
+import java.awt.Window;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -41,6 +48,9 @@ import java.util.Objects;
 /// Initializes FlatLaf and applies live theme or design-token changes to all Swing windows.
 @NotNullByDefault
 public final class SwingThemeManager {
+    /// Client property marking components whose domain-specific font family must not follow launcher chrome.
+    private static final String FIXED_FONT_FAMILY_PROPERTY = "xyml.fixedFontFamily";
+
     /// Serializes complete native-window appearance replacements.
     private final Object windowAppearanceLock = new Object();
 
@@ -65,6 +75,12 @@ public final class SwingThemeManager {
 
     /// Stores the accent currently installed into FlatLaf, or `null` for FlatLaf's platform default.
     private volatile @Nullable ThemeColor effectiveAccentColor;
+
+    /// Requested launcher UI family, or `null` for the active look-and-feel default.
+    private volatile @Nullable String defaultFontFamily;
+
+    /// Unmodified default font captured from the most recently installed look and feel.
+    private @Nullable Font lookAndFeelDefaultFont;
 
     /// Optional application callback that re-resolves a concrete theme after the system appearance changes.
     private volatile @Nullable Runnable systemThemeRefreshHandler;
@@ -148,6 +164,38 @@ public final class SwingThemeManager {
                 newTheme,
                 newDesignTokens,
                 newBrightnessPreference));
+    }
+
+    /// Applies a launcher-wide font family immediately and preserves it across later palette changes.
+    ///
+    /// This method may be called before initialization. In that case the request is retained and applied as part of
+    /// the first FlatLaf installation, avoiding a visible system-font frame during startup.
+    ///
+    /// @param family selected local family, or `null` for the active look-and-feel default
+    public void updateDefaultFontFamily(@Nullable String family) {
+        @Nullable String normalizedFamily = normalizeFontFamily(family);
+        EdtDispatcher.executeAndWait(() -> {
+            if (Objects.equals(defaultFontFamily, normalizedFamily)) {
+                return;
+            }
+            @Nullable Font previousDefaultFont = UIManager.getFont("defaultFont");
+            defaultFontFamily = normalizedFamily;
+            if (initialized) {
+                @Nullable Font replacement = applyDefaultFont();
+                FlatLaf.updateUI();
+                updateOpenWindowFonts(previousDefaultFont, replacement);
+            }
+        });
+    }
+
+    /// Marks a component subtree whose explicit font family must survive launcher-font changes.
+    ///
+    /// Domain-specific text surfaces such as game logs should use this marker while still inheriting colors and other
+    /// look-and-feel values.
+    ///
+    /// @param component subtree root with an independently configured family
+    public static void preserveExplicitFontFamily(JComponent component) {
+        Objects.requireNonNull(component, "component").putClientProperty(FIXED_FONT_FAMILY_PROPERTY, true);
     }
 
     /// Installs the callback used to rebuild a resolved theme after a system-appearance change.
@@ -251,6 +299,13 @@ public final class SwingThemeManager {
         return effectiveAccentColor;
     }
 
+    /// Returns the requested launcher UI font family.
+    ///
+    /// @return selected family, or `null` for the look-and-feel default
+    public @Nullable String defaultFontFamily() {
+        return defaultFontFamily;
+    }
+
     /// Returns whether FlatLaf has been installed by this manager.
     ///
     /// @return `true` after successful initialization
@@ -318,6 +373,7 @@ public final class SwingThemeManager {
             @Nullable ThemeColor accentColor,
             boolean installLookAndFeel) {
         EdtDispatcher.requireEventDispatchThread();
+        @Nullable Font previousDefaultFont = UIManager.getFont("defaultFont");
 
         if (installLookAndFeel) {
             @Nullable Map<String, String> previousExtraDefaults = FlatLaf.getGlobalExtraDefaults();
@@ -331,9 +387,11 @@ public final class SwingThemeManager {
                         previousExtraDefaults != null ? previousExtraDefaults : Map.of());
                 throw new IllegalStateException("Failed to install the FlatLaf " + resolvedVariant + " palette");
             }
+            lookAndFeelDefaultFont = UIManager.getLookAndFeelDefaults().getFont("defaultFont");
         }
 
         designTokens.applyTo(UIManager.getDefaults());
+        @Nullable Font replacementFont = applyDefaultFont();
         // FlatLaf caches the checkbox icon after first resolution, including the arc read at construction time.
         @Nullable Icon currentCheckBoxIcon = UIManager.getIcon("CheckBox.icon");
         if (currentCheckBoxIcon != null && currentCheckBoxIcon.getClass() == FlatCheckBoxIcon.class) {
@@ -343,6 +401,85 @@ public final class SwingThemeManager {
         effectiveAccentColor = accentColor;
         initialized = true;
         FlatLaf.updateUI();
+        updateOpenWindowFonts(previousDefaultFont, replacementFont);
+    }
+
+    /// Installs the requested family while preserving the look-and-feel font style and logical size.
+    ///
+    /// @return installed default font, or `null` when the look and feel exposes no font baseline
+    private @Nullable Font applyDefaultFont() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable Font baseline = lookAndFeelDefaultFont;
+        if (baseline == null) {
+            baseline = UIManager.getFont("Label.font");
+        }
+        if (baseline == null) {
+            return null;
+        }
+        @Nullable String family = defaultFontFamily;
+        Font replacement = family == null
+                ? baseline
+                : new Font(family, baseline.getStyle(), baseline.getSize()).deriveFont(baseline.getSize2D());
+        UIManager.put("defaultFont", new FontUIResource(replacement));
+        return replacement;
+    }
+
+    /// Updates explicit derived fonts in every displayable window after a launcher-family replacement.
+    ///
+    /// @param previousDefaultFont prior launcher default, or `null`
+    /// @param replacementFont replacement launcher default, or `null`
+    private static void updateOpenWindowFonts(
+            @Nullable Font previousDefaultFont,
+            @Nullable Font replacementFont) {
+        if (previousDefaultFont == null || replacementFont == null) {
+            return;
+        }
+        for (Window window : Window.getWindows()) {
+            if (window.isDisplayable()) {
+                replaceFontFamily(window, previousDefaultFont, replacementFont);
+            }
+        }
+    }
+
+    /// Replaces one launcher-derived family throughout a component subtree while preserving style and size.
+    ///
+    /// @param component current subtree root
+    /// @param previousDefaultFont previous launcher default
+    /// @param replacementFont replacement launcher default
+    static void replaceFontFamily(
+            Component component,
+            Font previousDefaultFont,
+            Font replacementFont) {
+        Component target = Objects.requireNonNull(component, "component");
+        Font previous = Objects.requireNonNull(previousDefaultFont, "previousDefaultFont");
+        Font replacement = Objects.requireNonNull(replacementFont, "replacementFont");
+        if (target instanceof JComponent swingComponent
+                && Boolean.TRUE.equals(swingComponent.getClientProperty(FIXED_FONT_FAMILY_PROPERTY))) {
+            return;
+        }
+
+        @Nullable Font current = target.getFont();
+        if (current != null && current.getFamily().equalsIgnoreCase(previous.getFamily())) {
+            Font replaced = new Font(replacement.getFamily(), current.getStyle(), 1).deriveFont(current.getSize2D());
+            target.setFont(current instanceof UIResource ? new FontUIResource(replaced) : replaced);
+        }
+        if (target instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                replaceFontFamily(child, previous, replacement);
+            }
+        }
+    }
+
+    /// Normalizes blank family names to the look-and-feel default representation.
+    ///
+    /// @param family requested family, or `null`
+    /// @return trimmed family, or `null`
+    private static @Nullable String normalizeFontFamily(@Nullable String family) {
+        if (family == null) {
+            return null;
+        }
+        String normalized = family.trim();
+        return normalized.isEmpty() ? null : normalized;
     }
 
     /// Replaces only FlatLaf's global accent variable while preserving unrelated caller defaults.

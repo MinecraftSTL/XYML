@@ -31,8 +31,11 @@ import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.theme.ThemeColorStyle;
 import space.minecraftstl.xyml.theme.ThemeContrast;
 
+import javax.swing.JLabel;
+import javax.swing.JPanel;
 import javax.swing.UIManager;
 import java.awt.Color;
+import java.awt.Font;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -113,6 +116,56 @@ public final class SwingThemeManagerTest {
                 () -> assertInstanceOf(FlatDarkLaf.class, UIManager.getLookAndFeel()),
                 () -> assertEquals(13, UIManager.getInt("Component.arc")),
                 () -> assertEquals(13, UIManager.getInt("CheckBox.arc")));
+    }
+
+    /// A requested launcher family is applied before first paint and survives later look-and-feel replacement.
+    @Test
+    public void appliesAndRetainsLauncherFontFamily() {
+        SwingThemeManager manager = new SwingThemeManager(
+                ThemeBrightnessPreference.LIGHT,
+                new SwingDesignTokens(4),
+                SystemThemeDetector.lightFallback());
+        manager.updateDefaultFontFamily(Font.MONOSPACED);
+        manager.initialize();
+
+        assertAll(
+                () -> assertEquals(Font.MONOSPACED, manager.defaultFontFamily()),
+                () -> assertEquals(Font.MONOSPACED, UIManager.getFont("defaultFont").getFamily()));
+
+        manager.update(ThemeBrightnessPreference.DARK, new SwingDesignTokens(4));
+        assertAll(
+                () -> assertEquals(Font.MONOSPACED, manager.defaultFontFamily()),
+                () -> assertEquals(Font.MONOSPACED, UIManager.getFont("defaultFont").getFamily()));
+
+        manager.updateDefaultFontFamily(null);
+        assertNull(manager.defaultFontFamily());
+    }
+
+    /// Existing derived launcher fonts change family while fixed domain fonts retain their own family and size.
+    @Test
+    public void replacesDerivedFontsButPreservesFixedSubtrees() {
+        EdtDispatcher.executeAndWait(() -> {
+            JPanel root = new JPanel();
+            JLabel launcherHeading = new JLabel();
+            launcherHeading.setFont(new Font(Font.DIALOG, Font.BOLD, 19));
+            JLabel fixedLog = new JLabel();
+            fixedLog.setFont(new Font(Font.DIALOG, Font.PLAIN, 15));
+            SwingThemeManager.preserveExplicitFontFamily(fixedLog);
+            root.add(launcherHeading);
+            root.add(fixedLog);
+
+            SwingThemeManager.replaceFontFamily(
+                    root,
+                    new Font(Font.DIALOG, Font.PLAIN, 12),
+                    new Font(Font.MONOSPACED, Font.PLAIN, 12));
+
+            assertAll(
+                    () -> assertEquals(Font.MONOSPACED, launcherHeading.getFont().getFamily()),
+                    () -> assertEquals(Font.BOLD, launcherHeading.getFont().getStyle()),
+                    () -> assertEquals(19.0F, launcherHeading.getFont().getSize2D()),
+                    () -> assertEquals(Font.DIALOG, fixedLog.getFont().getFamily()),
+                    () -> assertEquals(15.0F, fixedLog.getFont().getSize2D()));
+        });
     }
 
     /// Refreshing system mode responds to a changed platform appearance signal.

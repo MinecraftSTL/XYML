@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.setting.DownloadSource;
 import space.minecraftstl.xyml.setting.EnumCommonDirectory;
 import space.minecraftstl.xyml.setting.ProxyType;
+import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
@@ -73,9 +74,9 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Renders an embeddable Swing settings center backed by [SettingsCenterStore].
 ///
-/// This panel owns its embedded appearance, preset, directory, Java management, NBT tool, launcher-log controls, and
-/// asynchronous maintenance actions. It closes those resources with the general and network settings store, making
-/// the settings center safe to cache as one shell page.
+/// This panel owns its embedded appearance, fonts, preset, directory, Java management, NBT tool, launcher-log
+/// controls, and asynchronous maintenance actions. It closes those resources with the general and network settings
+/// store, making the settings center safe to cache as one shell page.
 @NotNullByDefault
 public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Add-on catalogue IDs exposed by the launcher setting.
@@ -93,6 +94,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
 
     /// Appearance content embedded and closed with this settings center.
     private final AppearanceSettingsPanel appearancePanel;
+
+    /// Optional production font settings section embedded below appearance controls.
+    private final @Nullable FontSettingsPanel fontSettingsPanel;
 
     /// Local Java runtime page embedded and closed with this settings center.
     private final JavaManagementPanel javaManagementPanel;
@@ -219,15 +223,32 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Creates a settings center backed by the process-wide launcher settings.
     ///
     /// @param appearancePanel appearance page to embed and own
+    /// @param fontRuntime live launcher-font application boundary
     /// @return configured settings center
-    public static SettingsCenterPanel createForCurrentSettings(AppearanceSettingsPanel appearancePanel) {
+    public static SettingsCenterPanel createForCurrentSettings(
+            AppearanceSettingsPanel appearancePanel,
+            FontSettingsRuntime fontRuntime) {
         EdtDispatcher.requireEventDispatchThread();
         LauncherSettingsCenterStore settingsStore = LauncherSettingsCenterStore.createForCurrentSettings();
+        final LauncherFontSettingsStore fontStore;
         try {
-            return new SettingsCenterPanel(settingsStore, appearancePanel);
-        } catch (RuntimeException exception) {
+            fontStore = LauncherFontSettingsStore.createForCurrentSettings();
+        } catch (RuntimeException | Error failure) {
             settingsStore.close();
-            throw exception;
+            throw failure;
+        }
+        try {
+            return new SettingsCenterPanel(
+                    settingsStore,
+                    appearancePanel,
+                    LauncherSettingsRestartCommand.create(),
+                    null,
+                    fontStore,
+                    Objects.requireNonNull(fontRuntime, "fontRuntime"));
+        } catch (RuntimeException | Error failure) {
+            fontStore.close();
+            settingsStore.close();
+            throw failure;
         }
     }
 
@@ -262,6 +283,24 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             AppearanceSettingsPanel appearancePanel,
             SettingsRestartCommand restartCommand,
             @Nullable SettingsMaintenanceActions maintenanceActions) {
+        this(store, appearancePanel, restartCommand, maintenanceActions, null, null);
+    }
+
+    /// Creates an embeddable settings center with optional production font settings.
+    ///
+    /// @param store toolkit-neutral general and network settings store
+    /// @param appearancePanel appearance page to embed and own
+    /// @param restartCommand launcher restart lifecycle command
+    /// @param maintenanceActions asynchronous maintenance actions, or `null` to create production actions
+    /// @param fontStore font settings store, or `null` to omit the production-only font section
+    /// @param fontRuntime live font runtime when `fontStore` is present, otherwise `null`
+    private SettingsCenterPanel(
+            SettingsCenterStore store,
+            AppearanceSettingsPanel appearancePanel,
+            SettingsRestartCommand restartCommand,
+            @Nullable SettingsMaintenanceActions maintenanceActions,
+            @Nullable FontSettingsStore fontStore,
+            @Nullable FontSettingsRuntime fontRuntime) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.store = Objects.requireNonNull(store, "store");
@@ -271,9 +310,19 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 restartCommand,
                 this::restartActivityChanged);
         appearancePanel.attachCornerRadiusRestartPanel(
-                localizedCornerRadiusRestartStrings(),
+                localizedDelayedEffectRestartStrings(),
                 restartCommand,
                 this::restartActivityChanged);
+        fontSettingsPanel = fontStore == null
+                ? null
+                : new FontSettingsPanel(
+                        fontStore,
+                        Objects.requireNonNull(fontRuntime, "fontRuntime"),
+                        FontFamilyCatalog.system(),
+                        Schedulers.io(),
+                        localizedDelayedEffectRestartStrings(),
+                        restartCommand,
+                        this::restartActivityChanged);
         languageBox = new JComboBox<>(new DefaultComboBoxModel<>(
                 SupportedLocale.getSupportedLocales().toArray(SupportedLocale[]::new)));
         javaManagementPanel = new JavaManagementPanel(new JavaManagerRuntimeManagementService());
@@ -328,6 +377,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 storeSubscription.unsubscribe();
                 store.close();
                 appearancePanel.close();
+                if (fontSettingsPanel != null) {
+                    fontSettingsPanel.close();
+                }
                 javaManagementPanel.close();
                 gameSettingsPresetsPanel.close();
                 gameDirectoryManagementPanel.close();
@@ -350,7 +402,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
 
         tabs.addTab(i18n("settings.launcher.general"), createScrollPane(createGeneralPage()));
         tabs.addTab(i18n("settings.launcher.download"), createScrollPane(createDownloadAndProxyPage()));
-        tabs.addTab(i18n("settings.launcher.appearance"), createScrollPane(appearancePanel));
+        tabs.addTab(i18n("settings.launcher.appearance"), createScrollPane(createAppearancePage()));
         tabs.addTab(i18n("settings.type.global.preset.manage_all"), gameSettingsPresetsPanel);
         tabs.addTab(i18n("game_directory.title"), gameDirectoryManagementPanel);
         tabs.addTab(i18n("java.management"), javaManagementPanel);
@@ -359,6 +411,20 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         tabs.addTab(i18n("contact"), createScrollPane(createFeedbackPage()));
         tabs.addTab(i18n("about"), createScrollPane(createAboutPage()));
         add(tabs, BorderLayout.CENTER);
+    }
+
+    /// Combines appearance and font controls into one continuous transparent page.
+    ///
+    /// @return appearance page content
+    private JPanel createAppearancePage() {
+        JPanel page = new JPanel(new MigLayout("insets 0, fillx, wrap 1", "[grow,fill]", "[]"));
+        page.setOpaque(false);
+        page.add(appearancePanel, "growx");
+        if (fontSettingsPanel != null) {
+            page.add(new JSeparator(), "growx, gapx 24, gapbottom 12");
+            page.add(fontSettingsPanel, "growx");
+        }
+        return page;
     }
 
     /// Configures immediate-persistence controls for launcher-wide general preferences.
@@ -1056,6 +1122,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         disableAprilFoolsBox.setEnabled(interactive);
         restartPanel.setAvailable(interactive);
         appearancePanel.setRestartInProgress(restartInProgress);
+        if (fontSettingsPanel != null) {
+            fontSettingsPanel.setRestartInProgress(restartInProgress);
+        }
         commonDirectoryTypeBox.setEnabled(interactive);
         chooseDirectoryButton.setEnabled(interactive);
         automaticThreadsBox.setEnabled(interactive);
@@ -1126,10 +1195,10 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         return localizedRestartStrings("settings.restart.prompt");
     }
 
-    /// Creates localized restart copy for appearance changes whose status text is shared by all locales.
+    /// Creates localized restart copy for settings whose status text is shared by all locales.
     ///
-    /// @return localized corner-radius restart presentation
-    private static SettingsRestartStrings localizedCornerRadiusRestartStrings() {
+    /// @return localized delayed-effect restart presentation
+    private static SettingsRestartStrings localizedDelayedEffectRestartStrings() {
         return localizedRestartStrings("settings.take_effect_after_restart");
     }
 
