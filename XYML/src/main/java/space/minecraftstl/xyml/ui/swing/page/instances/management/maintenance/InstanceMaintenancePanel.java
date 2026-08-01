@@ -46,6 +46,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.net.URI;
@@ -57,6 +58,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /// Presents test launch, script export, dependency repair, and destructive cleanup for one instance.
 ///
@@ -79,6 +81,9 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     /// Native chooser, confirmation, and result-dialog boundary.
     private final InstanceMaintenanceInteractions interactions;
 
+    /// Opens the repository catalog fixed to this existing instance.
+    private final Consumer<Component> repositoryUpdateCommand;
+
     /// Immutable visible text.
     private final InstanceMaintenanceStrings strings;
 
@@ -96,6 +101,9 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
 
     /// Applies a remote archive or server manifest to an installed modpack.
     private final JButton updateModpackUrlButton = new JButton();
+
+    /// Selects and applies a CurseForge or Modrinth version to an installed modpack.
+    private final JButton updateModpackRepositoryButton = new JButton();
 
     /// Forcibly refreshes the selected instance's assets.
     private final JButton redownloadAssetsButton = new JButton();
@@ -170,6 +178,13 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         exportCommand),
                 InstanceMaintenanceStrings.localized(),
                 new SwingInstanceMaintenanceInteractions(),
+                owner -> SwingRemoteModpackUpdateDialog.show(
+                        owner,
+                        repository,
+                        instanceId,
+                        taskProgressStrings,
+                        animator,
+                        progressAnimationDuration),
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration);
@@ -197,6 +212,13 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                 launchActions,
                 InstanceMaintenanceStrings.localized(),
                 new SwingInstanceMaintenanceInteractions(),
+                owner -> SwingRemoteModpackUpdateDialog.show(
+                        owner,
+                        repository,
+                        instanceId,
+                        taskProgressStrings,
+                        animator,
+                        progressAnimationDuration),
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration);
@@ -223,6 +245,42 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
             Duration progressAnimationDuration) {
+        this(
+                instanceId,
+                runDirectory,
+                service,
+                launchActions,
+                strings,
+                interactions,
+                owner -> { },
+                taskProgressStrings,
+                animator,
+                progressAnimationDuration);
+    }
+
+    /// Creates a maintenance page with an explicit repository-update catalog command.
+    ///
+    /// @param instanceId stable fixed instance identifier
+    /// @param runDirectory fixed instance run directory
+    /// @param service background Core operation boundary
+    /// @param launchActions application launch command boundary
+    /// @param strings immutable visible text
+    /// @param interactions native interaction boundary
+    /// @param repositoryUpdateCommand repository-catalog command bound to the fixed instance
+    /// @param taskProgressStrings localized task progress text
+    /// @param animator optional shared animator
+    /// @param progressAnimationDuration non-negative progress animation duration
+    private InstanceMaintenancePanel(
+            GameInstanceID instanceId,
+            Path runDirectory,
+            InstanceMaintenanceService service,
+            InstanceMaintenanceLaunchActions launchActions,
+            InstanceMaintenanceStrings strings,
+            InstanceMaintenanceInteractions interactions,
+            Consumer<Component> repositoryUpdateCommand,
+            TaskProgressStrings taskProgressStrings,
+            @Nullable SwingAnimator animator,
+            Duration progressAnimationDuration) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
@@ -231,6 +289,9 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         this.launchActions = Objects.requireNonNull(launchActions, "launchActions");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
+        this.repositoryUpdateCommand = Objects.requireNonNull(
+                repositoryUpdateCommand,
+                "repositoryUpdateCommand");
         Duration animationDuration = Objects.requireNonNull(
                 progressAnimationDuration,
                 "progressAnimationDuration");
@@ -343,6 +404,12 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
                         "assets/swing/icons/nav-downloads.svg",
                         strings.updateModpackUrlAction(),
                         this::updateModpackFromUrl),
+                configureAction(
+                        updateModpackRepositoryButton,
+                        "instanceMaintenanceUpdateModpackRepository",
+                        "assets/swing/icons/format-list-bulleted.svg",
+                        strings.updateModpackRepositoryAction(),
+                        this::updateModpackFromRepository),
                 configureAction(
                         redownloadAssetsButton,
                         "instanceMaintenanceRedownloadAssets",
@@ -507,6 +574,9 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         updateModpackUrlButton.setToolTipText(snapshot.modpack()
                 ? strings.updateModpackUrlAction()
                 : strings.updateUnavailableStatus());
+        updateModpackRepositoryButton.setToolTipText(snapshot.modpack()
+                ? strings.updateModpackRepositoryAction()
+                : strings.updateUnavailableStatus());
     }
 
     /// Opens a local archive chooser and starts a provider-validated update task.
@@ -536,6 +606,15 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
             startTask(
                     () -> service.updateModpack(source),
                     strings.updateModpackUrlAction());
+        }
+    }
+
+    /// Opens the built-in repository catalog fixed to the current existing instance.
+    private void updateModpackFromRepository() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable InstanceMaintenanceSnapshot snapshot = displayedSnapshot;
+        if (isReady() && snapshot != null && snapshot.modpack()) {
+            repositoryUpdateCommand.accept(this);
         }
     }
 
@@ -842,6 +921,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
         exportScriptButton.setEnabled(ready);
         updateModpackButton.setEnabled(ready && snapshot != null && snapshot.modpack());
         updateModpackUrlButton.setEnabled(ready && snapshot != null && snapshot.modpack());
+        updateModpackRepositoryButton.setEnabled(ready && snapshot != null && snapshot.modpack());
         redownloadAssetsButton.setEnabled(ready);
         removeAssetsButton.setEnabled(ready && snapshot != null && snapshot.assetsPresent());
         removeLibrariesButton.setEnabled(ready && snapshot != null && snapshot.librariesPresent());
