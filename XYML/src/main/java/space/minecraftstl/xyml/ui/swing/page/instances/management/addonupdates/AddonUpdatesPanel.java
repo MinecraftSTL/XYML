@@ -57,8 +57,11 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -74,6 +77,11 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// rows retain their exact Core updates so an explicit checked selection can run as one presented task.
 @NotNullByDefault
 public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
+    /// Collision-resistant timestamp used for the default exported CSV name.
+    private static final DateTimeFormatter EXPORT_FILE_TIME = DateTimeFormatter.ofPattern(
+            "yyyy-MM-dd'T'HH-mm-ss",
+            Locale.ROOT);
+
     /// Blocking access to local add-ons and remote source metadata.
     private final AddonUpdateScanAccess scanAccess;
 
@@ -98,6 +106,9 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
     /// Explicit command that starts local and remote inspection.
     private final JButton checkButton = new JButton();
 
+    /// Exports every actionable result row to a user-selected CSV file.
+    private final JButton exportButton = new JButton();
+
     /// Opens the selected row's exact remote project page when resolved.
     private final JButton openSourceButton = new JButton();
 
@@ -121,6 +132,9 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
 
     /// Guards one in-flight network scan and prevents concurrent duplicate calls.
     private final AtomicBoolean scanning = new AtomicBoolean();
+
+    /// Guards one in-flight CSV write and prevents duplicate export commands.
+    private final AtomicBoolean exporting = new AtomicBoolean();
 
     /// Guards terminal component teardown and late background callbacks.
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -292,13 +306,21 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
     private JComponent createHeadingBand() {
         JPanel heading = new JPanel(new MigLayout(
                 "insets 12 16 8 16, fillx",
-                "[grow,fill][]8[]8[]",
+                "[grow,fill][]8[]8[]8[]",
                 "[40!]"));
         heading.setOpaque(false);
         JLabel title = new JLabel(strings.title());
         title.setName("addonUpdatesTitle");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 26.0F));
         heading.add(title, "growx");
+
+        configureIconButton(
+                exportButton,
+                "addonUpdatesExport",
+                "assets/swing/icons/output.svg",
+                i18n("button.export"),
+                this::exportUpdateList);
+        heading.add(exportButton, "w 40!, h 40!");
 
         checkButton.setName("addonUpdatesCheck");
         checkButton.setText(strings.checkButtonText());
@@ -522,15 +544,69 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
     /// Synchronizes scanning, checked-update, selected-row, and task commands without querying a source.
     private void updateControls() {
         EdtDispatcher.requireEventDispatchThread();
-        boolean idle = !closed.get() && !scanning.get() && activeExecutor == null;
+        boolean idle = !closed.get() && !scanning.get() && !exporting.get() && activeExecutor == null;
         @Nullable AddonUpdateTableRow row = selectedRow();
         checkButton.setEnabled(idle);
+        exportButton.setEnabled(idle && tableModel.updateCount() > 0);
         resultsTable.setEnabled(idle);
         revealLocalButton.setEnabled(idle && row != null);
         openSourceButton.setEnabled(idle && row != null && row.sourcePage() != null);
         selectAllCheckBox.setEnabled(idle && tableModel.updateCount() > 0);
         selectAllCheckBox.setSelected(tableModel.areAllUpdatesSelected());
         updateButton.setEnabled(idle && !tableModel.selectedUpdates().isEmpty());
+    }
+
+    /// Exports every actionable result row to one explicitly chosen new CSV file.
+    private void exportUpdateList() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get() || scanning.get() || exporting.get() || activeExecutor != null) {
+            return;
+        }
+        @Unmodifiable List<AddonUpdateExportRow> rows = tableModel.exportRows();
+        if (rows.isEmpty()) {
+            updateControls();
+            return;
+        }
+        String suggestedName = "xyml-addon-update-list-"
+                + EXPORT_FILE_TIME.format(LocalDateTime.now())
+                + ".csv";
+        final @Nullable Path destination;
+        try {
+            destination = interactions.chooseExportFile(this, suggestedName);
+        } catch (RuntimeException failure) {
+            interactions.showFailure(this, strings.failureDialogTitle(), describeFailure(failure));
+            return;
+        }
+        if (destination == null || !exporting.compareAndSet(false, true)) {
+            return;
+        }
+        statusLabel.setText(i18n("button.export"));
+        updateControls();
+        final CompletionStage<@Nullable Void> completion;
+        try {
+            completion = Objects.requireNonNull(
+                    interactions.exportUpdateList(destination, rows),
+                    "interactions.exportUpdateList returned null");
+        } catch (RuntimeException failure) {
+            exporting.set(false);
+            interactions.showFailure(this, strings.failureDialogTitle(), describeFailure(failure));
+            updateControls();
+            return;
+        }
+        completion.whenComplete((
+                @Nullable Void ignored,
+                @Nullable Throwable failure) -> EdtDispatcher.execute(() -> {
+            if (closed.get()) {
+                return;
+            }
+            exporting.set(false);
+            if (failure == null) {
+                statusLabel.setText(i18n("message.success") + ": " + destination);
+            } else {
+                interactions.showFailure(this, strings.failureDialogTitle(), describeFailure(failure));
+            }
+            updateControls();
+        }));
     }
 
     /// Creates and starts one presented task for exactly the currently checked update items.
@@ -790,6 +866,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
             presentation.close();
         }
         checkButton.setEnabled(false);
+        exportButton.setEnabled(false);
         openSourceButton.setEnabled(false);
         revealLocalButton.setEnabled(false);
         selectAllCheckBox.setEnabled(false);
@@ -1037,6 +1114,23 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
                 }
             }
             return List.copyOf(selected);
+        }
+
+        /// Returns every actionable result row in stable table order for CSV export.
+        ///
+        /// @return immutable export snapshot excluding scan-failure rows
+        private @Unmodifiable List<AddonUpdateExportRow> exportRows() {
+            List<AddonUpdateExportRow> exports = new ArrayList<>();
+            for (AddonUpdateTableRow row : rows) {
+                if (row.update() != null) {
+                    exports.add(new AddonUpdateExportRow(
+                            row.fileName(),
+                            row.currentVersion(),
+                            row.targetVersion(),
+                            row.source()));
+                }
+            }
+            return List.copyOf(exports);
         }
 
         /// Returns the number of actionable update rows.
