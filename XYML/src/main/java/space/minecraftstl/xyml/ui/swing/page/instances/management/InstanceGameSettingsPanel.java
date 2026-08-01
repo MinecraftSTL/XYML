@@ -39,39 +39,34 @@ import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaManagerRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaRuntimeManagementSnapshot;
-import space.minecraftstl.xyml.util.i18n.I18n;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultComboBoxModel;
-import javax.swing.DefaultListCellRenderer;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
-import javax.swing.ListCellRenderer;
 import javax.swing.ScrollPaneConstants;
 import java.awt.BorderLayout;
-import java.awt.Component;
 import java.awt.Font;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
-import java.util.function.Function;
 
+import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsRenderers.enumKey;
+import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsRenderers.installRenderer;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsValueCodec.formatWindowDimension;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsValueCodec.parseOptionalInteger;
@@ -259,6 +254,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private final InheritedControl<JComboBox<Renderer>> vulkanRendererControl = inheritedControl(
             "instanceGameSettingsVulkanRenderer",
             new JComboBox<>());
+
+    /// Windows high-performance GPU preference.
+    private final InheritedControl<JCheckBox> highPerformanceGpuControl = inheritedControl(
+            "instanceGameSettingsHighPerformanceGpu",
+            new JCheckBox());
 
     /// Version-gated graphics-backend row.
     private final JPanel graphicsBackendRow = inheritedRowPanel(
@@ -721,6 +721,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         section.add(graphicsBackendRow, "span 3, growx");
         section.add(openGlRendererRow, "span 3, growx");
         section.add(vulkanRendererRow, "span 3, growx");
+        addBooleanControlRowWithSubtitle(
+                section,
+                i18n("settings.advanced.renderer.gpu_preferences"),
+                i18n("settings.advanced.windows_only"),
+                highPerformanceGpuControl);
         content.add(section, "growx");
         return content;
     }
@@ -747,19 +752,19 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Configures localized display text for enum and renderer choices.
     private void configureChoiceRenderers() {
-        installRenderer(windowTypeControl.editor(), InstanceGameSettingsPanel::windowTypeName);
+        installRenderer(windowTypeControl.editor(), InstanceGameSettingsRenderers::windowTypeName);
         installRenderer(
                 launcherVisibilityControl.editor(),
                 value -> i18n("settings.advanced.launcher_visibility." + enumKey(value)));
-        installRenderer(quickPlayTypeControl.editor(), InstanceGameSettingsPanel::quickPlayTypeName);
+        installRenderer(quickPlayTypeControl.editor(), InstanceGameSettingsRenderers::quickPlayTypeName);
         installRenderer(
                 processPriorityControl.editor(),
                 value -> i18n("settings.advanced.process_priority." + enumKey(value)));
         installRenderer(
                 graphicsBackendControl.editor(),
                 value -> i18n("settings.advanced.graphics_backend." + enumKey(value)));
-        installRenderer(openGlRendererControl.editor(), InstanceGameSettingsPanel::rendererName);
-        installRenderer(vulkanRendererControl.editor(), InstanceGameSettingsPanel::rendererName);
+        installRenderer(openGlRendererControl.editor(), InstanceGameSettingsRenderers::rendererName);
+        installRenderer(vulkanRendererControl.editor(), InstanceGameSettingsRenderers::rendererName);
     }
 
     /// Configures popup-triggered local Java and renderer choice loading.
@@ -1032,7 +1037,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                         editedChoice(
                                 vulkanRendererControl,
                                 current.graphics().vulkanRenderer(),
-                                "Vulkan renderer")),
+                                "Vulkan renderer"),
+                        highPerformanceGpuControl.overrideBox().isSelected(),
+                        editedBoolean(
+                                highPerformanceGpuControl,
+                                current.graphics().highPerformance())),
                 new InstanceGameSettingsSnapshot.NativeLibrarySettings(
                         useCustomNativesControl.overrideBox().isSelected(),
                         editedBoolean(
@@ -1363,6 +1372,10 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         openGlRendererControl.overrideBox().setSelected(values.openGlRendererOverridden());
         ensureComboValue(vulkanRendererControl.editor(), values.vulkanRenderer());
         vulkanRendererControl.overrideBox().setSelected(values.vulkanRendererOverridden());
+        applyBoolean(
+                highPerformanceGpuControl,
+                values.highPerformanceOverridden(),
+                values.highPerformance());
     }
 
     /// Applies one asynchronous game-version result unless the panel has already closed.
@@ -1739,6 +1752,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 graphicsBackendControl,
                 openGlRendererControl,
                 vulkanRendererControl,
+                highPerformanceGpuControl,
                 useCustomNativesControl,
                 nativesDirectoryControl,
                 notPatchNativesControl,
@@ -1864,6 +1878,29 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         section.add(editor, "span 2, growx");
     }
 
+    /// Adds one inherited boolean editor with a compact platform-availability subtitle.
+    ///
+    /// @param section target section
+    /// @param labelText localized field label
+    /// @param subtitleText localized availability note
+    /// @param control inherited boolean editor
+    private static void addBooleanControlRowWithSubtitle(
+            JPanel section,
+            String labelText,
+            String subtitleText,
+            InheritedControl<JCheckBox> control) {
+        addBooleanControlRow(section, labelText, control);
+        String validatedSubtitle = Objects.requireNonNull(subtitleText, "subtitleText");
+        JLabel subtitle = new JLabel(validatedSubtitle);
+        subtitle.setName(control.editor().getName() + "Subtitle");
+        subtitle.setFont(subtitle.getFont().deriveFont(
+                Font.PLAIN,
+                Math.max(10.0F, subtitle.getFont().getSize2D() - 1.0F)));
+        control.editor().setToolTipText(validatedSubtitle);
+        control.editor().getAccessibleContext().setAccessibleDescription(validatedSubtitle);
+        section.add(subtitle, "skip 1, span 2, growx");
+    }
+
     /// Adds one inherited multiline text editor row.
     ///
     /// @param section target section
@@ -1950,51 +1987,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private static <T> T selectedOrDefault(JComboBox<T> comboBox, T fallback) {
         @Nullable T value = selectedNullableValue(comboBox);
         return value != null ? value : Objects.requireNonNull(fallback, "fallback");
-    }
-
-    /// Installs a text-converting combo renderer.
-    private static <T> void installRenderer(JComboBox<T> comboBox, Function<T, String> displayName) {
-        DefaultListCellRenderer fallback = new DefaultListCellRenderer();
-        Function<T, String> converter = Objects.requireNonNull(displayName, "displayName");
-        ListCellRenderer<T> renderer = (
-                JList<? extends T> list,
-                T value,
-                int index,
-                boolean selected,
-                boolean focused) -> {
-            Component component = fallback.getListCellRendererComponent(
-                    list,
-                    value,
-                    index,
-                    selected,
-                    focused);
-            if (component instanceof JLabel label && value != null) {
-                label.setText(converter.apply(value));
-            }
-            return component;
-        };
-        comboBox.setRenderer(renderer);
-    }
-
-    /// Returns a localized game-window mode name.
-    private static String windowTypeName(GameWindowType value) {
-        return i18n("settings.game.window_type." + enumKey(value));
-    }
-
-    /// Returns a localized Quick Play mode name.
-    private static String quickPlayTypeName(QuickPlayType value) {
-        return i18n("settings.game.quick_play." + enumKey(value));
-    }
-
-    /// Returns a localized renderer name when available.
-    private static String rendererName(Renderer renderer) {
-        String key = "settings.advanced.renderer." + renderer.name().toLowerCase(Locale.ROOT);
-        return I18n.hasKey(key) ? i18n(key) : renderer.name();
-    }
-
-    /// Returns the lowercase localization suffix for one enum value.
-    private static String enumKey(Enum<?> value) {
-        return Objects.requireNonNull(value, "value").name().toLowerCase(Locale.ROOT);
     }
 
 }

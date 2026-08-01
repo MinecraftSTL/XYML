@@ -86,6 +86,10 @@ public interface WinConstants {
     // https://learn.microsoft.com/windows/win32/sysinfo/registry-key-security-and-access-rights
     int KEY_QUERY_VALUE = 0x0001;
     int KEY_ENUMERATE_SUB_KEYS = 0x0008;
+    /// Combined registry-key write access mask.
+    int KEY_WRITE = 0x20006;
+    /// Registry access right for changing one value.
+    int KEY_SET_VALUE = 0x0002;
     int KEY_READ = 0x20019;
 
     // https://learn.microsoft.com/windows/win32/sysinfo/registry-value-types
@@ -133,4 +137,6 @@ public interface WinConstants {
     // https://learn.microsoft.com/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute
     int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
+    /// Persists a newly created registry key across system restarts.
+    int REG_OPTION_NON_VOLATILE = 0x0000;
 }

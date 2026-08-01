@@ -346,6 +346,8 @@ public record InstanceGameSettingsSnapshot(
     /// @param openGlRenderer effective OpenGL renderer
     /// @param vulkanRendererOverridden whether the Vulkan renderer is local
     /// @param vulkanRenderer effective Vulkan renderer
+    /// @param highPerformanceOverridden whether the Windows GPU preference is local
+    /// @param highPerformance whether the high-performance GPU preference is enabled
     @NotNullByDefault
     public record GraphicsSettings(
             boolean backendOverridden,
@@ -353,7 +355,9 @@ public record InstanceGameSettingsSnapshot(
             boolean openGlRendererOverridden,
             Renderer openGlRenderer,
             boolean vulkanRendererOverridden,
-            Renderer vulkanRenderer) {
+            Renderer vulkanRenderer,
+            boolean highPerformanceOverridden,
+            boolean highPerformance) {
         /// Rejects missing graphics values.
         public GraphicsSettings {
             Objects.requireNonNull(backend, "backend");

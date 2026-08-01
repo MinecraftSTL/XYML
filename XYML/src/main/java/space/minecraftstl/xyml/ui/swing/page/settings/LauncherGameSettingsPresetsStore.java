@@ -255,6 +255,7 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
             preset.graphicsBackendProperty().setValue(values.graphics().backend());
             preset.openGLRendererProperty().setValue(values.graphics().openGlRenderer());
             preset.vulkanRendererProperty().setValue(values.graphics().vulkanRenderer());
+            preset.highPerformanceProperty().setValue(values.graphics().highPerformance());
 
             preset.useCustomNativesProperty().setValue(values.nativeLibraries().customDirectoryEnabled());
             preset.nativesDirectoryProperty().setValue(values.nativeLibraries().directory());
@@ -469,7 +470,8 @@ public final class LauncherGameSettingsPresetsStore implements GameSettingsPrese
                         new GameSettingsPresetEditor.GraphicsSettings(
                                 source.graphicsBackendProperty().getValue(),
                                 source.openGLRendererProperty().getValue(),
-                                source.vulkanRendererProperty().getValue()),
+                                source.vulkanRendererProperty().getValue(),
+                                source.highPerformanceProperty().getValue()),
                         new GameSettingsPresetEditor.NativeLibrarySettings(
                                 source.useCustomNativesProperty().getValue(),
                                 source.nativesDirectoryProperty().getValue(),
