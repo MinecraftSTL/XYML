@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.presentation.TaskSnapshot;
 import space.minecraftstl.xyml.task.presentation.TaskStatus;
@@ -634,7 +635,7 @@ final class DefaultGameLaunchServiceTest {
     /// @param instanceId stable test instance identifier
     /// @return immutable launch request
     private static LaunchRequest request(String instanceId) {
-        return new LaunchRequest("account-id", "directory-id", instanceId);
+        return new LaunchRequest("account-id", "directory-id", new GameInstanceID(instanceId));
     }
 
     /// Creates a service with explicit test-only presentation strings.

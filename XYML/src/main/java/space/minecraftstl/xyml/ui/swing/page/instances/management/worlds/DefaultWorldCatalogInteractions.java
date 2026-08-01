@@ -21,7 +21,9 @@ import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.nbt.SwingNBTEditorLauncher;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
 import javax.swing.JFileChooser;
@@ -30,8 +32,11 @@ import javax.swing.SwingUtilities;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.Component;
 import java.awt.Desktop;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
@@ -53,6 +58,9 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
 
     /// Caller-owned executor for filesystem and platform desktop work.
     private final Executor executor;
+
+    /// Lazily created modeless editor dedicated to direct world level-data paths.
+    private @Nullable SwingNBTEditorLauncher levelDataEditor;
 
     /// Creates the production interaction implementation.
     ///
@@ -193,6 +201,56 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
         return destination;
     }
 
+    /// Shows a PNG-only chooser for one selected world's custom icon.
+    ///
+    /// @param owner dialog owner
+    /// @param world selected loaded world
+    /// @return normalized candidate path, or null after cancellation
+    @Override
+    public @Nullable Path chooseWorldIcon(Component owner, WorldCatalogItem world) {
+        EdtDispatcher.requireEventDispatchThread();
+        WorldCatalogItem selectedWorld = Objects.requireNonNull(world, "world");
+        JFileChooser chooser = new EditablePathChooser(selectedWorld.path().toFile());
+        chooser.setDialogTitle(i18n("world.icon.choose.title"));
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setMultiSelectionEnabled(false);
+        chooser.setAcceptAllFileFilterUsed(false);
+        chooser.setFileFilter(new FileNameExtensionFilter(i18n("extension.png"), "png"));
+        chooser.setSelectedFile(new File("icon.png"));
+        if (chooser.showOpenDialog(Objects.requireNonNull(owner, "owner")) != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        @Nullable File selected = chooser.getSelectedFile();
+        return selected == null ? null : selected.toPath().toAbsolutePath().normalize();
+    }
+
+    /// Opens one exact world level-data file without invoking the settings file chooser.
+    ///
+    /// @param owner component used to resolve the launcher frame
+    /// @param levelDataPath exact level-data source
+    @Override
+    public void openLevelData(Component owner, Path levelDataPath) {
+        EdtDispatcher.requireEventDispatchThread();
+        Component checkedOwner = Objects.requireNonNull(owner, "owner");
+        if (levelDataEditor == null) {
+            levelDataEditor = SwingNBTEditorLauncher.createForDirectPaths(checkedOwner, executor);
+        }
+        levelDataEditor.open(Objects.requireNonNull(levelDataPath, "levelDataPath"));
+    }
+
+    /// Copies one world-detail value on the EDT.
+    ///
+    /// @param owner interaction owner
+    /// @param text exact text to copy
+    @Override
+    public void copyText(Component owner, String text) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                new StringSelection(Objects.requireNonNull(text, "text")),
+                null);
+    }
+
     /// Shows a platform-aware standalone launch-script save chooser on the EDT.
     ///
     /// @param owner dialog owner
@@ -249,6 +307,24 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
         return result;
     }
 
+    /// Reopens selected world metadata and schedules a browser launch outside the EDT.
+    ///
+    /// @param world selected readable world
+    /// @param tool requested Chunk Base destination
+    /// @return nullable-void asynchronous browser completion
+    @Override
+    public CompletionStage<@Nullable Void> openChunkBase(WorldCatalogItem world, ChunkBaseTool tool) {
+        WorldCatalogItem selectedWorld = Objects.requireNonNull(world, "world");
+        ChunkBaseTool selectedTool = Objects.requireNonNull(tool, "tool");
+        CompletableFuture<@Nullable Void> result = new CompletableFuture<>();
+        try {
+            executor.execute(() -> openChunkBaseOnExecutor(selectedWorld, selectedTool, result));
+        } catch (RuntimeException failure) {
+            result.completeExceptionally(failure);
+        }
+        return result;
+    }
+
     /// Displays one native failure dialog on the EDT.
     ///
     /// @param owner dialog owner
@@ -262,6 +338,16 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
                 Objects.requireNonNull(detail, "detail"),
                 Objects.requireNonNull(title, "title"),
                 JOptionPane.ERROR_MESSAGE);
+    }
+
+    /// Closes the lazily owned modeless level-data editor, if any.
+    @Override
+    public void close() {
+        @Nullable SwingNBTEditorLauncher editor = levelDataEditor;
+        levelDataEditor = null;
+        if (editor != null) {
+            editor.close();
+        }
     }
 
     /// Opens one directory outside the EDT and completes the caller future.
@@ -282,6 +368,38 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
                 throw new UnsupportedOperationException(i18n("swing.world_catalog.desktop_open_unsupported"));
             }
             desktop.open(directory.toFile());
+            result.complete(null);
+        } catch (IOException | RuntimeException failure) {
+            result.completeExceptionally(failure);
+        }
+    }
+
+    /// Reads the selected world seed, builds its Chunk Base URI, and opens the system browser.
+    ///
+    /// @param world selected readable row
+    /// @param tool requested Chunk Base destination
+    /// @param result externally visible completion
+    private static void openChunkBaseOnExecutor(
+            WorldCatalogItem world,
+            ChunkBaseTool tool,
+            CompletableFuture<@Nullable Void> result) {
+        try {
+            requireBackgroundThread();
+            World loadedWorld = new World(world.path());
+            final URI destination;
+            try {
+                destination = ChunkBaseWorldTools.createUri(loadedWorld, tool);
+            } catch (IllegalArgumentException failure) {
+                throw new IllegalArgumentException(i18n("swing.world_catalog.chunkbase_unavailable"), failure);
+            }
+            if (!Desktop.isDesktopSupported()) {
+                throw new UnsupportedOperationException(i18n("swing.world_catalog.browser_unavailable"));
+            }
+            Desktop desktop = Desktop.getDesktop();
+            if (!desktop.isSupported(Desktop.Action.BROWSE)) {
+                throw new UnsupportedOperationException(i18n("swing.world_catalog.browser_unavailable"));
+            }
+            desktop.browse(destination);
             result.complete(null);
         } catch (IOException | RuntimeException failure) {
             result.completeExceptionally(failure);

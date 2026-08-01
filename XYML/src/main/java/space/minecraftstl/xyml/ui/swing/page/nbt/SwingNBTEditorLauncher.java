@@ -22,8 +22,10 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.nbt.NBTFileType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
+import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Frame;
+import java.awt.Window;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.Executor;
@@ -74,6 +76,28 @@ public final class SwingNBTEditorLauncher implements AutoCloseable {
                 });
     }
 
+    /// Creates a launcher for callers that already own the exact NBT source path.
+    ///
+    /// No chooser is shown by [#open(Path)]. The component is used only to resolve the current
+    /// launcher frame when the first modeless editor window is created.
+    ///
+    /// @param owner stable component inside the launcher frame
+    /// @param ioExecutor caller-owned executor for NBT and bundled-icon I/O
+    /// @return direct-path editor launcher
+    public static SwingNBTEditorLauncher createForDirectPaths(
+            Component owner,
+            Executor ioExecutor) {
+        EdtDispatcher.requireEventDispatchThread();
+        Component checkedOwner = Objects.requireNonNull(owner, "owner");
+        return create(
+                checkedOwner,
+                () -> {
+                    @Nullable Window window = SwingUtilities.getWindowAncestor(checkedOwner);
+                    return window instanceof Frame frame ? frame : null;
+                },
+                Objects.requireNonNull(ioExecutor, "ioExecutor"));
+    }
+
     /// Creates a deterministic launcher boundary for headless tests.
     ///
     /// @param fileChooser injected file chooser
@@ -117,7 +141,7 @@ public final class SwingNBTEditorLauncher implements AutoCloseable {
     /// Opens a supported path in the current or a newly created modeless editor.
     ///
     /// @param source normalized or relative source supplied by the settings chooser
-    private void open(Path source) {
+    public void open(Path source) {
         EdtDispatcher.requireEventDispatchThread();
         Path normalizedSource = Objects.requireNonNull(source, "source")
                 .toAbsolutePath()

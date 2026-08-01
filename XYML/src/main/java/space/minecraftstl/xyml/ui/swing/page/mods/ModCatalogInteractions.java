@@ -43,6 +43,13 @@ public interface ModCatalogInteractions {
     /// @return whether deletion was explicitly confirmed
     boolean confirmDelete(Component owner, ModCatalogItem target);
 
+    /// Confirms permanent deletion of one selected stable-key batch on the EDT.
+    ///
+    /// @param owner dialog owner
+    /// @param selectedCount positive selected target count
+    /// @return whether batch deletion was explicitly confirmed
+    boolean confirmDeleteSelected(Component owner, int selectedCount);
+
     /// Schedules revealing one exact current Mod file.
     ///
     /// @param target normalized current file path

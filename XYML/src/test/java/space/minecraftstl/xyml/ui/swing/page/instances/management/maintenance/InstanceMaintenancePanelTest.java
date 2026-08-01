@@ -36,6 +36,7 @@ import java.awt.Container;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
+import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -156,6 +157,30 @@ final class InstanceMaintenancePanelTest {
         EdtDispatcher.executeAndWait(panel::close);
     }
 
+    /// Passes the exact validated remote source to the remote modpack update task.
+    @Test
+    void modpackUpdateUsesSelectedRemoteUri() {
+        RecordingService service = new RecordingService();
+        RecordingInteractions interactions = new RecordingInteractions();
+        URI source = URI.create("https://example.invalid/server-manifest.json");
+        interactions.modpackUri.set(source);
+        InstanceMaintenancePanel panel = createPanel(service, interactions, new RecordingLaunchActions());
+        InstanceMaintenanceSnapshot snapshot = new InstanceMaintenanceSnapshot(
+                INSTANCE_ID,
+                true,
+                false,
+                false,
+                false);
+        service.mutationResult = snapshot;
+        activateWithSnapshot(panel, service, snapshot);
+
+        EdtDispatcher.executeAndWait(() -> button(panel, "instanceMaintenanceUpdateModpackUrl").doClick());
+        waitFor(() -> service.remoteUpdateCalls.get() == 1);
+
+        assertEquals(source, service.updateUri.get());
+        EdtDispatcher.executeAndWait(panel::close);
+    }
+
     /// Delivers the exact chosen script path and reports the exact completed result.
     @Test
     void scriptExportPreservesDestinationAndReportsCompletion() {
@@ -225,6 +250,8 @@ final class InstanceMaintenancePanelTest {
                     "instanceMaintenanceTestLaunch",
                     "instanceMaintenanceExportScript",
                     "instanceMaintenanceUpdateModpack",
+                    "instanceMaintenanceUpdateModpackUrl",
+                    "instanceMaintenanceUpdateModpackRepository",
                     "instanceMaintenanceRedownloadAssets",
                     "instanceMaintenanceRemoveAssets",
                     "instanceMaintenanceRemoveLibraries",
@@ -426,6 +453,12 @@ final class InstanceMaintenancePanelTest {
         /// Exact selected archive charset, or null before a request.
         private final AtomicReference<@Nullable Charset> updateCharset = new AtomicReference<>();
 
+        /// Number of remote modpack update tasks requested.
+        private final AtomicInteger remoteUpdateCalls = new AtomicInteger();
+
+        /// Exact selected remote update source, or null before a request.
+        private final AtomicReference<@Nullable URI> updateUri = new AtomicReference<>();
+
         /// Number of shared asset removal tasks requested.
         private final AtomicInteger removeAssetsCalls = new AtomicInteger();
 
@@ -454,6 +487,17 @@ final class InstanceMaintenancePanelTest {
             updateCalls.incrementAndGet();
             updateArchive.set(archive);
             updateCharset.set(charset);
+            return Task.completed(mutationResult);
+        }
+
+        /// Records one remote update request.
+        ///
+        /// @param source selected remote source
+        /// @return immediate stopped result task
+        @Override
+        public Task<InstanceMaintenanceSnapshot> updateModpack(URI source) {
+            remoteUpdateCalls.incrementAndGet();
+            updateUri.set(source);
             return Task.completed(mutationResult);
         }
 
@@ -489,6 +533,9 @@ final class InstanceMaintenancePanelTest {
         /// Selected modpack archive, or null to simulate cancellation.
         private final AtomicReference<@Nullable Path> modpackArchive = new AtomicReference<>();
 
+        /// Selected remote modpack source, or null to simulate cancellation.
+        private final AtomicReference<@Nullable URI> modpackUri = new AtomicReference<>();
+
         /// Selected launch script, or null to simulate cancellation.
         private final AtomicReference<@Nullable Path> launchScript = new AtomicReference<>();
 
@@ -517,6 +564,15 @@ final class InstanceMaintenancePanelTest {
         @Override
         public @Nullable Path chooseModpackArchive(Component owner) {
             return modpackArchive.get();
+        }
+
+        /// Returns the configured remote source.
+        ///
+        /// @param owner unused native owner
+        /// @return configured remote URI, or null
+        @Override
+        public @Nullable URI chooseModpackUri(Component owner) {
+            return modpackUri.get();
         }
 
         /// Returns the configured script destination.

@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
@@ -145,7 +146,7 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
     /// @param statusStrings localized lifecycle text
     public DefaultResourcePackCatalogModel(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor backgroundExecutor,
             ResourcePackCatalogStatusStrings statusStrings) {
         this(
@@ -229,6 +230,14 @@ public final class DefaultResourcePackCatalogModel implements ResourcePackCatalo
     @Override
     public ResourcePackCatalogSnapshot snapshot() {
         return state.snapshot();
+    }
+
+    /// Returns the immutable current shallow path index without parsing row metadata.
+    ///
+    /// @return immutable indexed paths, or an empty list before indexing succeeds
+    @Override
+    public @Unmodifiable List<Path> indexedPaths() {
+        return state.content().paths();
     }
 
     /// Registers a listener whose first eligible transition is committed after this call.

@@ -38,6 +38,7 @@ import java.util.Objects;
 /// @param gameVersion parsed game-version display text, or `null` when not recorded
 /// @param locked whether the world currently appears locked
 /// @param failureDetail load detail, or `null` when Core successfully read the world
+/// @param details viewport-loaded world information, or `null` for unreadable and compatibility rows
 @NotNullByDefault
 public record WorldCatalogItem(
         Path path,
@@ -46,7 +47,8 @@ public record WorldCatalogItem(
         long lastPlayed,
         @Nullable String gameVersion,
         boolean locked,
-        @Nullable String failureDetail) {
+        @Nullable String failureDetail,
+        @Nullable WorldCatalogDetails details) {
     /// Normalizes the durable path and validates row identity values.
     public WorldCatalogItem {
         path = Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
@@ -60,11 +62,35 @@ public record WorldCatalogItem(
         }
     }
 
+    /// Creates a compatibility row without an expanded detail snapshot.
+    ///
+    /// This constructor keeps deterministic catalog and neighboring page tests concise. Production
+    /// rows created by [#loaded(World)] always include complete viewport-loaded details.
+    ///
+    /// @param path normalized direct-child world directory
+    /// @param directoryName local directory name
+    /// @param worldName stored level name
+    /// @param lastPlayed stored epoch milliseconds
+    /// @param gameVersion optional recorded game version
+    /// @param locked current lock state
+    /// @param failureDetail optional load failure
+    public WorldCatalogItem(
+            Path path,
+            String directoryName,
+            String worldName,
+            long lastPlayed,
+            @Nullable String gameVersion,
+            boolean locked,
+            @Nullable String failureDetail) {
+        this(path, directoryName, worldName, lastPlayed, gameVersion, locked, failureDetail, null);
+    }
+
     /// Creates a successfully decoded row from the Core world API.
     ///
     /// @param world fully loaded Core world
     /// @return immutable metadata suitable for a visible viewport row
-    public static WorldCatalogItem loaded(World world) {
+    /// @throws java.io.IOException when the decoded icon cannot cross the immutable UI boundary
+    public static WorldCatalogItem loaded(World world) throws java.io.IOException {
         World loadedWorld = Objects.requireNonNull(world, "world");
         @Nullable GameVersionNumber version = loadedWorld.getGameVersion();
         return new WorldCatalogItem(
@@ -74,7 +100,8 @@ public record WorldCatalogItem(
                 loadedWorld.getLastPlayed(),
                 version == null ? null : version.toString(),
                 loadedWorld.isLocked(),
-                null);
+                null,
+                WorldCatalogDetailsCodec.read(loadedWorld));
     }
 
     /// Creates a readable-path placeholder for a directory whose world metadata cannot be parsed.
@@ -95,7 +122,8 @@ public record WorldCatalogItem(
                 0L,
                 null,
                 false,
-                failureDetail(actualFailure));
+                failureDetail(actualFailure),
+                null);
     }
 
     /// Returns whether Core successfully decoded this world directory.

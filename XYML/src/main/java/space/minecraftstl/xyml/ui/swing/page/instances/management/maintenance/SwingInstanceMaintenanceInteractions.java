@@ -29,8 +29,10 @@ import javax.swing.JOptionPane;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.Component;
 import java.io.File;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Objects;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -71,6 +73,34 @@ public final class SwingInstanceMaintenanceInteractions implements InstanceMaint
         }
         @Nullable File selected = chooser.getSelectedFile();
         return selected == null ? null : selected.toPath().toAbsolutePath().normalize();
+    }
+
+    /// Prompts until the user supplies a valid direct HTTP(S) source or cancels.
+    ///
+    /// @param owner native dialog owner
+    /// @return validated remote archive or server-manifest URI, or null after cancellation
+    @Override
+    public @Nullable URI chooseModpackUri(Component owner) {
+        EdtDispatcher.requireEventDispatchThread();
+        Component resolvedOwner = Objects.requireNonNull(owner, "owner");
+        while (true) {
+            @Nullable String input = JOptionPane.showInputDialog(
+                    resolvedOwner,
+                    i18n("modpack.choose.remote.tooltip"),
+                    strings.updateModpackAction(),
+                    JOptionPane.QUESTION_MESSAGE);
+            if (input == null) {
+                return null;
+            }
+            @Nullable URI source = parseHttpUri(input);
+            if (source != null) {
+                return source;
+            }
+            showFailure(
+                    resolvedOwner,
+                    strings.updateModpackAction(),
+                    i18n("modpack.choose.remote.invalid"));
+        }
     }
 
     /// Opens a platform-aware local script save dialog.
@@ -153,6 +183,29 @@ public final class SwingInstanceMaintenanceInteractions implements InstanceMaint
                 requireNonBlank(detail, "detail"),
                 requireNonBlank(title, "title"),
                 messageType);
+    }
+
+    /// Parses one absolute HTTP(S) URI without resolving or contacting its host.
+    ///
+    /// @param input user-authored source text
+    /// @return normalized URI, or null when the text is not a supported network source
+    private static @Nullable URI parseHttpUri(String input) {
+        String candidate = Objects.requireNonNull(input, "input").trim();
+        if (candidate.isEmpty()) {
+            return null;
+        }
+        try {
+            URI uri = URI.create(candidate).normalize();
+            @Nullable String scheme = uri.getScheme();
+            @Nullable String host = uri.getHost();
+            if (scheme == null || host == null || host.isBlank()) {
+                return null;
+            }
+            String normalizedScheme = scheme.toLowerCase(Locale.ROOT);
+            return "http".equals(normalizedScheme) || "https".equals(normalizedScheme) ? uri : null;
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     /// Adds every script format supported by the current operating system.

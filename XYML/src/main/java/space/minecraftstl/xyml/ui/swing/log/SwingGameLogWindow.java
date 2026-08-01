@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.util.platform.ManagedProcess;
 import javax.swing.JFrame;
 import javax.swing.WindowConstants;
 import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -68,6 +69,9 @@ public final class SwingGameLogWindow implements AutoCloseable {
     /// Persists line-limit changes outside this window.
     private final IntConsumer maxLinesChanged;
 
+    /// Persisted game-log font captured for this window.
+    private final Font logFont;
+
     /// Prevents frame recreation and repeated resource shutdown after close.
     private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -104,7 +108,8 @@ public final class SwingGameLogWindow implements AutoCloseable {
                 new BoundedGameLogBuffer(logs, maxLines),
                 new ManagedProcessGameLogWindowActions(process),
                 newExportExecutor(),
-                maxLinesChanged);
+                maxLinesChanged,
+                SwingLogFontPreferences.currentOrDefault());
     }
 
     /// Creates a window from testable model, side-effect, and executor boundaries.
@@ -118,10 +123,27 @@ public final class SwingGameLogWindow implements AutoCloseable {
             GameLogWindowActions actions,
             ExecutorService exportExecutor,
             IntConsumer maxLinesChanged) {
+        this(buffer, actions, exportExecutor, maxLinesChanged, SwingLogFontPreferences.resolve(null, 12.0));
+    }
+
+    /// Creates a window from testable boundaries and an explicit game-log font.
+    ///
+    /// @param buffer bounded shared history
+    /// @param actions process and desktop actions
+    /// @param exportExecutor executor for blocking exports
+    /// @param maxLinesChanged persistence callback for line-limit changes
+    /// @param logFont configured game-log font
+    SwingGameLogWindow(
+            BoundedGameLogBuffer buffer,
+            GameLogWindowActions actions,
+            ExecutorService exportExecutor,
+            IntConsumer maxLinesChanged,
+            Font logFont) {
         this.buffer = Objects.requireNonNull(buffer, "buffer");
         this.actions = Objects.requireNonNull(actions, "actions");
         this.exportExecutor = Objects.requireNonNull(exportExecutor, "exportExecutor");
         this.maxLinesChanged = Objects.requireNonNull(maxLinesChanged, "maxLinesChanged");
+        this.logFont = Objects.requireNonNull(logFont, "logFont");
 
         WeakReference<SwingGameLogWindow> windowReference = new WeakReference<>(this);
         actions.registerProcessExit(() -> notifyProcessExit(windowReference));
@@ -224,7 +246,8 @@ public final class SwingGameLogWindow implements AutoCloseable {
                     actions,
                     exportExecutor,
                     maxLinesChanged,
-                    this::setAlwaysOnTopOnEdt);
+                    this::setAlwaysOnTopOnEdt,
+                    logFont);
             panel = currentPanel;
         }
         return currentPanel;

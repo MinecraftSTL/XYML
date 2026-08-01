@@ -33,8 +33,11 @@ import javax.swing.SwingUtilities;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.concurrent.CancellationException;
@@ -42,15 +45,21 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
-/// Asynchronous instance-world catalog with a shallow path index and viewport-only NBT parsing.
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
+/// Asynchronous instance-world catalog with a shallow path index and incremental NBT parsing.
 ///
 /// Opening the World tab enumerates direct child directories and publishes their exact count. It
 /// does not instantiate `World` for every save. Instead, `ViewportChoiceList` asks `load` for a
-/// short range and only those rows construct Core world objects to read NBT and lock state.
+/// short range. Show All materializes only those rows; the legacy current-version filter scans and
+/// caches only far enough to satisfy the currently requested filtered range.
 @NotNullByDefault
 public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     /// Serializes index ownership, mutations, closure, and atomic state replacement.
     private final Object stateLock = new Object();
+
+    /// Serializes incremental filtered scans without holding [#stateLock] during NBT I/O.
+    private final Object filterScanLock = new Object();
 
     /// Blocking repository and Core World boundary.
     private final WorldCatalogAccess access;
@@ -60,6 +69,9 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
 
     /// Stable status and action text.
     private final WorldCatalogStrings strings;
+
+    /// Whether the source belongs to an instance whose current version can filter worlds.
+    private final boolean versionFiltering;
 
     /// Thread-safe synchronous snapshot publisher.
     private final ValueChangeSupport<WorldCatalogSnapshot> changes = new ValueChangeSupport<>(this);
@@ -79,6 +91,24 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     /// Whether all subsequent model operations must fail immediately.
     private boolean closed;
 
+    /// Whether every shallow-index entry is visible instead of applying the current-version filter.
+    private boolean showAll;
+
+    /// Normalized current instance version resolved during the latest background refresh.
+    private Optional<String> currentGameVersion = Optional.empty();
+
+    /// Source revision represented by the incremental filtered cache, or negative before first use.
+    private long filterCacheRevision = -1L;
+
+    /// Matching paths already discovered in stable source order; guarded by [#filterScanLock].
+    private final List<Path> filteredDirectories = new ArrayList<>();
+
+    /// Number of shallow source directories examined for [#filterCacheRevision].
+    private int filteredScanCount;
+
+    /// Whether every shallow source directory has been examined for [#filterCacheRevision].
+    private boolean filteredScanComplete;
+
     /// Creates a production model without resolving or enumerating the saves directory.
     ///
     /// @param repository managed game repository
@@ -90,7 +120,7 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             GameInstanceID instanceId,
             Executor executor,
             WorldCatalogStrings strings) {
-        this(new FileSystemWorldCatalogAccess(repository, instanceId), executor, strings);
+        this(new FileSystemWorldCatalogAccess(repository, instanceId), executor, strings, false, true);
     }
 
     /// Creates a deterministic model with an injected blocking source for focused tests.
@@ -102,9 +132,27 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             WorldCatalogAccess access,
             Executor executor,
             WorldCatalogStrings strings) {
+        this(access, executor, strings, true, false);
+    }
+
+    /// Creates a deterministic model with explicit legacy-filter availability and initial state.
+    ///
+    /// @param access source adapter whose shallow scan and viewport loads can be observed
+    /// @param executor caller-owned executor for source work
+    /// @param strings status and action strings
+    /// @param showAll whether every indexed world is initially visible
+    /// @param versionFiltering whether current-instance filtering is available
+    DefaultWorldCatalogModel(
+            WorldCatalogAccess access,
+            Executor executor,
+            WorldCatalogStrings strings,
+            boolean showAll,
+            boolean versionFiltering) {
         this.access = Objects.requireNonNull(access, "access");
         this.executor = Objects.requireNonNull(executor, "executor");
         this.strings = Objects.requireNonNull(strings, "strings");
+        this.showAll = showAll;
+        this.versionFiltering = versionFiltering;
         state = initialState();
     }
 
@@ -114,6 +162,54 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     @Override
     public WorldCatalogSnapshot snapshot() {
         return state.snapshot();
+    }
+
+    /// Confirms that production instances retain the legacy current-version filter.
+    ///
+    /// @return configured version-filter availability
+    @Override
+    public boolean supportsVersionFiltering() {
+        return versionFiltering;
+    }
+
+    /// Returns the current unfiltered-list mode under the model state lock.
+    ///
+    /// @return whether every indexed world is visible
+    @Override
+    public boolean showAll() {
+        synchronized (stateLock) {
+            return showAll;
+        }
+    }
+
+    /// Invalidates viewport rows when the legacy current-version filter changes.
+    ///
+    /// @param replacement whether every indexed world should be visible
+    @Override
+    public void setShowAll(boolean replacement) {
+        if (!versionFiltering) {
+            return;
+        }
+        SnapshotTransition transition;
+        synchronized (stateLock) {
+            requireOpen();
+            if (showAll == replacement) {
+                return;
+            }
+            showAll = replacement;
+            WorldCatalogSnapshot previous = state.snapshot();
+            WorldCatalogSnapshot refreshed = new WorldCatalogSnapshot(
+                    previous.itemCount(),
+                    nextRevision(previous.contentRevision()),
+                    previous.status(),
+                    previous.statusText(),
+                    previous.operationText(),
+                    previous.listEnabled(),
+                    previous.refreshEnabled(),
+                    previous.operationPending());
+            transition = replaceStateLocked(state.directories(), refreshed);
+        }
+        publish(transition);
     }
 
     /// Registers a future listener while the model is open.
@@ -145,7 +241,21 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     /// @return exact current count, or empty while idle/loading/failed
     @Override
     public OptionalInt exactItemCount() {
-        return state.snapshot().itemCount();
+        ModelState captured;
+        boolean filtered;
+        synchronized (stateLock) {
+            captured = state;
+            filtered = versionFiltering && !showAll;
+        }
+        if (!filtered) {
+            return captured.snapshot().itemCount();
+        }
+        synchronized (filterScanLock) {
+            if (filterCacheRevision == captured.snapshot().contentRevision() && filteredScanComplete) {
+                return OptionalInt.of(filteredDirectories.size());
+            }
+        }
+        return OptionalInt.empty();
     }
 
     /// Exposes the current source revision used to discard superseded viewport rows.
@@ -233,6 +343,70 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
                 selectedWorld);
     }
 
+    /// Starts one serialized detail write followed by a fresh shallow index.
+    ///
+    /// @param world exact materialized current row
+    /// @param update validated form values
+    /// @return terminal catalog snapshot
+    @Override
+    public CompletionStage<WorldCatalogSnapshot> updateWorldDetails(
+            WorldCatalogItem world,
+            WorldDetailsUpdate update) {
+        WorldCatalogItem selectedWorld;
+        WorldDetailsUpdate requested;
+        try {
+            selectedWorld = Objects.requireNonNull(world, "world");
+            requested = Objects.requireNonNull(update, "update");
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+        return startMutation(
+                i18n("button.save"),
+                (source, cancellation) -> source.updateDetails(selectedWorld, requested, cancellation),
+                selectedWorld);
+    }
+
+    /// Starts one serialized exact-PNG icon replacement followed by a fresh shallow index.
+    ///
+    /// @param world exact materialized current row
+    /// @param source selected local PNG
+    /// @return terminal catalog snapshot
+    @Override
+    public CompletionStage<WorldCatalogSnapshot> replaceWorldIcon(
+            WorldCatalogItem world,
+            Path source) {
+        WorldCatalogItem selectedWorld;
+        Path selectedSource;
+        try {
+            selectedWorld = Objects.requireNonNull(world, "world");
+            selectedSource = Objects.requireNonNull(source, "source").toAbsolutePath().normalize();
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+        return startMutation(
+                i18n("world.icon.change"),
+                (access, cancellation) -> access.replaceIcon(selectedWorld, selectedSource, cancellation),
+                selectedWorld);
+    }
+
+    /// Starts one serialized world-icon reset followed by a fresh shallow index.
+    ///
+    /// @param world exact materialized current row
+    /// @return terminal catalog snapshot
+    @Override
+    public CompletionStage<WorldCatalogSnapshot> resetWorldIcon(WorldCatalogItem world) {
+        WorldCatalogItem selectedWorld;
+        try {
+            selectedWorld = Objects.requireNonNull(world, "world");
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+        return startMutation(
+                i18n("button.reset"),
+                (source, cancellation) -> source.resetIcon(selectedWorld, cancellation),
+                selectedWorld);
+    }
+
     /// Starts one serialized Core copy followed by a fresh shallow index.
     ///
     /// @param world exact materialized current row
@@ -289,17 +463,38 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             LoadCancellation cancellation) {
         Objects.requireNonNull(desiredRange, "desiredRange");
         Objects.requireNonNull(cancellation, "cancellation");
-        ModelState captured = state;
+        ModelState captured;
+        boolean filtered;
+        Optional<String> targetVersion;
         synchronized (stateLock) {
             if (closed) {
                 return CompletableFuture.failedFuture(new IllegalStateException("World catalog model is closed"));
             }
+            captured = state;
+            filtered = versionFiltering && !showAll;
+            targetVersion = currentGameVersion;
         }
         OptionalInt itemCount = captured.snapshot().itemCount();
         if (itemCount.isEmpty()) {
             return CompletableFuture.failedFuture(new IllegalStateException("World directory index is not ready"));
         }
         IndexRange effectiveRange = desiredRange.clampToItemCount(itemCount.getAsInt());
+        if (filtered) {
+            CompletableFuture<ChoicePage<WorldCatalogItem>> result = new CompletableFuture<>();
+            FilteredRangeOperation operation = new FilteredRangeOperation(
+                    captured.snapshot().contentRevision(),
+                    effectiveRange,
+                    captured.directories(),
+                    targetVersion,
+                    cancellation,
+                    result);
+            try {
+                executor.execute(() -> executeFilteredRange(operation));
+            } catch (RuntimeException failure) {
+                result.completeExceptionally(failure);
+            }
+            return result;
+        }
         @Unmodifiable List<Path> directories = List.copyOf(captured.directories().subList(
                 effectiveRange.startInclusive(),
                 effectiveRange.endExclusive()));
@@ -387,9 +582,13 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     private void executeRefresh(RefreshOperation operation) {
         try {
             requireBackgroundThread();
+            Optional<String> resolvedGameVersion = versionFiltering
+                    ? access.instanceGameVersion()
+                    : Optional.empty();
+            operation.cancellation().throwIfCancelled();
             @Unmodifiable List<Path> directories = access.indexWorldDirectories(operation.cancellation());
             operation.cancellation().throwIfCancelled();
-            commitRefresh(operation, directories);
+            commitRefresh(operation, directories, resolvedGameVersion);
         } catch (IOException | RuntimeException failure) {
             commitRefreshFailure(operation, failure);
         }
@@ -399,13 +598,18 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
     ///
     /// @param operation current refresh owner
     /// @param directories immutable direct-child paths
-    private void commitRefresh(RefreshOperation operation, @Unmodifiable List<Path> directories) {
+    /// @param resolvedGameVersion normalized current instance game version, when available
+    private void commitRefresh(
+            RefreshOperation operation,
+            @Unmodifiable List<Path> directories,
+            Optional<String> resolvedGameVersion) {
         SnapshotTransition transition;
         synchronized (stateLock) {
             if (!ownsRefresh(operation)) {
                 return;
             }
             activeRefreshCancellation = null;
+            currentGameVersion = Objects.requireNonNull(resolvedGameVersion, "resolvedGameVersion");
             WorldCatalogSnapshot previous = state.snapshot();
             WorldCatalogSnapshot ready = readySnapshot(
                     directories.size(),
@@ -628,6 +832,99 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
         }
     }
 
+    /// Incrementally scans and caches only enough source rows to satisfy one filtered viewport range.
+    ///
+    /// @param operation captured current-version range request
+    private void executeFilteredRange(FilteredRangeOperation operation) {
+        try {
+            requireBackgroundThread();
+            ChoicePage<WorldCatalogItem> page;
+            synchronized (filterScanLock) {
+                prepareFilteredCache(operation);
+                Map<Path, WorldCatalogItem> newlyScannedItems = new HashMap<>();
+                while (filteredDirectories.size() < operation.range().endExclusive()
+                        && filteredScanCount < operation.directories().size()) {
+                    requireCurrentFilteredOperation(operation);
+                    Path directory = operation.directories().get(filteredScanCount);
+                    WorldCatalogItem item = access.loadItem(directory, operation.cancellation());
+                    requireCurrentFilteredOperation(operation);
+                    filteredScanCount++;
+                    if (matchesCurrentVersion(item, operation.targetVersion())) {
+                        filteredDirectories.add(directory);
+                        newlyScannedItems.put(directory, item);
+                    }
+                }
+                filteredScanComplete = filteredScanCount == operation.directories().size();
+                int discoveredCount = filteredDirectories.size();
+                IndexRange actualRange = operation.range().clampToItemCount(discoveredCount);
+                List<WorldCatalogItem> values = new ArrayList<>(actualRange.length());
+                for (Path directory : filteredDirectories.subList(
+                        actualRange.startInclusive(),
+                        actualRange.endExclusive())) {
+                    requireCurrentFilteredOperation(operation);
+                    @Nullable WorldCatalogItem item = newlyScannedItems.get(directory);
+                    values.add(item == null
+                            ? access.loadItem(directory, operation.cancellation())
+                            : item);
+                }
+                OptionalInt exactCount = filteredScanComplete
+                        ? OptionalInt.of(discoveredCount)
+                        : OptionalInt.empty();
+                page = new ChoicePage<>(
+                        actualRange,
+                        List.copyOf(values),
+                        exactCount,
+                        filteredScanComplete && actualRange.endExclusive() == discoveredCount);
+            }
+            requireCurrentFilteredOperation(operation);
+            operation.result().complete(page);
+        } catch (RuntimeException failure) {
+            operation.result().completeExceptionally(failure);
+        }
+    }
+
+    /// Resets the incremental filtered cache when a source or mode revision changes.
+    ///
+    /// @param operation current filtered request
+    private void prepareFilteredCache(FilteredRangeOperation operation) {
+        requireCurrentFilteredOperation(operation);
+        if (filterCacheRevision != operation.contentRevision()) {
+            filterCacheRevision = operation.contentRevision();
+            filteredDirectories.clear();
+            filteredScanCount = 0;
+            filteredScanComplete = operation.directories().isEmpty();
+        }
+    }
+
+    /// Rejects an incremental scan superseded by refresh, mutation, mode change, or closure.
+    ///
+    /// @param operation captured filtered request
+    private void requireCurrentFilteredOperation(FilteredRangeOperation operation) {
+        operation.cancellation().throwIfCancelled();
+        synchronized (stateLock) {
+            if (closed
+                    || showAll
+                    || state.snapshot().contentRevision() != operation.contentRevision()) {
+                throw new CancellationException("Filtered world viewport result was superseded");
+            }
+        }
+    }
+
+    /// Applies the old UI rule: retain unknown versions and exact current-instance versions.
+    ///
+    /// @param item materialized world metadata
+    /// @param targetVersion normalized current instance version, when known
+    /// @return whether the row belongs to the filtered list
+    private static boolean matchesCurrentVersion(
+            WorldCatalogItem item,
+            Optional<String> targetVersion) {
+        @Nullable String worldVersion = Objects.requireNonNull(item, "item").gameVersion();
+        return worldVersion == null
+                || Objects.requireNonNull(targetVersion, "targetVersion")
+                        .map(worldVersion::equals)
+                        .orElse(false);
+    }
+
     /// Creates the ready state corresponding to one exact shallow source.
     ///
     /// @param count non-negative exact direct-child directory count
@@ -832,6 +1129,29 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
         /// Stores a defensive narrow directory slice.
         private RangeOperation {
             directories = List.copyOf(directories);
+        }
+    }
+
+    /// Captures one incrementally resolved current-version viewport range.
+    ///
+    /// @param contentRevision source revision captured when scheduled
+    /// @param range requested filtered range bounded by the shallow source count
+    /// @param directories complete immutable shallow source used until enough matches are found
+    /// @param targetVersion normalized current instance version, when known
+    /// @param cancellation viewport-owned cancellation signal
+    /// @param result externally visible filtered page result
+    @NotNullByDefault
+    private record FilteredRangeOperation(
+            long contentRevision,
+            IndexRange range,
+            @Unmodifiable List<Path> directories,
+            Optional<String> targetVersion,
+            LoadCancellation cancellation,
+            CompletableFuture<ChoicePage<WorldCatalogItem>> result) {
+        /// Stores a defensive complete path snapshot and validates request values.
+        private FilteredRangeOperation {
+            directories = List.copyOf(directories);
+            Objects.requireNonNull(targetVersion, "targetVersion");
         }
     }
 }

@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -56,6 +57,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -127,7 +129,7 @@ public final class ModCatalogPanelTest {
             panel.choiceList().refreshLoadPlan();
 
             JList<?> list = panel.choiceList().getList();
-            assertEquals(ListSelectionModel.SINGLE_SELECTION, list.getSelectionMode());
+            assertEquals(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION, list.getSelectionMode());
             assertFalse(model.requestedRanges().isEmpty());
             assertTrue(model.requestedRanges().get(0).length() < model.items().size());
 
@@ -160,6 +162,57 @@ public final class ModCatalogPanelTest {
         assertNotNull(panelReference.get());
     }
 
+    /// Logical select-all and batch commands use stable keys without loading off-screen rows.
+    @Test
+    public void batchesFilteredStableKeysWithoutWideningViewportLoads() throws Exception {
+        RecordingModel model = new RecordingModel(items(100));
+        RecordingInteractions interactions = new RecordingInteractions();
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            panel.setSize(new Dimension(900, 620));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            int rangeRequestCount = model.requestedRanges().size();
+            assertTrue(rangeRequestCount > 0);
+            assertTrue(model.requestedRanges().get(0).length() < model.items().size());
+
+            JList<?> list = panel.choiceList().getList();
+            list.setSelectionInterval(0, 1);
+            findButton(panel, "modsSelectAll").doClick();
+            int[] expectedIndices = new int[model.items().size()];
+            for (int index = 0; index < expectedIndices.length; index++) {
+                expectedIndices[index] = index;
+            }
+            assertArrayEquals(expectedIndices, list.getSelectedIndices());
+            assertFalse(findButton(panel, "modsEnabled").isEnabled());
+            assertFalse(findButton(panel, "modsReveal").isEnabled());
+            assertFalse(findButton(panel, "modsDelete").isEnabled());
+
+            findButton(panel, "modsEnableSelected").doClick();
+            findButton(panel, "modsDisableSelected").doClick();
+            @Unmodifiable List<String> allKeys = model.items().stream()
+                    .map(ModCatalogItem::localKey)
+                    .toList();
+            assertEquals(List.of(allKeys, allKeys), model.enabledBatches());
+            assertEquals(List.of(true, false), model.enabledBatchStates());
+
+            interactions.batchDeleteConfirmed = false;
+            findButton(panel, "modsDeleteSelected").doClick();
+            assertEquals(List.of(), model.deletedBatches());
+            interactions.batchDeleteConfirmed = true;
+            findButton(panel, "modsDeleteSelected").doClick();
+            assertEquals(List.of(allKeys), model.deletedBatches());
+            assertEquals(List.of(100, 100), interactions.batchDeleteCounts());
+            assertTrue(model.requestedRanges().size() >= rangeRequestCount);
+            assertTrue(model.requestedRanges().stream()
+                    .allMatch(range -> range.length() < model.items().size()));
+            panel.close();
+        });
+
+        assertTrue(model.closed());
+    }
+
     /// Verifies that production construction schedules Core refresh without synchronous disk work.
     @Test
     public void productionConstructorQueuesRealIndexWorkInHeadlessMode() throws Exception {
@@ -170,7 +223,7 @@ public final class ModCatalogPanelTest {
         SwingUtilities.invokeAndWait(() -> {
             ModCatalogPanel panel = new ModCatalogPanel(
                     repository,
-                    "test-instance",
+                    new GameInstanceID("test-instance"),
                     executor,
                     STRINGS,
                     STATUS_STRINGS,
@@ -402,11 +455,20 @@ public final class ModCatalogPanelTest {
         /// Enabled-state commands encoded as key and value.
         private final List<String> enabledCommands = new ArrayList<>();
 
+        /// Stable-key batches submitted for enabled-state changes.
+        private final List<@Unmodifiable List<String>> enabledBatches = new ArrayList<>();
+
+        /// Enabled states matching submitted stable-key batches.
+        private final List<Boolean> enabledBatchStates = new ArrayList<>();
+
         /// Import commands.
         private final List<@Unmodifiable List<Path>> imports = new ArrayList<>();
 
         /// Deleted stable keys.
         private final List<String> deletedKeys = new ArrayList<>();
+
+        /// Stable-key batches submitted for permanent deletion.
+        private final List<@Unmodifiable List<String>> deletedBatches = new ArrayList<>();
 
         /// Current immutable snapshot.
         private ModCatalogSnapshot snapshot;
@@ -449,6 +511,12 @@ public final class ModCatalogPanelTest {
         @Override
         public Path modsDirectory() {
             return Path.of("mods").toAbsolutePath().normalize();
+        }
+
+        /// Returns immutable stable keys matching the fake's logical list order.
+        @Override
+        public @Unmodifiable List<String> filteredLocalKeys() {
+            return items.stream().map(ModCatalogItem::localKey).toList();
         }
 
         /// Keeps the already-ready fake source unchanged.
@@ -503,6 +571,16 @@ public final class ModCatalogPanelTest {
             return CompletableFuture.completedFuture(snapshot);
         }
 
+        /// Records one stable-key enabled-state batch.
+        @Override
+        public CompletionStage<ModCatalogSnapshot> setModsEnabled(
+                @Unmodifiable List<String> localKeys,
+                boolean enabled) {
+            enabledBatches.add(List.copyOf(localKeys));
+            enabledBatchStates.add(enabled);
+            return CompletableFuture.completedFuture(snapshot);
+        }
+
         /// Records one import command.
         @Override
         public CompletionStage<ModCatalogSnapshot> importMods(@Unmodifiable List<Path> sources) {
@@ -514,6 +592,14 @@ public final class ModCatalogPanelTest {
         @Override
         public CompletionStage<ModCatalogSnapshot> deleteMod(String localKey) {
             deletedKeys.add(localKey);
+            return CompletableFuture.completedFuture(snapshot);
+        }
+
+        /// Records one stable-key deletion batch.
+        @Override
+        public CompletionStage<ModCatalogSnapshot> deleteMods(
+                @Unmodifiable List<String> localKeys) {
+            deletedBatches.add(List.copyOf(localKeys));
             return CompletableFuture.completedFuture(snapshot);
         }
 
@@ -591,6 +677,20 @@ public final class ModCatalogPanelTest {
             return List.copyOf(enabledCommands);
         }
 
+        /// Returns immutable enabled-state target batches.
+        ///
+        /// @return immutable stable-key batches
+        private @Unmodifiable List<@Unmodifiable List<String>> enabledBatches() {
+            return List.copyOf(enabledBatches);
+        }
+
+        /// Returns immutable enabled states matching target batches.
+        ///
+        /// @return immutable enabled states
+        private @Unmodifiable List<Boolean> enabledBatchStates() {
+            return List.copyOf(enabledBatchStates);
+        }
+
         /// Returns import commands.
         ///
         /// @return immutable source lists
@@ -603,6 +703,13 @@ public final class ModCatalogPanelTest {
         /// @return immutable keys
         private @Unmodifiable List<String> deletedKeys() {
             return List.copyOf(deletedKeys);
+        }
+
+        /// Returns immutable deletion target batches.
+        ///
+        /// @return immutable stable-key batches
+        private @Unmodifiable List<@Unmodifiable List<String>> deletedBatches() {
+            return List.copyOf(deletedBatches);
         }
 
         /// Returns whether close was called.
@@ -622,6 +729,12 @@ public final class ModCatalogPanelTest {
         /// Directory-open command count.
         private int openCount;
 
+        /// Whether the next selected-batch deletion is confirmed.
+        private boolean batchDeleteConfirmed = true;
+
+        /// Selected counts presented for batch deletion confirmation.
+        private final List<Integer> batchDeleteCounts = new ArrayList<>();
+
         /// Returns one deterministic import choice.
         @Override
         public @Unmodifiable List<Path> chooseImportFiles(Component owner, Path currentDirectory) {
@@ -632,6 +745,13 @@ public final class ModCatalogPanelTest {
         @Override
         public boolean confirmDelete(Component owner, ModCatalogItem target) {
             return true;
+        }
+
+        /// Records and returns the controlled selected-batch deletion decision.
+        @Override
+        public boolean confirmDeleteSelected(Component owner, int selectedCount) {
+            batchDeleteCounts.add(selectedCount);
+            return batchDeleteConfirmed;
         }
 
         /// Records one exact reveal path.
@@ -666,6 +786,13 @@ public final class ModCatalogPanelTest {
         /// @return open count
         private int openCount() {
             return openCount;
+        }
+
+        /// Returns immutable selected counts presented for batch deletion.
+        ///
+        /// @return immutable confirmation counts
+        private @Unmodifiable List<Integer> batchDeleteCounts() {
+            return List.copyOf(batchDeleteCounts);
         }
     }
 }

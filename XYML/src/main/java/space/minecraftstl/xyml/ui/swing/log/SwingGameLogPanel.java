@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.util.Log4jLevel;
 
 import javax.swing.BorderFactory;
@@ -107,6 +108,9 @@ final class SwingGameLogPanel extends JPanel {
     /// Presents export outcomes.
     private final GameLogWindowNotifier notifier;
 
+    /// Configured font shared by the list and every row renderer.
+    private final Font logFont;
+
     /// Visible rows shown by the log list.
     private final DefaultListModel<Log> visibleModel = new DefaultListModel<>();
 
@@ -171,7 +175,33 @@ final class SwingGameLogPanel extends JPanel {
                 backgroundExecutor,
                 maxLinesChanged,
                 alwaysOnTopChanged,
-                new SwingGameLogWindowNotifier());
+                new SwingGameLogWindowNotifier(),
+                defaultLogFont());
+    }
+
+    /// Creates a production panel with an explicit persisted game-log font.
+    ///
+    /// @param buffer bounded shared history
+    /// @param actions process and desktop side effects
+    /// @param backgroundExecutor executor for blocking operations
+    /// @param maxLinesChanged persistence callback for line-limit changes
+    /// @param alwaysOnTopChanged owning-frame always-on-top callback
+    /// @param logFont configured game-log font
+    SwingGameLogPanel(
+            BoundedGameLogBuffer buffer,
+            GameLogWindowActions actions,
+            Executor backgroundExecutor,
+            IntConsumer maxLinesChanged,
+            Consumer<Boolean> alwaysOnTopChanged,
+            Font logFont) {
+        this(
+                buffer,
+                actions,
+                backgroundExecutor,
+                maxLinesChanged,
+                alwaysOnTopChanged,
+                new SwingGameLogWindowNotifier(),
+                logFont);
     }
 
     /// Creates a panel with injectable desktop and notification boundaries for headless tests.
@@ -189,6 +219,33 @@ final class SwingGameLogPanel extends JPanel {
             IntConsumer maxLinesChanged,
             Consumer<Boolean> alwaysOnTopChanged,
             GameLogWindowNotifier notifier) {
+        this(
+                buffer,
+                actions,
+                backgroundExecutor,
+                maxLinesChanged,
+                alwaysOnTopChanged,
+                notifier,
+                defaultLogFont());
+    }
+
+    /// Creates a panel with injectable notifications and game-log font for focused tests.
+    ///
+    /// @param buffer bounded shared history
+    /// @param actions process and desktop side effects
+    /// @param backgroundExecutor executor for blocking operations
+    /// @param maxLinesChanged persistence callback for line-limit changes
+    /// @param alwaysOnTopChanged owning-frame always-on-top callback
+    /// @param notifier export outcome presenter
+    /// @param logFont configured game-log font
+    SwingGameLogPanel(
+            BoundedGameLogBuffer buffer,
+            GameLogWindowActions actions,
+            Executor backgroundExecutor,
+            IntConsumer maxLinesChanged,
+            Consumer<Boolean> alwaysOnTopChanged,
+            GameLogWindowNotifier notifier,
+            Font logFont) {
         super(new BorderLayout(0, 8));
         EdtDispatcher.requireEventDispatchThread();
         this.buffer = Objects.requireNonNull(buffer, "buffer");
@@ -197,6 +254,7 @@ final class SwingGameLogPanel extends JPanel {
         this.maxLinesChanged = Objects.requireNonNull(maxLinesChanged, "maxLinesChanged");
         this.alwaysOnTopChanged = Objects.requireNonNull(alwaysOnTopChanged, "alwaysOnTopChanged");
         this.notifier = Objects.requireNonNull(notifier, "notifier");
+        this.logFont = Objects.requireNonNull(logFont, "logFont");
         this.lineLimit = new JComboBox<>(lineLimitModel(buffer.maxLines()));
         initializeComponents();
         refreshVisibleRows();
@@ -404,7 +462,8 @@ final class SwingGameLogPanel extends JPanel {
     private void configureLogList() {
         logList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         logList.setCellRenderer(new LogCellRenderer(wrapText.isSelected()));
-        logList.setFont(new Font(Font.MONOSPACED, Font.PLAIN, logList.getFont().getSize()));
+        logList.setFont(logFont);
+        SwingThemeManager.preserveExplicitFontFamily(logList);
         logList.getInputMap(JComponent.WHEN_FOCUSED).put(
                 KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK),
                 "copy-selected-logs");
@@ -682,6 +741,15 @@ final class SwingGameLogPanel extends JPanel {
         }
     }
 
+    /// Creates the legacy-compatible default font for injected panels without persisted settings.
+    ///
+    /// @return platform monospaced font using the active list size
+    private static Font defaultLogFont() {
+        @Nullable Font listFont = UIManager.getFont("List.font");
+        float size = listFont == null ? 12.0F : listFont.getSize2D();
+        return new Font(Font.MONOSPACED, Font.PLAIN, 1).deriveFont(size);
+    }
+
     /// Renders severity-colored rows with the user-selected wrapping policy.
     @NotNullByDefault
     private static final class LogCellRenderer implements ListCellRenderer<Log> {
@@ -717,7 +785,7 @@ final class SwingGameLogPanel extends JPanel {
                 boolean selected,
                 boolean focused) {
             Component baseline = fallback.getListCellRendererComponent(list, value, index, selected, focused);
-            text.setFont(new Font(Font.MONOSPACED, Font.PLAIN, baseline.getFont().getSize()));
+            text.setFont(list.getFont());
             text.setText(value == null ? "" : value.getLog());
             text.setBackground(baseline.getBackground());
             text.setForeground(selected || value == null

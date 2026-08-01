@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 
 /// Blocking Core and filesystem boundary for the lazily materialized world catalog.
 ///
@@ -31,6 +32,15 @@ import java.util.List;
 /// construction belongs exclusively to `loadItem`, which receives the narrow viewport slice.
 @NotNullByDefault
 interface WorldCatalogAccess {
+    /// Resolves the normalized game version belonging to the managed instance.
+    ///
+    /// Sources without an owning instance may retain the empty default.
+    ///
+    /// @return current instance game version, or empty when it cannot be resolved
+    default Optional<String> instanceGameVersion() {
+        return Optional.empty();
+    }
+
     /// Resolves the managed saves directory without enumerating it.
     ///
     /// @return normalized saves directory
@@ -74,6 +84,43 @@ interface WorldCatalogAccess {
     /// @param cancellation cooperative operation cancellation signal
     /// @throws IOException when Core cannot delete the world
     void delete(WorldCatalogItem world, LoadCancellation cancellation) throws IOException;
+
+    /// Writes one selected world's editable details and keeps the mutation on the background side.
+    ///
+    /// Implementations that do not support detail editing may retain the default failure.
+    ///
+    /// @param world current readable world row
+    /// @param update validated form values
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when Core cannot write the world
+    default void updateDetails(
+            WorldCatalogItem world,
+            WorldDetailsUpdate update,
+            LoadCancellation cancellation) throws IOException {
+        throw new UnsupportedOperationException("World detail editing is unavailable");
+    }
+
+    /// Replaces one selected world's exact 64-by-64 PNG icon.
+    ///
+    /// @param world current readable world row
+    /// @param source selected PNG source
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when validation or replacement fails
+    default void replaceIcon(
+            WorldCatalogItem world,
+            Path source,
+            LoadCancellation cancellation) throws IOException {
+        throw new UnsupportedOperationException("World icon editing is unavailable");
+    }
+
+    /// Removes one selected world's custom icon.
+    ///
+    /// @param world current readable world row
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when deletion fails
+    default void resetIcon(WorldCatalogItem world, LoadCancellation cancellation) throws IOException {
+        throw new UnsupportedOperationException("World icon reset is unavailable");
+    }
 
     /// Copies one validated, unlocked current world beside its source.
     ///

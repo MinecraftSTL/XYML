@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.game.WorldArchiveImporter;
 import space.minecraftstl.xyml.game.WorldLockedException;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -39,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 /// Real repository and Core World API adapter for one managed instance's `saves` directory.
@@ -65,6 +67,16 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
     FileSystemWorldCatalogAccess(GameRepository repository, GameInstanceID instanceId) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
+    }
+
+    /// Resolves and normalizes the managed instance game version without enumerating saves.
+    ///
+    /// @return normalized current game version, or empty when the repository cannot resolve it
+    @Override
+    public Optional<String> instanceGameVersion() {
+        return repository.getGameVersion(instanceId)
+                .map(GameVersionNumber::asGameVersion)
+                .map(GameVersionNumber::toString);
     }
 
     /// Resolves the instance run directory and appends the conventional `saves` segment.
@@ -190,6 +202,64 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
         World sourceWorld = new World(selectedWorld.path());
         signal.throwIfCancelled();
         sourceWorld.delete();
+        signal.throwIfCancelled();
+    }
+
+    /// Reopens, lock-checks, and writes one current world's editable detail values.
+    ///
+    /// @param world selected current row
+    /// @param update validated submitted values
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when the row is stale, locked, malformed, or cannot be written
+    @Override
+    public void updateDetails(
+            WorldCatalogItem world,
+            WorldDetailsUpdate update,
+            LoadCancellation cancellation) throws IOException {
+        WorldCatalogItem selectedWorld = requireReadableWorld(world);
+        WorldDetailsUpdate requested = Objects.requireNonNull(update, "update");
+        LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");
+        signal.throwIfCancelled();
+        World sourceWorld = new World(selectedWorld.path());
+        signal.throwIfCancelled();
+        WorldCatalogDetailsCodec.apply(sourceWorld, requested);
+        signal.throwIfCancelled();
+    }
+
+    /// Reopens and replaces one current world's icon after exact PNG validation.
+    ///
+    /// @param world selected current row
+    /// @param source selected icon source
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when the row is locked or the source is not a 64-by-64 PNG
+    @Override
+    public void replaceIcon(
+            WorldCatalogItem world,
+            Path source,
+            LoadCancellation cancellation) throws IOException {
+        WorldCatalogItem selectedWorld = requireReadableWorld(world);
+        Path selectedSource = Objects.requireNonNull(source, "source").toAbsolutePath().normalize();
+        LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");
+        signal.throwIfCancelled();
+        World sourceWorld = new World(selectedWorld.path());
+        signal.throwIfCancelled();
+        WorldCatalogDetailsCodec.replaceIcon(sourceWorld, selectedSource);
+        signal.throwIfCancelled();
+    }
+
+    /// Reopens and removes one current unlocked world's icon.
+    ///
+    /// @param world selected current row
+    /// @param cancellation cooperative operation cancellation signal
+    /// @throws IOException when the row is locked or icon deletion fails
+    @Override
+    public void resetIcon(WorldCatalogItem world, LoadCancellation cancellation) throws IOException {
+        WorldCatalogItem selectedWorld = requireReadableWorld(world);
+        LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");
+        signal.throwIfCancelled();
+        World sourceWorld = new World(selectedWorld.path());
+        signal.throwIfCancelled();
+        WorldCatalogDetailsCodec.resetIcon(sourceWorld);
         signal.throwIfCancelled();
     }
 

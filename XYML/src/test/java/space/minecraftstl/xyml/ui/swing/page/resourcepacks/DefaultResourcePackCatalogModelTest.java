@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
@@ -1072,7 +1073,8 @@ public final class DefaultResourcePackCatalogModelTest {
                         + "incompatibleResourcePacks:[]\n");
         GameRepository repository = localRepository(temporaryDirectory);
         FileSystemResourcePackCatalogAccess access =
-                new FileSystemResourcePackCatalogAccess(repository, "test-instance");
+                new FileSystemResourcePackCatalogAccess(
+                        repository, new GameInstanceID("test-instance"));
         LoadCancellation cancellation = new LoadCancellation();
 
         ResourcePackCatalogIndex index = access.loadIndex(cancellation);

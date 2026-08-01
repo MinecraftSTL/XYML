@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.launch.DefaultGameLaunchService;
 import space.minecraftstl.xyml.game.launch.LaunchRequest;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
@@ -71,7 +72,7 @@ public final class LauncherHomeModelTest {
     @Test
     public void mapsMissingSelectionsAndReadyTransition() {
         FakeSelectionStore store = new FakeSelectionStore(
-                new HomeSelectionState("", "directory-a", "", "", "", "", ""));
+                new HomeSelectionState("", "directory-a", null, "", "", "", ""));
         AtomicReference<HomeSnapshot> published = new AtomicReference<>();
         LauncherHomeModel model = createModel(store, new AtomicInteger(), new AtomicInteger(),
                 new AtomicInteger(), new AtomicInteger());
@@ -79,10 +80,10 @@ public final class LauncherHomeModelTest {
 
         HomeSnapshot missingAccount = model.snapshot();
         store.publish(new HomeSelectionState(
-                "account-a", "directory-a", "", "Alex", "microsoft", "", ""));
+                "account-a", "directory-a", null, "Alex", "microsoft", "", ""));
         HomeSnapshot missingInstance = model.snapshot();
         store.publish(new HomeSelectionState(
-                "account-a", "directory-a", "instance-a",
+                "account-a", "directory-a", new GameInstanceID("instance-a"),
                 "Alex", "microsoft", "1.21.1", "Default directory"));
         HomeSnapshot ready = model.snapshot();
 
@@ -105,7 +106,7 @@ public final class LauncherHomeModelTest {
     @Test
     public void basesReadinessOnStableIdentityInsteadOfDisplayText() {
         FakeSelectionStore store = new FakeSelectionStore(
-                new HomeSelectionState("", "", "", "Alex", "microsoft", "1.21.1", "Games"));
+                new HomeSelectionState("", "", null, "Alex", "microsoft", "1.21.1", "Games"));
         AtomicInteger launches = new AtomicInteger();
         LauncherHomeModel model = createModel(
                 store, new AtomicInteger(), new AtomicInteger(), new AtomicInteger(), launches);
@@ -113,7 +114,8 @@ public final class LauncherHomeModelTest {
         HomeSnapshot presentationOnly = model.snapshot();
         model.launch();
         store.publish(new HomeSelectionState(
-                "account-a", "directory-a", "instance-a", "", "microsoft", "", "Games"));
+                "account-a", "directory-a", new GameInstanceID("instance-a"),
+                "", "microsoft", "", "Games"));
         HomeSnapshot identityReady = model.snapshot();
         model.launch();
 
@@ -132,7 +134,7 @@ public final class LauncherHomeModelTest {
     @Test
     public void delegatesCommandsAndGatesLaunch() {
         FakeSelectionStore store = new FakeSelectionStore(
-                new HomeSelectionState("", "directory-a", "", "", "", "", ""));
+                new HomeSelectionState("", "directory-a", null, "", "", "", ""));
         AtomicInteger accountSelections = new AtomicInteger();
         AtomicInteger instanceSelections = new AtomicInteger();
         AtomicInteger instanceAdditions = new AtomicInteger();
@@ -145,7 +147,8 @@ public final class LauncherHomeModelTest {
         model.addInstance();
         model.launch();
         store.publish(new HomeSelectionState(
-                "account-a", "directory-a", "instance-a", "Steve", "offline", "1.20.1", "Games"));
+                "account-a", "directory-a", new GameInstanceID("instance-a"),
+                "Steve", "offline", "1.20.1", "Games"));
         model.launch();
 
         assertAll(
@@ -160,7 +163,8 @@ public final class LauncherHomeModelTest {
     @Test
     public void exportsScriptWithoutRacingLaunchPreparation() {
         FakeSelectionStore store = new FakeSelectionStore(new HomeSelectionState(
-                "account-a", "directory-a", "instance-a", "Alex", "microsoft", "1.21.1", "Games"));
+                "account-a", "directory-a", new GameInstanceID("instance-a"),
+                "Alex", "microsoft", "1.21.1", "Games"));
         HomeStatusStrings strings = new HomeStatusStrings(
                 "Ready", "Choose an account", "Choose an instance", "Exporting launch script");
         AtomicReference<@Nullable LaunchRequest> exportedRequest = new AtomicReference<>();
@@ -190,7 +194,10 @@ public final class LauncherHomeModelTest {
 
             assertAll(
                     () -> assertEquals(
-                            new LaunchRequest("account-a", "directory-a", "instance-a"),
+                            new LaunchRequest(
+                                    "account-a",
+                                    "directory-a",
+                                    new GameInstanceID("instance-a")),
                             exportedRequest.get()),
                     () -> assertEquals(target, exportedPath.get()),
                     () -> assertEquals("Exporting launch script", exporting.statusText()),
@@ -214,9 +221,11 @@ public final class LauncherHomeModelTest {
     @Test
     public void capturesStableRequestAndTracksPreparingSession() {
         HomeSelectionState firstSelection = new HomeSelectionState(
-                "account-a", "directory-a", "instance-a", "Alex", "microsoft", "1.21.1", "Games");
+                "account-a", "directory-a", new GameInstanceID("instance-a"),
+                "Alex", "microsoft", "1.21.1", "Games");
         HomeSelectionState secondSelection = new HomeSelectionState(
-                "account-b", "directory-b", "instance-b", "Steve", "offline", "1.20.1", "Other");
+                "account-b", "directory-b", new GameInstanceID("instance-b"),
+                "Steve", "offline", "1.20.1", "Other");
         FakeSelectionStore store = new FakeSelectionStore(firstSelection);
         AtomicReference<@Nullable LaunchRequest> capturedRequest = new AtomicReference<>();
         AtomicInteger launchCalls = new AtomicInteger();
@@ -248,7 +257,10 @@ public final class LauncherHomeModelTest {
 
             assertAll(
                     () -> assertEquals(
-                            new LaunchRequest("account-a", "directory-a", "instance-a"),
+                            new LaunchRequest(
+                                    "account-a",
+                                    "directory-a",
+                                    new GameInstanceID("instance-a")),
                             capturedRequest.get()),
                     () -> assertEquals(1, launchCalls.get()),
                     () -> assertTrue(preparing.launching()),
@@ -268,7 +280,10 @@ public final class LauncherHomeModelTest {
             model.launch();
             assertAll(
                     () -> assertEquals(
-                            new LaunchRequest("account-b", "directory-b", "instance-b"),
+                            new LaunchRequest(
+                                    "account-b",
+                                    "directory-b",
+                                    new GameInstanceID("instance-b")),
                             capturedRequest.get()),
                     () -> assertEquals(2, launchCalls.get()));
         } finally {
@@ -281,7 +296,8 @@ public final class LauncherHomeModelTest {
     @Test
     public void publishesTerminalSnapshotWhenStatusUnsubscribeFails() {
         FakeSelectionStore store = new FakeSelectionStore(new HomeSelectionState(
-                "account-a", "directory-a", "instance-a", "Alex", "microsoft", "1.21.1", "Games"));
+                "account-a", "directory-a", new GameInstanceID("instance-a"),
+                "Alex", "microsoft", "1.21.1", "Games"));
         DefaultGameLaunchService launchService = pendingLaunchService();
         IllegalStateException unsubscribeFailure = new IllegalStateException("status unsubscribe failed");
         LauncherHomeModel model = new LauncherHomeModel(
@@ -320,7 +336,8 @@ public final class LauncherHomeModelTest {
     @Test
     public void reconcilesSessionAlreadyTerminalWhenCommandReturns() {
         FakeSelectionStore store = new FakeSelectionStore(new HomeSelectionState(
-                "account-a", "directory-a", "instance-a", "Alex", "microsoft", "1.21.1", "Games"));
+                "account-a", "directory-a", new GameInstanceID("instance-a"),
+                "Alex", "microsoft", "1.21.1", "Games"));
         RejectedExecutionException rejection = new RejectedExecutionException("test launch rejection");
         DefaultGameLaunchService launchService = new DefaultGameLaunchService(
                 request -> {
@@ -360,7 +377,8 @@ public final class LauncherHomeModelTest {
     @Test
     public void rollsBackPendingStateWhenLaunchCommandFails() {
         FakeSelectionStore store = new FakeSelectionStore(new HomeSelectionState(
-                "account-a", "directory-a", "instance-a", "Alex", "microsoft", "1.21.1", "Games"));
+                "account-a", "directory-a", new GameInstanceID("instance-a"),
+                "Alex", "microsoft", "1.21.1", "Games"));
         IllegalStateException failure = new IllegalStateException("test launch command failure");
         AtomicInteger launchCalls = new AtomicInteger();
         LauncherHomeModel model = new LauncherHomeModel(
@@ -392,7 +410,8 @@ public final class LauncherHomeModelTest {
     @Test
     public void isolatesRuntimeFailuresAcrossObservableRegistrations() {
         FakeSelectionStore store = new FakeSelectionStore(new HomeSelectionState(
-                "account-a", "directory-a", "instance-a", "Alex", "microsoft", "1.21.1", "Games"));
+                "account-a", "directory-a", new GameInstanceID("instance-a"),
+                "Alex", "microsoft", "1.21.1", "Games"));
         DefaultGameLaunchService launchService = pendingLaunchService();
         LauncherHomeModel model = new LauncherHomeModel(
                 store,
@@ -441,7 +460,8 @@ public final class LauncherHomeModelTest {
     @Test
     public void publishesDistinctSessionsByIdentityInsteadOfValueEquality() {
         FakeSelectionStore store = new FakeSelectionStore(new HomeSelectionState(
-                "account-a", "directory-a", "instance-a", "Alex", "microsoft", "1.21.1", "Games"));
+                "account-a", "directory-a", new GameInstanceID("instance-a"),
+                "Alex", "microsoft", "1.21.1", "Games"));
         DefaultGameLaunchService firstService = pendingLaunchService();
         DefaultGameLaunchService secondService = pendingLaunchService();
         AtomicInteger launchCalls = new AtomicInteger();
@@ -488,7 +508,7 @@ public final class LauncherHomeModelTest {
     public void closesSubscriptionAndRejectsFurtherUse() {
         FakeSelectionStore store = new FakeSelectionStore(
                 new HomeSelectionState(
-                        "account-a", "directory-a", "instance-a",
+                        "account-a", "directory-a", new GameInstanceID("instance-a"),
                         "Alex", "microsoft", "1.21.1", "Games"));
         AtomicInteger launches = new AtomicInteger();
         LauncherHomeModel model = createModel(
@@ -498,7 +518,8 @@ public final class LauncherHomeModelTest {
         model.close();
         model.close();
         store.publish(new HomeSelectionState(
-                "account-b", "directory-b", "instance-b", "Steve", "offline", "1.20.1", "Other"));
+                "account-b", "directory-b", new GameInstanceID("instance-b"),
+                "Steve", "offline", "1.20.1", "Other"));
 
         assertAll(
                 () -> assertFalse(store.hasSubscribers()),
@@ -515,10 +536,10 @@ public final class LauncherHomeModelTest {
     @Test
     public void reconcilesTransitionDuringSubscription() {
         FakeSelectionStore store = new FakeSelectionStore(
-                new HomeSelectionState("", "directory-a", "", "", "", "", ""));
+                new HomeSelectionState("", "directory-a", null, "", "", "", ""));
         HomeSelectionState readySelection =
                 new HomeSelectionState(
-                        "account-a", "directory-a", "instance-a",
+                        "account-a", "directory-a", new GameInstanceID("instance-a"),
                         "Alex", "microsoft", "1.21.1", "Games");
         store.transitionBeforeNextSubscription(readySelection);
 
@@ -537,9 +558,11 @@ public final class LauncherHomeModelTest {
     @Timeout(10)
     public void reconciliationCannotOverwriteLaterPublishedSelection() throws Exception {
         HomeSelectionState earlierSelection = new HomeSelectionState(
-                "account-a", "directory-a", "instance-a", "Alex", "microsoft", "1.21.1", "Games");
+                "account-a", "directory-a", new GameInstanceID("instance-a"),
+                "Alex", "microsoft", "1.21.1", "Games");
         HomeSelectionState laterSelection = new HomeSelectionState(
-                "account-b", "directory-b", "instance-b", "Steve", "offline", "1.20.1", "Other");
+                "account-b", "directory-b", new GameInstanceID("instance-b"),
+                "Steve", "offline", "1.20.1", "Other");
         FakeSelectionStore store = new FakeSelectionStore(earlierSelection);
         CountDownLatch reconciliationRead = new CountDownLatch(1);
         CountDownLatch reconciliationRelease = new CountDownLatch(1);
@@ -575,7 +598,10 @@ public final class LauncherHomeModelTest {
                         () -> assertEquals("Steve", model.snapshot().accountName()),
                         () -> assertEquals("1.20.1", model.snapshot().instanceName()),
                         () -> assertEquals(
-                                new LaunchRequest("account-b", "directory-b", "instance-b"),
+                                new LaunchRequest(
+                                        "account-b",
+                                        "directory-b",
+                                        new GameInstanceID("instance-b")),
                                 capturedRequest.get()));
             } finally {
                 model.close();

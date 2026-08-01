@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.ui.swing.page.home;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import java.util.Objects;
 
@@ -25,7 +27,7 @@ import java.util.Objects;
 ///
 /// @param accountId stable selected account ID, or empty for none
 /// @param gameDirectoryId stable selected game-directory ID, or empty for none
-/// @param instanceId stable selected instance ID within the game directory, or empty for none
+/// @param instanceId stable selected instance ID within the game directory, or `null` for none
 /// @param accountName selected account profile name, or empty for none
 /// @param accountDetail selected account provider detail
 /// @param instanceName selected instance display name, or empty when unavailable
@@ -34,7 +36,7 @@ import java.util.Objects;
 public record HomeSelectionState(
         String accountId,
         String gameDirectoryId,
-        String instanceId,
+        @Nullable GameInstanceID instanceId,
         String accountName,
         String accountDetail,
         String instanceName,
@@ -43,7 +45,6 @@ public record HomeSelectionState(
     public HomeSelectionState {
         Objects.requireNonNull(accountId, "accountId");
         Objects.requireNonNull(gameDirectoryId, "gameDirectoryId");
-        Objects.requireNonNull(instanceId, "instanceId");
         Objects.requireNonNull(accountName, "accountName");
         Objects.requireNonNull(accountDetail, "accountDetail");
         Objects.requireNonNull(instanceName, "instanceName");

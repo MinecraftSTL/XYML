@@ -34,6 +34,7 @@ import static space.minecraftstl.xyml.ui.swing.page.instances.management.Instanc
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSnapshot.LauncherSettings;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSnapshot.MemorySettings;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSnapshot.NativeLibrarySettings;
+import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSnapshot.ParentPresetSettings;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSnapshot.QuickPlaySettings;
 import static space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceGameSettingsSnapshot.WindowSettings;
 
@@ -47,18 +48,22 @@ final class InstanceGameSettingsMapper {
     /// Creates a complete effective snapshot while retaining each instance override marker independently.
     ///
     /// @param writable whether the repository can persist the represented settings
+    /// @param parentPreset selected parent preset and available choices
     /// @param instance local instance settings, or `null` when the instance has no settings file yet
     /// @param effective resolved parent-preset and instance values
     /// @return complete immutable editor snapshot
     static InstanceGameSettingsSnapshot snapshot(
             boolean writable,
+            ParentPresetSettings parentPreset,
             @Nullable GameSettings.Instance instance,
             GameSettings.Effective effective) {
+        Objects.requireNonNull(parentPreset, "parentPreset");
         Objects.requireNonNull(effective, "effective");
         @Nullable Integer maximumMemory = effective.getInheritable(GameSettings::maxMemoryProperty);
 
         return new InstanceGameSettingsSnapshot(
                 writable,
+                parentPreset,
                 new MemorySettings(
                         isOverridden(instance, GameSettings::autoMemoryProperty),
                         effective.getInheritable(GameSettings::autoMemoryProperty),
@@ -169,6 +174,7 @@ final class InstanceGameSettingsMapper {
             throw new IllegalArgumentException("No detected Java runtime is configured for this instance");
         }
 
+        settings.parentProperty().setValue(snapshot.parentPreset().selectedId());
         applyMemory(settings, snapshot.memory());
         applyJava(settings, snapshot.javaRuntime());
         applyWindow(settings, snapshot.window());

@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
@@ -164,7 +165,7 @@ public final class FileSystemResourcePackCatalogAccessTest {
         writeVersionJar(temporaryDirectory.resolve("ancestor-version.jar"));
         FileSystemResourcePackCatalogAccess access = new FileSystemResourcePackCatalogAccess(
                 repository(managed, run, temporaryDirectory.resolve("ancestor-version.jar")),
-                "test-instance");
+                new GameInstanceID("test-instance"));
         AtomicInteger commits = new AtomicInteger();
 
         ResourcePackCatalogMutationAccessResult result = access.mutateAndLoadIndex(
@@ -400,7 +401,7 @@ public final class FileSystemResourcePackCatalogAccessTest {
         AtomicInteger commits = new AtomicInteger();
         FileSystemResourcePackCatalogAccess access = new FileSystemResourcePackCatalogAccess(
                 fixture.repository(),
-                "test-instance",
+                new GameInstanceID("test-instance"),
                 () -> {
                     hookEntered.countDown();
                     await(releaseHook, "staging hook was not released");
@@ -440,7 +441,7 @@ public final class FileSystemResourcePackCatalogAccessTest {
         AtomicReference<@Nullable Throwable> failure = new AtomicReference<>();
         FileSystemResourcePackCatalogAccess first = new FileSystemResourcePackCatalogAccess(
                 fixture.repository(),
-                "test-instance",
+                new GameInstanceID("test-instance"),
                 () -> {
                     firstInsideGate.countDown();
                     await(releaseFirst, "first adapter gate was not released");
@@ -499,7 +500,8 @@ public final class FileSystemResourcePackCatalogAccessTest {
                 runDirectory,
                 runDirectory.resolve("options.txt"),
                 repository,
-                new FileSystemResourcePackCatalogAccess(repository, "test-instance"));
+                new FileSystemResourcePackCatalogAccess(
+                        repository, new GameInstanceID("test-instance")));
     }
 
     /// Creates one supported resource-pack directory.

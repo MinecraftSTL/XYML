@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.resourcepacks;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
@@ -38,6 +39,14 @@ public interface ResourcePackCatalogModel
     ///
     /// @return current catalog snapshot
     ResourcePackCatalogSnapshot snapshot();
+
+    /// Returns the current immutable shallow path index in source order.
+    ///
+    /// The list contains no parsed resource-pack metadata and is empty before a successful index.
+    /// Callers may use it to derive filtered viewport indexes without widening metadata loads.
+    ///
+    /// @return immutable current indexed paths
+    @Unmodifiable List<Path> indexedPaths();
 
     /// Registers for future catalog transitions on the publishing thread.
     ///

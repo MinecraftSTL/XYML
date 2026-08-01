@@ -21,6 +21,8 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -42,6 +44,7 @@ import javax.swing.JSplitPane;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.ListSelectionModel;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.event.ListDataEvent;
@@ -53,11 +56,14 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
+
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Independent Swing page for one installed-Mod catalog.
 ///
@@ -81,7 +87,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// Stable managed Mod directory used by import and directory-open commands.
     private final Path modsDirectory;
 
-    /// Viewport-driven single-choice list.
+    /// Viewport-driven multi-choice list.
     private final ViewportChoiceList<ModCatalogItem> choiceList;
 
     /// Search field applied to the in-memory index.
@@ -104,6 +110,18 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Selected-file deletion command.
     private final JButton deleteButton = new JButton();
+
+    /// Selects every logical row in the current filtered index.
+    private final JButton selectAllButton = new JButton();
+
+    /// Enables every selected rename-stable Mod key.
+    private final JButton enableSelectedButton = new JButton();
+
+    /// Disables every selected rename-stable Mod key.
+    private final JButton disableSelectedButton = new JButton();
+
+    /// Permanently deletes every selected rename-stable Mod key.
+    private final JButton deleteSelectedButton = new JButton();
 
     /// Selected enabled-state binary control.
     private final JCheckBox enabledToggle;
@@ -174,7 +192,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// @param actionStrings localized commands
     public ModCatalogPanel(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             ModCatalogStrings strings,
             ModCatalogStatusStrings statusStrings,
@@ -316,7 +334,11 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         filterBox.setRenderer(new FilterRenderer(strings));
         filterBox.getAccessibleContext().setAccessibleName(strings.filterLabel());
         filters.add(filterBox, "growx");
-        listSurface.add(filters, BorderLayout.NORTH);
+        JPanel listControls = new JPanel(new BorderLayout(0, 6));
+        listControls.setOpaque(false);
+        listControls.add(filters, BorderLayout.NORTH);
+        listControls.add(createBatchToolbar(), BorderLayout.SOUTH);
+        listSurface.add(listControls, BorderLayout.NORTH);
         choiceList.setName("modsChoiceList");
         SwingTransparency.revealBackgroundThroughScrollPane(choiceList);
         choiceList.getList().setName("modsList");
@@ -335,6 +357,43 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         split.setDividerLocation(0.44D);
         split.setMinimumSize(new Dimension(0, 0));
         return split;
+    }
+
+    /// Creates compact logical-selection commands without materializing off-screen rows.
+    ///
+    /// @return transparent batch command toolbar
+    private JComponent createBatchToolbar() {
+        JPanel toolbar = new JPanel(new MigLayout(
+                "insets 0, fillx",
+                "[grow,fill]6[grow,fill]6[grow,fill]6[grow,fill]",
+                "[36!]"));
+        toolbar.setName("modsBatchToolbar");
+        toolbar.setOpaque(false);
+        configureTextButton(
+                selectAllButton,
+                "modsSelectAll",
+                i18n("button.select_all"),
+                this::selectAllMods);
+        configureTextButton(
+                enableSelectedButton,
+                "modsEnableSelected",
+                i18n("mods.enable"),
+                () -> setSelectedModsEnabled(true));
+        configureTextButton(
+                disableSelectedButton,
+                "modsDisableSelected",
+                i18n("mods.disable"),
+                () -> setSelectedModsEnabled(false));
+        configureTextButton(
+                deleteSelectedButton,
+                "modsDeleteSelected",
+                i18n("button.remove"),
+                this::deleteSelectedMods);
+        toolbar.add(selectAllButton, "growx, h 36!");
+        toolbar.add(enableSelectedButton, "growx, h 36!");
+        toolbar.add(disableSelectedButton, "growx, h 36!");
+        toolbar.add(deleteSelectedButton, "growx, h 36!");
+        return toolbar;
     }
 
     /// Creates the unframed selected-Mod details surface.
@@ -441,6 +500,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Installs list listeners used for sparse loading and stable selection.
     private void configureList() {
+        choiceList.getList().setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         choiceList.getList().addListSelectionListener(selectionListener);
         choiceList.getChoiceModel().addListDataListener(listDataListener);
     }
@@ -516,25 +576,31 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Delegates one loaded user selection by stable key.
+    /// Delegates one loaded single selection and keeps multi-selection panel-owned.
     ///
     /// @param event list selection event
     private void selectionChanged(ListSelectionEvent event) {
         if (closed || synchronizing || event.getValueIsAdjusting()) {
             return;
         }
-        int selectedIndex = choiceList.getList().getSelectedIndex();
-        if (selectedIndex < 0) {
+        int selectedCount = choiceList.getList().getSelectedIndices().length;
+        if (selectedCount == 0) {
             model.clearSelection();
             showDetails(null);
             updateSelectionActions();
             return;
         }
-        @Nullable ModCatalogItem selected = choiceList.getSelectedValue();
+        if (selectedCount > 1) {
+            model.clearSelection();
+            showDetails(null);
+            updateSelectionActions();
+            return;
+        }
+        @Nullable ModCatalogItem selected = singleSelectedItem();
         if (selected != null) {
             model.selectMod(selected.localKey());
-            showDetails(selected);
         }
+        showDetails(selected);
         updateSelectionActions();
     }
 
@@ -543,7 +609,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         if (closed || synchronizing) {
             return;
         }
-        @Nullable ModCatalogItem selected = choiceList.getSelectedValue();
+        @Nullable ModCatalogItem selected = singleSelectedItem();
         if (selected != null) {
             model.selectMod(selected.localKey());
         }
@@ -562,8 +628,10 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         synchronizing = true;
         try {
             displayedSnapshot = snapshot;
-            if (appliedContentRevision != snapshot.contentRevision()) {
+            boolean contentChanged = appliedContentRevision != snapshot.contentRevision();
+            if (contentChanged) {
                 appliedContentRevision = snapshot.contentRevision();
+                choiceList.getList().clearSelection();
                 choiceList.reloadData();
             }
             if (!searchField.getText().equals(snapshot.searchQuery())) {
@@ -571,11 +639,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             }
             filterBox.setSelectedItem(snapshot.filter());
             choiceList.getList().setEnabled(snapshot.listEnabled());
-            if (snapshot.selectedIndex().isPresent()) {
-                choiceList.getList().setSelectedIndex(snapshot.selectedIndex().getAsInt());
-            } else {
-                choiceList.getList().clearSelection();
-            }
+            restoreSelection(snapshot, contentChanged);
             statusLabel.setText(snapshot.statusText());
             writeStatusLabel.setText(snapshot.writeStatusText());
             boolean mutationIdle = snapshot.writeStatus() != ModCatalogWriteStatus.BUSY;
@@ -587,9 +651,33 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         } finally {
             synchronizing = false;
         }
-        @Nullable ModCatalogItem selected = choiceList.getSelectedValue();
+        @Nullable ModCatalogItem selected = singleSelectedItem();
         showDetails(selected);
         updateSelectionActions();
+    }
+
+    /// Restores a model-owned single selection without collapsing a current panel-owned multi-selection.
+    ///
+    /// @param snapshot latest model state
+    /// @param contentChanged whether logical list indexes were replaced
+    private void restoreSelection(ModCatalogSnapshot snapshot, boolean contentChanged) {
+        JList<?> list = choiceList.getList();
+        if (snapshot.selectedIndex().isPresent()) {
+            int selectedIndex = snapshot.selectedIndex().getAsInt();
+            int itemCount = snapshot.itemCount().orElse(0);
+            if (selectedIndex >= 0 && selectedIndex < itemCount) {
+                if (!contentChanged
+                        && list.getSelectedIndices().length > 1
+                        && list.isSelectedIndex(selectedIndex)) {
+                    return;
+                }
+                list.setSelectedIndex(selectedIndex);
+                return;
+            }
+        }
+        if (contentChanged || list.getSelectedIndices().length <= 1) {
+            list.clearSelection();
+        }
     }
 
     /// Renders one loaded selection or the empty-selection state.
@@ -615,13 +703,117 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Updates selected-row commands from loaded selection and model state.
     private void updateSelectionActions() {
-        @Nullable ModCatalogItem selected = choiceList.getSelectedValue();
-        boolean mutable = selected != null
-                && displayedSnapshot.listEnabled()
-                && displayedSnapshot.writeStatus() != ModCatalogWriteStatus.BUSY;
-        enabledToggle.setEnabled(mutable);
-        revealButton.setEnabled(mutable);
-        deleteButton.setEnabled(mutable);
+        @Nullable ModCatalogSnapshot writable = currentWritableSnapshot();
+        int selectedCount = choiceList.getList().getSelectedIndices().length;
+        int visibleCount = model.filteredLocalKeys().size();
+        @Nullable ModCatalogItem selected = singleSelectedItem();
+        boolean singleMutable = writable != null && selected != null;
+        enabledToggle.setEnabled(singleMutable);
+        revealButton.setEnabled(singleMutable);
+        deleteButton.setEnabled(singleMutable);
+        selectAllButton.setEnabled(writable != null
+                && visibleCount > 0
+                && selectedCount < visibleCount);
+        enableSelectedButton.setEnabled(writable != null && selectedCount > 0);
+        disableSelectedButton.setEnabled(writable != null && selectedCount > 0);
+        deleteSelectedButton.setEnabled(writable != null && selectedCount > 0);
+    }
+
+    /// Returns the loaded row only when exactly one logical list index is selected.
+    ///
+    /// @return exact loaded single selection, or null for none, multiple, or a placeholder
+    private @Nullable ModCatalogItem singleSelectedItem() {
+        return choiceList.getList().getSelectedIndices().length == 1
+                ? choiceList.getSelectedValue()
+                : null;
+    }
+
+    /// Returns a stable writable snapshot shared by displayed Swing state and the model.
+    ///
+    /// @return writable current snapshot, or null when stale, loading, empty, or busy
+    private @Nullable ModCatalogSnapshot currentWritableSnapshot() {
+        ModCatalogSnapshot current = model.snapshot();
+        return !closed
+                && current.contentRevision() == displayedSnapshot.contentRevision()
+                && current.status() == ModCatalogStatus.READY
+                && current.listEnabled()
+                && current.writeStatus() != ModCatalogWriteStatus.BUSY
+                ? current
+                : null;
+    }
+
+    /// Captures selected logical indexes as immutable rename-stable keys without loading rows.
+    ///
+    /// @return immutable selected keys in filtered list order, or empty for stale indexes
+    private @Unmodifiable List<String> selectedLocalKeys() {
+        int[] selectedIndices = choiceList.getList().getSelectedIndices();
+        @Unmodifiable List<String> visibleKeys = model.filteredLocalKeys();
+        List<String> selectedKeys = new ArrayList<>(selectedIndices.length);
+        for (int selectedIndex : selectedIndices) {
+            if (selectedIndex < 0 || selectedIndex >= visibleKeys.size()) {
+                return List.of();
+            }
+            selectedKeys.add(visibleKeys.get(selectedIndex));
+        }
+        return List.copyOf(selectedKeys);
+    }
+
+    /// Revalidates a stable-key selection after a potentially modal interaction.
+    ///
+    /// @param expectedRevision captured content revision
+    /// @param expectedKeys captured stable keys
+    /// @return whether the exact writable selection remains current
+    private boolean isBatchSelectionCurrent(
+            long expectedRevision,
+            @Unmodifiable List<String> expectedKeys) {
+        @Nullable ModCatalogSnapshot current = currentWritableSnapshot();
+        return current != null
+                && current.contentRevision() == expectedRevision
+                && selectedLocalKeys().equals(expectedKeys);
+    }
+
+    /// Selects every logical row without accessing sparse row values.
+    private void selectAllMods() {
+        @Nullable ModCatalogSnapshot snapshot = currentWritableSnapshot();
+        if (snapshot == null) {
+            return;
+        }
+        int itemCount = snapshot.itemCount().orElse(0);
+        if (itemCount > 0) {
+            choiceList.getList().setSelectionInterval(0, itemCount - 1);
+        }
+        updateSelectionActions();
+    }
+
+    /// Submits one enabled state for the exact selected stable-key batch.
+    ///
+    /// @param enabled desired enabled state
+    private void setSelectedModsEnabled(boolean enabled) {
+        @Nullable ModCatalogSnapshot snapshot = currentWritableSnapshot();
+        if (snapshot == null) {
+            return;
+        }
+        @Unmodifiable List<String> selectedKeys = selectedLocalKeys();
+        if (!selectedKeys.isEmpty()
+                && isBatchSelectionCurrent(snapshot.contentRevision(), selectedKeys)) {
+            observeFailure(model.setModsEnabled(selectedKeys, enabled));
+        }
+    }
+
+    /// Confirms and permanently deletes the exact selected stable-key batch.
+    private void deleteSelectedMods() {
+        @Nullable ModCatalogSnapshot snapshot = currentWritableSnapshot();
+        if (snapshot == null) {
+            return;
+        }
+        @Unmodifiable List<String> selectedKeys = selectedLocalKeys();
+        if (selectedKeys.isEmpty()
+                || !interactions.confirmDeleteSelected(this, selectedKeys.size())) {
+            return;
+        }
+        if (isBatchSelectionCurrent(snapshot.contentRevision(), selectedKeys)) {
+            observeFailure(model.deleteMods(selectedKeys));
+        }
     }
 
     /// Opens the chooser and submits selected archives as one serialized import.
@@ -639,7 +831,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Schedules revealing the exact selected Mod file.
     private void revealSelected() {
-        @Nullable ModCatalogItem selected = choiceList.getSelectedValue();
+        @Nullable ModCatalogItem selected = singleSelectedItem();
         if (selected != null) {
             observeFailure(interactions.reveal(selected.path()));
         }
@@ -647,7 +839,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Confirms and submits permanent deletion of the exact selected Mod.
     private void deleteSelected() {
-        @Nullable ModCatalogItem selected = choiceList.getSelectedValue();
+        @Nullable ModCatalogItem selected = singleSelectedItem();
         if (selected != null && interactions.confirmDelete(this, selected)) {
             observeFailure(model.deleteMod(selected.localKey()));
         }
@@ -658,7 +850,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         if (closed || synchronizing) {
             return;
         }
-        @Nullable ModCatalogItem selected = choiceList.getSelectedValue();
+        @Nullable ModCatalogItem selected = singleSelectedItem();
         if (selected != null) {
             observeFailure(model.setModEnabled(selected.localKey(), enabledToggle.isSelected()));
         }
@@ -720,6 +912,26 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         button.addActionListener(event -> action.run());
     }
 
+    /// Configures one localized text command with matching accessibility text.
+    ///
+    /// @param button target command button
+    /// @param name deterministic component name
+    /// @param text localized visible and accessible text
+    /// @param action command callback
+    private static void configureTextButton(
+            JButton button,
+            String name,
+            String text,
+            Runnable action) {
+        button.setName(Objects.requireNonNull(name, "name"));
+        button.setText(Objects.requireNonNull(text, "text"));
+        button.setToolTipText(text);
+        button.getAccessibleContext().setAccessibleName(text);
+        button.getAccessibleContext().setAccessibleDescription(text);
+        Runnable checkedAction = Objects.requireNonNull(action, "action");
+        button.addActionListener(event -> checkedAction.run());
+    }
+
     /// Detaches listeners, cancels sparse loads, and closes the owned model.
     @Override
     public void close() {
@@ -736,6 +948,10 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         enabledToggle.setEnabled(false);
         revealButton.setEnabled(false);
         deleteButton.setEnabled(false);
+        selectAllButton.setEnabled(false);
+        enableSelectedButton.setEnabled(false);
+        disableSelectedButton.setEnabled(false);
+        deleteSelectedButton.setEnabled(false);
         searchField.getDocument().removeDocumentListener(searchListener);
         choiceList.getChoiceModel().removeListDataListener(listDataListener);
         choiceList.getList().removeListSelectionListener(selectionListener);

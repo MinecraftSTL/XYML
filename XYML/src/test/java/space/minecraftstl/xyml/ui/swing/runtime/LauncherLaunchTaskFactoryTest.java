@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.runtime;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.QuickPlayOption;
 import space.minecraftstl.xyml.game.launch.LaunchRequest;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
@@ -53,7 +54,7 @@ final class LauncherLaunchTaskFactoryTest {
         LaunchRequest request = new LaunchRequest(
                 "account:00000000-0000-0000-0000-000000000001",
                 "game-directory:00000000-0000-0000-0000-000000000002",
-                "instance-a");
+                new GameInstanceID("instance-a"));
         RecordingTask task = new RecordingTask();
         AtomicInteger dispatchCalls = new AtomicInteger();
         AtomicReference<@Nullable LaunchRequest> observedRequest = new AtomicReference<>();
@@ -81,7 +82,7 @@ final class LauncherLaunchTaskFactoryTest {
         LaunchRequest request = new LaunchRequest(
                 "account:00000000-0000-0000-0000-000000000001",
                 "game-directory:00000000-0000-0000-0000-000000000002",
-                "instance-a");
+                new GameInstanceID("instance-a"));
         Path requestedTarget = Path.of("build", "launch-script-test.bat");
         Path normalizedTarget = requestedTarget.toAbsolutePath().normalize();
         Task<Path> scriptTask = Task.completed(normalizedTarget);
@@ -116,7 +117,7 @@ final class LauncherLaunchTaskFactoryTest {
         LaunchRequest request = new LaunchRequest(
                 "account",
                 "directory",
-                "instance",
+                new GameInstanceID("instance"),
                 "World Folder");
         AtomicReference<@Nullable QuickPlayOption> observedOption = new AtomicReference<>();
 
@@ -133,7 +134,7 @@ final class LauncherLaunchTaskFactoryTest {
         AtomicInteger setterCalls = new AtomicInteger();
 
         LauncherLaunchTaskFactory.configureLaunchModes(
-                new LaunchRequest("account", "directory", "instance"),
+                new LaunchRequest("account", "directory", new GameInstanceID("instance")),
                 ignored -> setterCalls.incrementAndGet(),
                 setterCalls::incrementAndGet);
 
@@ -147,7 +148,7 @@ final class LauncherLaunchTaskFactoryTest {
         AtomicInteger testModeSetterCalls = new AtomicInteger();
 
         LauncherLaunchTaskFactory.configureLaunchModes(
-                LaunchRequest.test("account", "directory", "instance"),
+                LaunchRequest.test("account", "directory", new GameInstanceID("instance")),
                 ignored -> quickPlaySetterCalls.incrementAndGet(),
                 testModeSetterCalls::incrementAndGet);
 
@@ -169,7 +170,8 @@ final class LauncherLaunchTaskFactoryTest {
 
         EdtDispatcher.executeAndWait(() -> {
             try {
-                factory.create(new LaunchRequest("account", "directory", "instance"));
+                factory.create(new LaunchRequest(
+                        "account", "directory", new GameInstanceID("instance")));
             } catch (RuntimeException | Error failure) {
                 observedFailure.set(failure);
             }
@@ -193,7 +195,8 @@ final class LauncherLaunchTaskFactoryTest {
 
         IllegalArgumentException observed = assertThrows(
                 IllegalArgumentException.class,
-                () -> factory.create(new LaunchRequest("account", "directory", "instance")));
+                () -> factory.create(new LaunchRequest(
+                        "account", "directory", new GameInstanceID("instance"))));
 
         assertSame(failure, observed);
     }

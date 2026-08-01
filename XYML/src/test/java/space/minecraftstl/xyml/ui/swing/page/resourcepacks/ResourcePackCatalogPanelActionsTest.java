@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
 import javax.swing.AbstractButton;
 import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
@@ -51,6 +52,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -239,6 +241,76 @@ public final class ResourcePackCatalogPanelActionsTest {
                             List.of(compatibleEnabled, compatibleEnabled),
                             interactions.deletedTargets),
                     () -> assertTrue(interactions.dialogCallsOnEventDispatchThread.get()));
+            panel.close();
+        });
+    }
+
+    /// Search, logical select-all, and batch commands operate on stable filtered paths.
+    @Test
+    public void searchAndBatchCommandsUseFilteredStablePathsWithoutMaterializingAllRows() {
+        Path resourcePackDirectory = testPath("resourcepacks");
+        ResourcePackCatalogItem alphaFirst = item(
+                resourcePackDirectory.resolve("Alpha-One.zip"),
+                ResourcePackCompatibility.COMPATIBLE,
+                false);
+        ResourcePackCatalogItem beta = item(
+                resourcePackDirectory.resolve("Beta.zip"),
+                ResourcePackCompatibility.COMPATIBLE,
+                true);
+        ResourcePackCatalogItem alphaSecond = item(
+                resourcePackDirectory.resolve("alpha-two.zip"),
+                ResourcePackCompatibility.TOO_NEW,
+                false);
+        @Unmodifiable List<ResourcePackCatalogItem> rows = List.of(alphaFirst, beta, alphaSecond);
+        FakeResourcePackCatalogModel model = readyModel(rows, 1L);
+        FakeResourcePackCatalogInteractions interactions = new FakeResourcePackCatalogInteractions();
+        ResourcePackCatalogPanel panel = onEventDispatchThread(() -> new ResourcePackCatalogPanel(
+                model,
+                STRINGS,
+                ACTION_STRINGS,
+                interactions,
+                resourcePackDirectory));
+
+        onEventDispatchThread(() -> {
+            JTextField search = findComponent(panel, "resourcePacksSearch", JTextField.class);
+            assertEquals(Boolean.TRUE, search.getClientProperty("JTextField.showClearButton"));
+            search.setText("alpha");
+            assertEquals(2, panel.choiceList().getChoiceModel().getSize());
+
+            AbstractButton selectAll = findButton(panel, "resourcePacksSelectAll");
+            AbstractButton enable = findButton(panel, "resourcePacksEnableSelected");
+            AbstractButton disable = findButton(panel, "resourcePacksDisableSelected");
+            AbstractButton delete = findButton(panel, "resourcePacksDeleteSelected");
+            selectAll.doClick();
+            assertAll(
+                    () -> assertArrayEquals(
+                            new int[] {0, 1},
+                            panel.choiceList().getList().getSelectedIndices()),
+                    () -> assertFalse(findButton(panel, "resourcePacksEnabledToggle").isEnabled()),
+                    () -> assertFalse(findButton(panel, "resourcePacksReveal").isEnabled()),
+                    () -> assertTrue(enable.isEnabled()),
+                    () -> assertTrue(disable.isEnabled()),
+                    () -> assertTrue(delete.isEnabled()));
+
+            interactions.incompatibleEnableConfirmed = false;
+            enable.doClick();
+            assertEquals(List.of(), model.enabledPaths());
+            interactions.incompatibleEnableConfirmed = true;
+            enable.doClick();
+            assertEquals(List.of(alphaFirst.path(), alphaSecond.path()), model.enabledPaths());
+
+            disable.doClick();
+            assertEquals(List.of(alphaFirst.path(), alphaSecond.path()), model.disabledPaths());
+
+            interactions.deleteConfirmed = false;
+            delete.doClick();
+            assertEquals(List.of(), model.deletedPaths());
+            interactions.deleteConfirmed = true;
+            delete.doClick();
+            assertEquals(List.of(alphaFirst.path(), alphaSecond.path()), model.deletedPaths());
+
+            search.setText("");
+            assertEquals(3, panel.choiceList().getChoiceModel().getSize());
             panel.close();
         });
     }
@@ -811,6 +883,14 @@ public final class ResourcePackCatalogPanelActionsTest {
             return current.get();
         }
 
+        /// Returns current fake shallow paths in row order.
+        ///
+        /// @return immutable indexed paths
+        @Override
+        public @Unmodifiable List<Path> indexedPaths() {
+            return rows.stream().map(ResourcePackCatalogItem::path).toList();
+        }
+
         /// Registers one snapshot listener.
         ///
         /// @param listener transition listener
@@ -1096,6 +1176,17 @@ public final class ResourcePackCatalogPanelActionsTest {
             return incompatibleEnableConfirmed;
         }
 
+        /// Returns the controlled selected-batch enable decision.
+        ///
+        /// @param owner owning panel
+        /// @param selectedCount selected path count
+        /// @return controlled confirmation
+        @Override
+        public boolean confirmEnableSelected(Component owner, int selectedCount) {
+            recordDialogThread();
+            return incompatibleEnableConfirmed;
+        }
+
         /// Returns the controlled permanent-delete decision.
         ///
         /// @param owner owning panel
@@ -1105,6 +1196,17 @@ public final class ResourcePackCatalogPanelActionsTest {
         public boolean confirmDelete(Component owner, ResourcePackCatalogItem target) {
             recordDialogThread();
             deletedTargets.add(target);
+            return deleteConfirmed;
+        }
+
+        /// Returns the controlled selected-batch deletion decision.
+        ///
+        /// @param owner owning panel
+        /// @param selectedCount selected path count
+        /// @return controlled confirmation
+        @Override
+        public boolean confirmDeleteSelected(Component owner, int selectedCount) {
+            recordDialogThread();
             return deleteConfirmed;
         }
 

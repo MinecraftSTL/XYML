@@ -58,6 +58,9 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
     /// Corner radius active when this settings surface first observed process state.
     private @Nullable Integer baselineCornerRadius;
 
+    /// Font antialiasing mode active when this settings surface first observed process state.
+    private @Nullable FontAntialiasingMode baselineFontAntialiasingMode;
+
     /// Latest launcher language supplied to the general restart tracker.
     private @Nullable SupportedLocale currentLanguage;
 
@@ -66,6 +69,9 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
 
     /// Latest corner radius supplied to the appearance restart tracker.
     private @Nullable Integer currentCornerRadius;
+
+    /// Latest mode supplied to the font antialiasing restart tracker.
+    private @Nullable FontAntialiasingMode currentFontAntialiasingMode;
 
     /// Whether settings persistence currently permits restart-sensitive edits.
     private boolean available = true;
@@ -130,6 +136,19 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
             baselineCornerRadius = cornerRadius;
         }
         currentCornerRadius = cornerRadius;
+        updateRestartRequired();
+    }
+
+    /// Tracks font antialiasing against the mode initialized for the active process.
+    ///
+    /// @param mode current persisted font antialiasing mode
+    void updateFontAntialiasing(FontAntialiasingMode mode) {
+        EdtDispatcher.requireEventDispatchThread();
+        FontAntialiasingMode validatedMode = Objects.requireNonNull(mode, "mode");
+        if (baselineFontAntialiasingMode == null) {
+            baselineFontAntialiasingMode = validatedMode;
+        }
+        currentFontAntialiasingMode = validatedMode;
         updateRestartRequired();
     }
 
@@ -212,8 +231,8 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
 
     /// Recomputes whether any baseline value tracked by this row requires a restart.
     ///
-    /// A row normally tracks either the general language pair or the appearance radius. Keeping the checks in one
-    /// place lets both rows share identical button and progress behavior without resetting the other row's baseline.
+    /// A row normally tracks either the general language pair, appearance radius, or font antialiasing mode. Keeping
+    /// the checks in one place lets all rows share identical behavior without resetting another row's baseline.
     private void updateRestartRequired() {
         boolean generalChanged = currentLanguage != null
                 && baselineLanguage != null
@@ -224,7 +243,10 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
         boolean radiusChanged = currentCornerRadius != null
                 && baselineCornerRadius != null
                 && !Objects.equals(baselineCornerRadius, currentCornerRadius);
-        restartRequired = generalChanged || radiusChanged;
+        boolean fontAntialiasingChanged = currentFontAntialiasingMode != null
+                && baselineFontAntialiasingMode != null
+                && currentFontAntialiasingMode != baselineFontAntialiasingMode;
+        restartRequired = generalChanged || radiusChanged || fontAntialiasingChanged;
         updatePresentation();
     }
 }

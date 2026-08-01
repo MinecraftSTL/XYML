@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -30,26 +31,42 @@ import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 
 import javax.swing.BorderFactory;
+import javax.swing.DefaultListCellRenderer;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.nio.file.Path;
 import java.time.DateTimeException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
+import java.util.Base64;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -84,6 +101,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Refreshes only the shallow directory source.
     private final JButton refreshButton = new JButton();
 
+    /// Switches between the legacy current-version filter and every indexed world.
+    private final JCheckBox showAllCheckBox = new JCheckBox(i18n("world.show_all"));
+
     /// Starts ZIP archive selection and Core preflight.
     private final JButton importButton = new JButton();
 
@@ -98,6 +118,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Generates a standalone script that enters the exact selected world.
     private final JButton launchScriptButton = new JButton();
+
+    /// Opens the restored Chunk Base world-tool menu for compatible selected worlds.
+    private final JButton chunkBaseButton = new JButton();
 
     /// Copies the exact selected readable and unlocked world.
     private final JButton copyButton = new JButton();
@@ -134,6 +157,71 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Selected Core metadata readability state.
     private final JLabel readabilityValue = new JLabel();
+
+    /// Selected world icon preview loaded with its viewport row.
+    private final JLabel worldIconValue = new JLabel();
+
+    /// Editable stored world name.
+    private final JTextField worldNameField = new JTextField(18);
+
+    /// Chooses an exact 64-by-64 PNG replacement.
+    private final JButton changeIconButton = new JButton();
+
+    /// Removes the selected world's custom icon.
+    private final JButton resetIconButton = new JButton();
+
+    /// Selected world seed, masked by default with FlatLaf's built-in reveal control.
+    private final JPasswordField seedValue = new JPasswordField(18);
+
+    /// Selected world spawn position.
+    private final JLabel worldSpawnValue = new JLabel();
+
+    /// Selected played-time duration.
+    private final JLabel playedTimeValue = new JLabel();
+
+    /// Editable cheat and command permission.
+    private final JCheckBox allowCheatsCheckBox = new JCheckBox();
+
+    /// Editable structure-generation flag.
+    private final JCheckBox generateStructuresCheckBox = new JCheckBox();
+
+    /// Editable difficulty selection.
+    private final JComboBox<WorldCatalogDetails.Difficulty> difficultyBox = new JComboBox<>(
+            WorldCatalogDetails.Difficulty.values());
+
+    /// Editable difficulty-lock flag.
+    private final JCheckBox difficultyLockedCheckBox = new JCheckBox();
+
+    /// Selected player's current position.
+    private final JLabel playerLocationValue = new JLabel();
+
+    /// Selected player's last death position.
+    private final JLabel playerLastDeathValue = new JLabel();
+
+    /// Selected player's bed or respawn-anchor position.
+    private final JLabel playerSpawnValue = new JLabel();
+
+    /// Editable player game mode.
+    private final JComboBox<WorldCatalogDetails.GameMode> playerGameModeBox = new JComboBox<>(
+            WorldCatalogDetails.GameMode.values());
+
+    /// Editable player health.
+    private final JTextField playerHealthField = new JTextField(10);
+
+    /// Editable player hunger level.
+    private final JTextField playerFoodLevelField = new JTextField(10);
+
+    /// Editable player saturation.
+    private final JTextField playerFoodSaturationField = new JTextField(10);
+
+    /// Editable player experience level.
+    private final JTextField playerXpLevelField = new JTextField(10);
+
+    /// Persists every supported detail field in one background write.
+    private final JButton saveDetailsButton = new JButton(i18n("button.save"));
+
+    /// Opens only the selected world's exact level-data source in the NBT editor.
+    private final JButton editLevelDataButton = new JButton();
 
     /// Listener that reapplies selected details after sparse rows finish loading.
     private final ListDataListener listDataListener;
@@ -218,6 +306,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         add(createCatalogSplit(), BorderLayout.CENTER);
         add(createStatusBand(), BorderLayout.SOUTH);
         configureList();
+        configureDetailsControls();
         showDetails(null);
         modelSubscription = this.model.subscribe(change -> {
             @Nullable WorldCatalogSnapshot snapshot = change.currentValue();
@@ -278,13 +367,19 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private JComponent createHeadingBand() {
         JPanel heading = new JPanel(new MigLayout(
                 "insets 12 16 8 16, fillx",
-                "[grow,fill][]8[]8[]",
+                "[grow,fill][]12[]8[]8[]",
                 "[40!]"));
         heading.setOpaque(false);
         JLabel title = new JLabel(strings.title());
         title.setName("worldsPageTitle");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 26.0F));
         heading.add(title, "growx");
+        showAllCheckBox.setName("worldsShowAll");
+        showAllCheckBox.setOpaque(false);
+        showAllCheckBox.setSelected(model.showAll());
+        showAllCheckBox.setVisible(model.supportsVersionFiltering());
+        showAllCheckBox.addActionListener(event -> model.setShowAll(showAllCheckBox.isSelected()));
+        heading.add(showAllCheckBox);
         configureIconButton(
                 refreshButton,
                 "worldsRefresh",
@@ -339,30 +434,136 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         return split;
     }
 
-    /// Creates selected-world metadata and icon-only row actions.
+    /// Creates editable selected-world metadata and icon-only row actions.
     ///
     /// @return transparent vertically scrollable detail surface
     private JComponent createDetailsSurface() {
         JPanel details = new JPanel(new MigLayout(
                 "insets 8 16 8 12, fillx, wrap 2",
-                "[110!][grow,fill]",
-                "[]8[][][][][][]8[]"));
+                "[140!][grow,fill]",
+                "[]8[]"));
         details.setName("worldsDetails");
         details.setOpaque(false);
         detailTitle.setName("worldsDetailTitle");
         detailTitle.setFont(detailTitle.getFont().deriveFont(Font.BOLD, 20.0F));
         details.add(detailTitle, "span 2, growx");
+
+        addSectionTitle(details, i18n("world.info.basic"));
+        JPanel iconControls = new JPanel(new MigLayout(
+                "insets 0, gap 8",
+                "[64!][40!][40!]",
+                "[64!]"));
+        iconControls.setOpaque(false);
+        worldIconValue.setName("worldsIcon");
+        worldIconValue.setHorizontalAlignment(JLabel.CENTER);
+        worldIconValue.setPreferredSize(new Dimension(64, 64));
+        configureIconButton(
+                changeIconButton,
+                "worldsChangeIcon",
+                "assets/swing/icons/image.svg",
+                i18n("world.icon.change"),
+                this::chooseWorldIcon);
+        configureIconButton(
+                resetIconButton,
+                "worldsResetIcon",
+                "assets/swing/icons/restore.svg",
+                i18n("button.reset"),
+                this::resetWorldIcon);
+        iconControls.add(worldIconValue, "w 64!, h 64!");
+        iconControls.add(changeIconButton, "w 40!, h 40!");
+        iconControls.add(resetIconButton, "w 40!, h 40!");
+        addDetailComponentRow(details, i18n("world.icon"), iconControls);
+        worldNameField.setName("worldsWorldName");
+        addDetailComponentRow(details, i18n("world.name"), worldNameField);
         addDetailRow(details, strings.directoryNameLabel(), directoryValue, "worldsDirectory");
         addDetailRow(details, strings.pathLabel(), pathValue, "worldsPath");
         addDetailRow(details, strings.gameVersionLabel(), gameVersionValue, "worldsGameVersion");
+        seedValue.setName("worldsSeed");
+        seedValue.setEditable(false);
+        seedValue.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, strings.unavailableValue());
+        seedValue.putClientProperty(FlatClientProperties.STYLE, "showRevealButton: true");
+        seedValue.addMouseListener(new MouseAdapter() {
+            /// Copies the exact selected seed on a primary-button double click.
+            @Override
+            public void mouseClicked(MouseEvent event) {
+                if (event.getClickCount() == 2 && SwingUtilities.isLeftMouseButton(event)) {
+                    copySelectedSeed();
+                }
+            }
+        });
+        addDetailComponentRow(details, i18n("world.info.random_seed"), seedValue);
+        addDetailRow(details, i18n("world.info.spawn"), worldSpawnValue, "worldsSpawn");
         addDetailRow(details, strings.lastPlayedLabel(), lastPlayedValue, "worldsLastPlayed");
+        addDetailRow(details, i18n("world.info.time"), playedTimeValue, "worldsPlayedTime");
+        allowCheatsCheckBox.setName("worldsAllowCheats");
+        addDetailComponentRow(details, i18n("world.info.allow_cheats"), allowCheatsCheckBox);
+        generateStructuresCheckBox.setName("worldsGenerateStructures");
+        addDetailComponentRow(
+                details,
+                i18n("world.info.generate_features"),
+                generateStructuresCheckBox);
+        difficultyBox.setName("worldsDifficulty");
+        addDetailComponentRow(details, i18n("world.info.difficulty"), difficultyBox);
+        difficultyLockedCheckBox.setName("worldsDifficultyLocked");
+        addDetailComponentRow(
+                details,
+                i18n("world.info.difficulty_lock"),
+                difficultyLockedCheckBox);
+
+        addSectionTitle(details, i18n("world.info.player"));
+        addDetailRow(
+                details,
+                i18n("world.info.player.location"),
+                playerLocationValue,
+                "worldsPlayerLocation");
+        addDetailRow(
+                details,
+                i18n("world.info.player.last_death_location"),
+                playerLastDeathValue,
+                "worldsPlayerLastDeath");
+        addDetailRow(
+                details,
+                i18n("world.info.player.spawn"),
+                playerSpawnValue,
+                "worldsPlayerSpawn");
+        playerGameModeBox.setName("worldsPlayerGameMode");
+        addDetailComponentRow(
+                details,
+                i18n("world.info.player.game_type"),
+                playerGameModeBox);
+        playerHealthField.setName("worldsPlayerHealth");
+        addDetailComponentRow(
+                details,
+                i18n("world.info.player.health"),
+                playerHealthField);
+        playerFoodLevelField.setName("worldsPlayerFoodLevel");
+        addDetailComponentRow(
+                details,
+                i18n("world.info.player.food_level"),
+                playerFoodLevelField);
+        playerFoodSaturationField.setName("worldsPlayerFoodSaturation");
+        addDetailComponentRow(
+                details,
+                i18n("world.info.player.food_saturation_level"),
+                playerFoodSaturationField);
+        playerXpLevelField.setName("worldsPlayerXpLevel");
+        addDetailComponentRow(
+                details,
+                i18n("world.info.player.xp_level"),
+                playerXpLevelField);
+
+        addSectionTitle(details, strings.readabilityLabel());
         addDetailRow(details, strings.lockedLabel(), lockedValue, "worldsLocked");
         addDetailRow(details, strings.readabilityLabel(), readabilityValue, "worldsMetadata");
+        saveDetailsButton.setName("worldsSaveDetails");
+        saveDetailsButton.getAccessibleContext().setAccessibleName(i18n("button.save"));
+        saveDetailsButton.addActionListener(event -> saveWorldDetails());
+        details.add(saveDetailsButton, "span 2, right, h 36!");
 
         JPanel actions = new JPanel(new MigLayout(
-                "insets 0, gap 8",
-                "[40!][40!][40!][40!][40!][40!]",
-                "[40!]"));
+                "insets 0, gap 8, wrap 4",
+                "[40!][40!][40!][40!]",
+                "[40!][40!]"));
         actions.setOpaque(false);
         configureIconButton(
                 quickPlayButton,
@@ -376,6 +577,12 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 "assets/swing/icons/script.svg",
                 strings.launchScriptTooltip(),
                 this::generateSelectedWorldLaunchScript);
+        configureIconButton(
+                chunkBaseButton,
+                "worldsChunkBase",
+                "assets/swing/icons/open-in-new.svg",
+                i18n("world.chunkbase"),
+                this::showChunkBaseMenu);
         configureIconButton(
                 openWorldButton,
                 "worldsOpenSelected",
@@ -400,12 +607,20 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 "assets/swing/icons/delete.svg",
                 strings.deleteTooltip(),
                 this::deleteSelectedWorld);
+        configureIconButton(
+                editLevelDataButton,
+                "worldsEditLevelData",
+                "assets/swing/icons/format-list-bulleted.svg",
+                i18n("button.edit") + ": level.dat",
+                this::editSelectedLevelData);
         actions.add(quickPlayButton, "w 40!, h 40!");
         actions.add(launchScriptButton, "w 40!, h 40!");
+        actions.add(chunkBaseButton, "w 40!, h 40!");
         actions.add(openWorldButton, "w 40!, h 40!");
         actions.add(copyButton, "w 40!, h 40!");
         actions.add(exportButton, "w 40!, h 40!");
         actions.add(deleteButton, "w 40!, h 40!");
+        actions.add(editLevelDataButton, "w 40!, h 40!");
         details.add(actions, "span 2, right");
 
         JScrollPane scroll = new JScrollPane(details);
@@ -447,10 +662,96 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         panel.add(value, "growx");
     }
 
+    /// Adds one label and arbitrary value control to the aligned detail grid.
+    ///
+    /// @param panel target details surface
+    /// @param labelText non-blank static label
+    /// @param value reusable value control
+    private static void addDetailComponentRow(JPanel panel, String labelText, JComponent value) {
+        panel.add(new JLabel(Objects.requireNonNull(labelText, "labelText")));
+        panel.add(Objects.requireNonNull(value, "value"), "growx");
+    }
+
+    /// Adds one compact section heading without introducing nested card surfaces.
+    ///
+    /// @param panel target details surface
+    /// @param text localized section title
+    private static void addSectionTitle(JPanel panel, String text) {
+        JLabel section = new JLabel(Objects.requireNonNull(text, "text"));
+        section.setFont(section.getFont().deriveFont(Font.BOLD));
+        panel.add(section, "span 2, growx, gaptop 8");
+    }
+
     /// Configures sparse-row selection and loaded-range listeners.
     private void configureList() {
         choiceList.getList().addListSelectionListener(selectionListener);
         choiceList.getChoiceModel().addListDataListener(listDataListener);
+    }
+
+    /// Configures transparent detail controls and localized enum rendering.
+    private void configureDetailsControls() {
+        allowCheatsCheckBox.setOpaque(false);
+        generateStructuresCheckBox.setOpaque(false);
+        difficultyLockedCheckBox.setOpaque(false);
+        difficultyBox.setRenderer(WorldCatalogPanel::renderDifficulty);
+        playerGameModeBox.setRenderer(WorldCatalogPanel::renderGameMode);
+        worldNameField.addActionListener(event -> saveWorldDetails());
+        playerHealthField.addActionListener(event -> saveWorldDetails());
+        playerFoodLevelField.addActionListener(event -> saveWorldDetails());
+        playerFoodSaturationField.addActionListener(event -> saveWorldDetails());
+        playerXpLevelField.addActionListener(event -> saveWorldDetails());
+    }
+
+    /// Renders one difficulty with the existing localized world-information key.
+    ///
+    /// @param list owning combo-box list
+    /// @param value difficulty value, or `null`
+    /// @param index row index
+    /// @param selected whether the row is selected
+    /// @param focused whether the row owns focus
+    /// @return configured renderer component
+    private static Component renderDifficulty(
+            JList<? extends WorldCatalogDetails.Difficulty> list,
+            @Nullable WorldCatalogDetails.Difficulty value,
+            int index,
+            boolean selected,
+            boolean focused) {
+        JLabel label = (JLabel) new DefaultListCellRenderer().getListCellRendererComponent(
+                list,
+                value,
+                index,
+                selected,
+                focused);
+        label.setText(value == null
+                ? ""
+                : i18n("world.info.difficulty." + value.name().toLowerCase(Locale.ROOT)));
+        return label;
+    }
+
+    /// Renders one game mode with the existing localized player-information key.
+    ///
+    /// @param list owning combo-box list
+    /// @param value game-mode value, or `null`
+    /// @param index row index
+    /// @param selected whether the row is selected
+    /// @param focused whether the row owns focus
+    /// @return configured renderer component
+    private static Component renderGameMode(
+            JList<? extends WorldCatalogDetails.GameMode> list,
+            @Nullable WorldCatalogDetails.GameMode value,
+            int index,
+            boolean selected,
+            boolean focused) {
+        JLabel label = (JLabel) new DefaultListCellRenderer().getListCellRendererComponent(
+                list,
+                value,
+                index,
+                selected,
+                focused);
+        label.setText(value == null
+                ? ""
+                : i18n("world.info.player.game_type." + value.name().toLowerCase(Locale.ROOT)));
+        return label;
     }
 
     /// Creates the listener that updates details after a placeholder becomes a loaded world row.
@@ -520,6 +821,11 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                     ? snapshot.operationText()
                     : Objects.requireNonNull(quickPlayOperationText));
             refreshButton.setEnabled(snapshot.refreshEnabled() && commandIdle);
+            showAllCheckBox.setSelected(model.showAll());
+            showAllCheckBox.setEnabled(
+                    model.supportsVersionFiltering()
+                            && !snapshot.operationPending()
+                            && commandIdle);
             importButton.setEnabled(
                     snapshot.status() == WorldCatalogStatus.READY
                             && !snapshot.operationPending()
@@ -551,6 +857,37 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 ? strings.unavailableValue()
                 : world.readable() ? strings.readableValue() : strings.unreadableValue());
         readabilityValue.setToolTipText(world == null ? null : world.failureDetail());
+
+        @Nullable WorldCatalogDetails details = world == null ? null : world.details();
+        worldIconValue.setIcon(details == null || details.iconPngBase64() == null
+                ? new FlatSVGIcon("assets/swing/icons/image.svg", 32, 32)
+                : new ImageIcon(Base64.getDecoder().decode(Objects.requireNonNull(details.iconPngBase64()))));
+        worldNameField.setText(world == null ? "" : world.worldName());
+        seedValue.setText(details == null || details.seed() == null
+                ? ""
+                : Long.toString(Objects.requireNonNull(details.seed())));
+        worldSpawnValue.setText(optionalDetail(details == null ? null : details.worldSpawn()));
+        playedTimeValue.setText(details == null || details.playedTimeTicks() == null
+                ? strings.unavailableValue()
+                : formatPlayedTime(Objects.requireNonNull(details.playedTimeTicks())));
+
+        @Nullable WorldCatalogDetails.WorldSettings settings = details == null ? null : details.settings();
+        allowCheatsCheckBox.setSelected(settings != null && Boolean.TRUE.equals(settings.allowCheats()));
+        generateStructuresCheckBox.setSelected(
+                settings != null && Boolean.TRUE.equals(settings.generateStructures()));
+        difficultyBox.setSelectedItem(settings == null ? null : settings.difficulty());
+        difficultyLockedCheckBox.setSelected(
+                settings != null && Boolean.TRUE.equals(settings.difficultyLocked()));
+
+        @Nullable WorldCatalogDetails.PlayerSummary player = details == null ? null : details.player();
+        playerLocationValue.setText(optionalDetail(player == null ? null : player.location()));
+        playerLastDeathValue.setText(optionalDetail(player == null ? null : player.lastDeathLocation()));
+        playerSpawnValue.setText(optionalDetail(player == null ? null : player.spawn()));
+        playerGameModeBox.setSelectedItem(player == null ? null : player.gameMode());
+        playerHealthField.setText(optionalNumber(player == null ? null : player.health()));
+        playerFoodLevelField.setText(optionalNumber(player == null ? null : player.foodLevel()));
+        playerFoodSaturationField.setText(optionalNumber(player == null ? null : player.foodSaturation()));
+        playerXpLevelField.setText(optionalNumber(player == null ? null : player.xpLevel()));
     }
 
     /// Updates selected-row actions from the loaded selection and latest snapshot.
@@ -565,12 +902,74 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         boolean mutableSelection = usableSelection
                 && Objects.requireNonNull(world).readable()
                 && !world.locked();
+        @Nullable WorldCatalogDetails details = world == null ? null : world.details();
+        boolean editableDetails = mutableSelection && details != null;
         boolean launchableSelection = mutableSelection && quickPlayActions.available();
         quickPlayButton.setEnabled(launchableSelection);
         launchScriptButton.setEnabled(launchableSelection);
+        chunkBaseButton.setEnabled(usableSelection
+                && Objects.requireNonNull(world).readable()
+                && ChunkBaseWorldTools.supports(world));
         copyButton.setEnabled(mutableSelection);
         exportButton.setEnabled(mutableSelection);
         deleteButton.setEnabled(mutableSelection);
+        worldNameField.setEnabled(editableDetails);
+        seedValue.setEnabled(usableSelection && details != null && details.seed() != null);
+        changeIconButton.setEnabled(editableDetails);
+        resetIconButton.setEnabled(mutableSelection && details != null && details.hasIcon());
+        saveDetailsButton.setEnabled(editableDetails);
+        editLevelDataButton.setEnabled(editableDetails);
+
+        @Nullable WorldCatalogDetails.WorldSettings settings = details == null ? null : details.settings();
+        allowCheatsCheckBox.setEnabled(editableDetails
+                && settings != null
+                && settings.allowCheats() != null);
+        generateStructuresCheckBox.setEnabled(editableDetails
+                && settings != null
+                && settings.generateStructures() != null);
+        difficultyBox.setEnabled(editableDetails
+                && settings != null
+                && settings.difficulty() != null);
+        difficultyLockedCheckBox.setEnabled(editableDetails
+                && settings != null
+                && settings.difficultyLocked() != null);
+
+        @Nullable WorldCatalogDetails.PlayerSummary player = details == null ? null : details.player();
+        playerGameModeBox.setEnabled(editableDetails && player != null && player.gameMode() != null);
+        playerHealthField.setEnabled(editableDetails && player != null && player.health() != null);
+        playerFoodLevelField.setEnabled(editableDetails && player != null && player.foodLevel() != null);
+        playerFoodSaturationField.setEnabled(
+                editableDetails && player != null && player.foodSaturation() != null);
+        playerXpLevelField.setEnabled(editableDetails && player != null && player.xpLevel() != null);
+    }
+
+    /// Returns an optional detail string or the localized unavailable placeholder.
+    ///
+    /// @param value optional loaded value
+    /// @return visible detail text
+    private String optionalDetail(@Nullable String value) {
+        return value == null ? strings.unavailableValue() : value;
+    }
+
+    /// Returns an optional number without introducing locale-dependent edit syntax.
+    ///
+    /// @param value optional numeric value
+    /// @return stable editable number text or an empty string
+    private static String optionalNumber(@Nullable Number value) {
+        return value == null ? "" : value.toString();
+    }
+
+    /// Formats recorded game ticks with the legacy day, hour, and minute localization.
+    ///
+    /// @param ticks recorded played time
+    /// @return localized duration text
+    private static String formatPlayedTime(long ticks) {
+        Duration duration = Duration.ofSeconds(ticks / 20L);
+        return i18n(
+                "world.info.time.format",
+                duration.toDays(),
+                duration.toHoursPart(),
+                duration.toMinutesPart());
     }
 
     /// Starts an explicit fresh shallow directory index.
@@ -628,6 +1027,232 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
         if (selected != null) {
             observeFailure(interactions.openDirectory(selected.path()));
+        }
+    }
+
+    /// Captures and submits every supported world-information field in one background write.
+    private void saveWorldDetails() {
+        @Nullable WorldCatalogItem selected = mutableDetailsSelection();
+        if (selected == null) {
+            return;
+        }
+        final WorldDetailsUpdate update;
+        try {
+            update = captureDetailsUpdate(Objects.requireNonNull(selected.details()));
+        } catch (IllegalArgumentException failure) {
+            showFailure(failure);
+            return;
+        }
+        observeFailure(model.updateWorldDetails(selected, update));
+    }
+
+    /// Builds one validated update while preserving unsupported-field absence.
+    ///
+    /// @param details selected loaded details
+    /// @return immutable submitted values
+    private WorldDetailsUpdate captureDetailsUpdate(WorldCatalogDetails details) {
+        String worldName = worldNameField.getText().trim();
+        if (worldName.isBlank()) {
+            throw new IllegalArgumentException(i18n("world.name.enter"));
+        }
+        WorldCatalogDetails.WorldSettings currentSettings = details.settings();
+        WorldCatalogDetails.WorldSettings settings = new WorldCatalogDetails.WorldSettings(
+                currentSettings.allowCheats() == null ? null : allowCheatsCheckBox.isSelected(),
+                currentSettings.generateStructures() == null
+                        ? null
+                        : generateStructuresCheckBox.isSelected(),
+                currentSettings.difficulty() == null ? null : selectedDifficulty(),
+                currentSettings.difficultyLocked() == null
+                        ? null
+                        : difficultyLockedCheckBox.isSelected());
+        @Nullable WorldDetailsUpdate.PlayerUpdate player = capturePlayerUpdate(details.player());
+        return new WorldDetailsUpdate(worldName, settings, player);
+    }
+
+    /// Captures only player fields exposed by the selected world's NBT layout.
+    ///
+    /// @param current current player snapshot, or `null`
+    /// @return immutable player update, or `null`
+    private @Nullable WorldDetailsUpdate.PlayerUpdate capturePlayerUpdate(
+            @Nullable WorldCatalogDetails.PlayerSummary current) {
+        if (current == null) {
+            return null;
+        }
+        return new WorldDetailsUpdate.PlayerUpdate(
+                current.gameMode() == null ? null : selectedGameMode(),
+                current.health() == null ? null : parseFloat(playerHealthField),
+                current.foodLevel() == null ? null : parseInteger(playerFoodLevelField),
+                current.foodSaturation() == null ? null : parseFloat(playerFoodSaturationField),
+                current.xpLevel() == null ? null : parseInteger(playerXpLevelField));
+    }
+
+    /// Returns the selected non-null difficulty.
+    ///
+    /// @return selected difficulty
+    private WorldCatalogDetails.Difficulty selectedDifficulty() {
+        @Nullable Object selected = difficultyBox.getSelectedItem();
+        if (selected instanceof WorldCatalogDetails.Difficulty difficulty) {
+            return difficulty;
+        }
+        throw new IllegalArgumentException(i18n("world.info.difficulty"));
+    }
+
+    /// Returns the selected non-null player game mode.
+    ///
+    /// @return selected game mode
+    private WorldCatalogDetails.GameMode selectedGameMode() {
+        @Nullable Object selected = playerGameModeBox.getSelectedItem();
+        if (selected instanceof WorldCatalogDetails.GameMode gameMode) {
+            return gameMode;
+        }
+        throw new IllegalArgumentException(i18n("world.info.player.game_type"));
+    }
+
+    /// Parses one required finite float from an enabled player field.
+    ///
+    /// @param field source field
+    /// @return parsed finite value
+    private static float parseFloat(JTextField field) {
+        try {
+            float value = Float.parseFloat(Objects.requireNonNull(field, "field").getText().trim());
+            if (!Float.isFinite(value)) {
+                throw new NumberFormatException("Non-finite value");
+            }
+            return value;
+        } catch (NumberFormatException failure) {
+            throw new IllegalArgumentException(i18n("input.number"), failure);
+        }
+    }
+
+    /// Parses one required integer from an enabled player field.
+    ///
+    /// @param field source field
+    /// @return parsed integer
+    private static int parseInteger(JTextField field) {
+        try {
+            return Integer.parseInt(Objects.requireNonNull(field, "field").getText().trim());
+        } catch (NumberFormatException failure) {
+            throw new IllegalArgumentException(i18n("input.number"), failure);
+        }
+    }
+
+    /// Chooses and submits one exact 64-by-64 PNG world icon.
+    private void chooseWorldIcon() {
+        @Nullable WorldCatalogItem selected = mutableDetailsSelection();
+        if (selected == null) {
+            return;
+        }
+        @Nullable Path source;
+        try {
+            source = interactions.chooseWorldIcon(this, selected);
+        } catch (RuntimeException failure) {
+            showFailure(failure);
+            return;
+        }
+        if (source != null) {
+            observeFailure(model.replaceWorldIcon(selected, source));
+        }
+    }
+
+    /// Removes the current selected world's custom icon through the serialized model.
+    private void resetWorldIcon() {
+        @Nullable WorldCatalogItem selected = mutableDetailsSelection();
+        if (selected != null
+                && Objects.requireNonNull(selected.details()).hasIcon()) {
+            observeFailure(model.resetWorldIcon(selected));
+        }
+    }
+
+    /// Opens the selected world's exact level-data source without a generic file chooser.
+    private void editSelectedLevelData() {
+        @Nullable WorldCatalogItem selected = mutableDetailsSelection();
+        if (selected != null) {
+            try {
+                interactions.openLevelData(
+                        this,
+                        Objects.requireNonNull(selected.details()).levelDataPath());
+            } catch (RuntimeException failure) {
+                showFailure(failure);
+            }
+        }
+    }
+
+    /// Copies the exact selected seed without exposing it through the model or persistent state.
+    private void copySelectedSeed() {
+        @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
+        @Nullable WorldCatalogDetails details = selected == null ? null : selected.details();
+        if (closed.get() || details == null || details.seed() == null) {
+            return;
+        }
+        try {
+            interactions.copyText(this, Long.toString(Objects.requireNonNull(details.seed())));
+        } catch (RuntimeException failure) {
+            showFailure(failure);
+        }
+    }
+
+    /// Returns one exact selected row only while detail writes are currently safe to submit.
+    ///
+    /// @return editable selected row, or `null`
+    private @Nullable WorldCatalogItem mutableDetailsSelection() {
+        @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
+        if (closed.get()
+                || quickPlayOperationText != null
+                || displayedSnapshot.operationPending()
+                || !displayedSnapshot.listEnabled()
+                || selected == null
+                || !selected.readable()
+                || selected.locked()
+                || selected.details() == null) {
+            return null;
+        }
+        return selected;
+    }
+
+    /// Displays the compatible restored Chunk Base commands beside their compact toolbar button.
+    private void showChunkBaseMenu() {
+        @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
+        if (selected == null || !selected.readable() || !ChunkBaseWorldTools.supports(selected)) {
+            return;
+        }
+        JPopupMenu menu = new JPopupMenu();
+        addChunkBaseMenuItem(menu, "worldsChunkBaseSeedMap", "world.chunkbase.seed_map", ChunkBaseTool.SEED_MAP);
+        addChunkBaseMenuItem(menu, "worldsChunkBaseStronghold", "world.chunkbase.stronghold", ChunkBaseTool.STRONGHOLD);
+        addChunkBaseMenuItem(
+                menu,
+                "worldsChunkBaseNetherFortress",
+                "world.chunkbase.nether_fortress",
+                ChunkBaseTool.NETHER_FORTRESS);
+        if (ChunkBaseWorldTools.supportsEndCity(selected)) {
+            addChunkBaseMenuItem(menu, "worldsChunkBaseEndCity", "world.chunkbase.end_city", ChunkBaseTool.END_CITY);
+        }
+        menu.show(chunkBaseButton, 0, chunkBaseButton.getHeight());
+    }
+
+    /// Adds one localized Chunk Base destination to the current popup menu.
+    ///
+    /// @param menu target popup menu
+    /// @param name deterministic component name
+    /// @param labelKey existing localization key
+    /// @param tool destination represented by the item
+    private void addChunkBaseMenuItem(
+            JPopupMenu menu,
+            String name,
+            String labelKey,
+            ChunkBaseTool tool) {
+        JMenuItem item = new JMenuItem(i18n(Objects.requireNonNull(labelKey, "labelKey")));
+        item.setName(Objects.requireNonNull(name, "name"));
+        item.addActionListener(event -> openChunkBase(tool));
+        Objects.requireNonNull(menu, "menu").add(item);
+    }
+
+    /// Reopens the selected world and observes the asynchronous browser operation.
+    ///
+    /// @param tool selected Chunk Base destination
+    private void openChunkBase(ChunkBaseTool tool) {
+        @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
+        if (selected != null && selected.readable() && ChunkBaseWorldTools.supports(selected)) {
+            observeFailure(interactions.openChunkBase(selected, Objects.requireNonNull(tool, "tool")));
         }
     }
 
@@ -887,14 +1512,32 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         choiceList.close();
         model.close();
         refreshButton.setEnabled(false);
+        showAllCheckBox.setEnabled(false);
         importButton.setEnabled(false);
         openSavesButton.setEnabled(false);
         openWorldButton.setEnabled(false);
         quickPlayButton.setEnabled(false);
         launchScriptButton.setEnabled(false);
+        chunkBaseButton.setEnabled(false);
         copyButton.setEnabled(false);
         exportButton.setEnabled(false);
         deleteButton.setEnabled(false);
+        worldNameField.setEnabled(false);
+        seedValue.setEnabled(false);
+        changeIconButton.setEnabled(false);
+        resetIconButton.setEnabled(false);
+        allowCheatsCheckBox.setEnabled(false);
+        generateStructuresCheckBox.setEnabled(false);
+        difficultyBox.setEnabled(false);
+        difficultyLockedCheckBox.setEnabled(false);
+        playerGameModeBox.setEnabled(false);
+        playerHealthField.setEnabled(false);
+        playerFoodLevelField.setEnabled(false);
+        playerFoodSaturationField.setEnabled(false);
+        playerXpLevelField.setEnabled(false);
+        saveDetailsButton.setEnabled(false);
+        editLevelDataButton.setEnabled(false);
+        interactions.close();
         removeAll();
     }
 

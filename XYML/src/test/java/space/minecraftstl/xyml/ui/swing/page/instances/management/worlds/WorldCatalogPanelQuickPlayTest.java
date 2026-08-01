@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -32,10 +33,14 @@ import space.minecraftstl.xyml.util.platform.ManagedProcess;
 
 import javax.imageio.ImageIO;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
+import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
@@ -43,6 +48,7 @@ import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.lang.reflect.Proxy;
@@ -117,10 +123,18 @@ final class WorldCatalogPanelQuickPlayTest {
 
             JButton quickPlay = findNamed(panel, "worldsQuickPlay", JButton.class);
             JButton launchScript = findNamed(panel, "worldsLaunchScript", JButton.class);
+            JButton chunkBase = findNamed(panel, "worldsChunkBase", JButton.class);
+            JCheckBox showAll = findNamed(panel, "worldsShowAll", JCheckBox.class);
             JLabel directory = findNamed(panel, "worldsDirectory", JLabel.class);
             JLabel path = findNamed(panel, "worldsPath", JLabel.class);
             assertNotNull(quickPlay.getIcon());
             assertNotNull(launchScript.getIcon());
+            assertNotNull(chunkBase.getIcon());
+            assertTrue(chunkBase.isEnabled());
+            assertTrue(showAll.isVisible());
+            assertFalse(showAll.isSelected());
+            showAll.doClick();
+            assertTrue(model.showAll());
             assertEquals("World Folder", directory.getText());
             assertEquals(worldPath.toString(), path.getText());
             assertTrue(directory.getWidth() > 50, directory.getBounds().toString());
@@ -210,12 +224,11 @@ final class WorldCatalogPanelQuickPlayTest {
                     new RecordingInteractions(Path.of("build", "compact-world.bat")),
                     WorldQuickPlayActions.unavailable());
             panelReference.set(panel);
-            panel.setSize(720, 520);
+            panel.setSize(720, 980);
             layoutRecursively(panel);
             JScrollPane scroll = findNamed(panel, "worldsDetailsScroll", JScrollPane.class);
-            assertTrue(
-                    scroll.getVerticalScrollBar().getMaximum()
-                            <= scroll.getVerticalScrollBar().getVisibleAmount());
+            int largeMaximum = scroll.getVerticalScrollBar().getMaximum();
+            int largeVisibleAmount = scroll.getVerticalScrollBar().getVisibleAmount();
 
             panel.setSize(720, 280);
             panel.invalidate();
@@ -226,9 +239,12 @@ final class WorldCatalogPanelQuickPlayTest {
             assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER, scroll.getHorizontalScrollBarPolicy());
             assertFalse(scroll.isOpaque());
             assertFalse(scroll.getViewport().isOpaque());
+            int compactVisibleAmount = scroll.getVerticalScrollBar().getVisibleAmount();
+            assertTrue(scroll.getVerticalScrollBar().getMaximum() >= largeMaximum);
+            assertTrue(compactVisibleAmount < largeVisibleAmount);
             assertTrue(
                     scroll.getVerticalScrollBar().getMaximum()
-                            > scroll.getVerticalScrollBar().getVisibleAmount());
+                            > compactVisibleAmount);
 
             int bottom = scroll.getVerticalScrollBar().getMaximum()
                     - scroll.getVerticalScrollBar().getVisibleAmount();
@@ -240,15 +256,143 @@ final class WorldCatalogPanelQuickPlayTest {
             assertTrue(scroll.getViewport().getViewRect().intersects(deleteBounds));
             assertTrue(panel.choiceList().getViewport().getExtentSize().height > 0);
 
-            panel.setSize(720, 520);
+            panel.setSize(720, 980);
             panel.invalidate();
             layoutRecursively(panel);
-            assertTrue(
-                    scroll.getVerticalScrollBar().getMaximum()
-                            <= scroll.getVerticalScrollBar().getVisibleAmount());
+            assertTrue(scroll.getVerticalScrollBar().getVisibleAmount() > compactVisibleAmount);
             panel.close();
         });
         assertNotNull(panelReference.get());
+    }
+
+    /// Restored detail controls submit one complete update and target the exact world level data.
+    @Test
+    void editsWorldDetailsIconAndExactLevelDataPath() throws IOException {
+        Path worldPath = Path.of("build", "test-worlds", "editable-world").toAbsolutePath().normalize();
+        WorldCatalogDetails details = new WorldCatalogDetails(
+                worldPath.resolve("level.dat"),
+                encodedIcon(),
+                123456L,
+                "(10, 70, -5)",
+                24_000L,
+                new WorldCatalogDetails.WorldSettings(
+                        false,
+                        true,
+                        WorldCatalogDetails.Difficulty.NORMAL,
+                        false),
+                new WorldCatalogDetails.PlayerSummary(
+                        "(1.00, 65.00, 2.00)",
+                        "(3, 40, 4)",
+                        "(5, 70, 6)",
+                        WorldCatalogDetails.GameMode.SURVIVAL,
+                        20.0F,
+                        18,
+                        4.0F,
+                        7));
+        WorldCatalogItem world = new WorldCatalogItem(
+                worldPath,
+                "editable-world",
+                "Editable World",
+                1L,
+                "1.21.1",
+                false,
+                null,
+                details);
+        ImmediateWorldCatalogModel model = new ImmediateWorldCatalogModel(world);
+        RecordingInteractions interactions = new RecordingInteractions(Path.of("build", "unused.bat"));
+
+        EdtDispatcher.executeAndWait(() -> {
+            WorldCatalogPanel panel = new WorldCatalogPanel(
+                    model,
+                    WorldCatalogStrings.english(),
+                    interactions,
+                    WorldQuickPlayActions.unavailable());
+            panel.setSize(900, 980);
+            layoutRecursively(panel);
+            panel.choiceList().setSize(new Dimension(320, 180));
+            panel.choiceList().doLayout();
+            panel.choiceList().getViewport().setExtentSize(new Dimension(320, 180));
+            panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(0);
+
+            JPasswordField seed = findNamed(panel, "worldsSeed", JPasswordField.class);
+            assertEquals("123456", new String(seed.getPassword()));
+            assertTrue(seed.getEchoChar() != 0);
+            assertEquals("showRevealButton: true", seed.getClientProperty(FlatClientProperties.STYLE));
+            assertEquals("(10, 70, -5)", findNamed(panel, "worldsSpawn", JLabel.class).getText());
+            assertNotNull(findNamed(panel, "worldsIcon", JLabel.class).getIcon());
+            JTextField name = findNamed(panel, "worldsWorldName", JTextField.class);
+            JCheckBox cheats = findNamed(panel, "worldsAllowCheats", JCheckBox.class);
+            JCheckBox structures = findNamed(panel, "worldsGenerateStructures", JCheckBox.class);
+            JComboBox<?> difficulty = findNamed(panel, "worldsDifficulty", JComboBox.class);
+            JCheckBox difficultyLocked = findNamed(panel, "worldsDifficultyLocked", JCheckBox.class);
+            JComboBox<?> gameMode = findNamed(panel, "worldsPlayerGameMode", JComboBox.class);
+            JTextField health = findNamed(panel, "worldsPlayerHealth", JTextField.class);
+            JTextField food = findNamed(panel, "worldsPlayerFoodLevel", JTextField.class);
+            JTextField saturation = findNamed(panel, "worldsPlayerFoodSaturation", JTextField.class);
+            JTextField xp = findNamed(panel, "worldsPlayerXpLevel", JTextField.class);
+            assertTrue(name.isEnabled());
+            assertTrue(health.isEnabled());
+            seed.dispatchEvent(new MouseEvent(
+                    seed,
+                    MouseEvent.MOUSE_CLICKED,
+                    1L,
+                    0,
+                    1,
+                    1,
+                    2,
+                    false,
+                    MouseEvent.BUTTON1));
+            assertEquals("123456", interactions.copiedText());
+
+            name.setText("Renamed World");
+            cheats.setSelected(true);
+            structures.setSelected(false);
+            difficulty.setSelectedItem(WorldCatalogDetails.Difficulty.HARD);
+            difficultyLocked.setSelected(true);
+            gameMode.setSelectedItem(WorldCatalogDetails.GameMode.CREATIVE);
+            health.setText("16.5");
+            food.setText("12");
+            saturation.setText("2.5");
+            xp.setText("19");
+            findNamed(panel, "worldsSaveDetails", JButton.class).doClick();
+
+            WorldDetailsUpdate update = Objects.requireNonNull(model.detailsUpdate());
+            assertEquals(world, model.updatedWorld());
+            assertEquals("Renamed World", update.worldName());
+            assertEquals(Boolean.TRUE, update.settings().allowCheats());
+            assertEquals(Boolean.FALSE, update.settings().generateStructures());
+            assertEquals(WorldCatalogDetails.Difficulty.HARD, update.settings().difficulty());
+            assertEquals(Boolean.TRUE, update.settings().difficultyLocked());
+            WorldDetailsUpdate.PlayerUpdate player = Objects.requireNonNull(update.player());
+            assertEquals(WorldCatalogDetails.GameMode.CREATIVE, player.gameMode());
+            assertEquals(16.5F, player.health());
+            assertEquals(12, player.foodLevel());
+            assertEquals(2.5F, player.foodSaturation());
+            assertEquals(19, player.xpLevel());
+
+            findNamed(panel, "worldsChangeIcon", JButton.class).doClick();
+            assertEquals(world, model.iconWorld());
+            assertEquals(interactions.iconSource(), model.iconSource());
+            findNamed(panel, "worldsResetIcon", JButton.class).doClick();
+            assertEquals(world, model.resetIconWorld());
+            findNamed(panel, "worldsEditLevelData", JButton.class).doClick();
+            assertEquals(details.levelDataPath(), interactions.openedLevelData());
+            panel.close();
+        });
+
+        assertTrue(interactions.closed());
+    }
+
+    /// Encodes one deterministic 64-by-64 icon for the immutable UI fixture.
+    ///
+    /// @return Base64 PNG text
+    private static String encodedIcon() throws IOException {
+        BufferedImage image = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB);
+        image.setRGB(2, 3, 0xFF2468AC);
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        assertTrue(ImageIO.write(image, "PNG", output));
+        return java.util.Base64.getEncoder().encodeToString(output.toByteArray());
     }
 
     /// Creates the minimal launch session proxy used by the panel's completion observer.
@@ -392,11 +536,53 @@ final class WorldCatalogPanelQuickPlayTest {
                 true,
                 false);
 
+        /// Mutable Show All state used to verify panel-to-model wiring.
+        private boolean showAll;
+
+        /// World most recently submitted for detail editing.
+        private @Nullable WorldCatalogItem updatedWorld;
+
+        /// Detail values most recently submitted.
+        private @Nullable WorldDetailsUpdate detailsUpdate;
+
+        /// World most recently submitted for icon replacement.
+        private @Nullable WorldCatalogItem iconWorld;
+
+        /// Icon source most recently submitted.
+        private @Nullable Path iconSource;
+
+        /// World most recently submitted for icon reset.
+        private @Nullable WorldCatalogItem resetIconWorld;
+
         /// Creates one immediate model.
         ///
         /// @param world exact world row
         private ImmediateWorldCatalogModel(WorldCatalogItem world) {
             this.world = Objects.requireNonNull(world, "world");
+        }
+
+        /// Exposes version filtering so the production checkbox is visible in the fixture.
+        ///
+        /// @return true
+        @Override
+        public boolean supportsVersionFiltering() {
+            return true;
+        }
+
+        /// Returns the state last selected through the panel checkbox.
+        ///
+        /// @return current Show All state
+        @Override
+        public boolean showAll() {
+            return showAll;
+        }
+
+        /// Records the state selected through the panel checkbox.
+        ///
+        /// @param replacement whether every world should be visible
+        @Override
+        public void setShowAll(boolean replacement) {
+            showAll = replacement;
         }
 
         /// Returns the stable ready snapshot.
@@ -446,6 +632,33 @@ final class WorldCatalogPanelQuickPlayTest {
             return CompletableFuture.failedFuture(new UnsupportedOperationException());
         }
 
+        /// Records one immediate detail update.
+        @Override
+        public CompletionStage<WorldCatalogSnapshot> updateWorldDetails(
+                WorldCatalogItem selectedWorld,
+                WorldDetailsUpdate update) {
+            updatedWorld = Objects.requireNonNull(selectedWorld, "selectedWorld");
+            detailsUpdate = Objects.requireNonNull(update, "update");
+            return CompletableFuture.completedFuture(snapshot);
+        }
+
+        /// Records one immediate icon replacement.
+        @Override
+        public CompletionStage<WorldCatalogSnapshot> replaceWorldIcon(
+                WorldCatalogItem selectedWorld,
+                Path source) {
+            iconWorld = Objects.requireNonNull(selectedWorld, "selectedWorld");
+            iconSource = Objects.requireNonNull(source, "source").toAbsolutePath().normalize();
+            return CompletableFuture.completedFuture(snapshot);
+        }
+
+        /// Records one immediate icon reset.
+        @Override
+        public CompletionStage<WorldCatalogSnapshot> resetWorldIcon(WorldCatalogItem selectedWorld) {
+            resetIconWorld = Objects.requireNonNull(selectedWorld, "selectedWorld");
+            return CompletableFuture.completedFuture(snapshot);
+        }
+
         /// Returns the exact one-row count.
         @Override
         public OptionalInt exactItemCount() {
@@ -472,6 +685,41 @@ final class WorldCatalogPanelQuickPlayTest {
         @Override
         public void close() {
         }
+
+        /// Returns the most recently detail-edited world.
+        ///
+        /// @return edited world, or null before editing
+        private @Nullable WorldCatalogItem updatedWorld() {
+            return updatedWorld;
+        }
+
+        /// Returns the most recently submitted detail values.
+        ///
+        /// @return detail update, or null before editing
+        private @Nullable WorldDetailsUpdate detailsUpdate() {
+            return detailsUpdate;
+        }
+
+        /// Returns the most recently icon-edited world.
+        ///
+        /// @return icon world, or null before replacement
+        private @Nullable WorldCatalogItem iconWorld() {
+            return iconWorld;
+        }
+
+        /// Returns the most recently submitted icon source.
+        ///
+        /// @return icon source, or null before replacement
+        private @Nullable Path iconSource() {
+            return iconSource;
+        }
+
+        /// Returns the most recently icon-reset world.
+        ///
+        /// @return reset world, or null before reset
+        private @Nullable WorldCatalogItem resetIconWorld() {
+            return resetIconWorld;
+        }
     }
 
     /// Records script chooser feedback while avoiding native dialogs and desktop calls.
@@ -485,6 +733,20 @@ final class WorldCatalogPanelQuickPlayTest {
 
         /// Reported failure detail, or null without failure.
         private @Nullable String failure;
+
+        /// Deterministic world-icon source returned by the chooser.
+        private final Path iconSource = Path.of("build", "selected-world-icon.png")
+                .toAbsolutePath()
+                .normalize();
+
+        /// Exact level-data path most recently opened.
+        private @Nullable Path openedLevelData;
+
+        /// Exact world-detail text most recently copied.
+        private @Nullable String copiedText;
+
+        /// Whether panel closure released this interaction boundary.
+        private boolean closed;
 
         /// Creates one recording interaction boundary.
         ///
@@ -523,6 +785,26 @@ final class WorldCatalogPanelQuickPlayTest {
             return null;
         }
 
+        /// Returns the deterministic selected icon path.
+        @Override
+        public @Nullable Path chooseWorldIcon(Component owner, WorldCatalogItem world) {
+            return iconSource;
+        }
+
+        /// Records the exact direct world level-data path.
+        @Override
+        public void openLevelData(Component owner, Path levelDataPath) {
+            openedLevelData = Objects.requireNonNull(levelDataPath, "levelDataPath")
+                    .toAbsolutePath()
+                    .normalize();
+        }
+
+        /// Records exact copied world-detail text.
+        @Override
+        public void copyText(Component owner, String text) {
+            copiedText = Objects.requireNonNull(text, "text");
+        }
+
         /// Returns the configured local script destination.
         @Override
         public @Nullable Path chooseLaunchScriptDestination(Component owner, WorldCatalogItem world) {
@@ -541,10 +823,26 @@ final class WorldCatalogPanelQuickPlayTest {
             return CompletableFuture.completedFuture(null);
         }
 
+        /// Completes an unused Chunk Base request immediately.
+        ///
+        /// @param world selected world
+        /// @param tool selected destination
+        /// @return completed nullable-void stage
+        @Override
+        public CompletionStage<@Nullable Void> openChunkBase(WorldCatalogItem world, ChunkBaseTool tool) {
+            return CompletableFuture.completedFuture(null);
+        }
+
         /// Records unexpected visible failures.
         @Override
         public void showFailure(Component owner, String title, String detail) {
             failure = Objects.requireNonNull(detail, "detail");
+        }
+
+        /// Records release of the panel-owned interaction boundary.
+        @Override
+        public void close() {
+            closed = true;
         }
 
         /// Returns the successfully reported script path.
@@ -559,6 +857,34 @@ final class WorldCatalogPanelQuickPlayTest {
         /// @return failure detail, or null without failure
         private @Nullable String failure() {
             return failure;
+        }
+
+        /// Returns the deterministic icon source.
+        ///
+        /// @return normalized icon source
+        private Path iconSource() {
+            return iconSource;
+        }
+
+        /// Returns the exact opened level-data path.
+        ///
+        /// @return opened path, or null before editing
+        private @Nullable Path openedLevelData() {
+            return openedLevelData;
+        }
+
+        /// Returns the exact copied world-detail text.
+        ///
+        /// @return copied text, or null before copying
+        private @Nullable String copiedText() {
+            return copiedText;
+        }
+
+        /// Returns whether panel closure released the boundary.
+        ///
+        /// @return closure state
+        private boolean closed() {
+            return closed;
         }
     }
 }
