@@ -99,6 +99,7 @@ public final class DefaultModCatalogModelTest {
         executor.runNext();
         model.setSearchQuery("fabric-api");
         assertEquals(1, model.exactItemCount().orElseThrow());
+        assertEquals(List.of("fabric-api"), model.filteredLocalKeys());
         assertEquals(1, access.refreshCount());
 
         model.setFilter(ModCatalogFilter.DISABLED);
@@ -107,6 +108,40 @@ public final class DefaultModCatalogModelTest {
         assertEquals(1, model.exactItemCount().orElseThrow());
         assertEquals(ModCatalogFilter.DISABLED, model.snapshot().filter());
         assertEquals(1, access.refreshCount());
+        model.close();
+    }
+
+    /// Verifies that stable-key batches use one serialized mutation and one refreshed index each.
+    @Test
+    public void mutatesStableKeyBatchesWithSingleAccessRoundTrips() {
+        ManualExecutor executor = new ManualExecutor();
+        FakeAccess access = new FakeAccess(entries(4));
+        DefaultModCatalogModel model = new DefaultModCatalogModel(access, executor, STATUS_STRINGS);
+        model.loadIfNeeded();
+        executor.runNext();
+        assertEquals(List.of("mod-0", "mod-1", "mod-2", "mod-3"), model.filteredLocalKeys());
+
+        CompletionStage<ModCatalogSnapshot> disabled = model.setModsEnabled(
+                List.of("mod-0", "mod-2"),
+                false);
+        assertEquals(ModCatalogWriteStatus.BUSY, model.snapshot().writeStatus());
+        executor.runNext();
+        assertEquals(ModCatalogWriteStatus.IDLE, disabled.toCompletableFuture().join().writeStatus());
+        ModCatalogMutation.EnabledBatch enabledBatch = assertInstanceOf(
+                ModCatalogMutation.EnabledBatch.class,
+                access.mutations().get(0));
+        assertEquals(List.of("mod-0", "mod-2"), enabledBatch.localKeys());
+        assertFalse(enabledBatch.enabled());
+
+        CompletionStage<ModCatalogSnapshot> deleted = model.deleteMods(List.of("mod-1", "mod-3"));
+        executor.runNext();
+        assertEquals(2, deleted.toCompletableFuture().join().itemCount().orElseThrow());
+        ModCatalogMutation.DeleteBatch deleteBatch = assertInstanceOf(
+                ModCatalogMutation.DeleteBatch.class,
+                access.mutations().get(1));
+        assertEquals(List.of("mod-1", "mod-3"), deleteBatch.localKeys());
+        assertEquals(List.of("mod-0", "mod-2"), model.filteredLocalKeys());
+        assertEquals(2, access.mutations().size());
         model.close();
     }
 
@@ -295,6 +330,17 @@ public final class DefaultModCatalogModelTest {
                                 current.loaderType()));
                     }
                 }
+            } else if (mutation instanceof ModCatalogMutation.EnabledBatch enabledBatch) {
+                for (int index = 0; index < replacement.size(); index++) {
+                    ModCatalogEntry current = replacement.get(index);
+                    if (enabledBatch.localKeys().contains(current.localKey())) {
+                        replacement.set(index, entry(
+                                current.localKey(),
+                                current.name(),
+                                enabledBatch.enabled(),
+                                current.loaderType()));
+                    }
+                }
             } else if (mutation instanceof ModCatalogMutation.Import importMutation) {
                 for (Path source : importMutation.sources()) {
                     String fileName = source.getFileName().toString();
@@ -303,6 +349,8 @@ public final class DefaultModCatalogModelTest {
                 }
             } else if (mutation instanceof ModCatalogMutation.Delete deleteMutation) {
                 replacement.removeIf(entry -> entry.localKey().equals(deleteMutation.localKey()));
+            } else if (mutation instanceof ModCatalogMutation.DeleteBatch deleteBatch) {
+                replacement.removeIf(entry -> deleteBatch.localKeys().contains(entry.localKey()));
             }
             entries = List.copyOf(replacement);
             return new ModCatalogMutationResult(new ModCatalogIndex(entries), null);

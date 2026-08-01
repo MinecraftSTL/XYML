@@ -111,8 +111,12 @@ final class ModManagerCatalogAccess implements ModCatalogAccess {
             importMods(importMutation.sources(), cancellation);
         } else if (mutation instanceof ModCatalogMutation.Enabled enabledMutation) {
             setEnabled(enabledMutation.localKey(), enabledMutation.enabled());
+        } else if (mutation instanceof ModCatalogMutation.EnabledBatch enabledBatch) {
+            setEnabled(enabledBatch.localKeys(), enabledBatch.enabled(), cancellation);
         } else if (mutation instanceof ModCatalogMutation.Delete deleteMutation) {
             manager.removeMods(findCurrent(deleteMutation.localKey()));
+        } else if (mutation instanceof ModCatalogMutation.DeleteBatch deleteBatch) {
+            deleteMods(deleteBatch.localKeys(), cancellation);
         } else {
             throw new IllegalArgumentException("Unsupported Mod mutation " + mutation.getClass().getName());
         }
@@ -163,6 +167,32 @@ final class ModManagerCatalogAccess implements ModCatalogAccess {
     /// @throws IOException when the rename fails
     private void setEnabled(String localKey, boolean enabled) throws IOException {
         LocalModFile target = findCurrent(localKey);
+        setEnabled(target, enabled);
+    }
+
+    /// Preflights every stable key before applying one enabled state to the batch.
+    ///
+    /// @param localKeys immutable rename-stable target keys
+    /// @param enabled desired suffix state
+    /// @param cancellation cooperative cancellation before each irreversible rename
+    /// @throws IOException when current index access or a rename fails
+    private void setEnabled(
+            @Unmodifiable List<String> localKeys,
+            boolean enabled,
+            LoadCancellation cancellation) throws IOException {
+        @Unmodifiable List<LocalModFile> targets = findCurrent(localKeys);
+        for (LocalModFile target : targets) {
+            requireNotCancelled(cancellation);
+            setEnabled(target, enabled);
+        }
+    }
+
+    /// Enables or disables one already resolved current Core object.
+    ///
+    /// @param target exact current Core file
+    /// @param enabled desired suffix state
+    /// @throws IOException when the rename fails
+    private void setEnabled(LocalModFile target, boolean enabled) throws IOException {
         Path path = target.getFile();
         boolean currentlyEnabled = !manager.isDisabled(path);
         if (enabled == currentlyEnabled) {
@@ -173,6 +203,19 @@ final class ModManagerCatalogAccess implements ModCatalogAccess {
         } else {
             manager.disableMod(path);
         }
+    }
+
+    /// Preflights and deletes one stable-key batch through Core's existing batch operation.
+    ///
+    /// @param localKeys immutable rename-stable target keys
+    /// @param cancellation cooperative cancellation before irreversible deletion
+    /// @throws IOException when current index access or deletion fails
+    private void deleteMods(
+            @Unmodifiable List<String> localKeys,
+            LoadCancellation cancellation) throws IOException {
+        @Unmodifiable List<LocalModFile> targets = findCurrent(localKeys);
+        requireNotCancelled(cancellation);
+        manager.removeMods(targets.toArray(LocalModFile[]::new));
     }
 
     /// Resolves a mutation target from the manager's current exact index.
@@ -187,6 +230,20 @@ final class ModManagerCatalogAccess implements ModCatalogAccess {
             }
         }
         throw new IllegalArgumentException("Unknown current Mod: " + localKey);
+    }
+
+    /// Resolves every stable key before the first batch mutation starts.
+    ///
+    /// @param localKeys immutable rename-stable target keys
+    /// @return immutable exact current Core files in requested order
+    /// @throws IOException when current index access fails
+    private @Unmodifiable List<LocalModFile> findCurrent(
+            @Unmodifiable List<String> localKeys) throws IOException {
+        List<LocalModFile> targets = new ArrayList<>(localKeys.size());
+        for (String localKey : localKeys) {
+            targets.add(findCurrent(localKey));
+        }
+        return List.copyOf(targets);
     }
 
     /// Rebuilds the complete immutable index from the real Core manager.

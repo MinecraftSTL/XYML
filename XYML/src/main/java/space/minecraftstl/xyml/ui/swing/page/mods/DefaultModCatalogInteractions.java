@@ -41,6 +41,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+
 /// Production Swing dialog, AWT desktop, and NIO implementation for Mod commands.
 ///
 /// Dialogs run on the EDT. Directory creation and every Desktop call run on the caller-owned
@@ -97,6 +99,22 @@ public final class DefaultModCatalogInteractions implements ModCatalogInteractio
                 Objects.requireNonNull(owner, "owner"),
                 message,
                 strings.deleteAction(),
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /// Shows the legacy generic permanent-delete confirmation for a selected batch on the EDT.
+    @Override
+    public boolean confirmDeleteSelected(Component owner, int selectedCount) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(owner, "owner");
+        if (selectedCount <= 0) {
+            throw new IllegalArgumentException("selectedCount must be positive");
+        }
+        return JOptionPane.showConfirmDialog(
+                owner,
+                i18n("button.remove.confirm"),
+                i18n("button.remove"),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
     }

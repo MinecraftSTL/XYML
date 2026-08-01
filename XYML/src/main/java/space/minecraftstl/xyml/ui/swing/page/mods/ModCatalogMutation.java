@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 
@@ -57,6 +58,20 @@ sealed interface ModCatalogMutation {
         }
     }
 
+    /// Changes a non-empty batch of current Mods to one enabled state.
+    ///
+    /// @param localKeys immutable rename-stable target keys
+    /// @param enabled desired state
+    @NotNullByDefault
+    record EnabledBatch(
+            @Unmodifiable List<String> localKeys,
+            boolean enabled) implements ModCatalogMutation {
+        /// Freezes and validates unique target keys before any file mutation starts.
+        public EnabledBatch {
+            localKeys = validatedLocalKeys(localKeys);
+        }
+    }
+
     /// Deletes one current Mod file.
     ///
     /// @param localKey rename-stable target key
@@ -68,5 +83,37 @@ sealed interface ModCatalogMutation {
                 throw new IllegalArgumentException("localKey must not be blank");
             }
         }
+    }
+
+    /// Deletes a non-empty batch of current Mod files.
+    ///
+    /// @param localKeys immutable rename-stable target keys
+    @NotNullByDefault
+    record DeleteBatch(@Unmodifiable List<String> localKeys) implements ModCatalogMutation {
+        /// Freezes and validates unique target keys before any file mutation starts.
+        public DeleteBatch {
+            localKeys = validatedLocalKeys(localKeys);
+        }
+    }
+
+    /// Freezes one non-empty list of unique non-blank rename-stable keys.
+    ///
+    /// @param localKeys candidate target keys
+    /// @return immutable validated target keys
+    private static @Unmodifiable List<String> validatedLocalKeys(
+            @Unmodifiable List<String> localKeys) {
+        @Unmodifiable List<String> captured = Objects.requireNonNull(localKeys, "localKeys").stream()
+                .map(localKey -> Objects.requireNonNull(localKey, "localKeys contains null"))
+                .toList();
+        if (captured.isEmpty()) {
+            throw new IllegalArgumentException("At least one Mod local key is required");
+        }
+        if (captured.stream().anyMatch(String::isBlank)) {
+            throw new IllegalArgumentException("Mod local keys must not be blank");
+        }
+        if (new HashSet<>(captured).size() != captured.size()) {
+            throw new IllegalArgumentException("Mod local keys must be unique");
+        }
+        return captured;
     }
 }
