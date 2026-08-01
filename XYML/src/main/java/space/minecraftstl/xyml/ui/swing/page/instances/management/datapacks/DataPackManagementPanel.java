@@ -21,6 +21,7 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
 import space.minecraftstl.xyml.game.GameRepository;
@@ -39,6 +40,11 @@ import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSplitPane;
+import javax.swing.JTextField;
+import javax.swing.ListSelectionModel;
+import javax.swing.Timer;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import javax.swing.event.ListSelectionEvent;
@@ -106,6 +112,24 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
 
     /// Permanently deletes the selected data-pack row after explicit confirmation.
     private final JButton deleteDataPackButton = new JButton();
+
+    /// Searches selected-world packs by identifier, description, or `regex:` expression.
+    private final JTextField searchDataPacksField = new JTextField();
+
+    /// Clears the current data-pack search without replacing the editable search field.
+    private final JButton clearDataPackSearchButton = new JButton(i18n("button.clear"));
+
+    /// Selects every pack in the current filtered snapshot without materializing every lazy row.
+    private final JButton selectAllDataPacksButton = new JButton(i18n("button.select_all"));
+
+    /// Enables every selected data pack on the background executor.
+    private final JButton enableDataPacksButton = new JButton(i18n("mods.enable"));
+
+    /// Disables every selected data pack on the background executor.
+    private final JButton disableDataPacksButton = new JButton(i18n("mods.disable"));
+
+    /// Debounces search document changes while preserving immediate explicit clearing.
+    private final Timer searchTimer = new Timer(120, event -> applyDataPackSearch());
 
     /// Reacts when a selected world placeholder becomes a loaded viewport row.
     private final ListDataListener worldRowsListener = new ListDataListener() {
@@ -325,12 +349,11 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
                 "dataPacksDelete",
                 "assets/swing/icons/delete.svg",
                 strings.deleteTooltip(),
-                this::deleteSelectedDataPack);
+                this::deleteSelectedDataPacks);
         heading.add(refreshWorldsButton, "w 40!, h 40!");
         heading.add(openSavesButton, "w 40!, h 40!");
         heading.add(importDataPackButton, "w 40!, h 40!");
         heading.add(openDataPacksButton, "w 40!, h 40!");
-        heading.add(deleteDataPackButton, "w 40!, h 40!");
         add(heading, "growx");
 
         worldChoiceList.setName("dataPackWorldChoiceList");
@@ -339,6 +362,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         dataPackChoiceList.setName("dataPackChoiceList");
         dataPackChoiceList.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
         dataPackChoiceList.getList().setName("dataPackList");
+        dataPackChoiceList.getList().setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
 
         JPanel worldsPanel = new JPanel(new BorderLayout(0, 6));
         worldsPanel.setOpaque(false);
@@ -351,7 +375,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         packsPanel.setOpaque(false);
         packsPanel.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 12));
         packsPanel.setMinimumSize(new Dimension(0, 0));
-        packsPanel.add(sectionHeading(strings.dataPacksLabel(), "dataPackListLabel"), BorderLayout.NORTH);
+        packsPanel.add(createDataPackHeader(), BorderLayout.NORTH);
         packsPanel.add(dataPackChoiceList, BorderLayout.CENTER);
 
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, worldsPanel, packsPanel);
@@ -375,6 +399,66 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         add(status, "growx");
     }
 
+    /// Creates the data-pack heading, editable search, clear command, and batch-action toolbar.
+    ///
+    /// @return transparent compact header
+    private JPanel createDataPackHeader() {
+        JPanel header = new JPanel(new MigLayout("insets 0, fillx, wrap 1", "[grow,fill]", "[]2[]"));
+        header.setOpaque(false);
+
+        JPanel search = new JPanel(new MigLayout("insets 0, fillx", "[]8[grow,fill][]", "[]"));
+        search.setOpaque(false);
+        search.add(sectionHeading(strings.dataPacksLabel(), "dataPackListLabel"));
+        searchDataPacksField.setName("dataPacksSearch");
+        searchDataPacksField.setToolTipText(i18n("search"));
+        searchDataPacksField.getAccessibleContext().setAccessibleName(i18n("search"));
+        searchDataPacksField.getDocument().addDocumentListener(new DocumentListener() {
+            /// Restarts filtering after inserted text.
+            @Override
+            public void insertUpdate(DocumentEvent event) {
+                restartDataPackSearch();
+            }
+
+            /// Restarts filtering after removed text.
+            @Override
+            public void removeUpdate(DocumentEvent event) {
+                restartDataPackSearch();
+            }
+
+            /// Restarts filtering after a document attribute change.
+            @Override
+            public void changedUpdate(DocumentEvent event) {
+                restartDataPackSearch();
+            }
+        });
+        searchDataPacksField.addActionListener(event -> {
+            searchTimer.stop();
+            applyDataPackSearch();
+        });
+        clearDataPackSearchButton.setName("dataPacksSearchClear");
+        clearDataPackSearchButton.addActionListener(event -> clearDataPackSearch());
+        search.add(searchDataPacksField, "growx");
+        search.add(clearDataPackSearchButton);
+        header.add(search, "growx");
+
+        JPanel actions = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]8[]8[]8[]8[]", "[]"));
+        actions.setOpaque(false);
+        selectAllDataPacksButton.setName("dataPacksSelectAll");
+        selectAllDataPacksButton.addActionListener(event -> selectAllDataPacks());
+        enableDataPacksButton.setName("dataPacksEnable");
+        enableDataPacksButton.addActionListener(event -> setSelectedDataPacksActive(true));
+        disableDataPacksButton.setName("dataPacksDisable");
+        disableDataPacksButton.addActionListener(event -> setSelectedDataPacksActive(false));
+        actions.add(new JLabel(), "growx");
+        actions.add(selectAllDataPacksButton);
+        actions.add(enableDataPacksButton);
+        actions.add(disableDataPacksButton);
+        actions.add(deleteDataPackButton, "w 40!, h 40!");
+        header.add(actions, "growx");
+        searchTimer.setRepeats(false);
+        return header;
+    }
+
     /// Builds one semantic section heading with a predictable compact text scale.
     ///
     /// @param text visible non-blank heading text
@@ -394,6 +478,38 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
     private String dataPackText(DataPack.Pack dataPack) {
         DataPack.Pack pack = Objects.requireNonNull(dataPack, "dataPack");
         return pack.getId() + " - " + (pack.isActive() ? strings.activeText() : strings.inactiveText());
+    }
+
+    /// Restarts the non-repeating search timer after an editable document transition.
+    private void restartDataPackSearch() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!closed.get()) {
+            searchTimer.restart();
+        }
+    }
+
+    /// Clears the editable search and immediately restores the complete current snapshot.
+    private void clearDataPackSearch() {
+        EdtDispatcher.requireEventDispatchThread();
+        searchDataPacksField.setText("");
+        searchTimer.stop();
+        applyDataPackSearch();
+    }
+
+    /// Applies the current search query to the immutable source without materializing lazy rows.
+    private void applyDataPackSearch() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) {
+            return;
+        }
+        dataPackSource.setSearchQuery(searchDataPacksField.getText());
+        dataPackChoiceList.getList().clearSelection();
+        dataPackChoiceList.reloadData();
+        @Nullable SelectedWorld context = selectedWorld;
+        if (context != null && context.supportsDataPacks()) {
+            dataPackStatusLabel.setText(strings.packsReadyText(dataPackSource.exactItemCount().orElse(0)));
+        }
+        updateActionState();
     }
 
     /// Applies a lazy-world-model transition to the Swing controls on the EDT.
@@ -489,6 +605,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             return;
         }
         selectedWorld = Objects.requireNonNull(loaded, "loaded");
+        resetDataPackSearch();
         dataPackSource.replacePacks(packs);
         dataPackChoiceList.reloadData();
         dataPackStatusLabel.setText(loaded.supportsDataPacks()
@@ -507,6 +624,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
                 return;
             }
             selectedWorld = null;
+            resetDataPackSearch();
             dataPackSource.replacePacks(List.of());
             dataPackChoiceList.reloadData();
             dataPackStatusLabel.setText(strings.unreadableWorldText());
@@ -521,10 +639,19 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         selectedWorldPath = null;
         selectedWorld = null;
         dataPackOperationPending = false;
+        resetDataPackSearch();
         dataPackChoiceList.getList().clearSelection();
         dataPackSource.replacePacks(List.of());
         dataPackChoiceList.reloadData();
         dataPackStatusLabel.setText(strings.selectWorldText());
+    }
+
+    /// Resets search state without recursively applying a transient document event.
+    private void resetDataPackSearch() {
+        EdtDispatcher.requireEventDispatchThread();
+        searchDataPacksField.setText("");
+        searchTimer.stop();
+        dataPackSource.setSearchQuery("");
     }
 
     /// Starts a fresh shallow world-directory index and discards stale selected-world data.
@@ -613,12 +740,69 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         }
     }
 
-    /// Confirms and schedules permanent deletion of the selected loaded DataPack row.
-    private void deleteSelectedDataPack() {
+    /// Selects every row in the current exact filtered snapshot.
+    private void selectAllDataPacks() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (usableSelectedWorld() == null) {
+            return;
+        }
+        int count = dataPackSource.exactItemCount().orElse(0);
+        if (count > 0) {
+            dataPackChoiceList.getList().setSelectionInterval(0, count - 1);
+        }
+    }
+
+    /// Resolves durable selected packs by filtered model index without requiring visible row materialization.
+    ///
+    /// @return immutable selected packs in current filtered order
+    private @Unmodifiable List<DataPack.Pack> selectedDataPacks() {
+        return dataPackSource.selectedPacks(dataPackChoiceList.getList().getSelectedIndices());
+    }
+
+    /// Schedules one requested active-state transition for every selected data pack.
+    ///
+    /// @param active whether selected packs should become active
+    private void setSelectedDataPacksActive(boolean active) {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable SelectedWorld context = usableSelectedWorld();
-        @Nullable DataPack.Pack selected = dataPackChoiceList.getSelectedValue();
-        if (context == null || selected == null) {
+        @Unmodifiable List<DataPack.Pack> selected = selectedDataPacks();
+        if (context == null || selected.isEmpty()) {
+            return;
+        }
+        beginDataPackOperation();
+        try {
+            executor.execute(() -> setDataPacksActiveOnExecutor(context, selected, active));
+        } catch (RuntimeException failure) {
+            finishDataPackOperation(context, failure);
+        }
+    }
+
+    /// Changes selected data-pack states outside the EDT before publishing the refreshed snapshot.
+    ///
+    /// @param context stable selected-world data-pack context
+    /// @param selected immutable selected packs
+    /// @param active requested active state
+    private void setDataPacksActiveOnExecutor(
+            SelectedWorld context,
+            @Unmodifiable List<DataPack.Pack> selected,
+            boolean active) {
+        try {
+            requireBackgroundThread();
+            for (DataPack.Pack pack : selected) {
+                pack.setActive(active);
+            }
+            finishDataPackOperation(context, null);
+        } catch (RuntimeException failure) {
+            finishDataPackOperation(context, failure);
+        }
+    }
+
+    /// Confirms and schedules permanent deletion of all selected loaded data-pack rows.
+    private void deleteSelectedDataPacks() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable SelectedWorld context = usableSelectedWorld();
+        @Unmodifiable List<DataPack.Pack> selected = selectedDataPacks();
+        if (context == null || selected.isEmpty()) {
             return;
         }
         boolean confirmed;
@@ -633,27 +817,31 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         }
         beginDataPackOperation();
         try {
-            executor.execute(() -> deleteDataPackOnExecutor(context, selected));
+            executor.execute(() -> deleteDataPacksOnExecutor(context, selected));
         } catch (RuntimeException failure) {
             finishDataPackOperation(context, failure);
         }
     }
 
-    /// Deletes one selected pack through its owning Core DataPack manager outside the EDT.
+    /// Deletes selected packs through their owning Core data-pack manager outside the EDT.
     ///
     /// @param context stable selected-world data-pack context
-    /// @param selected durable selected pack row
-    private void deleteDataPackOnExecutor(SelectedWorld context, DataPack.Pack selected) {
+    /// @param selected immutable durable selected pack rows
+    private void deleteDataPacksOnExecutor(
+            SelectedWorld context,
+            @Unmodifiable List<DataPack.Pack> selected) {
         try {
             requireBackgroundThread();
-            context.dataPack().deletePack(selected);
+            for (DataPack.Pack pack : selected) {
+                context.dataPack().deletePack(pack);
+            }
             finishDataPackOperation(context, null);
         } catch (IOException | RuntimeException failure) {
             finishDataPackOperation(context, failure);
         }
     }
 
-    /// Marks an import or deletion pending and disables world/pack commands until it completes.
+    /// Marks a data-pack mutation pending and disables world/pack commands until it completes.
     private void beginDataPackOperation() {
         EdtDispatcher.requireEventDispatchThread();
         dataPackOperationPending = true;
@@ -704,19 +892,30 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             importDataPackButton.setEnabled(false);
             openDataPacksButton.setEnabled(false);
             deleteDataPackButton.setEnabled(false);
+            searchDataPacksField.setEnabled(false);
+            clearDataPackSearchButton.setEnabled(false);
+            selectAllDataPacksButton.setEnabled(false);
+            enableDataPacksButton.setEnabled(false);
+            disableDataPacksButton.setEnabled(false);
             worldChoiceList.getList().setEnabled(false);
             dataPackChoiceList.getList().setEnabled(false);
             return;
         }
         boolean usableWorld = usableSelectedWorld() != null;
-        @Nullable DataPack.Pack selectedPack = dataPackChoiceList.getSelectedValue();
+        boolean hasSelection = !selectedDataPacks().isEmpty();
+        int visibleCount = dataPackSource.exactItemCount().orElse(0);
         worldChoiceList.getList().setEnabled(displayedWorldSnapshot.listEnabled() && !dataPackOperationPending);
         dataPackChoiceList.getList().setEnabled(usableWorld);
         refreshWorldsButton.setEnabled(displayedWorldSnapshot.refreshEnabled() && !dataPackOperationPending);
         openSavesButton.setEnabled(!displayedWorldSnapshot.operationPending() && !dataPackOperationPending);
         importDataPackButton.setEnabled(usableWorld);
         openDataPacksButton.setEnabled(usableWorld);
-        deleteDataPackButton.setEnabled(usableWorld && selectedPack != null);
+        searchDataPacksField.setEnabled(usableWorld);
+        clearDataPackSearchButton.setEnabled(usableWorld && !searchDataPacksField.getText().isEmpty());
+        selectAllDataPacksButton.setEnabled(usableWorld && visibleCount > 0);
+        enableDataPacksButton.setEnabled(usableWorld && hasSelection);
+        disableDataPacksButton.setEnabled(usableWorld && hasSelection);
+        deleteDataPackButton.setEnabled(usableWorld && hasSelection);
     }
 
     /// Observes a desktop interaction and shows its failure while the panel remains open.
@@ -778,6 +977,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
 
     /// Releases all listeners and owned model resources on the Swing event-dispatch thread.
     private void closeOnEventDispatchThread() {
+        searchTimer.stop();
         worldSubscription.unsubscribe();
         worldChoiceList.getList().removeListSelectionListener(worldSelectionListener);
         worldChoiceList.getChoiceModel().removeListDataListener(worldRowsListener);
