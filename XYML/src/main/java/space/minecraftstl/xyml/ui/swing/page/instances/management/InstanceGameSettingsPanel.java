@@ -118,25 +118,19 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             inheritedControl("instanceGameSettingsMaximumMemory", new JTextField());
 
     /// Java selection strategy setting.
-    private final InheritedControl<InstanceJavaModeSelector> javaTypeControl = inheritedControl(
-            "instanceGameSettingsJavaMode",
-            new InstanceJavaModeSelector());
+    private final InstanceJavaModeSelector javaModeSelector;
 
     /// Requested Java major version setting.
-    private final InheritedControl<JTextField> javaVersionControl =
-            inheritedControl("instanceGameSettingsJavaVersion", new JTextField());
+    private final JTextField javaVersionField = new JTextField();
 
     /// Custom Java executable path setting.
-    private final InheritedControl<JTextField> javaPathControl =
-            inheritedControl("instanceGameSettingsJavaPath", new JTextField());
+    private final JTextField javaPathField = new JTextField();
 
     /// Editable custom Java executable path and file-selection command.
     private final InstanceJavaPathControls javaPathControls;
 
     /// Persisted detected Java runtime reference setting.
-    private final InheritedControl<JComboBox<DetectedJavaChoice>> detectedJavaControl = inheritedControl(
-            "instanceGameSettingsDetectedJava",
-            new JComboBox<>());
+    private final JComboBox<DetectedJavaChoice> detectedJavaComboBox = new JComboBox<>();
 
     /// Game-window mode setting.
     private final InheritedControl<JComboBox<GameWindowType>> windowTypeControl = inheritedControl(
@@ -459,7 +453,12 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.store = Objects.requireNonNull(store, "store");
-        javaPathControls = new InstanceJavaPathControls(javaPathControl.overrideBox(), javaPathControl.editor());
+        this.presentation = Objects.requireNonNull(presentation, "presentation");
+        javaModeSelector = new InstanceJavaModeSelector(this.presentation == GameSettingsEditorPresentation.INSTANCE);
+        javaVersionField.setName("instanceGameSettingsJavaVersion");
+        javaPathField.setName("instanceGameSettingsJavaPath");
+        detectedJavaComboBox.setName("instanceGameSettingsDetectedJava");
+        javaPathControls = new InstanceJavaPathControls(javaPathField);
         isolationControls = new InstanceIsolationControls(
                 store.forcedRunningDirectory(),
                 runningDirectoryControl.overrideBox(),
@@ -470,7 +469,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 this::saveEditedSnapshot,
                 this::reloadSnapshot);
         this.javaRuntimeService = Objects.requireNonNull(javaRuntimeService, "javaRuntimeService");
-        this.presentation = Objects.requireNonNull(presentation, "presentation");
         this.workingDirectoryChanged = Objects.requireNonNull(
                 workingDirectoryChanged,
                 "workingDirectoryChanged");
@@ -609,7 +607,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         }
 
         JPanel memory = sectionPanel("instanceGameSettingsMemory", i18n("settings.memory"));
-        addControlRow(memory, i18n("settings.memory.auto_allocate"), automaticMemoryControl);
+        addBooleanControlRow(memory, i18n("settings.memory.auto_allocate"), automaticMemoryControl);
         addControlRow(memory, i18n("settings.memory.manual_allocate"), maximumMemoryControl);
         memory.add(new InstanceMemoryAllocationControls(
                 automaticMemoryControl.editor(), maximumMemoryControl.editor()).component(), "skip 1, span 2, growx");
@@ -617,10 +615,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         content.add(new JSeparator(), "growx");
 
         JPanel java = sectionPanel("instanceGameSettingsJava", i18n("settings.game.java_directory"));
-        addControlRow(java, i18n("settings.game.java_directory"), javaTypeControl);
-        addControlRow(java, i18n("settings.game.java_directory.version"), javaVersionControl);
-        javaPathControls.addRow(java, i18n("settings.custom"));
-        addControlRow(java, i18n("settings.game.java_directory.choose"), detectedJavaControl);
+        javaModeSelector.addRows(
+                java,
+                javaVersionField,
+                javaPathControls.component(),
+                detectedJavaComboBox);
         content.add(java, "growx");
         content.add(new JSeparator(), "growx");
 
@@ -662,14 +661,17 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         JPanel content = tabContent("instanceGameSettingsLauncherTab");
         JPanel section = sectionPanel("instanceGameSettingsLauncher", i18n("settings.launcher"));
         addControlRow(section, i18n("settings.advanced.launcher_visible"), launcherVisibilityControl);
-        addControlRow(section, i18n("settings.launcher.allow_auto_agent"), allowAutoAgentControl);
-        addControlRow(
+        addBooleanControlRow(section, i18n("settings.launcher.allow_auto_agent"), allowAutoAgentControl);
+        addBooleanControlRow(
                 section,
                 i18n("settings.launcher.disable_auto_game_options"),
                 disableAutoGameOptionsControl);
-        addControlRow(section, i18n("settings.show_log"), showLogsControl);
-        addControlRow(section, i18n("settings.enable_debug_log_output"), debugLogControl);
-        addControlRow(section, i18n("settings.advanced.dont_check_game_completeness"), notCheckGameControl);
+        addBooleanControlRow(section, i18n("settings.show_log"), showLogsControl);
+        addBooleanControlRow(section, i18n("settings.enable_debug_log_output"), debugLogControl);
+        addBooleanControlRow(
+                section,
+                i18n("settings.advanced.dont_check_game_completeness"),
+                notCheckGameControl);
         content.add(section, "growx");
         return content;
     }
@@ -679,12 +681,12 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private JPanel createJvmSettingsTab() {
         JPanel content = tabContent("instanceGameSettingsJvmTab");
         JPanel section = sectionPanel("instanceGameSettingsJvm", i18n("settings.advanced.jvm"));
-        addControlRow(section, i18n("settings.advanced.no_jvm_args"), noJvmOptionsControl);
-        addControlRow(
+        addBooleanControlRow(section, i18n("settings.advanced.no_jvm_args"), noJvmOptionsControl);
+        addBooleanControlRow(
                 section,
                 i18n("settings.advanced.no_optimizing_jvm_args"),
                 noOptimizingJvmOptionsControl);
-        addControlRow(section, i18n("settings.advanced.dont_check_jvm_validity"), notCheckJvmControl);
+        addBooleanControlRow(section, i18n("settings.advanced.dont_check_jvm_validity"), notCheckJvmControl);
         addTextAreaRow(section, i18n("settings.advanced.jvm_args"), jvmOptionsControl);
         addControlRow(section, i18n("settings.memory.lower_bound"), minimumMemoryControl);
         addControlRow(
@@ -730,14 +732,14 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         JPanel section = sectionPanel(
                 "instanceGameSettingsNativeLibraries",
                 i18n("settings.advanced.natives_settings"));
-        addControlRow(
+        addBooleanControlRow(
                 section,
                 i18n("settings.advanced.natives_directory.custom.enabled"),
                 useCustomNativesControl);
         addControlRow(section, i18n("settings.advanced.natives_directory"), nativesDirectoryControl);
-        addControlRow(section, i18n("settings.advanced.dont_patch_natives"), notPatchNativesControl);
-        addControlRow(section, i18n("settings.advanced.use_native_glfw"), nativeGlfwControl);
-        addControlRow(section, i18n("settings.advanced.use_native_openal"), nativeOpenAlControl);
+        addBooleanControlRow(section, i18n("settings.advanced.dont_patch_natives"), notPatchNativesControl);
+        addBooleanControlRow(section, i18n("settings.advanced.use_native_glfw"), nativeGlfwControl);
+        addBooleanControlRow(section, i18n("settings.advanced.use_native_openal"), nativeOpenAlControl);
         content.add(section, "growx");
         return content;
     }
@@ -761,7 +763,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Configures popup-triggered local Java and renderer choice loading.
     private void configureLazyChoices() {
-        detectedJavaControl.editor().addPopupMenuListener(new PopupOpeningListener(() -> {
+        detectedJavaComboBox.addPopupMenuListener(new PopupOpeningListener(() -> {
             detectedJavaChoicesRequested = true;
             requestDetectedJavaChoices();
             requestJavaRefreshIfNecessary();
@@ -782,7 +784,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         }
         InstanceMemorySelectionController.install(automaticMemoryControl, maximumMemoryControl);
         automaticMemoryControl.editor().addActionListener(event -> updateEditingAvailability());
-        javaTypeControl.editor().addSelectionListener(this::updateEditingAvailability);
+        javaModeSelector.addSelectionListener(this::updateEditingAvailability);
         quickPlayTypeControl.editor().addActionListener(event -> updateEditingAvailability());
         noJvmOptionsControl.editor().addActionListener(event -> updateEditingAvailability());
         graphicsBackendControl.editor().addActionListener(event -> updateEditingAvailability());
@@ -882,18 +884,26 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 "Maximum memory",
                 1,
                 MAXIMUM_MEMORY_MIB);
-        JavaVersionType javaType = javaTypeControl.overrideBox().isSelected()
-                ? javaTypeControl.editor().selectedMode()
+        boolean javaTypeOverridden = !javaModeSelector.isInherited();
+        JavaVersionType javaType = javaTypeOverridden
+                ? javaModeSelector.selectedMode()
                 : current.javaRuntime().type();
-        String javaVersion = editedText(javaVersionControl, current.javaRuntime().customVersion());
-        String javaPath = editedText(javaPathControl, current.javaRuntime().customPath());
-        GameSettings.DetectedJava detectedJava = editedDetectedJava(current.javaRuntime().detectedJava());
-        validateJavaSettings(javaType, javaVersion, javaPath, detectedJava);
-        if (javaType == JavaVersionType.CUSTOM) {
+        String javaVersion = javaTypeOverridden
+                ? javaVersionField.getText().trim()
+                : current.javaRuntime().customVersion();
+        String javaPath = javaTypeOverridden
+                ? javaPathField.getText().trim()
+                : current.javaRuntime().customPath();
+        GameSettings.DetectedJava detectedJava = javaTypeOverridden
+                ? selectedOrStoredDetectedJava()
+                : current.javaRuntime().detectedJava();
+        if (javaTypeOverridden) {
+            validateJavaSettings(javaType, javaVersion, javaPath, detectedJava);
+        }
+        if (javaTypeOverridden && javaType == JavaVersionType.CUSTOM) {
             GameSettingsEditorValidation.validatePath(
-                    javaTypeControl.overrideBox().isSelected()
-                            || javaPathControl.overrideBox().isSelected(),
-                    javaPathControl.editor().getText(),
+                    true,
+                    javaPathField.getText(),
                     "custom Java path");
         }
 
@@ -954,13 +964,19 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                         maximumMemoryControl.overrideBox().isSelected(),
                         maximumMemory),
                 new InstanceGameSettingsSnapshot.JavaRuntimeSettings(
-                        javaTypeControl.overrideBox().isSelected(),
+                        javaTypeOverridden,
                         javaType,
-                        javaVersionControl.overrideBox().isSelected(),
+                        javaTypeOverridden
+                                && (presentation == GameSettingsEditorPresentation.GLOBAL_PRESET
+                                || javaType == JavaVersionType.VERSION),
                         javaVersion,
-                        javaPathControl.overrideBox().isSelected(),
+                        javaTypeOverridden
+                                && (presentation == GameSettingsEditorPresentation.GLOBAL_PRESET
+                                || javaType == JavaVersionType.CUSTOM),
                         javaPath,
-                        detectedJavaControl.overrideBox().isSelected(),
+                        javaTypeOverridden
+                                && (presentation == GameSettingsEditorPresentation.GLOBAL_PRESET
+                                || javaType == JavaVersionType.DETECTED),
                         detectedJava),
                 new InstanceGameSettingsSnapshot.WindowSettings(
                         windowTypeControl.overrideBox().isSelected(),
@@ -1083,21 +1099,18 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     }
 
     /// Validates Java payloads only when the corresponding local setting can affect launch behavior.
-    private void validateJavaSettings(
+    private static void validateJavaSettings(
             JavaVersionType type,
             String version,
             String path,
             GameSettings.DetectedJava detectedJava) {
-        boolean localType = javaTypeControl.overrideBox().isSelected();
-        if ((localType || javaVersionControl.overrideBox().isSelected()) && type == JavaVersionType.VERSION) {
+        if (type == JavaVersionType.VERSION) {
             parseRequiredInteger(version, "Java version", 1, Integer.MAX_VALUE);
         }
-        if ((localType || javaPathControl.overrideBox().isSelected()) && type == JavaVersionType.CUSTOM
-                && path.isBlank()) {
+        if (type == JavaVersionType.CUSTOM && path.isBlank()) {
             throw new IllegalArgumentException("Custom Java path must not be blank");
         }
-        if ((localType || detectedJavaControl.overrideBox().isSelected()) && type == JavaVersionType.DETECTED
-                && detectedJava.isEmpty()) {
+        if (type == JavaVersionType.DETECTED && detectedJava.isEmpty()) {
             throw new IllegalArgumentException("Select a detected Java runtime");
         }
     }
@@ -1174,18 +1187,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 : Objects.requireNonNull(inherited, "inherited");
     }
 
-    /// Returns a detected-Java identity only when its property is locally overridden.
-    ///
-    /// @param inherited current effective inherited identity
-    /// @return local selection or inherited identity
-    private GameSettings.DetectedJava editedDetectedJava(GameSettings.DetectedJava inherited) {
-        if (!detectedJavaControl.overrideBox().isSelected()) {
-            return Objects.requireNonNull(inherited, "inherited");
-        }
-        @Nullable DetectedJavaChoice choice = selectedNullableValue(detectedJavaControl.editor());
-        return choice == null ? inherited : choice.value();
-    }
-
     /// Parses a required integer only when its property is locally overridden.
     ///
     /// @param control inherited integer text control
@@ -1257,18 +1258,15 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                     maximumMemoryControl,
                     snapshot.memory().maximumOverridden(),
                     Integer.toString(snapshot.memory().maximumMiB()));
-            javaTypeControl.overrideBox().setSelected(snapshot.javaRuntime().typeOverridden());
-            javaTypeControl.editor().setSelectedMode(snapshot.javaRuntime().type());
-            applyText(
-                    javaVersionControl,
-                    snapshot.javaRuntime().customVersionOverridden(),
-                    snapshot.javaRuntime().customVersion());
-            applyText(
-                    javaPathControl,
-                    snapshot.javaRuntime().customPathOverridden(),
-                    snapshot.javaRuntime().customPath());
+            javaModeSelector.apply(
+                    snapshot.javaRuntime().typeOverridden()
+                            || snapshot.javaRuntime().customVersionOverridden()
+                            || snapshot.javaRuntime().customPathOverridden()
+                            || snapshot.javaRuntime().detectedJavaOverridden(),
+                    snapshot.javaRuntime().type());
+            javaVersionField.setText(snapshot.javaRuntime().customVersion());
+            javaPathField.setText(snapshot.javaRuntime().customPath());
             applyDetectedJavaSnapshotValue(snapshot.javaRuntime().detectedJava());
-            detectedJavaControl.overrideBox().setSelected(snapshot.javaRuntime().detectedJavaOverridden());
 
             applyChoice(windowTypeControl, snapshot.window().typeOverridden(), snapshot.window().type());
             applyText(
@@ -1431,15 +1429,15 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 && editedBoolean(automaticMemoryControl, snapshot.memory().automatic());
         maximumMemoryControl.editor().setEnabled(
                 maximumMemoryControl.editor().isEnabled() && !automaticMemory);
-        JavaVersionType javaType = snapshot == null || !javaTypeControl.overrideBox().isSelected()
-                ? snapshot == null ? JavaVersionType.AUTO : snapshot.javaRuntime().type()
-                : javaTypeControl.editor().selectedMode();
-        javaVersionControl.editor().setEnabled(
-                javaVersionControl.editor().isEnabled() && javaType == JavaVersionType.VERSION);
-        javaPathControl.editor().setEnabled(javaPathControl.editor().isEnabled() && javaType == JavaVersionType.CUSTOM);
-        javaPathControls.updateAvailability(javaPathControl.editor().isEnabled());
-        detectedJavaControl.editor().setEnabled(
-                detectedJavaControl.editor().isEnabled() && javaType == JavaVersionType.DETECTED);
+        javaModeSelector.setEnabled(writable);
+        boolean localJavaSettings = snapshot != null && !javaModeSelector.isInherited();
+        JavaVersionType javaType = localJavaSettings
+                ? javaModeSelector.selectedMode()
+                : snapshot == null ? JavaVersionType.AUTO : snapshot.javaRuntime().type();
+        javaVersionField.setEnabled(writable && localJavaSettings && javaType == JavaVersionType.VERSION);
+        javaPathField.setEnabled(writable && localJavaSettings && javaType == JavaVersionType.CUSTOM);
+        javaPathControls.updateAvailability(javaPathField.isEnabled());
+        detectedJavaComboBox.setEnabled(writable && localJavaSettings && javaType == JavaVersionType.DETECTED);
 
         GameWindowType windowType = snapshot == null
                 ? GameWindowType.WINDOWED
@@ -1483,7 +1481,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             replaceDetectedJavaChoices(List.of(), desired);
             return;
         }
-        JComboBox<DetectedJavaChoice> comboBox = detectedJavaControl.editor();
+        JComboBox<DetectedJavaChoice> comboBox = detectedJavaComboBox;
         if (!desired.isEmpty() && !containsDetectedJava(comboBox, desired)) {
             comboBox.insertItemAt(new DetectedJavaChoice(desired, desired.version()), 0);
         }
@@ -1564,7 +1562,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         for (DetectedJavaChoice choice : choices) {
             model.addElement(choice);
         }
-        detectedJavaControl.editor().setModel(model);
+        detectedJavaComboBox.setModel(model);
         selectDetectedJava(desired);
     }
 
@@ -1598,7 +1596,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     ///
     /// @return current editor selection or durable effective reference
     private GameSettings.DetectedJava selectedOrStoredDetectedJava() {
-        @Nullable DetectedJavaChoice selected = selectedNullableValue(detectedJavaControl.editor());
+        @Nullable DetectedJavaChoice selected = selectedNullableValue(detectedJavaComboBox);
         if (selected != null) {
             return selected.value();
         }
@@ -1610,7 +1608,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     ///
     /// @param desired desired reference
     private void selectDetectedJava(GameSettings.DetectedJava desired) {
-        JComboBox<DetectedJavaChoice> comboBox = detectedJavaControl.editor();
+        JComboBox<DetectedJavaChoice> comboBox = detectedJavaComboBox;
         for (int index = 0; index < comboBox.getItemCount(); index++) {
             DetectedJavaChoice choice = comboBox.getItemAt(index);
             if (choice.value().equals(desired)) {
@@ -1694,9 +1692,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     ///
     /// @param control inherited control
     private static void updateOverrideTooltip(InheritedControl<? extends JComponent> control) {
-        control.overrideBox().setToolTipText(i18n(control.overrideBox().isSelected()
+        String tooltip = i18n(control.overrideBox().isSelected()
                 ? "settings.game.override_global"
-                : "settings.game.inherit_global"));
+                : "settings.game.inherit_global");
+        control.overrideBox().setToolTipText(tooltip);
+        control.overrideBox().getAccessibleContext().setAccessibleDescription(tooltip);
     }
 
     /// Returns every inherited control in stable UI order.
@@ -1706,10 +1706,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         return List.of(
                 automaticMemoryControl,
                 maximumMemoryControl,
-                javaTypeControl,
-                javaVersionControl,
-                javaPathControl,
-                detectedJavaControl,
                 windowTypeControl,
                 windowWidthControl,
                 windowHeightControl,
@@ -1801,7 +1797,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private static JPanel sectionPanel(String name, String title) {
         JPanel section = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 3",
-                "[26!,center][220!,fill][grow,fill]",
+                "[26!,center][280!,fill][grow,fill]",
                 "[]10[]"));
         section.setName(Objects.requireNonNull(name, "name"));
         section.setOpaque(false);
@@ -1823,7 +1819,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             InheritedControl<? extends JComponent> control) {
         JPanel row = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[26!,center][220!,fill][grow,fill]",
+                "[26!,center][280!,fill][grow,fill]",
                 "[]"));
         row.setName(Objects.requireNonNull(name, "name"));
         row.setOpaque(false);
@@ -1840,9 +1836,32 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             JPanel section,
             String labelText,
             InheritedControl<? extends JComponent> control) {
+        String validatedLabel = Objects.requireNonNull(labelText, "labelText");
         section.add(control.overrideBox(), "aligny center");
-        section.add(new JLabel(Objects.requireNonNull(labelText, "labelText")), "aligny center");
+        JLabel label = new JLabel(validatedLabel);
+        label.setLabelFor(control.editor());
+        label.setName(control.editor().getName() + "Label");
+        control.overrideBox().getAccessibleContext().setAccessibleName(validatedLabel);
+        section.add(label, "aligny center");
         section.add(control.editor(), "growx");
+    }
+
+    /// Adds one inherited boolean editor whose visible text belongs to the value checkbox.
+    ///
+    /// @param section target section
+    /// @param labelText localized field label
+    /// @param control inherited boolean editor
+    private static void addBooleanControlRow(
+            JPanel section,
+            String labelText,
+            InheritedControl<JCheckBox> control) {
+        String validatedLabel = Objects.requireNonNull(labelText, "labelText");
+        JCheckBox editor = control.editor();
+        editor.setText(validatedLabel);
+        editor.getAccessibleContext().setAccessibleName(validatedLabel);
+        control.overrideBox().getAccessibleContext().setAccessibleName(validatedLabel);
+        section.add(control.overrideBox(), "aligny center");
+        section.add(editor, "span 2, growx");
     }
 
     /// Adds one inherited multiline text editor row.
@@ -1854,8 +1873,13 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             JPanel section,
             String labelText,
             InheritedControl<JTextArea> control) {
+        String validatedLabel = Objects.requireNonNull(labelText, "labelText");
         section.add(control.overrideBox(), "aligny top");
-        section.add(new JLabel(Objects.requireNonNull(labelText, "labelText")), "aligny top");
+        JLabel label = new JLabel(validatedLabel);
+        label.setLabelFor(control.editor());
+        label.setName(control.editor().getName() + "Label");
+        control.overrideBox().getAccessibleContext().setAccessibleName(validatedLabel);
+        section.add(label, "aligny top");
         JScrollPane scrollPane = new JScrollPane(control.editor());
         scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
         section.add(scrollPane, "growx, h 88!");
