@@ -31,9 +31,12 @@ import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.ScrollPaneConstants;
@@ -84,6 +87,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// Refreshes only the shallow directory source.
     private final JButton refreshButton = new JButton();
 
+    /// Switches between the legacy current-version filter and every indexed world.
+    private final JCheckBox showAllCheckBox = new JCheckBox(i18n("world.show_all"));
+
     /// Starts ZIP archive selection and Core preflight.
     private final JButton importButton = new JButton();
 
@@ -98,6 +104,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
     /// Generates a standalone script that enters the exact selected world.
     private final JButton launchScriptButton = new JButton();
+
+    /// Opens the restored Chunk Base world-tool menu for compatible selected worlds.
+    private final JButton chunkBaseButton = new JButton();
 
     /// Copies the exact selected readable and unlocked world.
     private final JButton copyButton = new JButton();
@@ -278,13 +287,19 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private JComponent createHeadingBand() {
         JPanel heading = new JPanel(new MigLayout(
                 "insets 12 16 8 16, fillx",
-                "[grow,fill][]8[]8[]",
+                "[grow,fill][]12[]8[]8[]",
                 "[40!]"));
         heading.setOpaque(false);
         JLabel title = new JLabel(strings.title());
         title.setName("worldsPageTitle");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 26.0F));
         heading.add(title, "growx");
+        showAllCheckBox.setName("worldsShowAll");
+        showAllCheckBox.setOpaque(false);
+        showAllCheckBox.setSelected(model.showAll());
+        showAllCheckBox.setVisible(model.supportsVersionFiltering());
+        showAllCheckBox.addActionListener(event -> model.setShowAll(showAllCheckBox.isSelected()));
+        heading.add(showAllCheckBox);
         configureIconButton(
                 refreshButton,
                 "worldsRefresh",
@@ -361,7 +376,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
 
         JPanel actions = new JPanel(new MigLayout(
                 "insets 0, gap 8",
-                "[40!][40!][40!][40!][40!][40!]",
+                "[40!][40!][40!][40!][40!][40!][40!]",
                 "[40!]"));
         actions.setOpaque(false);
         configureIconButton(
@@ -376,6 +391,12 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 "assets/swing/icons/script.svg",
                 strings.launchScriptTooltip(),
                 this::generateSelectedWorldLaunchScript);
+        configureIconButton(
+                chunkBaseButton,
+                "worldsChunkBase",
+                "assets/swing/icons/open-in-new.svg",
+                i18n("world.chunkbase"),
+                this::showChunkBaseMenu);
         configureIconButton(
                 openWorldButton,
                 "worldsOpenSelected",
@@ -402,6 +423,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 this::deleteSelectedWorld);
         actions.add(quickPlayButton, "w 40!, h 40!");
         actions.add(launchScriptButton, "w 40!, h 40!");
+        actions.add(chunkBaseButton, "w 40!, h 40!");
         actions.add(openWorldButton, "w 40!, h 40!");
         actions.add(copyButton, "w 40!, h 40!");
         actions.add(exportButton, "w 40!, h 40!");
@@ -520,6 +542,11 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                     ? snapshot.operationText()
                     : Objects.requireNonNull(quickPlayOperationText));
             refreshButton.setEnabled(snapshot.refreshEnabled() && commandIdle);
+            showAllCheckBox.setSelected(model.showAll());
+            showAllCheckBox.setEnabled(
+                    model.supportsVersionFiltering()
+                            && !snapshot.operationPending()
+                            && commandIdle);
             importButton.setEnabled(
                     snapshot.status() == WorldCatalogStatus.READY
                             && !snapshot.operationPending()
@@ -568,6 +595,9 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         boolean launchableSelection = mutableSelection && quickPlayActions.available();
         quickPlayButton.setEnabled(launchableSelection);
         launchScriptButton.setEnabled(launchableSelection);
+        chunkBaseButton.setEnabled(usableSelection
+                && Objects.requireNonNull(world).readable()
+                && ChunkBaseWorldTools.supports(world));
         copyButton.setEnabled(mutableSelection);
         exportButton.setEnabled(mutableSelection);
         deleteButton.setEnabled(mutableSelection);
@@ -628,6 +658,53 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
         if (selected != null) {
             observeFailure(interactions.openDirectory(selected.path()));
+        }
+    }
+
+    /// Displays the compatible restored Chunk Base commands beside their compact toolbar button.
+    private void showChunkBaseMenu() {
+        @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
+        if (selected == null || !selected.readable() || !ChunkBaseWorldTools.supports(selected)) {
+            return;
+        }
+        JPopupMenu menu = new JPopupMenu();
+        addChunkBaseMenuItem(menu, "worldsChunkBaseSeedMap", "world.chunkbase.seed_map", ChunkBaseTool.SEED_MAP);
+        addChunkBaseMenuItem(menu, "worldsChunkBaseStronghold", "world.chunkbase.stronghold", ChunkBaseTool.STRONGHOLD);
+        addChunkBaseMenuItem(
+                menu,
+                "worldsChunkBaseNetherFortress",
+                "world.chunkbase.nether_fortress",
+                ChunkBaseTool.NETHER_FORTRESS);
+        if (ChunkBaseWorldTools.supportsEndCity(selected)) {
+            addChunkBaseMenuItem(menu, "worldsChunkBaseEndCity", "world.chunkbase.end_city", ChunkBaseTool.END_CITY);
+        }
+        menu.show(chunkBaseButton, 0, chunkBaseButton.getHeight());
+    }
+
+    /// Adds one localized Chunk Base destination to the current popup menu.
+    ///
+    /// @param menu target popup menu
+    /// @param name deterministic component name
+    /// @param labelKey existing localization key
+    /// @param tool destination represented by the item
+    private void addChunkBaseMenuItem(
+            JPopupMenu menu,
+            String name,
+            String labelKey,
+            ChunkBaseTool tool) {
+        JMenuItem item = new JMenuItem(i18n(Objects.requireNonNull(labelKey, "labelKey")));
+        item.setName(Objects.requireNonNull(name, "name"));
+        item.addActionListener(event -> openChunkBase(tool));
+        Objects.requireNonNull(menu, "menu").add(item);
+    }
+
+    /// Reopens the selected world and observes the asynchronous browser operation.
+    ///
+    /// @param tool selected Chunk Base destination
+    private void openChunkBase(ChunkBaseTool tool) {
+        @Nullable WorldCatalogItem selected = choiceList.getSelectedValue();
+        if (selected != null && selected.readable() && ChunkBaseWorldTools.supports(selected)) {
+            observeFailure(interactions.openChunkBase(selected, Objects.requireNonNull(tool, "tool")));
         }
     }
 
@@ -887,11 +964,13 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         choiceList.close();
         model.close();
         refreshButton.setEnabled(false);
+        showAllCheckBox.setEnabled(false);
         importButton.setEnabled(false);
         openSavesButton.setEnabled(false);
         openWorldButton.setEnabled(false);
         quickPlayButton.setEnabled(false);
         launchScriptButton.setEnabled(false);
+        chunkBaseButton.setEnabled(false);
         copyButton.setEnabled(false);
         exportButton.setEnabled(false);
         deleteButton.setEnabled(false);

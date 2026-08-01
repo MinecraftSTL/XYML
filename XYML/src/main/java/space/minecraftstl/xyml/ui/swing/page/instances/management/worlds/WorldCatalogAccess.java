@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 
 /// Blocking Core and filesystem boundary for the lazily materialized world catalog.
 ///
@@ -31,6 +32,15 @@ import java.util.List;
 /// construction belongs exclusively to `loadItem`, which receives the narrow viewport slice.
 @NotNullByDefault
 interface WorldCatalogAccess {
+    /// Resolves the normalized game version belonging to the managed instance.
+    ///
+    /// Sources without an owning instance may retain the empty default.
+    ///
+    /// @return current instance game version, or empty when it cannot be resolved
+    default Optional<String> instanceGameVersion() {
+        return Optional.empty();
+    }
+
     /// Resolves the managed saves directory without enumerating it.
     ///
     /// @return normalized saves directory

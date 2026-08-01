@@ -30,6 +30,28 @@ import java.util.concurrent.CompletionStage;
 /// Supplies one lazily indexed instance-world catalog to a viewport-driven Swing list.
 @NotNullByDefault
 public interface WorldCatalogModel extends ViewportChoiceDataSource<WorldCatalogItem>, AutoCloseable {
+    /// Returns whether this model can filter worlds against the managed instance game version.
+    ///
+    /// @return whether the Show All control is available
+    default boolean supportsVersionFiltering() {
+        return false;
+    }
+
+    /// Returns whether worlds from every recorded game version are currently visible.
+    ///
+    /// @return true for an unfiltered catalog
+    default boolean showAll() {
+        return true;
+    }
+
+    /// Changes whether every world or only current-version and unknown-version worlds are visible.
+    ///
+    /// Implementations without version filtering ignore this command.
+    ///
+    /// @param showAll whether every indexed world should be visible
+    default void setShowAll(boolean showAll) {
+    }
+
     /// Returns the current immutable index and mutation state without blocking.
     ///
     /// @return latest catalog snapshot
