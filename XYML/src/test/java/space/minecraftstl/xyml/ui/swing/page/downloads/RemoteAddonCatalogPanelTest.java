@@ -318,6 +318,86 @@ final class RemoteAddonCatalogPanelTest {
         }
     }
 
+    /// Jumps directly between the provider result boundaries and keeps boundary commands synchronized.
+    @Test
+    void jumpsDirectlyBetweenFirstAndLastProviderPages() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new RemoteAddonCatalogPanel(
+                    RemoteAddonCatalogKind.MOD,
+                    backend,
+                    request -> Task.completed(null),
+                    kind -> Optional.of(fixtureTarget()),
+                    executor,
+                    RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO)));
+            RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                prepareViewport(panel.choiceList(), 160);
+                JButton search = findNamed(panel, "remoteAddonSearchAction", JButton.class);
+                assertNotNull(search);
+                search.doClick();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JButton first = findNamed(panel, "remoteAddonFirstPage", JButton.class);
+                JButton previous = findNamed(panel, "remoteAddonPreviousPage", JButton.class);
+                JButton next = findNamed(panel, "remoteAddonNextPage", JButton.class);
+                JButton last = findNamed(panel, "remoteAddonLastPage", JButton.class);
+                assertNotNull(first);
+                assertNotNull(previous);
+                assertNotNull(next);
+                assertNotNull(last);
+                assertAll(
+                        () -> assertFalse(first.isEnabled()),
+                        () -> assertFalse(previous.isEnabled()),
+                        () -> assertTrue(next.isEnabled()),
+                        () -> assertTrue(last.isEnabled()));
+                last.doClick();
+            });
+            awaitBackgroundWork(executor);
+            RemoteAddonCatalogQuery lastPageQuery = backend.lastQuery.get();
+            assertNotNull(lastPageQuery);
+            assertEquals(4, lastPageQuery.pageOffset());
+
+            EdtDispatcher.executeAndWait(() -> {
+                JButton first = findNamed(panel, "remoteAddonFirstPage", JButton.class);
+                JButton previous = findNamed(panel, "remoteAddonPreviousPage", JButton.class);
+                JButton next = findNamed(panel, "remoteAddonNextPage", JButton.class);
+                JButton last = findNamed(panel, "remoteAddonLastPage", JButton.class);
+                assertNotNull(first);
+                assertNotNull(previous);
+                assertNotNull(next);
+                assertNotNull(last);
+                assertAll(
+                        () -> assertTrue(first.isEnabled()),
+                        () -> assertTrue(previous.isEnabled()),
+                        () -> assertFalse(next.isEnabled()),
+                        () -> assertFalse(last.isEnabled()));
+                prepareViewport(panel.choiceList(), 240);
+                first.doClick();
+            });
+            awaitBackgroundWork(executor);
+            RemoteAddonCatalogQuery firstPageQuery = backend.lastQuery.get();
+            assertNotNull(firstPageQuery);
+            assertEquals(0, firstPageQuery.pageOffset());
+            assertEquals(3, backend.searchRequests.get());
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
     /// Refuses direct installation when a selected-instance target cannot be resolved.
     @Test
     void disablesDirectInstallationWithoutSelectedInstanceTarget() throws Exception {
@@ -617,7 +697,7 @@ final class RemoteAddonCatalogPanelTest {
                     List.of(child)));
         }
 
-        /// Records and returns a two-page provider result so next and previous commands are testable.
+        /// Records and returns a five-page provider result so every pagination command is testable.
         ///
         /// @param query explicit user-requested source query
         /// @return deterministic page containing the fixture item
@@ -625,7 +705,7 @@ final class RemoteAddonCatalogPanelTest {
         public RemoteAddonCatalogPage search(RemoteAddonCatalogQuery query) {
             lastQuery.set(Objects.requireNonNull(query, "query"));
             searchRequests.incrementAndGet();
-            return new RemoteAddonCatalogPage(List.of(item), query.pageOffset(), 2);
+            return new RemoteAddonCatalogPage(List.of(item), query.pageOffset(), 5);
         }
 
         /// Records and returns the fixture project's selected version.
