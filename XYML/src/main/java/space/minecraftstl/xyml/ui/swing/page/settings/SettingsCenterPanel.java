@@ -34,6 +34,9 @@ import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.log.LauncherLogPanel;
 import space.minecraftstl.xyml.ui.swing.page.nbt.NBTSettingsPanel;
+import space.minecraftstl.xyml.ui.swing.update.UpdateCheckRequest;
+import space.minecraftstl.xyml.ui.swing.update.UpdateCheckResult;
+import space.minecraftstl.xyml.upgrade.UpdateChannel;
 import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 
 import javax.swing.BorderFactory;
@@ -60,24 +63,33 @@ import java.awt.Font;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Renders an embeddable Swing settings center backed by [SettingsCenterStore].
 ///
-/// This panel owns its embedded appearance, preset, directory, Java management, NBT tool, and launcher-log controls,
-/// and closes them with the general and network settings store. That single lifecycle boundary makes the settings
-/// center safe to cache as one shell page.
+/// This panel owns its embedded appearance, preset, directory, Java management, NBT tool, launcher-log controls, and
+/// asynchronous maintenance actions. It closes those resources with the general and network settings store, making
+/// the settings center safe to cache as one shell page.
 @NotNullByDefault
 public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Add-on catalogue IDs exposed by the launcher setting.
     private static final @Unmodifiable List<String> ADDON_SOURCES = List.of("modrinth", "curseforge");
 
+    /// Release channels exposed by the legacy-compatible manual update selector.
+    private static final @Unmodifiable List<UpdateChannel> UPDATE_CHANNELS =
+            List.of(UpdateChannel.STABLE, UpdateChannel.DEVELOPMENT);
+
     /// Store supplying and persisting the non-appearance settings.
     private final SettingsCenterStore store;
+
+    /// Asynchronous update and cache actions owned by this settings center.
+    private final SettingsMaintenanceActions maintenanceActions;
 
     /// Appearance content embedded and closed with this settings center.
     private final AppearanceSettingsPanel appearancePanel;
@@ -106,6 +118,16 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Preview-update eligibility preference.
     private final JCheckBox previewUpdatesBox = new JCheckBox(i18n("update.preview"));
 
+    /// Release channel used by explicit update checks without changing the build's own channel.
+    private final JComboBox<UpdateChannel> updateChannelBox = new JComboBox<>(new DefaultComboBoxModel<>(
+            UPDATE_CHANNELS.toArray(UpdateChannel[]::new)));
+
+    /// Starts a manual update check for the selected release channel.
+    private final JButton checkUpdatesButton = new JButton(i18n("update.tooltip"));
+
+    /// Reports manual update-check progress and the latest terminal result.
+    private final JLabel updateStatusLabel = new JLabel();
+
     /// Automatic update-dialog suppression preference.
     private final JCheckBox disableUpdatePromptBox = new JCheckBox(i18n("update.disable_auto_show_update_dialog"));
 
@@ -126,6 +148,12 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
 
     /// Opens the currently resolved common directory in the native file manager.
     private final JButton revealDirectoryButton = new JButton(i18n("button.reveal_dir"));
+
+    /// Removes entries from the cache child of the currently resolved common directory.
+    private final JButton clearCacheButton = new JButton(i18n("launcher.cache_directory.clean"));
+
+    /// Reports cache-cleaning progress and the latest terminal result.
+    private final JLabel cacheStatusLabel = new JLabel();
 
     /// Automatic download-concurrency preference.
     private final JCheckBox automaticThreadsBox = new JCheckBox(i18n("settings.launcher.download.threads.auto"));
@@ -179,6 +207,12 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Whether restart preparation temporarily blocks settings navigation and edits.
     private boolean restartInProgress;
 
+    /// Whether one manual update request currently owns its controls.
+    private boolean updateCheckInProgress;
+
+    /// Whether one cache-cleaning request currently owns its control.
+    private boolean cacheClearInProgress;
+
     /// Whether this panel has released its owned store resources.
     private boolean closed;
 
@@ -214,6 +248,20 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             SettingsCenterStore store,
             AppearanceSettingsPanel appearancePanel,
             SettingsRestartCommand restartCommand) {
+        this(store, appearancePanel, restartCommand, null);
+    }
+
+    /// Creates an embeddable settings center with injectable restart and maintenance actions.
+    ///
+    /// @param store toolkit-neutral general and network settings store
+    /// @param appearancePanel appearance page to embed and own
+    /// @param restartCommand launcher restart lifecycle command
+    /// @param maintenanceActions asynchronous maintenance actions, or `null` to create production actions
+    SettingsCenterPanel(
+            SettingsCenterStore store,
+            AppearanceSettingsPanel appearancePanel,
+            SettingsRestartCommand restartCommand,
+            @Nullable SettingsMaintenanceActions maintenanceActions) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.store = Objects.requireNonNull(store, "store");
@@ -233,6 +281,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         gameDirectoryManagementPanel = GameDirectoryManagementPanel.createForCurrentDirectories();
         launcherLogPanel = LauncherLogPanel.createForCurrentLauncher();
         nbtSettingsPanel = NBTSettingsPanel.createForCurrentLauncher();
+        this.maintenanceActions = maintenanceActions == null
+                ? LauncherSettingsMaintenanceActions.create(this)
+                : maintenanceActions;
 
         configureComponents();
         storeSubscription = store.subscribe(this::storeChanged);
@@ -282,6 +333,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 gameDirectoryManagementPanel.close();
                 launcherLogPanel.close();
                 nbtSettingsPanel.close();
+                maintenanceActions.close();
                 restartPanel.close();
                 setInteractiveControlsEnabled(false);
             }
@@ -319,6 +371,12 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 restartPanel.updateSettings(selected, disableAprilFoolsBox.isSelected());
             }
         });
+        updateChannelBox.setName("settingsUpdateChannel");
+        updateChannelBox.setRenderer(updateChannelRenderer());
+        updateChannelBox.setSelectedItem(UpdateChannel.getChannel());
+        checkUpdatesButton.setName("settingsUpdateCheck");
+        checkUpdatesButton.addActionListener(event -> checkForUpdates());
+        updateStatusLabel.setName("settingsUpdateStatus");
         previewUpdatesBox.addActionListener(event -> {
             if (!applyingSnapshot) {
                 store.setAcceptPreviewUpdates(previewUpdatesBox.isSelected());
@@ -352,6 +410,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         });
         chooseDirectoryButton.addActionListener(event -> chooseCommonDirectory());
         revealDirectoryButton.addActionListener(event -> revealResolvedCommonDirectory());
+        clearCacheButton.setName("settingsClearCache");
+        clearCacheButton.addActionListener(event -> clearCache());
+        cacheStatusLabel.setName("settingsCacheStatus");
 
         automaticThreadsBox.addActionListener(event -> {
             if (!applyingSnapshot) {
@@ -406,6 +467,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         page.add(disableAprilFoolsBox, "growx");
         page.add(restartPanel, "growx");
         page.add(new JSeparator(), "growx");
+        page.add(createHeading(i18n("update")), "growx");
+        page.add(createFieldRow(i18n("update"), updateChannelBox), "growx");
+        page.add(createUpdateActionsRow(), "growx");
         page.add(previewUpdatesBox, "growx");
         page.add(disableUpdatePromptBox, "growx");
         page.add(new JSeparator(), "growx");
@@ -422,6 +486,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         page.add(createHeading(i18n("settings.launcher.download")), "growx");
         page.add(createFieldRow(i18n("launcher.cache_directory"), commonDirectoryTypeBox), "growx");
         page.add(createDirectoryRow(), "growx");
+        page.add(createCacheActionsRow(), "growx");
         page.add(new JSeparator(), "growx");
         page.add(automaticThreadsBox, "growx");
         page.add(createFieldRow(i18n("settings.launcher.download.threads"), downloadThreadsField), "growx");
@@ -450,6 +515,28 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         row.add(commonDirectoryField, "growx");
         row.add(chooseDirectoryButton);
         row.add(revealDirectoryButton);
+        return row;
+    }
+
+    /// Creates a cache-cleaning action row that remains usable without widening the directory input row.
+    ///
+    /// @return configured cache-action row
+    private JPanel createCacheActionsRow() {
+        JPanel row = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][]", "[]"));
+        row.setOpaque(false);
+        row.add(cacheStatusLabel, "growx");
+        row.add(clearCacheButton);
+        return row;
+    }
+
+    /// Creates the manual update action and its non-modal status presentation.
+    ///
+    /// @return configured update-action row
+    private JPanel createUpdateActionsRow() {
+        JPanel row = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][]", "[]"));
+        row.setOpaque(false);
+        row.add(updateStatusLabel, "growx");
+        row.add(checkUpdatesButton);
         return row;
     }
 
@@ -560,6 +647,13 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 selected);
     }
 
+    /// Creates a localized renderer for launcher update channels.
+    ///
+    /// @return update-channel combo-box renderer
+    private static ListCellRenderer<UpdateChannel> updateChannelRenderer() {
+        return (list, value, index, selected, focus) -> comboRenderer(list, updateChannelText(value), selected);
+    }
+
     /// Creates a localized renderer for common-directory modes.
     ///
     /// @return common-directory combo-box renderer
@@ -612,6 +706,20 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         return i18n("launcher.cache_directory.default");
     }
 
+    /// Converts a nullable update-channel selection to its localized display name.
+    ///
+    /// @param channel represented update channel, or null while a renderer initializes
+    /// @return localized channel text
+    private static String updateChannelText(@Nullable UpdateChannel channel) {
+        if (channel == UpdateChannel.DEVELOPMENT) {
+            return i18n("update.channel.dev");
+        }
+        if (channel == UpdateChannel.NIGHTLY) {
+            return i18n("update.channel.nightly");
+        }
+        return i18n("update.channel.stable");
+    }
+
     /// Converts a nullable download source to its localized display name.
     ///
     /// @param source represented source, or null while a renderer initializes
@@ -641,6 +749,116 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             return i18n("settings.launcher.proxy.socks");
         }
         return i18n("settings.launcher.proxy.default");
+    }
+
+    /// Starts a manual launcher update check for the selected channel and preview preference.
+    private void checkForUpdates() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || restartInProgress || updateCheckInProgress) {
+            return;
+        }
+        @Nullable UpdateChannel channel = (UpdateChannel) updateChannelBox.getSelectedItem();
+        if (channel == null) {
+            updateStatusLabel.setText(i18n("update.failed"));
+            return;
+        }
+
+        updateCheckInProgress = true;
+        updateStatusLabel.setText(i18n("update.checking"));
+        updateMaintenanceControlAvailability();
+        try {
+            maintenanceActions.checkForUpdates(new UpdateCheckRequest(channel, previewUpdatesBox.isSelected()))
+                    .whenComplete((
+                            @Nullable UpdateCheckResult result,
+                            @Nullable Throwable failure) -> EdtDispatcher.execute(
+                                    () -> completeUpdateCheck(result, failure)));
+        } catch (RuntimeException failure) {
+            completeUpdateCheck(null, failure);
+        }
+    }
+
+    /// Restores manual update controls and presents one terminal status on the EDT.
+    ///
+    /// @param result successful check result, or null on failure
+    /// @param failure check or prompt failure, or null on success
+    private void completeUpdateCheck(
+            @Nullable UpdateCheckResult result,
+            @Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        updateCheckInProgress = false;
+        if (failure != null || result == null) {
+            updateStatusLabel.setText(i18n("update.failed"));
+            if (failure != null) {
+                LOG.warning("Failed to check for launcher updates from settings", failure);
+            }
+        } else if (result.updateAvailable()) {
+            updateStatusLabel.setText(i18n("update.newest_version", result.remoteVersion().version()));
+        } else {
+            updateStatusLabel.setText(i18n("update.latest"));
+        }
+        updateMaintenanceControlAvailability();
+    }
+
+    /// Starts cache cleanup for the effective common directory without blocking the EDT.
+    private void clearCache() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable SettingsCenterSnapshot snapshot = displayedSnapshot;
+        if (closed || restartInProgress || cacheClearInProgress || snapshot == null) {
+            return;
+        }
+        String resolvedDirectory = snapshot.resolvedCommonDirectory();
+        if (resolvedDirectory.isBlank()) {
+            cacheStatusLabel.setText(i18n("message.failed"));
+            return;
+        }
+
+        Path commonDirectory;
+        try {
+            commonDirectory = Path.of(resolvedDirectory);
+        } catch (RuntimeException failure) {
+            cacheStatusLabel.setText(i18n("message.failed"));
+            LOG.warning("Invalid launcher cache directory: " + resolvedDirectory, failure);
+            return;
+        }
+
+        cacheClearInProgress = true;
+        cacheStatusLabel.setText(i18n("launcher.cache_directory.clean"));
+        updateDownloadControlAvailability();
+        try {
+            maintenanceActions.clearCache(commonDirectory).whenComplete((
+                    @Nullable Boolean cleaned,
+                    @Nullable Throwable failure) -> EdtDispatcher.execute(
+                            () -> completeCacheClear(commonDirectory, cleaned, failure)));
+        } catch (RuntimeException failure) {
+            completeCacheClear(commonDirectory, null, failure);
+        }
+    }
+
+    /// Restores the cache action and reports whether the exact cache child was cleaned.
+    ///
+    /// @param commonDirectory common directory used by the completed request
+    /// @param cleaned whether cleanup succeeded, or null on exceptional completion
+    /// @param failure cleanup failure, or null for a normal boolean outcome
+    private void completeCacheClear(
+            Path commonDirectory,
+            @Nullable Boolean cleaned,
+            @Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        cacheClearInProgress = false;
+        boolean succeeded = failure == null && Boolean.TRUE.equals(cleaned);
+        cacheStatusLabel.setText(i18n(succeeded ? "message.success" : "message.failed"));
+        if (failure != null) {
+            LOG.warning("Failed to clear launcher cache directory " + commonDirectory.resolve("cache"), failure);
+        } else if (!succeeded) {
+            LOG.warning("Failed to clear launcher cache directory " + commonDirectory.resolve("cache"));
+        }
+        updateDownloadControlAvailability();
     }
 
     /// Opens a native directory chooser and persists the chosen custom directory.
@@ -830,8 +1048,8 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     ///
     /// @param enabled whether settings changes can be persisted
     private void setInteractiveControlsEnabled(boolean enabled) {
-        boolean interactive = enabled && !restartInProgress;
-        tabs.setEnabled(!restartInProgress);
+        boolean interactive = enabled && !closed && !restartInProgress;
+        tabs.setEnabled(!closed && !restartInProgress);
         languageBox.setEnabled(interactive);
         previewUpdatesBox.setEnabled(interactive);
         disableUpdatePromptBox.setEnabled(interactive);
@@ -848,6 +1066,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         proxyAuthenticationBox.setEnabled(interactive);
         confirmNetworkButton.setEnabled(interactive);
         networkValidationLabel.setEnabled(interactive);
+        updateStatusLabel.setEnabled(!closed);
+        cacheStatusLabel.setEnabled(!closed);
+        updateMaintenanceControlAvailability();
         updateDownloadControlAvailability();
         updateProxyControlAvailability();
     }
@@ -862,16 +1083,26 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         setInteractiveControlsEnabled(snapshot != null && snapshot.writable());
     }
 
-    /// Updates controls whose availability depends on directory mode and automatic download concurrency.
+    /// Updates directory, cache, and download controls from persistent state and active-operation ownership.
     private void updateDownloadControlAvailability() {
         @Nullable SettingsCenterSnapshot snapshot = displayedSnapshot;
         boolean writable = snapshot != null && snapshot.writable() && !closed && !restartInProgress;
+        boolean resolvedDirectoryAvailable = snapshot != null && !snapshot.resolvedCommonDirectory().isBlank();
         @Nullable EnumCommonDirectory directoryType = (EnumCommonDirectory) commonDirectoryTypeBox.getSelectedItem();
         boolean customDirectory = directoryType == EnumCommonDirectory.CUSTOM;
         commonDirectoryField.setEnabled(writable && customDirectory);
         chooseDirectoryButton.setEnabled(writable && customDirectory);
-        revealDirectoryButton.setEnabled(snapshot != null && !snapshot.resolvedCommonDirectory().isBlank());
+        revealDirectoryButton.setEnabled(resolvedDirectoryAvailable && !closed && !restartInProgress);
+        clearCacheButton.setEnabled(
+                resolvedDirectoryAvailable && !closed && !restartInProgress && !cacheClearInProgress);
         downloadThreadsField.setEnabled(writable && !automaticThreadsBox.isSelected());
+    }
+
+    /// Updates controls used by manual update checks independently of persistent-settings writability.
+    private void updateMaintenanceControlAvailability() {
+        boolean available = !closed && !restartInProgress && !updateCheckInProgress;
+        updateChannelBox.setEnabled(available);
+        checkUpdatesButton.setEnabled(available && updateChannelBox.getSelectedItem() != null);
     }
 
     /// Updates controls whose availability depends on the selected proxy strategy and authentication preference.
