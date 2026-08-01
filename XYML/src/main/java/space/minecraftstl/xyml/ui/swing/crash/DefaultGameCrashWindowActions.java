@@ -24,7 +24,6 @@ import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.game.LogExporter;
-import space.minecraftstl.xyml.game.Version;
 import space.minecraftstl.xyml.util.platform.ManagedProcess;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.SystemUtils;
@@ -62,9 +61,6 @@ final class DefaultGameCrashWindowActions implements GameCrashWindowActions {
     /// Repository used by `LogExporter` to collect instance files.
     private final DefaultGameRepository repository;
 
-    /// Version identifier used as a fallback when launch options omit a display version.
-    private final Version version;
-
     /// Resolved launch configuration supplying version and game-directory information.
     private final LaunchOptions launchOptions;
 
@@ -81,7 +77,6 @@ final class DefaultGameCrashWindowActions implements GameCrashWindowActions {
     ///
     /// @param process completed managed process
     /// @param repository repository owning the launched instance
-    /// @param version launched version
     /// @param launchOptions resolved launch configuration
     /// @param logs immutable captured process-output snapshot
     /// @param showGameLogs action opening the Swing game-log window
@@ -89,14 +84,12 @@ final class DefaultGameCrashWindowActions implements GameCrashWindowActions {
     DefaultGameCrashWindowActions(
             ManagedProcess process,
             DefaultGameRepository repository,
-            Version version,
             LaunchOptions launchOptions,
             List<Log> logs,
             Runnable showGameLogs,
             Executor executor) {
         this.process = Objects.requireNonNull(process, "process");
         this.repository = Objects.requireNonNull(repository, "repository");
-        this.version = Objects.requireNonNull(version, "version");
         this.launchOptions = Objects.requireNonNull(launchOptions, "launchOptions");
         this.logs = List.copyOf(Objects.requireNonNull(logs, "logs"));
         this.showGameLogs = Objects.requireNonNull(showGameLogs, "showGameLogs");
@@ -119,7 +112,7 @@ final class DefaultGameCrashWindowActions implements GameCrashWindowActions {
                     return LogExporter.exportLogs(
                             target,
                             repository,
-                            Objects.requireNonNullElse(launchOptions.getVersionName(), version.getId()),
+                            launchOptions.getInstanceId(),
                             capturedText,
                             new CommandBuilder().addAll(process.getCommands()).toString(),
                             path -> belongsToCurrentLaunch(path, processStartTime));

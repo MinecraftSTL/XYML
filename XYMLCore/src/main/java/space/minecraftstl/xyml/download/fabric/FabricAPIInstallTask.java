@@ -18,7 +18,8 @@
 package space.minecraftstl.xyml.download.fabric;
 
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.game.Version;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
 
@@ -32,16 +33,16 @@ import java.util.List;
  *
  * @author huangyuhui
  */
-public final class FabricAPIInstallTask extends Task<Version> {
+public final class FabricAPIInstallTask extends Task<GameInstancePatch> {
 
     private final DefaultDependencyManager dependencyManager;
-    private final Version version;
+    private final GameInstanceManifest manifest;
     private final FabricAPIRemoteVersion remote;
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    public FabricAPIInstallTask(DefaultDependencyManager dependencyManager, Version version, FabricAPIRemoteVersion remoteVersion) {
+    public FabricAPIInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, FabricAPIRemoteVersion remoteVersion) {
         this.dependencyManager = dependencyManager;
-        this.version = version;
+        this.manifest = manifest;
         this.remote = remoteVersion;
     }
 
@@ -59,7 +60,7 @@ public final class FabricAPIInstallTask extends Task<Version> {
     public void execute() throws IOException {
         dependencies.add(new FileDownloadTask(
                 remote.getVersion().file().url(),
-                dependencyManager.getGameRepository().getModsDirectory(version.getId()).resolve("fabric-api-" + remote.getVersion().version() + ".jar"),
+                dependencyManager.getGameRepository().getModsDirectory(manifest.id()).resolve("fabric-api-" + remote.getVersion().version() + ".jar"),
                 remote.getVersion().file().getIntegrityCheck())
         );
     }

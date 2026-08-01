@@ -18,11 +18,11 @@
 package space.minecraftstl.xyml.modpack.server;
 
 import com.google.gson.JsonParseException;
-import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.addon.LocalAddonManager;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.GetTask;
@@ -45,30 +45,17 @@ public class ServerModpackCompletionTask extends Task<Void> {
 
     private final DefaultDependencyManager dependencyManager;
     private final DefaultGameRepository repository;
-    /// Target installed instance identifier.
-    private final String instanceId;
-    private @Nullable ModpackConfiguration<ServerModpackManifest> manifest;
-    private @Nullable GetTask dependent;
-    private @Nullable ServerModpackManifest remoteManifest;
+    private final GameInstanceID instanceId;
+    private ModpackConfiguration<ServerModpackManifest> manifest;
+    private GetTask dependent;
+    private ServerModpackManifest remoteManifest;
     private final List<Task<?>> dependencies = new ArrayList<>();
 
-    /// Creates a completion task that loads the instance configuration from disk.
-    ///
-    /// @param dependencyManager dependency manager bound to the target repository
-    /// @param instanceId target installed instance identifier
-    public ServerModpackCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+    public ServerModpackCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
         this(dependencyManager, instanceId, null);
     }
 
-    /// Creates a completion task with an optional prefetched server-modpack configuration.
-    ///
-    /// @param dependencyManager dependency manager bound to the target repository
-    /// @param instanceId target installed instance identifier
-    /// @param manifest prefetched configuration, or `null` to load it from disk
-    public ServerModpackCompletionTask(
-            DefaultDependencyManager dependencyManager,
-            String instanceId,
-            @Nullable ModpackConfiguration<ServerModpackManifest> manifest) {
+    public ServerModpackCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId, ModpackConfiguration<ServerModpackManifest> manifest) {
         this.dependencyManager = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
         this.instanceId = instanceId;
@@ -127,7 +114,7 @@ public class ServerModpackCompletionTask extends Task<Void> {
         Map<String, String> oldAddons = toMap(manifest.getManifest().getAddons());
         Map<String, String> newAddons = toMap(remoteManifest.getAddons());
         if (!Objects.equals(oldAddons, newAddons)) {
-            GameBuilder builder = dependencyManager.gameBuilder().name(instanceId);
+            GameBuilder builder = dependencyManager.newGameBuilder().name(instanceId);
             for (ServerModpackManifest.Addon addon : remoteManifest.getAddons()) {
                 builder.version(addon.getId(), addon.getVersion());
             }
@@ -135,7 +122,7 @@ public class ServerModpackCompletionTask extends Task<Void> {
             dependencies.add(builder.buildAsync());
         }
 
-        Path rootPath = repository.getVersionRoot(instanceId).toAbsolutePath().normalize();
+        Path rootPath = repository.getInstanceRoot(instanceId).toAbsolutePath().normalize();
         Map<String, ModpackConfiguration.FileInformation> files = manifest.getManifest().getFiles().stream()
                 .collect(Collectors.toMap(ModpackConfiguration.FileInformation::getPath,
                         Function.identity()));

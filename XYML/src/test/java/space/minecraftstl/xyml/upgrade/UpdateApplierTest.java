@@ -102,6 +102,22 @@ class UpdateApplierTest {
         assertThrows(UnsupportedOperationException.class, () -> command.add("unexpected"));
     }
 
+    /// Masks inherited proxy and service credentials only in the command line rendered for logs.
+    @Test
+    void masksSensitiveJavaCommandProperties() {
+        assertEquals(
+                "java -Dhttp.proxyPassword=s***** -Dxyml.microsoft.auth.id=c******** "
+                        + "-Dxyml.curseforge.apikey= -Dxyml.test=visible -jar XYML.jar",
+                UpdateApplier.maskCommandLine(List.of(
+                        "java",
+                        "-Dhttp.proxyPassword=secret",
+                        "-Dxyml.microsoft.auth.id=client-id",
+                        "-Dxyml.curseforge.apikey=",
+                        "-Dxyml.test=visible",
+                        "-jar",
+                        "XYML.jar")));
+    }
+
     /// Normalizes only non-blank native launcher paths published by jpackage.
     @Test
     void resolvesPackagedApplicationPath() {

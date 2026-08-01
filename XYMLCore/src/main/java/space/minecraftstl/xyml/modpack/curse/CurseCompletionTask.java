@@ -18,12 +18,12 @@
 package space.minecraftstl.xyml.modpack.curse;
 
 import com.google.gson.JsonParseException;
-import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.addon.mod.ModManager;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModpackCompletionException;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.task.FileDownloadTask;
@@ -50,30 +50,32 @@ public final class CurseCompletionTask extends Task<Void> {
     private final DefaultDependencyManager dependency;
     private final DefaultGameRepository repository;
     private final ModManager modManager;
-    /// Target installed instance identifier.
-    private final String instanceId;
-    private @Nullable CurseManifest manifest;
+    private final GameInstanceID instanceId;
+    private CurseManifest manifest;
     private List<Task<?>> dependencies;
 
     private final AtomicBoolean allNameKnown = new AtomicBoolean(true);
     private final AtomicInteger finished = new AtomicInteger(0);
     private final AtomicBoolean notFound = new AtomicBoolean(false);
 
-    /// Creates a completion task that loads the instance manifest from disk.
-    ///
-    /// @param dependencyManager dependency manager bound to the target repository
-    /// @param instanceId target installed instance identifier
-    public CurseCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+    /**
+     * Constructor.
+     *
+     * @param dependencyManager the dependency manager.
+     * @param instanceId           the existent and physical version.
+     */
+    public CurseCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
         this(dependencyManager, instanceId, null);
     }
 
-    /// Creates a completion task with an optional prefetched CurseForge manifest.
-    ///
-    /// @param dependencyManager dependency manager bound to the target repository
-    /// @param instanceId target installed instance identifier
-    /// @param manifest prefetched CurseForge manifest, or `null` to load it from disk
-    public CurseCompletionTask(
-            DefaultDependencyManager dependencyManager, String instanceId, @Nullable CurseManifest manifest) {
+    /**
+     * Constructor.
+     *
+     * @param dependencyManager the dependency manager.
+     * @param instanceId           the existent and physical version.
+     * @param manifest          the CurseForgeModpack manifest.
+     */
+    public CurseCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId, CurseManifest manifest) {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
         this.modManager = repository.getModManager(instanceId);
@@ -82,7 +84,7 @@ public final class CurseCompletionTask extends Task<Void> {
 
         if (manifest == null)
             try {
-                Path manifestFile = repository.getVersionRoot(instanceId).resolve("manifest.json");
+                Path manifestFile = repository.getInstanceRoot(instanceId).resolve("manifest.json");
                 if (Files.exists(manifestFile))
                     this.manifest = JsonUtils.fromJsonFile(manifestFile, CurseManifest.class);
             } catch (Exception e) {
@@ -107,7 +109,7 @@ public final class CurseCompletionTask extends Task<Void> {
         if (manifest == null)
             return;
 
-        Path root = repository.getVersionRoot(instanceId);
+        Path root = repository.getInstanceRoot(instanceId);
 
         // Because in China, Curse is too difficult to visit,
         // if failed, ignore it and retry next time.
@@ -135,7 +137,7 @@ public final class CurseCompletionTask extends Task<Void> {
                         .collect(Collectors.toList()));
         JsonUtils.writeToJsonFile(root.resolve("manifest.json"), newManifest);
 
-        Path versionRoot = repository.getVersionRoot(modManager.getInstanceId());
+        Path versionRoot = repository.getInstanceRoot(modManager.getInstanceId());
         Path resourcePacksRoot = versionRoot.resolve("resourcepacks");
         Path shaderPacksRoot = versionRoot.resolve("shaderpacks");
         finished.set(0);

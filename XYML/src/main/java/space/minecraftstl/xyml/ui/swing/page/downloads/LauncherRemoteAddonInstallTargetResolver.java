@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
 
@@ -41,8 +42,8 @@ public final class LauncherRemoteAddonInstallTargetResolver implements RemoteAdd
         RemoteAddonCatalogKind requestedKind = Objects.requireNonNull(kind, "kind");
         try {
             XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
-            @Nullable String instanceId = repository.getSelectedInstance();
-            if (instanceId == null || instanceId.isBlank() || !repository.hasVersion(instanceId)) {
+            @Nullable GameInstanceID instanceId = repository.getSelectedInstance();
+            if (instanceId == null || !repository.hasInstance(instanceId)) {
                 return Optional.empty();
             }
             if (requestedKind == RemoteAddonCatalogKind.WORLD) {

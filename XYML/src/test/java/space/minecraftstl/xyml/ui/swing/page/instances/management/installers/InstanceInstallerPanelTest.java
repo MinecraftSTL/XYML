@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.DefaultGameLoaderCatalogModel;
@@ -64,7 +65,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @NotNullByDefault
 final class InstanceInstallerPanelTest {
     /// The common instance identifier supplied by all focused panel scenarios.
-    private static final String INSTANCE_ID = "instance";
+    private static final GameInstanceID INSTANCE_ID = new GameInstanceID("instance");
 
     /// Activation alone starts exactly one asynchronous snapshot read and seeds retained loader state locally.
     @Test
@@ -491,7 +492,7 @@ final class InstanceInstallerPanelTest {
         /// @param instanceId target instance identifier
         /// @return manually completable snapshot stage
         @Override
-        public CompletionStage<InstanceInstallerSnapshot> loadSnapshot(String instanceId) {
+        public CompletionStage<InstanceInstallerSnapshot> loadSnapshot(GameInstanceID instanceId) {
             assertEquals(INSTANCE_ID, instanceId);
             loadCalls.incrementAndGet();
             return snapshotCompletion;
@@ -504,7 +505,7 @@ final class InstanceInstallerPanelTest {
         /// @return direct successful mutation task
         @Override
         public Task<InstanceInstallerSnapshot> installRemoteVersions(
-                String instanceId,
+                GameInstanceID instanceId,
                 Collection<? extends RemoteVersion> remoteVersions) {
             assertEquals(INSTANCE_ID, instanceId);
             remoteInstallCalls.incrementAndGet();
@@ -518,7 +519,7 @@ final class InstanceInstallerPanelTest {
         /// @param libraryId exact third-party library identifier
         /// @return direct successful mutation task
         @Override
-        public Task<InstanceInstallerSnapshot> removeLibrary(String instanceId, String libraryId) {
+        public Task<InstanceInstallerSnapshot> removeLibrary(GameInstanceID instanceId, String libraryId) {
             assertEquals(INSTANCE_ID, instanceId);
             removeCalls.incrementAndGet();
             removedLibraryId = libraryId;
@@ -531,7 +532,7 @@ final class InstanceInstallerPanelTest {
         /// @param installer selected local installer
         /// @return direct successful mutation task
         @Override
-        public Task<InstanceInstallerSnapshot> installOffline(String instanceId, Path installer) {
+        public Task<InstanceInstallerSnapshot> installOffline(GameInstanceID instanceId, Path installer) {
             assertEquals(INSTANCE_ID, instanceId);
             offlineCalls.incrementAndGet();
             offlineInstaller = installer;

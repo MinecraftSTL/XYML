@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.download.game;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.download.VersionList;
@@ -28,18 +29,29 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-/**
- *
- * @author huangyuhui
- */
-public final class VersionJsonDownloadTask extends Task<String> {
+/// Downloads the official JSON manifest for one real Minecraft version.
+@NotNullByDefault
+public final class GameInstanceJsonDownloadTask extends Task<String> {
+    /// Real Minecraft version identifier requested from the remote catalog.
     private final String gameVersion;
+
+    /// Dependency manager providing the remote catalog and download provider.
     private final DefaultDependencyManager dependencyManager;
+
+    /// Tasks that load the remote version catalog before this task runs.
     private final List<Task<?>> dependents = new ArrayList<>(1);
+
+    /// JSON download tasks scheduled after catalog resolution.
     private final List<Task<?>> dependencies = new ArrayList<>(1);
+
+    /// Remote catalog for real Minecraft versions.
     private final VersionList<?> gameVersionList;
 
-    public VersionJsonDownloadTask(String gameVersion, DefaultDependencyManager dependencyManager) {
+    /// Creates a manifest download task for one real Minecraft version.
+    ///
+    /// @param gameVersion real Minecraft version identifier
+    /// @param dependencyManager dependency manager used for catalog and network access
+    public GameInstanceJsonDownloadTask(String gameVersion, DefaultDependencyManager dependencyManager) {
         this.gameVersion = gameVersion;
         this.dependencyManager = dependencyManager;
         this.gameVersionList = dependencyManager.getVersionList("game");
@@ -49,16 +61,19 @@ public final class VersionJsonDownloadTask extends Task<String> {
         setSignificance(TaskSignificance.MODERATE);
     }
 
+    /// Returns JSON download work added after catalog resolution.
     @Override
     public Collection<Task<?>> getDependencies() {
         return dependencies;
     }
 
+    /// Returns the prerequisite catalog-loading task.
     @Override
     public Collection<Task<?>> getDependents() {
         return dependents;
     }
 
+    /// Resolves the requested real Minecraft version and schedules its JSON download.
     @Override
     public void execute() throws IOException {
         RemoteVersion remoteVersion = gameVersionList.getVersion(gameVersion, gameVersion)

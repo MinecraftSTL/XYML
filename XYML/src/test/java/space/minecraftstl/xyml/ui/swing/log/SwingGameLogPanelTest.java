@@ -27,6 +27,8 @@ import space.minecraftstl.xyml.util.CircularArrayList;
 import space.minecraftstl.xyml.util.Log4jLevel;
 
 import javax.swing.Action;
+import javax.swing.JTextArea;
+import javax.swing.ScrollPaneConstants;
 import java.awt.Component;
 import java.awt.event.ActionEvent;
 import java.nio.file.Path;
@@ -35,6 +37,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -73,6 +76,48 @@ class SwingGameLogPanelTest {
             panel.clearLogsButton().doClick();
             assertEquals(0, panel.visibleRowCount());
             assertEquals(0, buffer.size());
+        });
+    }
+
+    /// Switches between viewport wrapping and natural-width horizontal scrolling.
+    @Test
+    void wrapControlRebuildsRowsAndHorizontalScrollingPolicy() {
+        EdtDispatcher.executeAndWait(() -> {
+            SwingGameLogPanel panel = panel(
+                    new BoundedGameLogBuffer(new CircularArrayList<>(), 10),
+                    new RecordingActions(),
+                    new AtomicInteger());
+            panel.append(log("one long log line", Log4jLevel.INFO));
+
+            JTextArea unwrapped = assertInstanceOf(
+                    JTextArea.class,
+                    panel.logList().getCellRenderer().getListCellRendererComponent(
+                            panel.logList(),
+                            panel.logList().getModel().getElementAt(0),
+                            0,
+                            false,
+                            false));
+            assertFalse(panel.wrapTextControl().isSelected());
+            assertFalse(unwrapped.getLineWrap());
+            assertEquals(
+                    ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED,
+                    panel.horizontalScrollBarPolicy());
+
+            panel.wrapTextControl().doClick();
+
+            JTextArea wrapped = assertInstanceOf(
+                    JTextArea.class,
+                    panel.logList().getCellRenderer().getListCellRendererComponent(
+                            panel.logList(),
+                            panel.logList().getModel().getElementAt(0),
+                            0,
+                            false,
+                            false));
+            assertTrue(panel.wrapTextControl().isSelected());
+            assertTrue(wrapped.getLineWrap());
+            assertEquals(
+                    ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
+                    panel.horizontalScrollBarPolicy());
         });
     }
 

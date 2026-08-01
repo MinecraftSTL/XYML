@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 /// Creates one internally hosted management view on the Swing EDT.
 @FunctionalInterface
@@ -31,5 +32,5 @@ public interface InstanceManagementViewFactory {
     /// @param instanceId stable repository instance identifier
     /// @param returnCommand command returning to the instances list
     /// @return newly owned management view
-    InstanceManagementView create(String instanceId, Runnable returnCommand);
+    InstanceManagementView create(GameInstanceID instanceId, Runnable returnCommand);
 }

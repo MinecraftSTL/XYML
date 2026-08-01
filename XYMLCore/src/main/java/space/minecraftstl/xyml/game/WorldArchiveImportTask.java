@@ -30,7 +30,7 @@ public final class WorldArchiveImportTask extends Task<WorldArchiveImportResult>
     private final GameRepository repository;
 
     /// Stable managed instance identifier.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Local ZIP archive to validate and extract.
     private final Path archive;
@@ -49,7 +49,7 @@ public final class WorldArchiveImportTask extends Task<WorldArchiveImportResult>
     /// @param targetName final world directory and stored level name
     public WorldArchiveImportTask(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Path archive,
             String targetName) {
         this(repository, instanceId, archive, targetName, new WorldArchiveImporter());
@@ -64,12 +64,12 @@ public final class WorldArchiveImportTask extends Task<WorldArchiveImportResult>
     /// @param importer strict offline importer
     public WorldArchiveImportTask(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Path archive,
             String targetName,
             WorldArchiveImporter importer) {
         this.repository = Objects.requireNonNull(repository, "repository");
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
         this.archive = Objects.requireNonNull(archive, "archive").toAbsolutePath().normalize();
         this.targetName = requireNonBlank(targetName, "targetName");
         this.importer = Objects.requireNonNull(importer, "importer");

@@ -19,13 +19,16 @@ package space.minecraftstl.xyml.util.io;
 
 import kala.compress.archivers.zip.ZipArchiveEntry;
 import kala.compress.archivers.zip.ZipArchiveReader;
+import kala.compress.utils.BufferedDataInputSeekableChannel;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.tree.ZipFileTree;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.CharBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.*;
 import java.nio.file.*;
 import java.nio.file.spi.FileSystemProvider;
@@ -128,6 +131,18 @@ public final class CompressingUtils {
         throw new IOException("Cannot find suitable encoding for the zip.");
     }
 
+    /// Opens an owned buffered little-endian channel and closes the raw channel if wrapping fails.
+    private static BufferedDataInputSeekableChannel openBufferedChannel(Path zipFile) throws IOException {
+        SeekableByteChannel channel = Files.newByteChannel(zipFile);
+
+        try {
+            return new BufferedDataInputSeekableChannel(channel, 8192, ByteOrder.LITTLE_ENDIAN);
+        } catch (Throwable e) {
+            IOUtils.closeQuietly(channel, e);
+            throw e;
+        }
+    }
+
     public static ZipFileTree openZipTree(Path zipFile) throws IOException {
         return new ZipFileTree(openZipFile(zipFile));
     }
@@ -137,14 +152,14 @@ public final class CompressingUtils {
     }
 
     public static ZipArchiveReader openZipFile(Path zipFile, Charset charset) throws IOException {
-        return new ZipArchiveReader(zipFile, charset);
+        return new ZipArchiveReader(openBufferedChannel(zipFile), charset);
     }
 
     public static ZipArchiveReader openZipFileWithPossibleEncoding(Path zipFile, Charset possibleEncoding) throws IOException {
         if (possibleEncoding == null)
             possibleEncoding = StandardCharsets.UTF_8;
 
-        ZipArchiveReader zipReader = new ZipArchiveReader(Files.newByteChannel(zipFile));
+        ZipArchiveReader zipReader = new ZipArchiveReader(openBufferedChannel(zipFile));
 
         Charset suitableEncoding;
         try {
@@ -161,7 +176,7 @@ public final class CompressingUtils {
         }
 
         zipReader.close();
-        return new ZipArchiveReader(Files.newByteChannel(zipFile), suitableEncoding);
+        return new ZipArchiveReader(openBufferedChannel(zipFile), suitableEncoding);
     }
 
     public static final class Builder {

@@ -20,12 +20,9 @@ package space.minecraftstl.xyml.game;
 import com.google.gson.annotations.SerializedName;
 import space.minecraftstl.xyml.util.Immutable;
 
-/**
- *
- * @author huangyuhui
- */
+/// @author huangyuhui
 @Immutable
-public class LibraryDownloadInfo extends DownloadInfo {
+public final class LibraryDownloadInfo extends DownloadInfo {
 
     @SerializedName("path")
     private final String path;

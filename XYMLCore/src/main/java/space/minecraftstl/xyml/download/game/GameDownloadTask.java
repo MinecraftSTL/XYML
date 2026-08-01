@@ -18,7 +18,7 @@
 package space.minecraftstl.xyml.download.game;
 
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.game.Version;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.CacheRepository;
@@ -35,13 +35,13 @@ import java.util.List;
 public final class GameDownloadTask extends Task<Void> {
     private final DefaultDependencyManager dependencyManager;
     private final String gameVersion;
-    private final Version version;
+    private final GameInstanceManifest manifest;
     private final List<Task<?>> dependencies = new ArrayList<>();
 
-    public GameDownloadTask(DefaultDependencyManager dependencyManager, String gameVersion, Version version) {
+    public GameDownloadTask(DefaultDependencyManager dependencyManager, String gameVersion, GameInstanceManifest manifest) {
         this.dependencyManager = dependencyManager;
         this.gameVersion = gameVersion;
-        this.version = version.resolve(dependencyManager.getGameRepository());
+        this.manifest = manifest.resolve(dependencyManager.getGameRepository());
 
         setSignificance(TaskSignificance.MODERATE);
     }
@@ -53,12 +53,12 @@ public final class GameDownloadTask extends Task<Void> {
 
     @Override
     public void execute() {
-        Path jar = dependencyManager.getGameRepository().getVersionJar(version);
+        Path jar = dependencyManager.getGameRepository().getInstanceJar(manifest);
 
         var task = new FileDownloadTask(
-                dependencyManager.getDownloadProvider().injectURLWithCandidates(version.getDownloadInfo().getUrl()),
+                dependencyManager.getDownloadProvider().injectURLWithCandidates(manifest.getDownloadInfo().getUrl()),
                 jar,
-                FileDownloadTask.IntegrityCheck.of(CacheRepository.SHA1, version.getDownloadInfo().getSha1()));
+                FileDownloadTask.IntegrityCheck.of(CacheRepository.SHA1, manifest.getDownloadInfo().getSha1()));
         task.setCaching(true);
         task.setCacheRepository(dependencyManager.getCacheRepository());
 

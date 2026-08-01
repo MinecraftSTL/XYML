@@ -17,11 +17,14 @@
  */
 package space.minecraftstl.xyml;
 
-import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.SwingUtils;
 import space.minecraftstl.xyml.java.JavaRuntime;
+import space.minecraftstl.xyml.setting.SambaException;
+import space.minecraftstl.xyml.setting.SettingsManager;
+import space.minecraftstl.xyml.ui.swing.startup.SwingStartupSafetyDialogs;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.JarUtils;
+import space.minecraftstl.xyml.util.platform.CommandBuilder;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.ui.swing.shell.LauncherIconImages;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -34,7 +37,10 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -67,6 +73,19 @@ public final class EntryPoint {
 
         enableUnsafeMemoryAccess();
 
+        try {
+            SettingsManager.init();
+        } catch (SambaException e) {
+            showWarning(i18n("fatal.samba"));
+        } catch (IOException e) {
+            LOG.error("Failed to load config", e);
+            checkConfigOwner();
+            SwingUtils.showErrorDialog(i18n(
+                    "fatal.config_loading_failure",
+                    SettingsManager.localConfigDirectory()));
+            exit(1);
+        }
+
         Launcher.main(args);
     }
 
@@ -74,7 +93,7 @@ public final class EntryPoint {
     ///
     /// @param exitCode process exit status
     public static void exit(int exitCode) {
-        FileSaver.shutdown();
+        SettingsManager.shutdown();
         LOG.shutdown();
         System.exit(exitCode);
     }
@@ -87,23 +106,6 @@ public final class EntryPoint {
                 System.getProperties().putIfAbsent("sun.java2d.metal", "true");
             } else {
                 System.getProperties().putIfAbsent("sun.java2d.opengl", "true");
-            }
-        }
-
-        @Nullable String animationFrameRate = System.getenv("XYML_ANIMATION_FRAME_RATE");
-        if (animationFrameRate != null) {
-            LOG.info("XYML_ANIMATION_FRAME_RATE: " + animationFrameRate);
-
-            try {
-                int framesPerSecond = Integer.parseInt(animationFrameRate);
-                if (framesPerSecond <= 0)
-                    throw new NumberFormatException(animationFrameRate);
-                int frameDelayMillis = Math.max(1, Math.round(1000.0f / framesPerSecond));
-                System.getProperties().putIfAbsent(
-                        "xyml.swing.animationFrameDelayMillis",
-                        Integer.toString(frameDelayMillis));
-            } catch (NumberFormatException e) {
-                LOG.warning("Invalid animation frame rate: " + animationFrameRate);
             }
         }
 
@@ -203,16 +205,67 @@ public final class EntryPoint {
     /// Warns before running under Wine because native integrations may behave differently.
     private static void checkWine() {
         if (OperatingSystem.isRunningUnderWine()) {
-            SwingUtils.initLookAndFeel();
             LOG.warning("XYML is running under Wine or its distributions!");
-
-            int result = JOptionPane.showOptionDialog(null, i18n("fatal.wine_warning"), i18n("message.warning"), JOptionPane.OK_CANCEL_OPTION,
-                    JOptionPane.WARNING_MESSAGE, null, null, null);
-
-            if (result == JOptionPane.CANCEL_OPTION || result == JOptionPane.CLOSED_OPTION) {
-                exit(1);
-            }
+            showWarning(i18n("fatal.wine_warning"));
         }
+    }
+
+    /// Offers a Unix ownership repair command when the configuration directory is not writable.
+    private static void checkConfigOwner() {
+        if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS)
+            return;
+
+        String userName = Objects.requireNonNullElse(System.getProperty("user.name"), "");
+        Path configDirectory = SettingsManager.localConfigDirectory();
+        if (!Files.exists(configDirectory))
+            return;
+
+        String owner;
+        try {
+            owner = Files.getOwner(configDirectory).getName();
+        } catch (IOException e) {
+            LOG.warning("Failed to get file owner", e);
+            return;
+        }
+
+        if (Files.isWritable(configDirectory) || userName.equals("root") || userName.equals(owner))
+            return;
+
+        ArrayList<String> files = new ArrayList<>();
+        files.add(configDirectory.toString());
+        if (Files.exists(Metadata.XYML_USER_HOME))
+            files.add(Metadata.XYML_USER_HOME.toString());
+
+        Path gameDirectory = Paths.get(".minecraft").toAbsolutePath().normalize();
+        if (Files.exists(gameDirectory))
+            files.add(gameDirectory.toString());
+
+        String command = new CommandBuilder()
+                .addAll("sudo", "chown", "-R", userName)
+                .addAll(files)
+                .toString();
+        SwingStartupSafetyDialogs.offerCopyAndExit(
+                i18n("fatal.config_loading_failure.unix", owner, command),
+                command);
+        exit(1);
+    }
+
+    /// Displays a cancellable warning before the primary Swing runtime is initialized.
+    ///
+    /// @param message localized warning text
+    private static void showWarning(String message) {
+        SwingUtils.initLookAndFeel();
+        int result = JOptionPane.showOptionDialog(
+                null,
+                message,
+                i18n("message.warning"),
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                null,
+                null);
+        if (result == JOptionPane.CANCEL_OPTION || result == JOptionPane.CLOSED_OPTION)
+            exit(1);
     }
 
     /// Enables the JDK compatibility switch required by Java 24 and 25 memory-access warnings.

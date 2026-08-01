@@ -153,10 +153,10 @@ public sealed abstract class GameSettings extends ObservableSetting {
 
         /// The icon of the instance.
         @SerializedName("icon")
-        private final SettingProperty<InstanceIconType> icon = newSettingProperty("icon", InstanceIconType.DEFAULT);
+        private final SettingProperty<GameInstanceIconType> icon = newSettingProperty("icon", GameInstanceIconType.DEFAULT);
 
         /// Returns the instance icon property.
-        public SettingProperty<InstanceIconType> iconProperty() {
+        public SettingProperty<GameInstanceIconType> iconProperty() {
             return icon;
         }
 
@@ -913,11 +913,11 @@ public sealed abstract class GameSettings extends ObservableSetting {
         }
 
         /// Finds the effective Java runtime.
-        public @Nullable JavaRuntime getJava(@Nullable GameVersionNumber gameVersion, @Nullable Version version) throws InterruptedException {
+        public @Nullable JavaRuntime getJava(@Nullable GameVersionNumber gameVersion, @Nullable GameInstanceManifest manifest) throws InterruptedException {
             JavaVersionType javaVersionType = getInheritable(GameSettings::javaTypeProperty);
             switch (javaVersionType) {
                 case AUTO:
-                    return JavaManager.findSuitableJava(gameVersion, version);
+                    return JavaManager.findSuitableJava(gameVersion, manifest);
                 case CUSTOM:
                     try {
                         return JavaManager.getJava(Path.of(getInheritable(GameSettings::customJavaPathProperty)));
@@ -927,7 +927,7 @@ public sealed abstract class GameSettings extends ObservableSetting {
                 case VERSION: {
                     String javaVersion = getInheritable(GameSettings::customJavaVersionProperty);
                     if (StringUtils.isBlank(javaVersion)) {
-                        return JavaManager.findSuitableJava(gameVersion, version);
+                        return JavaManager.findSuitableJava(gameVersion, manifest);
                     }
 
                     int majorVersion = -1;
@@ -945,13 +945,13 @@ public sealed abstract class GameSettings extends ObservableSetting {
                     Collection<JavaRuntime> allJava = JavaManager.getAllJava().stream()
                             .filter(it -> it.getParsedVersion() == finalMajorVersion)
                             .collect(Collectors.toList());
-                    return JavaManager.findSuitableJava(allJava, gameVersion, version);
+                    return JavaManager.findSuitableJava(allJava, gameVersion, manifest);
                 }
                 case DETECTED: {
                     DetectedJava detectedJava = getInheritable(GameSettings::detectedJavaProperty);
                     String javaVersion = detectedJava.version();
                     if (StringUtils.isBlank(javaVersion)) {
-                        return JavaManager.findSuitableJava(gameVersion, version);
+                        return JavaManager.findSuitableJava(gameVersion, manifest);
                     }
 
                     if (StringUtils.isNotBlank(detectedJava.pathHash())) {

@@ -19,10 +19,11 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.event.Event;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameSettings;
-import space.minecraftstl.xyml.setting.InstanceIconType;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -35,15 +36,15 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
     private final XYMLGameRepository repository;
 
     /// Stable target instance identifier.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Creates one repository-backed icon store.
     ///
     /// @param repository repository owning the instance
     /// @param instanceId stable non-blank instance identifier
-    RepositoryInstanceIconStore(XYMLGameRepository repository, String instanceId) {
+    RepositoryInstanceIconStore(XYMLGameRepository repository, GameInstanceID instanceId) {
         this.repository = Objects.requireNonNull(repository, "repository");
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
     }
 
     /// Loads the custom file first and uses the persisted setting as its bundled fallback.
@@ -52,8 +53,8 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
     @Override
     public Snapshot load() {
         @Nullable GameSettings.Instance settings = repository.getInstanceGameSettings(instanceId);
-        @Nullable InstanceIconType storedType = settings != null ? settings.iconProperty().getValue() : null;
-        InstanceIconType builtInType = storedType != null ? storedType : InstanceIconType.DEFAULT;
+        @Nullable GameInstanceIconType storedType = settings != null ? settings.iconProperty().getValue() : null;
+        GameInstanceIconType builtInType = storedType != null ? storedType : GameInstanceIconType.DEFAULT;
         @Nullable Path customImage = repository.getInstanceIconFile(instanceId).orElse(null);
         return new Snapshot(builtInType, customImage);
     }
@@ -63,7 +64,7 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
     /// @param iconType independently selectable bundled icon type
     /// @throws IOException when an existing custom image cannot be removed
     @Override
-    public void selectBuiltIn(InstanceIconType iconType) throws IOException {
+    public void selectBuiltIn(GameInstanceIconType iconType) throws IOException {
         InstanceIconChoice.BuiltIn selection = new InstanceIconChoice.BuiltIn(iconType);
         @Nullable GameSettings.Instance settings = repository.getInstanceGameSettingsOrCreate(instanceId);
         if (settings == null) {
@@ -86,7 +87,7 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
         repository.setInstanceIconFile(instanceId, Objects.requireNonNull(sourceImage, "sourceImage"));
         @Nullable GameSettings.Instance settings = repository.getInstanceGameSettingsOrCreate(instanceId);
         if (settings != null) {
-            settings.iconProperty().setValue(InstanceIconType.DEFAULT);
+            settings.iconProperty().setValue(GameInstanceIconType.DEFAULT);
         }
     }
 

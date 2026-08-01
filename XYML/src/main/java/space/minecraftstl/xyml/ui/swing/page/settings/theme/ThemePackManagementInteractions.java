@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.awt.Component;
 import java.nio.file.Path;
+import java.util.Objects;
 import java.util.concurrent.CompletionStage;
 
 /// Native chooser, confirmation, and desktop boundary injected into the theme management panel.
@@ -45,4 +46,37 @@ public interface ThemePackManagementInteractions {
     /// @param directory exact validated directory
     /// @return completion stage resolved after desktop integration returns
     CompletionStage<@Nullable Void> revealInstalledDirectory(Path directory);
+
+    /// Collects current-theme metadata and selects an output archive through Swing dialogs on the EDT.
+    ///
+    /// Implementations that are used without export support may retain this cancellation default.
+    ///
+    /// @param owner dialog owner
+    /// @param defaults generated export defaults
+    /// @return confirmed export request, or `null` after cancellation
+    default @Nullable ThemePackExportRequest chooseThemePackExport(
+            Component owner,
+            ThemePackExportDefaults defaults) {
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(defaults, "defaults");
+        return null;
+    }
+
+    /// Reports a successfully published theme-pack archive on the EDT.
+    ///
+    /// @param owner dialog owner
+    /// @param outputFile published archive
+    default void showThemePackExportSuccess(Component owner, Path outputFile) {
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(outputFile, "outputFile");
+    }
+
+    /// Reports a failed current-theme export on the EDT.
+    ///
+    /// @param owner dialog owner
+    /// @param failure root export failure
+    default void showThemePackExportFailure(Component owner, Throwable failure) {
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(failure, "failure");
+    }
 }

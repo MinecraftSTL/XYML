@@ -18,8 +18,6 @@
 package space.minecraftstl.xyml.util.io;
 
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
-import org.glavo.chardet.DetectedCharset;
-import org.glavo.chardet.UniversalDetector;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.function.ExceptionalConsumer;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
@@ -27,6 +25,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFileAttributeView;
@@ -38,7 +38,6 @@ import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /**
@@ -234,24 +233,6 @@ public final class FileUtils {
             LOG.warning("Failed to get file size of " + file, e);
             return 0L;
         }
-    }
-
-    public static String readTextMaybeNativeEncoding(Path file) throws IOException {
-        byte[] bytes = Files.readAllBytes(file);
-
-        if (OperatingSystem.NATIVE_CHARSET == UTF_8)
-            return new String(bytes, UTF_8);
-
-        UniversalDetector detector = new UniversalDetector();
-        detector.handleData(bytes);
-        detector.dataEnd();
-
-        DetectedCharset detectedCharset = detector.getDetectedCharset();
-        if (detectedCharset != null && detectedCharset.isSupported()
-                && (detectedCharset == DetectedCharset.UTF_8 || detectedCharset == DetectedCharset.US_ASCII))
-            return new String(bytes, UTF_8);
-        else
-            return new String(bytes, OperatingSystem.NATIVE_CHARSET);
     }
 
     public static void deleteDirectory(Path directory) throws IOException {
@@ -506,14 +487,25 @@ public final class FileUtils {
         return file.toAbsolutePath().resolveSibling("." + file.getFileName().toString() + ".tmp");
     }
 
+    /// Saves UTF-8 text through a same-directory temporary file and atomic replacement boundary.
     public static void saveSafely(Path file, String content) throws IOException {
+        saveSafely(file, content, StandardCharsets.UTF_8);
+    }
+
+    /// Saves text using the requested encoding, falling back to UTF-8 when no encoding was detected.
+    ///
+    /// @param file destination path
+    /// @param content complete text to write
+    /// @param charset detected source encoding, or null to use UTF-8
+    /// @throws IOException when temporary output or replacement fails
+    public static void saveSafely(Path file, String content, @Nullable Charset charset) throws IOException {
         Path parent = file.toAbsolutePath().getParent();
         if (parent != null) {
             Files.createDirectories(parent);
         }
 
         Path tmpFile = tmpSaveFile(file);
-        try (BufferedWriter writer = Files.newBufferedWriter(tmpFile, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE)) {
+        try (BufferedWriter writer = Files.newBufferedWriter(tmpFile, charset != null ? charset : StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE)) {
             writer.write(content);
         }
 

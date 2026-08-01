@@ -17,17 +17,25 @@
  */
 package space.minecraftstl.xyml.download;
 
-/**
- *
- * @author huangyuhui
- */
+import org.jetbrains.annotations.NotNullByDefault;
+
+/// Supplies common download-provider and version-list behavior for dependency managers.
+///
+/// @author huangyuhui
+@NotNullByDefault
 public abstract class AbstractDependencyManager implements DependencyManager {
 
+    /// Returns the provider used to resolve remote Minecraft and loader versions.
     public abstract DownloadProvider getDownloadProvider();
 
+    /// Returns the cache repository used by this dependency manager.
     @Override
     public abstract DefaultCacheRepository getCacheRepository();
 
+    /// Returns a registered remote version list by its logical identifier.
+    ///
+    /// @param id logical list identifier such as `game` or `forge`
+    /// @return the matching version list
     @Override
     public VersionList<?> getVersionList(String id) {
         return getDownloadProvider().getVersionListById(id);

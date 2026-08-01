@@ -29,8 +29,8 @@ import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.GameJavaVersion;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.JavaVersionConstraint;
-import space.minecraftstl.xyml.game.Version;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.observable.property.ObservableValue;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -349,23 +349,30 @@ public final class JavaManager {
     /// Selects a compatible Java runtime for a game from the process-wide registry.
     ///
     /// @param gameVersion parsed game version, or `null` when unknown
-    /// @param version complete version metadata, or `null` when unavailable
+    /// @param manifest complete instance manifest, or `null` when unavailable
     /// @return preferred runtime, or `null` when no compatible runtime exists
     /// @throws InterruptedException if runtime initialization is interrupted
     @Nullable
-    public static JavaRuntime findSuitableJava(@Nullable GameVersionNumber gameVersion, @Nullable Version version) throws InterruptedException {
-        return findSuitableJava(getAllJava(), gameVersion, version);
+    public static JavaRuntime findSuitableJava(
+            @Nullable GameVersionNumber gameVersion,
+            @Nullable GameInstanceManifest manifest) throws InterruptedException {
+        return findSuitableJava(getAllJava(), gameVersion, manifest);
     }
 
     /// Selects a compatible Java runtime for a game from explicit candidates.
     ///
     /// @param javaRuntimes candidate runtimes
     /// @param gameVersion parsed game version, or `null` when unknown
-    /// @param version complete version metadata, or `null` when unavailable
+    /// @param manifest complete instance manifest, or `null` when unavailable
     /// @return preferred runtime, or `null` when no compatible runtime exists
     @Nullable
-    public static JavaRuntime findSuitableJava(Collection<JavaRuntime> javaRuntimes, @Nullable GameVersionNumber gameVersion, @Nullable Version version) {
-        @Nullable LibraryAnalyzer analyzer = version != null ? LibraryAnalyzer.analyze(version, gameVersion != null ? gameVersion.toString() : null) : null;
+    public static JavaRuntime findSuitableJava(
+            Collection<JavaRuntime> javaRuntimes,
+            @Nullable GameVersionNumber gameVersion,
+            @Nullable GameInstanceManifest manifest) {
+        @Nullable LibraryAnalyzer analyzer = manifest != null
+                ? LibraryAnalyzer.analyze(manifest, gameVersion != null ? gameVersion.toString() : null)
+                : null;
 
         boolean forceX86 = Architecture.SYSTEM_ARCH == Architecture.ARM64
                 && (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS || OperatingSystem.CURRENT_OS == OperatingSystem.MACOS)
@@ -386,8 +393,8 @@ public final class JavaManager {
             boolean violationSuggested = false;
 
             for (JavaVersionConstraint constraint : JavaVersionConstraint.ALL) {
-                if (constraint.appliesToVersion(gameVersion, version, java, analyzer)) {
-                    if (!constraint.checkJava(gameVersion, version, java, analyzer)) {
+                if (constraint.appliesToVersion(gameVersion, manifest, java, analyzer)) {
+                    if (!constraint.checkJava(gameVersion, manifest, java, analyzer)) {
                         if (constraint.isMandatory()) {
                             violationMandatory = true;
                         } else {

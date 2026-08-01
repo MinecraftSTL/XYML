@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.addon.LocalAddonFile;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -89,7 +90,8 @@ final class LocalModFileActiveStateTest {
     /// @param path current fixture path
     /// @return local mod model
     private LocalModFile createFile(Path path) {
-        ModManager manager = new ModManager(new DefaultGameRepository(temporaryDirectory), "instance");
+        ModManager manager = new ModManager(
+                new DefaultGameRepository(temporaryDirectory), new GameInstanceID("instance"));
         String id = path.getFileName().toString();
         LocalMod mod = manager.getLocalMod(id, ModLoaderType.UNKNOWN);
         return new LocalModFile(manager, mod, path, id, new LocalAddonFile.Description("fixture"));

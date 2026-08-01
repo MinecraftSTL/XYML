@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.RemoteVersion;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
 
 import java.time.Instant;
@@ -152,7 +153,7 @@ final class InstanceInstallerCompatibilityTest {
                         LibraryAnalyzer.LibraryMark.LibraryStatus.JUST_EXISTED));
         List<InstanceOtherLibraryEntry> mutableEntries = new ArrayList<>(List.of(clear, uncertain));
         InstanceInstallerSnapshot snapshot = new InstanceInstallerSnapshot(
-                "existing-instance",
+                new GameInstanceID("existing-instance"),
                 Optional.of("1.21.1"),
                 List.of(),
                 mutableEntries);
@@ -183,7 +184,7 @@ final class InstanceInstallerCompatibilityTest {
     @Test
     void rejectsProtectedAbsentAndExternallyUncertainRemovalTargets() {
         InstanceInstallerSnapshot snapshot = new InstanceInstallerSnapshot(
-                "existing-instance",
+                new GameInstanceID("existing-instance"),
                 Optional.of("1.21.1"),
                 List.of(new InstanceInstallerEntry(
                         GameLoaderKind.FORGE,
@@ -214,7 +215,7 @@ final class InstanceInstallerCompatibilityTest {
     /// @return immutable snapshot for Minecraft 1.21.1
     private static InstanceInstallerSnapshot snapshot(InstanceInstallerEntry... entries) {
         return new InstanceInstallerSnapshot(
-                "existing-instance", Optional.of("1.21.1"), List.of(entries), List.of());
+                new GameInstanceID("existing-instance"), Optional.of("1.21.1"), List.of(entries), List.of());
     }
 
     /// Creates an empty snapshot for one specific Minecraft version.
@@ -223,7 +224,7 @@ final class InstanceInstallerCompatibilityTest {
     /// @return immutable empty loader snapshot
     private static InstanceInstallerSnapshot snapshotForGameVersion(String gameVersion) {
         return new InstanceInstallerSnapshot(
-                "existing-instance", Optional.of(gameVersion), List.of(), List.of());
+                new GameInstanceID("existing-instance"), Optional.of(gameVersion), List.of(), List.of());
     }
 
     /// Creates a snapshot containing one prospective third-party library for boundary tests.
@@ -232,7 +233,7 @@ final class InstanceInstallerCompatibilityTest {
     /// @return snapshot construction result
     private static InstanceInstallerSnapshot snapshotWithOtherLibrary(String libraryId) {
         return new InstanceInstallerSnapshot(
-                "existing-instance",
+                new GameInstanceID("existing-instance"),
                 Optional.of("1.21.1"),
                 List.of(),
                 List.of(new InstanceOtherLibraryEntry(

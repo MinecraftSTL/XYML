@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.setting;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import space.minecraftstl.xyml.auth.AccountID;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -80,7 +81,7 @@ public final class TypedIDTest {
         assertEquals("account:123e4567-e89b-12d3-a456-426614174000", id.toString());
     }
 
-    /// Tests JSON serialization through the standard HMCL Gson instance.
+    /// Tests JSON serialization through the standard XYML Gson instance.
     @Test
     public void serializesAsPrefixedString() {
         GameSettingsPresetID id =
@@ -100,7 +101,7 @@ public final class TypedIDTest {
         GameDirectoryID id = GameDirectoryID.parse("game-directory:123e4567-e89b-12d3-a456-426614174000");
         LauncherSettings settings = new LauncherSettings();
 
-        settings.setSelectedInstance(id, "1.20.1");
+        settings.setSelectedInstance(id, new GameInstanceID("1.20.1"));
         JsonObject serialized = JsonParser.parseString(settings.toJson()).getAsJsonObject();
         LauncherSettings deserialized = Objects.requireNonNull(LauncherSettings.fromJson(serialized));
 
@@ -108,6 +109,6 @@ public final class TypedIDTest {
                 .getAsJsonObject(LauncherSettings.PROPERTY_SELECTED_INSTANCE)
                 .get(id.toString())
                 .getAsString());
-        assertEquals("1.20.1", deserialized.getSelectedInstance(id));
+        assertEquals("1.20.1", deserialized.getSelectedInstance(id).toString());
     }
 }

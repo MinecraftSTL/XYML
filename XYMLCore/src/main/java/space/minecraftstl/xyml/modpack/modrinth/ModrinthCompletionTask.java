@@ -17,10 +17,10 @@
  */
 package space.minecraftstl.xyml.modpack.modrinth;
 
-import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.addon.mod.ModManager;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModpackCompletionException;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
@@ -45,30 +45,32 @@ public class ModrinthCompletionTask extends Task<Void> {
     private final DefaultDependencyManager dependency;
     private final DefaultGameRepository repository;
     private final ModManager modManager;
-    /// Target installed instance identifier.
-    private final String instanceId;
-    private @Nullable ModrinthManifest manifest;
+    private final GameInstanceID instanceId;
+    private ModrinthManifest manifest;
     private final List<Task<?>> dependencies = new ArrayList<>();
 
     private final AtomicBoolean allNameKnown = new AtomicBoolean(true);
     private final AtomicInteger finished = new AtomicInteger(0);
     private final AtomicBoolean notFound = new AtomicBoolean(false);
 
-    /// Creates a completion task that loads the instance manifest from disk.
-    ///
-    /// @param dependencyManager dependency manager bound to the target repository
-    /// @param instanceId target installed instance identifier
-    public ModrinthCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+    /**
+     * Constructor.
+     *
+     * @param dependencyManager the dependency manager.
+     * @param instanceId           the existent and physical version.
+     */
+    public ModrinthCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
         this(dependencyManager, instanceId, null);
     }
 
-    /// Creates a completion task with an optional prefetched Modrinth manifest.
-    ///
-    /// @param dependencyManager dependency manager bound to the target repository
-    /// @param instanceId target installed instance identifier
-    /// @param manifest prefetched Modrinth manifest, or `null` to load it from disk
-    public ModrinthCompletionTask(
-            DefaultDependencyManager dependencyManager, String instanceId, @Nullable ModrinthManifest manifest) {
+    /**
+     * Constructor.
+     *
+     * @param dependencyManager the dependency manager.
+     * @param instanceId           the existent and physical version.
+     * @param manifest          the CurseForgeModpack manifest.
+     */
+    public ModrinthCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId, ModrinthManifest manifest) {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
         this.modManager = repository.getModManager(instanceId);
@@ -77,7 +79,7 @@ public class ModrinthCompletionTask extends Task<Void> {
 
         if (manifest == null)
             try {
-                Path manifestFile = repository.getVersionRoot(instanceId).resolve("modrinth.index.json");
+                Path manifestFile = repository.getInstanceRoot(instanceId).resolve("modrinth.index.json");
                 if (Files.exists(manifestFile))
                     this.manifest = JsonUtils.fromJsonFile(manifestFile, ModrinthManifest.class);
             } catch (Exception e) {

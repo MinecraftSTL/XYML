@@ -17,10 +17,12 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.downloads;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.game.install.GameInstallAlreadyRunningException;
 import space.minecraftstl.xyml.game.install.GameInstallRequest;
@@ -180,6 +182,9 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
 
     /// Exact destination instance-name editor.
     private final JTextField instanceNameField = new JTextField();
+
+    /// Restores the version-and-loader-derived destination name after a manual edit.
+    private final JButton resetInstanceNameButton = new JButton();
 
     /// Fixed-width installation configuration kept beside the scrollable version catalog.
     private final JPanel installConfigurationPanel = new JPanel();
@@ -612,7 +617,19 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         instanceNameField.setName("gameVersionsInstanceName");
         SwingTextFields.showClearButton(instanceNameField);
         instanceNameField.getDocument().addDocumentListener(instanceNameListener);
-        installConfigurationPanel.add(instanceNameField, "growx, h 40!");
+        JPanel instanceNameRow = new JPanel(new MigLayout(
+                "insets 0, fillx",
+                "[grow,fill]6[40!]",
+                "[40!]"));
+        instanceNameRow.setOpaque(false);
+        instanceNameRow.add(instanceNameField, "grow, h 40!");
+        resetInstanceNameButton.setName("gameVersionsResetInstanceName");
+        resetInstanceNameButton.setIcon(new FlatSVGIcon("assets/swing/icons/restore.svg", 18, 18));
+        resetInstanceNameButton.setToolTipText(i18n("button.reset"));
+        resetInstanceNameButton.getAccessibleContext().setAccessibleName(i18n("button.reset"));
+        resetInstanceNameButton.addActionListener(event -> resetInstanceName());
+        instanceNameRow.add(resetInstanceNameButton, "grow");
+        installConfigurationPanel.add(instanceNameRow, "growx, h 40!");
 
         JPanel installActions = new JPanel(new MigLayout(
                 "insets 0, fillx",
@@ -1013,9 +1030,16 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         @Nullable String versionId = loaderGameVersionId;
         boolean belongsToSelectedGame = versionId != null
                 && versionId.equals(nonNullSnapshot.gameVersion().orElse(null));
+        boolean mayReplaceSuggestedName = instanceNameField.getText().isBlank()
+                || Objects.equals(instanceNameField.getText(), suggestedInstanceName);
         selectedRemoteVersions = belongsToSelectedGame
                 ? nonNullSnapshot.selectedRemoteVersions()
                 : List.of();
+        if (belongsToSelectedGame && mayReplaceSuggestedName && versionId != null) {
+            applyInstanceNameSuggestion(defaultInstanceName(versionId, selectedRemoteVersions));
+        } else if (!mayReplaceSuggestedName) {
+            suggestedInstanceName = null;
+        }
         String summary = belongsToSelectedGame
                 ? nonNullSnapshot.summary()
                 : loaderSelectionPanel.selectionSummary();
@@ -1032,17 +1056,58 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         return i18n("settings.tabs.installers") + ": " + Objects.requireNonNull(summary, "summary");
     }
 
-    /// Applies one version-derived destination without classifying its document events as user edits.
+    /// Applies one version-and-loader-derived destination without classifying its document events as user edits.
     ///
-    /// @param versionId exact selected version ID used as the complete suggestion
-    private void applyInstanceNameSuggestion(String versionId) {
-        suggestedInstanceName = Objects.requireNonNull(versionId, "versionId");
+    /// @param suggestion complete suggested instance name
+    private void applyInstanceNameSuggestion(String suggestion) {
+        suggestedInstanceName = Objects.requireNonNull(suggestion, "suggestion");
         applyingInstanceNameSuggestion = true;
         try {
-            instanceNameField.setText(versionId);
+            instanceNameField.setText(suggestion);
         } finally {
             applyingInstanceNameSuggestion = false;
         }
+    }
+
+    /// Restores the exact default name derived from the selected game and primary loader kinds.
+    private void resetInstanceName() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable String versionId = selectedVersionId;
+        if (versionId == null) {
+            return;
+        }
+        applyInstanceNameSuggestion(defaultInstanceName(versionId, selectedRemoteVersions));
+        updateInstallAction();
+    }
+
+    /// Builds the historical concise instance name from Minecraft and selected primary loaders.
+    ///
+    /// @param versionId exact selected Minecraft version
+    /// @param loaders immutable selected loader and companion versions
+    /// @return suggested instance name
+    static String defaultInstanceName(
+            String versionId,
+            @Unmodifiable List<RemoteVersion> loaders) {
+        StringBuilder name = new StringBuilder(Objects.requireNonNull(versionId, "versionId"));
+        for (RemoteVersion loader : Objects.requireNonNull(loaders, "loaders")) {
+            @Nullable LibraryAnalyzer.LibraryType type =
+                    LibraryAnalyzer.LibraryType.fromPatchId(loader.getLibraryId());
+            @Nullable String suffix = type == null ? null : switch (type) {
+                case FORGE -> "Forge";
+                case NEO_FORGE -> "NeoForge";
+                case CLEANROOM -> "Cleanroom";
+                case LEGACY_FABRIC -> "LegacyFabric";
+                case FABRIC -> "Fabric";
+                case LITELOADER -> "LiteLoader";
+                case QUILT -> "Quilt";
+                case OPTIFINE -> "OptiFine";
+                default -> null;
+            };
+            if (suffix != null) {
+                name.append('-').append(suffix);
+            }
+        }
+        return name.toString();
     }
 
     /// Records intentional destination edits and refreshes installation eligibility.
@@ -1280,6 +1345,11 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     /// Enables installation only for an open catalog view with an exact loaded choice and nonblank name.
     private void updateInstallAction() {
         EdtDispatcher.requireEventDispatchThread();
+        resetInstanceNameButton.setEnabled(
+                isOpen()
+                        && workflowView == WorkflowView.CATALOG
+                        && selectedVersionId != null
+                        && displayedInstallSession == null);
         selectLoadersButton.setEnabled(
                 isOpen()
                         && workflowView == WorkflowView.CATALOG
@@ -1344,6 +1414,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
             cleanupFailure = attemptCleanup(cleanupFailure, () -> searchField.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> setFilterControlsEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> instanceNameField.setEnabled(false));
+            cleanupFailure = attemptCleanup(cleanupFailure, () -> resetInstanceNameButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> selectLoadersButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> installButton.setEnabled(false));
             cleanupFailure = attemptCleanup(cleanupFailure, () -> backToCatalogButton.setEnabled(false));

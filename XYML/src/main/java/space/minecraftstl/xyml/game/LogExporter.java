@@ -17,9 +17,9 @@
  */
 package space.minecraftstl.xyml.game;
 
+import kala.encdet.EncodingDetector;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.util.StringUtils;
-import space.minecraftstl.xyml.util.io.IOUtils;
 import space.minecraftstl.xyml.util.io.Zipper;
 import space.minecraftstl.xyml.util.logging.Logger;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
@@ -38,7 +38,10 @@ import java.util.concurrent.CompletableFuture;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Exports launcher and game diagnostics without exposing forbidden authentication tokens.
+@NotNullByDefault
 public final class LogExporter {
+    /// Prevents instantiation of the stateless exporter.
     private LogExporter() {
     }
 
@@ -52,22 +55,21 @@ public final class LogExporter {
     /// @param logMatcher optional matcher used to select files from each log directory
     /// @return future completed after the archive has been written
     public static CompletableFuture<Void> exportLogs(
-            Path zipFile, DefaultGameRepository gameRepository, String instanceId, String logs, String launchScript,
+            Path zipFile, DefaultGameRepository repository, GameInstanceID instanceId, String logs, String launchScript,
             @Nullable PathMatcher logMatcher) {
-        Path runDirectory = gameRepository.getRunDirectory(instanceId);
-        Path baseDirectory = gameRepository.getBaseDirectory();
-        List<String> versions = new ArrayList<>();
+        Path runDirectory = repository.getRunDirectory(instanceId);
+        List<GameInstanceID> instances = new ArrayList<>();
 
-        String currentVersionId = instanceId;
-        HashSet<String> resolvedSoFar = new HashSet<>();
+        GameInstanceID currentInstanceId = instanceId;
+        HashSet<GameInstanceID> resolvedSoFar = new HashSet<>();
         while (true) {
-            if (resolvedSoFar.contains(currentVersionId)) break;
-            resolvedSoFar.add(currentVersionId);
-            Version currentVersion = gameRepository.getVersion(currentVersionId);
-            versions.add(currentVersionId);
+            if (resolvedSoFar.contains(currentInstanceId)) break;
+            resolvedSoFar.add(currentInstanceId);
+            GameInstanceManifest currentManifest = repository.getInstanceManifest(currentInstanceId);
+            instances.add(currentInstanceId);
 
-            if (StringUtils.isNotBlank(currentVersion.getInheritsFrom())) {
-                currentVersionId = currentVersion.getInheritsFrom();
+            if (currentManifest.inheritsFrom() != null) {
+                currentInstanceId = currentManifest.inheritsFrom();
             } else {
                 break;
             }
@@ -84,10 +86,10 @@ public final class LogExporter {
                 zipper.putTextFile(logs, "minecraft.log");
                 zipper.putTextFile(Logger.filterForbiddenToken(launchScript), OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS ? "launch.bat" : "launch.sh");
 
-                for (String id : versions) {
-                    Path versionJson = baseDirectory.resolve("versions").resolve(id).resolve(id + ".json");
-                    if (Files.exists(versionJson)) {
-                        zipper.putFile(versionJson, id + ".json");
+                for (GameInstanceID id : instances) {
+                    Path instanceJson = repository.getInstanceJson(id);
+                    if (Files.exists(instanceJson)) {
+                        zipper.putFile(instanceJson, id + ".json");
                     }
                 }
             } catch (IOException e) {
@@ -96,13 +98,14 @@ public final class LogExporter {
         });
     }
 
+    /// Adds matching log files from one directory to the target archive.
     private static void processLogs(
             Path directory, String fileExtension, String logDirectory, Zipper zipper, @Nullable PathMatcher logMatcher) {
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory, fileExtension)) {
             for (Path file : stream) {
                 if (Files.isRegularFile(file)) {
                     if (logMatcher == null || logMatcher.matches(file)) {
-                        try (BufferedReader reader = IOUtils.newBufferedReaderMaybeNativeEncoding(file)) {
+                        try (BufferedReader reader = EncodingDetector.MODERN_WEB.newBufferedReader(file)) {
                             zipper.putLines(reader.lines().map(Logger::filterForbiddenToken), file.getFileName().toString());
                         } catch (IOException e) {
                             LOG.warning("Failed to read log file: " + file, e);

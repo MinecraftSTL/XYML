@@ -22,7 +22,8 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.event.EventBus;
 import space.minecraftstl.xyml.event.EventManager;
-import space.minecraftstl.xyml.event.RefreshedInstancesEvent;
+import space.minecraftstl.xyml.event.RefreshedGameInstancesEvent;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.image.InstanceIconLoader;
@@ -31,7 +32,7 @@ import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.GameSettings;
-import space.minecraftstl.xyml.setting.InstanceIconType;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -71,7 +72,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     private final Runnable addCommand;
 
     /// Command that opens management for a stable instance ID.
-    private final Consumer<String> manageCommand;
+    private final Consumer<GameInstanceID> manageCommand;
 
     /// Localized repository state and fallback text.
     private final RepositoryInstancesStatusStrings statusStrings;
@@ -100,7 +101,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// Creates a production model for one repository and one caller-owned I/O executor.
     ///
     /// An unloaded repository remains in its loading state until an already-running initial scan emits
-    /// [RefreshedInstancesEvent], or the composition root explicitly calls [#refreshInstances()].
+    /// [RefreshedGameInstancesEvent], or the composition root explicitly calls [#refreshInstances()].
     ///
     /// @param repository real installed-game repository
     /// @param backgroundExecutor caller-owned executor suitable for blocking disk and JAR access
@@ -111,11 +112,11 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             XYMLGameRepository repository,
             Executor backgroundExecutor,
             Runnable addCommand,
-            Consumer<String> manageCommand,
+            Consumer<GameInstanceID> manageCommand,
             RepositoryInstancesStatusStrings statusStrings) {
         this(
                 new XYMLRepositoryAccess(repository),
-                EventBus.EVENT_BUS.channel(RefreshedInstancesEvent.class),
+                EventBus.EVENT_BUS.channel(RefreshedGameInstancesEvent.class),
                 backgroundExecutor,
                 addCommand,
                 manageCommand,
@@ -134,10 +135,10 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// @param statusStrings localized repository text
     RepositoryInstancesModel(
             RepositoryAccess repository,
-            EventManager<RefreshedInstancesEvent> refreshedInstancesEvents,
+            EventManager<RefreshedGameInstancesEvent> refreshedInstancesEvents,
             Executor backgroundExecutor,
             Runnable addCommand,
-            Consumer<String> manageCommand,
+            Consumer<GameInstanceID> manageCommand,
             RepositoryInstancesStatusStrings statusStrings) {
         this.repository = Objects.requireNonNull(repository, "repository");
         Objects.requireNonNull(refreshedInstancesEvents, "refreshedInstancesEvents");
@@ -194,7 +195,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         SourceSnapshot source = state.source();
         List<String> identifiers = new ArrayList<>(source.entries().size());
         for (RepositoryEntry entry : source.entries()) {
-            identifiers.add(entry.id());
+            identifiers.add(entry.id().id());
         }
         return List.copyOf(identifiers);
     }
@@ -205,7 +206,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         SourceSnapshot source = state.source();
         List<InstanceSearchEntry> entries = new ArrayList<>(source.entries().size());
         for (RepositoryEntry entry : source.entries()) {
-            entries.add(new InstanceSearchEntry(entry.id(), entry.id()));
+            entries.add(new InstanceSearchEntry(entry.id(), entry.id().id()));
         }
         return List.copyOf(entries);
     }
@@ -222,7 +223,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             requireOpen();
             requestSource = state.source();
         }
-        int index = indexOf(requestSource.entries(), stableId);
+        int index = indexOf(requestSource.entries(), new GameInstanceID(stableId));
         if (index < 0) {
             return CompletableFuture.failedFuture(
                     new IllegalArgumentException("Unknown instance: " + stableId));
@@ -261,7 +262,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
 
     /// Persists a stable loaded instance selection and publishes its indexed state.
     @Override
-    public void selectInstance(String instanceId) {
+    public void selectInstance(GameInstanceID instanceId) {
         Objects.requireNonNull(instanceId, "instanceId");
         InstancesSnapshot previous;
         InstancesSnapshot replacement;
@@ -341,7 +342,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// Delegates management for the currently selected stable instance ID.
     @Override
     public void manageSelectedInstance() {
-        String selectedInstanceId;
+        GameInstanceID selectedInstanceId;
         synchronized (stateLock) {
             requireOpen();
             ModelState current = state;
@@ -408,7 +409,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             String detail = entry.resolveGameVersion().orElse(statusStrings.unknownVersionDetail());
             checkLoadActive(cancellation);
             InstanceIconData icon = repository.resolveIcon(entry.id());
-            items.add(new InstanceListItem(entry.id(), entry.id(), detail, icon));
+            items.add(new InstanceListItem(entry.id(), entry.id().id(), detail, icon));
         }
         checkLoadActive(cancellation);
         return new ChoicePage<>(
@@ -431,19 +432,19 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         checkLoadActive(cancellation);
         InstanceIconData icon = repository.resolveIcon(entry.id());
         checkLoadActive(cancellation);
-        return new InstanceListItem(entry.id(), entry.id(), detail, icon);
+        return new InstanceListItem(entry.id(), entry.id().id(), detail, icon);
     }
 
     /// Applies a matching real-repository refresh event without releasing model-owned refresh ownership.
     ///
     /// @param event completed refresh event
-    private void repositoryRefreshed(RefreshedInstancesEvent event) {
+    private void repositoryRefreshed(RefreshedGameInstancesEvent event) {
         if (event.getSource() != repository.eventSource()) {
             return;
         }
         try {
             @Unmodifiable List<RepositoryEntry> entries = repository.displayedInstances();
-            @Nullable String selectedInstanceId = repository.selectedInstanceId();
+            @Nullable GameInstanceID selectedInstanceId = repository.selectedInstanceId();
             applyRepositoryEvent(entries, selectedInstanceId);
         } catch (RuntimeException failure) {
             LOG.warning("Failed to apply refreshed instances", failure);
@@ -453,8 +454,8 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// Applies one repository-confirmed selection without changing indexed content.
     ///
     /// @param change repository selection transition
-    private void selectionChanged(ValueChange<String> change) {
-        @Nullable String selectedInstanceId = change.currentValue();
+    private void selectionChanged(ValueChange<GameInstanceID> change) {
+        @Nullable GameInstanceID selectedInstanceId = change.currentValue();
         InstancesSnapshot previous;
         InstancesSnapshot replacement;
         synchronized (stateLock) {
@@ -514,7 +515,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// Replaces initial content without incrementing the initial revision.
     private void replaceInitialRepositoryContent() {
         @Unmodifiable List<RepositoryEntry> entries = repository.displayedInstances();
-        @Nullable String selectedInstanceId = repository.selectedInstanceId();
+        @Nullable GameInstanceID selectedInstanceId = repository.selectedInstanceId();
         InstancesSnapshot previous;
         InstancesSnapshot replacement;
         synchronized (stateLock) {
@@ -535,7 +536,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// @param selectedInstanceId repository-selected ID, or null for none
     private void applyRepositoryEvent(
             @Unmodifiable List<RepositoryEntry> entries,
-            @Nullable String selectedInstanceId) {
+            @Nullable GameInstanceID selectedInstanceId) {
         InstancesSnapshot previous;
         InstancesSnapshot replacement;
         synchronized (stateLock) {
@@ -591,7 +592,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// @param operation refresh ownership token
     private void finishOperationFromRepository(RefreshOperation operation) {
         @Unmodifiable List<RepositoryEntry> entries;
-        @Nullable String selectedInstanceId;
+        @Nullable GameInstanceID selectedInstanceId;
         try {
             entries = repository.displayedInstances();
             selectedInstanceId = repository.selectedInstanceId();
@@ -658,7 +659,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// @return ready page snapshot
     private InstancesSnapshot readySnapshot(
             SourceSnapshot source,
-            @Nullable String selectedInstanceId) {
+            @Nullable GameInstanceID selectedInstanceId) {
         OptionalInt selectedIndex = selectedIndex(source.entries(), selectedInstanceId);
         return new InstancesSnapshot(
                 selectedIndex,
@@ -733,7 +734,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// @return selected source index, or empty when the persisted ID is absent
     private static OptionalInt selectedIndex(
             @Unmodifiable List<RepositoryEntry> entries,
-            @Nullable String selectedInstanceId) {
+            @Nullable GameInstanceID selectedInstanceId) {
         int selectedIndex = indexOf(entries, selectedInstanceId);
         return selectedIndex < 0 ? OptionalInt.empty() : OptionalInt.of(selectedIndex);
     }
@@ -745,7 +746,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// @return zero-based index, or -1 when absent
     private static int indexOf(
             @Unmodifiable List<RepositoryEntry> entries,
-            @Nullable String instanceId) {
+            @Nullable GameInstanceID instanceId) {
         if (instanceId == null) {
             return -1;
         }
@@ -860,15 +861,12 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
     /// @param contentToken identity or value representing captured row content
     /// @param detailResolver resolver capturing the matching repository version descriptor
     @NotNullByDefault
-    record RepositoryEntry(String id, Object contentToken, DetailResolver detailResolver) {
+    record RepositoryEntry(GameInstanceID id, Object contentToken, DetailResolver detailResolver) {
         /// Validates one repository entry.
         RepositoryEntry {
             Objects.requireNonNull(id, "id");
             Objects.requireNonNull(contentToken, "contentToken");
             Objects.requireNonNull(detailResolver, "detailResolver");
-            if (id.isBlank()) {
-                throw new IllegalArgumentException("Repository instance ID cannot be blank");
-            }
         }
 
         /// Resolves this captured instance's underlying game version.
@@ -894,13 +892,13 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         @Unmodifiable List<RepositoryEntry> displayedInstances();
 
         /// Returns the selected stable instance ID, or null for none.
-        @Nullable String selectedInstanceId();
+        @Nullable GameInstanceID selectedInstanceId();
 
         /// Registers for repository-confirmed selected-instance transitions.
         ///
         /// @param listener selected-instance transition listener
         /// @return independently cancellable listener registration
-        Subscription subscribeSelectedInstance(ValueChangeListener<String> listener);
+        Subscription subscribeSelectedInstance(ValueChangeListener<GameInstanceID> listener);
 
         /// Registers for repository-confirmed instance-icon transitions.
         ///
@@ -915,12 +913,12 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         ///
         /// @param instanceId stable instance ID
         /// @return immutable normalized icon pixels
-        InstanceIconData resolveIcon(String instanceId);
+        InstanceIconData resolveIcon(GameInstanceID instanceId);
 
         /// Persists the selected stable instance ID.
         ///
         /// @param instanceId stable instance ID
-        void setSelectedInstanceId(String instanceId);
+        void setSelectedInstanceId(GameInstanceID instanceId);
 
         /// Performs a blocking repository refresh on a background thread.
         void refresh();
@@ -951,29 +949,26 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             return repository.isLoaded();
         }
 
-        /// Captures each displayed version object inside its lazy game-version resolver.
+        /// Captures each displayed instance manifest inside its lazy game-version resolver.
         @Override
         public @Unmodifiable List<RepositoryEntry> displayedInstances() {
-            return repository.getDisplayInstances()
-                    .map(version -> {
-                        java.nio.file.Path primaryJar = repository.getVersionJar(version);
-                        return new RepositoryEntry(
-                                version.getId(),
-                                version,
-                                () -> repository.detectGameVersion(primaryJar));
-                    })
+            return repository.getDisplayInstanceManifests()
+                    .map(manifest -> new RepositoryEntry(
+                            manifest.id(),
+                            manifest,
+                            () -> repository.getGameVersion(manifest)))
                     .toList();
         }
 
         /// Returns the persisted selected repository instance ID.
         @Override
-        public @Nullable String selectedInstanceId() {
+        public @Nullable GameInstanceID selectedInstanceId() {
             return repository.getSelectedInstance();
         }
 
         /// Registers a toolkit-neutral selected-instance listener.
         @Override
-        public Subscription subscribeSelectedInstance(ValueChangeListener<String> listener) {
+        public Subscription subscribeSelectedInstance(ValueChangeListener<GameInstanceID> listener) {
             return repository.subscribeSelectedInstance(listener);
         }
 
@@ -991,13 +986,13 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         /// @param instanceId stable instance ID
         /// @return immutable normalized icon pixels
         @Override
-        public InstanceIconData resolveIcon(String instanceId) {
+        public InstanceIconData resolveIcon(GameInstanceID instanceId) {
             @Nullable GameSettings.Instance settings = repository.getInstanceGameSettings(instanceId);
-            @Nullable InstanceIconType configuredType = settings == null
+            @Nullable GameInstanceIconType configuredType = settings == null
                     ? null
                     : settings.iconProperty().getValue();
-            InstanceIconType builtInType = configuredType == null
-                    ? InstanceIconType.DEFAULT
+            GameInstanceIconType builtInType = configuredType == null
+                    ? GameInstanceIconType.DEFAULT
                     : configuredType;
             @Nullable java.nio.file.Path customIcon = repository.getInstanceIconFile(instanceId)
                     .orElse(null);
@@ -1006,14 +1001,14 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
 
         /// Queues one selected repository instance ID on the Swing event thread.
         @Override
-        public void setSelectedInstanceId(String instanceId) {
+        public void setSelectedInstanceId(GameInstanceID instanceId) {
             LauncherStateDispatcher.execute(() -> repository.setSelectedInstance(instanceId));
         }
 
         /// Performs one blocking repository refresh.
         @Override
         public void refresh() {
-            repository.refreshInstances();
+            repository.refresh();
         }
     }
 }

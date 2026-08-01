@@ -21,12 +21,14 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.export.ModpackExportTaskFactory;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
@@ -52,6 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Verifies that modpack export file selection remains local, lazy, and expansion-driven.
 @NotNullByDefault
@@ -76,7 +79,7 @@ final class ModpackExportPanelTest {
                         resolverCalls.incrementAndGet();
                         return runDirectory;
                     },
-                    "instance",
+                    new GameInstanceID("instance"),
                     unusedTaskFactory(),
                     fixedOutputChooser(runDirectory.resolve("bundle")),
                     executor,
@@ -152,7 +155,7 @@ final class ModpackExportPanelTest {
                         resolverCalls.incrementAndGet();
                         return runDirectory;
                     },
-                    "instance",
+                    new GameInstanceID("instance"),
                     unusedTaskFactory(),
                     fixedOutputChooser(runDirectory.resolve("bundle")),
                     executor,
@@ -172,6 +175,39 @@ final class ModpackExportPanelTest {
         assertNotNull(panelReference.get());
     }
 
+    /// Shows a localized empty state after the background root scan completes without exportable entries.
+    @Test
+    void emptyRootShowsLocalizedStatusAndKeepsRefreshAvailable() {
+        QueuedExecutor executor = new QueuedExecutor();
+        AtomicReference<@Nullable ModpackExportPanel> panelReference = new AtomicReference<>();
+
+        EdtDispatcher.executeAndWait(() -> {
+            ModpackExportPanel panel = new ModpackExportPanel(
+                    ignored -> runDirectory,
+                    new GameInstanceID("instance"),
+                    unusedTaskFactory(),
+                    fixedOutputChooser(runDirectory.resolve("bundle")),
+                    executor,
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO);
+            panelReference.set(panel);
+            panel.activate();
+        });
+
+        executor.runNext();
+        EdtDispatcher.executeAndWait(() -> {
+            ModpackExportPanel panel = Objects.requireNonNull(panelReference.get(), "panel");
+            JLabel status = findNamed(panel, "modpackExportStatus", JLabel.class);
+            JButton refresh = findNamed(panel, "modpackExportRefreshFiles", JButton.class);
+            JButton export = findNamed(panel, "modpackExportStart", JButton.class);
+            assertEquals(i18n("modpack.files.empty"), status.getText());
+            assertTrue(refresh.isEnabled());
+            assertFalse(export.isEnabled());
+            panel.close();
+        });
+    }
+
     /// Keeps output selection reachable when the host leaves only a short export content area.
     @Test
     void constrainedHeightScrollsTheCompleteMetadataForm() {
@@ -181,7 +217,7 @@ final class ModpackExportPanelTest {
         EdtDispatcher.executeAndWait(() -> {
             ModpackExportPanel panel = new ModpackExportPanel(
                     ignored -> runDirectory,
-                    "instance",
+                    new GameInstanceID("instance"),
                     unusedTaskFactory(),
                     fixedOutputChooser(runDirectory.resolve("bundle")),
                     executor,

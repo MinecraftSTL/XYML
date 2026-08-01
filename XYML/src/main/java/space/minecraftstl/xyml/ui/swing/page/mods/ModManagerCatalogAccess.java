@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.mod.LocalModFile;
 import space.minecraftstl.xyml.addon.mod.ModManager;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.util.io.FileUtils;
@@ -54,7 +55,7 @@ final class ModManagerCatalogAccess implements ModCatalogAccess {
     ModManagerCatalogAccess(GameRepository repository, String instanceId) {
         manager = new ModManager(
                 Objects.requireNonNull(repository, "repository"),
-                Objects.requireNonNull(instanceId, "instanceId"));
+                new GameInstanceID(Objects.requireNonNull(instanceId, "instanceId")));
     }
 
     /// Returns the normalized path supplied by the real repository.

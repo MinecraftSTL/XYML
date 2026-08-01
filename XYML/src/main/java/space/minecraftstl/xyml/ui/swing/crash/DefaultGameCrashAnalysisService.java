@@ -17,13 +17,13 @@
  */
 package space.minecraftstl.xyml.ui.swing.crash;
 
+import kala.encdet.EncodingDetector;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
 import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.util.Pair;
-import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -112,7 +112,7 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
 
         String log;
         try {
-            log = FileUtils.readTextMaybeNativeEncoding(latestLog);
+            log = EncodingDetector.MODERN_WEB.readString(latestLog);
         } catch (IOException exception) {
             LOG.warning("Failed to read logs/latest.log", exception);
             return pair(Set.of(), Set.of());

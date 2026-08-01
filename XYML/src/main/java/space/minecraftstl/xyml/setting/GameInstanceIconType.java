@@ -22,7 +22,7 @@ import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 
 /// Identifies the bundled icon resource associated with an instance.
 @NotNullByDefault
-public enum InstanceIconType {
+public enum GameInstanceIconType {
     /// Default grass-block icon.
     DEFAULT("/assets/img/grass.png"),
 
@@ -59,15 +59,15 @@ public enum InstanceIconType {
     // Please append new items at last
 
     /// Maps one Mod loader to its default icon type.
-    public static InstanceIconType getIconType(ModLoaderType modLoaderType) {
+    public static GameInstanceIconType getIconType(ModLoaderType modLoaderType) {
         return switch (modLoaderType) {
-            case FORGE -> InstanceIconType.FORGE;
-            case NEO_FORGE -> InstanceIconType.NEO_FORGE;
-            case FABRIC -> InstanceIconType.FABRIC;
-            case QUILT -> InstanceIconType.QUILT;
-            case LITE_LOADER -> InstanceIconType.CHICKEN;
-            case CLEANROOM -> InstanceIconType.CLEANROOM;
-            default -> InstanceIconType.COMMAND;
+            case FORGE -> GameInstanceIconType.FORGE;
+            case NEO_FORGE -> GameInstanceIconType.NEO_FORGE;
+            case FABRIC -> GameInstanceIconType.FABRIC;
+            case QUILT -> GameInstanceIconType.QUILT;
+            case LITE_LOADER -> GameInstanceIconType.CHICKEN;
+            case CLEANROOM -> GameInstanceIconType.CLEANROOM;
+            default -> GameInstanceIconType.COMMAND;
         };
     }
 
@@ -75,7 +75,7 @@ public enum InstanceIconType {
     private final String resourceUrl;
 
     /// Creates one icon type.
-    InstanceIconType(String resourceUrl) {
+    GameInstanceIconType(String resourceUrl) {
         this.resourceUrl = resourceUrl;
     }
 

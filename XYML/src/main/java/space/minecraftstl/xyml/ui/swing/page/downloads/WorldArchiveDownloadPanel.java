@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -145,7 +146,7 @@ public final class WorldArchiveDownloadPanel extends JPanel implements AutoClose
         if (selected == null) {
             showSelectionRequired();
         } else {
-            targetLabel.setText(selected.instanceId());
+            targetLabel.setText(selected.instanceId().id());
             WorldCatalogPanel createdCatalog = new WorldCatalogPanel(
                     selected.repository(),
                     selected.instanceId(),
@@ -173,8 +174,8 @@ public final class WorldArchiveDownloadPanel extends JPanel implements AutoClose
     private static @Nullable SelectedInstance resolveSelectedInstance() {
         try {
             XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
-            @Nullable String instanceId = repository.getSelectedInstance();
-            if (instanceId == null || instanceId.isBlank()) {
+            @Nullable GameInstanceID instanceId = repository.getSelectedInstance();
+            if (instanceId == null) {
                 return null;
             }
             return new SelectedInstance(repository, instanceId);
@@ -188,14 +189,11 @@ public final class WorldArchiveDownloadPanel extends JPanel implements AutoClose
     /// @param repository selected repository owning the instance
     /// @param instanceId stable non-blank selected instance identifier
     @NotNullByDefault
-    private record SelectedInstance(XYMLGameRepository repository, String instanceId) {
+    private record SelectedInstance(XYMLGameRepository repository, GameInstanceID instanceId) {
         /// Validates the captured launcher selection.
         private SelectedInstance {
             repository = Objects.requireNonNull(repository, "repository");
             instanceId = Objects.requireNonNull(instanceId, "instanceId");
-            if (instanceId.isBlank()) {
-                throw new IllegalArgumentException("instanceId must not be blank");
-            }
         }
     }
 }

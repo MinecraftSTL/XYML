@@ -43,6 +43,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -99,6 +100,7 @@ final class SwingRemoteWorldSaveTargetResolverTest {
         assertEquals(destination.toAbsolutePath().normalize(), target.exactDestination());
         assertEquals(destination.toAbsolutePath().normalize(), target.resolveDestination(version));
         assertEquals(RemoteAddonCatalogKind.WORLD, target.kind());
+        assertNull(target.instanceId());
     }
 
     /// Uses a safe fallback suggestion for path-bearing provider metadata and leaves no target after cancellation.

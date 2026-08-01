@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DownloadProvider;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.ModpackHelper;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.modpack.Modpack;
@@ -65,12 +66,12 @@ public final class DefaultRemoteModpackInstallLauncher implements RemoteModpackI
     @Override
     public Task<?> createInstallTask(RemoteModpackInstallRequest request) throws IOException {
         RemoteModpackInstallRequest installRequest = Objects.requireNonNull(request, "request");
-        if (!XYMLGameRepository.isValidInstanceId(installRequest.instanceName())) {
+        if (!XYMLGameRepository.isValidInstanceId(installRequest.instanceId().id())) {
             throw new IllegalArgumentException("Invalid remote modpack instance name");
         }
 
         XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
-        if (repository.instanceIdConflicts(installRequest.instanceName())) {
+        if (repository.instanceIdConflicts(installRequest.instanceId())) {
             throw new IllegalArgumentException("Remote modpack instance name already exists");
         }
 
@@ -79,12 +80,15 @@ public final class DefaultRemoteModpackInstallLauncher implements RemoteModpackI
                 downloadProvider.injectURLWithCandidates(installRequest.version().file().url()),
                 archive,
                 installRequest.version().file().getIntegrityCheck());
+        download.setName(installRequest.version().name().isBlank()
+                ? installRequest.version().file().filename()
+                : installRequest.version().name());
         download.addIntegrityCheckHandler(FileDownloadTask.ZIP_INTEGRITY_CHECK_HANDLER);
         return download
                 .thenComposeAsync(Schedulers.io(), ignored -> createInstallTask(repository, installRequest, archive))
                 .whenComplete(Schedulers.io(), failure -> cleanupTerminalState(
                         repository,
-                        installRequest.instanceName(),
+                        installRequest.instanceId(),
                         archive,
                         failure));
     }
@@ -104,7 +108,7 @@ public final class DefaultRemoteModpackInstallLauncher implements RemoteModpackI
         return ModpackHelper.getInstallTask(
                 repository,
                 archive,
-                request.instanceName(),
+                request.instanceId(),
                 modpack,
                 request.item().addon().iconUrl());
     }
@@ -112,17 +116,17 @@ public final class DefaultRemoteModpackInstallLauncher implements RemoteModpackI
     /// Clears unfinished repository state and removes the temporary archive after task termination.
     ///
     /// @param repository destination repository captured for this task
-    /// @param instanceName destination instance identifier
+    /// @param instanceId destination instance identifier
     /// @param archive temporary remote archive
     /// @param failure terminal task failure, or null after success
     /// @throws IOException when the temporary archive cannot be deleted
     private static void cleanupTerminalState(
             XYMLGameRepository repository,
-            String instanceName,
+            GameInstanceID instanceId,
             Path archive,
             @Nullable Throwable failure) throws IOException {
         if (failure != null) {
-            repository.undoMark(instanceName);
+            repository.undoMark(instanceId);
         }
         Files.deleteIfExists(archive);
     }

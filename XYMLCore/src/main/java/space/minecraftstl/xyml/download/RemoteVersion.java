@@ -17,7 +17,8 @@
  */
 package space.minecraftstl.xyml.download;
 
-import space.minecraftstl.xyml.game.Version;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.ToStringBuilder;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
@@ -95,7 +96,7 @@ public class RemoteVersion implements Comparable<RemoteVersion> {
         return type;
     }
 
-    public Task<Version> getInstallTask(DefaultDependencyManager dependencyManager, Version baseVersion) {
+    public Task<GameInstancePatch> getInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest baseVersion) {
         throw new UnsupportedOperationException(this + " cannot be installed yet");
     }
 
