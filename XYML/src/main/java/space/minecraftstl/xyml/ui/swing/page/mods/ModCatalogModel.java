@@ -46,6 +46,14 @@ public interface ModCatalogModel extends ViewportChoiceDataSource<ModCatalogItem
     /// @return Mod directory
     Path modsDirectory();
 
+    /// Returns the current filtered row identities without materializing viewport metadata rows.
+    ///
+    /// The order exactly matches this data source's logical indexes. A local key remains stable
+    /// when enabling or disabling a Mod renames its physical file with the disabled suffix.
+    ///
+    /// @return immutable filtered local keys in logical list order
+    @Unmodifiable List<String> filteredLocalKeys();
+
     /// Starts the first background `ModManager` refresh when still idle.
     void loadIfNeeded();
 
@@ -77,6 +85,15 @@ public interface ModCatalogModel extends ViewportChoiceDataSource<ModCatalogItem
     /// @return asynchronous terminal snapshot
     CompletionStage<ModCatalogSnapshot> setModEnabled(String localKey, boolean enabled);
 
+    /// Enables or disables one non-empty batch of indexed Mods with one follow-up refresh.
+    ///
+    /// @param localKeys immutable rename-stable target keys
+    /// @param enabled desired on-disk state
+    /// @return asynchronous terminal snapshot
+    CompletionStage<ModCatalogSnapshot> setModsEnabled(
+            @Unmodifiable List<String> localKeys,
+            boolean enabled);
+
     /// Imports valid local Mod archives and refreshes the exact catalog afterward.
     ///
     /// @param sources source files captured defensively
@@ -88,6 +105,12 @@ public interface ModCatalogModel extends ViewportChoiceDataSource<ModCatalogItem
     /// @param localKey rename-stable target key
     /// @return asynchronous terminal snapshot
     CompletionStage<ModCatalogSnapshot> deleteMod(String localKey);
+
+    /// Permanently deletes one non-empty batch of indexed current Mods with one follow-up refresh.
+    ///
+    /// @param localKeys immutable rename-stable target keys
+    /// @return asynchronous terminal snapshot
+    CompletionStage<ModCatalogSnapshot> deleteMods(@Unmodifiable List<String> localKeys);
 
     /// Cancels outstanding pre-commit work and rejects later commands and loads.
     @Override

@@ -135,6 +135,14 @@ public final class DefaultModCatalogModel implements ModCatalogModel {
         return access.modsDirectory();
     }
 
+    /// Returns the immutable current filtered local-key order without materializing public rows.
+    @Override
+    public @Unmodifiable List<String> filteredLocalKeys() {
+        return state.filteredEntries().stream()
+                .map(ModCatalogEntry::localKey)
+                .toList();
+    }
+
     /// Returns the exact filtered count only after a successful refresh.
     @Override
     public OptionalInt exactItemCount() {
@@ -243,6 +251,22 @@ public final class DefaultModCatalogModel implements ModCatalogModel {
                 enabled ? strings.enablingText() : strings.disablingText());
     }
 
+    /// Starts one serialized batch of Core enabled-state renames and one follow-up refresh.
+    @Override
+    public CompletionStage<ModCatalogSnapshot> setModsEnabled(
+            @Unmodifiable List<String> localKeys,
+            boolean enabled) {
+        ModCatalogMutation mutation;
+        try {
+            mutation = new ModCatalogMutation.EnabledBatch(localKeys, enabled);
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+        return startMutation(
+                mutation,
+                enabled ? strings.enablingText() : strings.disablingText());
+    }
+
     /// Starts one serialized preflighted Core import.
     @Override
     public CompletionStage<ModCatalogSnapshot> importMods(@Unmodifiable List<Path> sources) {
@@ -261,6 +285,18 @@ public final class DefaultModCatalogModel implements ModCatalogModel {
         ModCatalogMutation mutation;
         try {
             mutation = new ModCatalogMutation.Delete(localKey);
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+        return startMutation(mutation, strings.deletingText());
+    }
+
+    /// Starts one serialized permanent Core batch deletion and one follow-up refresh.
+    @Override
+    public CompletionStage<ModCatalogSnapshot> deleteMods(@Unmodifiable List<String> localKeys) {
+        ModCatalogMutation mutation;
+        try {
+            mutation = new ModCatalogMutation.DeleteBatch(localKeys);
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
