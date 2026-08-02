@@ -25,48 +25,68 @@
 
 ## Introduction
 
-XYML is an open-source, cross-platform Minecraft launcher that supports Mod Management, Game Customizing, ModLoader Installing (Forge, NeoForge, Cleanroom, Fabric, Legacy Fabric, Quilt, LiteLoader, and OptiFine), Modpack Creating, UI Customization, and more.
+XYML (xOyz Minecraft Launcher) is an open-source, cross-platform Minecraft launcher independently maintained by the
+MinecraftSTL community. Its current desktop interface is built with Swing and provides complete workflows for
+installing and launching the game, maintaining instances, and managing modpacks.
 
-XYML has amazing cross-platform capabilities. Not only does it run on different operating systems like Windows, Linux, macOS, and FreeBSD, but it also supports various CPU architectures such as x86, ARM, RISC-V, MIPS, and LoongArch. You can easily enjoy Minecraft across different platforms through XYML.
+Its main features include:
 
-For systems and CPU architectures supported by XYML, please refer to [this table](PLATFORM.md).
+- Installing and managing Minecraft together with loaders such as Forge, NeoForge, Cleanroom, Fabric, Legacy Fabric,
+  Quilt, LiteLoader, and OptiFine;
+- Managing accounts, game instances, Java runtimes, and game settings;
+- Managing mods, resource packs, worlds, and modpacks, including modpack installation, updates, creation, and export;
+- Customizing launcher themes, backgrounds, and appearance.
 
-## Download
+XYML supports multiple operating systems and CPU architectures. See the [platform support table](PLATFORM.md) for exact
+support levels and limitations. The launcher requires Java 17 or later, and Java 21 is recommended.
 
-You can download XYML from the following sources:
+## Relationship with HMCL
 
-- [XYML Official Website](https://github.com/MinecraftSTL/XYML/releases)
-- [GitHub Release](https://github.com/MinecraftSTL/XYML/releases)
-- [CNB Release](https://github.com/MinecraftSTL/XYML/releases)
+XYML originates from the code and Git history of
+[HMCL (Hello Minecraft! Launcher)](https://github.com/HMCL-dev/HMCL), which is this project's upstream repository.
+HMCL's maintainers and community contributors established the foundations that XYML inherits, including game
+launching and downloads, instance and account management, modpacks, localization, and cross-platform support. This
+repository preserves those historical commits, authorship, and copyright notices with gratitude.
+
+XYML is a downstream project independently maintained by MinecraftSTL and is not an official HMCL release. XYML
+manages its own versions, release channels, artifacts, and issue tracking; the release status of HMCL and XYML does not
+represent the other project. This repository retains `HMCL-dev/HMCL` as its upstream source so that suitable upstream
+changes can be tracked and evaluated for XYML.
+
+## Downloads and Releases
+
+Download official XYML builds from [GitHub Releases](https://github.com/MinecraftSTL/XYML/releases). XYML uses four
+release channels: stable, beta, alpha, and dev. Their version formats, test audiences, feedback policies, and promotion
+order are documented in the [release model](ReleaseSchedule.md).
 
 ## Contributing
 
-XYML is a community-driven open-source project, and everyone is welcome to contribute code or provide suggestions.
+You can participate in XYML through the following channels:
 
-You can contribute to XYML development in the following ways:
+- Report problems or propose features through [GitHub Issues](https://github.com/MinecraftSTL/XYML/issues/new/choose);
+- Fork this repository and [submit a pull request](https://github.com/MinecraftSTL/XYML/compare);
+- Follow the [contributing guide](Contributing.md) to build, run, and debug XYML from source.
 
-- Report bugs or request features by [creating an issue](https://github.com/MinecraftSTL/XYML/issues/new/choose) on GitHub.
-- Contribute code by forking the repository on GitHub and [submitting a pull request](https://github.com/MinecraftSTL/XYML/compare).
+## Contributors and Acknowledgments
 
-Before contributing, please read the [Contributing Guide](./Contributing.md), which includes the following:
+Thank you to everyone who contributes code, translations, testing, issue reports, and documentation to XYML.
 
-- [How to build and run XYML from source](./Contributing.md#build-xyml)
-- [Adjusting XYML behavior using debug options](./Contributing.md#debug-options)
+[![XYML Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
 
-## Contributors
-
-Since 2015, more than 120 contributors have participated in XYML. Thank you for your hard work!
-
-[![Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
+We also thank
+[HMCL's authors and contributors throughout its history](https://github.com/HMCL-dev/HMCL/graphs/contributors). The
+long-running development inherited by XYML belongs to that upstream history and should not be represented as work
+produced solely by the XYML project.
 
 ## License
 
-The software is distributed under [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html) license with the following additional terms:
+XYML is distributed under the [GNU General Public License, version 3 or later](../LICENSE), with the GPLv3 Section 7
+additional requirements inherited from HMCL:
 
-### Additional terms under GPLv3 Section 7
+1. When distributing a modified version of this program, you must reasonably change its name or version number so that
+   it can be distinguished from the original version (under
+   [GPLv3 Section 7(c)](../LICENSE#L372-L374)). The program name and version are defined in
+   [`Metadata.java`](../XYML/src/main/java/space/minecraftstl/xyml/Metadata.java).
+2. You must not remove copyright notices displayed by the program (under [GPLv3 Section 7(b)](../LICENSE#L368-L370)).
 
-1. When you distribute a modified version of the software, you must change the software name or the version number in a reasonable way in order to distinguish it from the original version. (Under [GPLv3, 7(c)](https://github.com/HMCL-dev/HMCL/blob/11820e31a85d8989e41d97476712b07e7094b190/LICENSE#L372-L374))
-
-   The software name and the version number can be edited [here](https://github.com/MinecraftSTL/XYML/blob/main/XYML/src/main/java/space/minecraftstl/xyml/Metadata.java).
-
-2. You must not remove the copyright declaration displayed in the software. (Under [GPLv3, 7(b)](https://github.com/HMCL-dev/HMCL/blob/11820e31a85d8989e41d97476712b07e7094b190/LICENSE#L368-L370))
+The complete licensing terms are provided in [LICENSE](../LICENSE) and in the copyright and license notices of individual source files.
