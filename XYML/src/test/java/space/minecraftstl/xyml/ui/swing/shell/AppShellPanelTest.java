@@ -244,8 +244,14 @@ public final class AppShellPanelTest {
                         () -> assertSame(toolbar.instanceSelector(), components[4]),
                         () -> assertSame(toolbar.launchButton(), components[5]),
                         () -> assertSame(toolbar.winWindowButtonsPlaceholder(), components[6]),
+                        () -> assertEquals(
+                                toolbar.brandLabel().getPreferredSize().width,
+                                toolbar.brandLabel().getWidth()),
                         () -> assertTrue(rightEdge(toolbar.brandLabel()) <= toolbar.gameDirectorySelector().getX()),
                         () -> assertTrue(rightEdge(toolbar.gameDirectorySelector()) <= toolbar.accountSelector().getX()),
+                        () -> assertEquals(
+                                toolbar.gameDirectorySelector().getX() - rightEdge(toolbar.brandLabel()),
+                                toolbar.accountSelector().getX() - rightEdge(toolbar.gameDirectorySelector())),
                         () -> assertTrue(rightEdge(toolbar.accountSelector()) <= toolbar.instanceSelector().getX()),
                         () -> assertTrue(rightEdge(toolbar.instanceSelector()) <= toolbar.launchButton().getX()),
                         () -> assertTrue(toolbar.instanceSelector().getX() > toolbar.getWidth() / 2),
@@ -334,6 +340,36 @@ public final class AppShellPanelTest {
                 assertAll(
                         () -> assertNull(panel.selectedPage()),
                         () -> assertFalse(panel.navigationButton(ShellPageId.INSTANCES).isSelected()));
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
+    /// A long development version keeps both leading selectors immediately after the complete brand title.
+    @Test
+    public void positionsLeadingSelectorsAfterVariableLengthVersionTitle() {
+        AppShellPanel panel = createPanel(creationCounts());
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                panel.setSize(new Dimension(RENDER_WIDTH, RENDER_HEIGHT));
+                ShellToolbarPanel toolbar = panel.toolbar();
+                toolbar.brandLabel().setText("XYML 1.0.1-dev.20260803+build.1234567890");
+                layoutTree(panel);
+
+                int brandDirectoryGap = toolbar.gameDirectorySelector().getX() - rightEdge(toolbar.brandLabel());
+                int directoryAccountGap = toolbar.accountSelector().getX()
+                        - rightEdge(toolbar.gameDirectorySelector());
+                assertAll(
+                        () -> assertEquals(
+                                toolbar.brandLabel().getPreferredSize().width,
+                                toolbar.brandLabel().getWidth()),
+                        () -> assertTrue(brandDirectoryGap > 0),
+                        () -> assertEquals(directoryAccountGap, brandDirectoryGap),
+                        () -> assertTrue(rightEdge(toolbar.brandLabel()) <= toolbar.gameDirectorySelector().getX()),
+                        () -> assertTrue(rightEdge(toolbar.gameDirectorySelector()) <= toolbar.accountSelector().getX()),
+                        () -> assertTrue(rightEdge(toolbar.accountSelector()) <= toolbar.instanceSelector().getX()));
             });
         } finally {
             panel.close();

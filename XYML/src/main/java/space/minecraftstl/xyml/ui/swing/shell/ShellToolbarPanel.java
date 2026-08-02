@@ -112,7 +112,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
             Runnable revealDefaultPageCommand) {
         super(new MigLayout(
                 "insets 0, fillx",
-                "[]12[168!,shrink 80]12[190!,shrink 90]8[168!,shrink 80]push"
+                "[]12[pref!]8[190!,shrink 90]8[168!,shrink 80]push"
                         + "[238!,shrink 100]8[132!,shrink 60]2[]",
                 "[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
