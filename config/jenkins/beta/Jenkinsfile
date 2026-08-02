@@ -4,7 +4,7 @@ pipeline {
     environment {
         XYML_CI = '1'
 
-        RELEASE_CHANNEL = 'stable'
+        RELEASE_CHANNEL = 'beta'
         MICROSOFT_AUTH_ID = credentials('microsoft_auth_id')
         CURSEFORGE_API_KEY = credentials('curseforge_api_key')
         XYML_SIGNATURE_KEY = credentials('xyml_signature_key')

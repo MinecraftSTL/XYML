@@ -4,7 +4,7 @@ pipeline {
     environment {
         XYML_CI = '1'
 
-        VERSION_TYPE = 'dev'
+        RELEASE_CHANNEL = 'dev'
         MICROSOFT_AUTH_ID = credentials('microsoft_auth_id')
         CURSEFORGE_API_KEY = credentials('curseforge_api_key')
         XYML_SIGNATURE_KEY = credentials('xyml_signature_key')
@@ -15,7 +15,6 @@ pipeline {
             steps {
                 sh 'bash ./config/jenkins/config-jenkins.sh'
                 sh './gradlew clean makeExecutables makeDeb --stacktrace --no-daemon'
-                archiveArtifacts artifacts: 'XYML/build/libs/*'
             }
         }
     }
