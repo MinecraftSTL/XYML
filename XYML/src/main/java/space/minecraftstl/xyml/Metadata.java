@@ -67,10 +67,13 @@ public final class Metadata {
     /// Launcher release download page.
     public static final String DOWNLOAD_URL = PUBLISH_URL + "/releases";
 
-    /// Update descriptor endpoint, optionally overridden for deployment-specific infrastructure.
+    /// Channel-specific update descriptor template, optionally overridden for deployment-specific infrastructure.
+    ///
+    /// The `{channel}` placeholder is resolved to `stable`, `beta`, `alpha`, or `dev` before query parameters are
+    /// appended.
     public static final String XYML_UPDATE_URL = System.getProperty(
             "xyml.update_source.override",
-            DOWNLOAD_URL + "/latest/download/xyml-update.json");
+            DOWNLOAD_URL + "/download/release-channels/xyml-update-{channel}.json");
 
     /// Release page used when an automatic update cannot be applied.
     public static final String MANUAL_UPDATE_URL = DOWNLOAD_URL;
@@ -91,7 +94,7 @@ public final class Metadata {
     public static final String GROUPS_URL = "https://qm.qq.com/cgi-bin/qm/qr?k=wz9sCQuIj4TiQBHUpeuBGM-pZ83f5ini&jump_from=webapi&authKey=VKucBpojFUOiDWF7OCbmvDI6Vfkjr+S1m4e7+unOBAuEfW/j1yXYTnf50c+z/NWs";
 
     /// Build channel embedded in the launcher artifact.
-    public static final String BUILD_CHANNEL = JarUtils.getAttribute("xyml.version.type", "nightly");
+    public static final String BUILD_CHANNEL = JarUtils.getAttribute("xyml.release.channel", "dev");
 
     /// Environment variable that disables the confirmation for illegal offline usernames.
     public static final String SKIP_OFFLINE_USERNAME_CHECK_ENVIRONMENT_VARIABLE = "XYML_SKIP_OFFLINE_USERNAME_CHECK";
@@ -178,14 +181,19 @@ public final class Metadata {
         return "stable".equals(BUILD_CHANNEL);
     }
 
+    /// Returns whether the artifact belongs to the public beta release channel.
+    public static boolean isBeta() {
+        return "beta".equals(BUILD_CHANNEL);
+    }
+
+    /// Returns whether the artifact belongs to the internal alpha release channel.
+    public static boolean isAlpha() {
+        return "alpha".equals(BUILD_CHANNEL);
+    }
+
     /// Returns whether the artifact belongs to the development release channel.
     public static boolean isDev() {
         return "dev".equals(BUILD_CHANNEL);
-    }
-
-    /// Returns whether the artifact belongs to a nightly or other non-stable, non-development channel.
-    public static boolean isNightly() {
-        return !isStable() && !isDev();
     }
 
     /// Returns the recommended Java download page for the current platform, or `null` when unsupported.

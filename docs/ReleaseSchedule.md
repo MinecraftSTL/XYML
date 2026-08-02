@@ -1,137 +1,97 @@
-# xOyz Minecraft Launcher Release Schedule
+# xOyz Minecraft Launcher Release Model
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
 **English** | 中文 ([简体](ReleaseSchedule_zh.md), [繁體](ReleaseSchedule_zh_Hant.md))
 <!-- #END LANGUAGE_SWITCHER -->
 
-This document describes the XYML version release schedule starting from October 2025.
+This document defines the XYML release model beginning with `1.0.0`.
 
-## Versioning Rules
+## Scope and History
 
-### Version Branches
+- `1.0.0` is the first stable version under this model.
+- Historical development snapshots, tags, and changelogs keep the release model and version meaning they originally used. They are not renamed or reinterpreted.
+- The unreleased `3.17.0` stable test artifact has one deliberately narrow migration exception: it may recognize `1.0.0` stable as an update. This is not a general version epoch or compatibility adapter, and no other `3.x -> 1.x` transition is implied.
+- Every version component is written in decimal. Hexadecimal, Base64, and other radices are not used.
 
-XYML has multiple **version branches**, each named in the format `<major>.<minor>` (e.g., `3.7`).
+## Version Format
 
-The major version is incremented only when there are significant architectural changes in XYML,
-while the minor version is incremented regularly according to the release schedule.
+The number of decimal components identifies the release channel.
 
-### Version Types
+| Channel | Format | Example | Audience |
+| --- | --- | --- | --- |
+| Stable | `x.y.z` | `1.0.0` | General users |
+| Beta | `x.y.z.b` | `1.0.0.1` | Unselected volunteers |
+| Alpha | `x.y.z.b.a` | `1.0.0.0.1` | Selected testers |
+| Dev | `x.y.z.b.a.d` | `1.0.0.0.0.1` | Developers and early verification |
 
-XYML has two types of versions: **Stable** and **Beta**.
+The first three components describe the scale of a stable change:
 
-#### Stable Version
+- `x` changes for a large architectural rewrite.
+- `x.y` changes for a feature release.
+- `x.y.z` changes for bug fixes and small adjustments.
 
-The XYML stable version is suitable for users who prioritize software stability.
-New features are merged into the stable version only after thorough testing.
+The additional `b`, `a`, and `d` counters identify beta, alpha, and dev candidates based on that stable line. Each promotion chooses a new version for the target channel; a version is never promoted by merely truncating its trailing components.
 
-The stable version number follows the naming rule `<version branch>.<build number>` (e.g., `3.7.1`).
-The build number is calculated independently for each version branch.
+### Ordering and Promotion
 
-#### Beta Version
+Decimal comparison remains chronological when target counters are advanced correctly. A normal patch candidate can progress as follows:
 
-The XYML beta version is suitable for users who want to experience new features first.
-The beta version includes the latest features and bug fixes,
-but may also have more issues due to insufficient testing.
-
-The beta version follows the naming rule `<version branch>.0.<build number>` (e.g., `3.7.0.300`).
-The build number is shared globally across all version branches.
-
-## Release Channels
-
-XYML has two main release channels: **Stable Channel** and **Beta Channel**.
-They are used to release the XYML stable and beta versions, respectively.
-
-To test XYML versions before official release, we will push updates to some users in advance.
-Users can enable the "Preview XYML releases early" option on the "Settings > General" page to receive preview updates from the corresponding channel.
-
-## Release Model
-
-```mermaid
----
-displayMode: compact
----
-gantt
-    title XYML Version Lifecycle (Example)
-    section 3.11
-        today: vert, 2026-02-20, 0d
-        Beta Phase: done, c1, after b1, 31d
-        Preview Phase: active, c2, after c1, 16d
-        Maintenance Phase: c3, after c2, 30d
-        3.11.0.118: milestone, after b1, 0d
-        3.11.0.119: milestone, 2026-02-01, 0d
-        3.11.1: milestone, after c1, 0d
-    section 3.10
-        Beta Phase: done, b1, after a1, 31d
-        Preview Phase: done, b2, after b1, 16d
-        Maintenance Phase: active, b3, after b2, 31d
-        3.10.0.116: milestone, after a1, 0d
-        3.10.0.117: milestone, 2025-12-30, 0d
-        3.10.1: milestone, after b1, 0d
-        3.10.2: milestone, 2026-01-23, 0d
-        3.10.3: milestone, after b2, 0d
-        3.10.4: milestone, 2026-02-11, 0d
-    section 3.9
-        Beta Phase: done, a1, 2025-11-15, 30d
-        Preview Phase: done, a2, after a1, 16d
-        Maintenance Phase: done, a3, after a2, 31d
-        3.9.0.114: milestone, 2025-11-15, 0d
-        3.9.0.115: milestone, 2025-11-30, 0d
-        3.9.1: milestone, after a1, 0d
-        3.9.2: milestone, 2025-12-23, 0d
-        3.9.3: milestone, after a2, 0d
-        3.9.4: milestone, 2026-01-11, 0d
+```text
+1.0.0 < 1.0.0.0.0.1 < 1.0.0.0.1 < 1.0.0.1 < 1.0.1
+stable     dev             alpha          beta        stable
 ```
 
-In general, we release a new version branch every month,
-and each version branch `x.y` has a lifecycle of two and a half months.
+For example, beta `3.17.0.1` normally lands in stable `3.17.1`, not stable `3.17.0`. If an emergency fix advances stable to `3.17.1` first, the candidate may first appear in stable `3.17.2`. The stable version is selected when the beta is actually promoted, based on both its changes and the then-current stable version.
 
-The lifecycle of each version branch is divided into the following stages:
+## Branch Model
 
-1. **Beta Phase** (Mid-month M ~ Mid-month M+1)
+| Branch | Channel | Role |
+| --- | --- | --- |
+| `main` | Stable | Generally available releases and emergency fixes |
+| `beta` | Beta | Public testing by unselected volunteers |
+| `alpha` | Alpha | Testing by a selected group |
+| `dev` | Dev | Default branch for feature and fix integration |
 
-   During this phase, the version is developed in the Git branch `main`.
+GitHub's default branch should be `dev`. Feature and fix branches start from `dev` and merge back into `dev` after their focused tests pass.
 
-   Typically, we release a beta version `x.y.0.<build number>` based on this branch every week,
-   which includes all features and bug fixes merged during the week.
+```mermaid
+flowchart LR
+    F["Feature or fix branch"] --> D["dev"]
+    D -->|"--no-ff promotion"| A["alpha"]
+    A -->|"--no-ff promotion"| B["beta"]
+    B -->|"--no-ff promotion"| S["main / stable"]
+    H["hotfix/*"] -->|"--no-ff promotion"| S
+    S -. "forward sync" .-> B
+    B -. "forward sync" .-> A
+    A -. "forward sync" .-> D
+```
 
-2. **Preview Phase** (Mid-month M+1 ~ End of month M+1)
+Every merge toward a more stable channel must use `git merge --no-ff`, including `hotfix/* -> main`. This preserves the tested candidate boundary as an explicit merge commit. After a stable hotfix or promotion, synchronize `main -> beta -> alpha -> dev` one adjacent branch at a time. Do not rebase or force-push shared release branches.
 
-   In mid-month M+1, we fork the `main` branch to create the `release/x.y` branch,
-   which corresponds to the fixed version branch `x.y`.
+The release-policy workflow validates adjacent branch flow before merge and audits the resulting promotion commit after merge. Repository rules must also allow merge commits for release PRs; a post-merge audit can detect, but cannot retroactively prevent, a squash or rebase merge.
 
-   At the same time, the version branch corresponding to the `main` branch is incremented to `x.y♯`,
-   entering the beta phase of the next version branch.
+## Distribution and Feedback
 
-   After the fork, no new features will be added to this version branch;
-   only bug fixes and data updates will be made.
+Update frequency increases from Stable to Beta, Alpha, and Dev.
 
-   Within a few days, we will release a stable preview version `x.y.1` and
-   push it to users in the stable channel who have enabled preview updates.
+| Channel | GitHub download | Other download locations | Feedback entry |
+| --- | --- | --- | --- |
+| Stable | Public | Published | Public |
+| Beta | Public | May be published | Public |
+| Alpha | Public prerelease | Not published | Restricted testing program |
+| Dev | Public prerelease | Not published | Restricted testing program |
 
-   Before the end of month M+1, the stable version corresponding to version branch `x.y` will remain in preview status.
-   If issues are found during the preview, we will release and push new stable preview versions (such as `x.y.2`, `x.y.3`, etc.) after fixing them.
+Alpha and Dev artifacts are intentionally downloadable from GitHub Releases. Public availability of the binaries does not open their feedback intake: reports for those channels are accepted only through the restricted testing program, and the public bug form is reserved for current Stable and Beta releases.
 
-3. **Stable Release** (End of month M+1)
+## Building and Publishing
 
-   At the end of month M+1, if there are no unexpected issues, we will promote the latest stable preview `x.y.z` to the official release and push it to all users in the stable channel.
+The build accepts these release inputs:
 
-4. **Maintenance Phase** (Month M+2)
+- `RELEASE_CHANNEL`: exactly `stable`, `beta`, `alpha`, or `dev`.
+- `RELEASE_VERSION`: an explicit complete decimal version used for a promotion.
+- `BUILD_NUMBER`: the final positive decimal component used for an ordinary CI build when `RELEASE_VERSION` is absent.
+- `STABLE_VERSION`: an optional override of `stableVersion` in `config/project.properties`.
 
-   In month M+2, version branch `x.y` enters the maintenance phase.
-   We will release stable updates irregularly based on the number and severity of issues fixed,
-   and push them to all users in the stable channel.
+Official builds reject missing or malformed release inputs. Local builds default to a six-component Dev snapshot such as `1.0.0.0.0.SNAPSHOT`.
 
-   At the end of month M+2, after the official release of the stable version corresponding to version branch `x.y♯`, the lifecycle of version branch `x.y` ends, the Git branch `release/x.y` is
-   archived, and no longer receives updates.
-
-## Long-Term Support Version Branches
-
-Some special version branches are selected as Long-Term Support (LTS) branches.
-Their lifecycle does not end with the official release of the next version branch's stable version.
-We will continue to backport necessary patches to these branches for a longer period.
-
-List of Long-Term Support Version Branches:
-
-| Version Branch | Official Release Date | End of Lifecycle | Current Support Status | Notes                                                                                                                                |
-|----------------|:---------------------:|:----------------:|:----------------------:|:-------------------------------------------------------------------------------------------------------------------------------------|
-| 3.6            |   November 23, 2024   |       TBD        |       Supported        | This is the last version branch that supports running on Java 8.<br>It is suitable for users on legacy platforms such as Windows XP. |
+The GitHub publishing workflow must run from the branch matching its selected channel. It creates a public release, marks Beta, Alpha, and Dev as prereleases, and updates the channel-specific update descriptor. Only Stable and Beta artifacts are handed to non-GitHub distribution jobs.
