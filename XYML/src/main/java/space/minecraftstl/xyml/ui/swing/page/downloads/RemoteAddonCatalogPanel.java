@@ -38,6 +38,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
+import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -72,6 +73,9 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// artifact to the existing task presentation pipeline rather than opening a browser.
 @NotNullByDefault
 public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseable {
+    /// Bottom spacing after the final add-on row, matching the upstream download-list padding.
+    private static final int RESULT_LIST_BOTTOM_PADDING = 9;
+
     /// Immutable category represented by this panel and by all its acquisition requests.
     private final RemoteAddonCatalogKind kind;
 
@@ -484,6 +488,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         JList<ChoiceListEntry<RemoteAddonCatalogItem>> resultList = choiceList.getList();
         resultList.setName("remoteAddonResultsView");
         resultList.setOpaque(false);
+        resultList.setBorder(BorderFactory.createEmptyBorder(0, 0, RESULT_LIST_BOTTOM_PADDING, 0));
         resultList.addListSelectionListener(event -> {
             if (!event.getValueIsAdjusting()) {
                 selectedRowChanged();
@@ -1275,9 +1280,17 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                     index,
                     isSelected,
                     cellHasFocus);
+            setIcon(null);
             if (value instanceof RemoteAddon.Version version) {
                 String displayName = version.name().isBlank() ? version.version() : version.name();
-                setText(displayName + " (" + version.version() + ")");
+                @Nullable RemoteAddon.VersionType versionType = version.versionType();
+                if (versionType == null) {
+                    setText(displayName + " (" + version.version() + ")");
+                } else {
+                    setText(displayName + " (" + version.version() + ") - "
+                            + RemoteVersionChannelPresentation.label(versionType));
+                    setIcon(RemoteVersionChannelPresentation.icon(versionType));
+                }
             }
             return component;
         }

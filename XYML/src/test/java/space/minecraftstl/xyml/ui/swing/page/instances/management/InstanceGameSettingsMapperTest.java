@@ -76,6 +76,7 @@ final class InstanceGameSettingsMapperTest {
         assertEquals("--demo", instance.gameArgumentsProperty().getValue());
         assertEquals("echo ready", instance.preLaunchCommandProperty().getValue());
         assertEquals(GraphicsAPI.VULKAN, instance.graphicsBackendProperty().getValue());
+        assertTrue(instance.highPerformanceProperty().getValue());
         assertEquals("native-bin", instance.nativesDirectoryProperty().getValue());
         InstanceGameSettingsSnapshot inherited = InstanceGameSettingsMapper.snapshot(
                 true,
@@ -90,6 +91,8 @@ final class InstanceGameSettingsMapperTest {
         assertEquals(GameWindowType.WINDOWED, inherited.window().type());
         assertFalse(inherited.graphics().backendOverridden());
         assertEquals(GraphicsAPI.DEFAULT, inherited.graphics().backend());
+        assertFalse(inherited.graphics().highPerformanceOverridden());
+        assertFalse(inherited.graphics().highPerformance());
     }
 
     /// Validates an empty detected-runtime reference only when the instance locally selects detected Java.
@@ -232,7 +235,9 @@ final class InstanceGameSettingsMapperTest {
                         overridden,
                         Renderer.OpenGL.ZINK,
                         overridden,
-                        Renderer.Vulkan.LAVAPIPE),
+                        Renderer.Vulkan.LAVAPIPE,
+                        overridden,
+                        true),
                 new InstanceGameSettingsSnapshot.NativeLibrarySettings(
                         overridden,
                         true,
@@ -299,6 +304,7 @@ final class InstanceGameSettingsMapperTest {
                 GameSettings.PROPERTY_GRAPHICS_BACKEND,
                 GameSettings.PROPERTY_OPENGL_RENDERER,
                 GameSettings.PROPERTY_VULKAN_RENDERER,
+                GameSettings.PROPERTY_HIGH_PERFORMANCE,
                 GameSettings.PROPERTY_ENVIRONMENT_VARIABLES,
                 GameSettings.PROPERTY_COMMAND_WRAPPER,
                 GameSettings.PROPERTY_PRE_LAUNCH_COMMAND,

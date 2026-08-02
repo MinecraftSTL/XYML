@@ -151,7 +151,8 @@ public final class GameSettingsPresetsPanelTest {
                             new GameSettingsPresetEditor.GraphicsSettings(
                                     GraphicsAPI.VULKAN,
                                     Renderer.DEFAULT,
-                                    Renderer.DEFAULT),
+                                    Renderer.DEFAULT,
+                                    true),
                             saved.graphics()),
                     () -> assertEquals(
                             new GameSettingsPresetEditor.NativeLibrarySettings(
@@ -429,6 +430,7 @@ public final class GameSettingsPresetsPanelTest {
         setText(panel, "instanceGameSettingsPostExitCommand", "echo post");
 
         setChoice(panel, "instanceGameSettingsGraphicsBackend", GraphicsAPI.VULKAN);
+        setBoolean(panel, "instanceGameSettingsHighPerformanceGpu", true);
 
         setBoolean(panel, "instanceGameSettingsUseCustomNatives", true);
         setText(panel, "instanceGameSettingsNativesDirectory", "C:/Games/Performance/natives");
@@ -471,6 +473,7 @@ public final class GameSettingsPresetsPanelTest {
                 "instanceGameSettingsGraphicsBackend",
                 "instanceGameSettingsOpenGlRenderer",
                 "instanceGameSettingsVulkanRenderer",
+                "instanceGameSettingsHighPerformanceGpu",
                 "instanceGameSettingsUseCustomNatives",
                 "instanceGameSettingsNativesDirectory",
                 "instanceGameSettingsDisableNativePatching",
@@ -584,7 +587,8 @@ public final class GameSettingsPresetsPanelTest {
                         new GameSettingsPresetEditor.GraphicsSettings(
                                 GraphicsAPI.DEFAULT,
                                 Renderer.DEFAULT,
-                                Renderer.DEFAULT),
+                                Renderer.DEFAULT,
+                                false),
                         new GameSettingsPresetEditor.NativeLibrarySettings(false, "", false, false, false),
                         DefaultIsolationType.MODDED));
     }
@@ -627,7 +631,8 @@ public final class GameSettingsPresetsPanelTest {
                 new GameSettingsPresetEditor.GraphicsSettings(
                         GraphicsAPI.DEFAULT,
                         Renderer.DEFAULT,
-                        Renderer.DEFAULT),
+                        Renderer.DEFAULT,
+                        false),
                 new GameSettingsPresetEditor.NativeLibrarySettings(false, path, false, false, false),
                 DefaultIsolationType.MODDED);
     }

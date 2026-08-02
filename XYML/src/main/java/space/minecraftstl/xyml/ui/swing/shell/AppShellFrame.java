@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
+import space.minecraftstl.xyml.ui.swing.WindowsNativeUtils;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
@@ -196,6 +197,7 @@ public final class AppShellFrame extends JFrame {
         EdtDispatcher.executeAndWait(() -> {
             setExtendedState(nonIconifiedState(getExtendedState()));
             setVisible(true);
+            WindowsNativeUtils.applyAppUserModelRelaunchProperties(this);
             requestSystemThemeRefresh();
         });
     }
@@ -205,6 +207,7 @@ public final class AppShellFrame extends JFrame {
         EdtDispatcher.executeAndWait(() -> {
             systemThemeRefreshTimer.stop();
             setExtendedState(nonIconifiedState(getExtendedState()));
+            WindowsNativeUtils.clearAppUserModelRelaunchProperties(this);
             setVisible(false);
         });
     }
@@ -228,6 +231,7 @@ public final class AppShellFrame extends JFrame {
     @Override
     public void dispose() {
         systemThemeRefreshTimer.stop();
+        WindowsNativeUtils.clearAppUserModelRelaunchProperties(this);
         disposeInOrder(
                 () -> disposeInOrder(backgroundController::close, shellPanel::close),
                 () -> disposeInOrder(this::uninstallUndecoratedWindowResizer, super::dispose));

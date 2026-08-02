@@ -44,6 +44,7 @@ import space.minecraftstl.xyml.ui.swing.page.accounts.AccountReauthentication;
 import space.minecraftstl.xyml.util.*;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.platform.*;
+import space.minecraftstl.xyml.util.platform.windows.WinReg;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
 
@@ -72,6 +73,13 @@ public final class LauncherHelper {
 
     /// Persistent tip key for the LWJGL memory-util launch recommendation.
     private static final String LWJGL_3_4_1_TIP = "lwjgl3.4.1-ffm";
+
+    /// Per-user DirectX registry key containing executable-specific GPU preferences.
+    private static final String WINDOWS_GPU_PREFERENCES_KEY =
+            "Software\\Microsoft\\DirectX\\UserGpuPreferences";
+
+    /// DirectX preference value selecting the high-performance GPU.
+    private static final String HIGH_PERFORMANCE_GPU_PREFERENCE = "GpuPreference=2;";
 
     /// Repository supplying the selected instance and launch dependencies.
     private final XYMLGameRepository repository;
@@ -330,9 +338,12 @@ public final class LauncherHelper {
                 })
                 .thenComposeAsync(() -> logIn(account).withStage("launch.state.logging_in"))
                 .thenComposeAsync((@Nullable AuthInfo authInfo) -> Task.supplyAsync(() -> {
+                    JavaRuntime selectedJava = Objects.requireNonNull(
+                            javaVersionRef.get(),
+                            "selected Java runtime");
                     LaunchOptions.Builder launchOptionsBuilder = repository.getLaunchOptions(
                             selectedInstanceId,
-                            Objects.requireNonNull(javaVersionRef.get(), "selected Java runtime"),
+                            selectedJava,
                             repository.getBaseDirectory(),
                             javaAgents,
                             javaArguments,
@@ -342,6 +353,10 @@ public final class LauncherHelper {
                     }
                     if (quickPlayOption != null) {
                         launchOptionsBuilder.setQuickPlayOption(quickPlayOption);
+                    }
+                    if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS
+                            && setting.getInheritable(GameSettings::highPerformanceProperty)) {
+                        applyHighPerformanceGpuPreference(WinReg.INSTANCE, selectedJava.getBinary());
                     }
 
                     LaunchOptions launchOptions = launchOptionsBuilder.create();
@@ -360,6 +375,40 @@ public final class LauncherHelper {
                     );
                 }));
         return launcherTask;
+    }
+
+    /// Writes the DirectX high-performance preference when this Java executable has no explicit preference yet.
+    ///
+    /// Registry failures are logged and deliberately do not prevent game launch.
+    ///
+    /// @param registry available Windows registry bridge, or `null`
+    /// @param javaBinary selected Java executable
+    static void applyHighPerformanceGpuPreference(@Nullable WinReg registry, Path javaBinary) {
+        if (registry == null) {
+            return;
+        }
+        String javaPath = FileUtils.getAbsolutePath(Objects.requireNonNull(javaBinary, "javaBinary"));
+        try {
+            @Nullable Object current = registry.queryValue(
+                    WinReg.HKEY.HKEY_CURRENT_USER,
+                    WINDOWS_GPU_PREFERENCES_KEY,
+                    javaPath);
+            if (current != null) {
+                LOG.info("GPU preference for " + javaPath + " already exists: " + current);
+                return;
+            }
+            if (registry.setValue(
+                    WinReg.HKEY.HKEY_CURRENT_USER,
+                    WINDOWS_GPU_PREFERENCES_KEY,
+                    javaPath,
+                    HIGH_PERFORMANCE_GPU_PREFERENCE)) {
+                LOG.info("Successfully applied high performance GPU preference for java: " + javaPath);
+            } else {
+                LOG.warning("Failed to apply high performance GPU preference for java: " + javaPath);
+            }
+        } catch (Exception failure) {
+            LOG.warning("Failed to apply high performance GPU preference", failure);
+        }
     }
 
     /// Adds production process ownership without applying presentation visibility policy.

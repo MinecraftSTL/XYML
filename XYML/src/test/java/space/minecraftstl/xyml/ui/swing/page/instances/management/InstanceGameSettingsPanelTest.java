@@ -778,6 +778,7 @@ final class InstanceGameSettingsPanelTest {
                 overrideChoice(panel, "instanceGameSettingsGraphicsBackend", GraphicsAPI.VULKAN);
                 clickOverride(panel, "instanceGameSettingsOpenGlRenderer");
                 clickOverride(panel, "instanceGameSettingsVulkanRenderer");
+                overrideBoolean(panel, "instanceGameSettingsHighPerformanceGpu", true);
 
                 overrideBoolean(panel, "instanceGameSettingsUseCustomNatives", true);
                 overrideText(panel, "instanceGameSettingsNativesDirectory", "native-bin");
@@ -814,6 +815,8 @@ final class InstanceGameSettingsPanelTest {
             assertEquals(GraphicsAPI.VULKAN, saved.graphics().backend());
             assertTrue(saved.graphics().openGlRendererOverridden());
             assertTrue(saved.graphics().vulkanRendererOverridden());
+            assertTrue(saved.graphics().highPerformanceOverridden());
+            assertTrue(saved.graphics().highPerformance());
             assertTrue(saved.nativeLibraries().customDirectoryEnabled());
             assertEquals("native-bin", saved.nativeLibraries().directory());
             assertTrue(saved.nativeLibraries().patchingDisabled());
@@ -1163,7 +1166,9 @@ final class InstanceGameSettingsPanelTest {
                         false,
                         Renderer.DEFAULT,
                         false,
-                        Renderer.DEFAULT),
+                        Renderer.DEFAULT,
+                        false,
+                        false),
                 new InstanceGameSettingsSnapshot.NativeLibrarySettings(
                         false,
                         false,
@@ -1409,6 +1414,7 @@ final class InstanceGameSettingsPanelTest {
                 "instanceGameSettingsGraphicsBackend",
                 "instanceGameSettingsOpenGlRenderer",
                 "instanceGameSettingsVulkanRenderer",
+                "instanceGameSettingsHighPerformanceGpu",
                 "instanceGameSettingsUseCustomNatives",
                 "instanceGameSettingsNativesDirectory",
                 "instanceGameSettingsDisableNativePatching",

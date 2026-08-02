@@ -43,6 +43,9 @@ public final class Metadata {
     /// Current build version, optionally overridden for diagnostics and development.
     public static final String VERSION = System.getProperty("xyml.version.override", JarUtils.getAttribute("xyml.version", "@develop@"));
 
+    /// Explicit Application User Model ID used for Windows taskbar grouping and pinning.
+    public static final String WINDOWS_APP_USER_MODEL_ID = "space.minecraftstl.xyml";
+
     /// Short product title containing the product name and current version.
     public static final String TITLE = NAME + " " + VERSION;
 

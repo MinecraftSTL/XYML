@@ -167,7 +167,9 @@ public record GameSettingsPresetEditor(
                         true,
                         graphics.openGlRenderer(),
                         true,
-                        graphics.vulkanRenderer()),
+                        graphics.vulkanRenderer(),
+                        true,
+                        graphics.highPerformance()),
                 new InstanceGameSettingsSnapshot.NativeLibrarySettings(
                         true,
                         nativeLibraries.customDirectoryEnabled(),
@@ -259,7 +261,8 @@ public record GameSettingsPresetEditor(
                 new GraphicsSettings(
                         snapshot.graphics().backend(),
                         snapshot.graphics().openGlRenderer(),
-                        snapshot.graphics().vulkanRenderer()),
+                        snapshot.graphics().vulkanRenderer(),
+                        snapshot.graphics().highPerformance()),
                 new NativeLibrarySettings(
                         snapshot.nativeLibraries().customDirectoryEnabled(),
                         snapshot.nativeLibraries().directory(),
@@ -445,11 +448,13 @@ public record GameSettingsPresetEditor(
     /// @param backend selected graphics API
     /// @param openGlRenderer selected OpenGL renderer
     /// @param vulkanRenderer selected Vulkan renderer
+    /// @param highPerformance whether Windows should prefer a high-performance GPU
     @NotNullByDefault
     public record GraphicsSettings(
             GraphicsAPI backend,
             Renderer openGlRenderer,
-            Renderer vulkanRenderer) {
+            Renderer vulkanRenderer,
+            boolean highPerformance) {
         /// Rejects missing graphics values.
         public GraphicsSettings {
             Objects.requireNonNull(backend, "backend");

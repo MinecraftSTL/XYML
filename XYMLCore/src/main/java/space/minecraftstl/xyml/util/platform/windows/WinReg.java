@@ -22,6 +22,8 @@ import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.util.platform.NativeUtils;
 
 import java.nio.ByteOrder;
@@ -32,12 +34,14 @@ import java.util.List;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * @author Glavo
- */
+/// Reads and mutates Windows registry values through the available native bridge.
+///
+/// @author Glavo
+@NotNullByDefault
 public abstract class WinReg {
 
-    public static final WinReg INSTANCE = NativeUtils.USE_JNA && Advapi32.INSTANCE != null
+    /// Native registry bridge, or `null` when JNA is unavailable.
+    public static final @Nullable WinReg INSTANCE = NativeUtils.USE_JNA && Advapi32.INSTANCE != null
             ? new JNAWinReg(Advapi32.INSTANCE) : null;
 
     /**
@@ -71,7 +75,7 @@ public abstract class WinReg {
 
     public abstract boolean exists(HKEY root, String key);
 
-    public abstract Object queryValue(HKEY root, String key, String valueName);
+    public abstract @Nullable Object queryValue(HKEY root, String key, String valueName);
 
     public abstract List<String> querySubKeyNames(HKEY root, String key);
 
@@ -88,6 +92,25 @@ public abstract class WinReg {
         return list;
     }
 
+    /// Creates the target key when necessary and writes one string value.
+    ///
+    /// @param root predefined registry root
+    /// @param key key path below the root
+    /// @param valueName value name
+    /// @param value string value
+    /// @return whether the native write succeeded
+    public abstract boolean setValue(HKEY root, String key, String valueName, String value);
+
+    /// Deletes one value from an existing registry key.
+    ///
+    /// @param root predefined registry root
+    /// @param key key path below the root
+    /// @param valueName value name
+    /// @return whether the native deletion succeeded
+    public abstract boolean deleteValue(HKEY root, String key, String valueName);
+
+    /// JNA-backed registry implementation.
+    @NotNullByDefault
     private static final class JNAWinReg extends WinReg {
 
         private final Advapi32 advapi32;
@@ -115,7 +138,7 @@ public abstract class WinReg {
         }
 
         @Override
-        public Object queryValue(HKEY root, String key, String valueName) {
+        public @Nullable Object queryValue(HKEY root, String key, String valueName) {
             PointerByReference phkKey = new PointerByReference();
             if (advapi32.RegOpenKeyExW(root.toPointer(), new WString(key), 0, WinConstants.KEY_READ, phkKey) != WinConstants.ERROR_SUCCESS)
                 return null;
@@ -244,6 +267,65 @@ public abstract class WinReg {
             }
 
             return Collections.emptyList();
+        }
+
+        /// {@inheritDoc}
+        @Override
+        public boolean setValue(HKEY root, String key, String valueName, String value) {
+            PointerByReference phkKey = new PointerByReference();
+            int status = advapi32.RegCreateKeyExW(
+                    root.toPointer(),
+                    new WString(key),
+                    0,
+                    null,
+                    WinConstants.REG_OPTION_NON_VOLATILE,
+                    WinConstants.KEY_WRITE,
+                    null,
+                    phkKey,
+                    null
+            );
+
+            if (status != WinConstants.ERROR_SUCCESS) {
+                return false;
+            }
+
+            Pointer hkey = phkKey.getValue();
+            try {
+                byte[] data = (value + "\0").getBytes(StandardCharsets.UTF_16LE);
+                try (Memory mem = new Memory(data.length)) {
+                    mem.write(0, data, 0, data.length);
+                    status = advapi32.RegSetValueExW(
+                            hkey,
+                            new WString(valueName),
+                            0,
+                            WinConstants.REG_SZ,
+                            mem,
+                            data.length
+                    );
+                }
+                return status == WinConstants.ERROR_SUCCESS;
+            } finally {
+                advapi32.RegCloseKey(hkey);
+            }
+        }
+
+        /// {@inheritDoc}
+        @Override
+        public boolean deleteValue(HKEY root, String key, String valueName) {
+            PointerByReference phkKey = new PointerByReference();
+            int status = advapi32.RegOpenKeyExW(root.toPointer(), new WString(key), 0, WinConstants.KEY_SET_VALUE, phkKey);
+
+            if (status != WinConstants.ERROR_SUCCESS) {
+                return false;
+            }
+
+            Pointer hkey = phkKey.getValue();
+            try {
+                status = advapi32.RegDeleteValueW(hkey, new WString(valueName));
+                return status == WinConstants.ERROR_SUCCESS;
+            } finally {
+                advapi32.RegCloseKey(hkey);
+            }
         }
     }
 

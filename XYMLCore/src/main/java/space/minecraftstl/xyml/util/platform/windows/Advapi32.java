@@ -22,14 +22,18 @@ import com.sun.jna.WString;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
 import com.sun.jna.win32.StdCallLibrary;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.util.platform.NativeUtils;
 
-/**
- * @author Glavo
- */
+/// Native Windows registry functions exposed through JNA.
+///
+/// @author Glavo
+@NotNullByDefault
 public interface Advapi32 extends StdCallLibrary {
 
-    Advapi32 INSTANCE = NativeUtils.USE_JNA && com.sun.jna.Platform.isWindows()
+    /// Loaded native binding, or `null` when JNA or Windows is unavailable.
+    @Nullable Advapi32 INSTANCE = NativeUtils.USE_JNA && com.sun.jna.Platform.isWindows()
             ? NativeUtils.load("advapi32", Advapi32.class)
             : null;
 
@@ -56,4 +60,34 @@ public interface Advapi32 extends StdCallLibrary {
                       IntByReference lpReserved,
                       Pointer lpClass, IntByReference lpcchClass,
                       Pointer lpftLastWriteTime);
+
+    /// Creates or opens a registry key.
+    ///
+    /// @see <a href="https://learn.microsoft.com/windows/win32/api/winreg/nf-winreg-regcreatekeyexw">RegCreateKeyExW function</a>
+    int RegCreateKeyExW(
+            Pointer hKey,
+            WString lpSubKey,
+            int reserved,
+            @Nullable WString lpClass,
+            int dwOptions,
+            int samDesired,
+            @Nullable Pointer lpSecurityAttributes,
+            PointerByReference phkResult,
+            @Nullable IntByReference lpdwDisposition);
+
+    /// Writes one registry value.
+    ///
+    /// @see <a href="https://learn.microsoft.com/windows/win32/api/winreg/nf-winreg-regsetvalueexw">RegSetValueExW function</a>
+    int RegSetValueExW(
+            Pointer hKey,
+            WString lpValueName,
+            int reserved,
+            int dwType,
+            Pointer lpData,
+            int cbData);
+
+    /// Deletes one registry value.
+    ///
+    /// @see <a href="https://learn.microsoft.com/windows/win32/api/winreg/nf-winreg-regdeletevaluew">RegDeleteValueW function</a>
+    int RegDeleteValueW(Pointer hKey, WString lpValueName);
 }
