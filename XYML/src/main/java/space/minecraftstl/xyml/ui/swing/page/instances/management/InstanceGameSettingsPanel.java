@@ -24,7 +24,6 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GraphicsAPI;
 import space.minecraftstl.xyml.game.ProcessPriority;
-import space.minecraftstl.xyml.game.QuickPlayType;
 import space.minecraftstl.xyml.game.Renderer;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.java.JavaRuntime;
@@ -139,6 +138,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private final InheritedControl<JTextField> windowHeightControl =
             inheritedControl("instanceGameSettingsWindowHeight", new JTextField());
 
+    /// Common window-size presets synchronized with the independent width and height settings.
+    private final InstanceWindowSizeControls windowSizeControls;
+
     /// Launcher visibility behavior setting.
     private final InheritedControl<JComboBox<LauncherVisibility>> launcherVisibilityControl = inheritedControl(
             "instanceGameSettingsLauncherVisibility",
@@ -164,10 +166,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private final InheritedControl<JCheckBox> notCheckGameControl =
             inheritedControl("instanceGameSettingsSkipGameCheck", new JCheckBox());
 
-    /// Quick Play destination type setting.
-    private final InheritedControl<JComboBox<QuickPlayType>> quickPlayTypeControl = inheritedControl(
-            "instanceGameSettingsQuickPlayMode",
-            new JComboBox<>(QuickPlayType.values()));
+    /// Inherited and local Quick Play mode choices.
+    private final InstanceQuickPlayModeSelector quickPlayModeSelector;
 
     /// Quick Play multiplayer server setting.
     private final InheritedControl<JTextField> quickPlayMultiplayerControl =
@@ -462,6 +462,14 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         javaPathField.setName("instanceGameSettingsJavaPath");
         detectedJavaComboBox.setName("instanceGameSettingsDetectedJava");
         javaPathControls = new InstanceJavaPathControls(javaPathField);
+        windowSizeControls = new InstanceWindowSizeControls(
+                windowWidthControl.editor(),
+                windowHeightControl.editor());
+        quickPlayModeSelector = new InstanceQuickPlayModeSelector(
+                this.presentation == GameSettingsEditorPresentation.INSTANCE,
+                quickPlayMultiplayerControl,
+                quickPlaySingleplayerControl,
+                quickPlayRealmsControl);
         isolationControls = new InstanceIsolationControls(
                 store.forcedRunningDirectory(),
                 runningDirectoryControl.overrideBox(),
@@ -626,22 +634,14 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
         JPanel window = sectionPanel("instanceGameSettingsWindow", i18n("settings.game.window_type"));
         addControlRow(window, i18n("settings.game.window_type"), windowTypeControl);
-        window.add(new InstanceWindowSizeControls(
-                windowWidthControl.overrideBox(),
-                windowHeightControl.overrideBox(),
-                windowWidthControl.editor(),
-                windowHeightControl.editor(),
-                windowTypeControl.editor()).component(), "span 3, growx");
+        window.add(windowSizeControls.component(), "span 3, growx");
         addControlRow(window, i18n("settings.game.window_width"), windowWidthControl);
         addControlRow(window, i18n("settings.game.window_height"), windowHeightControl);
         content.add(window, "growx");
         content.add(new JSeparator(), "growx");
 
         JPanel quickPlay = sectionPanel("instanceGameSettingsQuickPlay", i18n("settings.game.quick_play"));
-        addControlRow(quickPlay, i18n("settings.game.quick_play"), quickPlayTypeControl);
-        addControlRow(quickPlay, i18n("settings.game.quick_play.multiplayer"), quickPlayMultiplayerControl);
-        addControlRow(quickPlay, i18n("settings.game.quick_play.singleplayer"), quickPlaySingleplayerControl);
-        addControlRow(quickPlay, i18n("settings.game.quick_play.realms"), quickPlayRealmsControl);
+        quickPlayModeSelector.addRows(quickPlay);
         content.add(quickPlay, "growx");
         content.add(new JSeparator(), "growx");
 
@@ -756,7 +756,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         installRenderer(
                 launcherVisibilityControl.editor(),
                 value -> i18n("settings.advanced.launcher_visibility." + enumKey(value)));
-        installRenderer(quickPlayTypeControl.editor(), InstanceGameSettingsRenderers::quickPlayTypeName);
         installRenderer(
                 processPriorityControl.editor(),
                 value -> i18n("settings.advanced.process_priority." + enumKey(value)));
@@ -790,7 +789,8 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         }
         memoryModeSelector.addSelectionListener(this::updateEditingAvailability);
         javaModeSelector.addSelectionListener(this::updateEditingAvailability);
-        quickPlayTypeControl.editor().addActionListener(event -> updateEditingAvailability());
+        quickPlayModeSelector.addSelectionListener(this::updateEditingAvailability);
+        windowTypeControl.editor().addActionListener(event -> updateEditingAvailability());
         noJvmOptionsControl.editor().addActionListener(event -> updateEditingAvailability());
         graphicsBackendControl.editor().addActionListener(event -> updateEditingAvailability());
         useCustomNativesControl.editor().addActionListener(event -> updateEditingAvailability());
@@ -940,16 +940,14 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                     nativesDirectoryControl.editor().getText(),
                     "native library directory");
         }
-        QuickPlayType quickPlayType = editedChoice(
-                quickPlayTypeControl,
-                current.quickPlay().type(),
-                "Quick Play type");
+        InstanceGameSettingsSnapshot.QuickPlaySettings quickPlay =
+                quickPlayModeSelector.editedSettings(current.quickPlay());
         GameSettingsEditorValidation.validateQuickPlayTargets(
-                quickPlayType,
-                quickPlayMultiplayerControl.overrideBox().isSelected(),
-                quickPlayMultiplayerControl.editor().getText(),
-                quickPlaySingleplayerControl.overrideBox().isSelected(),
-                quickPlaySingleplayerControl.editor().getText());
+                quickPlay.type(),
+                quickPlay.multiplayerOverridden(),
+                quickPlay.multiplayer(),
+                quickPlay.singleplayerOverridden(),
+                quickPlay.singleplayer());
 
         @Nullable Integer minimumMemory = editedOptionalInteger(
                 minimumMemoryControl,
@@ -1086,15 +1084,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// @return edited Quick Play settings
     private InstanceGameSettingsSnapshot.QuickPlaySettings editedQuickPlaySettings(
             InstanceGameSettingsSnapshot.QuickPlaySettings current) {
-        return new InstanceGameSettingsSnapshot.QuickPlaySettings(
-                quickPlayTypeControl.overrideBox().isSelected(),
-                editedChoice(quickPlayTypeControl, current.type(), "Quick Play type"),
-                quickPlayMultiplayerControl.overrideBox().isSelected(),
-                editedText(quickPlayMultiplayerControl, current.multiplayer()),
-                quickPlaySingleplayerControl.overrideBox().isSelected(),
-                editedText(quickPlaySingleplayerControl, current.singleplayer()),
-                quickPlayRealmsControl.overrideBox().isSelected(),
-                editedText(quickPlayRealmsControl, current.realms()));
+        return quickPlayModeSelector.editedSettings(current);
     }
 
     /// Builds general launch options from their independent controls.
@@ -1325,10 +1315,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
 
     /// Applies Quick Play controls.
     private void applyQuickPlaySettings(InstanceGameSettingsSnapshot.QuickPlaySettings values) {
-        applyChoice(quickPlayTypeControl, values.typeOverridden(), values.type());
-        applyText(quickPlayMultiplayerControl, values.multiplayerOverridden(), values.multiplayer());
-        applyText(quickPlaySingleplayerControl, values.singleplayerOverridden(), values.singleplayer());
-        applyText(quickPlayRealmsControl, values.realmsOverridden(), values.realms());
+        quickPlayModeSelector.apply(values);
     }
 
     /// Applies general launch-option controls.
@@ -1464,16 +1451,13 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         boolean windowed = windowType == GameWindowType.WINDOWED;
         windowWidthControl.editor().setEnabled(windowWidthControl.editor().isEnabled() && windowed);
         windowHeightControl.editor().setEnabled(windowHeightControl.editor().isEnabled() && windowed);
+        windowSizeControls.setEditingAvailable(
+                writable
+                        && windowed
+                        && windowWidthControl.editor().isEnabled()
+                        && windowHeightControl.editor().isEnabled());
 
-        QuickPlayType quickPlayType = snapshot == null
-                ? QuickPlayType.NONE
-                : effectiveChoice(quickPlayTypeControl, snapshot.quickPlay().type());
-        quickPlayMultiplayerControl.editor().setEnabled(
-                quickPlayMultiplayerControl.editor().isEnabled() && quickPlayType == QuickPlayType.MULTIPLAYER);
-        quickPlaySingleplayerControl.editor().setEnabled(
-                quickPlaySingleplayerControl.editor().isEnabled() && quickPlayType == QuickPlayType.SINGLEPLAYER);
-        quickPlayRealmsControl.editor().setEnabled(
-                quickPlayRealmsControl.editor().isEnabled() && quickPlayType == QuickPlayType.REALMS);
+        quickPlayModeSelector.updateAvailability(writable);
         boolean noJvmOptions = snapshot != null
                 && editedBoolean(noJvmOptionsControl, snapshot.jvm().noOptions());
         noOptimizingJvmOptionsControl.editor().setEnabled(
@@ -1732,10 +1716,6 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 showLogsControl,
                 debugLogControl,
                 notCheckGameControl,
-                quickPlayTypeControl,
-                quickPlayMultiplayerControl,
-                quickPlaySingleplayerControl,
-                quickPlayRealmsControl,
                 runningDirectoryControl,
                 gameArgumentsControl,
                 environmentVariablesControl,

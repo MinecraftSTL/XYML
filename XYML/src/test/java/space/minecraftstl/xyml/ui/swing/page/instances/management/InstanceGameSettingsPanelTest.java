@@ -448,10 +448,26 @@ final class InstanceGameSettingsPanelTest {
                         gameScroll,
                         "instanceGameSettingsWindowHeight",
                         JTextField.class);
-                JComboBox<?> quickPlay = findNamed(
+                JRadioButton quickPlayNone = findNamed(
                         gameScroll,
-                        "instanceGameSettingsQuickPlayMode",
-                        JComboBox.class);
+                        "instanceGameSettingsQuickPlayModeNONE",
+                        JRadioButton.class);
+                JRadioButton javaAutomatic = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsJavaModeAUTO",
+                        JRadioButton.class);
+                JRadioButton quickPlayMultiplayer = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsQuickPlayModeMULTIPLAYER",
+                        JRadioButton.class);
+                JRadioButton quickPlaySingleplayer = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsQuickPlayModeSINGLEPLAYER",
+                        JRadioButton.class);
+                JRadioButton quickPlayRealms = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsQuickPlayModeREALMS",
+                        JRadioButton.class);
                 JTextField multiplayer = findNamed(
                         gameScroll,
                         "instanceGameSettingsQuickPlayMultiplayer",
@@ -481,13 +497,17 @@ final class InstanceGameSettingsPanelTest {
                         verticalGap(windowType, resolutionRow),
                         verticalGap(resolutionRow, windowWidth),
                         verticalGap(windowWidth, windowHeight));
-                assertEquals(quickPlay.getX(), multiplayer.getX());
                 assertEquals(multiplayer.getX(), singleplayer.getX());
                 assertEquals(singleplayer.getX(), realms.getX());
+                assertEquals(javaAutomatic.getX(), quickPlayNone.getX());
+                assertNull(findNamedNullable(
+                        gameScroll,
+                        "instanceGameSettingsQuickPlayMultiplayerOverride",
+                        JCheckBox.class));
                 assertUniformRowGaps(
-                        verticalGap(quickPlay, multiplayer),
-                        verticalGap(multiplayer, singleplayer),
-                        verticalGap(singleplayer, realms));
+                        verticalGap(quickPlayNone, quickPlayMultiplayer),
+                        verticalGap(quickPlayMultiplayer, quickPlaySingleplayer),
+                        verticalGap(quickPlaySingleplayer, quickPlayRealms));
                 assertLabelPrecedesEditor(runningDirectoryLabel, runningDirectoryEditor);
                 for (String name : List.of(
                         "instanceGameSettingsGameArguments",
@@ -759,8 +779,9 @@ final class InstanceGameSettingsPanelTest {
                 overrideBoolean(panel, "instanceGameSettingsDebugLog", true);
                 overrideBoolean(panel, "instanceGameSettingsSkipGameCheck", true);
 
-                overrideChoice(panel, "instanceGameSettingsQuickPlayMode", QuickPlayType.MULTIPLAYER);
-                overrideText(panel, "instanceGameSettingsQuickPlayMultiplayer", "localhost:25565");
+                selectQuickPlayMode(panel, QuickPlayType.MULTIPLAYER);
+                findNamed(panel, "instanceGameSettingsQuickPlayMultiplayer", JTextField.class)
+                        .setText("localhost:25565");
                 overrideText(panel, "instanceGameSettingsGameArguments", "--demo");
                 overrideText(panel, "instanceGameSettingsEnvironmentVariables", "XYML_TEST=1");
                 overrideChoice(panel, "instanceGameSettingsProcessPriority", ProcessPriority.HIGH);
@@ -801,6 +822,10 @@ final class InstanceGameSettingsPanelTest {
             assertTrue(saved.launcher().debugLog());
             assertTrue(saved.launcher().notCheckGame());
             assertEquals(QuickPlayType.MULTIPLAYER, saved.quickPlay().type());
+            assertTrue(saved.quickPlay().typeOverridden());
+            assertTrue(saved.quickPlay().multiplayerOverridden());
+            assertFalse(saved.quickPlay().singleplayerOverridden());
+            assertFalse(saved.quickPlay().realmsOverridden());
             assertEquals("localhost:25565", saved.quickPlay().multiplayer());
             assertEquals("--demo", saved.launchOptions().gameArguments());
             assertEquals("XYML_TEST=1", saved.launchOptions().environmentVariables());
@@ -935,28 +960,35 @@ final class InstanceGameSettingsPanelTest {
                 assertTrue(inheritance.isSelected());
                 assertFalse(javaPath.isEnabled());
 
+                JComboBox<?> windowSizePreset = findNamed(
+                        panel,
+                        "instanceGameSettingsWindowSizePreset",
+                        JComboBox.class);
+                assertFalse(windowSizePreset.isEnabled());
+                clickOverride(panel, "instanceGameSettingsWindowWidth");
+                assertFalse(windowSizePreset.isEnabled());
+                clickOverride(panel, "instanceGameSettingsWindowHeight");
+                assertTrue(windowSizePreset.isEnabled());
                 clickOverride(panel, "instanceGameSettingsWindowType");
                 findNamed(panel, "instanceGameSettingsWindowType", JComboBox.class)
                         .setSelectedItem(GameWindowType.FULLSCREEN);
-                clickOverride(panel, "instanceGameSettingsWindowWidth");
+                assertFalse(windowSizePreset.isEnabled());
                 JTextField windowWidth = findNamed(
                         panel,
                         "instanceGameSettingsWindowWidth",
                         JTextField.class);
                 assertFalse(windowWidth.isEnabled());
                 clickOverride(panel, "instanceGameSettingsWindowType");
+                assertTrue(windowSizePreset.isEnabled());
                 assertTrue(windowWidth.isEnabled());
 
-                clickOverride(panel, "instanceGameSettingsQuickPlayMode");
-                findNamed(panel, "instanceGameSettingsQuickPlayMode", JComboBox.class)
-                        .setSelectedItem(QuickPlayType.MULTIPLAYER);
-                clickOverride(panel, "instanceGameSettingsQuickPlayMultiplayer");
+                selectQuickPlayMode(panel, QuickPlayType.MULTIPLAYER);
                 JTextField multiplayer = findNamed(
                         panel,
                         "instanceGameSettingsQuickPlayMultiplayer",
                         JTextField.class);
                 assertTrue(multiplayer.isEnabled());
-                clickOverride(panel, "instanceGameSettingsQuickPlayMode");
+                findNamed(panel, "instanceGameSettingsQuickPlayModeInherit", JRadioButton.class).doClick();
                 assertFalse(multiplayer.isEnabled());
 
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
@@ -969,6 +1001,9 @@ final class InstanceGameSettingsPanelTest {
             assertFalse(saved.javaRuntime().typeOverridden());
             assertEquals(JavaVersionType.AUTO, saved.javaRuntime().type());
             assertFalse(saved.quickPlay().typeOverridden());
+            assertFalse(saved.quickPlay().multiplayerOverridden());
+            assertFalse(saved.quickPlay().singleplayerOverridden());
+            assertFalse(saved.quickPlay().realmsOverridden());
             assertEquals(QuickPlayType.NONE, saved.quickPlay().type());
         } finally {
             closePanel(panelReference);
@@ -1010,8 +1045,9 @@ final class InstanceGameSettingsPanelTest {
                 panelReference.set(panel);
                 overrideJavaMode(panel, JavaVersionType.VERSION);
                 findNamed(panel, "instanceGameSettingsJavaVersion", JTextField.class).setText(" 21 ");
-                overrideChoice(panel, "instanceGameSettingsQuickPlayMode", QuickPlayType.MULTIPLAYER);
-                overrideText(panel, "instanceGameSettingsQuickPlayMultiplayer", " localhost:25565 ");
+                selectQuickPlayMode(panel, QuickPlayType.MULTIPLAYER);
+                findNamed(panel, "instanceGameSettingsQuickPlayMultiplayer", JTextField.class)
+                        .setText(" localhost:25565 ");
                 overrideText(panel, "instanceGameSettingsRunningDirectory", " instance-run ");
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
             });
@@ -1394,10 +1430,6 @@ final class InstanceGameSettingsPanelTest {
                 "instanceGameSettingsShowLogs",
                 "instanceGameSettingsDebugLog",
                 "instanceGameSettingsSkipGameCheck",
-                "instanceGameSettingsQuickPlayMode",
-                "instanceGameSettingsQuickPlayMultiplayer",
-                "instanceGameSettingsQuickPlaySingleplayer",
-                "instanceGameSettingsQuickPlayRealms",
                 "instanceGameSettingsRunningDirectory",
                 "instanceGameSettingsGameArguments",
                 "instanceGameSettingsEnvironmentVariables",
@@ -1543,7 +1575,7 @@ final class InstanceGameSettingsPanelTest {
         assertTrue(editor.getY() < override.getY() + override.getHeight());
     }
 
-    /// Asserts three row gaps differ only by normal device-scale rounding.
+    /// Asserts three row gaps stay uniform across normal look-and-feel margins and device-scale rounding.
     ///
     /// @param first first measured gap
     /// @param second second measured gap
@@ -1551,9 +1583,10 @@ final class InstanceGameSettingsPanelTest {
     private static void assertUniformRowGaps(int first, int second, int third) {
         int minimum = Math.min(first, Math.min(second, third));
         int maximum = Math.max(first, Math.max(second, third));
-        assertTrue(minimum >= 9);
-        assertTrue(maximum <= 11);
-        assertTrue(maximum - minimum <= 1);
+        String diagnostics = "row gaps: " + first + ", " + second + ", " + third;
+        assertTrue(minimum >= 9, diagnostics);
+        assertTrue(maximum <= 12, diagnostics);
+        assertTrue(maximum - minimum <= 1, diagnostics);
     }
 
     /// Enables one override and selects a combo value.
@@ -1564,6 +1597,14 @@ final class InstanceGameSettingsPanelTest {
     private static void overrideChoice(InstanceGameSettingsPanel panel, String editorName, Object value) {
         clickOverride(panel, editorName);
         findNamed(panel, editorName, JComboBox.class).setSelectedItem(Objects.requireNonNull(value, "value"));
+    }
+
+    /// Selects one local Quick Play mode through its radio button.
+    ///
+    /// @param panel settings panel
+    /// @param type desired local mode
+    private static void selectQuickPlayMode(InstanceGameSettingsPanel panel, QuickPlayType type) {
+        findNamed(panel, "instanceGameSettingsQuickPlayMode" + type.name(), JRadioButton.class).doClick();
     }
 
     /// Simulates the user opening one combo without creating a native popup in headless tests.
