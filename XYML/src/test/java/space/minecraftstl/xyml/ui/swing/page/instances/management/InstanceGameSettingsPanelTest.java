@@ -365,9 +365,9 @@ final class InstanceGameSettingsPanelTest {
         }
     }
 
-    /// Keeps advanced editors beside labels when wide and stacks them without clipping when narrow.
+    /// Keeps every advanced command editor in one stable column with uniform row spacing.
     @Test
-    void laysOutAdvancedEditorsResponsively() {
+    void alignsAdvancedCommandEditors() {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
@@ -375,29 +375,111 @@ final class InstanceGameSettingsPanelTest {
                 panelReference.set(panel);
                 JTabbedPane tabs = findNamed(panel, "instanceGameSettingsTabs", JTabbedPane.class);
                 JScrollPane commandsScroll = (JScrollPane) tabs.getComponentAt(3);
-                JLabel label = findNamed(
+                JLabel preLaunchLabel = findNamed(
                         commandsScroll,
                         "instanceGameSettingsPreLaunchCommandLabel",
                         JLabel.class);
-                JTextField editor = findNamed(
+                JTextField preLaunch = findNamed(
                         commandsScroll,
                         "instanceGameSettingsPreLaunchCommand",
                         JTextField.class);
-                JPanel row = findNamed(
+                JLabel wrapperLabel = findNamed(
                         commandsScroll,
-                        "instanceGameSettingsPreLaunchCommandRow",
-                        JPanel.class);
+                        "instanceGameSettingsCommandWrapperLabel",
+                        JLabel.class);
+                JTextField wrapper = findNamed(
+                        commandsScroll,
+                        "instanceGameSettingsCommandWrapper",
+                        JTextField.class);
+                JLabel postExitLabel = findNamed(
+                        commandsScroll,
+                        "instanceGameSettingsPostExitCommandLabel",
+                        JLabel.class);
+                JTextField postExit = findNamed(
+                        commandsScroll,
+                        "instanceGameSettingsPostExitCommand",
+                        JTextField.class);
 
                 layoutScrollableTab(commandsScroll, 700, 280);
-                assertTrue(label.getX() + label.getWidth() + 16 <= editor.getX());
-                assertTrue(editor.getWidth() >= 180);
-
-                layoutScrollableTab(commandsScroll, 420, 280);
-                assertTrue(editor.getY() >= label.getY() + label.getHeight() + 6);
-                assertTrue(editor.getWidth() >= 300);
+                assertEquals(preLaunch.getX(), wrapper.getX());
+                assertEquals(wrapper.getX(), postExit.getX());
+                assertEquals(16, preLaunch.getX() - preLaunchLabel.getX() - preLaunchLabel.getWidth());
+                assertEquals(16, wrapper.getX() - wrapperLabel.getX() - wrapperLabel.getWidth());
+                assertEquals(16, postExit.getX() - postExitLabel.getX() - postExitLabel.getWidth());
+                int commandGap = verticalGap(preLaunch, wrapper);
+                assertTrue(commandGap >= 9 && commandGap <= 11);
+                assertEquals(commandGap, verticalGap(wrapper, postExit));
+                assertTrue(preLaunch.getWidth() >= 180);
                 assertEquals(commandsScroll.getViewport().getExtentSize().width,
                         commandsScroll.getViewport().getView().getWidth());
-                assertTrue(row.getHeight() >= editor.getY() + editor.getHeight());
+            });
+        } finally {
+            closePanel(panelReference);
+        }
+    }
+
+    /// Keeps window and Quick Play rows on the same vertical rhythm and editor column.
+    @Test
+    void alignsGameSettingRows() {
+        AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                InstanceGameSettingsPanel panel = createPanel(new RecordingStore(snapshot()));
+                panelReference.set(panel);
+                JTabbedPane tabs = findNamed(panel, "instanceGameSettingsTabs", JTabbedPane.class);
+                JScrollPane gameScroll = (JScrollPane) tabs.getComponentAt(0);
+                JComboBox<?> windowType = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsWindowType",
+                        JComboBox.class);
+                JPanel resolutionRow = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsWindowSizePresetRow",
+                        JPanel.class);
+                JComboBox<?> resolution = findNamed(
+                        resolutionRow,
+                        "instanceGameSettingsWindowSizePreset",
+                        JComboBox.class);
+                JTextField windowWidth = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsWindowWidth",
+                        JTextField.class);
+                JTextField windowHeight = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsWindowHeight",
+                        JTextField.class);
+                JComboBox<?> quickPlay = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsQuickPlayMode",
+                        JComboBox.class);
+                JTextField multiplayer = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsQuickPlayMultiplayer",
+                        JTextField.class);
+                JTextField singleplayer = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsQuickPlaySingleplayer",
+                        JTextField.class);
+                JTextField realms = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsQuickPlayRealms",
+                        JTextField.class);
+
+                layoutScrollableTab(gameScroll, 700, 900);
+                assertEquals(windowType.getX(), resolutionRow.getX() + resolution.getX());
+                assertEquals(windowType.getX(), windowWidth.getX());
+                assertEquals(windowWidth.getX(), windowHeight.getX());
+                assertUniformRowGaps(
+                        verticalGap(windowType, resolutionRow),
+                        verticalGap(resolutionRow, windowWidth),
+                        verticalGap(windowWidth, windowHeight));
+                assertEquals(quickPlay.getX(), multiplayer.getX());
+                assertEquals(multiplayer.getX(), singleplayer.getX());
+                assertEquals(singleplayer.getX(), realms.getX());
+                assertUniformRowGaps(
+                        verticalGap(quickPlay, multiplayer),
+                        verticalGap(multiplayer, singleplayer),
+                        verticalGap(singleplayer, realms));
             });
         } finally {
             closePanel(panelReference);
@@ -1397,6 +1479,28 @@ final class InstanceGameSettingsPanelTest {
                 layoutTree(container);
             }
         }
+    }
+
+    /// Returns the empty vertical space between two siblings ordered from top to bottom.
+    ///
+    /// @param upper component on the preceding row
+    /// @param lower component on the following row
+    /// @return vertical gap in pixels
+    private static int verticalGap(Component upper, Component lower) {
+        return lower.getY() - upper.getY() - upper.getHeight();
+    }
+
+    /// Asserts three row gaps differ only by normal device-scale rounding.
+    ///
+    /// @param first first measured gap
+    /// @param second second measured gap
+    /// @param third third measured gap
+    private static void assertUniformRowGaps(int first, int second, int third) {
+        int minimum = Math.min(first, Math.min(second, third));
+        int maximum = Math.max(first, Math.max(second, third));
+        assertTrue(minimum >= 9);
+        assertTrue(maximum <= 11);
+        assertTrue(maximum - minimum <= 1);
     }
 
     /// Enables one override and selects a combo value.
