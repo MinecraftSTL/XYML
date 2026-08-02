@@ -45,12 +45,10 @@ val launcherExe = System.getenv("XYML_LAUNCHER_EXE")
     ?: layout.projectDirectory.file("image/XYMLLauncher.windows.stub").asFile
 
 val buildNumber = System.getenv("BUILD_NUMBER")?.toInt()
-if (buildNumber != null) {
-    version = if (JenkinsUtils.IS_ON_CI && versionType == "dev") {
-        "$versionRoot.0.$buildNumber"
-    } else {
-        "$versionRoot.$buildNumber"
-    }
+if (versionType == "stable") {
+    version = versionRoot
+} else if (buildNumber != null) {
+    version = "$versionRoot.$buildNumber"
 } else {
     val shortCommit = System.getenv("GITHUB_SHA")?.lowercase()?.substring(0, 7)
     version = if (shortCommit.isNullOrBlank()) {
