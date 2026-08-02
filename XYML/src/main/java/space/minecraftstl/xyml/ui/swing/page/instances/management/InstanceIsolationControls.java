@@ -105,15 +105,27 @@ final class InstanceIsolationControls {
     /// @param showOverride whether the generic local-override checkbox remains visible
     void addRunningDirectoryRow(JPanel section, boolean showOverride) {
         JPanel checkedSection = Objects.requireNonNull(section, "section");
+        JPanel row = new JPanel(new MigLayout(
+                "insets 0, fillx", "[26!,center]8[280!,fill]16[grow,fill]", "[]"));
+        row.setName("instanceGameSettingsRunningDirectoryRow");
+        row.setOpaque(false);
         overrideBox.setVisible(showOverride);
-        checkedSection.add(overrideBox, "hidemode 3, aligny center");
-        checkedSection.add(new JLabel(i18n("settings.game.running_directory")), "aligny center");
+        row.add(overrideBox, "cell 0 0, hidemode 3, aligny center");
+
+        String labelText = i18n("settings.game.running_directory");
+        JLabel label = new JLabel(labelText);
+        label.setName("instanceGameSettingsRunningDirectoryLabel");
+        label.setLabelFor(directoryField);
+        overrideBox.getAccessibleContext().setAccessibleName(labelText);
+        row.add(label, "cell 1 0, aligny center");
 
         JPanel editor = new JPanel(new BorderLayout(6, 0));
+        editor.setName("instanceGameSettingsRunningDirectoryEditor");
         editor.setOpaque(false);
         editor.add(directoryField, BorderLayout.CENTER);
         editor.add(browseButton, BorderLayout.EAST);
-        checkedSection.add(editor, "growx");
+        row.add(editor, "cell 2 0, growx");
+        checkedSection.add(row, "span 3, growx");
     }
 
     /// Applies durable inheritance state without firing user actions.

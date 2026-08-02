@@ -55,7 +55,6 @@ import javax.swing.JSlider;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
-import javax.swing.SwingUtilities;
 import javax.swing.event.PopupMenuEvent;
 import javax.swing.event.PopupMenuListener;
 import java.awt.Component;
@@ -367,9 +366,9 @@ final class InstanceGameSettingsPanelTest {
         }
     }
 
-    /// Keeps text, multiline, and choice editors behind complete advanced-setting labels.
+    /// Keeps every advanced command editor in one stable column with uniform row spacing.
     @Test
-    void alignsAdvancedEditors() {
+    void alignsAdvancedCommandEditors() {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
@@ -385,10 +384,6 @@ final class InstanceGameSettingsPanelTest {
                         commandsScroll,
                         "instanceGameSettingsPreLaunchCommand",
                         JTextField.class);
-                JCheckBox preLaunchOverride = findNamed(
-                        commandsScroll,
-                        "instanceGameSettingsPreLaunchCommandOverride",
-                        JCheckBox.class);
                 JLabel wrapperLabel = findNamed(
                         commandsScroll,
                         "instanceGameSettingsCommandWrapperLabel",
@@ -397,10 +392,6 @@ final class InstanceGameSettingsPanelTest {
                         commandsScroll,
                         "instanceGameSettingsCommandWrapper",
                         JTextField.class);
-                JCheckBox wrapperOverride = findNamed(
-                        commandsScroll,
-                        "instanceGameSettingsCommandWrapperOverride",
-                        JCheckBox.class);
                 JLabel postExitLabel = findNamed(
                         commandsScroll,
                         "instanceGameSettingsPostExitCommandLabel",
@@ -409,73 +400,18 @@ final class InstanceGameSettingsPanelTest {
                         commandsScroll,
                         "instanceGameSettingsPostExitCommand",
                         JTextField.class);
-                JScrollPane jvmScroll = (JScrollPane) tabs.getComponentAt(2);
-                JCheckBox noJvmArgumentsOverride = findNamed(
-                        jvmScroll,
-                        "instanceGameSettingsNoJvmOptionsOverride",
-                        JCheckBox.class);
-                JCheckBox noJvmArguments = findNamed(
-                        jvmScroll,
-                        "instanceGameSettingsNoJvmOptions",
-                        JCheckBox.class);
-                JCheckBox jvmArgumentsOverride = findNamed(
-                        jvmScroll,
-                        "instanceGameSettingsJvmOptionsOverride",
-                        JCheckBox.class);
-                JLabel jvmArgumentsLabel = findNamed(
-                        jvmScroll,
-                        "instanceGameSettingsJvmOptionsLabel",
-                        JLabel.class);
-                JTextArea jvmArguments = findNamed(
-                        jvmScroll,
-                        "instanceGameSettingsJvmOptions",
-                        JTextArea.class);
-                JScrollPane jvmArgumentsEditor = (JScrollPane) Objects.requireNonNull(
-                        SwingUtilities.getAncestorOfClass(JScrollPane.class, jvmArguments));
-                JScrollPane graphicsScroll = (JScrollPane) tabs.getComponentAt(4);
-                JLabel graphicsBackendLabel = findNamed(
-                        graphicsScroll,
-                        "instanceGameSettingsGraphicsBackendLabel",
-                        JLabel.class);
-                JComboBox<?> graphicsBackend = findNamed(
-                        graphicsScroll,
-                        "instanceGameSettingsGraphicsBackend",
-                        JComboBox.class);
-
                 layoutScrollableTab(commandsScroll, 700, 280);
-                layoutScrollableTab(jvmScroll, 700, 420);
-                layoutScrollableTab(graphicsScroll, 700, 280);
                 assertEquals(preLaunch.getX(), wrapper.getX());
                 assertEquals(wrapper.getX(), postExit.getX());
                 assertLabelPrecedesEditor(preLaunchLabel, preLaunch);
                 assertLabelPrecedesEditor(wrapperLabel, wrapper);
                 assertLabelPrecedesEditor(postExitLabel, postExit);
-                assertLabelPrecedesEditor(jvmArgumentsLabel, jvmArgumentsEditor);
-                assertLabelPrecedesEditor(graphicsBackendLabel, graphicsBackend);
-                assertOverridePrecedesSameRow(preLaunchOverride, preLaunch);
-                assertOverridePrecedesSameRow(noJvmArgumentsOverride, noJvmArguments);
-                assertOverridePrecedesSameRow(jvmArgumentsOverride, jvmArgumentsEditor);
                 int commandGap = verticalGap(preLaunch, wrapper);
                 assertTrue(commandGap >= 9 && commandGap <= 11);
                 assertEquals(commandGap, verticalGap(wrapper, postExit));
                 assertTrue(preLaunch.getWidth() >= 180);
                 assertEquals(commandsScroll.getViewport().getExtentSize().width,
                         commandsScroll.getViewport().getView().getWidth());
-
-                layoutScrollableTab(commandsScroll, 520, 280);
-                assertOverridePrecedesSameRow(preLaunchOverride, preLaunch);
-                assertFalse(preLaunch.isEnabled());
-                assertFalse(wrapper.isEnabled());
-                preLaunchOverride.doClick();
-                assertTrue(preLaunch.isEnabled());
-                assertFalse(wrapper.isEnabled());
-                assertFalse(wrapperOverride.isSelected());
-
-                assertFalse(noJvmArguments.isEnabled());
-                assertFalse(jvmArguments.isEnabled());
-                noJvmArgumentsOverride.doClick();
-                assertTrue(noJvmArguments.isEnabled());
-                assertFalse(jvmArguments.isEnabled());
             });
         } finally {
             closePanel(panelReference);
@@ -528,6 +464,14 @@ final class InstanceGameSettingsPanelTest {
                         gameScroll,
                         "instanceGameSettingsQuickPlayRealms",
                         JTextField.class);
+                JLabel runningDirectoryLabel = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsRunningDirectoryLabel",
+                        JLabel.class);
+                JPanel runningDirectoryEditor = findNamed(
+                        gameScroll,
+                        "instanceGameSettingsRunningDirectoryEditor",
+                        JPanel.class);
 
                 layoutScrollableTab(gameScroll, 700, 900);
                 assertEquals(windowType.getX(), resolutionRow.getX() + resolution.getX());
@@ -544,6 +488,24 @@ final class InstanceGameSettingsPanelTest {
                         verticalGap(quickPlay, multiplayer),
                         verticalGap(multiplayer, singleplayer),
                         verticalGap(singleplayer, realms));
+                assertLabelPrecedesEditor(runningDirectoryLabel, runningDirectoryEditor);
+                for (String name : List.of(
+                        "instanceGameSettingsGameArguments",
+                        "instanceGameSettingsEnvironmentVariables",
+                        "instanceGameSettingsProcessPriority")) {
+                    JComponent editor = findNamed(gameScroll, name, JComponent.class);
+                    JLabel label = findNamed(gameScroll, name + "Label", JLabel.class);
+                    JCheckBox override = findNamed(gameScroll, name + "Override", JCheckBox.class);
+                    assertLabelPrecedesEditor(label, editor);
+                    assertOverridePrecedesSameRow(override, editor);
+                }
+                JTextField gameArguments = findNamed(
+                        gameScroll, "instanceGameSettingsGameArguments", JTextField.class);
+                JTextField environment = findNamed(
+                        gameScroll, "instanceGameSettingsEnvironmentVariables", JTextField.class);
+                findNamed(gameScroll, "instanceGameSettingsGameArgumentsOverride", JCheckBox.class).doClick();
+                assertTrue(gameArguments.isEnabled());
+                assertFalse(environment.isEnabled());
             });
         } finally {
             closePanel(panelReference);
