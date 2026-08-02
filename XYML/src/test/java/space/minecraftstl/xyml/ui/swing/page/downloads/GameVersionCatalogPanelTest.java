@@ -54,10 +54,12 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.KeyStroke;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
@@ -339,6 +341,44 @@ public final class GameVersionCatalogPanelTest {
                     false,
                     MouseEvent.BUTTON1));
             assertEquals(instanceName.getText().length(), instanceName.getSelectionEnd());
+            panel.close();
+        });
+    }
+
+    /// Keeps the complete automatic-loader installation workflow reachable in a short download window.
+    @Test
+    public void constrainedHeightScrollsTheAutomaticLoaderInstallationPage() {
+        FakeCatalogModel model = FakeCatalogModel.immediate(
+                items(1),
+                snapshot(-1, 1, 1L, GameVersionCatalogStatus.READY, "Ready", true, true));
+        GameVersionCatalogPanel panel = onEventDispatchThread(() -> createPanel(model));
+
+        onEventDispatchThread(() -> {
+            panel.setSize(new Dimension(820, 340));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+            panel.choiceList().getList().setSelectedIndex(0);
+            findButton(panel, "gameVersionsLoaders").doClick();
+            layoutRecursively(panel);
+
+            JScrollPane scroll = findComponent(panel, "gameVersionsLoaderScroll", JScrollPane.class);
+            assertAll(
+                    () -> assertEquals(
+                            ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER,
+                            scroll.getHorizontalScrollBarPolicy()),
+                    () -> assertEquals(
+                            ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                            scroll.getVerticalScrollBarPolicy()),
+                    () -> assertFalse(scroll.isOpaque()),
+                    () -> assertFalse(scroll.getViewport().isOpaque()),
+                    () -> assertTrue(
+                            scroll.getVerticalScrollBar().getMaximum()
+                                    > scroll.getVerticalScrollBar().getVisibleAmount()));
+
+            int bottom = scroll.getVerticalScrollBar().getMaximum()
+                    - scroll.getVerticalScrollBar().getVisibleAmount();
+            scroll.getVerticalScrollBar().setValue(bottom);
+            assertEquals(bottom, scroll.getVerticalScrollBar().getValue());
             panel.close();
         });
     }
