@@ -60,7 +60,6 @@ import javax.swing.ListCellRenderer;
 import javax.swing.ScrollPaneConstants;
 import java.awt.BorderLayout;
 import java.awt.Component;
-import java.awt.Dimension;
 import java.awt.Font;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -1801,9 +1800,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// @return configured section panel
     private static JPanel sectionPanel(String name, String title) {
         JPanel section = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 3",
-                "[26!,center][280!,fill][grow,fill]",
-                "[]10[]"));
+                "insets 0, fillx, wrap 3", "[26!,center]8[280!,fill]16[grow,fill]", "[]10[]"));
         section.setName(Objects.requireNonNull(name, "name"));
         section.setOpaque(false);
         JLabel heading = new JLabel(Objects.requireNonNull(title, "title"));
@@ -1822,11 +1819,11 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             String name,
             String labelText,
             InheritedControl<? extends JComponent> control) {
-        JPanel row = new InstanceSettingsControlRow(
-                labelText,
-                control.overrideBox(),
-                control.editor());
+        JPanel row = new JPanel(new MigLayout(
+                "insets 0, fillx", "[26!,center]8[280!,fill]16[grow,fill]", "[]"));
         row.setName(Objects.requireNonNull(name, "name"));
+        row.setOpaque(false);
+        addControlRow(row, labelText, control);
         return row;
     }
 
@@ -1839,10 +1836,14 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             JPanel section,
             String labelText,
             InheritedControl<? extends JComponent> control) {
-        section.add(new InstanceSettingsControlRow(
-                labelText,
-                control.overrideBox(),
-                control.editor()), "span 3, growx");
+        String validatedLabel = Objects.requireNonNull(labelText, "labelText");
+        section.add(control.overrideBox(), "aligny center");
+        JLabel label = new JLabel(validatedLabel);
+        label.setLabelFor(control.editor());
+        label.setName(control.editor().getName() + "Label");
+        control.overrideBox().getAccessibleContext().setAccessibleName(validatedLabel);
+        section.add(label, "aligny center");
+        section.add(control.editor(), "growx");
     }
 
     /// Adds one inherited boolean editor whose visible text belongs to the value checkbox.
@@ -1873,15 +1874,15 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             String labelText,
             InheritedControl<JTextArea> control) {
         String validatedLabel = Objects.requireNonNull(labelText, "labelText");
+        section.add(control.overrideBox(), "aligny top");
+        JLabel label = new JLabel(validatedLabel);
+        label.setLabelFor(control.editor());
+        label.setName(control.editor().getName() + "Label");
+        control.overrideBox().getAccessibleContext().setAccessibleName(validatedLabel);
+        section.add(label, "aligny top");
         JScrollPane scrollPane = new JScrollPane(control.editor());
         scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
-        scrollPane.setPreferredSize(new Dimension(180, 88));
-        scrollPane.setMinimumSize(new Dimension(80, 88));
-        section.add(new InstanceSettingsControlRow(
-                validatedLabel,
-                control.overrideBox(),
-                control.editor(),
-                scrollPane), "span 3, growx");
+        section.add(scrollPane, "growx, h 88!");
     }
 
     /// Applies one boolean value and override state.
