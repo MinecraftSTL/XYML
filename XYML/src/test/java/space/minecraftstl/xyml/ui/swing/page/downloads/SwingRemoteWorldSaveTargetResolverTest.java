@@ -169,29 +169,29 @@ final class SwingRemoteWorldSaveTargetResolverTest {
 
     /// Provides unused Core contracts required by the remote world fixture.
     @NotNullByDefault
-    private static final class FixtureAddonData implements RemoteAddon.IMod {
+    private static final class FixtureAddonData implements RemoteAddon.IAddon {
         /// Rejects dependency resolution because this target test never requests it.
         ///
-        /// @param modRepository unused source repository
+        /// @param repo unused source repository
         /// @param downloadProvider unused download provider
         /// @return never returns normally
         /// @throws IOException always because dependency resolution is outside this test
         @Override
         public List<RemoteAddon> loadDependencies(
-                RemoteAddonRepository modRepository,
+                RemoteAddonRepository repo,
                 DownloadProvider downloadProvider) throws IOException {
             throw new IOException("Fixture dependencies are outside the save-target test");
         }
 
         /// Rejects backend version loading because this target test supplies its version directly.
         ///
-        /// @param modRepository unused source repository
+        /// @param repo unused source repository
         /// @param downloadProvider unused download provider
         /// @return never returns normally
         /// @throws IOException always because backend loading is outside this test
         @Override
         public Stream<RemoteAddon.Version> loadVersions(
-                RemoteAddonRepository modRepository,
+                RemoteAddonRepository repo,
                 DownloadProvider downloadProvider) throws IOException {
             throw new IOException("Fixture versions are supplied directly");
         }

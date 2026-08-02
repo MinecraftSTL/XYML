@@ -144,7 +144,9 @@ final class InstanceGameSettingsMapper {
                         isOverridden(instance, GameSettings::openGLRendererProperty),
                         effective.getInheritable(GameSettings::openGLRendererProperty),
                         isOverridden(instance, GameSettings::vulkanRendererProperty),
-                        effective.getInheritable(GameSettings::vulkanRendererProperty)),
+                        effective.getInheritable(GameSettings::vulkanRendererProperty),
+                        isOverridden(instance, GameSettings::highPerformanceProperty),
+                        effective.getInheritable(GameSettings::highPerformanceProperty)),
                 new NativeLibrarySettings(
                         isOverridden(instance, GameSettings::useCustomNativesProperty),
                         effective.getInheritable(GameSettings::useCustomNativesProperty),
@@ -324,6 +326,11 @@ final class InstanceGameSettingsMapper {
                 values.vulkanRendererOverridden(),
                 values.vulkanRenderer(),
                 GameSettings::vulkanRendererProperty);
+        apply(
+                settings,
+                values.highPerformanceOverridden(),
+                values.highPerformance(),
+                GameSettings::highPerformanceProperty);
     }
 
     /// Applies native-library replacement properties.

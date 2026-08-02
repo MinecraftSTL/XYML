@@ -63,7 +63,7 @@ public record AddonUpdateItem(
                 || !localFile.equals(updatePath)
                 || !currentVersion.equals(update.currentVersion().version())
                 || !targetVersion.equals(update.targetVersion().version())
-                || source != update.targetVersion().self().getType()) {
+                || source != update.targetVersion().self().getSource()) {
             throw new IllegalArgumentException("Update presentation data does not match the retained Core update");
         }
     }
@@ -85,7 +85,7 @@ public record AddonUpdateItem(
                 localAddonFile.getFile(),
                 exactUpdate.currentVersion().version(),
                 exactUpdate.targetVersion().version(),
-                exactUpdate.targetVersion().self().getType(),
+                exactUpdate.targetVersion().self().getSource(),
                 sourcePage,
                 exactUpdate);
     }
