@@ -55,6 +55,7 @@ import javax.swing.JSlider;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
 import javax.swing.event.PopupMenuEvent;
 import javax.swing.event.PopupMenuListener;
 import java.awt.Component;
@@ -73,6 +74,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
@@ -365,9 +367,9 @@ final class InstanceGameSettingsPanelTest {
         }
     }
 
-    /// Keeps every advanced command editor in one stable column with uniform row spacing.
+    /// Keeps text, multiline, and choice editors behind complete advanced-setting labels.
     @Test
-    void alignsAdvancedCommandEditors() {
+    void alignsAdvancedEditors() {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
@@ -383,6 +385,10 @@ final class InstanceGameSettingsPanelTest {
                         commandsScroll,
                         "instanceGameSettingsPreLaunchCommand",
                         JTextField.class);
+                JCheckBox preLaunchOverride = findNamed(
+                        commandsScroll,
+                        "instanceGameSettingsPreLaunchCommandOverride",
+                        JCheckBox.class);
                 JLabel wrapperLabel = findNamed(
                         commandsScroll,
                         "instanceGameSettingsCommandWrapperLabel",
@@ -391,6 +397,10 @@ final class InstanceGameSettingsPanelTest {
                         commandsScroll,
                         "instanceGameSettingsCommandWrapper",
                         JTextField.class);
+                JCheckBox wrapperOverride = findNamed(
+                        commandsScroll,
+                        "instanceGameSettingsCommandWrapperOverride",
+                        JCheckBox.class);
                 JLabel postExitLabel = findNamed(
                         commandsScroll,
                         "instanceGameSettingsPostExitCommandLabel",
@@ -399,19 +409,73 @@ final class InstanceGameSettingsPanelTest {
                         commandsScroll,
                         "instanceGameSettingsPostExitCommand",
                         JTextField.class);
+                JScrollPane jvmScroll = (JScrollPane) tabs.getComponentAt(2);
+                JCheckBox noJvmArgumentsOverride = findNamed(
+                        jvmScroll,
+                        "instanceGameSettingsNoJvmOptionsOverride",
+                        JCheckBox.class);
+                JCheckBox noJvmArguments = findNamed(
+                        jvmScroll,
+                        "instanceGameSettingsNoJvmOptions",
+                        JCheckBox.class);
+                JCheckBox jvmArgumentsOverride = findNamed(
+                        jvmScroll,
+                        "instanceGameSettingsJvmOptionsOverride",
+                        JCheckBox.class);
+                JLabel jvmArgumentsLabel = findNamed(
+                        jvmScroll,
+                        "instanceGameSettingsJvmOptionsLabel",
+                        JLabel.class);
+                JTextArea jvmArguments = findNamed(
+                        jvmScroll,
+                        "instanceGameSettingsJvmOptions",
+                        JTextArea.class);
+                JScrollPane jvmArgumentsEditor = (JScrollPane) Objects.requireNonNull(
+                        SwingUtilities.getAncestorOfClass(JScrollPane.class, jvmArguments));
+                JScrollPane graphicsScroll = (JScrollPane) tabs.getComponentAt(4);
+                JLabel graphicsBackendLabel = findNamed(
+                        graphicsScroll,
+                        "instanceGameSettingsGraphicsBackendLabel",
+                        JLabel.class);
+                JComboBox<?> graphicsBackend = findNamed(
+                        graphicsScroll,
+                        "instanceGameSettingsGraphicsBackend",
+                        JComboBox.class);
 
                 layoutScrollableTab(commandsScroll, 700, 280);
+                layoutScrollableTab(jvmScroll, 700, 420);
+                layoutScrollableTab(graphicsScroll, 700, 280);
                 assertEquals(preLaunch.getX(), wrapper.getX());
                 assertEquals(wrapper.getX(), postExit.getX());
-                assertEquals(16, preLaunch.getX() - preLaunchLabel.getX() - preLaunchLabel.getWidth());
-                assertEquals(16, wrapper.getX() - wrapperLabel.getX() - wrapperLabel.getWidth());
-                assertEquals(16, postExit.getX() - postExitLabel.getX() - postExitLabel.getWidth());
+                assertLabelPrecedesEditor(preLaunchLabel, preLaunch);
+                assertLabelPrecedesEditor(wrapperLabel, wrapper);
+                assertLabelPrecedesEditor(postExitLabel, postExit);
+                assertLabelPrecedesEditor(jvmArgumentsLabel, jvmArgumentsEditor);
+                assertLabelPrecedesEditor(graphicsBackendLabel, graphicsBackend);
+                assertOverridePrecedesSameRow(preLaunchOverride, preLaunch);
+                assertOverridePrecedesSameRow(noJvmArgumentsOverride, noJvmArguments);
+                assertOverridePrecedesSameRow(jvmArgumentsOverride, jvmArgumentsEditor);
                 int commandGap = verticalGap(preLaunch, wrapper);
                 assertTrue(commandGap >= 9 && commandGap <= 11);
                 assertEquals(commandGap, verticalGap(wrapper, postExit));
                 assertTrue(preLaunch.getWidth() >= 180);
                 assertEquals(commandsScroll.getViewport().getExtentSize().width,
                         commandsScroll.getViewport().getView().getWidth());
+
+                layoutScrollableTab(commandsScroll, 520, 280);
+                assertOverridePrecedesSameRow(preLaunchOverride, preLaunch);
+                assertFalse(preLaunch.isEnabled());
+                assertFalse(wrapper.isEnabled());
+                preLaunchOverride.doClick();
+                assertTrue(preLaunch.isEnabled());
+                assertFalse(wrapper.isEnabled());
+                assertFalse(wrapperOverride.isSelected());
+
+                assertFalse(noJvmArguments.isEnabled());
+                assertFalse(jvmArguments.isEnabled());
+                noJvmArgumentsOverride.doClick();
+                assertTrue(noJvmArguments.isEnabled());
+                assertFalse(jvmArguments.isEnabled());
             });
         } finally {
             closePanel(panelReference);
@@ -1488,6 +1552,27 @@ final class InstanceGameSettingsPanelTest {
     /// @return vertical gap in pixels
     private static int verticalGap(Component upper, Component lower) {
         return lower.getY() - upper.getY() - upper.getHeight();
+    }
+
+    /// Asserts one complete label ends before its aligned editor starts.
+    ///
+    /// @param label localized setting label
+    /// @param editor editor aligned in the following column
+    private static void assertLabelPrecedesEditor(JLabel label, Component editor) {
+        assertSame(label.getParent(), editor.getParent());
+        assertTrue(label.getWidth() >= label.getPreferredSize().width);
+        assertEquals(16, editor.getX() - label.getX() - label.getWidth());
+    }
+
+    /// Asserts an inheritance checkbox remains left of and vertically aligned with its own editor.
+    ///
+    /// @param override inheritance checkbox
+    /// @param editor editor controlled by the checkbox
+    private static void assertOverridePrecedesSameRow(JCheckBox override, Component editor) {
+        assertSame(override.getParent(), editor.getParent());
+        assertTrue(override.getX() + override.getWidth() <= editor.getX());
+        assertTrue(override.getY() < editor.getY() + editor.getHeight());
+        assertTrue(editor.getY() < override.getY() + override.getHeight());
     }
 
     /// Asserts three row gaps differ only by normal device-scale rounding.

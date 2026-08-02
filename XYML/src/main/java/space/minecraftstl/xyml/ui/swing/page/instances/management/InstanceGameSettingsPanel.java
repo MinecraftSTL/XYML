@@ -1800,7 +1800,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     /// @return configured section panel
     private static JPanel sectionPanel(String name, String title) {
         JPanel section = new JPanel(new MigLayout(
-                "insets 0, fillx, wrap 3", "[26!,center]8[280!,fill]16[grow,fill]", "[]10[]"));
+                "insets 0, fillx, wrap 3", "[26!,center]8[320:pref,fill]16[grow,fill]", "[]10[]"));
         section.setName(Objects.requireNonNull(name, "name"));
         section.setOpaque(false);
         JLabel heading = new JLabel(Objects.requireNonNull(title, "title"));
@@ -1820,7 +1820,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             String labelText,
             InheritedControl<? extends JComponent> control) {
         JPanel row = new JPanel(new MigLayout(
-                "insets 0, fillx", "[26!,center]8[280!,fill]16[grow,fill]", "[]"));
+                "insets 0, fillx", "[26!,center]8[320:pref,fill]16[grow,fill]", "[]"));
         row.setName(Objects.requireNonNull(name, "name"));
         row.setOpaque(false);
         addControlRow(row, labelText, control);
