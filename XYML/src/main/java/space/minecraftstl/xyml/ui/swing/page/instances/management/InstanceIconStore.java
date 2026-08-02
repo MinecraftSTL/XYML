@@ -30,7 +30,7 @@ import java.nio.file.Path;
 /// publication runs on the EDT after a mutation has completed successfully.
 @NotNullByDefault
 interface InstanceIconStore {
-    /// Loads the currently persisted built-in type and optional custom-image path.
+    /// Loads the effective built-in type and optional custom-image path.
     ///
     /// @return complete icon state for preview rendering
     Snapshot load();
@@ -59,7 +59,7 @@ interface InstanceIconStore {
 
     /// Immutable icon state loaded outside the EDT.
     ///
-    /// @param builtInType persisted bundled fallback type
+    /// @param builtInType effective bundled type after automatic `DEFAULT` resolution
     /// @param customImage existing custom-image path, or `null` when the bundled image is active
     @NotNullByDefault
     record Snapshot(GameInstanceIconType builtInType, @Nullable Path customImage) {

@@ -21,13 +21,17 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.event.Event;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstanceAutomaticIconResolver;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Objects;
+
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Persists overview icon selections through the launcher's existing instance repository APIs.
 @NotNullByDefault
@@ -47,16 +51,33 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
     }
 
-    /// Loads the custom file first and uses the persisted setting as its bundled fallback.
+    /// Loads the custom file first and resolves `DEFAULT` to the instance's automatic bundled icon.
     ///
     /// @return current repository-backed icon state
     @Override
     public Snapshot load() {
         @Nullable GameSettings.Instance settings = repository.getInstanceGameSettings(instanceId);
         @Nullable GameInstanceIconType storedType = settings != null ? settings.iconProperty().getValue() : null;
-        GameInstanceIconType builtInType = storedType != null ? storedType : GameInstanceIconType.DEFAULT;
+        GameInstanceIconType builtInType = storedType == null || storedType == GameInstanceIconType.DEFAULT
+                ? resolveAutomaticIconType()
+                : storedType;
         @Nullable Path customImage = repository.getInstanceIconFile(instanceId).orElse(null);
         return new Snapshot(builtInType, customImage);
+    }
+
+    /// Resolves the same manifest-derived automatic icon used by the installed-instance list.
+    ///
+    /// @return detected loader icon, or the default icon when manifest analysis is unavailable
+    private GameInstanceIconType resolveAutomaticIconType() {
+        try {
+            GameInstanceManifest manifest = repository.getInstanceManifest(instanceId);
+            return InstanceAutomaticIconResolver.resolve(
+                    repository.resolve(manifest),
+                    repository.getGameVersion(manifest).orElse(null));
+        } catch (RuntimeException failure) {
+            LOG.warning("Failed to resolve automatic icon for instance " + instanceId, failure);
+            return GameInstanceIconType.DEFAULT;
+        }
     }
 
     /// Verifies writable settings, removes custom images, and persists the selected bundled type.
@@ -78,7 +99,7 @@ final class RepositoryInstanceIconStore implements InstanceIconStore {
         settings.iconProperty().setValue(selection.iconType());
     }
 
-    /// Copies one supported image and makes grass the bundled fallback.
+    /// Copies one supported image and restores automatic bundled selection after custom-image removal.
     ///
     /// @param sourceImage local supported image
     /// @throws IOException when copying the image fails
