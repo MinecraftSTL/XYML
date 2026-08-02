@@ -70,7 +70,7 @@ final class InstanceWindowSizeControls {
     /// Transparent row inserted into the game-window section.
     private final JPanel component = new JPanel(new MigLayout(
             "insets 0, fillx",
-            "[26!,center][220!,fill][grow,fill]",
+            "[26!,center]8[280!,fill]16[grow,fill]",
             "[]"));
 
     /// Prevents reciprocal document and selector listeners from looping.
