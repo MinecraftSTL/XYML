@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -502,10 +503,13 @@ public final class RepositoryInstancesModelTest {
             List<RepositoryInstancesModel.RepositoryEntry> entries = new ArrayList<>();
             for (GameInstanceID instanceId : displayedIds) {
                 Optional<String> capturedDetail = Optional.ofNullable(details.get(instanceId));
+                InstancePresentation capturedPresentation = new InstancePresentation(
+                        capturedDetail.orElse(STATUS_STRINGS.unknownVersionDetail()),
+                        GameInstanceIconType.DEFAULT);
                 entries.add(new RepositoryInstancesModel.RepositoryEntry(
                         instanceId,
                         List.of(instanceId, capturedDetail),
-                        () -> resolveCapturedDetail(instanceId, capturedDetail)));
+                        () -> resolveCapturedPresentation(instanceId, capturedPresentation)));
             }
             return List.copyOf(entries);
         }
@@ -534,9 +538,12 @@ public final class RepositoryInstancesModelTest {
         /// Records and returns deterministic non-transparent pixels for one demanded row.
         ///
         /// @param instanceId stable instance ID
+        /// @param defaultIconType automatic icon derived from the captured presentation
         /// @return immutable normalized icon pixels
         @Override
-        public synchronized InstanceIconData resolveIcon(GameInstanceID instanceId) {
+        public synchronized InstanceIconData resolveIcon(
+                GameInstanceID instanceId,
+                GameInstanceIconType defaultIconType) {
             resolvedIconIds.add(instanceId);
             int[] pixels = new int[InstanceIconData.PIXEL_COUNT];
             int color = 0xFF000000 | (instanceId.hashCode() & 0x00FFFFFF);
@@ -554,16 +561,16 @@ public final class RepositoryInstancesModelTest {
             selectionChanges.fireChange(previous, instanceId);
         }
 
-        /// Records and returns one revision-captured game-version detail.
+        /// Records and returns one revision-captured instance presentation.
         ///
         /// @param instanceId stable instance ID
-        /// @param capturedDetail detail captured with the source revision
-        /// @return captured detail
-        private synchronized Optional<String> resolveCapturedDetail(
+        /// @param capturedPresentation presentation captured with the source revision
+        /// @return captured presentation
+        private synchronized InstancePresentation resolveCapturedPresentation(
                 GameInstanceID instanceId,
-                Optional<String> capturedDetail) {
+                InstancePresentation capturedPresentation) {
             resolvedIds.add(instanceId);
-            return capturedDetail;
+            return capturedPresentation;
         }
 
         /// Applies the configured refresh or throws its configured failure.
