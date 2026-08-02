@@ -13,6 +13,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+      RELEASE_CHANNEL: >-
+        ${{ github.event_name == 'push' && github.ref_name == 'main' && 'stable'
+        || github.event_name == 'push' && github.ref_name == 'beta' && 'beta'
+        || github.event_name == 'push' && github.ref_name == 'alpha' && 'alpha'
+        || 'dev' }}
     steps:
       - uses: actions/checkout@v6
       - name: Set up JDK 17

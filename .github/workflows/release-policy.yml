@@ -1,0 +1,51 @@
+name: Release Branch Policy
+
+on:
+  pull_request:
+    branches:
+      - main
+      - beta
+      - alpha
+      - dev
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+      - closed
+
+permissions:
+  contents: read
+
+jobs:
+  validate-flow:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout protected policy
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Validate adjacent branch flow
+        run: >-
+          bash ./config/release/validate-branch-flow.sh
+          "${{ github.head_ref }}"
+          "${{ github.base_ref }}"
+
+  audit-promotion-merge:
+    if: github.event.action == 'closed' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout merged commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 2
+
+      - name: Require no-ff for promotion
+        run: >-
+          bash ./config/release/validate-branch-flow.sh
+          "${{ github.head_ref }}"
+          "${{ github.base_ref }}"
+          "${{ github.event.pull_request.merge_commit_sha }}"

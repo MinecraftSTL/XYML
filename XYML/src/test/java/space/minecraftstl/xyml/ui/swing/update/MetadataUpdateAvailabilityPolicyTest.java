@@ -26,46 +26,57 @@ import space.minecraftstl.xyml.upgrade.UpdateChannel;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies parity with the established launcher update-availability rules.
+/// Verifies channel-aware update ordering and the single stable-version reset exception.
 @NotNullByDefault
 class MetadataUpdateAvailabilityPolicyTest {
-    /// Uses semantic comparison for ordinary releases on the current channel.
+    /// Uses numeric comparison for ordinary releases on the current channel.
     @Test
-    void comparesStableVersionsSemantically() {
+    void comparesVersionsNumericallyWithinChannel() {
         MetadataUpdateAvailabilityPolicy policy = new MetadataUpdateAvailabilityPolicy(
-                "3.6.1",
-                UpdateChannel.STABLE,
-                false);
+                "1.0.0",
+                UpdateChannel.STABLE);
+        MetadataUpdateAvailabilityPolicy betaPolicy = new MetadataUpdateAvailabilityPolicy(
+                "1.0.0.1",
+                UpdateChannel.BETA);
 
-        assertTrue(policy.isUpdateAvailable(remote("3.6.2", UpdateChannel.STABLE, false)));
-        assertFalse(policy.isUpdateAvailable(remote("3.6.1", UpdateChannel.STABLE, false)));
-        assertFalse(policy.isUpdateAvailable(remote("3.5.9", UpdateChannel.STABLE, false)));
+        assertTrue(policy.isUpdateAvailable(remote("1.0.1", UpdateChannel.STABLE, false)));
+        assertFalse(policy.isUpdateAvailable(remote("1.0.0", UpdateChannel.STABLE, false)));
+        assertFalse(policy.isUpdateAvailable(remote("0.9.9", UpdateChannel.STABLE, false)));
+        assertTrue(betaPolicy.isUpdateAvailable(remote("1.0.0.2", UpdateChannel.BETA, false)));
+        assertFalse(betaPolicy.isUpdateAvailable(remote("1.0.0.0", UpdateChannel.BETA, false)));
     }
 
-    /// Offers a different forced or cross-channel build regardless of semantic ordering.
+    /// Offers a different forced or cross-channel build regardless of numeric ordering.
     @Test
-    void replacesDifferentForcedNightlyOrCrossChannelBuilds() {
+    void replacesDifferentForcedOrCrossChannelBuilds() {
         MetadataUpdateAvailabilityPolicy stable = new MetadataUpdateAvailabilityPolicy(
-                "3.6.1",
-                UpdateChannel.STABLE,
-                false);
+                "1.0.1",
+                UpdateChannel.STABLE);
 
-        assertTrue(stable.isUpdateAvailable(remote("3.5.0", UpdateChannel.STABLE, true)));
-        assertTrue(stable.isUpdateAvailable(remote("3.5.0", UpdateChannel.NIGHTLY, false)));
-        assertTrue(stable.isUpdateAvailable(remote("3.5.0", UpdateChannel.DEVELOPMENT, false)));
-        assertFalse(stable.isUpdateAvailable(remote("3.6.1", UpdateChannel.NIGHTLY, false)));
+        assertTrue(stable.isUpdateAvailable(remote("1.0.0", UpdateChannel.STABLE, true)));
+        assertTrue(stable.isUpdateAvailable(remote("1.0.0.1", UpdateChannel.BETA, false)));
+        assertTrue(stable.isUpdateAvailable(remote("1.0.0.0.1", UpdateChannel.ALPHA, false)));
+        assertTrue(stable.isUpdateAvailable(remote("1.0.0.0.0.1", UpdateChannel.DEV, false)));
+        assertFalse(stable.isUpdateAvailable(remote("1.0.1", UpdateChannel.BETA, false)));
     }
 
-    /// Uses version inequality for a running nightly artifact.
+    /// Allows only the exact unreleased stable test build to cross the intentional version reset.
     @Test
-    void runningNightlyReplacesAnyDifferentVersion() {
-        MetadataUpdateAvailabilityPolicy policy = new MetadataUpdateAvailabilityPolicy(
-                "3.6.1.100",
-                UpdateChannel.NIGHTLY,
-                true);
+    void permitsOnlyExactOneTimeStableReset() {
+        MetadataUpdateAvailabilityPolicy exactLegacy = new MetadataUpdateAvailabilityPolicy(
+                "3.17.0",
+                UpdateChannel.STABLE);
+        MetadataUpdateAvailabilityPolicy otherLegacy = new MetadataUpdateAvailabilityPolicy(
+                "3.17.1",
+                UpdateChannel.STABLE);
+        MetadataUpdateAvailabilityPolicy legacyBeta = new MetadataUpdateAvailabilityPolicy(
+                "3.17.0",
+                UpdateChannel.BETA);
 
-        assertTrue(policy.isUpdateAvailable(remote("3.6.1.99", UpdateChannel.NIGHTLY, false)));
-        assertFalse(policy.isUpdateAvailable(remote("3.6.1.100", UpdateChannel.NIGHTLY, false)));
+        assertTrue(exactLegacy.isUpdateAvailable(remote("1.0.0", UpdateChannel.STABLE, false)));
+        assertFalse(exactLegacy.isUpdateAvailable(remote("1.0.1", UpdateChannel.STABLE, false)));
+        assertFalse(otherLegacy.isUpdateAvailable(remote("1.0.0", UpdateChannel.STABLE, false)));
+        assertFalse(legacyBeta.isUpdateAvailable(remote("1.0.0", UpdateChannel.BETA, false)));
     }
 
     /// Suppresses offers for source placeholders and snapshot development versions.
@@ -73,12 +84,10 @@ class MetadataUpdateAvailabilityPolicyTest {
     void suppressesDevelopmentPlaceholders() {
         MetadataUpdateAvailabilityPolicy placeholder = new MetadataUpdateAvailabilityPolicy(
                 "@develop@",
-                UpdateChannel.DEVELOPMENT,
-                false);
+                UpdateChannel.DEV);
         MetadataUpdateAvailabilityPolicy snapshot = new MetadataUpdateAvailabilityPolicy(
-                "3.7.SNAPSHOT",
-                UpdateChannel.DEVELOPMENT,
-                false);
+                "1.0.0.0.0.SNAPSHOT",
+                UpdateChannel.DEV);
 
         assertFalse(placeholder.isUpdateAvailable(remote("99.0", UpdateChannel.STABLE, true)));
         assertFalse(snapshot.isUpdateAvailable(remote("99.0", UpdateChannel.STABLE, true)));
