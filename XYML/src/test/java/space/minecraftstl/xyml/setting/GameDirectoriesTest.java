@@ -23,6 +23,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.collection.ListChange;
 import space.minecraftstl.xyml.observable.collection.ObservableList;
@@ -348,6 +349,48 @@ public final class GameDirectoriesTest {
 
             assertTrue(repository.removeInstanceFromDisk(id));
             assertEquals(repository.getBaseDirectory(), repository.getRunDirectory(id));
+        }
+    }
+
+    /// Tests that post-install calibration isolates a modded instance found by the refreshed XYML manifest.
+    @Test
+    public void refreshedModdedInstanceUsesIsolatedModDirectory(@TempDir Path tempDirectory)
+            throws ReflectiveOperationException, IOException, InterruptedException {
+        GameSettingsPresetID defaultPresetId =
+                GameSettingsPresetID.parse("game-settings-preset:123e4567-e89b-12d3-a456-426614174003");
+        GameSettings.Preset defaultPreset = new GameSettings.Preset(defaultPresetId);
+        defaultPreset.defaultIsolationTypeProperty().setValue(DefaultIsolationType.MODDED);
+        GameSettingsPresets presets = new GameSettingsPresets();
+        presets.getPresets().setAll(List.of(defaultPreset));
+
+        GameDirectory gameDirectory = new GameDirectory(
+                GameDirectoryID.generate(),
+                LocalizedText.plain("Dev"),
+                PortablePath.of(tempDirectory.toString()));
+        GameDirectories localDirectories = new GameDirectories();
+        localDirectories.getGameDirectories().add(gameDirectory);
+        GameDirectories userDirectories = new GameDirectories();
+
+        try (GameDirectoryEnvironment ignored =
+                     new GameDirectoryEnvironment(localDirectories, userDirectories, presets)) {
+            settings().defaultGameSettingsPresetProperty().set(defaultPresetId);
+            XYMLGameRepository repository = new XYMLGameRepository(gameDirectory);
+            GameInstanceID id = new GameInstanceID("refreshed-fabric");
+            GameInstanceManifest manifest = new GameInstanceManifest(id)
+                    .withMainClass("net.fabricmc.loader.impl.launch.knot.KnotClient");
+            Path manifestFile = repository.getInstanceJson(id);
+            Files.createDirectories(manifestFile.getParent());
+            JsonUtils.writeToJsonFile(manifestFile, manifest);
+
+            repository.refresh();
+            assertTrue(repository.hasInstance(id));
+            assertEquals(repository.getBaseDirectory(), repository.getRunDirectory(id));
+
+            repository.applyDefaultIsolationSetting(id);
+            FileSaver.waitForAllSaves();
+
+            assertEquals(repository.getInstanceRoot(id), repository.getRunDirectory(id));
+            assertEquals(repository.getInstanceRoot(id).resolve("mods"), repository.getModsDirectory(id));
         }
     }
 

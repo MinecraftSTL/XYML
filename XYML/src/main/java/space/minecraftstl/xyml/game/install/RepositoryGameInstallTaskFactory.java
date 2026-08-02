@@ -110,7 +110,10 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         configureBuilder(builder, instanceId, request);
         repository.applyDefaultIsolationSettingForNewInstance(instanceId, isModded(request));
         return builder.buildAsync()
-                .whenComplete(repositoryRefreshExecutor, ignoredFailure -> repository.refresh())
+                .whenComplete(repositoryRefreshExecutor, ignoredFailure -> {
+                    repository.refresh();
+                    repository.applyDefaultIsolationSetting(instanceId);
+                })
                 .thenRunAsync(
                         instanceSelectionExecutor,
                         () -> repository.setSelectedInstance(instanceId));
