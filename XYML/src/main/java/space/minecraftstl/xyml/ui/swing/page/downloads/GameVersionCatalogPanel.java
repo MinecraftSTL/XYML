@@ -55,12 +55,14 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.KeyStroke;
 import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
@@ -677,6 +679,15 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         loaderActions.add(backFromLoadersButton, "grow, h 40!");
         loaderWorkspace.add(loaderActions, "growx");
 
+        JScrollPane loaderScroll = new JScrollPane(loaderWorkspace);
+        loaderScroll.setName("gameVersionsLoaderScroll");
+        loaderScroll.setBorder(BorderFactory.createEmptyBorder());
+        loaderScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        loaderScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+        loaderScroll.getVerticalScrollBar().setUnitIncrement(16);
+        loaderScroll.setMinimumSize(new java.awt.Dimension(0, 0));
+        SwingTransparency.revealBackgroundThroughScrollPane(loaderScroll);
+
         JPanel taskWorkspace = new JPanel(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
@@ -703,7 +714,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         workflowCards.setName("gameVersionsWorkflowCards");
         workflowCards.setMinimumSize(new java.awt.Dimension(0, 0));
         workflowCards.add(catalogWorkspace, CATALOG_VIEW);
-        workflowCards.add(loaderWorkspace, LOADER_VIEW);
+        workflowCards.add(loaderScroll, LOADER_VIEW);
         workflowCards.add(taskWorkspace, TASK_VIEW);
         gameVersionsPanel.add(workflowCards, "grow");
 
