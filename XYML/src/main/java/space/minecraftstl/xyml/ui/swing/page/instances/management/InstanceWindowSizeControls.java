@@ -21,9 +21,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.setting.GameWindowType;
 
-import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -49,20 +47,11 @@ final class InstanceWindowSizeControls {
     private static final Pattern RESOLUTION_PATTERN = Pattern.compile(
             "\\s*(\\d+(?:\\.\\d+)?)\\s*[xX\\u00D7]\\s*(\\d+(?:\\.\\d+)?)\\s*");
 
-    /// Width inheritance switch.
-    private final JCheckBox widthOverride;
-
-    /// Height inheritance switch.
-    private final JCheckBox heightOverride;
-
     /// Width value editor.
     private final JTextField widthEditor;
 
     /// Height value editor.
     private final JTextField heightEditor;
-
-    /// Effective window-mode editor controlling preset availability.
-    private final JComboBox<GameWindowType> windowTypeEditor;
 
     /// Editable preset selector containing display-compatible common resolutions.
     private final JComboBox<String> resolutionSelector = new JComboBox<>();
@@ -76,24 +65,18 @@ final class InstanceWindowSizeControls {
     /// Prevents reciprocal document and selector listeners from looping.
     private boolean synchronizing;
 
+    /// Parent-computed writable and windowed-mode availability.
+    private boolean editingAvailable;
+
     /// Creates one common-resolution selector over the existing inherited editors.
     ///
-    /// @param widthOverride width inheritance switch
-    /// @param heightOverride height inheritance switch
     /// @param widthEditor width text field
     /// @param heightEditor height text field
-    /// @param windowTypeEditor effective window-mode selector
     InstanceWindowSizeControls(
-            JCheckBox widthOverride,
-            JCheckBox heightOverride,
             JTextField widthEditor,
-            JTextField heightEditor,
-            JComboBox<GameWindowType> windowTypeEditor) {
-        this.widthOverride = Objects.requireNonNull(widthOverride, "widthOverride");
-        this.heightOverride = Objects.requireNonNull(heightOverride, "heightOverride");
+            JTextField heightEditor) {
         this.widthEditor = Objects.requireNonNull(widthEditor, "widthEditor");
         this.heightEditor = Objects.requireNonNull(heightEditor, "heightEditor");
-        this.windowTypeEditor = Objects.requireNonNull(windowTypeEditor, "windowTypeEditor");
         configureComponents();
         configureInteractions();
         synchronizeSelectorFromDimensions();
@@ -105,6 +88,14 @@ final class InstanceWindowSizeControls {
     /// @return row component
     JComponent component() {
         return component;
+    }
+
+    /// Applies availability already resolved from panel writability and the effective window mode.
+    ///
+    /// @param enabled whether selecting a common size may edit the current settings surface
+    void setEditingAvailable(boolean enabled) {
+        editingAvailable = enabled;
+        updateAvailability();
     }
 
     /// Returns common resolutions bounded by the largest attached display.
@@ -138,7 +129,7 @@ final class InstanceWindowSizeControls {
         component.add(resolutionSelector, "growx");
     }
 
-    /// Connects bidirectional dimension synchronization and inherited editor availability.
+    /// Connects bidirectional dimension synchronization.
     private void configureInteractions() {
         DocumentListener dimensionListener = new DocumentListener() {
             /// Synchronizes after text insertion.
@@ -162,9 +153,6 @@ final class InstanceWindowSizeControls {
         widthEditor.getDocument().addDocumentListener(dimensionListener);
         heightEditor.getDocument().addDocumentListener(dimensionListener);
         resolutionSelector.addActionListener(event -> applySelectedResolution());
-        windowTypeEditor.addActionListener(event -> updateAvailability());
-        widthOverride.addPropertyChangeListener("enabled", event -> updateAvailability());
-        heightOverride.addPropertyChangeListener("enabled", event -> updateAvailability());
     }
 
     /// Mirrors exact current dimensions into the editable selector without changing either editor.
@@ -197,8 +185,6 @@ final class InstanceWindowSizeControls {
             return;
         }
 
-        activateOverride(widthOverride);
-        activateOverride(heightOverride);
         synchronizing = true;
         try {
             widthEditor.setText(matcher.group(1));
@@ -209,21 +195,9 @@ final class InstanceWindowSizeControls {
         synchronizeSelectorFromDimensions();
     }
 
-    /// Activates an available inherited setting through its ordinary user interaction path.
-    ///
-    /// @param override inheritance switch
-    private static void activateOverride(JCheckBox override) {
-        if (!override.isSelected() && override.isEnabled()) {
-            override.doClick();
-        }
-    }
-
-    /// Enables presets only for an editable windowed-mode settings surface.
+    /// Applies the parent panel's effective editing availability.
     private void updateAvailability() {
-        resolutionSelector.setEnabled(
-                windowTypeEditor.getSelectedItem() == GameWindowType.WINDOWED
-                        && widthOverride.isEnabled()
-                        && heightOverride.isEnabled());
+        resolutionSelector.setEnabled(editingAvailable);
     }
 
     /// Appends one preset when the current display bounds can represent it.

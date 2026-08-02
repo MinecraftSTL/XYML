@@ -20,10 +20,8 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
-import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
-import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JTextField;
 import java.awt.Component;
@@ -52,66 +50,53 @@ final class InstanceWindowSizeControlsTest {
                 InstanceWindowSizeControls.supportedResolutions(3_840, 2_160));
     }
 
-    /// Shows the effective dimensions first and applies a chosen preset as paired local overrides.
+    /// Shows effective dimensions first and applies a chosen preset after the parent enables paired editing.
     @Test
     void appliesSelectedPresetWithoutInventingADefault() {
         EdtDispatcher.executeAndWait(() -> {
-            JCheckBox widthOverride = new JCheckBox();
-            JCheckBox heightOverride = new JCheckBox();
             JTextField width = new JTextField("854.5");
             JTextField height = new JTextField("480");
-            JComboBox<GameWindowType> windowType = new JComboBox<>(GameWindowType.values());
-            windowType.setSelectedItem(GameWindowType.WINDOWED);
             InstanceWindowSizeControls controls = new InstanceWindowSizeControls(
-                    widthOverride,
-                    heightOverride,
                     width,
-                    height,
-                    windowType);
+                    height);
             JComboBox<?> selector = findNamed(
                     controls.component(),
                     "instanceGameSettingsWindowSizePreset",
                     JComboBox.class);
 
             assertEquals("854.5x480", selector.getEditor().getItem());
+            assertFalse(selector.isEnabled());
+            controls.setEditingAvailable(true);
             selector.setSelectedItem("1280x720");
-            assertTrue(widthOverride.isSelected());
-            assertTrue(heightOverride.isSelected());
             assertEquals("1280", width.getText());
             assertEquals("720", height.getText());
         });
     }
 
-    /// Preserves editable custom dimensions and disables presets outside windowed mode.
+    /// Preserves editable custom dimensions and follows parent-resolved editing availability.
     @Test
-    void acceptsCustomResolutionAndFollowsWindowMode() {
+    void acceptsCustomResolutionAndFollowsEditingAvailability() {
         EdtDispatcher.executeAndWait(() -> {
-            JCheckBox widthOverride = new JCheckBox();
-            JCheckBox heightOverride = new JCheckBox();
-            widthOverride.setSelected(true);
-            heightOverride.setSelected(true);
             JTextField width = new JTextField("854");
             JTextField height = new JTextField("480");
-            JComboBox<GameWindowType> windowType = new JComboBox<>(GameWindowType.values());
-            windowType.setSelectedItem(GameWindowType.WINDOWED);
             InstanceWindowSizeControls controls = new InstanceWindowSizeControls(
-                    widthOverride,
-                    heightOverride,
                     width,
-                    height,
-                    windowType);
+                    height);
             JComboBox<?> selector = findNamed(
                     controls.component(),
                     "instanceGameSettingsWindowSizePreset",
                     JComboBox.class);
 
+            assertFalse(selector.isEnabled());
+            controls.setEditingAvailable(true);
+            assertTrue(selector.isEnabled());
             selector.setSelectedItem("1000.5x700");
             assertEquals("1000.5", width.getText());
             assertEquals("700", height.getText());
 
-            windowType.setSelectedItem(GameWindowType.FULLSCREEN);
+            controls.setEditingAvailable(false);
             assertFalse(selector.isEnabled());
-            windowType.setSelectedItem(GameWindowType.WINDOWED);
+            controls.setEditingAvailable(true);
             assertTrue(selector.isEnabled());
         });
     }

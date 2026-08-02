@@ -239,7 +239,11 @@ public final class GameSettingsPresetsPanelTest {
                     () -> assertFalse(findComponent(
                             panel,
                             "gameSettingsPresetSave",
-                            AbstractButton.class).isEnabled()));
+                            AbstractButton.class).isEnabled()),
+                    () -> assertFalse(findComponent(
+                            panel,
+                            "instanceGameSettingsWindowSizePreset",
+                            JComboBox.class).isEnabled()));
             tabs.setSelectedIndex(5);
             assertEquals(5, tabs.getSelectedIndex());
             panel.close();
@@ -270,6 +274,44 @@ public final class GameSettingsPresetsPanelTest {
                         findComponent(panel, name + "Label", JLabel.class),
                         findComponent(panel, name, Component.class));
             }
+            panel.close();
+        });
+    }
+
+    /// Keeps common window sizes editable in writable global presets and saves both dimensions together.
+    @Test
+    public void editsGlobalWindowSizePresetsWithoutVisibleOverrideControls() {
+        FakeGameSettingsPresetsStore store = new FakeGameSettingsPresetsStore(
+                snapshot(1L, preset("8", "Window size", true)));
+        GameSettingsPresetsPanel panel = onEventDispatchThread(
+                () -> new GameSettingsPresetsPanel(store, new StaticJavaRuntimeManagementService()));
+
+        onEventDispatchThread(() -> {
+            JComboBox<?> preset = findComponent(
+                    panel,
+                    "instanceGameSettingsWindowSizePreset",
+                    JComboBox.class);
+            assertTrue(preset.isEnabled());
+            preset.setSelectedItem("1280x720");
+            assertEquals("1280", findComponent(
+                    panel,
+                    "instanceGameSettingsWindowWidth",
+                    JTextField.class).getText());
+            assertEquals("720", findComponent(
+                    panel,
+                    "instanceGameSettingsWindowHeight",
+                    JTextField.class).getText());
+            setChoice(panel, "instanceGameSettingsWindowType", GameWindowType.MAXIMIZED);
+            assertFalse(preset.isEnabled());
+            setChoice(panel, "instanceGameSettingsWindowType", GameWindowType.FULLSCREEN);
+            assertFalse(preset.isEnabled());
+            setChoice(panel, "instanceGameSettingsWindowType", GameWindowType.WINDOWED);
+            assertTrue(preset.isEnabled());
+            findComponent(panel, "gameSettingsPresetSave", AbstractButton.class).doClick();
+
+            GameSettingsPresetEditor saved = Objects.requireNonNull(store.lastEditor.get());
+            assertEquals(1280.0D, saved.window().width());
+            assertEquals(720.0D, saved.window().height());
             panel.close();
         });
     }
@@ -366,6 +408,23 @@ public final class GameSettingsPresetsPanelTest {
                 panel,
                 "instanceGameSettingsJavaModeInherit",
                 AbstractButton.class));
+        for (QuickPlayType type : QuickPlayType.values()) {
+            assertNotNull(findComponent(
+                    panel,
+                    "instanceGameSettingsQuickPlayMode" + type.name(),
+                    AbstractButton.class));
+        }
+        assertNull(findOptionalComponent(
+                panel,
+                "instanceGameSettingsQuickPlayModeInherit",
+                AbstractButton.class));
+        for (String editorName : List.of(
+                "instanceGameSettingsQuickPlayMultiplayer",
+                "instanceGameSettingsQuickPlaySingleplayer",
+                "instanceGameSettingsQuickPlayRealms")) {
+            assertNotNull(findComponent(panel, editorName, JTextField.class));
+            assertNull(findOptionalComponent(panel, editorName + "Override", JCheckBox.class));
+        }
         for (String editorName : List.of(
                 "instanceGameSettingsJavaVersion",
                 "instanceGameSettingsJavaPath",
@@ -408,7 +467,7 @@ public final class GameSettingsPresetsPanelTest {
         setBoolean(panel, "instanceGameSettingsDebugLog", true);
         setBoolean(panel, "instanceGameSettingsSkipGameCheck", true);
 
-        setChoice(panel, "instanceGameSettingsQuickPlayMode", QuickPlayType.MULTIPLAYER);
+        setQuickPlayMode(panel, QuickPlayType.MULTIPLAYER);
         setText(panel, "instanceGameSettingsQuickPlayMultiplayer", "play.example.org:25565");
         setText(panel, "instanceGameSettingsQuickPlaySingleplayer", "World_One");
         setText(panel, "instanceGameSettingsQuickPlayRealms", "realm-7");
@@ -453,10 +512,6 @@ public final class GameSettingsPresetsPanelTest {
                 "instanceGameSettingsShowLogs",
                 "instanceGameSettingsDebugLog",
                 "instanceGameSettingsSkipGameCheck",
-                "instanceGameSettingsQuickPlayMode",
-                "instanceGameSettingsQuickPlayMultiplayer",
-                "instanceGameSettingsQuickPlaySingleplayer",
-                "instanceGameSettingsQuickPlayRealms",
                 "instanceGameSettingsRunningDirectory",
                 "instanceGameSettingsGameArguments",
                 "instanceGameSettingsEnvironmentVariables",
@@ -519,6 +574,17 @@ public final class GameSettingsPresetsPanelTest {
         findComponent(
                 panel,
                 "instanceGameSettingsJavaMode" + Objects.requireNonNull(mode, "mode").name(),
+                AbstractButton.class).doClick();
+    }
+
+    /// Selects one Quick Play mode.
+    ///
+    /// @param panel containing panel
+    /// @param type desired Quick Play mode
+    private static void setQuickPlayMode(GameSettingsPresetsPanel panel, QuickPlayType type) {
+        findComponent(
+                panel,
+                "instanceGameSettingsQuickPlayMode" + Objects.requireNonNull(type, "type").name(),
                 AbstractButton.class).doClick();
     }
 
