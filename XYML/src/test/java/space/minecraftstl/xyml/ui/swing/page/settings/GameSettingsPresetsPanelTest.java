@@ -41,7 +41,10 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import javax.swing.AbstractButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
@@ -238,6 +241,34 @@ public final class GameSettingsPresetsPanelTest {
                             AbstractButton.class).isEnabled()));
             tabs.setSelectedIndex(5);
             assertEquals(5, tabs.getSelectedIndex());
+            panel.close();
+        });
+    }
+
+    /// Keeps global launch-option labels and editors aligned after every override checkbox is hidden.
+    @Test
+    public void alignsGlobalLaunchOptionsAfterOverridesAreHidden() {
+        GameSettingsPresetSnapshot initial = preset("7", "Layout", true);
+        GameSettingsPresetsPanel panel = onEventDispatchThread(() -> new GameSettingsPresetsPanel(
+                new FakeGameSettingsPresetsStore(snapshot(1L, initial)),
+                new StaticJavaRuntimeManagementService()));
+
+        onEventDispatchThread(() -> {
+            JTabbedPane tabs = findComponent(panel, "globalGameSettingsPresetTabs", JTabbedPane.class);
+            JScrollPane gameScroll = (JScrollPane) tabs.getComponentAt(0);
+            layoutScrollableTab(gameScroll, 520, 900);
+            assertLabelPrecedesEditor(
+                    findComponent(panel, "instanceGameSettingsRunningDirectoryLabel", JLabel.class),
+                    findComponent(panel, "instanceGameSettingsRunningDirectoryEditor", JPanel.class));
+            for (String name : List.of(
+                    "instanceGameSettingsGameArguments",
+                    "instanceGameSettingsEnvironmentVariables",
+                    "instanceGameSettingsProcessPriority")) {
+                assertFalse(findComponent(panel, name + "Override", JCheckBox.class).isVisible());
+                assertLabelPrecedesEditor(
+                        findComponent(panel, name + "Label", JLabel.class),
+                        findComponent(panel, name, Component.class));
+            }
             panel.close();
         });
     }
@@ -617,6 +648,43 @@ public final class GameSettingsPresetsPanelTest {
     /// @param action EDT-bound action
     private static void onEventDispatchThread(Runnable action) {
         EdtDispatcher.executeAndWait(Objects.requireNonNull(action, "action"));
+    }
+
+    /// Lays out one settings tab and every nested container at the requested viewport size.
+    ///
+    /// @param scrollPane settings tab scroll pane
+    /// @param width viewport width
+    /// @param height viewport height
+    private static void layoutScrollableTab(JScrollPane scrollPane, int width, int height) {
+        scrollPane.setSize(width, height);
+        scrollPane.doLayout();
+        scrollPane.getViewport().doLayout();
+        Component view = scrollPane.getViewport().getView();
+        if (view instanceof Container container) {
+            layoutTree(container);
+        }
+    }
+
+    /// Recursively lays out one nested Swing hierarchy.
+    ///
+    /// @param root hierarchy root
+    private static void layoutTree(Container root) {
+        root.doLayout();
+        for (Component child : root.getComponents()) {
+            if (child instanceof Container container) {
+                layoutTree(container);
+            }
+        }
+    }
+
+    /// Asserts one full label ends before its editor starts in the same row grid.
+    ///
+    /// @param label localized setting label
+    /// @param editor associated editor
+    private static void assertLabelPrecedesEditor(JLabel label, Component editor) {
+        assertEquals(label.getParent(), editor.getParent());
+        assertTrue(label.getWidth() >= label.getPreferredSize().width);
+        assertEquals(16, editor.getX() - label.getX() - label.getWidth());
     }
 
     /// Finds one named component in a Swing hierarchy.
