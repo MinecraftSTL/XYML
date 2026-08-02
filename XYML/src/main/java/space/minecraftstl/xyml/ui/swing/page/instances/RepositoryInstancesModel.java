@@ -41,7 +41,6 @@ import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -115,7 +114,7 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             Consumer<GameInstanceID> manageCommand,
             RepositoryInstancesStatusStrings statusStrings) {
         this(
-                new XYMLRepositoryAccess(repository),
+                new XYMLRepositoryAccess(repository, statusStrings),
                 EventBus.EVENT_BUS.channel(RefreshedGameInstancesEvent.class),
                 backgroundExecutor,
                 addCommand,
@@ -406,10 +405,10 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         for (int index = actualRange.startInclusive(); index < actualRange.endExclusive(); index++) {
             checkLoadActive(cancellation);
             RepositoryEntry entry = requestSource.entries().get(index);
-            String detail = entry.resolveGameVersion().orElse(statusStrings.unknownVersionDetail());
+            InstancePresentation presentation = entry.resolvePresentation();
             checkLoadActive(cancellation);
-            InstanceIconData icon = repository.resolveIcon(entry.id());
-            items.add(new InstanceListItem(entry.id(), entry.id().id(), detail, icon));
+            InstanceIconData icon = repository.resolveIcon(entry.id(), presentation.defaultIconType());
+            items.add(new InstanceListItem(entry.id(), entry.id().id(), presentation.detail(), icon));
         }
         checkLoadActive(cancellation);
         return new ChoicePage<>(
@@ -428,11 +427,11 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             RepositoryEntry entry,
             LoadCancellation cancellation) {
         checkLoadActive(cancellation);
-        String detail = entry.resolveGameVersion().orElse(statusStrings.unknownVersionDetail());
+        InstancePresentation presentation = entry.resolvePresentation();
         checkLoadActive(cancellation);
-        InstanceIconData icon = repository.resolveIcon(entry.id());
+        InstanceIconData icon = repository.resolveIcon(entry.id(), presentation.defaultIconType());
         checkLoadActive(cancellation);
-        return new InstanceListItem(entry.id(), entry.id().id(), detail, icon);
+        return new InstanceListItem(entry.id(), entry.id().id(), presentation.detail(), icon);
     }
 
     /// Applies a matching real-repository refresh event without releasing model-owned refresh ownership.
@@ -845,37 +844,37 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
 
     }
 
-    /// Captured lazy detail resolver for one exact repository instance revision.
+    /// Captured lazy presentation resolver for one exact repository instance revision.
     @FunctionalInterface
     @NotNullByDefault
-    interface DetailResolver {
-        /// Resolves the captured instance's underlying game version.
+    interface PresentationResolver {
+        /// Resolves the captured instance's row detail and automatic icon type.
         ///
-        /// @return game version, or empty when unknown
-        Optional<String> resolveGameVersion();
+        /// @return immutable presentation metadata
+        InstancePresentation resolvePresentation();
     }
 
-    /// Immutable stable ID and revision-captured lazy detail resolver.
+    /// Immutable stable ID and revision-captured lazy presentation resolver.
     ///
     /// @param id stable instance ID
     /// @param contentToken identity or value representing captured row content
-    /// @param detailResolver resolver capturing the matching repository version descriptor
+    /// @param presentationResolver resolver capturing the matching repository version descriptor
     @NotNullByDefault
-    record RepositoryEntry(GameInstanceID id, Object contentToken, DetailResolver detailResolver) {
+    record RepositoryEntry(GameInstanceID id, Object contentToken, PresentationResolver presentationResolver) {
         /// Validates one repository entry.
         RepositoryEntry {
             Objects.requireNonNull(id, "id");
             Objects.requireNonNull(contentToken, "contentToken");
-            Objects.requireNonNull(detailResolver, "detailResolver");
+            Objects.requireNonNull(presentationResolver, "presentationResolver");
         }
 
-        /// Resolves this captured instance's underlying game version.
+        /// Resolves this captured instance's row detail and automatic icon type.
         ///
-        /// @return game version, or empty when unknown
-        Optional<String> resolveGameVersion() {
+        /// @return immutable presentation metadata
+        InstancePresentation resolvePresentation() {
             return Objects.requireNonNull(
-                    detailResolver.resolveGameVersion(),
-                    "detail resolver result");
+                    presentationResolver.resolvePresentation(),
+                    "presentation resolver result");
         }
     }
 
@@ -912,8 +911,9 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         /// caller-owned background executor.
         ///
         /// @param instanceId stable instance ID
+        /// @param defaultIconType automatic icon derived from the resolved manifest
         /// @return immutable normalized icon pixels
-        InstanceIconData resolveIcon(GameInstanceID instanceId);
+        InstanceIconData resolveIcon(GameInstanceID instanceId, GameInstanceIconType defaultIconType);
 
         /// Persists the selected stable instance ID.
         ///
@@ -930,11 +930,19 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
         /// Wrapped repository.
         private final XYMLGameRepository repository;
 
+        /// Localized fallback used when the resolved manifest has no detectable Minecraft version.
+        private final String unknownVersionDetail;
+
         /// Creates a real repository access adapter.
         ///
         /// @param repository wrapped repository
-        private XYMLRepositoryAccess(XYMLGameRepository repository) {
+        /// @param statusStrings localized repository text
+        private XYMLRepositoryAccess(
+                XYMLGameRepository repository,
+                RepositoryInstancesStatusStrings statusStrings) {
             this.repository = Objects.requireNonNull(repository, "repository");
+            this.unknownVersionDetail = Objects.requireNonNull(statusStrings, "statusStrings")
+                    .unknownVersionDetail();
         }
 
         /// Returns the wrapped repository event identity.
@@ -949,14 +957,17 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             return repository.isLoaded();
         }
 
-        /// Captures each displayed instance manifest inside its lazy game-version resolver.
+        /// Captures each displayed instance manifest inside its lazy presentation resolver.
         @Override
         public @Unmodifiable List<RepositoryEntry> displayedInstances() {
             return repository.getDisplayInstanceManifests()
                     .map(manifest -> new RepositoryEntry(
                             manifest.id(),
                             manifest,
-                            () -> repository.getGameVersion(manifest)))
+                            () -> InstancePresentation.resolve(
+                                    repository.resolve(manifest),
+                                    repository.getGameVersion(manifest).orElse(null),
+                                    unknownVersionDetail)))
                     .toList();
         }
 
@@ -981,18 +992,22 @@ public final class RepositoryInstancesModel implements InstancesModel, AutoClose
             return repository.onInstanceIconChanged.subscribe(listener);
         }
 
-        /// Resolves custom or configured bundled icon pixels for one demanded row.
+        /// Resolves custom, configured, or automatically selected bundled icon pixels for one demanded row.
         ///
         /// @param instanceId stable instance ID
+        /// @param defaultIconType automatic icon derived from the resolved manifest
         /// @return immutable normalized icon pixels
         @Override
-        public InstanceIconData resolveIcon(GameInstanceID instanceId) {
+        public InstanceIconData resolveIcon(
+                GameInstanceID instanceId,
+                GameInstanceIconType defaultIconType) {
             @Nullable GameSettings.Instance settings = repository.getInstanceGameSettings(instanceId);
             @Nullable GameInstanceIconType configuredType = settings == null
                     ? null
                     : settings.iconProperty().getValue();
             GameInstanceIconType builtInType = configuredType == null
-                    ? GameInstanceIconType.DEFAULT
+                    || configuredType == GameInstanceIconType.DEFAULT
+                    ? Objects.requireNonNull(defaultIconType, "defaultIconType")
                     : configuredType;
             @Nullable java.nio.file.Path customIcon = repository.getInstanceIconFile(instanceId)
                     .orElse(null);
