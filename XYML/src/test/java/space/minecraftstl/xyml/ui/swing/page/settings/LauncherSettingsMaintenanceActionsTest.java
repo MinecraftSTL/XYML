@@ -65,7 +65,7 @@ public final class LauncherSettingsMaintenanceActionsTest {
                 presenter(interaction),
                 Runnable::run);
         try {
-            UpdateCheckRequest request = new UpdateCheckRequest(UpdateChannel.DEVELOPMENT, true);
+            UpdateCheckRequest request = new UpdateCheckRequest(UpdateChannel.BETA, true);
             UpdateCheckResult result = actions.checkForUpdates(request).toCompletableFuture().join();
 
             assertSame(request, fetchedRequest.get());

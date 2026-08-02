@@ -91,8 +91,8 @@ public final class RemoteUpdateCheckSource implements UpdateCheckSource {
         query.put(
                 "channel",
                 request.preview()
-                        ? request.channel().channelName + "-preview"
-                        : request.channel().channelName);
+                        ? request.channel().channelName() + "-preview"
+                        : request.channel().channelName());
         String requestUrl = NetworkUtils.withQuery(endpoint, query);
         return RemoteVersion.fetch(request.channel(), request.preview(), requestUrl);
     }

@@ -17,26 +17,71 @@
  */
 package space.minecraftstl.xyml.upgrade;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.Metadata;
 
+/// Canonical XYML release channels ordered from most stable to most frequently updated.
+@NotNullByDefault
 public enum UpdateChannel {
-    STABLE("stable"),
-    DEVELOPMENT("dev"),
-    NIGHTLY("nightly");
+    /// Stable release channel using three decimal version components.
+    STABLE("stable", 3),
 
-    public final String channelName;
+    /// Public beta channel using four decimal version components.
+    BETA("beta", 4),
 
-    UpdateChannel(String channelName) {
+    /// Internal alpha channel using five decimal version components.
+    ALPHA("alpha", 5),
+
+    /// Development channel using six decimal version components.
+    DEV("dev", 6);
+
+    /// Canonical lowercase channel identifier used by update requests.
+    private final String channelName;
+
+    /// Exact decimal component count required by published versions in this channel.
+    private final int versionComponentCount;
+
+    /// Creates one immutable release channel definition.
+    ///
+    /// @param channelName canonical lowercase channel identifier
+    /// @param versionComponentCount exact published version component count
+    UpdateChannel(String channelName, int versionComponentCount) {
         this.channelName = channelName;
+        this.versionComponentCount = versionComponentCount;
     }
 
-    public static UpdateChannel getChannel() {
-        if (Metadata.isDev()) {
-            return DEVELOPMENT;
-        } else if (Metadata.isNightly()) {
-            return NIGHTLY;
-        } else {
-            return STABLE;
+    /// Resolves a canonical release channel identifier.
+    ///
+    /// @param channelName canonical lowercase channel identifier
+    /// @return matching release channel
+    /// @throws IllegalArgumentException when the identifier is unsupported
+    public static UpdateChannel fromName(String channelName) {
+        for (UpdateChannel channel : values()) {
+            if (channel.channelName.equals(channelName)) {
+                return channel;
+            }
         }
+        throw new IllegalArgumentException("Unsupported release channel: " + channelName);
+    }
+
+    /// Returns the release channel embedded in the running launcher artifact.
+    ///
+    /// @return current artifact release channel
+    public static UpdateChannel getChannel() {
+        return fromName(Metadata.BUILD_CHANNEL);
+    }
+
+    /// Returns the canonical lowercase channel identifier.
+    ///
+    /// @return channel identifier
+    public String channelName() {
+        return channelName;
+    }
+
+    /// Returns the exact decimal component count required by published versions.
+    ///
+    /// @return published version component count
+    public int versionComponentCount() {
+        return versionComponentCount;
     }
 }

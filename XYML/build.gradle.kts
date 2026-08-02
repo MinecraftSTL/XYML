@@ -8,6 +8,7 @@ import space.minecraftstl.xyml.gradle.l10n.UpsideDownTranslate
 import space.minecraftstl.xyml.gradle.mod.ParseModDataTask
 import space.minecraftstl.xyml.gradle.pack.CreateDeb
 import space.minecraftstl.xyml.gradle.pack.ReleaseType
+import space.minecraftstl.xyml.gradle.pack.ReleaseVersionResolver
 import space.minecraftstl.xyml.gradle.utils.PropertiesUtils
 import java.net.URI
 import java.nio.file.FileSystems
@@ -31,8 +32,21 @@ val projectConfig = PropertiesUtils.load(rootProject.file("config/project.proper
 
 val isOfficial = JenkinsUtils.IS_ON_CI || GitHubActionUtils.IS_ON_OFFICIAL_REPO
 
-val versionType = System.getenv("VERSION_TYPE") ?: if (isOfficial) "nightly" else "unofficial"
-val versionRoot = System.getenv("VERSION_ROOT") ?: projectConfig.getProperty("versionRoot") ?: "3"
+val releaseChannelName = System.getenv("RELEASE_CHANNEL")?.takeIf { it.isNotBlank() } ?: "dev"
+val currentReleaseType = ReleaseType.fromName(releaseChannelName)
+val stableVersion = System.getenv("STABLE_VERSION")?.takeIf { it.isNotBlank() }
+    ?: projectConfig.getProperty("stableVersion")
+    ?: "1.0.0"
+val explicitReleaseVersion = System.getenv("RELEASE_VERSION")?.takeIf { it.isNotBlank() }
+val buildNumber = System.getenv("BUILD_NUMBER")?.takeIf { it.isNotBlank() }
+
+version = ReleaseVersionResolver.resolve(
+    currentReleaseType,
+    stableVersion,
+    explicitReleaseVersion,
+    buildNumber,
+    isOfficial
+)
 
 val microsoftAuthId = System.getenv("MICROSOFT_AUTH_ID") ?: ""
 val curseForgeApiKey = System.getenv("CURSEFORGE_API_KEY") ?: ""
@@ -43,22 +57,6 @@ val launcherExe = System.getenv("XYML_LAUNCHER_EXE")
     ?.takeIf { it.isNotBlank() }
     ?.let { file(it) }
     ?: layout.projectDirectory.file("image/XYMLLauncher.windows.stub").asFile
-
-val buildNumber = System.getenv("BUILD_NUMBER")?.toInt()
-if (versionType == "stable") {
-    version = versionRoot
-} else if (buildNumber != null) {
-    version = "$versionRoot.$buildNumber"
-} else {
-    val shortCommit = System.getenv("GITHUB_SHA")?.lowercase()?.substring(0, 7)
-    version = if (shortCommit.isNullOrBlank()) {
-        "$versionRoot.SNAPSHOT"
-    } else if (isOfficial) {
-        "$versionRoot.dev-$shortCommit"
-    } else {
-        "$versionRoot.unofficial-$shortCommit"
-    }
-}
 
 val embedResources = configurations.register("embedResources")
 
@@ -148,7 +146,7 @@ val xymlProperties = buildList {
     System.getenv("GITHUB_SHA")?.let {
         add("xyml.version.hash" to it)
     }
-    add("xyml.version.type" to versionType)
+    add("xyml.release.channel" to currentReleaseType.getName())
     add("xyml.microsoft.auth.id" to microsoftAuthId)
     add("xyml.curseforge.apikey" to curseForgeApiKey)
     add("xyml.authlib-injector.version" to libs.authlib.injector.get().version!!)
@@ -825,7 +823,20 @@ tasks.register("nativePackage") {
 }
 
 tasks.check {
+    dependsOn("validateReleaseMetadata")
     dependsOn(verifyOfflineUiArtifact)
+}
+
+tasks.register("validateReleaseMetadata") {
+    group = "verification"
+    description = "Validates and prints the canonical XYML release channel and version."
+    inputs.property("releaseChannel", currentReleaseType.getName())
+    inputs.property("releaseVersion", project.version.toString())
+
+    doLast {
+        logger.lifecycle("XYML release channel: ${currentReleaseType.getName()}")
+        logger.lifecycle("XYML release version: ${project.version}")
+    }
 }
 
 tasks.processResources {
@@ -886,14 +897,8 @@ val makeDeb = tasks.register("makeDeb", CreateDeb::class) {
 
     val debFile = layout.file(provider { artifactFile("deb") })
 
-    val debChannel = when (versionType) {
-        "stable" -> ReleaseType.STABLE
-        "dev" -> ReleaseType.DEVELOPMENT
-        else -> ReleaseType.NIGHTLY
-    }
-
     version.set(project.version.toString())
-    releaseType.set(debChannel)
+    releaseType.set(currentReleaseType)
     launcherClassName.set("space.minecraftstl.xyml.Launcher")
     appShFile.set(layout.file(provider { artifactFile("sh") }))
     iconFile.set(layout.projectDirectory.file("image/xyml.png"))

@@ -82,9 +82,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Add-on catalogue IDs exposed by the launcher setting.
     private static final @Unmodifiable List<String> ADDON_SOURCES = List.of("modrinth", "curseforge");
 
-    /// Release channels exposed by the legacy-compatible manual update selector.
+    /// Broadly distributed release channels exposed by the manual update selector.
     private static final @Unmodifiable List<UpdateChannel> UPDATE_CHANNELS =
-            List.of(UpdateChannel.STABLE, UpdateChannel.DEVELOPMENT);
+            List.of(UpdateChannel.STABLE, UpdateChannel.BETA);
 
     /// Store supplying and persisting the non-appearance settings.
     private final SettingsCenterStore store;
@@ -777,13 +777,15 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// @param channel represented update channel, or null while a renderer initializes
     /// @return localized channel text
     private static String updateChannelText(@Nullable UpdateChannel channel) {
-        if (channel == UpdateChannel.DEVELOPMENT) {
-            return i18n("update.channel.dev");
+        if (channel == null) {
+            return "";
         }
-        if (channel == UpdateChannel.NIGHTLY) {
-            return i18n("update.channel.nightly");
-        }
-        return i18n("update.channel.stable");
+        return switch (channel) {
+            case STABLE -> i18n("update.channel.stable");
+            case BETA -> i18n("update.channel.beta");
+            case ALPHA -> i18n("update.channel.alpha");
+            case DEV -> i18n("update.channel.dev");
+        };
     }
 
     /// Converts a nullable download source to its localized display name.
