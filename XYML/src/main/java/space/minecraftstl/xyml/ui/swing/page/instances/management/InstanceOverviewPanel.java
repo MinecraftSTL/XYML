@@ -462,7 +462,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
 
     /// Resolves one complete metadata snapshot on the caller-owned background executor.
     ///
-    /// @return resolved instance paths, persisted icon identity, and decoded 40-pixel preview
+    /// @return resolved instance paths, effective icon identity, and decoded 40-pixel preview
     private InstanceSnapshot readSnapshot() {
         Path instanceRoot = Objects.requireNonNull(repository.getInstanceRoot(instanceId), "instance root")
                 .toAbsolutePath()
@@ -827,7 +827,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// @param instanceRoot resolved version-root directory
     /// @param gameDirectory resolved effective game running directory
     /// @param versionDetail resolved Minecraft version text, or an empty string when unavailable
-    /// @param iconState persisted custom and bundled icon identity
+    /// @param iconState effective custom and bundled icon identity
     /// @param iconPreview exact-size decoded Swing preview
     @NotNullByDefault
     private record InstanceSnapshot(
