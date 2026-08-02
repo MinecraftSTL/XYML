@@ -27,7 +27,6 @@ import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.util.platform.SystemInfo;
 import space.minecraftstl.xyml.util.platform.hardware.PhysicalMemoryStatus;
 
-import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -70,8 +69,8 @@ final class InstanceMemoryAllocationControls {
     /// Physical-memory refresh interval matching the legacy status control.
     private static final int REFRESH_INTERVAL_MILLIS = 3_000;
 
-    /// Automatic allocation editor whose value determines the displayed allocation.
-    private final JCheckBox automaticMemoryEditor;
+    /// Selector that resolves inherited, automatic, and manual allocation modes.
+    private final InstanceMemoryModeSelector memoryModeSelector;
 
     /// Manual heap editor synchronized with the slider.
     private final JTextField maximumMemoryEditor;
@@ -115,15 +114,18 @@ final class InstanceMemoryAllocationControls {
     /// Prevents reciprocal text and slider listeners from looping.
     private boolean synchronizingEditors;
 
+    /// Effective inherited automatic-allocation value used while the inheritance choice is selected.
+    private boolean inheritedAutomatic = true;
+
     /// Creates production memory controls using the process-wide hardware detector.
     ///
-    /// @param automaticMemoryEditor automatic allocation checkbox
+    /// @param memoryModeSelector memory mode selector
     /// @param maximumMemoryEditor manual heap text field
     InstanceMemoryAllocationControls(
-            JCheckBox automaticMemoryEditor,
+            InstanceMemoryModeSelector memoryModeSelector,
             JTextField maximumMemoryEditor) {
         this(
-                automaticMemoryEditor,
+                memoryModeSelector,
                 maximumMemoryEditor,
                 SystemInfo::getPhysicalMemoryStatus,
                 Schedulers.io());
@@ -131,16 +133,16 @@ final class InstanceMemoryAllocationControls {
 
     /// Creates memory controls with explicit polling dependencies for deterministic tests.
     ///
-    /// @param automaticMemoryEditor automatic allocation checkbox
+    /// @param memoryModeSelector memory mode selector
     /// @param maximumMemoryEditor manual heap text field
     /// @param memoryStatusSupplier physical-memory snapshot supplier
     /// @param executor executor used to invoke the supplier
     InstanceMemoryAllocationControls(
-            JCheckBox automaticMemoryEditor,
+            InstanceMemoryModeSelector memoryModeSelector,
             JTextField maximumMemoryEditor,
             Supplier<PhysicalMemoryStatus> memoryStatusSupplier,
             Executor executor) {
-        this.automaticMemoryEditor = Objects.requireNonNull(automaticMemoryEditor, "automaticMemoryEditor");
+        this.memoryModeSelector = Objects.requireNonNull(memoryModeSelector, "memoryModeSelector");
         this.maximumMemoryEditor = Objects.requireNonNull(maximumMemoryEditor, "maximumMemoryEditor");
         this.memoryStatusSupplier = Objects.requireNonNull(memoryStatusSupplier, "memoryStatusSupplier");
         this.executor = Objects.requireNonNull(executor, "executor");
@@ -155,6 +157,14 @@ final class InstanceMemoryAllocationControls {
     /// @return component inserted beneath the memory editors
     JComponent component() {
         return component;
+    }
+
+    /// Applies the inherited allocation mode and refreshes the displayed effective allocation.
+    ///
+    /// @param automatic whether the inherited preset allocates memory automatically
+    void applyInheritedAutomatic(boolean automatic) {
+        inheritedAutomatic = automatic;
+        updateMemorySummary();
     }
 
     /// Requests one background status refresh unless another request is already active.
@@ -213,7 +223,7 @@ final class InstanceMemoryAllocationControls {
         });
         maximumMemorySlider.addChangeListener(event -> synchronizeTextFromSlider());
         maximumMemoryEditor.addPropertyChangeListener("enabled", event -> updateSliderAvailability());
-        automaticMemoryEditor.addActionListener(event -> updateMemorySummary());
+        memoryModeSelector.addSelectionListener(this::updateMemorySummary);
         component.addHierarchyListener(event -> {
             if ((event.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) == 0) {
                 return;
@@ -287,7 +297,10 @@ final class InstanceMemoryAllocationControls {
 
     /// Updates localized memory labels and the segmented bar from current editors.
     private void updateMemorySummary() {
-        long allocated = automaticMemoryEditor.isSelected()
+        boolean automatic = memoryModeSelector.isInherited()
+                ? inheritedAutomatic
+                : memoryModeSelector.isAutomatic();
+        long allocated = automatic
                 ? automaticAllocation()
                 : (long) parsedMaximumOrFallback() * BYTES_PER_MIB;
         memoryBar.setMemory(memoryStatus, allocated);

@@ -299,6 +299,26 @@ public final class GameSettingsPresetsPanelTest {
                     () -> assertTrue(override.isSelected(), editorName),
                     () -> assertFalse(override.isVisible(), editorName));
         }
+        for (String mode : List.of("Automatic", "Manual")) {
+            AbstractButton button = findComponent(
+                    panel,
+                    "instanceGameSettingsMemoryMode" + mode,
+                    AbstractButton.class);
+            assertNull(button.getClientProperty("JButton.buttonType"), mode);
+        }
+        assertNotNull(findComponent(panel, "instanceGameSettingsMaximumMemory", JTextField.class));
+        assertNull(findOptionalComponent(
+                panel,
+                "instanceGameSettingsMemoryModeInherit",
+                AbstractButton.class));
+        assertNull(findOptionalComponent(
+                panel,
+                "instanceGameSettingsAutomaticMemoryOverride",
+                JCheckBox.class));
+        assertNull(findOptionalComponent(
+                panel,
+                "instanceGameSettingsMaximumMemoryOverride",
+                JCheckBox.class));
         for (JavaVersionType mode : List.of(
                 JavaVersionType.AUTO,
                 JavaVersionType.VERSION,
@@ -327,7 +347,10 @@ public final class GameSettingsPresetsPanelTest {
     ///
     /// @param panel global preset panel under test
     private static void editEverySettingsGroup(GameSettingsPresetsPanel panel) {
-        setBoolean(panel, "instanceGameSettingsAutomaticMemory", false);
+        findComponent(
+                panel,
+                "instanceGameSettingsMemoryModeManual",
+                AbstractButton.class).doClick();
         setText(panel, "instanceGameSettingsMaximumMemory", "6144");
 
         setJavaMode(panel, JavaVersionType.CUSTOM);
@@ -388,8 +411,6 @@ public final class GameSettingsPresetsPanelTest {
     /// @return immutable stable editor-name list
     private static @Unmodifiable List<String> globalEditorNames() {
         return List.of(
-                "instanceGameSettingsAutomaticMemory",
-                "instanceGameSettingsMaximumMemory",
                 "instanceGameSettingsWindowType",
                 "instanceGameSettingsWindowWidth",
                 "instanceGameSettingsWindowHeight",

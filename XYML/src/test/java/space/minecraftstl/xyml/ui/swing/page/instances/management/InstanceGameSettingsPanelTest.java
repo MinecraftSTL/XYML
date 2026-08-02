@@ -50,6 +50,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
+import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
@@ -89,9 +90,7 @@ final class InstanceGameSettingsPanelTest {
                 InstanceGameSettingsPanel panel = createPanel(store, workingDirectoryChanges::incrementAndGet);
                 panelReference.set(panel);
 
-                clickOverride(panel, "instanceGameSettingsAutomaticMemory");
-                findNamed(panel, "instanceGameSettingsAutomaticMemory", JCheckBox.class).doClick();
-                clickOverride(panel, "instanceGameSettingsMaximumMemory");
+                selectMemoryMode(panel, false);
                 findNamed(panel, "instanceGameSettingsMaximumMemory", JTextField.class).setText("6144");
                 overrideJavaMode(panel, JavaVersionType.VERSION);
                 findNamed(panel, "instanceGameSettingsJavaVersion", JTextField.class).setText("21");
@@ -296,6 +295,21 @@ final class InstanceGameSettingsPanelTest {
                     assertNotNull(findNamed(panel, editorName, JComponent.class), editorName);
                     assertNotNull(findNamed(panel, editorName + "Override", JCheckBox.class), editorName);
                 }
+                for (String mode : List.of("Inherit", "Automatic", "Manual")) {
+                    assertNotNull(findNamed(
+                            panel,
+                            "instanceGameSettingsMemoryMode" + mode,
+                            JRadioButton.class));
+                }
+                assertNotNull(findNamed(panel, "instanceGameSettingsMaximumMemory", JTextField.class));
+                assertNull(findNamedNullable(
+                        panel,
+                        "instanceGameSettingsAutomaticMemoryOverride",
+                        JCheckBox.class));
+                assertNull(findNamedNullable(
+                        panel,
+                        "instanceGameSettingsMaximumMemoryOverride",
+                        JCheckBox.class));
                 for (JavaVersionType mode : InstanceJavaModeSelector.displayOrder()) {
                     assertNotNull(findNamed(
                             panel,
@@ -316,56 +330,74 @@ final class InstanceGameSettingsPanelTest {
         }
     }
 
-    /// Keeps the inheritance control visually separate from the labeled automatic-memory value.
+    /// Exposes inheritance, automatic allocation, and manual allocation as three native radio choices.
     @Test
-    void labelsTheAutomaticMemoryValueCheckbox() {
+    void exposesThreeInstanceMemoryModeChoices() {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
                 InstanceGameSettingsPanel panel = createPanel(new RecordingStore(snapshot()));
                 panelReference.set(panel);
-                JCheckBox override = findNamed(
+                JRadioButton inheritance = findNamed(
                         panel,
-                        "instanceGameSettingsAutomaticMemoryOverride",
-                        JCheckBox.class);
-                JCheckBox value = findNamed(
+                        "instanceGameSettingsMemoryModeInherit",
+                        JRadioButton.class);
+                JRadioButton automatic = findNamed(
                         panel,
-                        "instanceGameSettingsAutomaticMemory",
-                        JCheckBox.class);
-                String label = i18n("settings.memory.auto_allocate");
+                        "instanceGameSettingsMemoryModeAutomatic",
+                        JRadioButton.class);
+                JRadioButton manual = findNamed(
+                        panel,
+                        "instanceGameSettingsMemoryModeManual",
+                        JRadioButton.class);
 
-                assertEquals("", Objects.toString(override.getText(), ""));
-                assertEquals(label, value.getText());
-                assertEquals(label, override.getAccessibleContext().getAccessibleName());
-                assertEquals(label, value.getAccessibleContext().getAccessibleName());
+                assertTrue(inheritance.isSelected());
+                assertEquals(i18n("settings.memory.auto_allocate"), automatic.getText());
+                assertEquals(i18n("settings.memory.manual_allocate"), manual.getText());
+                automatic.doClick();
+                assertTrue(automatic.isSelected());
+                manual.doClick();
+                assertTrue(manual.isSelected());
+                assertFalse(automatic.isSelected());
             });
         } finally {
             closePanel(panelReference);
         }
     }
 
-    /// Keeps advanced text editors to the right of their complete localized labels.
+    /// Keeps advanced editors beside labels when wide and stacks them without clipping when narrow.
     @Test
-    void alignsAdvancedEditorsAfterTheirLabels() {
+    void laysOutAdvancedEditorsResponsively() {
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
                 InstanceGameSettingsPanel panel = createPanel(new RecordingStore(snapshot()));
                 panelReference.set(panel);
-                JPanel commands = findNamed(panel, "instanceGameSettingsCommands", JPanel.class);
-                commands.setSize(900, 240);
-                commands.doLayout();
-
+                JTabbedPane tabs = findNamed(panel, "instanceGameSettingsTabs", JTabbedPane.class);
+                JScrollPane commandsScroll = (JScrollPane) tabs.getComponentAt(3);
                 JLabel label = findNamed(
-                        commands,
+                        commandsScroll,
                         "instanceGameSettingsPreLaunchCommandLabel",
                         JLabel.class);
                 JTextField editor = findNamed(
-                        commands,
+                        commandsScroll,
                         "instanceGameSettingsPreLaunchCommand",
                         JTextField.class);
-                assertTrue(label.getX() + label.getWidth() <= editor.getX());
-                assertTrue(editor.getX() >= 300);
+                JPanel row = findNamed(
+                        commandsScroll,
+                        "instanceGameSettingsPreLaunchCommandRow",
+                        JPanel.class);
+
+                layoutScrollableTab(commandsScroll, 700, 280);
+                assertTrue(label.getX() + label.getWidth() + 16 <= editor.getX());
+                assertTrue(editor.getWidth() >= 180);
+
+                layoutScrollableTab(commandsScroll, 420, 280);
+                assertTrue(editor.getY() >= label.getY() + label.getHeight() + 6);
+                assertTrue(editor.getWidth() >= 300);
+                assertEquals(commandsScroll.getViewport().getExtentSize().width,
+                        commandsScroll.getViewport().getView().getWidth());
+                assertTrue(row.getHeight() >= editor.getY() + editor.getHeight());
             });
         } finally {
             closePanel(panelReference);
@@ -693,7 +725,7 @@ final class InstanceGameSettingsPanelTest {
             EdtDispatcher.executeAndWait(() -> {
                 InstanceGameSettingsPanel panel = createPanel(store);
                 panelReference.set(panel);
-                clickOverride(panel, "instanceGameSettingsMaximumMemory");
+                selectMemoryMode(panel, false);
                 findNamed(panel, "instanceGameSettingsMaximumMemory", JTextField.class).setText("not-a-number");
                 findNamed(panel, "instanceGameSettingsSave", JButton.class).doClick();
                 JLabel status = findNamed(panel, "instanceGameSettingsStatus", JLabel.class);
@@ -705,23 +737,23 @@ final class InstanceGameSettingsPanelTest {
         }
     }
 
-    /// Selecting a local manual heap value also disables inherited automatic allocation for this instance.
+    /// Selecting the manual radio enables its value editor and persists one normalized local mode.
     @Test
-    void selectingManualMemoryOverrideEnablesEditing() {
+    void selectingManualMemoryModeEnablesEditing() {
         RecordingStore store = new RecordingStore(snapshot());
         AtomicReference<@Nullable InstanceGameSettingsPanel> panelReference = new AtomicReference<>();
         try {
             EdtDispatcher.executeAndWait(() -> {
                 InstanceGameSettingsPanel panel = createPanel(store);
                 panelReference.set(panel);
-                JCheckBox automaticOverride = findNamed(
+                JRadioButton inheritance = findNamed(
                         panel,
-                        "instanceGameSettingsAutomaticMemoryOverride",
-                        JCheckBox.class);
-                JCheckBox automatic = findNamed(
+                        "instanceGameSettingsMemoryModeInherit",
+                        JRadioButton.class);
+                JRadioButton manual = findNamed(
                         panel,
-                        "instanceGameSettingsAutomaticMemory",
-                        JCheckBox.class);
+                        "instanceGameSettingsMemoryModeManual",
+                        JRadioButton.class);
                 JTextField maximum = findNamed(
                         panel,
                         "instanceGameSettingsMaximumMemory",
@@ -731,15 +763,14 @@ final class InstanceGameSettingsPanelTest {
                         "instanceGameSettingsMaximumMemorySlider",
                         JSlider.class);
 
-                assertFalse(automaticOverride.isSelected());
-                assertTrue(automatic.isSelected());
+                assertTrue(inheritance.isSelected());
                 assertFalse(maximum.isEnabled());
                 assertFalse(slider.isEnabled());
 
-                clickOverride(panel, "instanceGameSettingsMaximumMemory");
+                manual.doClick();
 
-                assertTrue(automaticOverride.isSelected());
-                assertFalse(automatic.isSelected());
+                assertTrue(manual.isSelected());
+                assertFalse(inheritance.isSelected());
                 assertTrue(maximum.isEnabled());
                 assertTrue(slider.isEnabled());
                 maximum.setText("6144");
@@ -767,9 +798,12 @@ final class InstanceGameSettingsPanelTest {
                 InstanceGameSettingsPanel panel = createPanel(store);
                 panelReference.set(panel);
 
-                clickOverride(panel, "instanceGameSettingsMaximumMemory");
+                selectMemoryMode(panel, false);
                 findNamed(panel, "instanceGameSettingsMaximumMemory", JTextField.class).setText("not-a-number");
-                clickOverride(panel, "instanceGameSettingsMaximumMemory");
+                findNamed(
+                        panel,
+                        "instanceGameSettingsMemoryModeInherit",
+                        JRadioButton.class).doClick();
 
                 JRadioButton inheritance = findNamed(
                         panel,
@@ -1238,8 +1272,6 @@ final class InstanceGameSettingsPanelTest {
     /// @return immutable stable editor-name list
     private static @Unmodifiable List<String> editorNames() {
         return List.of(
-                "instanceGameSettingsAutomaticMemory",
-                "instanceGameSettingsMaximumMemory",
                 "instanceGameSettingsWindowType",
                 "instanceGameSettingsWindowWidth",
                 "instanceGameSettingsWindowHeight",
@@ -1326,6 +1358,45 @@ final class InstanceGameSettingsPanelTest {
                 panel,
                 "instanceGameSettingsJavaMode" + Objects.requireNonNull(mode, "mode").name(),
                 JRadioButton.class).doClick();
+    }
+
+    /// Selects one explicit local memory-allocation mode.
+    ///
+    /// @param panel settings panel
+    /// @param automatic whether automatic allocation should be selected
+    private static void selectMemoryMode(InstanceGameSettingsPanel panel, boolean automatic) {
+        findNamed(
+                panel,
+                "instanceGameSettingsMemoryMode" + (automatic ? "Automatic" : "Manual"),
+                JRadioButton.class).doClick();
+    }
+
+    /// Lays out a production scroll tab once at each nesting level, matching one normal validation pass.
+    ///
+    /// @param scrollPane tab scroll pane
+    /// @param width test viewport width
+    /// @param height test viewport height
+    private static void layoutScrollableTab(JScrollPane scrollPane, int width, int height) {
+        JScrollPane validatedPane = Objects.requireNonNull(scrollPane, "scrollPane");
+        validatedPane.setSize(width, height);
+        validatedPane.doLayout();
+        validatedPane.getViewport().doLayout();
+        Component view = validatedPane.getViewport().getView();
+        if (view instanceof Container container) {
+            layoutTree(container);
+        }
+    }
+
+    /// Recursively lays out one nested Swing component tree.
+    ///
+    /// @param root container whose descendants need current bounds
+    private static void layoutTree(Container root) {
+        root.doLayout();
+        for (Component child : root.getComponents()) {
+            if (child instanceof Container container) {
+                layoutTree(container);
+            }
+        }
     }
 
     /// Enables one override and selects a combo value.
