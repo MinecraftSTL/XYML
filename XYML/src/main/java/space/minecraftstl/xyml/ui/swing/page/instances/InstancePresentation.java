@@ -23,7 +23,6 @@ import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.util.i18n.I18n;
-import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -55,7 +54,7 @@ record InstancePresentation(String detail, GameInstanceIconType defaultIconType)
                 gameVersion);
         return new InstancePresentation(
                 describe(analyzer, gameVersion, unknownVersionDetail),
-                resolveDefaultIconType(analyzer, gameVersion));
+                InstanceAutomaticIconResolver.resolve(analyzer, gameVersion));
     }
 
     /// Builds localized game and recognized-library version detail in stable library-type order.
@@ -90,52 +89,4 @@ record InstancePresentation(String detail, GameInstanceIconType defaultIconType)
         return detail.toString();
     }
 
-    /// Selects the loader-first bundled icon with a game-version fallback.
-    ///
-    /// @param analyzer analyzed instance libraries and patches
-    /// @param gameVersion detected Minecraft version, or null when unavailable
-    /// @return automatically selected bundled icon type
-    private static GameInstanceIconType resolveDefaultIconType(
-            LibraryAnalyzer analyzer,
-            @Nullable String gameVersion) {
-        if (analyzer.has(LibraryAnalyzer.LibraryType.FABRIC)) {
-            return GameInstanceIconType.FABRIC;
-        }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.QUILT)) {
-            return GameInstanceIconType.QUILT;
-        }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.LEGACY_FABRIC)) {
-            return GameInstanceIconType.LEGACY_FABRIC;
-        }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.NEO_FORGE)) {
-            return GameInstanceIconType.NEO_FORGE;
-        }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.FORGE)) {
-            return GameInstanceIconType.FORGE;
-        }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)) {
-            return GameInstanceIconType.CLEANROOM;
-        }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.LITELOADER)) {
-            return GameInstanceIconType.CHICKEN;
-        }
-        if (analyzer.has(LibraryAnalyzer.LibraryType.OPTIFINE)) {
-            return GameInstanceIconType.OPTIFINE;
-        }
-        if (gameVersion == null || gameVersion.isBlank()) {
-            return GameInstanceIconType.GRASS;
-        }
-
-        GameVersionNumber versionNumber = GameVersionNumber.asGameVersion(gameVersion);
-        if (versionNumber.isAprilFools()) {
-            return GameInstanceIconType.APRIL_FOOLS;
-        }
-        if (versionNumber instanceof GameVersionNumber.LegacySnapshot) {
-            return GameInstanceIconType.COMMAND;
-        }
-        if (versionNumber instanceof GameVersionNumber.Old) {
-            return GameInstanceIconType.CRAFT_TABLE;
-        }
-        return GameInstanceIconType.GRASS;
-    }
 }
