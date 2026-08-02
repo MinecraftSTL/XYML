@@ -67,10 +67,13 @@ public final class Metadata {
     /// Launcher release download page.
     public static final String DOWNLOAD_URL = PUBLISH_URL + "/releases";
 
-    /// Update descriptor endpoint, optionally overridden for deployment-specific infrastructure.
+    /// Channel-specific update descriptor template, optionally overridden for deployment-specific infrastructure.
+    ///
+    /// The `{channel}` placeholder is resolved to `stable`, `beta`, `alpha`, or `dev` before query parameters are
+    /// appended.
     public static final String XYML_UPDATE_URL = System.getProperty(
             "xyml.update_source.override",
-            DOWNLOAD_URL + "/latest/download/xyml-update.json");
+            DOWNLOAD_URL + "/download/release-channels/xyml-update-{channel}.json");
 
     /// Release page used when an automatic update cannot be applied.
     public static final String MANUAL_UPDATE_URL = DOWNLOAD_URL;
