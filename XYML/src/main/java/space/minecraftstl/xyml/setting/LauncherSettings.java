@@ -106,6 +106,18 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Default derived from the launcher's predominant six-pixel surface radius.
     public static final int DEFAULT_CORNER_RADIUS = 6;
 
+    /// Slowest supported launcher animation speed percentage.
+    public static final int MINIMUM_ANIMATION_SPEED_PERCENTAGE = AnimationSpeedSettings.MINIMUM_PERCENTAGE;
+
+    /// Fastest supported launcher animation speed percentage.
+    public static final int MAXIMUM_ANIMATION_SPEED_PERCENTAGE = AnimationSpeedSettings.MAXIMUM_PERCENTAGE;
+
+    /// Persisted animation-speed adjustment increment.
+    public static final int ANIMATION_SPEED_PERCENTAGE_STEP = AnimationSpeedSettings.PERCENTAGE_STEP;
+
+    /// Default launcher animation speed percentage.
+    public static final int DEFAULT_ANIMATION_SPEED_PERCENTAGE = AnimationSpeedSettings.DEFAULT_PERCENTAGE;
+
     /// Gson instance used for launcher settings and related toolkit-neutral settings objects.
     public static final Gson SETTINGS_GSON = new GsonBuilder()
             .registerTypeAdapter(Path.class, PathTypeAdapter.INSTANCE)
@@ -480,6 +492,16 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Returns the UI animation disable property.
     public BooleanProperty animationDisabledProperty() {
         return animationDisabled;
+    }
+
+    /// Percentage applied to authored Swing animation speeds.
+    @SerializedName("animationSpeedPercentage")
+    private final IntegerProperty animationSpeedPercentage =
+            new SimpleIntegerProperty(DEFAULT_ANIMATION_SPEED_PERCENTAGE);
+
+    /// Returns the adjustable Swing animation-speed percentage property.
+    public IntegerProperty animationSpeedPercentageProperty() {
+        return animationSpeedPercentage;
     }
 
     // Networks

@@ -21,10 +21,14 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.MotionPolicy;
+import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 
 import javax.swing.JPanel;
 import java.awt.CardLayout;
 import java.awt.Dimension;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -78,6 +82,32 @@ final class InstanceManagementPageDeckTest {
             assertTrue(deck.isLoaded(InstanceManagementPageId.OVERVIEW));
             assertTrue(deck.isLoaded(InstanceManagementPageId.MODS));
             assertEquals(InstanceManagementPageId.OVERVIEW, deck.selectedPage());
+        });
+    }
+
+    /// User-selected management destinations inherit the shared cached-frame transition context.
+    @Test
+    void animatesManagementDestinationChanges() {
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 10_000);
+
+        EdtDispatcher.executeAndWait(() -> {
+            InstanceManagementPageDeck deck = new InstanceManagementPageDeck(Map.of(
+                    InstanceManagementPageId.OVERVIEW,
+                    () -> InstanceManagementPage.passive(new JPanel(), () -> { }),
+                    InstanceManagementPageId.MODS,
+                    () -> InstanceManagementPage.passive(new JPanel(), () -> { })));
+            SwingContentTransition.provideContext(deck, animator, Duration.ofSeconds(2L));
+            deck.setSize(640, 480);
+            deck.showPage(InstanceManagementPageId.OVERVIEW);
+            deck.doLayout();
+
+            deck.showPage(InstanceManagementPageId.MODS);
+
+            assertEquals(InstanceManagementPageId.MODS, deck.selectedPage());
+            assertTrue(deck.isTransitionRunning());
+            animator.setMotionPolicy(MotionPolicy.OFF);
+            assertFalse(deck.isTransitionRunning());
+            deck.close();
         });
     }
 

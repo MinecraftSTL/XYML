@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
@@ -67,11 +68,11 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Lazily created Swing destination pages.
     private final ShellPageCache<JComponent> pageCache;
 
-    /// Stable instance-management page retained underneath every top-level overlay.
+    /// Stable instance-management page retained across every top-level transition.
     private final JComponent instancesPage;
 
-    /// Lazy overlay deck for accounts, downloads, and settings.
-    private final ShellPageDeck overlayDeck;
+    /// Unified page deck for instance management, accounts, downloads, and settings.
+    private final ShellPageDeck pageDeck;
 
     /// Full-window-content title-bar workflow controls.
     private final ShellToolbarPanel toolbar;
@@ -82,7 +83,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Launch progress temporarily covering both base and top-level overlays.
     private final LaunchTaskOverlayPanel launchTaskOverlay;
 
-    /// Layered workspace retaining the base, page overlay, and launch-task overlay.
+    /// Layered workspace retaining the page deck and launch-task overlay.
     private final ShellWorkspace workspace;
 
     /// Current decoded background and native-transparency paint state.
@@ -122,7 +123,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         Objects.requireNonNull(progressAnimationDuration, "progressAnimationDuration");
         navigationState = new ShellNavigationState();
         pageCache = new ShellPageCache<>(Objects.requireNonNull(pageFactories));
-        overlayDeck = new ShellPageDeck(animator, pageTransitionDuration);
+        pageDeck = new ShellPageDeck(animator, pageTransitionDuration);
         instancesPage = pageCache.getOrCreate(ShellPageId.INSTANCES);
         if (instancesPage instanceof InstancesPanel panel) {
             panel.setRevealDefaultPageCommand(this::revealDefaultPage);
@@ -145,12 +146,13 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 taskProgressStrings,
                 animator,
                 progressAnimationDuration);
-        workspace = new ShellWorkspace(instancesPage, overlayDeck, launchTaskOverlay);
+        workspace = new ShellWorkspace(pageDeck, launchTaskOverlay);
 
         setLayout(new MigLayout(
                 "insets 0, fill",
                 "[52!][grow,fill]",
                 "[" + HEADER_HEIGHT + "!][grow,fill]"));
+        SwingContentTransition.provideContext(this, animator, pageTransitionDuration);
         setOpaque(true);
         setMinimumSize(new Dimension(MINIMUM_WIDTH, MINIMUM_HEIGHT));
         setPreferredSize(new Dimension(PREFERRED_WIDTH, PREFERRED_HEIGHT));
@@ -161,6 +163,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         add(navigationRail, "cell 0 1, grow");
         add(workspace, "cell 1 1, grow, gap 18 20 18 18");
         showInstanceManagement();
+        pageDeck.showPage(instancesPage, false);
         updateSelection(null);
     }
 
@@ -267,18 +270,13 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
         if (page == ShellPageId.INSTANCES) {
             showInstanceListPage();
-            overlayDeck.setVisible(false);
-            instancesPage.setVisible(true);
-            workspace.revalidate();
-            workspace.repaint();
+            pageDeck.showPage(instancesPage, true);
             updateSelection(page);
             return;
         }
+        JComponent destinationPage = pageCache.getOrCreate(page);
+        pageDeck.showPage(destinationPage, true);
         showInstanceManagement();
-        JComponent overlayPage = pageCache.getOrCreate(page);
-        instancesPage.setVisible(false);
-        overlayDeck.setVisible(true);
-        overlayDeck.showPage(overlayPage, true);
         updateSelection(page);
     }
 
@@ -305,15 +303,12 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         revealDefaultPage();
     }
 
-    /// Exposes the already-mounted persistent page without starting another management transition.
+    /// Exposes the cached persistent page without starting another management transition.
     private void revealDefaultPage() {
         EdtDispatcher.requireEventDispatchThread();
         navigationState.clear();
-        overlayDeck.setVisible(false);
-        instancesPage.setVisible(true);
+        pageDeck.showPage(instancesPage, true);
         updateSelection(null);
-        workspace.revalidate();
-        workspace.repaint();
     }
 
     /// Reveals the persistent page's list card without disposing its management view.
@@ -326,7 +321,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Restores management for the selected instance when the persistent page supports it.
     private void showInstanceManagement() {
         if (instancesPage instanceof InstancesPanel panel) {
-            panel.showSelectedInstanceManagement().toCompletableFuture().join();
+            panel.showSelectedInstanceManagement(false).toCompletableFuture().join();
         }
     }
 
@@ -391,10 +386,14 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     ///
     /// @return the active page component
     @Nullable JComponent activePage() {
-        @Nullable ShellPageId selectedPage = navigationState.selectedPage();
-        return selectedPage == null || selectedPage == ShellPageId.INSTANCES
-                ? instancesPage
-                : overlayDeck.currentPage();
+        return pageDeck.currentPage();
+    }
+
+    /// Returns the unified top-level page deck for focused transition verification.
+    ///
+    /// @return stable page deck
+    ShellPageDeck pageDeck() {
+        return pageDeck;
     }
 
     /// Returns a navigation button for focused layout and accessibility verification.
@@ -449,23 +448,19 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Fixed-bounds layered workspace keeping instance management alive below transient overlays.
+    /// Fixed-bounds layered workspace keeping page transitions below the launch-task overlay.
     @NotNullByDefault
     private static final class ShellWorkspace extends JPanel {
-        /// Creates the base and both overlay layers in input-facing z-order.
+        /// Creates the page and launch-overlay layers in input-facing z-order.
         ///
-        /// @param base persistent instance page
-        /// @param pageOverlay accounts, downloads, and settings deck
+        /// @param pageDeck all persistent and lazy top-level pages
         /// @param launchOverlay current launch-task surface
         private ShellWorkspace(
-                JComponent base,
-                ShellPageDeck pageOverlay,
+                ShellPageDeck pageDeck,
                 LaunchTaskOverlayPanel launchOverlay) {
             super(null);
             setOpaque(false);
-            pageOverlay.setVisible(false);
-            add(Objects.requireNonNull(base, "base"));
-            add(Objects.requireNonNull(pageOverlay, "pageOverlay"), 0);
+            add(Objects.requireNonNull(pageDeck, "pageDeck"));
             add(Objects.requireNonNull(launchOverlay, "launchOverlay"), 0);
         }
 

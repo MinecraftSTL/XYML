@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests policy, cancellation, easing, and monotonic progress logic without waiting for real timer frames.
@@ -114,6 +115,24 @@ public final class SwingAnimatorTest {
                 () -> assertEquals(0.5, SwingAnimator.normalizedProgress(50L, 100L)),
                 () -> assertEquals(1.0, SwingAnimator.normalizedProgress(100L, 100L)),
                 () -> assertEquals(1.0, SwingAnimator.normalizedProgress(150L, 100L)));
+    }
+
+    /// Larger speed percentages shorten authored durations while slower settings lengthen them.
+    @Test
+    public void scalesAuthoredDurationByAnimationSpeed() {
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 16, 150);
+
+        assertAll(
+                () -> assertEquals(150, animator.animationSpeedPercentage()),
+                () -> assertEquals(2_000L, SwingAnimator.scaledDurationNanos(1_000L, 50)),
+                () -> assertEquals(1_000L, SwingAnimator.scaledDurationNanos(1_000L, 100)),
+                () -> assertEquals(500L, SwingAnimator.scaledDurationNanos(1_000L, 200)),
+                () -> assertEquals(1L, SwingAnimator.scaledDurationNanos(1L, 200)),
+                () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(0L, 200)));
+
+        animator.setAnimationSpeedPercentage(80);
+        assertEquals(80, animator.animationSpeedPercentage());
+        assertThrows(IllegalArgumentException.class, () -> animator.setAnimationSpeedPercentage(0));
     }
 
     /// Every easing curve preserves exact start and end values after clamping.

@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.setting.AnimationSpeedSettings;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 
 import java.util.Objects;
@@ -32,6 +33,7 @@ import java.util.Objects;
 /// @param maximumCornerRadius largest supported corner radius
 /// @param cornerRadiusStep supported radius increment
 /// @param animationsEnabled whether non-essential launcher animation is enabled
+/// @param animationSpeed current percentage and supported animation-speed slider grid
 /// @param themeColor complete launcher theme-color source and palette-style controls
 /// @param background complete effective launcher-background setting controls
 /// @param writable whether the current settings store accepts changes
@@ -43,11 +45,46 @@ public record AppearanceSettingsSnapshot(
         int maximumCornerRadius,
         int cornerRadiusStep,
         boolean animationsEnabled,
+        AnimationSpeedSettings animationSpeed,
         ThemeColorAppearanceSettings themeColor,
         BackgroundAppearanceSettings background,
         boolean writable) {
 
-    /// Creates a snapshot for callers that do not customize theme colors.
+    /// Creates a snapshot for callers that do not customize animation speed.
+    ///
+    /// @param brightnessPreference theme, system, light, or dark preference
+    /// @param cornerRadius current component corner radius
+    /// @param minimumCornerRadius smallest supported corner radius
+    /// @param maximumCornerRadius largest supported corner radius
+    /// @param cornerRadiusStep supported radius increment
+    /// @param animationsEnabled whether non-essential launcher animation is enabled
+    /// @param themeColor complete launcher theme-color source and palette-style controls
+    /// @param background complete launcher-background setting controls
+    /// @param writable whether the current settings store accepts changes
+    public AppearanceSettingsSnapshot(
+            ThemeBrightnessPreference brightnessPreference,
+            int cornerRadius,
+            int minimumCornerRadius,
+            int maximumCornerRadius,
+            int cornerRadiusStep,
+            boolean animationsEnabled,
+            ThemeColorAppearanceSettings themeColor,
+            BackgroundAppearanceSettings background,
+            boolean writable) {
+        this(
+                brightnessPreference,
+                cornerRadius,
+                minimumCornerRadius,
+                maximumCornerRadius,
+                cornerRadiusStep,
+                animationsEnabled,
+                AnimationSpeedSettings.defaults(),
+                themeColor,
+                background,
+                writable);
+    }
+
+    /// Creates a snapshot for callers that do not customize theme colors or animation speed.
     ///
     /// @param brightnessPreference theme, system, light, or dark preference
     /// @param cornerRadius current component corner radius
@@ -81,6 +118,7 @@ public record AppearanceSettingsSnapshot(
     /// Validates one appearance settings snapshot.
     public AppearanceSettingsSnapshot {
         Objects.requireNonNull(brightnessPreference, "brightnessPreference");
+        Objects.requireNonNull(animationSpeed, "animationSpeed");
         Objects.requireNonNull(themeColor, "themeColor");
         Objects.requireNonNull(background, "background");
         if (minimumCornerRadius < 0) {

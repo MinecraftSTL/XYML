@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.setting.AnimationSpeedSettings;
 import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
@@ -61,9 +62,10 @@ public final class AppearanceSettingsPanelTest {
     /// Localized text used by focused panel tests.
     private static final AppearanceSettingsStrings STRINGS = new AppearanceSettingsStrings(
             "Appearance", "Theme mode", "Theme", "System", "Light", "Dark", "Corner radius", "Animations",
+            "Animation speed",
             AppearanceBackgroundStrings.englishFallback());
 
-    /// User controls persist theme, aligned radius, and animation changes through the model.
+    /// User controls persist theme, aligned radius, animation speed, and animation changes through the model.
     @Test
     public void writesUserChangesWithoutInventingRadiusValues() {
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
@@ -73,6 +75,7 @@ public final class AppearanceSettingsPanelTest {
         onEventDispatchThread(() -> {
             findComponent(panel, "appearanceThemeDARK", AbstractButton.class).doClick();
             findComponent(panel, "appearanceCornerRadius", JSlider.class).setValue(10);
+            findComponent(panel, "appearanceAnimationSpeed", JSlider.class).setValue(145);
             findComponent(panel, "appearanceAnimations", AbstractButton.class).doClick();
 
             assertAll(
@@ -80,12 +83,16 @@ public final class AppearanceSettingsPanelTest {
                             ThemeBrightnessPreference.DARK,
                             panel.selectedBrightnessPreference()),
                     () -> assertEquals(9, panel.displayedCornerRadius()),
+                    () -> assertEquals(150, panel.displayedAnimationSpeedPercentage()),
                     () -> assertFalse(panel.areAnimationsEnabled()),
                     () -> assertEquals(
                             ThemeBrightnessPreference.DARK,
                             model.snapshot().brightnessPreference()),
                     () -> assertEquals(9, model.snapshot().cornerRadius()),
-                    () -> assertFalse(model.snapshot().animationsEnabled()));
+                    () -> assertEquals(150, model.snapshot().animationSpeed().percentage()),
+                    () -> assertFalse(model.snapshot().animationsEnabled()),
+                    () -> assertFalse(findComponent(
+                            panel, "appearanceAnimationSpeed", JSlider.class).isEnabled()));
             panel.close();
         });
     }
@@ -107,6 +114,27 @@ public final class AppearanceSettingsPanelTest {
 
             slider.setValueIsAdjusting(false);
             assertEquals(9, model.snapshot().cornerRadius());
+            panel.close();
+        });
+    }
+
+    /// Animation-speed dragging previews an aligned percentage but persists only when adjustment finishes.
+    @Test
+    public void commitsAnimationSpeedAfterSliderAdjustmentFinishes() {
+        FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                ThemeBrightnessPreference.SYSTEM, 6, true, true));
+        AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
+
+        onEventDispatchThread(() -> {
+            JSlider slider = findComponent(panel, "appearanceAnimationSpeed", JSlider.class);
+            slider.setValueIsAdjusting(true);
+            slider.setValue(145);
+            assertAll(
+                    () -> assertEquals(150, panel.displayedAnimationSpeedPercentage()),
+                    () -> assertEquals(100, model.snapshot().animationSpeed().percentage()));
+
+            slider.setValueIsAdjusting(false);
+            assertEquals(150, model.snapshot().animationSpeed().percentage());
             panel.close();
         });
     }
@@ -220,9 +248,12 @@ public final class AppearanceSettingsPanelTest {
                             ThemeBrightnessPreference.DARK,
                             panel.selectedBrightnessPreference()),
                     () -> assertEquals(15, panel.displayedCornerRadius()),
+                    () -> assertEquals(100, panel.displayedAnimationSpeedPercentage()),
                     () -> assertFalse(panel.areAnimationsEnabled()),
                     () -> assertFalse(findComponent(
-                            panel, "appearanceCornerRadius", JSlider.class).isEnabled()));
+                            panel, "appearanceCornerRadius", JSlider.class).isEnabled()),
+                    () -> assertFalse(findComponent(
+                            panel, "appearanceAnimationSpeed", JSlider.class).isEnabled()));
             panel.close();
         });
     }
@@ -458,6 +489,7 @@ public final class AppearanceSettingsPanelTest {
                 "Dark",
                 "A deliberately longer corner-radius field label",
                 "Animations",
+                "Animation speed",
                 AppearanceBackgroundStrings.englishFallback());
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
                 ThemeBrightnessPreference.SYSTEM, 6, true, true));
@@ -636,6 +668,9 @@ public final class AppearanceSettingsPanelTest {
                         findComponent(panel, "appearanceCornerRadius", JSlider.class))),
                 () -> assertEquals(expectedX, horizontalPosition(
                         panel,
+                        findComponent(panel, "appearanceAnimationSpeed", JSlider.class))),
+                () -> assertEquals(expectedX, horizontalPosition(
+                        panel,
                         findComponent(panel, "appearanceBackgroundType", JComboBox.class))),
                 () -> assertEquals(expectedX, horizontalPosition(
                         panel,
@@ -716,6 +751,7 @@ public final class AppearanceSettingsPanelTest {
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     value.animationsEnabled(),
+                    value.animationSpeed(),
                     value.themeColor(),
                     value.background(),
                     value.writable()));
@@ -732,6 +768,7 @@ public final class AppearanceSettingsPanelTest {
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     value.animationsEnabled(),
+                    value.animationSpeed(),
                     value.themeColor(),
                     value.background(),
                     value.writable()));
@@ -748,6 +785,28 @@ public final class AppearanceSettingsPanelTest {
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     enabled,
+                    value.animationSpeed(),
+                    value.themeColor(),
+                    value.background(),
+                    value.writable()));
+        }
+
+        /// Replaces the aligned animation speed while preserving all other fields.
+        @Override
+        public void setAnimationSpeedPercentage(int percentage) {
+            AppearanceSettingsSnapshot value = snapshot();
+            publish(new AppearanceSettingsSnapshot(
+                    value.brightnessPreference(),
+                    value.cornerRadius(),
+                    value.minimumCornerRadius(),
+                    value.maximumCornerRadius(),
+                    value.cornerRadiusStep(),
+                    value.animationsEnabled(),
+                    new AnimationSpeedSettings(
+                            percentage,
+                            value.animationSpeed().minimumPercentage(),
+                            value.animationSpeed().maximumPercentage(),
+                            value.animationSpeed().percentageStep()),
                     value.themeColor(),
                     value.background(),
                     value.writable()));
@@ -767,6 +826,7 @@ public final class AppearanceSettingsPanelTest {
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     value.animationsEnabled(),
+                    value.animationSpeed(),
                     Objects.requireNonNull(themeColor, "themeColor"),
                     value.background(),
                     value.writable()));
@@ -786,6 +846,7 @@ public final class AppearanceSettingsPanelTest {
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     value.animationsEnabled(),
+                    value.animationSpeed(),
                     value.themeColor(),
                     Objects.requireNonNull(background, "background"),
                     value.writable()));

@@ -26,30 +26,43 @@ import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests persistence and defaults for Swing appearance settings.
 @NotNullByDefault
 public final class LauncherAppearanceSettingsTest {
-    /// A new settings object uses the documented default surface radius.
+    /// A new settings object uses the documented appearance defaults.
     @Test
-    public void usesDefaultCornerRadius() {
+    public void usesDefaultAppearanceValues() {
         LauncherSettings settings = new LauncherSettings();
 
         assertEquals(LauncherSettings.DEFAULT_CORNER_RADIUS, settings.cornerRadiusProperty().get());
+        assertEquals(
+                LauncherSettings.DEFAULT_ANIMATION_SPEED_PERCENTAGE,
+                settings.animationSpeedPercentageProperty().get());
     }
 
-    /// A changed radius survives launcher-settings JSON serialization and deserialization.
+    /// Changed appearance values survive launcher-settings JSON serialization and deserialization.
     @Test
-    public void persistsChangedCornerRadius() {
+    public void persistsChangedAppearanceValues() {
         LauncherSettings settings = new LauncherSettings();
         settings.cornerRadiusProperty().set(14);
+        settings.animationSpeedPercentageProperty().set(170);
 
         JsonObject serialized = LauncherSettings.SETTINGS_GSON.toJsonTree(settings).getAsJsonObject();
         LauncherSettings restored = Objects.requireNonNull(LauncherSettings.fromJson(serialized));
 
         assertEquals(14, serialized.get("cornerRadius").getAsInt());
         assertEquals(14, restored.cornerRadiusProperty().get());
+        assertEquals(170, serialized.get("animationSpeedPercentage").getAsInt());
+        assertEquals(170, restored.animationSpeedPercentageProperty().get());
+    }
+
+    /// Animation-speed ranges reject a maximum that cannot be represented by the configured step.
+    @Test
+    public void validatesAnimationSpeedSliderGrid() {
+        assertThrows(IllegalArgumentException.class, () -> new AnimationSpeedSettings(100, 50, 195, 10));
     }
 
     /// Window transparency persists directly while retired background settings are discarded.

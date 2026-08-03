@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.setting.AnimationSpeedSettings;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 
 import java.util.Objects;
@@ -30,6 +31,7 @@ import java.util.Objects;
 /// @param maximumCornerRadius maximum supported radius
 /// @param cornerRadiusStep supported radius increment
 /// @param animationsDisabled whether non-essential motion is disabled
+/// @param animationSpeed current percentage and supported animation-speed slider grid
 /// @param themeColor complete persisted launcher theme-color values
 /// @param background complete persisted launcher-background values
 /// @param writable whether this store accepts changes
@@ -42,11 +44,49 @@ public record StoredAppearanceSettings(
         int maximumCornerRadius,
         int cornerRadiusStep,
         boolean animationsDisabled,
+        AnimationSpeedSettings animationSpeed,
         ThemeColorAppearanceSettings themeColor,
         BackgroundAppearanceSettings background,
         boolean writable,
         boolean themeBrightnessOverridden) {
-    /// Creates raw appearance values for callers that do not customize theme colors.
+    /// Creates raw appearance values for callers that do not customize animation speed.
+    ///
+    /// @param themeBrightnessValue persisted brightness identifier
+    /// @param cornerRadius current component radius
+    /// @param minimumCornerRadius minimum supported radius
+    /// @param maximumCornerRadius maximum supported radius
+    /// @param cornerRadiusStep supported radius increment
+    /// @param animationsDisabled whether non-essential motion is disabled
+    /// @param themeColor complete persisted launcher theme-color values
+    /// @param background complete persisted launcher-background values
+    /// @param writable whether this store accepts changes
+    /// @param themeBrightnessOverridden whether brightness overrides the selected theme
+    public StoredAppearanceSettings(
+            String themeBrightnessValue,
+            int cornerRadius,
+            int minimumCornerRadius,
+            int maximumCornerRadius,
+            int cornerRadiusStep,
+            boolean animationsDisabled,
+            ThemeColorAppearanceSettings themeColor,
+            BackgroundAppearanceSettings background,
+            boolean writable,
+            boolean themeBrightnessOverridden) {
+        this(
+                themeBrightnessValue,
+                cornerRadius,
+                minimumCornerRadius,
+                maximumCornerRadius,
+                cornerRadiusStep,
+                animationsDisabled,
+                AnimationSpeedSettings.defaults(),
+                themeColor,
+                background,
+                writable,
+                themeBrightnessOverridden);
+    }
+
+    /// Creates raw appearance values for callers that do not customize theme colors or animation speed.
     ///
     /// @param themeBrightnessValue persisted brightness identifier
     /// @param cornerRadius current component radius
@@ -83,6 +123,7 @@ public record StoredAppearanceSettings(
     /// Validates one raw settings snapshot.
     public StoredAppearanceSettings {
         Objects.requireNonNull(themeBrightnessValue, "themeBrightnessValue");
+        Objects.requireNonNull(animationSpeed, "animationSpeed");
         Objects.requireNonNull(themeColor, "themeColor");
         Objects.requireNonNull(background, "background");
         if (minimumCornerRadius < 0) {

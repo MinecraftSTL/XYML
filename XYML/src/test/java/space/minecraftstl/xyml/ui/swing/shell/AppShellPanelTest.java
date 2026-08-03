@@ -222,6 +222,53 @@ public final class AppShellPanelTest {
         }
     }
 
+    /// Instance management and transient destinations share the same animated top-level page deck.
+    @Test
+    public void transitionsIntoAndOutOfPersistentInstanceManagement() {
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 10_000);
+        AppShellPanel panel = createPanel(
+                pageFactories(creationCounts()),
+                new TestHomeModel(),
+                testAccountsModel(),
+                animator,
+                Duration.ofSeconds(2L));
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                panel.pageDeck().setSize(720, 520);
+                panel.pageDeck().doLayout();
+                JComponent instancesPage = Objects.requireNonNull(panel.activePage(), "instances page");
+                panel.navigateTo(ShellPageId.DOWNLOADS);
+                JComponent downloadsPage = Objects.requireNonNull(panel.activePage(), "downloads page");
+                assertAll(
+                        () -> assertEquals(1, panel.pageDeck().getComponentCount()),
+                        () -> assertNull(instancesPage.getParent()),
+                        () -> assertSame(panel.pageDeck(), downloadsPage.getParent()),
+                        () -> assertTrue(panel.pageDeck().isTransitionRunning()));
+
+                animator.setMotionPolicy(MotionPolicy.OFF);
+                animator.setMotionPolicy(MotionPolicy.FULL);
+                panel.pageDeck().doLayout();
+                panel.navigateTo(ShellPageId.INSTANCES);
+                assertAll(
+                        () -> assertSame(instancesPage, panel.activePage()),
+                        () -> assertEquals(1, panel.pageDeck().getComponentCount()),
+                        () -> assertSame(panel.pageDeck(), instancesPage.getParent()),
+                        () -> assertNull(downloadsPage.getParent()),
+                        () -> assertTrue(panel.pageDeck().isTransitionRunning()));
+
+                animator.setMotionPolicy(MotionPolicy.OFF);
+                assertAll(
+                        () -> assertEquals(1, panel.pageDeck().getComponentCount()),
+                        () -> assertFalse(downloadsPage.isVisible()),
+                        () -> assertTrue(instancesPage.isVisible()),
+                        () -> assertFalse(panel.pageDeck().isTransitionRunning()));
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
     /// The title bar restores brand identity before directory, account, instance, launch, and native controls.
     @Test
     public void laysOutTitleBarWorkflowInStableOrder() {
@@ -572,6 +619,28 @@ public final class AppShellPanelTest {
             Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> factories,
             HomeModel homeModel,
             AccountsModel accountsModel) {
+        return createPanel(
+                factories,
+                homeModel,
+                accountsModel,
+                new SwingAnimator(MotionPolicy.OFF, 16),
+                Duration.ZERO);
+    }
+
+    /// Creates a shell around caller-selected factories, models, and page-transition timing.
+    ///
+    /// @param factories complete page factories
+    /// @param homeModel caller-owned launcher model
+    /// @param accountsModel caller-owned lazy account model
+    /// @param animator caller-owned shared animator
+    /// @param pageTransitionDuration non-negative top-level page transition duration
+    /// @return initialized shell panel
+    private static AppShellPanel createPanel(
+            Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> factories,
+            HomeModel homeModel,
+            AccountsModel accountsModel,
+            SwingAnimator animator,
+            Duration pageTransitionDuration) {
         AtomicReference<@Nullable AppShellPanel> result = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> {
             SwingThemeManager themeManager = new SwingThemeManager(
@@ -591,8 +660,8 @@ public final class AppShellPanelTest {
                             ShellRecentSelections.transientSelections()),
                     testHomeStrings(),
                     TaskProgressStrings.english(),
-                    new SwingAnimator(MotionPolicy.OFF, 16),
-                    Duration.ZERO,
+                    animator,
+                    pageTransitionDuration,
                     Duration.ZERO));
         });
         return Objects.requireNonNull(result.get());
