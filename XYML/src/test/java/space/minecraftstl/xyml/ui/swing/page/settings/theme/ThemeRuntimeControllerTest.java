@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.setting.AnimationSpeedSettings;
 import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
@@ -39,6 +40,7 @@ import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
 import space.minecraftstl.xyml.ui.swing.page.settings.AppearanceSettingsSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.settings.BackgroundAppearanceSettings;
+import space.minecraftstl.xyml.ui.swing.page.settings.ThemeColorAppearanceSettings;
 
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -90,6 +92,7 @@ public final class ThemeRuntimeControllerTest {
                 () -> assertEquals(ThemeColor.of("#E67E22"), themeManager.effectiveAccentColor()),
                 () -> assertEquals(17, themeManager.designTokens().cornerRadius()),
                 () -> assertEquals(MotionPolicy.OFF, animator.motionPolicy()),
+                () -> assertEquals(150, animator.animationSpeedPercentage()),
                 () -> assertEquals(ThemeBrightness.LIGHT,
                         Objects.requireNonNull(themeManager.resolvedTheme()).brightness()));
 
@@ -270,6 +273,8 @@ public final class ThemeRuntimeControllerTest {
                 24,
                 1,
                 animations,
+                new AnimationSpeedSettings(150, 50, 200, 10),
+                ThemeColorAppearanceSettings.defaults(),
                 background(),
                 true);
     }

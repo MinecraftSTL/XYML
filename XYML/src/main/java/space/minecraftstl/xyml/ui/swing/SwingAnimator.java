@@ -31,8 +31,11 @@ import java.util.function.DoubleConsumer;
 /// Runs small, cancelable Swing animations from elapsed monotonic time rather than accumulated timer ticks.
 @NotNullByDefault
 public final class SwingAnimator {
-    /// Timer delay supplied by the application according to its frame-rate setting.
-    private final int frameDelayMillis;
+    /// Authored animation duration multiplier represented as a percentage.
+    private static final int NORMAL_SPEED_PERCENTAGE = 100;
+
+    /// Shared coalescing frame clock used by every active animation.
+    private final Timer frameTimer;
 
     /// Animations currently owned by this animator; accessed only on the EDT.
     private final Set<RunningAnimation> activeAnimations = new HashSet<>();
@@ -40,16 +43,36 @@ public final class SwingAnimator {
     /// Policy applied to new and currently active animations.
     private volatile MotionPolicy motionPolicy;
 
+    /// Percentage applied inversely to the authored duration of each newly started animation.
+    private volatile int animationSpeedPercentage;
+
     /// Creates an animator without choosing an implicit frame rate.
     ///
     /// @param initialMotionPolicy the initial motion-accessibility policy
     /// @param frameDelayMillis the positive delay between Swing timer events
     public SwingAnimator(MotionPolicy initialMotionPolicy, int frameDelayMillis) {
+        this(initialMotionPolicy, frameDelayMillis, NORMAL_SPEED_PERCENTAGE);
+    }
+
+    /// Creates an animator with explicit frame timing and initial speed.
+    ///
+    /// @param initialMotionPolicy the initial motion-accessibility policy
+    /// @param frameDelayMillis the positive delay between Swing timer events
+    /// @param animationSpeedPercentage positive speed where one hundred preserves authored durations
+    public SwingAnimator(
+            MotionPolicy initialMotionPolicy,
+            int frameDelayMillis,
+            int animationSpeedPercentage) {
         motionPolicy = Objects.requireNonNull(initialMotionPolicy);
         if (frameDelayMillis <= 0) {
             throw new IllegalArgumentException("frameDelayMillis must be positive");
         }
-        this.frameDelayMillis = frameDelayMillis;
+        if (animationSpeedPercentage <= 0) {
+            throw new IllegalArgumentException("animationSpeedPercentage must be positive");
+        }
+        this.animationSpeedPercentage = animationSpeedPercentage;
+        frameTimer = new Timer(frameDelayMillis, event -> tickActiveAnimations());
+        frameTimer.setCoalesce(true);
     }
 
     /// Returns the current motion-accessibility policy.
@@ -57,6 +80,25 @@ public final class SwingAnimator {
     /// @return the policy used for animations
     public MotionPolicy motionPolicy() {
         return motionPolicy;
+    }
+
+    /// Returns the speed applied to newly started animations.
+    ///
+    /// @return positive percentage where one hundred preserves authored durations
+    public int animationSpeedPercentage() {
+        return animationSpeedPercentage;
+    }
+
+    /// Changes the speed applied to newly started animations.
+    ///
+    /// Active animations retain the duration captured when they started so their progress remains continuous.
+    ///
+    /// @param percentage positive speed where larger values complete animations sooner
+    public void setAnimationSpeedPercentage(int percentage) {
+        if (percentage <= 0) {
+            throw new IllegalArgumentException("percentage must be positive");
+        }
+        animationSpeedPercentage = percentage;
     }
 
     /// Changes the motion policy and immediately completes active animations no longer allowed by it.
@@ -103,12 +145,13 @@ public final class SwingAnimator {
             throw new IllegalArgumentException("duration must not be negative");
         }
 
+        long scaledDurationNanos = scaledDurationNanos(duration.toNanos(), animationSpeedPercentage);
         AtomicReference<@Nullable RunningAnimation> result = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> {
             RunningAnimation animation = new RunningAnimation(
-                    duration.toNanos(), purpose, easing, frameConsumer, completion);
+                    scaledDurationNanos, purpose, easing, frameConsumer, completion);
             result.set(animation);
-            if (duration.isZero() || !motionPolicy.allows(purpose)) {
+            if (scaledDurationNanos == 0L || !motionPolicy.allows(purpose)) {
                 animation.completeImmediately();
             } else {
                 animation.start();
@@ -147,6 +190,43 @@ public final class SwingAnimator {
         return (double) elapsedNanos / durationNanos;
     }
 
+    /// Converts an authored duration to the duration used at one animation speed.
+    ///
+    /// @param durationNanos non-negative authored duration
+    /// @param speedPercentage positive speed percentage
+    /// @return zero for an authored zero duration, otherwise at least one nanosecond
+    static long scaledDurationNanos(long durationNanos, int speedPercentage) {
+        if (durationNanos < 0L) {
+            throw new IllegalArgumentException("durationNanos must not be negative");
+        }
+        if (speedPercentage <= 0) {
+            throw new IllegalArgumentException("speedPercentage must be positive");
+        }
+        if (durationNanos == 0L) {
+            return 0L;
+        }
+        double scaled = durationNanos * (double) NORMAL_SPEED_PERCENTAGE / speedPercentage;
+        return Math.max(1L, Math.min(Long.MAX_VALUE, Math.round(scaled)));
+    }
+
+    /// Advances one stable snapshot of all animations from the shared EDT frame clock.
+    private void tickActiveAnimations() {
+        EdtDispatcher.requireEventDispatchThread();
+
+        RunningAnimation[] snapshot = activeAnimations.toArray(RunningAnimation[]::new);
+        for (RunningAnimation animation : snapshot) {
+            animation.tick();
+        }
+        stopFrameTimerWhenIdle();
+    }
+
+    /// Stops frame delivery after the final active animation leaves the shared clock.
+    private void stopFrameTimerWhenIdle() {
+        if (activeAnimations.isEmpty()) {
+            frameTimer.stop();
+        }
+    }
+
     /// Represents the internal lifecycle state of a running or completed animation.
     @NotNullByDefault
     private enum AnimationState {
@@ -181,9 +261,6 @@ public final class SwingAnimator {
         /// Runs after the final frame during successful completion.
         private final Runnable completion;
 
-        /// Coalescing Swing timer that schedules frame checks on the EDT.
-        private final Timer timer;
-
         /// Monotonic start instant captured immediately before the initial frame.
         private long startedAtNanos;
 
@@ -208,8 +285,6 @@ public final class SwingAnimator {
             this.easing = easing;
             this.frameConsumer = frameConsumer;
             this.completion = completion;
-            timer = new Timer(frameDelayMillis, event -> tick());
-            timer.setCoalesce(true);
         }
 
         /// Emits the initial frame and starts timer delivery.
@@ -221,7 +296,9 @@ public final class SwingAnimator {
             startedAtNanos = System.nanoTime();
             try {
                 frameConsumer.accept(easing.apply(0.0));
-                timer.start();
+                if (state == AnimationState.RUNNING) {
+                    frameTimer.start();
+                }
             } catch (RuntimeException | Error e) {
                 cancelOnEventDispatchThread();
                 throw e;
@@ -247,7 +324,6 @@ public final class SwingAnimator {
             EdtDispatcher.requireEventDispatchThread();
 
             if (state != AnimationState.RUNNING) {
-                timer.stop();
                 return;
             }
 
@@ -273,8 +349,8 @@ public final class SwingAnimator {
                 return;
             }
 
-            timer.stop();
             activeAnimations.remove(this);
+            stopFrameTimerWhenIdle();
             try {
                 frameConsumer.accept(easing.apply(1.0));
                 state = AnimationState.FINISHED;
@@ -299,8 +375,8 @@ public final class SwingAnimator {
                 return;
             }
 
-            timer.stop();
             activeAnimations.remove(this);
+            stopFrameTimerWhenIdle();
             state = AnimationState.CANCELLED;
         }
 

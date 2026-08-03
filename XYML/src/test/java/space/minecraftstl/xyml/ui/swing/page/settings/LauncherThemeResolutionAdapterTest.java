@@ -45,7 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Tests launcher-setting adaptation and atomic four-state brightness persistence.
+/// Tests launcher-setting adaptation and atomic appearance persistence.
 @NotNullByDefault
 public final class LauncherThemeResolutionAdapterTest {
     /// Override membership and source values map to one immutable resolution request.
@@ -110,6 +110,36 @@ public final class LauncherThemeResolutionAdapterTest {
                 () -> assertEquals("dark", settings.themeBrightnessModeProperty().get()),
                 () -> assertFalse(settings.getThemeAppearanceOverrides().contains(
                         LauncherSettings.THEME_APPEARANCE_BRIGHTNESS_MODE)),
+                () -> assertEquals(2, transitions.get()));
+        store.close();
+        EdtDispatcher.executeAndWait(() -> { });
+    }
+
+    /// Animation speed is persisted directly while externally edited values are normalized for the UI model.
+    @Test
+    public void persistsAndNormalizesAnimationSpeed() {
+        AtomicReference<@Nullable LauncherAppearanceStore> storeReference = new AtomicReference<>();
+        AtomicReference<@Nullable LauncherSettings> settingsReference = new AtomicReference<>();
+        AtomicInteger transitions = new AtomicInteger();
+
+        EdtDispatcher.executeAndWait(() -> {
+            LauncherSettings settings = new LauncherSettings();
+            settings.animationSpeedPercentageProperty().set(217);
+            LauncherAppearanceStore store = new LauncherAppearanceStore(settings, () -> true);
+            store.subscribe(change -> transitions.incrementAndGet());
+            storeReference.set(store);
+            settingsReference.set(settings);
+
+            assertEquals(200, store.snapshot().animationSpeed().percentage());
+            store.setAnimationSpeedPercentage(130);
+            settings.animationSpeedPercentageProperty().set(44);
+        });
+
+        LauncherAppearanceStore store = Objects.requireNonNull(storeReference.get());
+        LauncherSettings settings = Objects.requireNonNull(settingsReference.get());
+        assertAll(
+                () -> assertEquals(44, settings.animationSpeedPercentageProperty().get()),
+                () -> assertEquals(50, store.snapshot().animationSpeed().percentage()),
                 () -> assertEquals(2, transitions.get()));
         store.close();
         EdtDispatcher.executeAndWait(() -> { });

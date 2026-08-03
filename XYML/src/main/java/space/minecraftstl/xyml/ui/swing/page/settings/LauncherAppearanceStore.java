@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.setting.AnimationSpeedSettings;
 import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
@@ -85,6 +86,7 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
         propertySubscriptions.add(settings.themeBrightnessModeProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.cornerRadiusProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.animationDisabledProperty().subscribe(change -> requestSnapshotRefresh()));
+        propertySubscriptions.add(settings.animationSpeedPercentageProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.themeColorTypeProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.customThemeColorProperty().subscribe(change -> requestSnapshotRefresh()));
         propertySubscriptions.add(settings.backgroundTypeProperty().subscribe(change -> requestSnapshotRefresh()));
@@ -161,6 +163,17 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
         execute(() -> {
             if (!closed.get()) {
                 settings.animationDisabledProperty().set(disabled);
+            }
+        });
+    }
+
+    /// Queues one validated animation-speed percentage for persistence on the Swing state event thread.
+    @Override
+    public void setAnimationSpeedPercentage(int percentage) {
+        requireOpen();
+        execute(() -> {
+            if (!closed.get()) {
+                settings.animationSpeedPercentageProperty().set(percentage);
             }
         });
     }
@@ -324,6 +337,8 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
         requireEventThread();
         @Nullable String configuredMode = settings.themeBrightnessModeProperty().get();
         int radius = alignRadius(settings.cornerRadiusProperty().get());
+        int animationSpeedPercentage = alignAnimationSpeedPercentage(
+                settings.animationSpeedPercentageProperty().get());
         BackgroundType backgroundType = Objects.requireNonNullElse(
                 settings.backgroundTypeProperty().get(),
                 BackgroundType.DEFAULT);
@@ -358,6 +373,11 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
                 LauncherSettings.MAXIMUM_CORNER_RADIUS,
                 LauncherSettings.CORNER_RADIUS_STEP,
                 settings.animationDisabledProperty().get(),
+                new AnimationSpeedSettings(
+                        animationSpeedPercentage,
+                        LauncherSettings.MINIMUM_ANIMATION_SPEED_PERCENTAGE,
+                        LauncherSettings.MAXIMUM_ANIMATION_SPEED_PERCENTAGE,
+                        LauncherSettings.ANIMATION_SPEED_PERCENTAGE_STEP),
                 themeColor,
                 background,
                 writableSupplier.getAsBoolean(),
@@ -376,6 +396,20 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
         int offset = constrained - LauncherSettings.MINIMUM_CORNER_RADIUS;
         return LauncherSettings.MINIMUM_CORNER_RADIUS
                 + offset / LauncherSettings.CORNER_RADIUS_STEP * LauncherSettings.CORNER_RADIUS_STEP;
+    }
+
+    /// Constrains an externally edited speed to the supported stepped range.
+    ///
+    /// @param percentage raw persisted speed percentage
+    /// @return supported percentage aligned downward to the nearest step
+    private static int alignAnimationSpeedPercentage(int percentage) {
+        int constrained = Math.max(
+                LauncherSettings.MINIMUM_ANIMATION_SPEED_PERCENTAGE,
+                Math.min(LauncherSettings.MAXIMUM_ANIMATION_SPEED_PERCENTAGE, percentage));
+        int offset = constrained - LauncherSettings.MINIMUM_ANIMATION_SPEED_PERCENTAGE;
+        return LauncherSettings.MINIMUM_ANIMATION_SPEED_PERCENTAGE
+                + offset / LauncherSettings.ANIMATION_SPEED_PERCENTAGE_STEP
+                        * LauncherSettings.ANIMATION_SPEED_PERCENTAGE_STEP;
     }
 
     /// Rejects property writes after listener cleanup.
