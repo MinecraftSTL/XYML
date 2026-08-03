@@ -31,6 +31,7 @@ import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.UIManager;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
@@ -69,6 +70,7 @@ final class InstanceOverviewIconSelectionTest {
     /// Replaces a custom image with a bundled type, publishes once, and refreshes the 40-pixel preview.
     @Test
     void selectsBuiltInIconAndRefreshesPreview() throws Exception {
+        @Nullable Object previousComponentArc = UIManager.getDefaults().get("Component.arc");
         Path customImage = createSolidImage(repositoryRoot().resolve("custom.png"), Color.RED);
         RecordingIconStore iconStore = new RecordingIconStore(customImage);
         ChoiceInteractions interactions = new ChoiceInteractions(
@@ -76,13 +78,16 @@ final class InstanceOverviewIconSelectionTest {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         AtomicReference<@Nullable InstanceOverviewPanel> panelReference = new AtomicReference<>();
         try {
-            EdtDispatcher.executeAndWait(() -> panelReference.set(new InstanceOverviewPanel(
-                    repository(),
-                    new GameInstanceID("instance"),
-                    executor,
-                    InstanceOverviewStrings.english(),
-                    interactions,
-                    iconStore)));
+            EdtDispatcher.executeAndWait(() -> {
+                UIManager.put("Component.arc", 20);
+                panelReference.set(new InstanceOverviewPanel(
+                        repository(),
+                        new GameInstanceID("instance"),
+                        executor,
+                        InstanceOverviewStrings.english(),
+                        interactions,
+                        iconStore));
+            });
             InstanceOverviewPanel panel = Objects.requireNonNull(panelReference.get());
             awaitBackgroundWork(executor);
 
@@ -97,6 +102,12 @@ final class InstanceOverviewIconSelectionTest {
                 assertEquals(40, image.getWidth());
                 assertEquals(40, image.getHeight());
                 assertEquals(Color.RED.getRGB(), image.getRGB(20, 20));
+                BufferedImage roundedPreview = renderPreview(preview);
+                assertEquals(0, roundedPreview.getRGB(0, 0) >>> 24);
+                assertEquals(Color.RED.getRGB(), roundedPreview.getRGB(20, 20));
+                UIManager.put("Component.arc", 0);
+                BufferedImage squarePreview = renderPreview(preview);
+                assertEquals(Color.RED.getRGB(), squarePreview.getRGB(0, 0));
                 assertTrue(choose.isVisible());
                 assertTrue(delete.isEnabled());
                 choose.doClick();
@@ -128,9 +139,32 @@ final class InstanceOverviewIconSelectionTest {
             if (panel != null) {
                 panel.close();
             }
+            EdtDispatcher.executeAndWait(() -> {
+                if (previousComponentArc == null) {
+                    UIManager.getDefaults().remove("Component.arc");
+                } else {
+                    UIManager.put("Component.arc", previousComponentArc);
+                }
+            });
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
         }
+    }
+
+    /// Paints the instance icon preview at its fixed production size onto a transparent image.
+    ///
+    /// @param preview loaded icon preview
+    /// @return rendered preview pixels
+    private static BufferedImage renderPreview(JLabel preview) {
+        preview.setSize(40, 40);
+        BufferedImage image = new BufferedImage(40, 40, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            preview.paint(graphics);
+        } finally {
+            graphics.dispose();
+        }
+        return image;
     }
 
     /// Creates one solid PNG for deterministic custom preview checks.
