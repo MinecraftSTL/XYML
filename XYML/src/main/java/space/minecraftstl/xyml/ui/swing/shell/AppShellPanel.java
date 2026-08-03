@@ -20,8 +20,10 @@ package space.minecraftstl.xyml.ui.swing.shell;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingButtonRippleSupport;
 import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
@@ -41,6 +43,7 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -61,6 +64,16 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
     /// Stable full-window-content title-bar height.
     public static final int HEADER_HEIGHT = 52;
+
+    /// Authored expansion and fade duration for click-origin button feedback.
+    private static final Duration BUTTON_RIPPLE_DURATION = Duration.ofMillis(450L);
+
+    /// Physical navigation order used to derive top-level transition direction.
+    private static final @Unmodifiable List<ShellPageId> NAVIGATION_ORDER = List.of(
+            ShellPageId.ACCOUNTS,
+            ShellPageId.INSTANCES,
+            ShellPageId.DOWNLOADS,
+            ShellPageId.SETTINGS);
 
     /// Toolkit-neutral selected-destination state.
     private final ShellNavigationState navigationState;
@@ -85,6 +98,9 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
     /// Layered workspace retaining the page deck and launch-task overlay.
     private final ShellWorkspace workspace;
+
+    /// Root-level click-origin feedback shared by every current and lazily added button.
+    private final SwingButtonRippleSupport buttonRippleSupport;
 
     /// Current decoded background and native-transparency paint state.
     private WindowBackgroundVisual windowBackground = initialWindowBackground();
@@ -165,6 +181,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         showInstanceManagement();
         pageDeck.showPage(instancesPage, false);
         updateSelection(null);
+        buttonRippleSupport = new SwingButtonRippleSupport(this, animator, BUTTON_RIPPLE_DURATION);
     }
 
     /// Replaces the renderer-ready background and schedules repainting.
@@ -223,6 +240,15 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
     }
 
+    /// Paints ordinary children before adding non-intercepting button ripple feedback above them.
+    ///
+    /// @param graphics target Swing graphics
+    @Override
+    protected void paintChildren(Graphics graphics) {
+        super.paintChildren(graphics);
+        buttonRippleSupport.paintRipples(graphics);
+    }
+
     /// Scales one image to cover the shell while preserving its aspect ratio.
     ///
     /// @param graphics target graphics
@@ -264,18 +290,20 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
             throw new IllegalStateException("Application shell is closed");
         }
         Objects.requireNonNull(page);
+        @Nullable ShellPageId previousPage = navigationState.selectedPage();
         if (!navigationState.select(page)) {
             return;
         }
+        SwingContentTransition.Direction direction = transitionDirection(previousPage, page);
 
         if (page == ShellPageId.INSTANCES) {
             showInstanceListPage();
-            pageDeck.showPage(instancesPage, true);
+            pageDeck.showPage(instancesPage, true, direction);
             updateSelection(page);
             return;
         }
         JComponent destinationPage = pageCache.getOrCreate(page);
-        pageDeck.showPage(destinationPage, true);
+        pageDeck.showPage(destinationPage, true, direction);
         showInstanceManagement();
         updateSelection(page);
     }
@@ -306,8 +334,12 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Exposes the cached persistent page without starting another management transition.
     private void revealDefaultPage() {
         EdtDispatcher.requireEventDispatchThread();
+        @Nullable ShellPageId previousPage = navigationState.selectedPage();
         navigationState.clear();
-        pageDeck.showPage(instancesPage, true);
+        pageDeck.showPage(
+                instancesPage,
+                true,
+                transitionDirection(previousPage, ShellPageId.INSTANCES));
         updateSelection(null);
     }
 
@@ -368,6 +400,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 failure = attemptClose(failure, toolbar);
                 navigationRail.disableNavigation();
                 failure = attemptClose(failure, launchTaskOverlay);
+                failure = attemptClose(failure, buttonRippleSupport);
                 failure = attemptClose(failure, pageCache);
                 if (failure instanceof RuntimeException runtimeException) {
                     throw runtimeException;
@@ -424,6 +457,20 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     private void updateSelection(@Nullable ShellPageId page) {
         toolbar.setSelectedPage(page);
         navigationRail.setSelectedPage(page);
+    }
+
+    /// Derives horizontal motion from the navigation rail's physical destination order.
+    ///
+    /// @param previous selected side destination, or null while instance management is exposed
+    /// @param destination incoming destination
+    /// @return direction matching the destination's position relative to the previous page
+    private static SwingContentTransition.Direction transitionDirection(
+            @Nullable ShellPageId previous,
+            ShellPageId destination) {
+        ShellPageId origin = previous != null ? previous : ShellPageId.INSTANCES;
+        return NAVIGATION_ORDER.indexOf(destination) > NAVIGATION_ORDER.indexOf(origin)
+                ? SwingContentTransition.Direction.FORWARD
+                : SwingContentTransition.Direction.BACKWARD;
     }
 
     /// Attempts one shell-owned cleanup while retaining the first failure.

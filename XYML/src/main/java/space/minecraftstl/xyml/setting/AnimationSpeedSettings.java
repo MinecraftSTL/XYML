@@ -21,7 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 
 /// Defines the persisted percentage and supported slider grid for launcher animation speed.
 ///
-/// @param percentage current speed where one hundred percent preserves each animation's authored duration
+/// @param percentage current speed where one hundred preserves authored duration and the maximum is instant
 /// @param minimumPercentage slowest supported speed
 /// @param maximumPercentage fastest supported speed
 /// @param percentageStep supported adjustment increment
@@ -37,7 +37,7 @@ public record AnimationSpeedSettings(
     /// Slowest supported animation speed percentage.
     public static final int MINIMUM_PERCENTAGE = 50;
 
-    /// Fastest supported animation speed percentage.
+    /// Slider endpoint representing infinite speed and therefore no animation frames.
     public static final int MAXIMUM_PERCENTAGE = 200;
 
     /// Persisted animation-speed adjustment increment.
@@ -74,5 +74,12 @@ public record AnimationSpeedSettings(
                 MINIMUM_PERCENTAGE,
                 MAXIMUM_PERCENTAGE,
                 PERCENTAGE_STEP);
+    }
+
+    /// Returns whether the current slider position requests instant visual changes.
+    ///
+    /// @return true when the current percentage equals the supported maximum
+    public boolean isInstant() {
+        return percentage == maximumPercentage;
     }
 }

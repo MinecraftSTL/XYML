@@ -139,6 +139,31 @@ public final class AppearanceSettingsPanelTest {
         });
     }
 
+    /// The maximum speed position is persisted normally but displayed as infinite instant switching.
+    @Test
+    public void displaysMaximumAnimationSpeedAsInfinity() {
+        FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                ThemeBrightnessPreference.SYSTEM, 6, true, true));
+        AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
+
+        onEventDispatchThread(() -> {
+            findComponent(panel, "appearanceAnimationSpeed", JSlider.class)
+                    .setValue(AnimationSpeedSettings.MAXIMUM_PERCENTAGE);
+
+            assertAll(
+                    () -> assertEquals(
+                            AnimationSpeedSettings.MAXIMUM_PERCENTAGE,
+                            model.snapshot().animationSpeed().percentage()),
+                    () -> assertEquals(
+                            "\u221e",
+                            findComponent(
+                                    panel,
+                                    "appearanceAnimationSpeedValue",
+                                    JLabel.class).getText()));
+            panel.close();
+        });
+    }
+
     /// The appearance restart row sits below the slider and activates only after the radius leaves its baseline.
     @Test
     public void showsCornerRadiusRestartActionBelowSlider() {

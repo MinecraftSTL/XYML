@@ -116,13 +116,17 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
         if (destination == selectedPage) {
             return;
         }
+        SwingContentTransition.Direction direction = transitionDirection(selectedPage, destination);
         @Nullable JComponent outgoingComponent = selectedComponent();
         @Nullable InstanceManagementPage loadedPage = loadedPages.get(destination);
         if (loadedPage == null) {
-            contentTransition.transitionFrom(outgoingComponent, () -> createAndActivate(destination));
+            contentTransition.transitionFrom(
+                    outgoingComponent,
+                    direction,
+                    () -> createAndActivate(destination));
         } else {
             InstanceManagementPage destinationPage = loadedPage;
-            contentTransition.transitionFrom(outgoingComponent, () -> {
+            contentTransition.transitionFrom(outgoingComponent, direction, () -> {
                 cardLayout.show(this, destination.name());
                 try {
                     destinationPage.activate();
@@ -224,13 +228,14 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
         EdtDispatcher.executeAndWait(this::closeLoadedPages);
     }
 
-    /// Paints the live selected management destination and its cached outgoing predecessor.
+    /// Paints cached management destinations during a transition and otherwise paints the live page.
     ///
     /// @param graphics management deck graphics
     @Override
     protected void paintChildren(Graphics graphics) {
-        super.paintChildren(graphics);
-        contentTransition.paintOverlay(graphics);
+        if (!contentTransition.paintFrames(graphics)) {
+            super.paintChildren(graphics);
+        }
     }
 
     /// Releases any cached transition frame before the management deck leaves the display hierarchy.
@@ -238,6 +243,22 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
     public void removeNotify() {
         contentTransition.settle();
         super.removeNotify();
+    }
+
+    /// Derives horizontal motion from canonical navigation order.
+    ///
+    /// @param previous currently selected destination, or null before initial display
+    /// @param destination incoming supported destination
+    /// @return forward when the destination follows the previous page, otherwise backward
+    private SwingContentTransition.Direction transitionDirection(
+            @Nullable InstanceManagementPageId previous,
+            InstanceManagementPageId destination) {
+        if (previous == null) {
+            return SwingContentTransition.Direction.FORWARD;
+        }
+        return availablePages.indexOf(destination) > availablePages.indexOf(previous)
+                ? SwingContentTransition.Direction.FORWARD
+                : SwingContentTransition.Direction.BACKWARD;
     }
 
     /// Creates one destination, makes it visible, and runs its first selection action.

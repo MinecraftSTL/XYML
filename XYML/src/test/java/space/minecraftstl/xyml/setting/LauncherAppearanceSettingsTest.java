@@ -63,6 +63,8 @@ public final class LauncherAppearanceSettingsTest {
     @Test
     public void validatesAnimationSpeedSliderGrid() {
         assertThrows(IllegalArgumentException.class, () -> new AnimationSpeedSettings(100, 50, 195, 10));
+        assertFalse(AnimationSpeedSettings.defaults().isInstant());
+        assertTrue(new AnimationSpeedSettings(200, 50, 200, 10).isInstant());
     }
 
     /// Window transparency persists directly while retired background settings are discarded.

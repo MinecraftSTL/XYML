@@ -24,6 +24,7 @@ import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
 import java.awt.AlphaComposite;
 import java.awt.Component;
+import java.awt.Container;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsConfiguration;
@@ -33,33 +34,67 @@ import java.awt.image.BufferedImage;
 import java.time.Duration;
 import java.util.Objects;
 
-/// Animates content replacement from one cached outgoing frame instead of repainting an entire component tree.
+/// Animates content replacement by composing cached frames from both sides of the replacement.
 ///
 /// A root context lets nested navigation components reuse the application's animator and duration without adding
-/// animation parameters to every page constructor. The outgoing surface is rendered once before replacement; each
-/// subsequent frame only composites that image over the live incoming content, keeping EDT frame work bounded.
+/// animation parameters to every page constructor. Both visual surfaces are rendered exactly once around the content
+/// change. During animation the host paints only these cached frames, so the incoming live tree cannot appear before
+/// the transition starts and complex descendants do not consume work on every frame.
 @NotNullByDefault
 public final class SwingContentTransition {
+    /// Spatial direction of one content replacement.
+    @NotNullByDefault
+    public enum Direction {
+        /// A later destination enters from the right while its predecessor leaves to the left.
+        FORWARD(1),
+
+        /// An earlier destination enters from the left while its predecessor leaves to the right.
+        BACKWARD(-1);
+
+        /// Sign applied to the incoming frame's initial horizontal offset.
+        private final int incomingOffsetSign;
+
+        /// Creates one stable direction definition.
+        ///
+        /// @param incomingOffsetSign either positive one for forward or negative one for backward
+        Direction(int incomingOffsetSign) {
+            this.incomingOffsetSign = incomingOffsetSign;
+        }
+
+        /// Returns the incoming frame's initial horizontal offset sign.
+        ///
+        /// @return positive one for forward or negative one for backward
+        private int incomingOffsetSign() {
+            return incomingOffsetSign;
+        }
+    }
+
     /// Client-property key carrying the nearest shared animation context.
     private static final String CONTEXT_PROPERTY = SwingContentTransition.class.getName() + ".context";
 
     /// Default travel for compact navigation inside one page.
     private static final int DEFAULT_TRAVEL = 12;
 
-    /// Component whose content replacement and overlay painting are coordinated.
+    /// Component whose content replacement and transition painting are coordinated.
     private final JComponent host;
 
     /// Optional direct context used by hosts that already receive explicit animation dependencies.
     private final @Nullable AnimationContext explicitContext;
 
-    /// Maximum leftward travel of the outgoing snapshot.
+    /// Maximum horizontal travel of either cached frame.
     private final int travel;
 
-    /// Cached outgoing frame retained only while a transition is active.
+    /// Cached visual state from immediately before content replacement.
     private @Nullable BufferedImage outgoingFrame;
 
-    /// Host-relative bounds occupied by the cached outgoing frame.
-    private @Nullable Rectangle outgoingBounds;
+    /// Cached visual state from immediately after content replacement.
+    private @Nullable BufferedImage incomingFrame;
+
+    /// Host-relative bounds occupied by both cached frames.
+    private @Nullable Rectangle frameBounds;
+
+    /// Spatial direction used by the current or most recent transition.
+    private Direction direction = Direction.FORWARD;
 
     /// Current eased transition progress from zero to one.
     private double progress = 1.0;
@@ -69,17 +104,17 @@ public final class SwingContentTransition {
 
     /// Creates a nested transition that resolves animation policy from its nearest ancestor context.
     ///
-    /// @param host component whose paint method will call [#paintOverlay(Graphics)]
+    /// @param host component whose paint method will call [#paintFrames(Graphics)]
     public SwingContentTransition(JComponent host) {
         this(host, null, DEFAULT_TRAVEL);
     }
 
     /// Creates an explicitly configured transition for an existing animation owner.
     ///
-    /// @param host component whose paint method will call [#paintOverlay(Graphics)]
+    /// @param host component whose paint method will call [#paintFrames(Graphics)]
     /// @param animator shared animation scheduler and policy owner
     /// @param duration non-negative authored transition duration
-    /// @param travel non-negative maximum outgoing horizontal travel
+    /// @param travel non-negative maximum horizontal travel
     public SwingContentTransition(
             JComponent host,
             SwingAnimator animator,
@@ -92,7 +127,7 @@ public final class SwingContentTransition {
     ///
     /// @param host transition paint host
     /// @param explicitContext direct context, or null for ancestor lookup
-    /// @param travel non-negative maximum outgoing horizontal travel
+    /// @param travel non-negative maximum horizontal travel
     private SwingContentTransition(
             JComponent host,
             @Nullable AnimationContext explicitContext,
@@ -116,15 +151,28 @@ public final class SwingContentTransition {
                 new AnimationContext(animator, duration));
     }
 
-    /// Replaces content after capturing its outgoing visual state and starts a lightweight overlay transition.
-    ///
-    /// The change runs exactly once on the EDT. Missing context, disabled decorative motion, zero-sized content,
-    /// and zero duration all apply the replacement immediately without allocating an image.
+    /// Replaces content with the default forward spatial direction.
     ///
     /// @param outgoingContent currently visible content to capture, or null before initial display
     /// @param contentChange synchronous content replacement action
     public void transitionFrom(@Nullable JComponent outgoingContent, Runnable contentChange) {
+        transitionFrom(outgoingContent, Direction.FORWARD, contentChange);
+    }
+
+    /// Replaces content after capturing both visual states and starts a lightweight cached-frame transition.
+    ///
+    /// The change runs exactly once on the EDT. Missing context, disabled decorative motion, instant animation speed,
+    /// zero-sized content, and zero duration all apply the replacement immediately without retaining images.
+    ///
+    /// @param outgoingContent currently visible content to capture, or null before initial display
+    /// @param transitionDirection direction derived from the destinations' relative positions
+    /// @param contentChange synchronous content replacement action
+    public void transitionFrom(
+            @Nullable JComponent outgoingContent,
+            Direction transitionDirection,
+            Runnable contentChange) {
         EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(transitionDirection, "transitionDirection");
         Objects.requireNonNull(contentChange, "contentChange");
         settle();
 
@@ -132,20 +180,29 @@ public final class SwingContentTransition {
         if (outgoingContent == null
                 || context == null
                 || context.duration().isZero()
+                || context.animator().animationsCompleteImmediately()
                 || !context.animator().motionPolicy().allows(MotionPurpose.DECORATIVE)) {
             contentChange.run();
             return;
         }
 
         @Nullable Rectangle bounds = contentBounds(outgoingContent);
-        @Nullable BufferedImage capturedFrame = bounds == null ? null : captureHostRegion(bounds);
+        @Nullable BufferedImage capturedOutgoing = bounds == null ? null : captureHostRegion(bounds);
         contentChange.run();
-        if (capturedFrame == null || bounds == null) {
+        if (capturedOutgoing == null || bounds == null) {
             return;
         }
 
-        outgoingFrame = capturedFrame;
-        outgoingBounds = bounds;
+        layoutVisibleTree(host);
+        @Nullable BufferedImage capturedIncoming = captureHostRegion(bounds);
+        if (capturedIncoming == null) {
+            return;
+        }
+
+        outgoingFrame = capturedOutgoing;
+        incomingFrame = capturedIncoming;
+        frameBounds = bounds;
+        direction = transitionDirection;
         progress = 0.0;
         AnimationHandle started = context.animator().animate(
                 context.duration(),
@@ -156,31 +213,37 @@ public final class SwingContentTransition {
         animation = started.isRunning() ? started : null;
     }
 
-    /// Paints the cached outgoing frame over already-rendered live incoming content.
+    /// Paints both cached frames in place of the host's live children while a transition is active.
     ///
-    /// @param graphics host graphics after ordinary child painting
-    public void paintOverlay(Graphics graphics) {
+    /// The caller must skip ordinary child painting when this method returns true. Keeping live children out of the
+    /// active frame prevents the destination from appearing instantly beneath a translating translucent predecessor.
+    ///
+    /// @param graphics host graphics before ordinary child painting
+    /// @return true when cached frames completely handled child painting
+    public boolean paintFrames(Graphics graphics) {
         Objects.requireNonNull(graphics, "graphics");
-        @Nullable BufferedImage frame = outgoingFrame;
-        @Nullable Rectangle bounds = outgoingBounds;
-        if (frame == null || bounds == null || progress >= 1.0) {
-            return;
+        @Nullable BufferedImage outgoing = outgoingFrame;
+        @Nullable BufferedImage incoming = incomingFrame;
+        @Nullable Rectangle bounds = frameBounds;
+        if (outgoing == null || incoming == null || bounds == null || progress >= 1.0) {
+            return false;
         }
 
-        Graphics2D overlayGraphics = (Graphics2D) graphics.create();
+        Graphics2D transitionGraphics = (Graphics2D) graphics.create();
         try {
-            overlayGraphics.clip(bounds);
-            int offset = (int) Math.round(-travel * progress);
-            overlayGraphics.translate(bounds.x + offset, bounds.y);
-            float opacity = (float) Math.max(0.0, Math.min(1.0, 1.0 - progress));
-            overlayGraphics.setComposite(AlphaComposite.SrcOver.derive(opacity));
-            overlayGraphics.drawImage(frame, 0, 0, null);
+            transitionGraphics.clip(bounds);
+            int sign = direction.incomingOffsetSign();
+            int outgoingOffset = (int) Math.round(-sign * travel * progress);
+            int incomingOffset = (int) Math.round(sign * travel * (1.0 - progress));
+            drawFrame(transitionGraphics, outgoing, bounds, outgoingOffset, 1.0 - progress);
+            drawFrame(transitionGraphics, incoming, bounds, incomingOffset, progress);
         } finally {
-            overlayGraphics.dispose();
+            transitionGraphics.dispose();
         }
+        return true;
     }
 
-    /// Returns whether a cached frame is currently advancing on the shared animator.
+    /// Returns whether cached frames are currently advancing on the shared animator.
     ///
     /// @return true while a content transition remains active
     public boolean isRunning() {
@@ -188,14 +251,21 @@ public final class SwingContentTransition {
         return current != null && current.isRunning();
     }
 
-    /// Cancels any active frame delivery and releases the cached image immediately.
+    /// Cancels any active frame delivery and releases both cached images immediately.
     public void settle() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable AnimationHandle current = animation;
         if (current != null) {
             current.cancel();
         }
-        clearFrame();
+        clearFrames();
+    }
+
+    /// Returns the spatial direction used by the current or most recent transition.
+    ///
+    /// @return stable transition direction
+    Direction direction() {
+        return direction;
     }
 
     /// Converts one direct or nested content component's bounds into clipped host coordinates.
@@ -211,7 +281,7 @@ public final class SwingContentTransition {
         return clipped.isEmpty() ? null : clipped;
     }
 
-    /// Captures one host region before content replacement so transparent children retain their composed surface.
+    /// Captures one host region so transparent descendants retain their already-composed visual state.
     ///
     /// @param bounds non-empty host-relative region
     /// @return rendered frame, or null when host geometry is no longer usable
@@ -238,8 +308,46 @@ public final class SwingContentTransition {
     private BufferedImage createFrame(int width, int height) {
         @Nullable GraphicsConfiguration configuration = host.getGraphicsConfiguration();
         return configuration == null
-                ? new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+                ? new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE)
                 : configuration.createCompatibleImage(width, height, Transparency.TRANSLUCENT);
+    }
+
+    /// Lays out only visible incoming branches before their one-time capture.
+    ///
+    /// @param container current visible layout branch
+    private static void layoutVisibleTree(Container container) {
+        container.doLayout();
+        for (Component child : container.getComponents()) {
+            if (child.isVisible() && child instanceof Container nestedContainer) {
+                layoutVisibleTree(nestedContainer);
+            }
+        }
+    }
+
+    /// Draws one cached frame at an offset and bounded opacity.
+    ///
+    /// @param graphics clipped transition graphics
+    /// @param frame cached visual state
+    /// @param bounds host-relative frame bounds
+    /// @param horizontalOffset current signed horizontal offset
+    /// @param opacity current opacity between zero and one
+    private static void drawFrame(
+            Graphics2D graphics,
+            BufferedImage frame,
+            Rectangle bounds,
+            int horizontalOffset,
+            double opacity) {
+        if (opacity <= 0.0) {
+            return;
+        }
+        Graphics2D frameGraphics = (Graphics2D) graphics.create();
+        try {
+            float boundedOpacity = (float) Math.max(0.0, Math.min(1.0, opacity));
+            frameGraphics.setComposite(AlphaComposite.SrcOver.derive(boundedOpacity));
+            frameGraphics.drawImage(frame, bounds.x + horizontalOffset, bounds.y, null);
+        } finally {
+            frameGraphics.dispose();
+        }
     }
 
     /// Resolves the explicit context or nearest context-bearing Swing ancestor.
@@ -262,41 +370,49 @@ public final class SwingContentTransition {
         return null;
     }
 
-    /// Applies one eased progress value and repaints only the moving overlay region.
+    /// Applies one eased progress value and repaints the complete cached-frame union.
     ///
     /// @param value eased progress between zero and one
     private void applyProgress(double value) {
         progress = Math.max(0.0, Math.min(1.0, value));
-        repaintOverlayBounds();
+        repaintFrameBounds();
     }
 
-    /// Releases the completed frame after the incoming live component is fully exposed.
+    /// Releases completed frames after the incoming live component is ready to take over.
     private void finish() {
-        clearFrame();
+        clearFrames();
     }
 
     /// Clears retained frame state and repaints its former bounds.
-    private void clearFrame() {
-        @Nullable Rectangle previousBounds = outgoingBounds;
+    private void clearFrames() {
+        @Nullable Rectangle previousBounds = frameBounds;
         outgoingFrame = null;
-        outgoingBounds = null;
+        incomingFrame = null;
+        frameBounds = null;
         animation = null;
         progress = 1.0;
         if (previousBounds != null) {
-            host.repaint(
-                    previousBounds.x - travel,
-                    previousBounds.y,
-                    previousBounds.width + travel,
-                    previousBounds.height);
+            repaintFrameBounds(previousBounds);
         }
     }
 
-    /// Repaints the exact union of the original and translated outgoing frame.
-    private void repaintOverlayBounds() {
-        @Nullable Rectangle bounds = outgoingBounds;
+    /// Repaints the union of both frames and every possible translated position.
+    private void repaintFrameBounds() {
+        @Nullable Rectangle bounds = frameBounds;
         if (bounds != null) {
-            host.repaint(bounds.x - travel, bounds.y, bounds.width + travel, bounds.height);
+            repaintFrameBounds(bounds);
         }
+    }
+
+    /// Repaints one complete cached-frame union.
+    ///
+    /// @param bounds original host-relative frame bounds
+    private void repaintFrameBounds(Rectangle bounds) {
+        host.repaint(
+                bounds.x - travel,
+                bounds.y,
+                bounds.width + 2 * travel,
+                bounds.height);
     }
 
     /// Immutable shared animator and authored duration inherited by nested content transitions.

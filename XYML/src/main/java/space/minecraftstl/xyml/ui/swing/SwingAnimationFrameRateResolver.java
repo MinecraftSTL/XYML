@@ -38,11 +38,8 @@ public final class SwingAnimationFrameRateResolver {
     /// Environment variable whose positive integer value specifies animation frames per second.
     private static final String FRAME_RATE_ENVIRONMENT_VARIABLE = "XYML_ANIMATION_FRAME_RATE";
 
-    /// Existing timer delay used for ordinary or unknown display refresh rates.
+    /// Existing timer delay used for unknown display refresh rates.
     private static final int DEFAULT_FRAME_DELAY_MILLIS = 16;
-
-    /// Lowest refresh rate that benefits from replacing the ordinary timer delay automatically.
-    private static final int HIGH_REFRESH_RATE_THRESHOLD = 90;
 
     /// Prevents construction of this stateless resolver.
     private SwingAnimationFrameRateResolver() {
@@ -51,8 +48,8 @@ public final class SwingAnimationFrameRateResolver {
     /// Resolves the timer delay for the current process and default AWT display.
     ///
     /// Explicit configuration is ignored while animation is disabled because no timer will advance. A JVM delay
-    /// property takes precedence over the frame-rate environment variable. Without either override, displays at
-    /// or above 90 Hz use a matching integer delay while ordinary, unknown, and headless displays retain 16 ms.
+    /// property takes precedence over the frame-rate environment variable. Without either override, every known
+    /// positive display refresh rate uses a matching integer delay while unknown and headless displays retain 16 ms.
     ///
     /// @param animationsDisabled whether the persisted appearance setting disables animation
     /// @return a positive timer delay in milliseconds
@@ -114,8 +111,8 @@ public final class SwingAnimationFrameRateResolver {
             warningSink.accept("Failed to detect the display refresh rate: " + detectionFailure);
             return DEFAULT_FRAME_DELAY_MILLIS;
         }
-        return detectedRefreshRate >= HIGH_REFRESH_RATE_THRESHOLD
-                ? frameDelayForFramesPerSecond(detectedRefreshRate)
+        return detectedRefreshRate > 0
+                ? Math.min(DEFAULT_FRAME_DELAY_MILLIS, frameDelayForFramesPerSecond(detectedRefreshRate))
                 : DEFAULT_FRAME_DELAY_MILLIS;
     }
 
