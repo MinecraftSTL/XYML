@@ -31,6 +31,7 @@ import java.awt.Container;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.event.ContainerAdapter;
 import java.awt.event.ContainerEvent;
 import java.awt.event.MouseAdapter;
@@ -49,7 +50,8 @@ import java.util.Set;
 ///
 /// The support owns no button appearance and paints only after the root's ordinary children. Each press starts a
 /// separate animation, so repeated presses can overlap without cancelling or restarting earlier ripples. Container
-/// listeners keep lazy pages covered while removed component trees release their listeners and active feedback.
+/// listeners keep lazy pages covered. Each ripple snapshots its root-relative geometry on press, allowing feedback to
+/// finish smoothly even when the pressed button is removed by the page change it initiated.
 @NotNullByDefault
 public final class SwingButtonRippleSupport implements AutoCloseable {
     /// Peak alpha applied to the button foreground color.
@@ -108,7 +110,9 @@ public final class SwingButtonRippleSupport implements AutoCloseable {
     /// @param graphics root graphics after ordinary child painting
     public void paintRipples(Graphics graphics) {
         Objects.requireNonNull(graphics, "graphics");
-        if (closed || activeRipples.isEmpty()) {
+        if (closed
+                || activeRipples.isEmpty()
+                || SwingContentTransition.isFrameCaptureInProgress()) {
             return;
         }
         Ripple[] snapshot = activeRipples.toArray(Ripple[]::new);
@@ -163,9 +167,18 @@ public final class SwingButtonRippleSupport implements AutoCloseable {
         if (closed || !button.isEnabled() || !registeredButtons.contains(button)) {
             return;
         }
+        @Nullable Container parent = button.getParent();
+        if (parent == null || button.getWidth() <= 0 || button.getHeight() <= 0) {
+            return;
+        }
         int x = Math.max(0, Math.min(button.getWidth(), origin.x));
         int y = Math.max(0, Math.min(button.getHeight(), origin.y));
-        Ripple ripple = new Ripple(button, new Point(x, y), rippleColor(button));
+        Point location = SwingUtilities.convertPoint(button, 0, 0, root);
+        Rectangle bounds = new Rectangle(location.x, location.y, button.getWidth(), button.getHeight());
+        int arc = Math.max(0, Math.min(
+                Math.min(bounds.width, bounds.height),
+                UIManager.getInt("Button.arc")));
+        Ripple ripple = new Ripple(bounds, new Point(x, y), rippleColor(button), arc);
         activeRipples.add(ripple);
         ripple.start();
     }
@@ -185,7 +198,7 @@ public final class SwingButtonRippleSupport implements AutoCloseable {
         }
     }
 
-    /// Detaches listeners and cancels ripples owned by one removed component tree.
+    /// Detaches listeners from one removed component tree without interrupting captured feedback.
     ///
     /// @param component removed component-tree root
     private void unregisterTree(Component component) {
@@ -197,20 +210,6 @@ public final class SwingButtonRippleSupport implements AutoCloseable {
         }
         if (component instanceof AbstractButton button && registeredButtons.remove(button)) {
             button.removeMouseListener(buttonPressListener);
-            cancelRipples(button);
-        }
-    }
-
-    /// Cancels all independent feedback still owned by one removed button.
-    ///
-    /// @param button removed button
-    private void cancelRipples(AbstractButton button) {
-        Ripple[] snapshot = activeRipples.toArray(Ripple[]::new);
-        for (Ripple ripple : snapshot) {
-            if (ripple.button() == button) {
-                ripple.cancel();
-                activeRipples.remove(ripple);
-            }
         }
     }
 
@@ -227,16 +226,11 @@ public final class SwingButtonRippleSupport implements AutoCloseable {
         return new Color(resolved.getRed(), resolved.getGreen(), resolved.getBlue());
     }
 
-    /// Repaints exactly one currently attached button region.
+    /// Repaints one captured button region independently of its original component lifecycle.
     ///
-    /// @param button ripple-owning button
-    private void repaintButton(AbstractButton button) {
-        @Nullable Container parent = button.getParent();
-        if (parent == null || !SwingUtilities.isDescendingFrom(button, root)) {
-            return;
-        }
-        Point location = SwingUtilities.convertPoint(button, 0, 0, root);
-        root.repaint(location.x, location.y, button.getWidth(), button.getHeight());
+    /// @param bounds root-relative captured button bounds
+    private void repaintRipple(Rectangle bounds) {
+        root.repaint(bounds.x, bounds.y, bounds.width, bounds.height);
     }
 
     /// Completes cleanup on the EDT without retaining removed page trees.
@@ -294,14 +288,17 @@ public final class SwingButtonRippleSupport implements AutoCloseable {
     /// Owns one press's independent geometry, timing, and lifecycle.
     @NotNullByDefault
     private final class Ripple {
-        /// Button whose bounds clip this feedback.
-        private final AbstractButton button;
+        /// Root-relative button bounds captured at press time.
+        private final Rectangle bounds;
 
         /// Button-local point from which the circle expands.
         private final Point origin;
 
         /// Opaque source color whose alpha fades over time.
         private final Color color;
+
+        /// Rounded clip arc captured from the active look and feel at press time.
+        private final int arc;
 
         /// Current eased expansion progress from zero to one.
         private double progress;
@@ -311,13 +308,15 @@ public final class SwingButtonRippleSupport implements AutoCloseable {
 
         /// Creates one ripple before it is scheduled.
         ///
-        /// @param button pressed button
+        /// @param bounds root-relative button bounds captured at press time
         /// @param origin clamped button-local press position
         /// @param color opaque ripple source color
-        private Ripple(AbstractButton button, Point origin, Color color) {
-            this.button = Objects.requireNonNull(button, "button");
+        /// @param arc rounded clip arc captured at press time
+        private Ripple(Rectangle bounds, Point origin, Color color, int arc) {
+            this.bounds = new Rectangle(Objects.requireNonNull(bounds, "bounds"));
             this.origin = new Point(Objects.requireNonNull(origin, "origin"));
             this.color = Objects.requireNonNull(color, "color");
+            this.arc = arc;
         }
 
         /// Starts independent frame delivery without cancelling any existing ripple.
@@ -331,55 +330,36 @@ public final class SwingButtonRippleSupport implements AutoCloseable {
             animation = started.isRunning() ? started : null;
         }
 
-        /// Returns the owning button by identity.
-        ///
-        /// @return pressed button
-        private AbstractButton button() {
-            return button;
-        }
-
         /// Applies one expansion frame and requests a bounded repaint.
         ///
         /// @param value eased progress between zero and one
         private void applyProgress(double value) {
             progress = Math.max(0.0, Math.min(1.0, value));
-            repaintButton(button);
+            repaintRipple(bounds);
         }
 
-        /// Paints this ripple when its button remains visible below the root.
+        /// Paints this ripple in its captured button geometry even after the original page is removed.
         ///
         /// @param graphics root graphics after ordinary child painting
         private void paint(Graphics graphics) {
-            @Nullable Container parent = button.getParent();
-            if (parent == null
-                    || !button.isVisible()
-                    || button.getWidth() <= 0
-                    || button.getHeight() <= 0
-                    || !SwingUtilities.isDescendingFrom(button, root)) {
-                return;
-            }
-            Point location = SwingUtilities.convertPoint(button, 0, 0, root);
-            int width = button.getWidth();
-            int height = button.getHeight();
-            double radius = rippleRadius(width, height, origin, progress);
+            double radius = rippleRadius(bounds.width, bounds.height, origin, progress);
             float opacity = rippleOpacity(progress);
-            int arc = Math.max(0, Math.min(Math.min(width, height), UIManager.getInt("Button.arc")));
 
             Graphics2D rippleGraphics = (Graphics2D) graphics.create();
             try {
                 rippleGraphics.clip(new RoundRectangle2D.Double(
-                        location.x,
-                        location.y,
-                        width,
-                        height,
+                        bounds.x,
+                        bounds.y,
+                        bounds.width,
+                        bounds.height,
                         arc,
                         arc));
                 rippleGraphics.setComposite(AlphaComposite.SrcOver.derive(opacity));
                 rippleGraphics.setColor(color);
                 double diameter = radius * 2.0;
                 rippleGraphics.fill(new Ellipse2D.Double(
-                        location.x + origin.x - radius,
-                        location.y + origin.y - radius,
+                        bounds.x + origin.x - radius,
+                        bounds.y + origin.y - radius,
                         diameter,
                         diameter));
             } finally {
@@ -391,7 +371,7 @@ public final class SwingButtonRippleSupport implements AutoCloseable {
         private void finish() {
             animation = null;
             activeRipples.remove(this);
-            repaintButton(button);
+            repaintRipple(bounds);
         }
 
         /// Cancels this ripple without affecting other presses.
@@ -401,7 +381,7 @@ public final class SwingButtonRippleSupport implements AutoCloseable {
                 current.cancel();
             }
             animation = null;
-            repaintButton(button);
+            repaintRipple(bounds);
         }
     }
 }

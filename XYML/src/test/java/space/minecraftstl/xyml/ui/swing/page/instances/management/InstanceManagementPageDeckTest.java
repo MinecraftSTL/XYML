@@ -104,6 +104,9 @@ final class InstanceManagementPageDeckTest {
             deck.showPage(InstanceManagementPageId.MODS);
 
             assertEquals(InstanceManagementPageId.MODS, deck.selectedPage());
+            assertEquals(
+                    SwingContentTransition.Direction.VERTICAL_FORWARD,
+                    deck.contentTransitionDirection());
             assertTrue(deck.isTransitionRunning());
             animator.setMotionPolicy(MotionPolicy.OFF);
             assertFalse(deck.isTransitionRunning());

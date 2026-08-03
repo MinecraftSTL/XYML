@@ -65,7 +65,7 @@ final class ShellPageDeck extends JPanel {
     /// @param page the page to show
     /// @param animate whether a settled existing page should transition visually
     void showPage(JComponent page, boolean animate) {
-        showPage(page, animate, SwingContentTransition.Direction.FORWARD);
+        showPage(page, animate, SwingContentTransition.Direction.HORIZONTAL_FORWARD);
     }
 
     /// Shows a page using a direction derived from the destinations' visual positions.
@@ -132,6 +132,13 @@ final class ShellPageDeck extends JPanel {
     /// @return true while a top-level page change remains active
     boolean isTransitionRunning() {
         return contentTransition.isRunning();
+    }
+
+    /// Returns the direction used by the current or most recent page transition.
+    ///
+    /// @return spatial transition direction
+    SwingContentTransition.Direction transitionDirection() {
+        return contentTransition.direction();
     }
 
     /// Adds a cached page or moves it to the input-facing component position.

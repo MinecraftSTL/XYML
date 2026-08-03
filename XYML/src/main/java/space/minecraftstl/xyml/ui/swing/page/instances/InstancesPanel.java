@@ -748,8 +748,8 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         };
         if (animate) {
             SwingContentTransition.Direction direction = MANAGEMENT_VIEW_CARD.equals(card)
-                    ? SwingContentTransition.Direction.FORWARD
-                    : SwingContentTransition.Direction.BACKWARD;
+                    ? SwingContentTransition.Direction.HORIZONTAL_FORWARD
+                    : SwingContentTransition.Direction.HORIZONTAL_BACKWARD;
             rootTransition.transitionFrom(outgoing, direction, replacement);
         } else {
             rootTransition.settle();

@@ -459,7 +459,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         navigationRail.setSelectedPage(page);
     }
 
-    /// Derives horizontal motion from the navigation rail's physical destination order.
+    /// Derives vertical motion from the navigation rail's physical destination order.
     ///
     /// @param previous selected side destination, or null while instance management is exposed
     /// @param destination incoming destination
@@ -469,8 +469,8 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
             ShellPageId destination) {
         ShellPageId origin = previous != null ? previous : ShellPageId.INSTANCES;
         return NAVIGATION_ORDER.indexOf(destination) > NAVIGATION_ORDER.indexOf(origin)
-                ? SwingContentTransition.Direction.FORWARD
-                : SwingContentTransition.Direction.BACKWARD;
+                ? SwingContentTransition.Direction.VERTICAL_FORWARD
+                : SwingContentTransition.Direction.VERTICAL_BACKWARD;
     }
 
     /// Attempts one shell-owned cleanup while retaining the first failure.

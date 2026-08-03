@@ -174,6 +174,14 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
         return contentTransition.isRunning();
     }
 
+    /// Returns the direction used by the current or most recent management transition.
+    ///
+    /// @return spatial transition direction
+    SwingContentTransition.Direction contentTransitionDirection() {
+        EdtDispatcher.requireEventDispatchThread();
+        return contentTransition.direction();
+    }
+
     /// Releases cached non-visible pages whose backing instance directories changed.
     ///
     /// The visible page cannot be invalidated because removing the selected card would leave navigation and content
@@ -245,7 +253,7 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
         super.removeNotify();
     }
 
-    /// Derives horizontal motion from canonical navigation order.
+    /// Derives vertical motion from canonical navigation order.
     ///
     /// @param previous currently selected destination, or null before initial display
     /// @param destination incoming supported destination
@@ -254,11 +262,11 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
             @Nullable InstanceManagementPageId previous,
             InstanceManagementPageId destination) {
         if (previous == null) {
-            return SwingContentTransition.Direction.FORWARD;
+            return SwingContentTransition.Direction.VERTICAL_FORWARD;
         }
         return availablePages.indexOf(destination) > availablePages.indexOf(previous)
-                ? SwingContentTransition.Direction.FORWARD
-                : SwingContentTransition.Direction.BACKWARD;
+                ? SwingContentTransition.Direction.VERTICAL_FORWARD
+                : SwingContentTransition.Direction.VERTICAL_BACKWARD;
     }
 
     /// Creates one destination, makes it visible, and runs its first selection action.
