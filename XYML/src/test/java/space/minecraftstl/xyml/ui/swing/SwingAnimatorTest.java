@@ -117,7 +117,7 @@ public final class SwingAnimatorTest {
                 () -> assertEquals(1.0, SwingAnimator.normalizedProgress(150L, 100L)));
     }
 
-    /// Larger speed percentages shorten authored durations while slower settings lengthen them.
+    /// Finite speed percentages scale authored durations while the maximum represents infinity.
     @Test
     public void scalesAuthoredDurationByAnimationSpeed() {
         SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 16, 150);
@@ -126,13 +126,44 @@ public final class SwingAnimatorTest {
                 () -> assertEquals(150, animator.animationSpeedPercentage()),
                 () -> assertEquals(2_000L, SwingAnimator.scaledDurationNanos(1_000L, 50)),
                 () -> assertEquals(1_000L, SwingAnimator.scaledDurationNanos(1_000L, 100)),
-                () -> assertEquals(500L, SwingAnimator.scaledDurationNanos(1_000L, 200)),
-                () -> assertEquals(1L, SwingAnimator.scaledDurationNanos(1L, 200)),
+                () -> assertEquals(526L, SwingAnimator.scaledDurationNanos(1_000L, 190)),
+                () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(1_000L, 200)),
+                () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(1L, 200)),
                 () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(0L, 200)));
 
         animator.setAnimationSpeedPercentage(80);
         assertEquals(80, animator.animationSpeedPercentage());
         assertThrows(IllegalArgumentException.class, () -> animator.setAnimationSpeedPercentage(0));
+    }
+
+    /// Selecting infinite speed finishes every active animation and suppresses intermediate frames thereafter.
+    @Test
+    public void infiniteSpeedFinishesActiveAndFutureAnimationsImmediately() {
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 10_000);
+        List<Double> activeFrames = new ArrayList<>();
+
+        AnimationHandle active = animator.animate(
+                Duration.ofSeconds(2L),
+                MotionPurpose.DECORATIVE,
+                Easing.LINEAR,
+                activeFrames::add,
+                () -> { });
+        animator.setAnimationSpeedPercentage(200);
+
+        List<Double> futureFrames = new ArrayList<>();
+        AnimationHandle future = animator.animate(
+                Duration.ofSeconds(2L),
+                MotionPurpose.DECORATIVE,
+                Easing.LINEAR,
+                futureFrames::add,
+                () -> { });
+
+        assertAll(
+                () -> assertEquals(List.of(0.0, 1.0), activeFrames),
+                () -> assertTrue(active.isFinished()),
+                animator::animationsCompleteImmediately,
+                () -> assertEquals(List.of(1.0), futureFrames),
+                () -> assertTrue(future.isFinished()));
     }
 
     /// Every easing curve preserves exact start and end values after clamping.

@@ -659,7 +659,9 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
                     applyingSnapshot = false;
                 }
             }
-            animationSpeedValue.setText(percentage + "%");
+            animationSpeedValue.setText(animationSpeedText(
+                    percentage,
+                    animationSpeedSlider.getMaximum()));
             @Nullable AppearanceSettingsSnapshot snapshot = displayedSnapshot;
             if (!applyingSnapshot
                     && !animationSpeedSlider.getValueIsAdjusting()
@@ -668,6 +670,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
                 model.setAnimationSpeedPercentage(percentage);
             }
         });
+        animationSpeedValue.setName("appearanceAnimationSpeedValue");
         animationSpeedValue.setHorizontalAlignment(JLabel.TRAILING);
 
         JPanel control = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]12[48!]", "[]"));
@@ -978,6 +981,17 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         return (int) aligned;
     }
 
+    /// Formats a finite speed as a percentage and the maximum endpoint as infinity.
+    ///
+    /// @param percentage aligned animation-speed slider position
+    /// @param maximumPercentage model-provided instant endpoint
+    /// @return concise visible speed value
+    private static String animationSpeedText(int percentage, int maximumPercentage) {
+        return percentage == maximumPercentage
+                ? "\u221e"
+                : percentage + "%";
+    }
+
     /// Coalesces a model transition to the latest snapshot on the EDT.
     ///
     /// @param change transition that invalidated displayed controls
@@ -1017,7 +1031,9 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
             animationSpeedSlider.setMinorTickSpacing(speed.percentageStep());
             animationSpeedSlider.setSnapToTicks(true);
             animationSpeedSlider.setValue(speed.percentage());
-            animationSpeedValue.setText(speed.percentage() + "%");
+            animationSpeedValue.setText(animationSpeedText(
+                    speed.percentage(),
+                    speed.maximumPercentage()));
 
             ThemeColorAppearanceSettings themeColor = snapshot.themeColor();
             themeColorOverridden.setSelected(themeColor.overridden());

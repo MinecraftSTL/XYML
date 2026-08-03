@@ -369,13 +369,14 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         EdtDispatcher.executeAndWait(this::closeOnEventDispatchThread);
     }
 
-    /// Paints the live list or management details and then its cached outgoing predecessor.
+    /// Paints cached list or management frames during a transition and otherwise paints live details.
     ///
     /// @param graphics instance-page graphics
     @Override
     protected void paintChildren(Graphics graphics) {
-        super.paintChildren(graphics);
-        rootTransition.paintOverlay(graphics);
+        if (!rootTransition.paintFrames(graphics)) {
+            super.paintChildren(graphics);
+        }
     }
 
     /// Releases a cached internal transition before the instance page leaves the display hierarchy.
@@ -732,7 +733,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
     /// Applies one root-card replacement with optional inherited snapshot animation.
     ///
     /// @param card destination card identifier
-    /// @param animate whether to retain and fade the currently visible card
+    /// @param animate whether to animate between the currently visible and destination cards
     /// @param preparation content mutation that must run immediately before card selection
     private void showRootCard(String card, boolean animate, Runnable preparation) {
         EdtDispatcher.requireEventDispatchThread();
@@ -746,7 +747,10 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
             ((CardLayout) getLayout()).show(this, card);
         };
         if (animate) {
-            rootTransition.transitionFrom(outgoing, replacement);
+            SwingContentTransition.Direction direction = MANAGEMENT_VIEW_CARD.equals(card)
+                    ? SwingContentTransition.Direction.FORWARD
+                    : SwingContentTransition.Direction.BACKWARD;
+            rootTransition.transitionFrom(outgoing, direction, replacement);
         } else {
             rootTransition.settle();
             replacement.run();

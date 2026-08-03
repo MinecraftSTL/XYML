@@ -25,10 +25,10 @@ import javax.swing.JTabbedPane;
 import java.awt.Component;
 import java.awt.Graphics;
 
-/// Adds inherited, snapshot-composited content transitions to ordinary Swing tab selection.
+/// Adds inherited, position-aware cached-frame content transitions to ordinary Swing tab selection.
 @NotNullByDefault
 public final class AnimatedTabbedPane extends JTabbedPane {
-    /// Outgoing-frame transition painted after the newly selected live tab content.
+    /// Two-frame transition painted in place of live tab content while selection is changing.
     private final SwingContentTransition contentTransition;
 
     /// Creates a tab host that resolves animation context from its nearest configured ancestor.
@@ -41,22 +41,27 @@ public final class AnimatedTabbedPane extends JTabbedPane {
     /// @param index selected tab index
     @Override
     public void setSelectedIndex(int index) {
+        int previousIndex = getSelectedIndex();
         @Nullable Component previous = getSelectedComponent();
-        if (previous == null || index == getSelectedIndex()) {
+        if (previous == null || index == previousIndex) {
             super.setSelectedIndex(index);
             return;
         }
         @Nullable JComponent outgoing = previous instanceof JComponent component ? component : null;
-        contentTransition.transitionFrom(outgoing, () -> selectImmediately(index));
+        SwingContentTransition.Direction direction = index > previousIndex
+                ? SwingContentTransition.Direction.FORWARD
+                : SwingContentTransition.Direction.BACKWARD;
+        contentTransition.transitionFrom(outgoing, direction, () -> selectImmediately(index));
     }
 
-    /// Paints the selected live content and then fades its cached predecessor away.
+    /// Paints cached tab frames during a transition and otherwise delegates to standard child painting.
     ///
     /// @param graphics tab host graphics
     @Override
     protected void paintChildren(Graphics graphics) {
-        super.paintChildren(graphics);
-        contentTransition.paintOverlay(graphics);
+        if (!contentTransition.paintFrames(graphics)) {
+            super.paintChildren(graphics);
+        }
     }
 
     /// Cancels retained transition frames before the tab host leaves the display hierarchy.
@@ -71,6 +76,13 @@ public final class AnimatedTabbedPane extends JTabbedPane {
     /// @return true while the outgoing tab frame remains visible
     boolean isContentTransitionRunning() {
         return contentTransition.isRunning();
+    }
+
+    /// Returns the direction derived for the current or most recent tab selection.
+    ///
+    /// @return direction matching the selected tab's relative index
+    SwingContentTransition.Direction contentTransitionDirection() {
+        return contentTransition.direction();
     }
 
     /// Delegates selection to the standard tab implementation without recursively capturing another frame.

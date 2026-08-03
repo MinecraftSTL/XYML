@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import javax.swing.JPanel;
+import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.image.BufferedImage;
 import java.time.Duration;
@@ -35,15 +36,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies cached-frame content transitions and inherited animated tab selection.
 @NotNullByDefault
 public final class SwingContentTransitionTest {
-    /// Repeated animation paints reuse one captured outgoing host frame instead of traversing its component tree.
+    /// Repeated paints reuse exactly two frames and initially conceal the already-installed incoming component.
     @Test
-    public void capturesOutgoingContentOnlyOnce() {
+    public void capturesBothStatesOnceAndStartsFromOutgoingFrame() {
         SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 10_000);
 
         EdtDispatcher.executeAndWait(() -> {
             CountingHost host = new CountingHost();
             JPanel outgoing = new JPanel();
             JPanel incoming = new JPanel();
+            outgoing.setBackground(Color.RED);
+            incoming.setBackground(Color.BLUE);
             host.setSize(480, 320);
             outgoing.setBounds(0, 0, 480, 320);
             incoming.setBounds(0, 0, 480, 320);
@@ -54,21 +57,25 @@ public final class SwingContentTransitionTest {
                     Duration.ofSeconds(2L),
                     20);
 
-            transition.transitionFrom(outgoing, () -> {
+            transition.transitionFrom(outgoing, SwingContentTransition.Direction.BACKWARD, () -> {
                 host.remove(outgoing);
                 host.add(incoming);
             });
             BufferedImage target = new BufferedImage(480, 320, BufferedImage.TYPE_INT_ARGB);
             Graphics graphics = target.getGraphics();
             try {
-                transition.paintOverlay(graphics);
-                transition.paintOverlay(graphics);
+                assertTrue(transition.paintFrames(graphics));
+                assertTrue(transition.paintFrames(graphics));
             } finally {
                 graphics.dispose();
             }
 
             assertAll(
-                    () -> assertEquals(1, host.printCount()),
+                    () -> assertEquals(2, host.printCount()),
+                    () -> assertEquals(Color.RED.getRGB(), target.getRGB(240, 160)),
+                    () -> assertEquals(
+                            SwingContentTransition.Direction.BACKWARD,
+                            transition.direction()),
                     transition::isRunning,
                     () -> assertSame(host, incoming.getParent()));
             animator.setMotionPolicy(MotionPolicy.OFF);
@@ -76,7 +83,7 @@ public final class SwingContentTransitionTest {
         });
     }
 
-    /// Tab selection inherits one animation context and keeps the standard selected-index contract.
+    /// Tab selection inherits context and derives opposite directions from relative tab indices.
     @Test
     public void animatesInheritedTabContentSelection() {
         SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 10_000);
@@ -86,19 +93,34 @@ public final class SwingContentTransitionTest {
             SwingContentTransition.provideContext(tabs, animator, Duration.ofSeconds(2L));
             JPanel first = new JPanel();
             JPanel second = new JPanel();
+            JPanel third = new JPanel();
             tabs.addTab("First", first);
             tabs.addTab("Second", second);
+            tabs.addTab("Third", third);
             tabs.setSize(480, 320);
             tabs.doLayout();
 
-            tabs.setSelectedIndex(1);
+            tabs.setSelectedIndex(2);
 
             assertAll(
-                    () -> assertEquals(1, tabs.getSelectedIndex()),
+                    () -> assertEquals(2, tabs.getSelectedIndex()),
                     () -> assertTrue(first.getWidth() > 0),
+                    () -> assertEquals(
+                            SwingContentTransition.Direction.FORWARD,
+                            tabs.contentTransitionDirection()),
                     tabs::isContentTransitionRunning);
             animator.setMotionPolicy(MotionPolicy.OFF);
             assertFalse(tabs.isContentTransitionRunning());
+
+            animator.setMotionPolicy(MotionPolicy.FULL);
+            tabs.setSelectedIndex(0);
+            assertAll(
+                    () -> assertEquals(0, tabs.getSelectedIndex()),
+                    () -> assertEquals(
+                            SwingContentTransition.Direction.BACKWARD,
+                            tabs.contentTransitionDirection()),
+                    tabs::isContentTransitionRunning);
+            animator.setMotionPolicy(MotionPolicy.OFF);
         });
     }
 

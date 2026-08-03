@@ -29,13 +29,13 @@ import java.awt.Graphics;
 import java.time.Duration;
 import java.util.Objects;
 
-/// Keeps page bounds stable while fading and slightly translating a cached outgoing destination frame.
+/// Keeps page bounds stable while translating and cross-fading cached frames from both destinations.
 @NotNullByDefault
 final class ShellPageDeck extends JPanel {
     /// Maximum horizontal travel used to preserve spatial continuity during a transition.
     private static final int TRANSITION_TRAVEL = 20;
 
-    /// Snapshot-composited transition that avoids repainting two complete page trees on every frame.
+    /// Snapshot-composited transition that avoids repainting complete page trees on every frame.
     private final SwingContentTransition contentTransition;
 
     /// The page accepting input and remaining after a transition.
@@ -65,8 +65,21 @@ final class ShellPageDeck extends JPanel {
     /// @param page the page to show
     /// @param animate whether a settled existing page should transition visually
     void showPage(JComponent page, boolean animate) {
+        showPage(page, animate, SwingContentTransition.Direction.FORWARD);
+    }
+
+    /// Shows a page using a direction derived from the destinations' visual positions.
+    ///
+    /// @param page the page to show
+    /// @param animate whether a settled existing page should transition visually
+    /// @param direction spatial relationship between the previous and incoming pages
+    void showPage(
+            JComponent page,
+            boolean animate,
+            SwingContentTransition.Direction direction) {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(page);
+        Objects.requireNonNull(direction, "direction");
 
         if (currentPage == page) {
             return;
@@ -79,7 +92,7 @@ final class ShellPageDeck extends JPanel {
             return;
         }
 
-        contentTransition.transitionFrom(previousPage, () -> replacePage(previousPage, page));
+        contentTransition.transitionFrom(previousPage, direction, () -> replacePage(previousPage, page));
     }
 
     /// Returns the currently visible destination page.
@@ -97,13 +110,14 @@ final class ShellPageDeck extends JPanel {
         }
     }
 
-    /// Paints the live destination and then composites its cached outgoing predecessor.
+    /// Paints cached destination frames during a transition and otherwise paints the live page.
     ///
     /// @param graphics the target graphics context
     @Override
     protected void paintChildren(Graphics graphics) {
-        super.paintChildren(graphics);
-        contentTransition.paintOverlay(graphics);
+        if (!contentTransition.paintFrames(graphics)) {
+            super.paintChildren(graphics);
+        }
     }
 
     /// Cancels timer delivery and settles the deck before it becomes undisplayable.

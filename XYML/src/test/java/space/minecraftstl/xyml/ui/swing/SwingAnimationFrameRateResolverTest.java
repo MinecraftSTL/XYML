@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Tests animation frame-delay precedence, validation, and high-refresh display adaptation.
+/// Tests animation frame-delay precedence, validation, and display-refresh adaptation.
 @NotNullByDefault
 public final class SwingAnimationFrameRateResolverTest {
     /// An explicit JVM delay takes precedence over the environment and does not inspect the display.
@@ -84,23 +84,25 @@ public final class SwingAnimationFrameRateResolverTest {
         assertEquals(16, delay);
     }
 
-    /// Automatic detection adapts common high-refresh displays using nearest-millisecond delays.
+    /// Automatic detection adapts common display refresh rates using nearest-millisecond delays.
     @Test
     public void highRefreshDisplaysUseMatchingDelays() {
         assertAll(
+                () -> assertEquals(13, resolveAutomatically(75)),
                 () -> assertEquals(11, resolveAutomatically(90)),
                 () -> assertEquals(8, resolveAutomatically(120)),
                 () -> assertEquals(7, resolveAutomatically(144)),
                 () -> assertEquals(6, resolveAutomatically(165)));
     }
 
-    /// Ordinary, unknown, and just-below-threshold refresh rates keep the 16 ms default.
+    /// Sixty-hertz and unknown displays retain the established default while other known rates adapt.
     @Test
     public void ordinaryOrUnknownDisplaysUseDefaultDelay() {
         assertAll(
                 () -> assertEquals(16, resolveAutomatically(0)),
+                () -> assertEquals(16, resolveAutomatically(30)),
                 () -> assertEquals(16, resolveAutomatically(60)),
-                () -> assertEquals(16, resolveAutomatically(89)));
+                () -> assertEquals(11, resolveAutomatically(89)));
     }
 
     /// An invalid explicit environment value warns and suppresses automatic detection.
