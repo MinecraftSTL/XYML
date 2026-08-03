@@ -24,6 +24,10 @@ import javax.swing.JComponent;
 import javax.swing.JTabbedPane;
 import java.awt.Component;
 import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Rectangle;
+import java.awt.Shape;
+import java.awt.geom.Area;
 
 /// Adds inherited, position-aware cached-frame content transitions to ordinary Swing tab selection.
 @NotNullByDefault
@@ -48,20 +52,34 @@ public final class AnimatedTabbedPane extends JTabbedPane {
             return;
         }
         @Nullable JComponent outgoing = previous instanceof JComponent component ? component : null;
-        SwingContentTransition.Direction direction = index > previousIndex
-                ? SwingContentTransition.Direction.FORWARD
-                : SwingContentTransition.Direction.BACKWARD;
+        SwingContentTransition.Direction direction = transitionDirection(previousIndex, index);
         contentTransition.transitionFrom(outgoing, direction, () -> selectImmediately(index));
     }
 
-    /// Paints cached tab frames during a transition and otherwise delegates to standard child painting.
+    /// Keeps tab labels live while replacing only the selected content region with cached transition frames.
     ///
     /// @param graphics tab host graphics
     @Override
     protected void paintChildren(Graphics graphics) {
-        if (!contentTransition.paintFrames(graphics)) {
+        @Nullable Rectangle contentBounds = contentTransition.activeFrameBounds();
+        if (contentBounds == null) {
             super.paintChildren(graphics);
+            return;
         }
+
+        Graphics2D tabChromeGraphics = (Graphics2D) graphics.create();
+        try {
+            @Nullable Shape originalClip = tabChromeGraphics.getClip();
+            Area tabChromeClip = originalClip == null
+                    ? new Area(new Rectangle(0, 0, getWidth(), getHeight()))
+                    : new Area(originalClip);
+            tabChromeClip.subtract(new Area(contentBounds));
+            tabChromeGraphics.setClip(tabChromeClip);
+            super.paintChildren(tabChromeGraphics);
+        } finally {
+            tabChromeGraphics.dispose();
+        }
+        contentTransition.paintFrames(graphics);
     }
 
     /// Cancels retained transition frames before the tab host leaves the display hierarchy.
@@ -83,6 +101,25 @@ public final class AnimatedTabbedPane extends JTabbedPane {
     /// @return direction matching the selected tab's relative index
     SwingContentTransition.Direction contentTransitionDirection() {
         return contentTransition.direction();
+    }
+
+    /// Derives movement axis from tab placement and movement sign from relative tab index.
+    ///
+    /// @param previousIndex previously selected tab index
+    /// @param destinationIndex incoming tab index
+    /// @return spatial direction matching the visible tab arrangement
+    private SwingContentTransition.Direction transitionDirection(
+            int previousIndex,
+            int destinationIndex) {
+        boolean forward = destinationIndex > previousIndex;
+        return switch (getTabPlacement()) {
+            case LEFT, RIGHT -> forward
+                    ? SwingContentTransition.Direction.VERTICAL_FORWARD
+                    : SwingContentTransition.Direction.VERTICAL_BACKWARD;
+            default -> forward
+                    ? SwingContentTransition.Direction.HORIZONTAL_FORWARD
+                    : SwingContentTransition.Direction.HORIZONTAL_BACKWARD;
+        };
     }
 
     /// Delegates selection to the standard tab implementation without recursively capturing another frame.

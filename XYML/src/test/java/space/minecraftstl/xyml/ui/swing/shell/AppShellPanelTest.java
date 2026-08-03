@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
@@ -244,6 +245,9 @@ public final class AppShellPanelTest {
                         () -> assertEquals(1, panel.pageDeck().getComponentCount()),
                         () -> assertNull(instancesPage.getParent()),
                         () -> assertSame(panel.pageDeck(), downloadsPage.getParent()),
+                        () -> assertEquals(
+                                SwingContentTransition.Direction.VERTICAL_FORWARD,
+                                panel.pageDeck().transitionDirection()),
                         () -> assertTrue(panel.pageDeck().isTransitionRunning()));
 
                 animator.setMotionPolicy(MotionPolicy.OFF);
@@ -255,6 +259,9 @@ public final class AppShellPanelTest {
                         () -> assertEquals(1, panel.pageDeck().getComponentCount()),
                         () -> assertSame(panel.pageDeck(), instancesPage.getParent()),
                         () -> assertNull(downloadsPage.getParent()),
+                        () -> assertEquals(
+                                SwingContentTransition.Direction.VERTICAL_BACKWARD,
+                                panel.pageDeck().transitionDirection()),
                         () -> assertTrue(panel.pageDeck().isTransitionRunning()));
 
                 animator.setMotionPolicy(MotionPolicy.OFF);

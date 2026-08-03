@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.JComponent;
+import javax.swing.RepaintManager;
 import javax.swing.SwingUtilities;
 import java.awt.AlphaComposite;
 import java.awt.Component;
@@ -29,9 +30,13 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsConfiguration;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.Toolkit;
 import java.awt.Transparency;
+import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Objects;
 
 /// Animates content replacement by composing cached frames from both sides of the replacement.
@@ -46,22 +51,40 @@ public final class SwingContentTransition {
     @NotNullByDefault
     public enum Direction {
         /// A later destination enters from the right while its predecessor leaves to the left.
-        FORWARD(1),
+        HORIZONTAL_FORWARD(true, 1),
 
         /// An earlier destination enters from the left while its predecessor leaves to the right.
-        BACKWARD(-1);
+        HORIZONTAL_BACKWARD(true, -1),
 
-        /// Sign applied to the incoming frame's initial horizontal offset.
+        /// A later destination enters from below while its predecessor leaves upward.
+        VERTICAL_FORWARD(false, 1),
+
+        /// An earlier destination enters from above while its predecessor leaves downward.
+        VERTICAL_BACKWARD(false, -1);
+
+        /// Whether movement follows the horizontal rather than vertical axis.
+        private final boolean horizontal;
+
+        /// Sign applied to the incoming frame's initial offset on the selected axis.
         private final int incomingOffsetSign;
 
         /// Creates one stable direction definition.
         ///
+        /// @param horizontal whether movement follows the horizontal axis
         /// @param incomingOffsetSign either positive one for forward or negative one for backward
-        Direction(int incomingOffsetSign) {
+        Direction(boolean horizontal, int incomingOffsetSign) {
+            this.horizontal = horizontal;
             this.incomingOffsetSign = incomingOffsetSign;
         }
 
-        /// Returns the incoming frame's initial horizontal offset sign.
+        /// Returns whether movement follows the horizontal axis.
+        ///
+        /// @return true for horizontal movement and false for vertical movement
+        private boolean isHorizontal() {
+            return horizontal;
+        }
+
+        /// Returns the incoming frame's initial offset sign.
         ///
         /// @return positive one for forward or negative one for backward
         private int incomingOffsetSign() {
@@ -72,6 +95,10 @@ public final class SwingContentTransition {
     /// Client-property key carrying the nearest shared animation context.
     private static final String CONTEXT_PROPERTY = SwingContentTransition.class.getName() + ".context";
 
+    /// EDT-local marker preventing root overlays from being baked into internal transition frames.
+    private static final ThreadLocal<Boolean> FRAME_CAPTURE_IN_PROGRESS =
+            ThreadLocal.withInitial(() -> Boolean.FALSE);
+
     /// Default travel for compact navigation inside one page.
     private static final int DEFAULT_TRAVEL = 12;
 
@@ -81,7 +108,7 @@ public final class SwingContentTransition {
     /// Optional direct context used by hosts that already receive explicit animation dependencies.
     private final @Nullable AnimationContext explicitContext;
 
-    /// Maximum horizontal travel of either cached frame.
+    /// Maximum travel of either cached frame on the selected axis.
     private final int travel;
 
     /// Cached visual state from immediately before content replacement.
@@ -94,7 +121,7 @@ public final class SwingContentTransition {
     private @Nullable Rectangle frameBounds;
 
     /// Spatial direction used by the current or most recent transition.
-    private Direction direction = Direction.FORWARD;
+    private Direction direction = Direction.HORIZONTAL_FORWARD;
 
     /// Current eased transition progress from zero to one.
     private double progress = 1.0;
@@ -114,7 +141,7 @@ public final class SwingContentTransition {
     /// @param host component whose paint method will call [#paintFrames(Graphics)]
     /// @param animator shared animation scheduler and policy owner
     /// @param duration non-negative authored transition duration
-    /// @param travel non-negative maximum horizontal travel
+    /// @param travel non-negative maximum travel on the selected axis
     public SwingContentTransition(
             JComponent host,
             SwingAnimator animator,
@@ -127,7 +154,7 @@ public final class SwingContentTransition {
     ///
     /// @param host transition paint host
     /// @param explicitContext direct context, or null for ancestor lookup
-    /// @param travel non-negative maximum horizontal travel
+    /// @param travel non-negative maximum travel on the selected axis
     private SwingContentTransition(
             JComponent host,
             @Nullable AnimationContext explicitContext,
@@ -151,12 +178,19 @@ public final class SwingContentTransition {
                 new AnimationContext(animator, duration));
     }
 
+    /// Returns whether the EDT is currently painting one internal cached transition frame.
+    ///
+    /// @return true only during synchronous transition capture
+    static boolean isFrameCaptureInProgress() {
+        return FRAME_CAPTURE_IN_PROGRESS.get();
+    }
+
     /// Replaces content with the default forward spatial direction.
     ///
     /// @param outgoingContent currently visible content to capture, or null before initial display
     /// @param contentChange synchronous content replacement action
     public void transitionFrom(@Nullable JComponent outgoingContent, Runnable contentChange) {
-        transitionFrom(outgoingContent, Direction.FORWARD, contentChange);
+        transitionFrom(outgoingContent, Direction.HORIZONTAL_FORWARD, contentChange);
     }
 
     /// Replaces content after capturing both visual states and starts a lightweight cached-frame transition.
@@ -235,8 +269,24 @@ public final class SwingContentTransition {
             int sign = direction.incomingOffsetSign();
             int outgoingOffset = (int) Math.round(-sign * travel * progress);
             int incomingOffset = (int) Math.round(sign * travel * (1.0 - progress));
-            drawFrame(transitionGraphics, outgoing, bounds, outgoingOffset, 1.0 - progress);
-            drawFrame(transitionGraphics, incoming, bounds, incomingOffset, progress);
+            int outgoingX = direction.isHorizontal() ? outgoingOffset : 0;
+            int outgoingY = direction.isHorizontal() ? 0 : outgoingOffset;
+            int incomingX = direction.isHorizontal() ? incomingOffset : 0;
+            int incomingY = direction.isHorizontal() ? 0 : incomingOffset;
+            drawFrame(
+                    transitionGraphics,
+                    outgoing,
+                    bounds,
+                    outgoingX,
+                    outgoingY,
+                    1.0 - progress);
+            drawFrame(
+                    transitionGraphics,
+                    incoming,
+                    bounds,
+                    incomingX,
+                    incomingY,
+                    progress);
         } finally {
             transitionGraphics.dispose();
         }
@@ -264,8 +314,31 @@ public final class SwingContentTransition {
     /// Returns the spatial direction used by the current or most recent transition.
     ///
     /// @return stable transition direction
-    Direction direction() {
+    public Direction direction() {
         return direction;
+    }
+
+    /// Returns the content-only bounds currently replaced by cached frames.
+    ///
+    /// @return defensive bounds copy, or null while no transition is active
+    @Nullable Rectangle activeFrameBounds() {
+        @Nullable Rectangle bounds = frameBounds;
+        return bounds == null ? null : new Rectangle(bounds);
+    }
+
+    /// Converts a positive logical length to the nearest positive device-pixel length.
+    ///
+    /// @param logicalLength positive component length in Swing coordinates
+    /// @param scale positive finite device scale
+    /// @return positive device-pixel length
+    static int scaledPixelLength(int logicalLength, double scale) {
+        if (logicalLength <= 0) {
+            throw new IllegalArgumentException("logicalLength must be positive");
+        }
+        if (!Double.isFinite(scale) || scale <= 0.0) {
+            throw new IllegalArgumentException("scale must be positive and finite");
+        }
+        return Math.max(1, (int) Math.round(logicalLength * scale));
     }
 
     /// Converts one direct or nested content component's bounds into clipped host coordinates.
@@ -289,12 +362,39 @@ public final class SwingContentTransition {
         if (bounds.width <= 0 || bounds.height <= 0) {
             return null;
         }
-        BufferedImage frame = createFrame(bounds.width, bounds.height);
+        JComponent captureSurface = resolveCaptureSurface();
+        Rectangle captureBounds = captureSurface == host
+                ? new Rectangle(bounds)
+                : SwingUtilities.convertRectangle(host, bounds, captureSurface);
+        @Nullable GraphicsConfiguration configuration = captureSurface.getGraphicsConfiguration();
+        AffineTransform deviceTransform = configuration == null
+                ? new AffineTransform()
+                : configuration.getDefaultTransform();
+        double deviceScaleX = positiveScale(deviceTransform.getScaleX());
+        double deviceScaleY = positiveScale(deviceTransform.getScaleY());
+        int pixelWidth = scaledPixelLength(captureBounds.width, deviceScaleX);
+        int pixelHeight = scaledPixelLength(captureBounds.height, deviceScaleY);
+        BufferedImage frame = createFrame(
+                pixelWidth,
+                pixelHeight,
+                configuration,
+                captureSurface.isOpaque());
         Graphics2D frameGraphics = frame.createGraphics();
+        RepaintManager repaintManager = RepaintManager.currentManager(captureSurface);
+        boolean doubleBufferingEnabled = repaintManager.isDoubleBufferingEnabled();
+        boolean previousCaptureState = FRAME_CAPTURE_IN_PROGRESS.get();
         try {
-            frameGraphics.translate(-bounds.x, -bounds.y);
-            host.printAll(frameGraphics);
+            FRAME_CAPTURE_IN_PROGRESS.set(Boolean.TRUE);
+            repaintManager.setDoubleBufferingEnabled(false);
+            applyDesktopFontRenderingHints(frameGraphics);
+            frameGraphics.scale(
+                    (double) pixelWidth / captureBounds.width,
+                    (double) pixelHeight / captureBounds.height);
+            frameGraphics.translate(-captureBounds.x, -captureBounds.y);
+            captureSurface.paint(frameGraphics);
         } finally {
+            FRAME_CAPTURE_IN_PROGRESS.set(previousCaptureState);
+            repaintManager.setDoubleBufferingEnabled(doubleBufferingEnabled);
             frameGraphics.dispose();
         }
         return frame;
@@ -302,14 +402,64 @@ public final class SwingContentTransition {
 
     /// Allocates a display-compatible translucent frame when graphics configuration is available.
     ///
-    /// @param width positive frame width
-    /// @param height positive frame height
-    /// @return transparent image suitable for repeated alpha composition
-    private BufferedImage createFrame(int width, int height) {
-        @Nullable GraphicsConfiguration configuration = host.getGraphicsConfiguration();
+    /// @param width positive frame width in device pixels
+    /// @param height positive frame height in device pixels
+    /// @param configuration host graphics configuration, or null before display attachment
+    /// @param opaque whether the fully composed capture surface is opaque
+    /// @return cached image suitable for repeated alpha composition
+    private static BufferedImage createFrame(
+            int width,
+            int height,
+            @Nullable GraphicsConfiguration configuration,
+            boolean opaque) {
+        int transparency = opaque ? Transparency.OPAQUE : Transparency.TRANSLUCENT;
         return configuration == null
-                ? new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE)
-                : configuration.createCompatibleImage(width, height, Transparency.TRANSLUCENT);
+                ? new BufferedImage(
+                        width,
+                        height,
+                        opaque ? BufferedImage.TYPE_INT_RGB : BufferedImage.TYPE_INT_ARGB_PRE)
+                : configuration.createCompatibleImage(width, height, transparency);
+    }
+
+    /// Resolves the nearest context-bearing ancestor whose paint contains the composed page background.
+    ///
+    /// @return shared animation root, or the host when no inherited context surface exists
+    private JComponent resolveCaptureSurface() {
+        @Nullable Component cursor = host;
+        while (cursor != null) {
+            if (cursor instanceof JComponent component
+                    && component.getClientProperty(CONTEXT_PROPERTY) instanceof AnimationContext) {
+                return component;
+            }
+            cursor = cursor.getParent();
+        }
+        return host;
+    }
+
+    /// Normalizes one graphics-transform scale for defensive off-screen capture.
+    ///
+    /// @param scale graphics-configuration transform scale
+    /// @return positive finite scale, falling back to one
+    private static double positiveScale(double scale) {
+        double magnitude = Math.abs(scale);
+        return Double.isFinite(magnitude) && magnitude > 0.0 ? magnitude : 1.0;
+    }
+
+    /// Applies desktop LCD antialiasing and fractional-metrics hints to an off-screen frame when available.
+    ///
+    /// @param graphics fresh frame graphics
+    private static void applyDesktopFontRenderingHints(Graphics2D graphics) {
+        @Nullable Object desktopHints = Toolkit.getDefaultToolkit()
+                .getDesktopProperty("awt.font.desktophints");
+        if (!(desktopHints instanceof Map<?, ?> hints)) {
+            return;
+        }
+        for (Map.Entry<?, ?> entry : hints.entrySet()) {
+            @Nullable Object value = entry.getValue();
+            if (entry.getKey() instanceof RenderingHints.Key key && value != null) {
+                graphics.setRenderingHint(key, value);
+            }
+        }
     }
 
     /// Lays out only visible incoming branches before their one-time capture.
@@ -330,12 +480,14 @@ public final class SwingContentTransition {
     /// @param frame cached visual state
     /// @param bounds host-relative frame bounds
     /// @param horizontalOffset current signed horizontal offset
+    /// @param verticalOffset current signed vertical offset
     /// @param opacity current opacity between zero and one
     private static void drawFrame(
             Graphics2D graphics,
             BufferedImage frame,
             Rectangle bounds,
             int horizontalOffset,
+            int verticalOffset,
             double opacity) {
         if (opacity <= 0.0) {
             return;
@@ -344,7 +496,13 @@ public final class SwingContentTransition {
         try {
             float boundedOpacity = (float) Math.max(0.0, Math.min(1.0, opacity));
             frameGraphics.setComposite(AlphaComposite.SrcOver.derive(boundedOpacity));
-            frameGraphics.drawImage(frame, bounds.x + horizontalOffset, bounds.y, null);
+            frameGraphics.drawImage(
+                    frame,
+                    bounds.x + horizontalOffset,
+                    bounds.y + verticalOffset,
+                    bounds.width,
+                    bounds.height,
+                    null);
         } finally {
             frameGraphics.dispose();
         }
@@ -408,11 +566,19 @@ public final class SwingContentTransition {
     ///
     /// @param bounds original host-relative frame bounds
     private void repaintFrameBounds(Rectangle bounds) {
-        host.repaint(
-                bounds.x - travel,
-                bounds.y,
-                bounds.width + 2 * travel,
-                bounds.height);
+        if (direction.isHorizontal()) {
+            host.repaint(
+                    bounds.x - travel,
+                    bounds.y,
+                    bounds.width + 2 * travel,
+                    bounds.height);
+        } else {
+            host.repaint(
+                    bounds.x,
+                    bounds.y - travel,
+                    bounds.width,
+                    bounds.height + 2 * travel);
+        }
     }
 
     /// Immutable shared animator and authored duration inherited by nested content transitions.

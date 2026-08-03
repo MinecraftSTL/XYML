@@ -52,7 +52,7 @@ public final class SwingButtonRippleSupportTest {
                 () -> assertEquals(0.0F, SwingButtonRippleSupport.rippleOpacity(1.0)));
     }
 
-    /// Two presses on one button retain separate animations until global policy completes both.
+    /// Two presses survive removal of their source button and remain independent until normal completion.
     @Test
     public void repeatedPressesAnimateConcurrently() {
         SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 10_000);
@@ -80,10 +80,11 @@ public final class SwingButtonRippleSupportTest {
             }
             assertEquals(2, support.activeRippleCount());
 
+            root.remove(button);
+            assertEquals(2, support.activeRippleCount());
+
             animator.setMotionPolicy(MotionPolicy.OFF);
-            assertAll(
-                    () -> assertEquals(0, support.activeRippleCount()),
-                    () -> assertTrue(button.getMouseListeners().length > 0));
+            assertEquals(0, support.activeRippleCount());
             support.close();
         });
     }
