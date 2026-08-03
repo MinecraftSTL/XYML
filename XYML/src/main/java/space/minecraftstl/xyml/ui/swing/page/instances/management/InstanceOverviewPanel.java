@@ -39,6 +39,10 @@ import javax.swing.UIManager;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.geom.RoundRectangle2D;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -841,6 +845,36 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     /// Preview label whose contrast surface follows live FlatLaf theme changes.
     @NotNullByDefault
     private static final class IconPreviewLabel extends JLabel {
+        /// Clips the background and instance image to the current component corner radius.
+        ///
+        /// @param graphics target graphics context
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            int arc = Math.max(0, UIManager.getInt("Component.arc"));
+            if (arc == 0 || getWidth() <= 0 || getHeight() <= 0) {
+                super.paintComponent(graphics);
+                return;
+            }
+
+            Graphics2D roundedGraphics = (Graphics2D) graphics.create();
+            try {
+                roundedGraphics.setRenderingHint(
+                        RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                int boundedArc = Math.min(arc, Math.min(getWidth(), getHeight()));
+                roundedGraphics.clip(new RoundRectangle2D.Float(
+                        0,
+                        0,
+                        getWidth(),
+                        getHeight(),
+                        boundedArc,
+                        boundedArc));
+                super.paintComponent(roundedGraphics);
+            } finally {
+                roundedGraphics.dispose();
+            }
+        }
+
         /// Refreshes the preview background after the application switches light or dark mode.
         @Override
         public void updateUI() {
