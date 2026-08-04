@@ -33,6 +33,7 @@ import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import java.awt.AlphaComposite;
 import java.awt.Color;
@@ -46,6 +47,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Renders a title-bar workflow above persistent instance management and lazy overlay pages.
 @NotNullByDefault
@@ -104,6 +107,12 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
     /// Current decoded background and native-transparency paint state.
     private WindowBackgroundVisual windowBackground = initialWindowBackground();
+
+    /// Next physical navigation position whose page has not yet been considered for preloading.
+    private int nextSidebarPreloadIndex;
+
+    /// Whether the first completed shell paint has started incremental sidebar-page preloading.
+    private boolean sidebarPreloadingStarted;
 
     /// Whether this shell has released all cached page resources.
     private boolean closed;
@@ -240,13 +249,53 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Paints ordinary children before adding non-intercepting button ripple feedback above them.
+    /// Paints ordinary children before adding button feedback and scheduling post-first-paint page preloading.
     ///
     /// @param graphics target Swing graphics
     @Override
     protected void paintChildren(Graphics graphics) {
         super.paintChildren(graphics);
         buttonRippleSupport.paintRipples(graphics);
+        if (isShowing()) {
+            startSidebarPagePreloading();
+        }
+    }
+
+    /// Starts one-page-per-event-turn preloading after the persistent main page has painted.
+    ///
+    /// Package visibility keeps the incremental scheduling contract directly testable without a native window.
+    void startSidebarPagePreloading() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || sidebarPreloadingStarted) {
+            return;
+        }
+        sidebarPreloadingStarted = true;
+        SwingUtilities.invokeLater(this::preloadNextSidebarPage);
+    }
+
+    /// Creates at most one uncached sidebar page before yielding to queued paint and input events.
+    private void preloadNextSidebarPage() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+
+        while (nextSidebarPreloadIndex < NAVIGATION_ORDER.size()) {
+            ShellPageId page = NAVIGATION_ORDER.get(nextSidebarPreloadIndex++);
+            if (pageCache.isCached(page)) {
+                continue;
+            }
+            try {
+                pageCache.getOrCreate(page);
+            } catch (RuntimeException failure) {
+                LOG.warning("Failed to preload sidebar page " + page, failure);
+            }
+            break;
+        }
+
+        if (!closed && nextSidebarPreloadIndex < NAVIGATION_ORDER.size()) {
+            SwingUtilities.invokeLater(this::preloadNextSidebarPage);
+        }
     }
 
     /// Scales one image to cover the shell while preserving its aspect ratio.
