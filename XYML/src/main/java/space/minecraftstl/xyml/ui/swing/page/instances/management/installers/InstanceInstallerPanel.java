@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
+import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
@@ -90,7 +91,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     private final TaskProgressHostPanel progressHost;
 
     /// Stable top-level navigation between installed-state and online-loader workflows.
-    private final JTabbedPane tabs = new JTabbedPane();
+    private final JTabbedPane tabs = new AnimatedTabbedPane();
 
     /// Mutable model for recognized loader rows in the installed-state page.
     private final DefaultListModel<InstanceInstallerEntry> installedLoaderModel = new DefaultListModel<>();

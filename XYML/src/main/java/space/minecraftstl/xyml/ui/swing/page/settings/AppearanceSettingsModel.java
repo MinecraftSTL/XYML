@@ -51,6 +51,11 @@ public interface AppearanceSettingsModel {
     /// @param enabled whether animation should remain enabled
     void setAnimationsEnabled(boolean enabled);
 
+    /// Persists a supported launcher animation speed.
+    ///
+    /// @param percentage requested speed percentage
+    void setAnimationSpeedPercentage(int percentage);
+
     /// Persists a complete theme-color source and palette-style configuration.
     ///
     /// @param themeColor complete replacement theme-color settings

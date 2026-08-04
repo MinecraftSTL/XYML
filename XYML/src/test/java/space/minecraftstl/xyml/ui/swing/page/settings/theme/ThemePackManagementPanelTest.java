@@ -278,6 +278,7 @@ public final class ThemePackManagementPanelTest {
                         "深色",
                         "圆角半径",
                         "启用动画",
+                        "动画速度",
                         AppearanceBackgroundStrings.simplifiedChinese()),
                 themePanel));
         try {
@@ -757,6 +758,12 @@ public final class ThemePackManagementPanelTest {
         /// Rejects unexpected animation writes from the noninteractive visual test.
         @Override
         public void setAnimationsEnabled(boolean enabled) {
+            throw new UnsupportedOperationException("Static visual model does not accept writes");
+        }
+
+        /// Rejects unexpected animation-speed writes from the noninteractive visual test.
+        @Override
+        public void setAnimationSpeedPercentage(int percentage) {
             throw new UnsupportedOperationException("Static visual model does not accept writes");
         }
 

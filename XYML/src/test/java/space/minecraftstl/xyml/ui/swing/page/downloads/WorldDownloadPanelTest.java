@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
@@ -46,6 +47,7 @@ import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies that the download center renders remote and local world workflows without eager network work.
@@ -66,6 +68,7 @@ final class WorldDownloadPanelTest {
             BufferedImage image = onEdt(() -> {
                 panel.setSize(1024, 720);
                 JTabbedPane categories = panel.categoryTabs();
+                assertInstanceOf(AnimatedTabbedPane.class, categories);
                 assertFalse(panel.isOpaque());
                 assertFalse(categories.isOpaque());
                 for (int index = 0; index < categories.getTabCount(); index++) {

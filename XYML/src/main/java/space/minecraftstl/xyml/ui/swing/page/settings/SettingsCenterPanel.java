@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.setting.DownloadSource;
 import space.minecraftstl.xyml.setting.EnumCommonDirectory;
 import space.minecraftstl.xyml.setting.ProxyType;
 import space.minecraftstl.xyml.task.Schedulers;
+import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
@@ -114,7 +115,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     private final NBTSettingsPanel nbtSettingsPanel;
 
     /// Stable top-level navigation among functional settings pages.
-    private final JTabbedPane tabs = new JTabbedPane();
+    private final JTabbedPane tabs = new AnimatedTabbedPane();
 
     /// Locale selector with user-facing localized display names.
     private final JComboBox<SupportedLocale> languageBox;

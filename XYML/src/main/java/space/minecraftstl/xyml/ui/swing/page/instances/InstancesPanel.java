@@ -25,6 +25,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
@@ -47,6 +48,7 @@ import javax.swing.event.ListDataListener;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Font;
+import java.awt.Graphics;
 import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
@@ -103,6 +105,9 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
 
     /// Cards that switch between the lazy list and exact empty state.
     private final JPanel listCards = new JPanel(new CardLayout());
+
+    /// Snapshot-composited transition between the instance list and management details.
+    private final SwingContentTransition rootTransition;
 
     /// Refresh command.
     private final JButton refreshButton = new JButton();
@@ -188,6 +193,9 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
     /// Whether repository selection changes should keep the persistent management surface synchronized.
     private boolean persistentManagementRequested;
 
+    /// Whether the next coordinator-provided management component should transition into view.
+    private boolean animateNextManagementMount = true;
+
     /// Whether the instance-list side page is currently exposed by the shell.
     private boolean instanceListPageVisible;
 
@@ -217,6 +225,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.managementCoordinator = Objects.requireNonNull(managementCoordinator, "managementCoordinator");
+        rootTransition = new SwingContentTransition(this);
         filteredSource = new FilteredInstancesDataSource(model);
         choiceList = new ViewportChoiceList<>(filteredSource, new InstanceListCellRenderer());
 
@@ -270,6 +279,14 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         return choiceList;
     }
 
+    /// Returns whether the list and management-details root cards are currently transitioning.
+    ///
+    /// @return true while a cached outgoing root card remains active
+    boolean isRootTransitionRunning() {
+        EdtDispatcher.requireEventDispatchThread();
+        return rootTransition.isRunning();
+    }
+
     /// Closes any active instance-management view and restores the installed-instance list.
     ///
     /// @return asynchronous coordinator completion
@@ -290,20 +307,30 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         EdtDispatcher.requireEventDispatchThread();
         persistentManagementRequested = false;
         instanceListPageVisible = true;
-        ((CardLayout) getLayout()).show(this, INSTANCES_VIEW_CARD);
-        refreshRootCards();
+        if (!instancesWorkspace.isVisible()) {
+            showRootCard(INSTANCES_VIEW_CARD, true, () -> { });
+        }
     }
 
     /// Reveals management for the model-selected instance, creating or replacing it only when necessary.
     ///
     /// @return completion of any required coordinator transition
     public CompletionStage<@Nullable Void> showSelectedInstanceManagement() {
+        return showSelectedInstanceManagement(true);
+    }
+
+    /// Reveals management while optionally suppressing a shell-preparation transition.
+    ///
+    /// @param animate whether a visible list-to-management replacement should animate
+    /// @return completion of any required coordinator transition
+    public CompletionStage<@Nullable Void> showSelectedInstanceManagement(boolean animate) {
         EdtDispatcher.requireEventDispatchThread();
         persistentManagementRequested = true;
         instanceListPageVisible = false;
         @Nullable String serializedSelectedId = selectedInstanceId(displayedSnapshot());
         if (serializedSelectedId == null) {
             managementContextRevision = Long.MIN_VALUE;
+            animateNextManagementMount = animate;
             CompletionStage<@Nullable Void> completion = managementCoordinator.returnToInstanceList();
             persistentManagementRequested = true;
             return completion;
@@ -313,17 +340,23 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         if (selectedId.equals(managementCoordinator.currentInstanceId())
                 && managementContextRevision == requestedContextRevision
                 && managementWorkspace.getComponentCount() > 0) {
-            ((CardLayout) getLayout()).show(this, MANAGEMENT_VIEW_CARD);
-            refreshRootCards();
+            if (!managementWorkspace.isVisible()) {
+                showRootCard(MANAGEMENT_VIEW_CARD, animate, () -> { });
+            }
+            animateNextManagementMount = true;
             return CompletableFuture.completedFuture(null);
         }
+        animateNextManagementMount = animate;
         CompletionStage<@Nullable Void> completion = managementCoordinator.open(selectedId);
         completion.whenComplete((@Nullable Void ignored, @Nullable Throwable failure) -> EdtDispatcher.execute(() -> {
-            if (!closed
-                    && failure == null
-                    && selectedId.equals(managementCoordinator.currentInstanceId())
-                    && requestedContextRevision == model.selectionContextRevision()) {
-                managementContextRevision = requestedContextRevision;
+            if (!closed) {
+                if (failure == null
+                        && selectedId.equals(managementCoordinator.currentInstanceId())
+                        && requestedContextRevision == model.selectionContextRevision()) {
+                    managementContextRevision = requestedContextRevision;
+                } else if (failure != null) {
+                    animateNextManagementMount = true;
+                }
             }
         }));
         return completion;
@@ -334,6 +367,23 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
     public void close() {
         closed = true;
         EdtDispatcher.executeAndWait(this::closeOnEventDispatchThread);
+    }
+
+    /// Paints cached list or management frames during a transition and otherwise paints live details.
+    ///
+    /// @param graphics instance-page graphics
+    @Override
+    protected void paintChildren(Graphics graphics) {
+        if (!rootTransition.paintFrames(graphics)) {
+            super.paintChildren(graphics);
+        }
+    }
+
+    /// Releases a cached internal transition before the instance page leaves the display hierarchy.
+    @Override
+    public void removeNotify() {
+        rootTransition.settle();
+        super.removeNotify();
     }
 
     /// Builds the stable title, command, list, and status layout.
@@ -594,6 +644,7 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
             return;
         }
         resourcesClosed = true;
+        rootTransition.settle();
         revealDefaultPageCommand = () -> { };
         pendingUserSelectionIndex = -1;
         pendingModelSelectionId = null;
@@ -679,6 +730,34 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
         repaint();
     }
 
+    /// Applies one root-card replacement with optional inherited snapshot animation.
+    ///
+    /// @param card destination card identifier
+    /// @param animate whether to animate between the currently visible and destination cards
+    /// @param preparation content mutation that must run immediately before card selection
+    private void showRootCard(String card, boolean animate, Runnable preparation) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(card, "card");
+        Objects.requireNonNull(preparation, "preparation");
+        @Nullable JComponent outgoing = instancesWorkspace.isVisible()
+                ? instancesWorkspace
+                : managementWorkspace.isVisible() ? managementWorkspace : null;
+        Runnable replacement = () -> {
+            preparation.run();
+            ((CardLayout) getLayout()).show(this, card);
+        };
+        if (animate) {
+            SwingContentTransition.Direction direction = MANAGEMENT_VIEW_CARD.equals(card)
+                    ? SwingContentTransition.Direction.HORIZONTAL_FORWARD
+                    : SwingContentTransition.Direction.HORIZONTAL_BACKWARD;
+            rootTransition.transitionFrom(outgoing, direction, replacement);
+        } else {
+            rootTransition.settle();
+            replacement.run();
+        }
+        refreshRootCards();
+    }
+
     /// Card host implementation that never assumes ownership of a management view.
     @NotNullByDefault
     private final class PanelManagementHost implements InstanceManagementHost {
@@ -693,12 +772,12 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
             persistentManagementRequested = true;
             instanceListPageVisible = false;
             managementContextRevision = model.selectionContextRevision();
-            managementWorkspace.removeAll();
-            managementWorkspace.add(component, BorderLayout.CENTER);
-            ((CardLayout) InstancesPanel.this.getLayout()).show(
-                    InstancesPanel.this,
-                    MANAGEMENT_VIEW_CARD);
-            refreshManagementCards();
+            boolean animate = animateNextManagementMount;
+            animateNextManagementMount = true;
+            showRootCard(MANAGEMENT_VIEW_CARD, animate, () -> {
+                managementWorkspace.removeAll();
+                managementWorkspace.add(component, BorderLayout.CENTER);
+            });
             if (revealDefaultPage) {
                 revealDefaultPageCommand.run();
             }
@@ -712,16 +791,9 @@ public final class InstancesPanel extends JPanel implements AutoCloseable {
                 instanceListPageVisible = true;
             }
             managementContextRevision = Long.MIN_VALUE;
-            managementWorkspace.removeAll();
-            ((CardLayout) InstancesPanel.this.getLayout()).show(
-                    InstancesPanel.this,
-                    INSTANCES_VIEW_CARD);
-            refreshManagementCards();
-        }
-
-        /// Revalidates and repaints the dynamic mount and root card container.
-        private void refreshManagementCards() {
-            refreshRootCards();
+            boolean animate = animateNextManagementMount;
+            animateNextManagementMount = true;
+            showRootCard(INSTANCES_VIEW_CARD, animate, managementWorkspace::removeAll);
         }
     }
 }
