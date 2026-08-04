@@ -29,11 +29,11 @@ import java.util.Objects;
 
 /// Transparent vertical-scroll content that always follows its viewport width.
 @NotNullByDefault
-final class ViewportTrackingPanel extends JPanel implements Scrollable {
+public final class ViewportTrackingPanel extends JPanel implements Scrollable {
     /// Creates a panel using the supplied content layout.
     ///
     /// @param layout content layout manager
-    ViewportTrackingPanel(LayoutManager layout) {
+    public ViewportTrackingPanel(LayoutManager layout) {
         super(Objects.requireNonNull(layout, "layout"));
         setOpaque(false);
     }
