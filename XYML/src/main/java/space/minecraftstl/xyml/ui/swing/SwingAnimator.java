@@ -21,11 +21,17 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.setting.AnimationSpeedSettings;
 
-import javax.swing.Timer;
+import javax.swing.SwingUtilities;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.DoubleConsumer;
 
@@ -35,8 +41,21 @@ public final class SwingAnimator {
     /// Authored animation duration multiplier represented as a percentage.
     private static final int NORMAL_SPEED_PERCENTAGE = 100;
 
-    /// Shared coalescing frame clock used by every active animation.
-    private final Timer frameTimer;
+    /// Upper bound on frame tasks waiting for the EDT; elapsed-time progress makes extra tasks disposable.
+    private static final int MAX_PENDING_FRAME_TICKS = 4;
+
+    /// Shared high-resolution scheduler used to request EDT frame delivery.
+    private static final ScheduledExecutorService FRAME_SCHEDULER =
+            Executors.newSingleThreadScheduledExecutor(new DaemonThreadFactory());
+
+    /// Delay between high-resolution scheduler ticks.
+    private final int frameDelayMillis;
+
+    /// Bounds frame tasks waiting for the EDT while allowing one wake-up to process several ticks.
+    private final AtomicInteger pendingFrameTicks = new AtomicInteger();
+
+    /// Current scheduler task, or null while no animation is active.
+    private @Nullable ScheduledFuture<?> frameSchedule;
 
     /// Animations currently owned by this animator; accessed only on the EDT.
     private final Set<RunningAnimation> activeAnimations = new HashSet<>();
@@ -50,7 +69,7 @@ public final class SwingAnimator {
     /// Creates an animator without choosing an implicit frame rate.
     ///
     /// @param initialMotionPolicy the initial motion-accessibility policy
-    /// @param frameDelayMillis the positive delay between Swing timer events
+    /// @param frameDelayMillis the positive delay between scheduler frame requests
     public SwingAnimator(MotionPolicy initialMotionPolicy, int frameDelayMillis) {
         this(initialMotionPolicy, frameDelayMillis, NORMAL_SPEED_PERCENTAGE);
     }
@@ -58,7 +77,7 @@ public final class SwingAnimator {
     /// Creates an animator with explicit frame timing and initial speed.
     ///
     /// @param initialMotionPolicy the initial motion-accessibility policy
-    /// @param frameDelayMillis the positive delay between Swing timer events
+    /// @param frameDelayMillis the positive delay between scheduler frame requests
     /// @param animationSpeedPercentage supported speed where one hundred preserves duration and infinity is instant
     public SwingAnimator(
             MotionPolicy initialMotionPolicy,
@@ -73,8 +92,7 @@ public final class SwingAnimator {
                     "Unsupported animation speed percentage: " + animationSpeedPercentage);
         }
         this.animationSpeedPercentage = animationSpeedPercentage;
-        frameTimer = new Timer(frameDelayMillis, event -> tickActiveAnimations());
-        frameTimer.setCoalesce(true);
+        this.frameDelayMillis = frameDelayMillis;
     }
 
     /// Returns the current motion-accessibility policy.
@@ -229,7 +247,32 @@ public final class SwingAnimator {
         return Math.max(1L, Math.min(Long.MAX_VALUE, Math.round(scaled)));
     }
 
-    /// Advances one stable snapshot of all animations from the shared EDT frame clock.
+    /// Requests one bounded EDT frame from the high-resolution scheduler thread.
+    private void requestFrameTick() {
+        int pending = pendingFrameTicks.incrementAndGet();
+        if (pending <= MAX_PENDING_FRAME_TICKS) {
+            SwingUtilities.invokeLater(() -> {
+                pendingFrameTicks.decrementAndGet();
+                tickActiveAnimations();
+            });
+        } else {
+            pendingFrameTicks.decrementAndGet();
+        }
+    }
+
+    /// Starts high-resolution scheduling after the first frame is visible.
+    private void startFrameScheduler() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (frameSchedule == null) {
+            frameSchedule = FRAME_SCHEDULER.scheduleAtFixedRate(
+                    this::requestFrameTick,
+                    frameDelayMillis,
+                    frameDelayMillis,
+                    TimeUnit.MILLISECONDS);
+        }
+    }
+
+    /// Advances one stable snapshot of all animations from a scheduled EDT frame.
     private void tickActiveAnimations() {
         EdtDispatcher.requireEventDispatchThread();
 
@@ -237,13 +280,29 @@ public final class SwingAnimator {
         for (RunningAnimation animation : snapshot) {
             animation.tick();
         }
-        stopFrameTimerWhenIdle();
+        stopFrameSchedulerWhenIdle();
     }
 
     /// Stops frame delivery after the final active animation leaves the shared clock.
-    private void stopFrameTimerWhenIdle() {
-        if (activeAnimations.isEmpty()) {
-            frameTimer.stop();
+    private void stopFrameSchedulerWhenIdle() {
+        if (activeAnimations.isEmpty() && frameSchedule != null) {
+            frameSchedule.cancel(false);
+            frameSchedule = null;
+        }
+    }
+
+    /// Creates daemon threads so the shared scheduler cannot keep the launcher alive after shutdown.
+    @NotNullByDefault
+    private static final class DaemonThreadFactory implements ThreadFactory {
+        /// Creates one named daemon scheduler thread.
+        ///
+        /// @param runnable scheduler task
+        /// @return daemon thread used by the shared frame scheduler
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(Objects.requireNonNull(runnable, "runnable"), "XYML-SwingAnimatorClock");
+            thread.setDaemon(true);
+            return thread;
         }
     }
 
@@ -253,7 +312,7 @@ public final class SwingAnimator {
         /// The animation exists but has not started.
         CREATED,
 
-        /// The Swing timer is advancing the animation.
+        /// The shared scheduler is advancing the animation.
         RUNNING,
 
         /// The caller stopped the animation before completion.
@@ -263,7 +322,7 @@ public final class SwingAnimator {
         FINISHED
     }
 
-    /// Owns one Swing timer and keeps all callback transitions on the EDT.
+    /// Owns one shared-scheduler registration and keeps all callback transitions on the EDT.
     @NotNullByDefault
     private final class RunningAnimation implements AnimationHandle {
         /// Total requested duration in nanoseconds.
@@ -307,7 +366,7 @@ public final class SwingAnimator {
             this.completion = completion;
         }
 
-        /// Emits the initial frame and starts timer delivery.
+        /// Emits the initial frame and starts scheduled frame delivery.
         private void start() {
             EdtDispatcher.requireEventDispatchThread();
 
@@ -317,7 +376,7 @@ public final class SwingAnimator {
             try {
                 frameConsumer.accept(easing.apply(0.0));
                 if (state == AnimationState.RUNNING) {
-                    frameTimer.start();
+                    startFrameScheduler();
                 }
             } catch (RuntimeException | Error e) {
                 cancelOnEventDispatchThread();
@@ -325,7 +384,7 @@ public final class SwingAnimator {
             }
         }
 
-        /// Applies the final state without starting a timer.
+        /// Applies the final state without starting scheduled frame delivery.
         private void completeImmediately() {
             EdtDispatcher.requireEventDispatchThread();
 
@@ -339,7 +398,7 @@ public final class SwingAnimator {
             }
         }
 
-        /// Recomputes progress from monotonic elapsed time for one timer event.
+        /// Recomputes progress from monotonic elapsed time for one scheduled frame.
         private void tick() {
             EdtDispatcher.requireEventDispatchThread();
 
@@ -361,7 +420,7 @@ public final class SwingAnimator {
             }
         }
 
-        /// Stops timer delivery, applies the final frame, and invokes completion.
+        /// Stops scheduled frame delivery, applies the final frame, and invokes completion.
         private void finishOnEventDispatchThread() {
             EdtDispatcher.requireEventDispatchThread();
 
@@ -370,7 +429,7 @@ public final class SwingAnimator {
             }
 
             activeAnimations.remove(this);
-            stopFrameTimerWhenIdle();
+            stopFrameSchedulerWhenIdle();
             try {
                 frameConsumer.accept(easing.apply(1.0));
                 state = AnimationState.FINISHED;
@@ -381,13 +440,13 @@ public final class SwingAnimator {
             }
         }
 
-        /// Cancels this animation and synchronously stops its timer on the EDT.
+        /// Cancels this animation and synchronously detaches it from the scheduler on the EDT.
         @Override
         public void cancel() {
             EdtDispatcher.executeAndWait(this::cancelOnEventDispatchThread);
         }
 
-        /// Stops timer delivery without applying another frame or invoking completion.
+        /// Stops scheduled frame delivery without applying another frame or invoking completion.
         private void cancelOnEventDispatchThread() {
             EdtDispatcher.requireEventDispatchThread();
 
@@ -396,11 +455,11 @@ public final class SwingAnimator {
             }
 
             activeAnimations.remove(this);
-            stopFrameTimerWhenIdle();
+            stopFrameSchedulerWhenIdle();
             state = AnimationState.CANCELLED;
         }
 
-        /// Returns whether timer frames are currently enabled for this animation.
+        /// Returns whether scheduled frames are currently enabled for this animation.
         ///
         /// @return `true` only while the animation is running
         @Override
