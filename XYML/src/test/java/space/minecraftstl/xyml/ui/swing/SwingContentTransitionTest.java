@@ -136,6 +136,16 @@ public final class SwingContentTransitionTest {
                 () -> assertEquals(960, SwingContentTransition.scaledPixelLength(480, 2.0)));
     }
 
+    /// Translation snaps to physical pixels at each common display scale without fractional resampling.
+    @Test
+    public void alignsOffsetsToDevicePixels() {
+        assertAll(
+                () -> assertEquals(3.0, SwingContentTransition.alignOffsetToDevicePixel(2.7, 1.0)),
+                () -> assertEquals(2.4, SwingContentTransition.alignOffsetToDevicePixel(2.7, 1.25)),
+                () -> assertEquals(2.5, SwingContentTransition.alignOffsetToDevicePixel(2.7, 2.0)),
+                () -> assertEquals(-2.5, SwingContentTransition.alignOffsetToDevicePixel(-2.7, 2.0)));
+    }
+
     /// Transparent content captures its context root so composed background pixels remain part of the frame.
     @Test
     public void capturesComposedContextSurfaceBehindTransparentContent() {
