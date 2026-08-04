@@ -266,13 +266,24 @@ public final class SwingContentTransition {
         Graphics2D transitionGraphics = (Graphics2D) graphics.create();
         try {
             transitionGraphics.clip(bounds);
+            AffineTransform deviceTransform = transitionGraphics.getTransform();
+            double deviceScaleX = positiveScale(deviceTransform.getScaleX());
+            double deviceScaleY = positiveScale(deviceTransform.getScaleY());
             int sign = direction.incomingOffsetSign();
             double outgoingOffset = -sign * travel * progress;
             double incomingOffset = sign * travel * (1.0 - progress);
-            double outgoingX = direction.isHorizontal() ? outgoingOffset : 0.0;
-            double outgoingY = direction.isHorizontal() ? 0.0 : outgoingOffset;
-            double incomingX = direction.isHorizontal() ? incomingOffset : 0.0;
-            double incomingY = direction.isHorizontal() ? 0.0 : incomingOffset;
+            double outgoingX = direction.isHorizontal()
+                    ? alignOffsetToDevicePixel(outgoingOffset, deviceScaleX)
+                    : 0.0;
+            double outgoingY = direction.isHorizontal()
+                    ? 0.0
+                    : alignOffsetToDevicePixel(outgoingOffset, deviceScaleY);
+            double incomingX = direction.isHorizontal()
+                    ? alignOffsetToDevicePixel(incomingOffset, deviceScaleX)
+                    : 0.0;
+            double incomingY = direction.isHorizontal()
+                    ? 0.0
+                    : alignOffsetToDevicePixel(incomingOffset, deviceScaleY);
             drawFrame(
                     transitionGraphics,
                     outgoing,
@@ -339,6 +350,21 @@ public final class SwingContentTransition {
             throw new IllegalArgumentException("scale must be positive and finite");
         }
         return Math.max(1, (int) Math.round(logicalLength * scale));
+    }
+
+    /// Snaps a logical translation to a physical pixel without forcing a full-frame resampling pass.
+    ///
+    /// @param logicalOffset requested translation in Swing coordinates
+    /// @param deviceScale positive finite device scale along the translated axis
+    /// @return nearest logical offset that lands on a physical pixel
+    static double alignOffsetToDevicePixel(double logicalOffset, double deviceScale) {
+        if (!Double.isFinite(logicalOffset)) {
+            throw new IllegalArgumentException("logicalOffset must be finite");
+        }
+        if (!Double.isFinite(deviceScale) || deviceScale <= 0.0) {
+            throw new IllegalArgumentException("deviceScale must be positive and finite");
+        }
+        return Math.rint(logicalOffset * deviceScale) / deviceScale;
     }
 
     /// Converts one direct or nested content component's bounds into clipped host coordinates.
@@ -479,8 +505,8 @@ public final class SwingContentTransition {
     /// @param graphics clipped transition graphics
     /// @param frame cached visual state
     /// @param bounds host-relative frame bounds
-    /// @param horizontalOffset current subpixel signed horizontal offset
-    /// @param verticalOffset current subpixel signed vertical offset
+    /// @param horizontalOffset current device-pixel-aligned horizontal offset
+    /// @param verticalOffset current device-pixel-aligned vertical offset
     /// @param opacity current opacity between zero and one
     private static void drawFrame(
             Graphics2D graphics,
@@ -496,9 +522,6 @@ public final class SwingContentTransition {
         try {
             float boundedOpacity = (float) Math.max(0.0, Math.min(1.0, opacity));
             frameGraphics.setComposite(AlphaComposite.SrcOver.derive(boundedOpacity));
-            frameGraphics.setRenderingHint(
-                    RenderingHints.KEY_INTERPOLATION,
-                    RenderingHints.VALUE_INTERPOLATION_BILINEAR);
             frameGraphics.translate(horizontalOffset, verticalOffset);
             frameGraphics.drawImage(
                     frame,
