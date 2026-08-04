@@ -247,6 +247,9 @@ final class ModpackExportPanelTest {
             assertEquals(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER, scroll.getHorizontalScrollBarPolicy());
             assertFalse(scroll.isOpaque());
             assertFalse(scroll.getViewport().isOpaque());
+            assertEquals(
+                    scroll.getViewport().getExtentSize().width,
+                    metadata.getWidth());
             assertTrue(
                     scroll.getVerticalScrollBar().getMaximum()
                             > scroll.getVerticalScrollBar().getVisibleAmount());
@@ -258,7 +261,14 @@ final class ModpackExportPanelTest {
                     chooseOutput.getParent(),
                     chooseOutput.getBounds(),
                     metadata);
-            assertTrue(scroll.getViewport().getViewRect().intersects(outputBounds));
+            Rectangle viewportBounds = scroll.getViewport().getViewRect();
+            assertTrue(
+                    viewportBounds.contains(outputBounds),
+                    () -> "viewport=" + viewportBounds
+                            + ", output=" + outputBounds
+                            + ", outputParent=" + chooseOutput.getParent().getBounds()
+                            + ", outputParentMinimum=" + chooseOutput.getParent().getMinimumSize()
+                            + ", metadataMinimum=" + metadata.getMinimumSize());
             assertTrue(files.getViewport().getExtentSize().height > 0);
 
             panel.setSize(800, 600);
