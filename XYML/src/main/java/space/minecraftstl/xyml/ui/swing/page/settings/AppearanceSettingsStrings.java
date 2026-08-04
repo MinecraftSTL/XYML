@@ -31,6 +31,7 @@ import java.util.Objects;
 /// @param darkThemeLabel dark theme option
 /// @param cornerRadiusLabel corner-radius field label
 /// @param animationsLabel animation toggle label
+/// @param animationSpeedLabel animation-speed field label
 /// @param background complete launcher-background controls
 @NotNullByDefault
 public record AppearanceSettingsStrings(
@@ -42,6 +43,7 @@ public record AppearanceSettingsStrings(
         String darkThemeLabel,
         String cornerRadiusLabel,
         String animationsLabel,
+        String animationSpeedLabel,
         AppearanceBackgroundStrings background) {
     /// Validates localized settings text.
     public AppearanceSettingsStrings {
@@ -53,6 +55,7 @@ public record AppearanceSettingsStrings(
         Objects.requireNonNull(darkThemeLabel, "darkThemeLabel");
         Objects.requireNonNull(cornerRadiusLabel, "cornerRadiusLabel");
         Objects.requireNonNull(animationsLabel, "animationsLabel");
+        Objects.requireNonNull(animationSpeedLabel, "animationSpeedLabel");
         Objects.requireNonNull(background, "background");
     }
 }

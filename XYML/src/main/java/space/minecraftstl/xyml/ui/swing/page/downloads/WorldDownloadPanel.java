@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
@@ -46,7 +47,7 @@ public final class WorldDownloadPanel extends JPanel implements AutoCloseable {
     private final WorldArchiveDownloadPanel localArchivePanel;
 
     /// Nested world workflow selector exposed for keyboard navigation and focused verification.
-    private final JTabbedPane workflowTabs = new JTabbedPane();
+    private final JTabbedPane workflowTabs = new AnimatedTabbedPane();
 
     /// Whether this composite has rejected further activation.
     private volatile boolean closed;
