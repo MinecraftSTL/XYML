@@ -77,6 +77,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -87,6 +88,8 @@ import java.util.Set;
 import java.util.HashSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -108,6 +111,51 @@ public final class AppShellPanelTest {
 
     /// Fixed screenshot height matching the shell's preferred height.
     private static final int RENDER_HEIGHT = AppShellPanel.PREFERRED_HEIGHT;
+
+    /// Sidebar preloading starts only after the main page is ready and follows physical navigation order.
+    ///
+    /// @throws InterruptedException when the test thread is interrupted while awaiting incremental preloading
+    @Test
+    public void preloadsSidebarPagesIncrementallyAfterMainPage() throws InterruptedException {
+        List<ShellPageId> creationOrder = new ArrayList<>();
+        CountDownLatch pagesCreated = new CountDownLatch(ShellPageId.values().length);
+        AtomicReference<@Nullable JComponent> mainPage = new AtomicReference<>();
+        EnumMap<ShellPageId, ShellPageFactory<? extends JComponent>> factories =
+                new EnumMap<>(ShellPageId.class);
+        for (ShellPageId page : ShellPageId.values()) {
+            factories.put(page, () -> {
+                creationOrder.add(page);
+                pagesCreated.countDown();
+                return samplePage(page);
+            });
+        }
+        AppShellPanel panel = createPanel(factories, new TestHomeModel());
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                mainPage.set(panel.activePage());
+                assertEquals(List.of(ShellPageId.INSTANCES), creationOrder);
+                assertEquals(ShellPageId.values().length - 1L, pagesCreated.getCount());
+                panel.startSidebarPagePreloading();
+                assertEquals(List.of(ShellPageId.INSTANCES), creationOrder);
+            });
+            assertTrue(pagesCreated.await(5L, TimeUnit.SECONDS));
+
+            EdtDispatcher.executeAndWait(() -> assertAll(
+                    () -> assertEquals(
+                            List.of(
+                                    ShellPageId.INSTANCES,
+                                    ShellPageId.ACCOUNTS,
+                                    ShellPageId.DOWNLOADS,
+                                    ShellPageId.SETTINGS),
+                            creationOrder),
+                    () -> assertEquals(ShellPageId.values().length, panel.cachedPageCount()),
+                    () -> assertNull(panel.selectedPage()),
+                    () -> assertSame(mainPage.get(), panel.activePage())));
+        } finally {
+            panel.close();
+        }
+    }
 
     /// Instance management is created first, retained below overlays, and reused after returning.
     @Test
