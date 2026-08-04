@@ -75,7 +75,8 @@ public final class AppearanceSettingsPanelTest {
         onEventDispatchThread(() -> {
             findComponent(panel, "appearanceThemeDARK", AbstractButton.class).doClick();
             findComponent(panel, "appearanceCornerRadius", JSlider.class).setValue(10);
-            findComponent(panel, "appearanceAnimationSpeed", JSlider.class).setValue(145);
+            findComponent(panel, "appearanceAnimationSpeed", JSlider.class).setValue(
+                    AnimationSpeedSettings.sliderPositionForPercentage(160));
             findComponent(panel, "appearanceAnimations", AbstractButton.class).doClick();
 
             assertAll(
@@ -83,13 +84,13 @@ public final class AppearanceSettingsPanelTest {
                             ThemeBrightnessPreference.DARK,
                             panel.selectedBrightnessPreference()),
                     () -> assertEquals(9, panel.displayedCornerRadius()),
-                    () -> assertEquals(150, panel.displayedAnimationSpeedPercentage()),
+                    () -> assertEquals(160, panel.displayedAnimationSpeedPercentage()),
                     () -> assertFalse(panel.areAnimationsEnabled()),
                     () -> assertEquals(
                             ThemeBrightnessPreference.DARK,
                             model.snapshot().brightnessPreference()),
                     () -> assertEquals(9, model.snapshot().cornerRadius()),
-                    () -> assertEquals(150, model.snapshot().animationSpeed().percentage()),
+                    () -> assertEquals(160, model.snapshot().animationSpeed().percentage()),
                     () -> assertFalse(model.snapshot().animationsEnabled()),
                     () -> assertFalse(findComponent(
                             panel, "appearanceAnimationSpeed", JSlider.class).isEnabled()));
@@ -118,7 +119,7 @@ public final class AppearanceSettingsPanelTest {
         });
     }
 
-    /// Animation-speed dragging previews an aligned percentage but persists only when adjustment finishes.
+    /// Animation-speed dragging previews a discrete scale position but persists only when adjustment finishes.
     @Test
     public void commitsAnimationSpeedAfterSliderAdjustmentFinishes() {
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
@@ -128,13 +129,37 @@ public final class AppearanceSettingsPanelTest {
         onEventDispatchThread(() -> {
             JSlider slider = findComponent(panel, "appearanceAnimationSpeed", JSlider.class);
             slider.setValueIsAdjusting(true);
-            slider.setValue(145);
+            slider.setValue(AnimationSpeedSettings.sliderPositionForPercentage(250));
             assertAll(
-                    () -> assertEquals(150, panel.displayedAnimationSpeedPercentage()),
+                    () -> assertEquals(250, panel.displayedAnimationSpeedPercentage()),
                     () -> assertEquals(100, model.snapshot().animationSpeed().percentage()));
 
             slider.setValueIsAdjusting(false);
-            assertEquals(150, model.snapshot().animationSpeed().percentage());
+            assertEquals(250, model.snapshot().animationSpeed().percentage());
+            panel.close();
+        });
+    }
+
+    /// Finite slider positions display the requested decimal multipliers across all three step bands.
+    @Test
+    public void displaysDiscreteAnimationSpeedMultipliers() {
+        FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                ThemeBrightnessPreference.SYSTEM, 6, true, true));
+        AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
+
+        onEventDispatchThread(() -> {
+            JSlider slider = findComponent(panel, "appearanceAnimationSpeed", JSlider.class);
+            JLabel value = findComponent(panel, "appearanceAnimationSpeedValue", JLabel.class);
+
+            assertAll(
+                    () -> assertEquals(0, slider.getMinimum()),
+                    () -> assertEquals(AnimationSpeedSettings.sliderPositionCount() - 1, slider.getMaximum()));
+            assertAnimationSpeedLabel(slider, value, 10, "0.1");
+            assertAnimationSpeedLabel(slider, value, 100, "1");
+            assertAnimationSpeedLabel(slider, value, 120, "1.2");
+            assertAnimationSpeedLabel(slider, value, 200, "2");
+            assertAnimationSpeedLabel(slider, value, 250, "2.5");
+            assertAnimationSpeedLabel(slider, value, 500, "5");
             panel.close();
         });
     }
@@ -148,11 +173,12 @@ public final class AppearanceSettingsPanelTest {
 
         onEventDispatchThread(() -> {
             findComponent(panel, "appearanceAnimationSpeed", JSlider.class)
-                    .setValue(AnimationSpeedSettings.MAXIMUM_PERCENTAGE);
+                    .setValue(AnimationSpeedSettings.sliderPositionForPercentage(
+                            AnimationSpeedSettings.INSTANT_PERCENTAGE));
 
             assertAll(
                     () -> assertEquals(
-                            AnimationSpeedSettings.MAXIMUM_PERCENTAGE,
+                            AnimationSpeedSettings.INSTANT_PERCENTAGE,
                             model.snapshot().animationSpeed().percentage()),
                     () -> assertEquals(
                             "\u221e",
@@ -680,6 +706,21 @@ public final class AppearanceSettingsPanelTest {
         return SwingUtilities.convertPoint(parent, component.getLocation(), root).x;
     }
 
+    /// Selects one supported speed and verifies its exact multiplier label.
+    ///
+    /// @param slider discrete animation-speed slider
+    /// @param label multiplier value label
+    /// @param percentage supported persisted percentage
+    /// @param expectedText expected decimal multiplier
+    private static void assertAnimationSpeedLabel(
+            JSlider slider,
+            JLabel label,
+            int percentage,
+            String expectedText) {
+        slider.setValue(AnimationSpeedSettings.sliderPositionForPercentage(percentage));
+        assertEquals(expectedText, label.getText());
+    }
+
     /// Verifies every labeled appearance input uses the same page-relative leading edge.
     ///
     /// @param panel laid-out appearance panel
@@ -827,11 +868,7 @@ public final class AppearanceSettingsPanelTest {
                     value.maximumCornerRadius(),
                     value.cornerRadiusStep(),
                     value.animationsEnabled(),
-                    new AnimationSpeedSettings(
-                            percentage,
-                            value.animationSpeed().minimumPercentage(),
-                            value.animationSpeed().maximumPercentage(),
-                            value.animationSpeed().percentageStep()),
+                    new AnimationSpeedSettings(percentage),
                     value.themeColor(),
                     value.background(),
                     value.writable()));

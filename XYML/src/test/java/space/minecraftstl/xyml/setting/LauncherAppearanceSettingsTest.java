@@ -23,6 +23,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import java.util.Objects;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -59,12 +60,32 @@ public final class LauncherAppearanceSettingsTest {
         assertEquals(170, restored.animationSpeedPercentageProperty().get());
     }
 
-    /// Animation-speed ranges reject a maximum that cannot be represented by the configured step.
+    /// Animation speed exposes exactly the requested finite bands followed by an instant endpoint.
     @Test
-    public void validatesAnimationSpeedSliderGrid() {
-        assertThrows(IllegalArgumentException.class, () -> new AnimationSpeedSettings(100, 50, 195, 10));
+    public void exposesDiscreteAnimationSpeedSliderScale() {
+        assertEquals(
+                java.util.List.of(
+                        10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
+                        120, 140, 160, 180, 200,
+                        250, 300, 350, 400, 450, 500,
+                        AnimationSpeedSettings.INSTANT_PERCENTAGE),
+                IntStream.range(0, AnimationSpeedSettings.sliderPositionCount())
+                        .mapToObj(AnimationSpeedSettings::percentageAtSliderPosition)
+                        .toList());
+        assertThrows(IllegalArgumentException.class, () -> new AnimationSpeedSettings(110));
         assertFalse(AnimationSpeedSettings.defaults().isInstant());
-        assertTrue(new AnimationSpeedSettings(200, 50, 200, 10).isInstant());
+        assertTrue(new AnimationSpeedSettings(AnimationSpeedSettings.INSTANT_PERCENTAGE).isInstant());
+    }
+
+    /// Externally edited values select the nearest finite notch without inventing an instant setting.
+    @Test
+    public void normalizesExternalAnimationSpeedValues() {
+        assertEquals(10, AnimationSpeedSettings.normalizePercentage(-100));
+        assertEquals(120, AnimationSpeedSettings.normalizePercentage(130));
+        assertEquals(500, AnimationSpeedSettings.normalizePercentage(900));
+        assertEquals(
+                AnimationSpeedSettings.INSTANT_PERCENTAGE,
+                AnimationSpeedSettings.normalizePercentage(AnimationSpeedSettings.INSTANT_PERCENTAGE));
     }
 
     /// Window transparency persists directly while retired background settings are discarded.

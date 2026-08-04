@@ -145,14 +145,11 @@ public final class PersistedAppearanceSettingsModel
         store.setAnimationsDisabled(!enabled);
     }
 
-    /// Persists a speed aligned to the current model-provided bounds and step.
+    /// Persists one launcher-supported discrete animation speed.
     @Override
     public void setAnimationSpeedPercentage(int percentage) {
         requireWritable();
-        AnimationSpeedSettings speed = currentSnapshot.animationSpeed();
-        if (percentage < speed.minimumPercentage()
-                || percentage > speed.maximumPercentage()
-                || (percentage - speed.minimumPercentage()) % speed.percentageStep() != 0) {
+        if (!AnimationSpeedSettings.isSupportedPercentage(percentage)) {
             throw new IllegalArgumentException("Unsupported animation speed percentage: " + percentage);
         }
         store.setAnimationSpeedPercentage(percentage);

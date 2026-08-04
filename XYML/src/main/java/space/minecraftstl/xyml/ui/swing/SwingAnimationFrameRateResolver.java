@@ -38,8 +38,14 @@ public final class SwingAnimationFrameRateResolver {
     /// Environment variable whose positive integer value specifies animation frames per second.
     private static final String FRAME_RATE_ENVIRONMENT_VARIABLE = "XYML_ANIMATION_FRAME_RATE";
 
-    /// Existing timer delay used for unknown display refresh rates.
-    private static final int DEFAULT_FRAME_DELAY_MILLIS = 16;
+    /// Minimum automatic sampling rate used to avoid missing display refreshes between EDT repaint passes.
+    private static final int MINIMUM_AUTOMATIC_FRAME_RATE = 120;
+
+    /// Timer delay used for unknown displays and invalid automatic configuration.
+    private static final int DEFAULT_FRAME_DELAY_MILLIS = 8;
+
+    /// Established nearest practical Swing timer delay for an explicit sixty-frame rate.
+    private static final int SIXTY_HERTZ_FRAME_DELAY_MILLIS = 16;
 
     /// Prevents construction of this stateless resolver.
     private SwingAnimationFrameRateResolver() {
@@ -49,7 +55,7 @@ public final class SwingAnimationFrameRateResolver {
     ///
     /// Explicit configuration is ignored while animation is disabled because no timer will advance. A JVM delay
     /// property takes precedence over the frame-rate environment variable. Without either override, every known
-    /// positive display refresh rate uses a matching integer delay while unknown and headless displays retain 16 ms.
+    /// positive display refresh rate uses at least 120 Hz sampling while unknown and headless displays retain 8 ms.
     ///
     /// @param animationsDisabled whether the persisted appearance setting disables animation
     /// @return a positive timer delay in milliseconds
@@ -111,9 +117,11 @@ public final class SwingAnimationFrameRateResolver {
             warningSink.accept("Failed to detect the display refresh rate: " + detectionFailure);
             return DEFAULT_FRAME_DELAY_MILLIS;
         }
-        return detectedRefreshRate > 0
-                ? Math.min(DEFAULT_FRAME_DELAY_MILLIS, frameDelayForFramesPerSecond(detectedRefreshRate))
-                : DEFAULT_FRAME_DELAY_MILLIS;
+        if (detectedRefreshRate <= 0) {
+            return DEFAULT_FRAME_DELAY_MILLIS;
+        }
+        int samplingRate = Math.max(MINIMUM_AUTOMATIC_FRAME_RATE, detectedRefreshRate);
+        return frameDelayForFramesPerSecond(samplingRate);
     }
 
     /// Reads the refresh rate reported by the default AWT graphics device.
@@ -152,7 +160,7 @@ public final class SwingAnimationFrameRateResolver {
     /// @return positive timer delay in milliseconds
     private static int frameDelayForFramesPerSecond(int framesPerSecond) {
         if (framesPerSecond == 60) {
-            return DEFAULT_FRAME_DELAY_MILLIS;
+            return SIXTY_HERTZ_FRAME_DELAY_MILLIS;
         }
         return Math.max(1, (int) Math.round(1000.0 / framesPerSecond));
     }

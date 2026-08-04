@@ -109,7 +109,7 @@ public final class PersistedAppearanceSettingsModelTest {
         model.setThemeBrightnessPreference(ThemeBrightnessPreference.DARK);
         model.setCornerRadius(14);
         model.setAnimationsEnabled(true);
-        model.setAnimationSpeedPercentage(170);
+        model.setAnimationSpeedPercentage(180);
         ThemeColorAppearanceSettings replacementThemeColor = new ThemeColorAppearanceSettings(
                 Objects.requireNonNull(ThemeColor.of("#123456")),
                 true);
@@ -131,13 +131,13 @@ public final class PersistedAppearanceSettingsModelTest {
                 () -> assertEquals("dark", store.snapshot().themeBrightnessValue()),
                 () -> assertEquals(14, store.snapshot().cornerRadius()),
                 () -> assertFalse(store.snapshot().animationsDisabled()),
-                () -> assertEquals(170, store.snapshot().animationSpeed().percentage()),
+                () -> assertEquals(180, store.snapshot().animationSpeed().percentage()),
                 () -> assertEquals(
                         ThemeBrightnessPreference.DARK,
                         model.snapshot().brightnessPreference()),
                 () -> assertEquals(14, model.snapshot().cornerRadius()),
                 () -> assertTrue(model.snapshot().animationsEnabled()),
-                () -> assertEquals(170, model.snapshot().animationSpeed().percentage()),
+                () -> assertEquals(180, model.snapshot().animationSpeed().percentage()),
                 () -> assertEquals(replacementThemeColor, model.snapshot().themeColor()),
                 () -> assertEquals(replacementBackground, model.snapshot().background()),
                 () -> assertEquals(7, applied.size()),
@@ -368,11 +368,7 @@ public final class PersistedAppearanceSettingsModelTest {
                     current.maximumCornerRadius(),
                     current.cornerRadiusStep(),
                     current.animationsDisabled(),
-                    new AnimationSpeedSettings(
-                            percentage,
-                            current.animationSpeed().minimumPercentage(),
-                            current.animationSpeed().maximumPercentage(),
-                            current.animationSpeed().percentageStep()),
+                    new AnimationSpeedSettings(percentage),
                     current.themeColor(),
                     current.background(),
                     current.writable(),
