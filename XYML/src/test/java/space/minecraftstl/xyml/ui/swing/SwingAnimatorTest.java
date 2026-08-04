@@ -21,10 +21,14 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.setting.AnimationSpeedSettings;
 
+import javax.swing.SwingUtilities;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -32,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Tests policy, cancellation, easing, and monotonic progress logic without waiting for real timer frames.
+/// Tests policy, cancellation, easing, monotonic progress, and scheduled EDT frame delivery.
 @NotNullByDefault
 public final class SwingAnimatorTest {
     /// Off policy applies only the final frame and reports normal completion.
@@ -107,7 +111,45 @@ public final class SwingAnimatorTest {
                 () -> assertTrue(handle.isFinished()));
     }
 
-    /// Elapsed-time progress is clamped and independent of timer tick counts.
+    /// Scheduled delivery keeps every frame and completion callback on the EDT.
+    ///
+    /// @throws InterruptedException when the test thread is interrupted while awaiting completion
+    @Test
+    public void schedulerDeliversFramesOnEventDispatchThread() throws InterruptedException {
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 4);
+        CountDownLatch completed = new CountDownLatch(1);
+        AtomicBoolean callbacksOnEventDispatchThread = new AtomicBoolean(true);
+        AtomicInteger frameCount = new AtomicInteger();
+
+        AnimationHandle handle = animator.animate(
+                Duration.ofMillis(80L),
+                MotionPurpose.ESSENTIAL,
+                Easing.LINEAR,
+                value -> {
+                    frameCount.incrementAndGet();
+                    if (!SwingUtilities.isEventDispatchThread()) {
+                        callbacksOnEventDispatchThread.set(false);
+                    }
+                },
+                () -> {
+                    if (!SwingUtilities.isEventDispatchThread()) {
+                        callbacksOnEventDispatchThread.set(false);
+                    }
+                    completed.countDown();
+                });
+
+        try {
+            assertTrue(completed.await(2L, TimeUnit.SECONDS));
+            assertAll(
+                    () -> assertTrue(frameCount.get() >= 2),
+                    () -> assertTrue(callbacksOnEventDispatchThread.get()),
+                    () -> assertTrue(handle.isFinished()));
+        } finally {
+            animator.cancelAll();
+        }
+    }
+
+    /// Elapsed-time progress is clamped and independent of delivered frame counts.
     @Test
     public void normalizedProgressIsBounded() {
         assertAll(
