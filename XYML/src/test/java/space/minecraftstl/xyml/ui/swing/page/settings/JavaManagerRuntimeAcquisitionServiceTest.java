@@ -443,6 +443,7 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
                     () -> assertFalse(children
                             .map(path -> path.getFileName().toString())
                             .anyMatch(name -> name.startsWith(".xyml-java-stage-")
+                                    || name.startsWith(".xyml-java-lease-")
                                     || name.startsWith(".xyml-java-manifest-"))));
         }
     }
@@ -477,14 +478,80 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
                     .findFirst()
                     .orElseThrow();
         }
+        Path markerLeaseFile;
+        try (var children = Files.list(platformRoot)) {
+            markerLeaseFile = children
+                    .filter(path -> path.getFileName().toString().startsWith(".xyml-java-lease-"))
+                    .findFirst()
+                    .orElseThrow();
+        }
+        assertTrue(Files.isSameFile(markerFile, markerLeaseFile));
         String copiedToken = Files.readString(markerFile);
         Files.delete(markerFile);
         Files.delete(stagingDirectory);
         Files.createDirectory(stagingDirectory);
         Files.writeString(markerFile, copiedToken);
+        assertFalse(Files.isSameFile(markerFile, markerLeaseFile));
         Path foreignRelease = Files.writeString(
                 stagingDirectory.resolve("release"),
                 "foreign-release");
+
+        assertFalse(extractor.test());
+        publication.postExecute();
+
+        assertAll(
+                () -> assertEquals("foreign-release", Files.readString(foreignRelease)),
+                () -> assertTrue(Files.isDirectory(stagingDirectory)),
+                () -> assertFalse(Files.exists(
+                        stagingDirectory.resolve("bin"),
+                        LinkOption.NOFOLLOW_LINKS)),
+                () -> assertInstanceOf(IOException.class, extractor.getException()));
+    }
+
+    /// Rejects a replaced staging directory even when the original marker inode is linked back into it.
+    @Test
+    void rejectsReplacedStagingDirectoryWithOriginalMarkerLease() throws Exception {
+        Path archive = temporaryDirectory().resolve("reattached-marker.zip");
+        writeDirectJavaZip(archive, Platform.SYSTEM_PLATFORM, null, null);
+        Path platformRoot = temporaryDirectory().resolve("reattached-marker-platform");
+        Files.createDirectories(platformRoot);
+        Task<JavaRuntime> publication = JavaRuntimeInstallationPublisher.createInstallTask(
+                Platform.SYSTEM_PLATFORM,
+                "runtime",
+                archive,
+                platformRoot,
+                platformRoot.resolve("runtime"),
+                platformRoot.resolve("runtime.json"));
+        publication.execute();
+        Task<?> extractor = publication.getDependencies().iterator().next();
+        Path stagingDirectory;
+        Path markerLeaseFile;
+        try (var children = Files.list(platformRoot)) {
+            List<Path> paths = children.toList();
+            stagingDirectory = paths.stream()
+                    .filter(path -> path.getFileName().toString().startsWith(".xyml-java-stage-"))
+                    .findFirst()
+                    .orElseThrow();
+            markerLeaseFile = paths.stream()
+                    .filter(path -> path.getFileName().toString().startsWith(".xyml-java-lease-"))
+                    .findFirst()
+                    .orElseThrow();
+        }
+        Path markerFile;
+        try (var children = Files.list(stagingDirectory)) {
+            markerFile = children
+                    .filter(path -> path.getFileName().toString().startsWith(".xyml-install-owner-"))
+                    .findFirst()
+                    .orElseThrow();
+        }
+        Files.delete(markerFile);
+        Files.delete(stagingDirectory);
+        Files.createDirectory(stagingDirectory);
+        Files.createLink(markerFile, markerLeaseFile);
+        Path foreignRelease = Files.writeString(
+                stagingDirectory.resolve("release"),
+                "foreign-release");
+        assertTrue(Files.isSameFile(markerFile, markerLeaseFile));
 
         assertFalse(extractor.test());
         publication.postExecute();
