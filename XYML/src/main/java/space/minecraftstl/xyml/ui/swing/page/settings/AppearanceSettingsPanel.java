@@ -113,7 +113,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// Binary persisted animation preference.
     private final JCheckBox animationsEnabled = new JCheckBox();
 
-    /// Slider configured from model-provided animation-speed bounds and increment.
+    /// Slider whose consecutive positions represent the launcher-wide discrete animation speeds.
     private final JSlider animationSpeedSlider = new JSlider();
 
     /// Current animation speed displayed beside the slider.
@@ -276,7 +276,10 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// @return current animation speed percentage
     public int displayedAnimationSpeedPercentage() {
         EdtDispatcher.requireEventDispatchThread();
-        return animationSpeedSlider.getValue();
+        @Nullable AppearanceSettingsSnapshot snapshot = displayedSnapshot;
+        return snapshot == null
+                ? AnimationSpeedSettings.DEFAULT_PERCENTAGE
+                : AnimationSpeedSettings.percentageAtSliderPosition(animationSpeedSlider.getValue());
     }
 
     /// Returns the complete background values currently represented by controls.
@@ -650,19 +653,11 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         animationSpeedSlider.setPaintLabels(false);
         animationSpeedSlider.setName("appearanceAnimationSpeed");
         animationSpeedSlider.addChangeListener(event -> {
-            int percentage = alignedAnimationSpeedPercentage(animationSpeedSlider.getValue());
-            if (percentage != animationSpeedSlider.getValue()) {
-                applyingSnapshot = true;
-                try {
-                    animationSpeedSlider.setValue(percentage);
-                } finally {
-                    applyingSnapshot = false;
-                }
-            }
-            animationSpeedValue.setText(animationSpeedText(
-                    percentage,
-                    animationSpeedSlider.getMaximum()));
             @Nullable AppearanceSettingsSnapshot snapshot = displayedSnapshot;
+            int percentage = snapshot == null
+                    ? AnimationSpeedSettings.DEFAULT_PERCENTAGE
+                    : AnimationSpeedSettings.percentageAtSliderPosition(animationSpeedSlider.getValue());
+            animationSpeedValue.setText(animationSpeedText(percentage));
             if (!applyingSnapshot
                     && !animationSpeedSlider.getValueIsAdjusting()
                     && snapshot != null
@@ -963,33 +958,19 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         return (int) aligned;
     }
 
-    /// Aligns an arbitrary slider position to the model-provided animation-speed grid.
+    /// Formats a finite percentage as its decimal multiplier and the instant endpoint as infinity.
     ///
-    /// @param rawPercentage raw slider position
-    /// @return nearest supported speed percentage within the current model bounds
-    private int alignedAnimationSpeedPercentage(int rawPercentage) {
-        @Nullable AppearanceSettingsSnapshot snapshot = displayedSnapshot;
-        if (snapshot == null) {
-            return rawPercentage;
-        }
-        AnimationSpeedSettings speed = snapshot.animationSpeed();
-        long offset = (long) rawPercentage - speed.minimumPercentage();
-        long alignedOffset = Math.round((double) offset / speed.percentageStep()) * speed.percentageStep();
-        long aligned = Math.max(
-                speed.minimumPercentage(),
-                Math.min(speed.maximumPercentage(), (long) speed.minimumPercentage() + alignedOffset));
-        return (int) aligned;
-    }
-
-    /// Formats a finite speed as a percentage and the maximum endpoint as infinity.
-    ///
-    /// @param percentage aligned animation-speed slider position
-    /// @param maximumPercentage model-provided instant endpoint
+    /// @param percentage supported animation-speed percentage
     /// @return concise visible speed value
-    private static String animationSpeedText(int percentage, int maximumPercentage) {
-        return percentage == maximumPercentage
-                ? "\u221e"
-                : percentage + "%";
+    private static String animationSpeedText(int percentage) {
+        if (percentage == AnimationSpeedSettings.INSTANT_PERCENTAGE) {
+            return "\u221e";
+        }
+        int whole = percentage / 100;
+        int tenths = percentage % 100 / 10;
+        return tenths == 0
+                ? Integer.toString(whole)
+                : whole + "." + tenths;
     }
 
     /// Coalesces a model transition to the latest snapshot on the EDT.
@@ -1026,14 +1007,12 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
             }
             animationsEnabled.setSelected(snapshot.animationsEnabled());
             AnimationSpeedSettings speed = snapshot.animationSpeed();
-            animationSpeedSlider.setMinimum(speed.minimumPercentage());
-            animationSpeedSlider.setMaximum(speed.maximumPercentage());
-            animationSpeedSlider.setMinorTickSpacing(speed.percentageStep());
+            animationSpeedSlider.setMinimum(0);
+            animationSpeedSlider.setMaximum(AnimationSpeedSettings.sliderPositionCount() - 1);
+            animationSpeedSlider.setMinorTickSpacing(1);
             animationSpeedSlider.setSnapToTicks(true);
-            animationSpeedSlider.setValue(speed.percentage());
-            animationSpeedValue.setText(animationSpeedText(
-                    speed.percentage(),
-                    speed.maximumPercentage()));
+            animationSpeedSlider.setValue(AnimationSpeedSettings.sliderPositionForPercentage(speed.percentage()));
+            animationSpeedValue.setText(animationSpeedText(speed.percentage()));
 
             ThemeColorAppearanceSettings themeColor = snapshot.themeColor();
             themeColorOverridden.setSelected(themeColor.overridden());

@@ -31,7 +31,7 @@ import java.util.Objects;
 /// @param maximumCornerRadius maximum supported radius
 /// @param cornerRadiusStep supported radius increment
 /// @param animationsDisabled whether non-essential motion is disabled
-/// @param animationSpeed current percentage and supported animation-speed slider grid
+/// @param animationSpeed current launcher-supported discrete animation speed
 /// @param themeColor complete persisted launcher theme-color values
 /// @param background complete persisted launcher-background values
 /// @param writable whether this store accepts changes

@@ -44,7 +44,7 @@ public final class SwingAnimator {
     /// Policy applied to new and currently active animations.
     private volatile MotionPolicy motionPolicy;
 
-    /// Percentage applied inversely to authored duration, with the configured maximum representing infinity.
+    /// Supported percentage applied inversely to authored duration, with a dedicated value representing infinity.
     private volatile int animationSpeedPercentage;
 
     /// Creates an animator without choosing an implicit frame rate.
@@ -59,7 +59,7 @@ public final class SwingAnimator {
     ///
     /// @param initialMotionPolicy the initial motion-accessibility policy
     /// @param frameDelayMillis the positive delay between Swing timer events
-    /// @param animationSpeedPercentage positive speed where one hundred preserves duration and the maximum is instant
+    /// @param animationSpeedPercentage supported speed where one hundred preserves duration and infinity is instant
     public SwingAnimator(
             MotionPolicy initialMotionPolicy,
             int frameDelayMillis,
@@ -68,8 +68,9 @@ public final class SwingAnimator {
         if (frameDelayMillis <= 0) {
             throw new IllegalArgumentException("frameDelayMillis must be positive");
         }
-        if (animationSpeedPercentage <= 0) {
-            throw new IllegalArgumentException("animationSpeedPercentage must be positive");
+        if (!AnimationSpeedSettings.isSupportedPercentage(animationSpeedPercentage)) {
+            throw new IllegalArgumentException(
+                    "Unsupported animation speed percentage: " + animationSpeedPercentage);
         }
         this.animationSpeedPercentage = animationSpeedPercentage;
         frameTimer = new Timer(frameDelayMillis, event -> tickActiveAnimations());
@@ -85,22 +86,22 @@ public final class SwingAnimator {
 
     /// Returns the speed applied to newly started animations.
     ///
-    /// @return positive percentage where one hundred preserves duration and the configured maximum is instant
+    /// @return supported percentage where one hundred preserves duration and the instant endpoint disables frames
     public int animationSpeedPercentage() {
         return animationSpeedPercentage;
     }
 
     /// Changes the speed applied to animations.
     ///
-    /// Active animations retain their captured duration for finite values. Selecting the configured maximum finishes
+    /// Active animations retain their captured duration for finite values. Selecting the instant endpoint finishes
     /// every active animation immediately so the application cannot remain on a partial visual frame at infinity.
     ///
-    /// @param percentage positive speed where larger values complete animations sooner
+    /// @param percentage supported speed where larger finite values complete animations sooner
     public void setAnimationSpeedPercentage(int percentage) {
-        if (percentage <= 0) {
-            throw new IllegalArgumentException("percentage must be positive");
+        if (!AnimationSpeedSettings.isSupportedPercentage(percentage)) {
+            throw new IllegalArgumentException("Unsupported animation speed percentage: " + percentage);
         }
-        if (percentage < AnimationSpeedSettings.MAXIMUM_PERCENTAGE) {
+        if (percentage != AnimationSpeedSettings.INSTANT_PERCENTAGE) {
             animationSpeedPercentage = percentage;
             return;
         }
@@ -117,7 +118,7 @@ public final class SwingAnimator {
     ///
     /// @return true when animation speed is at or beyond the configured instant endpoint
     public boolean animationsCompleteImmediately() {
-        return animationSpeedPercentage >= AnimationSpeedSettings.MAXIMUM_PERCENTAGE;
+        return animationSpeedPercentage == AnimationSpeedSettings.INSTANT_PERCENTAGE;
     }
 
     /// Changes the motion policy and immediately completes active animations no longer allowed by it.
@@ -221,7 +222,7 @@ public final class SwingAnimator {
         if (speedPercentage <= 0) {
             throw new IllegalArgumentException("speedPercentage must be positive");
         }
-        if (durationNanos == 0L || speedPercentage >= AnimationSpeedSettings.MAXIMUM_PERCENTAGE) {
+        if (durationNanos == 0L || speedPercentage == AnimationSpeedSettings.INSTANT_PERCENTAGE) {
             return 0L;
         }
         double scaled = durationNanos * (double) NORMAL_SPEED_PERCENTAGE / speedPercentage;

@@ -92,7 +92,7 @@ public final class ThemeRuntimeControllerTest {
                 () -> assertEquals(ThemeColor.of("#E67E22"), themeManager.effectiveAccentColor()),
                 () -> assertEquals(17, themeManager.designTokens().cornerRadius()),
                 () -> assertEquals(MotionPolicy.OFF, animator.motionPolicy()),
-                () -> assertEquals(150, animator.animationSpeedPercentage()),
+                () -> assertEquals(160, animator.animationSpeedPercentage()),
                 () -> assertEquals(ThemeBrightness.LIGHT,
                         Objects.requireNonNull(themeManager.resolvedTheme()).brightness()));
 
@@ -273,7 +273,7 @@ public final class ThemeRuntimeControllerTest {
                 24,
                 1,
                 animations,
-                new AnimationSpeedSettings(150, 50, 200, 10),
+                new AnimationSpeedSettings(160),
                 ThemeColorAppearanceSettings.defaults(),
                 background(),
                 true);

@@ -131,7 +131,7 @@ public final class LauncherThemeResolutionAdapterTest {
             settingsReference.set(settings);
 
             assertEquals(200, store.snapshot().animationSpeed().percentage());
-            store.setAnimationSpeedPercentage(130);
+            store.setAnimationSpeedPercentage(140);
             settings.animationSpeedPercentageProperty().set(44);
         });
 
@@ -139,7 +139,7 @@ public final class LauncherThemeResolutionAdapterTest {
         LauncherSettings settings = Objects.requireNonNull(settingsReference.get());
         assertAll(
                 () -> assertEquals(44, settings.animationSpeedPercentageProperty().get()),
-                () -> assertEquals(50, store.snapshot().animationSpeed().percentage()),
+                () -> assertEquals(40, store.snapshot().animationSpeed().percentage()),
                 () -> assertEquals(2, transitions.get()));
         store.close();
         EdtDispatcher.executeAndWait(() -> { });

@@ -373,11 +373,7 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
                 LauncherSettings.MAXIMUM_CORNER_RADIUS,
                 LauncherSettings.CORNER_RADIUS_STEP,
                 settings.animationDisabledProperty().get(),
-                new AnimationSpeedSettings(
-                        animationSpeedPercentage,
-                        LauncherSettings.MINIMUM_ANIMATION_SPEED_PERCENTAGE,
-                        LauncherSettings.MAXIMUM_ANIMATION_SPEED_PERCENTAGE,
-                        LauncherSettings.ANIMATION_SPEED_PERCENTAGE_STEP),
+                new AnimationSpeedSettings(animationSpeedPercentage),
                 themeColor,
                 background,
                 writableSupplier.getAsBoolean(),
@@ -398,18 +394,12 @@ public final class LauncherAppearanceStore implements AppearanceSettingsStore, A
                 + offset / LauncherSettings.CORNER_RADIUS_STEP * LauncherSettings.CORNER_RADIUS_STEP;
     }
 
-    /// Constrains an externally edited speed to the supported stepped range.
+    /// Constrains an externally edited speed to the nearest supported discrete value.
     ///
     /// @param percentage raw persisted speed percentage
     /// @return supported percentage aligned downward to the nearest step
     private static int alignAnimationSpeedPercentage(int percentage) {
-        int constrained = Math.max(
-                LauncherSettings.MINIMUM_ANIMATION_SPEED_PERCENTAGE,
-                Math.min(LauncherSettings.MAXIMUM_ANIMATION_SPEED_PERCENTAGE, percentage));
-        int offset = constrained - LauncherSettings.MINIMUM_ANIMATION_SPEED_PERCENTAGE;
-        return LauncherSettings.MINIMUM_ANIMATION_SPEED_PERCENTAGE
-                + offset / LauncherSettings.ANIMATION_SPEED_PERCENTAGE_STEP
-                        * LauncherSettings.ANIMATION_SPEED_PERCENTAGE_STEP;
+        return AnimationSpeedSettings.normalizePercentage(percentage);
     }
 
     /// Rejects property writes after listener cleanup.

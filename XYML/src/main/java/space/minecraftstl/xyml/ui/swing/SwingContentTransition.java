@@ -267,12 +267,12 @@ public final class SwingContentTransition {
         try {
             transitionGraphics.clip(bounds);
             int sign = direction.incomingOffsetSign();
-            int outgoingOffset = (int) Math.round(-sign * travel * progress);
-            int incomingOffset = (int) Math.round(sign * travel * (1.0 - progress));
-            int outgoingX = direction.isHorizontal() ? outgoingOffset : 0;
-            int outgoingY = direction.isHorizontal() ? 0 : outgoingOffset;
-            int incomingX = direction.isHorizontal() ? incomingOffset : 0;
-            int incomingY = direction.isHorizontal() ? 0 : incomingOffset;
+            double outgoingOffset = -sign * travel * progress;
+            double incomingOffset = sign * travel * (1.0 - progress);
+            double outgoingX = direction.isHorizontal() ? outgoingOffset : 0.0;
+            double outgoingY = direction.isHorizontal() ? 0.0 : outgoingOffset;
+            double incomingX = direction.isHorizontal() ? incomingOffset : 0.0;
+            double incomingY = direction.isHorizontal() ? 0.0 : incomingOffset;
             drawFrame(
                     transitionGraphics,
                     outgoing,
@@ -479,15 +479,15 @@ public final class SwingContentTransition {
     /// @param graphics clipped transition graphics
     /// @param frame cached visual state
     /// @param bounds host-relative frame bounds
-    /// @param horizontalOffset current signed horizontal offset
-    /// @param verticalOffset current signed vertical offset
+    /// @param horizontalOffset current subpixel signed horizontal offset
+    /// @param verticalOffset current subpixel signed vertical offset
     /// @param opacity current opacity between zero and one
     private static void drawFrame(
             Graphics2D graphics,
             BufferedImage frame,
             Rectangle bounds,
-            int horizontalOffset,
-            int verticalOffset,
+            double horizontalOffset,
+            double verticalOffset,
             double opacity) {
         if (opacity <= 0.0) {
             return;
@@ -496,10 +496,14 @@ public final class SwingContentTransition {
         try {
             float boundedOpacity = (float) Math.max(0.0, Math.min(1.0, opacity));
             frameGraphics.setComposite(AlphaComposite.SrcOver.derive(boundedOpacity));
+            frameGraphics.setRenderingHint(
+                    RenderingHints.KEY_INTERPOLATION,
+                    RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            frameGraphics.translate(horizontalOffset, verticalOffset);
             frameGraphics.drawImage(
                     frame,
-                    bounds.x + horizontalOffset,
-                    bounds.y + verticalOffset,
+                    bounds.x,
+                    bounds.y,
                     bounds.width,
                     bounds.height,
                     null);

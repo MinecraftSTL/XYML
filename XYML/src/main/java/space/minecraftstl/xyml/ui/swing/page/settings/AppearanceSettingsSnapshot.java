@@ -33,7 +33,7 @@ import java.util.Objects;
 /// @param maximumCornerRadius largest supported corner radius
 /// @param cornerRadiusStep supported radius increment
 /// @param animationsEnabled whether non-essential launcher animation is enabled
-/// @param animationSpeed current percentage and supported animation-speed slider grid
+/// @param animationSpeed current launcher-supported discrete animation speed
 /// @param themeColor complete launcher theme-color source and palette-style controls
 /// @param background complete effective launcher-background setting controls
 /// @param writable whether the current settings store accepts changes

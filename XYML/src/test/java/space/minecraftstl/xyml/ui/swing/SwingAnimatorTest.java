@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.setting.AnimationSpeedSettings;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -117,23 +118,28 @@ public final class SwingAnimatorTest {
                 () -> assertEquals(1.0, SwingAnimator.normalizedProgress(150L, 100L)));
     }
 
-    /// Finite speed percentages scale authored durations while the maximum represents infinity.
+    /// Finite speed percentages scale authored durations while the dedicated endpoint represents infinity.
     @Test
     public void scalesAuthoredDurationByAnimationSpeed() {
-        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 16, 150);
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 16, 160);
 
         assertAll(
-                () -> assertEquals(150, animator.animationSpeedPercentage()),
+                () -> assertEquals(160, animator.animationSpeedPercentage()),
                 () -> assertEquals(2_000L, SwingAnimator.scaledDurationNanos(1_000L, 50)),
                 () -> assertEquals(1_000L, SwingAnimator.scaledDurationNanos(1_000L, 100)),
-                () -> assertEquals(526L, SwingAnimator.scaledDurationNanos(1_000L, 190)),
-                () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(1_000L, 200)),
-                () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(1L, 200)),
-                () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(0L, 200)));
+                () -> assertEquals(556L, SwingAnimator.scaledDurationNanos(1_000L, 180)),
+                () -> assertEquals(200L, SwingAnimator.scaledDurationNanos(1_000L, 500)),
+                () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(
+                        1_000L, AnimationSpeedSettings.INSTANT_PERCENTAGE)),
+                () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(
+                        1L, AnimationSpeedSettings.INSTANT_PERCENTAGE)),
+                () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(
+                        0L, AnimationSpeedSettings.INSTANT_PERCENTAGE)));
 
         animator.setAnimationSpeedPercentage(80);
         assertEquals(80, animator.animationSpeedPercentage());
         assertThrows(IllegalArgumentException.class, () -> animator.setAnimationSpeedPercentage(0));
+        assertThrows(IllegalArgumentException.class, () -> animator.setAnimationSpeedPercentage(110));
     }
 
     /// Selecting infinite speed finishes every active animation and suppresses intermediate frames thereafter.
@@ -148,7 +154,7 @@ public final class SwingAnimatorTest {
                 Easing.LINEAR,
                 activeFrames::add,
                 () -> { });
-        animator.setAnimationSpeedPercentage(200);
+        animator.setAnimationSpeedPercentage(AnimationSpeedSettings.INSTANT_PERCENTAGE);
 
         List<Double> futureFrames = new ArrayList<>();
         AnimationHandle future = animator.animate(
