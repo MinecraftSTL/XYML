@@ -356,6 +356,9 @@ public final class AppShellPanelTest {
                                 toolbar.accountSelector().getX() - rightEdge(toolbar.gameDirectorySelector())),
                         () -> assertTrue(rightEdge(toolbar.accountSelector()) <= toolbar.instanceSelector().getX()),
                         () -> assertTrue(rightEdge(toolbar.instanceSelector()) <= toolbar.launchButton().getX()),
+                        () -> assertEquals(
+                                toolbar.launchButton().getPreferredSize().width,
+                                toolbar.launchButton().getWidth()),
                         () -> assertTrue(toolbar.instanceSelector().getX() > toolbar.getWidth() / 2),
                         () -> assertTrue(toolbar.brandLabel().getX() >= 12),
                         () -> assertEquals(Boolean.TRUE, toolbar.getClientProperty(
