@@ -29,6 +29,9 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.MotionPolicy;
+import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
@@ -53,6 +56,7 @@ import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.event.ActionEvent;
 import java.awt.image.BufferedImage;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -561,6 +565,36 @@ public final class InstancesPanelTest {
                     () -> assertEquals(instanceId("instance-1"), coordinator.currentInstanceId()),
                     () -> assertEquals(4, factory.creationCount()),
                     () -> assertEquals(1, secondView.closeCount()));
+            panel.close();
+            coordinator.close();
+        });
+    }
+
+    /// Visible list and management-detail changes share the inherited lightweight content transition.
+    @Test
+    public void animatesListAndManagementDetailChanges() {
+        FakeInstancesModel model = FakeInstancesModel.immediate(items(2), snapshot(0, 2, 0L));
+        RecordingManagementFactory factory = new RecordingManagementFactory(null);
+        InstanceManagementCoordinator coordinator = new InstanceManagementCoordinator(factory);
+        InstancesPanel panel = onEventDispatchThread(
+                () -> new InstancesPanel(model, STRINGS, coordinator));
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 10_000);
+
+        onEventDispatchThread(() -> {
+            SwingContentTransition.provideContext(panel, animator, Duration.ofSeconds(2L));
+            panel.setSize(new Dimension(820, 480));
+            layoutRecursively(panel);
+
+            panel.showSelectedInstanceManagement().toCompletableFuture().join();
+            assertTrue(panel.isRootTransitionRunning());
+            animator.setMotionPolicy(MotionPolicy.OFF);
+            animator.setMotionPolicy(MotionPolicy.FULL);
+            layoutRecursively(panel);
+
+            panel.showInstanceListPage();
+            assertTrue(panel.isRootTransitionRunning());
+            animator.setMotionPolicy(MotionPolicy.OFF);
+            assertFalse(panel.isRootTransitionRunning());
             panel.close();
             coordinator.close();
         });
