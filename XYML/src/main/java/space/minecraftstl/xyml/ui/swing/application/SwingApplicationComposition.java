@@ -219,7 +219,8 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 SettingsManager.settings().launcherFontFamilyProperty().get()));
         SwingAnimator animator = new SwingAnimator(
                 rawAppearance.animationsDisabled() ? MotionPolicy.OFF : MotionPolicy.FULL,
-                animationFrameDelayMillis);
+                animationFrameDelayMillis,
+                rawAppearance.animationSpeed().percentage());
 
         try {
             return createForCollaborators(

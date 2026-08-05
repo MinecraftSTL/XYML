@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
+import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
@@ -99,7 +100,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
     private final Subscription javaRuntimeSubscription;
 
     /// Tabbed grouping for the complete settings surface.
-    private final JTabbedPane settingsTabs = new JTabbedPane();
+    private final JTabbedPane settingsTabs = new AnimatedTabbedPane();
 
     /// Inherited, automatic, and manual memory-allocation choices.
     private final InstanceMemoryModeSelector memoryModeSelector;

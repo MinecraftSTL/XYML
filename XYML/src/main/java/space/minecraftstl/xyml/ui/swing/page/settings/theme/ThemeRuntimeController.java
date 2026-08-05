@@ -529,6 +529,7 @@ public final class ThemeRuntimeController
 
     /// Immediately updates motion and, when available, tokens without discarding the resolved accent.
     private void applyImmediateAppearance(AppearanceSettingsSnapshot snapshot) {
+        animator.setAnimationSpeedPercentage(snapshot.animationSpeed().percentage());
         animator.setMotionPolicy(snapshot.animationsEnabled() ? MotionPolicy.FULL : MotionPolicy.OFF);
         @Nullable ResolvedTheme currentTheme = themeManager.resolvedTheme();
         if (currentTheme != null) {
@@ -551,6 +552,7 @@ public final class ThemeRuntimeController
                 new SwingDesignTokens(snapshot.cornerRadius()),
                 snapshot.brightnessPreference());
         themeManager.updateWindowAppearance(SwingWindowAppearanceRequest.resolve(selection, snapshot));
+        animator.setAnimationSpeedPercentage(snapshot.animationSpeed().percentage());
         animator.setMotionPolicy(snapshot.animationsEnabled() ? MotionPolicy.FULL : MotionPolicy.OFF);
     }
 

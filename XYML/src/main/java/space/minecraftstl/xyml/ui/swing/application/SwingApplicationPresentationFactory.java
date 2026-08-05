@@ -477,6 +477,7 @@ public final class SwingApplicationPresentationFactory {
                 i18n("settings.launcher.brightness.dark"),
                 i18n("settings.launcher.corner_radius"),
                 i18n("settings.launcher.animation"),
+                i18n("settings.launcher.animation_speed"),
                 createAppearanceBackgroundStrings());
     }
 

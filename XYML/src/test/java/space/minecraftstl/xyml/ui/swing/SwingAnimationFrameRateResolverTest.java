@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Tests animation frame-delay precedence, validation, and high-refresh display adaptation.
+/// Tests animation frame-delay precedence, validation, and display-refresh adaptation.
 @NotNullByDefault
 public final class SwingAnimationFrameRateResolverTest {
     /// An explicit JVM delay takes precedence over the environment and does not inspect the display.
@@ -84,23 +84,25 @@ public final class SwingAnimationFrameRateResolverTest {
         assertEquals(16, delay);
     }
 
-    /// Automatic detection adapts common high-refresh displays using nearest-millisecond delays.
+    /// Automatic detection samples at least 120 Hz and still adapts to faster displays.
     @Test
     public void highRefreshDisplaysUseMatchingDelays() {
         assertAll(
-                () -> assertEquals(11, resolveAutomatically(90)),
+                () -> assertEquals(8, resolveAutomatically(75)),
+                () -> assertEquals(8, resolveAutomatically(90)),
                 () -> assertEquals(8, resolveAutomatically(120)),
                 () -> assertEquals(7, resolveAutomatically(144)),
                 () -> assertEquals(6, resolveAutomatically(165)));
     }
 
-    /// Ordinary, unknown, and just-below-threshold refresh rates keep the 16 ms default.
+    /// Ordinary, slow, and unknown displays use the 120 Hz automatic sampling floor.
     @Test
     public void ordinaryOrUnknownDisplaysUseDefaultDelay() {
         assertAll(
-                () -> assertEquals(16, resolveAutomatically(0)),
-                () -> assertEquals(16, resolveAutomatically(60)),
-                () -> assertEquals(16, resolveAutomatically(89)));
+                () -> assertEquals(8, resolveAutomatically(0)),
+                () -> assertEquals(8, resolveAutomatically(30)),
+                () -> assertEquals(8, resolveAutomatically(60)),
+                () -> assertEquals(8, resolveAutomatically(89)));
     }
 
     /// An invalid explicit environment value warns and suppresses automatic detection.
@@ -120,7 +122,7 @@ public final class SwingAnimationFrameRateResolverTest {
                 warnings::add);
 
         assertAll(
-                () -> assertEquals(16, delay),
+                () -> assertEquals(8, delay),
                 () -> assertEquals(0, detectionCount.get()),
                 () -> assertEquals(List.of("Invalid animation frame rate: fast"), warnings));
     }
@@ -142,7 +144,7 @@ public final class SwingAnimationFrameRateResolverTest {
                 warnings::add);
 
         assertAll(
-                () -> assertEquals(16, delay),
+                () -> assertEquals(8, delay),
                 () -> assertEquals(0, detectionCount.get()),
                 () -> assertEquals(List.of("Invalid Swing animation frame delay: 0"), warnings));
     }
@@ -164,7 +166,7 @@ public final class SwingAnimationFrameRateResolverTest {
                 warnings::add);
 
         assertAll(
-                () -> assertEquals(16, delay),
+                () -> assertEquals(8, delay),
                 () -> assertEquals(0, detectionCount.get()),
                 () -> assertTrue(warnings.isEmpty()));
     }
@@ -184,7 +186,7 @@ public final class SwingAnimationFrameRateResolverTest {
                 warnings::add);
 
         assertAll(
-                () -> assertEquals(16, delay),
+                () -> assertEquals(8, delay),
                 () -> assertEquals(1, warnings.size()),
                 () -> assertTrue(warnings.get(0).contains("display unavailable")));
     }
