@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.export;
 
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.ViewportTrackingPanel;
 
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
@@ -474,7 +475,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
     ///
     /// @return configured vertically scrollable metadata surface
     private JComponent createMetadataSurface() {
-        JPanel metadata = new JPanel(new MigLayout(
+        JPanel metadata = new ViewportTrackingPanel(new MigLayout(
                 "insets 8 16 8 12, fillx, wrap 2",
                 "[120!][grow,fill]"));
         metadata.setName("modpackExportMetadata");
@@ -494,15 +495,15 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
         descriptionScroll.setName("modpackExportDescriptionScroll");
         SwingTransparency.revealBackgroundThroughScrollPane(descriptionScroll);
-        metadata.add(descriptionScroll, "grow, h 84!");
+        metadata.add(descriptionScroll, "grow, wmin 0, h 84!");
         metadata.add(new JLabel(""));
-        metadata.add(forceUpdateCheck, "growx");
+        metadata.add(forceUpdateCheck, "growx, wmin 0");
         metadata.add(new JLabel(i18n("modpack.wizard.step.initialization.save")));
         JPanel outputRow = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][]", "[40!]"));
         outputRow.setOpaque(false);
-        outputRow.add(outputField, "growx, h 40!");
+        outputRow.add(outputField, "growx, wmin 0, h 40!");
         outputRow.add(chooseOutputButton, "w 40!, h 40!");
-        metadata.add(outputRow, "growx");
+        metadata.add(outputRow, "growx, wmin 0");
 
         JScrollPane scroll = new JScrollPane(metadata);
         scroll.setName("modpackExportMetadataScroll");
@@ -548,7 +549,7 @@ public final class ModpackExportPanel extends JPanel implements AutoCloseable {
         JComponent input = Objects.requireNonNull(field, "field");
         fieldLabel.setLabelFor(input);
         panel.add(fieldLabel);
-        panel.add(input, Objects.requireNonNull(constraints, "constraints"));
+        panel.add(input, Objects.requireNonNull(constraints, "constraints") + ", wmin 0");
     }
 
     /// Creates concise request feedback and a task-owned progress surface.

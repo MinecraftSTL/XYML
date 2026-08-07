@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.observable.property.ReadOnlyProperty;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.presentation.TaskSnapshot;
+import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
@@ -87,6 +88,7 @@ import java.util.function.Supplier;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -173,6 +175,7 @@ public final class GameVersionCatalogPanelTest {
                     .getListCellRendererComponent(list, entry, 0, true, false)).isOpaque();
 
             assertAll(
+                    () -> assertInstanceOf(AnimatedTabbedPane.class, tabs),
                     () -> assertFalse(panel.isOpaque()),
                     () -> assertFalse(tabs.isOpaque()),
                     () -> assertFalse(findComponent(

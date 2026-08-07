@@ -50,6 +50,8 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -134,14 +136,20 @@ public final class AppShellFrameTest {
                 () -> assertSame(nativeFailure, thrown.getSuppressed()[0]));
     }
 
-    /// The frame installs full-window FlatLaf chrome and opens on persistent instance management.
+    /// The frame installs full-window FlatLaf chrome, paints instance management first, then preloads sidebar pages.
+    ///
+    /// @throws InterruptedException when the test thread is interrupted while awaiting post-paint preloading
     @Test
-    public void createsFullWindowContentFrame() {
+    public void createsFullWindowContentFrame() throws InterruptedException {
         assumeFalse(GraphicsEnvironment.isHeadless());
+        CountDownLatch pagesCreated = new CountDownLatch(ShellPageId.values().length);
         EnumMap<ShellPageId, ShellPageFactory<? extends JComponent>> factories =
                 new EnumMap<>(ShellPageId.class);
         for (ShellPageId page : ShellPageId.values()) {
-            factories.put(page, JPanel::new);
+            factories.put(page, () -> {
+                pagesCreated.countDown();
+                return new JPanel();
+            });
         }
 
         SwingThemeManager themeManager = new SwingThemeManager(
@@ -191,6 +199,7 @@ public final class AppShellFrameTest {
                             rootPane.getWindowDecorationStyle()),
                     () -> assertNull(frame.shellPanel().selectedPage()),
                     () -> assertTrue(frame.shellPanel().isPageCached(ShellPageId.INSTANCES)),
+                    () -> assertEquals(ShellPageId.values().length - 1L, pagesCreated.getCount()),
                     () -> assertEquals("mac horizontal zeroInFullScreen",
                             frame.shellPanel().toolbar().macWindowButtonsPlaceholder().getClientProperty(
                                     FlatClientProperties.FULL_WINDOW_CONTENT_BUTTONS_PLACEHOLDER)),
@@ -211,6 +220,7 @@ public final class AppShellFrameTest {
                     () -> assertEquals(255, frame.getBackground().getAlpha()));
 
             frame.open();
+            assertTrue(pagesCreated.await(5L, TimeUnit.SECONDS));
             if (!SystemInfo.isMacOS) {
                 Rectangle buttonBounds = assertInstanceOf(
                         Rectangle.class,

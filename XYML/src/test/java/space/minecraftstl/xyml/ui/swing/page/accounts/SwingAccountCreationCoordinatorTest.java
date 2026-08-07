@@ -61,6 +61,8 @@ public final class SwingAccountCreationCoordinatorTest {
     }
 
     /// Offline, Microsoft, and authlib requests all authenticate and commit on the caller executor.
+    ///
+    /// @throws Exception when asynchronous workflow or callback delivery fails
     @Test
     public void supportsAllThreeMethodsOnCallerExecutor() throws Exception {
         FakeGateway gateway = new FakeGateway();
@@ -79,6 +81,7 @@ public final class SwingAccountCreationCoordinatorTest {
             RecordingListener listener = new RecordingListener();
             AccountCreationResult result = coordinator.start(request, listener)
                     .completion().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            assertTrue(listener.successDelivered.await(5, TimeUnit.SECONDS));
             assertAll(
                     () -> assertEquals(request.method(), result.method()),
                     () -> assertEquals(request.portable(), result.portable()),
@@ -103,8 +106,10 @@ public final class SwingAccountCreationCoordinatorTest {
     }
 
     /// Cancelling the invalid-name acknowledgement returns to the form before authentication starts.
+    ///
+    /// @throws InterruptedException when callback delivery waiting is interrupted
     @Test
-    public void invalidOfflineNameRequiresConfirmation() {
+    public void invalidOfflineNameRequiresConfirmation() throws InterruptedException {
         FakeGateway gateway = new FakeGateway();
         FakeInteraction interaction = new FakeInteraction();
         interaction.confirmInvalidName = false;
@@ -117,6 +122,7 @@ public final class SwingAccountCreationCoordinatorTest {
 
         assertThrows(CancellationException.class,
                 () -> operation.completion().toCompletableFuture().join());
+        assertTrue(listener.cancellationDelivered.await(5, TimeUnit.SECONDS));
         assertAll(
                 () -> assertEquals(List.of("invalid name"), interaction.invalidNames),
                 () -> assertTrue(gateway.requests.isEmpty()),
@@ -506,8 +512,14 @@ public final class SwingAccountCreationCoordinatorTest {
         /// Successful result.
         private final AtomicReference<@Nullable AccountCreationResult> result = new AtomicReference<>();
 
+        /// Signals successful callback delivery independently from completion-future wakeup order.
+        private final CountDownLatch successDelivered = new CountDownLatch(1);
+
         /// Cancellation callback count.
         private final AtomicInteger cancellations = new AtomicInteger();
+
+        /// Signals cancellation callback delivery independently from completion-future wakeup order.
+        private final CountDownLatch cancellationDelivered = new CountDownLatch(1);
 
         /// Localized failure message.
         private final AtomicReference<@Nullable String> failureMessage = new AtomicReference<>();
@@ -528,12 +540,14 @@ public final class SwingAccountCreationCoordinatorTest {
         @Override
         public void onSucceeded(AccountCreationResult successfulResult) {
             result.set(successfulResult);
+            successDelivered.countDown();
         }
 
         /// Captures cancellation.
         @Override
         public void onCancelled() {
             cancellations.incrementAndGet();
+            cancellationDelivered.countDown();
         }
 
         /// Captures localized and original failure.

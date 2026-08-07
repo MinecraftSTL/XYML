@@ -51,6 +51,11 @@ public interface AppearanceSettingsStore {
     /// @param disabled whether animation is disabled
     void setAnimationsDisabled(boolean disabled);
 
+    /// Persists a validated launcher animation speed.
+    ///
+    /// @param percentage speed percentage
+    void setAnimationSpeedPercentage(int percentage);
+
     /// Persists theme-color source, custom seed, style, and override membership atomically.
     ///
     /// @param themeColor complete replacement theme-color settings

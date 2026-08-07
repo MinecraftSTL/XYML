@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.task.Schedulers;
+import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
@@ -91,7 +92,7 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         EdtDispatcher.requireEventDispatchThread();
         setOpaque(false);
 
-        categoryTabs = new JTabbedPane();
+        categoryTabs = new AnimatedTabbedPane();
         categoryTabs.setName("downloadsCategoryTabs");
         SwingTransparency.revealBackgroundThroughTabs(categoryTabs);
         categoryTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);

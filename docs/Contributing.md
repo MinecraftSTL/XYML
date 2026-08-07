@@ -1,7 +1,7 @@
 # Contributing Guide
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-**English** | 中文 ([简体](Contributing_zh.md), [繁體](Contributing_zh_Hant.md))
+中文 ([简体](Contributing_zh.md), [繁體](Contributing_zh_Hant.md)) | **English**
 <!-- #END LANGUAGE_SWITCHER -->
 
 ## Build XYML

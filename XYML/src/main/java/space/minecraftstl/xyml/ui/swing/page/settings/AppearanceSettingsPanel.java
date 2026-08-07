@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
+import space.minecraftstl.xyml.setting.AnimationSpeedSettings;
 import space.minecraftstl.xyml.setting.BackgroundType;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
@@ -111,6 +112,12 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
 
     /// Binary persisted animation preference.
     private final JCheckBox animationsEnabled = new JCheckBox();
+
+    /// Slider whose consecutive positions represent the launcher-wide discrete animation speeds.
+    private final JSlider animationSpeedSlider = new JSlider();
+
+    /// Current animation speed displayed beside the slider.
+    private final JLabel animationSpeedValue = new JLabel();
 
     /// Whether launcher theme-color values override the selected theme pack.
     private final JCheckBox themeColorOverridden = new JCheckBox();
@@ -207,6 +214,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
                 strings.themeModeLabel(),
                 i18n("settings.launcher.theme_color"),
                 strings.cornerRadiusLabel(),
+                strings.animationSpeedLabel(),
                 backgroundStrings.sourceTypeLabel(),
                 backgroundStrings.builtinSelectionLabel(),
                 backgroundStrings.localPathLabel(),
@@ -261,6 +269,17 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     public boolean areAnimationsEnabled() {
         EdtDispatcher.requireEventDispatchThread();
         return animationsEnabled.isSelected();
+    }
+
+    /// Returns the animation speed currently represented by the slider.
+    ///
+    /// @return current animation speed percentage
+    public int displayedAnimationSpeedPercentage() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable AppearanceSettingsSnapshot snapshot = displayedSnapshot;
+        return snapshot == null
+                ? AnimationSpeedSettings.DEFAULT_PERCENTAGE
+                : AnimationSpeedSettings.percentageAtSliderPosition(animationSpeedSlider.getValue());
     }
 
     /// Returns the complete background values currently represented by controls.
@@ -367,7 +386,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         add(new JSeparator(), "growx, gapbottom 12");
         add(createRadiusRow(), "gapbottom 12");
         add(new JSeparator(), "growx, gapbottom 12");
-        add(createAnimationRow(), "gapbottom 12");
+        add(createAnimationRow(), "gapbottom 4");
+        add(createAnimationSpeedRow(), "gapbottom 12");
         add(new JSeparator(), "growx, gapbottom 14");
 
         JLabel backgroundHeading = new JLabel(backgroundStrings.sectionTitle());
@@ -613,9 +633,50 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         animationsEnabled.addActionListener(event -> {
             if (!applyingSnapshot) {
                 model.setAnimationsEnabled(animationsEnabled.isSelected());
+                @Nullable AppearanceSettingsSnapshot snapshot = displayedSnapshot;
+                if (snapshot != null) {
+                    animationSpeedSlider.setEnabled(
+                            snapshot.writable() && !restartInProgress && animationsEnabled.isSelected());
+                }
             }
         });
         return createFullWidthToggleRow(animationsEnabled);
+    }
+
+    /// Creates the model-bounded animation-speed slider row.
+    ///
+    /// @return configured animation-speed field row
+    private JPanel createAnimationSpeedRow() {
+        JLabel label = new JLabel(strings.animationSpeedLabel());
+        label.setName("appearanceAnimationSpeedLabel");
+        animationSpeedSlider.setPaintTicks(false);
+        animationSpeedSlider.setPaintLabels(false);
+        animationSpeedSlider.setName("appearanceAnimationSpeed");
+        animationSpeedSlider.addChangeListener(event -> {
+            @Nullable AppearanceSettingsSnapshot snapshot = displayedSnapshot;
+            int percentage = snapshot == null
+                    ? AnimationSpeedSettings.DEFAULT_PERCENTAGE
+                    : AnimationSpeedSettings.percentageAtSliderPosition(animationSpeedSlider.getValue());
+            animationSpeedValue.setText(animationSpeedText(percentage));
+            if (!applyingSnapshot
+                    && !animationSpeedSlider.getValueIsAdjusting()
+                    && snapshot != null
+                    && snapshot.animationSpeed().percentage() != percentage) {
+                model.setAnimationSpeedPercentage(percentage);
+            }
+        });
+        animationSpeedValue.setName("appearanceAnimationSpeedValue");
+        animationSpeedValue.setHorizontalAlignment(JLabel.TRAILING);
+
+        JPanel control = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]12[48!]", "[]"));
+        control.setOpaque(false);
+        control.add(animationSpeedSlider, "growx");
+        control.add(animationSpeedValue, "alignx right");
+
+        JPanel row = fieldRow();
+        row.add(label, "growx");
+        row.add(control, "wmin 260, growx");
+        return row;
     }
 
     /// Creates one labeled two-column row for an arbitrary control.
@@ -897,6 +958,21 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         return (int) aligned;
     }
 
+    /// Formats a finite percentage as its decimal multiplier and the instant endpoint as infinity.
+    ///
+    /// @param percentage supported animation-speed percentage
+    /// @return concise visible speed value
+    private static String animationSpeedText(int percentage) {
+        if (percentage == AnimationSpeedSettings.INSTANT_PERCENTAGE) {
+            return "\u221e";
+        }
+        int whole = percentage / 100;
+        int tenths = percentage % 100 / 10;
+        return tenths == 0
+                ? Integer.toString(whole)
+                : whole + "." + tenths;
+    }
+
     /// Coalesces a model transition to the latest snapshot on the EDT.
     ///
     /// @param change transition that invalidated displayed controls
@@ -930,6 +1006,13 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
                 cornerRadiusRestartPanel.updateCornerRadius(snapshot.cornerRadius());
             }
             animationsEnabled.setSelected(snapshot.animationsEnabled());
+            AnimationSpeedSettings speed = snapshot.animationSpeed();
+            animationSpeedSlider.setMinimum(0);
+            animationSpeedSlider.setMaximum(AnimationSpeedSettings.sliderPositionCount() - 1);
+            animationSpeedSlider.setMinorTickSpacing(1);
+            animationSpeedSlider.setSnapToTicks(true);
+            animationSpeedSlider.setValue(AnimationSpeedSettings.sliderPositionForPercentage(speed.percentage()));
+            animationSpeedValue.setText(animationSpeedText(speed.percentage()));
 
             ThemeColorAppearanceSettings themeColor = snapshot.themeColor();
             themeColorOverridden.setSelected(themeColor.overridden());
@@ -969,6 +1052,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         }
         cornerRadiusSlider.setEnabled(interactive);
         animationsEnabled.setEnabled(interactive);
+        animationSpeedSlider.setEnabled(interactive && animationsEnabled.isSelected());
         setThemeColorControlsEnabled(interactive);
         setBackgroundControlsEnabled(interactive);
     }
