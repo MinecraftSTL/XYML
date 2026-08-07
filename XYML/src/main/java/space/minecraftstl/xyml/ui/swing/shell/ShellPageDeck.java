@@ -19,56 +19,45 @@ package space.minecraftstl.xyml.ui.swing.shell;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.ui.swing.AnimationHandle;
-import space.minecraftstl.xyml.ui.swing.Easing;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
-import space.minecraftstl.xyml.ui.swing.MotionPurpose;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
-import java.awt.AlphaComposite;
 import java.awt.Graphics;
-import java.awt.Graphics2D;
 import java.time.Duration;
 import java.util.Objects;
 
-/// Keeps page bounds stable while cross-fading and slightly translating a destination change.
+/// Keeps page bounds stable while translating and cross-fading cached frames from both destinations.
 @NotNullByDefault
 final class ShellPageDeck extends JPanel {
     /// Maximum horizontal travel used to preserve spatial continuity during a transition.
     private static final int TRANSITION_TRAVEL = 20;
 
-    /// Animator that enforces the current motion-accessibility policy.
-    private final SwingAnimator animator;
-
-    /// Caller-selected duration used for decorative page changes.
-    private final Duration transitionDuration;
+    /// Snapshot-composited transition that avoids repainting complete page trees on every frame.
+    private final SwingContentTransition contentTransition;
 
     /// The page accepting input and remaining after a transition.
     private @Nullable JComponent currentPage;
-
-    /// The page being removed from the visual transition.
-    private @Nullable JComponent outgoingPage;
-
-    /// Active transition handle, or `null` when the deck is settled.
-    private @Nullable AnimationHandle transition;
-
-    /// Eased transition progress from zero to one.
-    private double transitionProgress = 1.0;
 
     /// Creates a transparent page deck with caller-defined animation timing.
     ///
     /// @param animator the shared Swing animator
     /// @param transitionDuration the non-negative duration of a page change
     ShellPageDeck(SwingAnimator animator, Duration transitionDuration) {
-        this.animator = Objects.requireNonNull(animator);
-        this.transitionDuration = Objects.requireNonNull(transitionDuration);
+        Objects.requireNonNull(animator, "animator");
+        Objects.requireNonNull(transitionDuration, "transitionDuration");
         if (transitionDuration.isNegative()) {
             throw new IllegalArgumentException("transitionDuration must not be negative");
         }
         setLayout(null);
         setOpaque(false);
+        contentTransition = new SwingContentTransition(
+                this,
+                animator,
+                transitionDuration,
+                TRANSITION_TRAVEL);
     }
 
     /// Shows a page, optionally animating from the previous page under the current motion policy.
@@ -76,42 +65,34 @@ final class ShellPageDeck extends JPanel {
     /// @param page the page to show
     /// @param animate whether a settled existing page should transition visually
     void showPage(JComponent page, boolean animate) {
+        showPage(page, animate, SwingContentTransition.Direction.HORIZONTAL_FORWARD);
+    }
+
+    /// Shows a page using a direction derived from the destinations' visual positions.
+    ///
+    /// @param page the page to show
+    /// @param animate whether a settled existing page should transition visually
+    /// @param direction spatial relationship between the previous and incoming pages
+    void showPage(
+            JComponent page,
+            boolean animate,
+            SwingContentTransition.Direction direction) {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(page);
+        Objects.requireNonNull(direction, "direction");
 
-        settleActiveTransition();
         if (currentPage == page) {
             return;
         }
 
         @Nullable JComponent previousPage = currentPage;
-        currentPage = page;
-        attachAtFront(page);
-        page.setVisible(true);
-
         if (previousPage == null || !animate) {
-            if (previousPage != null) {
-                remove(previousPage);
-            }
-            outgoingPage = null;
-            transitionProgress = 1.0;
-            revalidate();
-            repaint();
+            contentTransition.settle();
+            replacePage(previousPage, page);
             return;
         }
 
-        outgoingPage = previousPage;
-        previousPage.setVisible(true);
-        transitionProgress = 0.0;
-        revalidate();
-
-        AnimationHandle startedTransition = animator.animate(
-                transitionDuration,
-                MotionPurpose.DECORATIVE,
-                Easing.DECELERATE,
-                this::applyTransitionProgress,
-                this::finishTransition);
-        transition = startedTransition.isRunning() ? startedTransition : null;
+        contentTransition.transitionFrom(previousPage, direction, () -> replacePage(previousPage, page));
     }
 
     /// Returns the currently visible destination page.
@@ -129,43 +110,35 @@ final class ShellPageDeck extends JPanel {
         }
     }
 
-    /// Paints incoming and outgoing pages without changing their layout bounds.
+    /// Paints cached destination frames during a transition and otherwise paints the live page.
     ///
     /// @param graphics the target graphics context
     @Override
     protected void paintChildren(Graphics graphics) {
-        @Nullable JComponent incoming = currentPage;
-        if (incoming == null) {
-            return;
-        }
-
-        @Nullable JComponent outgoing = outgoingPage;
-        if (outgoing == null || transitionProgress >= 1.0) {
-            // Normal Swing child painting owns double buffering once the deck is settled. Calling child.paint()
-            // from here nests RepaintManager buffers and can leave translated copies of the page on screen.
+        if (!contentTransition.paintFrames(graphics)) {
             super.paintChildren(graphics);
-            return;
         }
-
-        int outgoingOffset = (int) Math.round(-TRANSITION_TRAVEL * transitionProgress);
-        int incomingOffset = (int) Math.round(TRANSITION_TRAVEL * (1.0 - transitionProgress));
-        paintPage(graphics, outgoing, outgoingOffset, (float) (1.0 - transitionProgress));
-        paintPage(graphics, incoming, incomingOffset, (float) (0.55 + 0.45 * transitionProgress));
-    }
-
-    /// Reports overlapping drawing while two destination pages are transitioning.
-    ///
-    /// @return always `false` because transition pages overlap
-    @Override
-    public boolean isOptimizedDrawingEnabled() {
-        return false;
     }
 
     /// Cancels timer delivery and settles the deck before it becomes undisplayable.
     @Override
     public void removeNotify() {
-        settleActiveTransition();
+        contentTransition.settle();
         super.removeNotify();
+    }
+
+    /// Returns whether the cached outgoing frame is currently transitioning.
+    ///
+    /// @return true while a top-level page change remains active
+    boolean isTransitionRunning() {
+        return contentTransition.isRunning();
+    }
+
+    /// Returns the direction used by the current or most recent page transition.
+    ///
+    /// @return spatial transition direction
+    SwingContentTransition.Direction transitionDirection() {
+        return contentTransition.direction();
     }
 
     /// Adds a cached page or moves it to the input-facing component position.
@@ -180,56 +153,19 @@ final class ShellPageDeck extends JPanel {
         }
     }
 
-    /// Applies one eased transition frame without changing child bounds.
+    /// Replaces the sole live destination while preserving cached page instances for later navigation.
     ///
-    /// @param progress eased progress from zero to one
-    private void applyTransitionProgress(double progress) {
-        transitionProgress = Math.max(0.0, Math.min(1.0, progress));
-        repaint();
-    }
-
-    /// Removes the outgoing page and leaves the incoming page fully rendered.
-    private void finishTransition() {
-        @Nullable JComponent finishedPage = outgoingPage;
-        if (finishedPage != null) {
-            remove(finishedPage);
+    /// @param previousPage outgoing cached page, or null before initial display
+    /// @param page incoming cached page
+    private void replacePage(@Nullable JComponent previousPage, JComponent page) {
+        currentPage = page;
+        attachAtFront(page);
+        page.setVisible(true);
+        if (previousPage != null) {
+            remove(previousPage);
+            previousPage.setVisible(false);
         }
-        outgoingPage = null;
-        transition = null;
-        transitionProgress = 1.0;
         revalidate();
         repaint();
-    }
-
-    /// Cancels any active timer before completing the deck's current visual state.
-    private void settleActiveTransition() {
-        @Nullable AnimationHandle activeTransition = transition;
-        if (activeTransition != null) {
-            activeTransition.cancel();
-        }
-        if (outgoingPage != null) {
-            finishTransition();
-        } else {
-            transition = null;
-        }
-    }
-
-    /// Paints one child page through an isolated alpha and translation transform.
-    ///
-    /// @param graphics the deck graphics context
-    /// @param page the page to paint
-    /// @param horizontalOffset the visual-only horizontal translation
-    /// @param opacity the bounded page opacity
-    private static void paintPage(Graphics graphics, JComponent page, int horizontalOffset, float opacity) {
-        Graphics2D pageGraphics = (Graphics2D) graphics.create();
-        try {
-            pageGraphics.translate(page.getX() + horizontalOffset, page.getY());
-            pageGraphics.clipRect(0, 0, page.getWidth(), page.getHeight());
-            pageGraphics.setComposite(AlphaComposite.SrcOver.derive(Math.max(0.0f, Math.min(1.0f, opacity))));
-            // printAll bypasses Swing double buffering while the deck composites two translated page frames.
-            page.printAll(pageGraphics);
-        } finally {
-            pageGraphics.dispose();
-        }
     }
 }

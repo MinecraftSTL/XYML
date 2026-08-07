@@ -800,6 +800,7 @@ class SwingApplicationCompositionTest {
                         "Empty"),
                 new AppearanceSettingsStrings(
                         "Appearance", "Theme", "Follow theme", "System", "Light", "Dark", "Radius", "Animations",
+                        "Animation speed",
                         space.minecraftstl.xyml.ui.swing.page.settings.AppearanceBackgroundStrings.englishFallback()),
                 Duration.ZERO,
                 new TaskProgressStrings(

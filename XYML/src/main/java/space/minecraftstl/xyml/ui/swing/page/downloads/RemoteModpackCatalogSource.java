@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 
 import java.util.List;
+import java.util.Objects;
 
 /// Selectable remote catalog backends that provide modpack-capable Core repositories.
 ///
@@ -80,7 +81,9 @@ public enum RemoteModpackCatalogSource {
     ///
     /// @return non-null Core modpack repository
     public RemoteAddonRepository repository() {
-        return source.modpackRepo;
+        return Objects.requireNonNull(
+                source.getRepoForType(RemoteAddon.Type.MODPACK),
+                "Missing modpack repository for " + source);
     }
 
     /// Returns the source name for visual rendering.

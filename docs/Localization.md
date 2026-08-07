@@ -1,7 +1,7 @@
 # Localization
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-**English** | 中文 ([简体](Localization_zh.md), [繁體](Localization_zh_Hant.md))
+中文 ([简体](Localization_zh.md), [繁體](Localization_zh_Hant.md)) | **English**
 <!-- #END LANGUAGE_SWITCHER -->
 
 XYML provides localization support for multiple languages.
@@ -330,7 +330,7 @@ add the following content under the document title:
 After running `./gradlew updateDocuments`, these two lines will be automatically replaced with language switcher links like the following:
 
 ```markdown
-**English** (**Standard**, [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | 中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
+中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | **English** (**Standard**, [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 ```
 
 For more about macros, see [MacroProcessor.java](../buildSrc/src/main/java/space/minecraftstl/xyml/gradle/docs/MacroProcessor.java).

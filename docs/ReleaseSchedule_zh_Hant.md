@@ -1,7 +1,7 @@
 # xOyz Minecraft Launcher 發佈模型
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-[English](ReleaseSchedule.md) | **中文** ([简体](ReleaseSchedule_zh.md), **繁體**)
+**中文** ([简体](ReleaseSchedule_zh.md), **繁體**) | [English](ReleaseSchedule.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
 本文定義從 `1.0.0` 開始使用的 XYML 發佈模型。

@@ -1,26 +1,92 @@
+<!-- #BEGIN COPY -->
+<!-- #PROPERTY NAME=TITLE -->
 <div align="center">
-    <img src="/XYML/src/main/resources/assets/img/icon@8x.png" alt="XYML Logo" width="64" style="transform: rotate(180deg);"/>
+    <img src="/XYML/src/main/resources/assets/img/icon@8x.png" alt="XYML Logo" width="64"/>
 </div>
 
-<h1 align="center">ɹǝɥɔunɐ˥ ¡ʇɟɐɹɔǝuᴉW ollǝH</h1>
+<h1 align="center">xOyz Minecraft Launcher</h1>
+<!-- #END COPY -->
 
-<!-- #BEGIN BLOCK -->
-<!-- #PROPERTY PROCESS_LINK=false -->
-**ɥsᴉlƃuƎ** (**uʍoᗡ ǝpᴉsd∩** '[pɹɐpuɐʇS](README.md))
-<!-- #END BLOCK -->
+<!-- #BEGIN COPY -->
+<!-- #PROPERTY NAME=BADGES -->
+<div align="center">
+
+[![GitHub](https://img.shields.io/badge/GitHub-repo-blue?style=flat-square&logo=github)](https://github.com/MinecraftSTL/XYML)
+
+
+</div>
+<!-- #END COPY -->
+
+---
+
+<!-- #BEGIN LANGUAGE_SWITCHER -->
+中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | **English** ([Standard](README.md), **uʍoᗡ ǝpᴉsd∩**) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
+<!-- #END LANGUAGE_SWITCHER -->
 
 ## uoᴉʇɔnpoɹʇuI
 
-˙[ǝlqɐʇ sᴉɥʇ](PLATFORM.md) oʇ ɹǝɟǝɹ ǝsɐǝld '˥ƆWH ʎq pǝʇɹoddns sǝɹnʇɔǝʇᴉɥɔɹɐ ∩ԀƆ puɐ sɯǝʇsʎs ɹoℲ
+ǝɥʇ ʎq pǝuᴉɐʇuᴉɐɯ ʎꞁʇuǝpuǝdǝpuᴉ ɹǝɥɔunɐꞁ ʇɟɐɹɔǝuᴉW ɯɹoɟʇɐꞁd-ssoɹɔ 'ǝɔɹnos-uǝdo uɐ sᴉ (ɹǝɥɔunɐꞀ ʇɟɐɹɔǝuᴉW zʎOx) ꞀWʎX
+ɹoɟ sʍoꞁɟʞɹoʍ ǝʇǝꞁdɯoɔ sǝpᴉʌoɹd puɐ ᵷuᴉʍS ɥʇᴉʍ ʇꞁᴉnq sᴉ ǝɔɐɟɹǝʇuᴉ doʇʞsǝp ʇuǝɹɹnɔ sʇI ˙ʎʇᴉunɯɯoɔ Ꞁ⟘SʇɟɐɹɔǝuᴉW
+˙sʞɔɐdpoɯ ᵷuᴉᵷɐuɐɯ puɐ 'sǝɔuɐʇsuᴉ ᵷuᴉuᴉɐʇuᴉɐɯ 'ǝɯɐᵷ ǝɥʇ ᵷuᴉɥɔunɐꞁ puɐ ᵷuᴉꞁꞁɐʇsuᴉ
 
-˙˥ƆWH ɥƃnoɹɥʇ sɯɹoɟʇɐld ʇuǝɹǝɟɟᴉp ssoɹɔɐ ʇɟɐɹɔǝuᴉW ʎoɾuǝ ʎlᴉsɐǝ uɐɔ no⅄ ˙ɥɔɹ∀ƃuoo˥ puɐ 'SԀIW 'Λ-ƆSIɹ 'Wɹ∀ '98x sɐ ɥɔns sǝɹnʇɔǝʇᴉɥɔɹɐ ∩ԀƆ snoᴉɹɐʌ sʇɹoddns oslɐ ʇᴉ ʇnq 'pSqǝǝɹℲ puɐ 'SOɔɐɯ 'xnuᴉ˥ 'sʍopuᴉM ǝʞᴉl sɯǝʇsʎs ƃuᴉʇɐɹǝdo ʇuǝɹǝɟɟᴉp uo unɹ ʇᴉ sǝop ʎluo ʇoN ˙sǝᴉʇᴉlᴉqɐdɐɔ ɯɹoɟʇɐld-ssoɹɔ ƃuᴉzɐɯɐ sɐɥ ˥ƆWH
+:ǝpnꞁɔuᴉ sǝɹnʇɐǝɟ uᴉɐɯ sʇI
 
-˙ǝɹoɯ puɐ 'uoᴉʇɐzᴉɯoʇsnƆ I∩ 'ƃuᴉʇɐǝɹƆ ʞɔɐdpoW '(ǝuᴉℲᴉʇdO puɐ 'ɹǝpɐo˥ǝʇᴉ˥ 'ʇlᴉnQ 'ɔᴉɹqɐℲ ʎɔɐᵷǝꞀ 'ɔᴉɹqɐℲ 'ɯooɹuɐǝlƆ 'ǝƃɹoℲoǝN 'ǝƃɹoℲ) ƃuᴉllɐʇsuI ɹǝpɐo˥poW 'ƃuᴉzᴉɯoʇsnƆ ǝɯɐפ 'ʇuǝɯǝƃɐuɐW poW sʇɹoddns ʇɐɥʇ ɹǝɥɔunɐl ʇɟɐɹɔǝuᴉW ɯɹoɟʇɐld-ssoɹɔ 'ǝɔɹnos-uǝdo uɐ sᴉ ˥ƆWH
+- 'ɔᴉɹqɐℲ ʎɔɐᵷǝꞀ 'ɔᴉɹqɐℲ 'ɯooɹuɐǝꞁƆ 'ǝᵷɹoℲoǝN 'ǝᵷɹoℲ sɐ ɥɔns sɹǝpɐoꞁ ɥʇᴉʍ ɹǝɥʇǝᵷoʇ ʇɟɐɹɔǝuᴉW ᵷuᴉᵷɐuɐɯ puɐ ᵷuᴉꞁꞁɐʇsuI
+  ⸵ǝuᴉℲᴉʇdO puɐ 'ɹǝpɐoꞀǝʇᴉꞀ 'ʇꞁᴉnὉ
+- ⸵sᵷuᴉʇʇǝs ǝɯɐᵷ puɐ 'sǝɯᴉʇunɹ ɐʌɐſ 'sǝɔuɐʇsuᴉ ǝɯɐᵷ 'sʇunoɔɔɐ ᵷuᴉᵷɐuɐW
+- ⸵ʇɹodxǝ puɐ 'uoᴉʇɐǝɹɔ 'sǝʇɐpdn 'uoᴉʇɐꞁꞁɐʇsuᴉ ʞɔɐdpoɯ ᵷuᴉpnꞁɔuᴉ 'sʞɔɐdpoɯ puɐ 'spꞁɹoʍ 'sʞɔɐd ǝɔɹnosǝɹ 'spoɯ ᵷuᴉᵷɐuɐW
+- ˙ǝɔuɐɹɐǝddɐ puɐ 'spunoɹᵷʞɔɐq 'sǝɯǝɥʇ ɹǝɥɔunɐꞁ ᵷuᴉzᴉɯoʇsnƆ
 
-## pɐoluʍoᗡ
+ʇɔɐxǝ ɹoɟ [ǝꞁqɐʇ ʇɹoddns ɯɹoɟʇɐꞁd](PLATFORM.md) ǝɥʇ ǝǝS ˙sǝɹnʇɔǝʇᴉɥɔɹɐ ∩ԀƆ puɐ sɯǝʇsʎs ᵷuᴉʇɐɹǝdo ǝꞁdᴉʇꞁnɯ sʇɹoddns ꞀWʎX
+˙pǝpuǝɯɯoɔǝɹ sᴉ Ɩᘔ ɐʌɐſ puɐ 'ɹǝʇɐꞁ ɹo ㄥƖ ɐʌɐſ sǝɹᴉnbǝɹ ɹǝɥɔunɐꞁ ǝɥ⟘ ˙suoᴉʇɐʇᴉɯᴉꞁ puɐ sꞁǝʌǝꞁ ʇɹoddns
 
-˙ǝʌoqɐ pǝʇsᴉl sǝʇᴉsqǝʍ lɐᴉɔᴉɟɟo ǝɥʇ ɯoɹɟ sǝsɐǝlǝɹ pɐoluʍop oʇ ʎluo pǝpuǝɯɯoɔǝɹ sᴉ ʇᴉ 'ʎɹɐssǝɔǝu ʇou ɥƃnoɥʇl∀
+## ꞀƆWH ɥʇᴉʍ dᴉɥsuoᴉʇɐꞁǝᴚ
 
-˙[sǝsɐǝlǝɹ qnHʇᴉפ](https://github.com/MinecraftSTL/XYML/releases) uᴉ ˥ƆWH ɟo uoᴉsɹǝʌ ʇsǝʇɐl ǝɥʇ puᴉɟ oslɐ uɐɔ no⅄
+ɟo ʎɹoʇsᴉɥ ʇᴉ⅁ puɐ ǝpoɔ ǝɥʇ ɯoɹɟ sǝʇɐuᴉᵷᴉɹo ꞀWʎX
+˙ʎɹoʇᴉsodǝɹ ɯɐǝɹʇsdn s,ʇɔǝɾoɹd sᴉɥʇ sᴉ ɥɔᴉɥʍ '[(ɹǝɥɔunɐꞀ ¡ʇɟɐɹɔǝuᴉW oꞁꞁǝH) ꞀƆWH](https://github.com/HMCL-dev/HMCL)
+ǝɯɐᵷ ᵷuᴉpnꞁɔuᴉ 'sʇᴉɹǝɥuᴉ ꞀWʎX ʇɐɥʇ suoᴉʇɐpunoɟ ǝɥʇ pǝɥsᴉꞁqɐʇsǝ sɹoʇnqᴉɹʇuoɔ ʎʇᴉunɯɯoɔ puɐ sɹǝuᴉɐʇuᴉɐɯ s,ꞀƆWH
+sᴉɥ⟘ ˙ʇɹoddns ɯɹoɟʇɐꞁd-ssoɹɔ puɐ 'uoᴉʇɐzᴉꞁɐɔoꞁ 'sʞɔɐdpoɯ 'ʇuǝɯǝᵷɐuɐɯ ʇunoɔɔɐ puɐ ǝɔuɐʇsuᴉ 'spɐoꞁuʍop puɐ ᵷuᴉɥɔunɐꞁ
+˙ǝpnʇᴉʇɐɹᵷ ɥʇᴉʍ sǝɔᴉʇou ʇɥᵷᴉɹʎdoɔ puɐ 'dᴉɥsɹoɥʇnɐ 'sʇᴉɯɯoɔ ꞁɐɔᴉɹoʇsᴉɥ ǝsoɥʇ sǝʌɹǝsǝɹd ʎɹoʇᴉsodǝɹ
 
-˙[ǝʇᴉsqǝʍ lɐᴉɔᴉɟɟo](https://github.com/MinecraftSTL/XYML/releases) ǝɥʇ ɯoɹɟ uoᴉsɹǝʌ ʇsǝʇɐl ǝɥʇ pɐoluʍop
+ꞀWʎX ˙ǝsɐǝꞁǝɹ ꞀƆWH ꞁɐᴉɔᴉɟɟo uɐ ʇou sᴉ puɐ Ꞁ⟘SʇɟɐɹɔǝuᴉW ʎq pǝuᴉɐʇuᴉɐɯ ʎꞁʇuǝpuǝdǝpuᴉ ʇɔǝɾoɹd ɯɐǝɹʇsuʍop ɐ sᴉ ꞀWʎX
+ʇou sǝop ꞀWʎX puɐ ꞀƆWH ɟo snʇɐʇs ǝsɐǝꞁǝɹ ǝɥʇ ⸵ᵷuᴉʞɔɐɹʇ ǝnssᴉ puɐ 'sʇɔɐɟᴉʇɹɐ 'sꞁǝuuɐɥɔ ǝsɐǝꞁǝɹ 'suoᴉsɹǝʌ uʍo sʇᴉ sǝᵷɐuɐɯ
+ɯɐǝɹʇsdn ǝꞁqɐʇᴉns ʇɐɥʇ os ǝɔɹnos ɯɐǝɹʇsdn sʇᴉ sɐ `HMCL-dev/HMCL` suᴉɐʇǝɹ ʎɹoʇᴉsodǝɹ sᴉɥ⟘ ˙ʇɔǝɾoɹd ɹǝɥʇo ǝɥʇ ʇuǝsǝɹdǝɹ
+˙ꞀWʎX ɹoɟ pǝʇɐnꞁɐʌǝ puɐ pǝʞɔɐɹʇ qǝ ʞuɐɔ sǝᵷuɐɥɔ
+
+## sǝsɐǝꞁǝᴚ puɐ spɐoꞁuʍoᗡ
+
+ɹnoɟ sǝsn ꞀWʎX ˙[sǝsɐǝꞁǝᴚ qnHʇᴉ⅁](https://github.com/MinecraftSTL/XYML/releases) ɯoɹɟ spꞁᴉnq ꞀWʎX ꞁɐᴉɔᴉɟɟo pɐoꞁuʍoᗡ
+uoᴉʇoɯoɹd puɐ 'sǝᴉɔᴉꞁod ʞɔɐqpǝǝɟ 'sǝɔuǝᴉpnɐ ʇsǝʇ 'sʇɐɯɹoɟ uoᴉsɹǝʌ ɹᴉǝɥ⟘ ˙ʌǝp puɐ 'ɐɥdꞁɐ 'ɐʇǝq 'ǝꞁqɐʇs :sꞁǝuuɐɥɔ ǝsɐǝꞁǝɹ
+˙[ꞁǝpoɯ ǝsɐǝꞁǝɹ](ReleaseSchedule.md) ǝɥʇ uᴉ pǝʇuǝɯnɔop ǝɹɐ ɹǝpɹo
+
+## ᵷuᴉʇnqᴉɹʇuoƆ
+
+:sꞁǝuuɐɥɔ ᵷuᴉʍoꞁꞁoɟ ǝɥʇ ɥᵷnoɹɥʇ ꞀWʎX uᴉ ǝʇɐdᴉɔᴉʇɹɐd uɐɔ noʎ
+
+- ⸵[sǝnssI qnHʇᴉ⅁](https://github.com/MinecraftSTL/XYML/issues/new/choose) ɥᵷnoɹɥʇ sǝɹnʇɐǝɟ ǝsodoɹd ɹo sɯǝꞁqoɹd ʇɹodǝᴚ
+- ⸵[ʇsǝnbǝɹ ꞁꞁnd ɐ ʇᴉɯqns](https://github.com/MinecraftSTL/XYML/compare) puɐ ʎɹoʇᴉsodǝɹ sᴉɥʇ ʞɹoℲ
+- ˙ǝɔɹnos ɯoɹɟ ꞀWʎX ᵷnqǝp puɐ 'unɹ 'pꞁᴉnq oʇ [ǝpᴉnᵷ ᵷuᴉʇnqᴉɹʇuoƆ](Contributing.md) ǝɥʇ ʍoꞁꞁoℲ
+
+## sʇuǝɯᵷpǝꞁʍouʞɔⱯ puɐ sɹoʇnqᴉɹʇuoƆ
+
+˙ꞀWʎX oʇ uoᴉʇɐʇuǝɯnɔop puɐ 'sʇɹodǝɹ ǝnssᴉ 'ᵷuᴉʇsǝʇ 'suoᴉʇɐꞁsuɐɹʇ 'ǝpoɔ sǝʇnqᴉɹʇuoɔ oɥʍ ǝuoʎɹǝʌǝ oʇ noʎ ʞuɐɥ⟘
+
+[![XYML Contributors](https://contrib.rocks/image?repo=MinecraftSTL/XYML)](https://github.com/MinecraftSTL/XYML/graphs/contributors)
+
+ʞuɐɥʇ osꞁɐ ǝM
+ǝɥ⟘ ˙[ʎɹoʇsᴉɥ sʇᴉ ʇnoɥᵷnoɹɥʇ sɹoʇnqᴉɹʇuoɔ puɐ sɹoɥʇnɐ s,ꞀƆWH](https://github.com/HMCL-dev/HMCL/graphs/contributors)
+ʞɹoʍ sɐ pǝʇuǝsǝɹdǝɹ ǝq ʇou pꞁnoɥs puɐ ʎɹoʇsᴉɥ ɯɐǝɹʇsdn ʇɐɥʇ oʇ sᵷuoꞁǝq ꞀWʎX ʎq pǝʇᴉɹǝɥuᴉ ʇuǝɯdoꞁǝʌǝp ᵷuᴉuunɹ-ᵷuoꞁ
+˙ʇɔǝɾoɹd ꞀWʎX ǝɥʇ ʎq ʎꞁǝꞁos pǝɔnpoɹd
+
+## ǝsuǝɔᴉꞀ
+
+ㄥ uoᴉʇɔǝS ƐʌꞀԀ⅁ ǝɥʇ ɥʇᴉʍ '[ɹǝʇɐꞁ ɹo Ɛ uoᴉsɹǝʌ 'ǝsuǝɔᴉꞀ ɔᴉꞁqnԀ ꞁɐɹǝuǝ⅁ ∩N⅁](../LICENSE) ǝɥʇ ɹǝpun pǝʇnqᴉɹʇsᴉp sᴉ ꞀWʎX
+:ꞀƆWH ɯoɹɟ pǝʇᴉɹǝɥuᴉ sʇuǝɯǝɹᴉnbǝɹ ꞁɐuoᴉʇᴉppɐ
+
+1. ʇɐɥʇ os ɹǝqɯnu uoᴉsɹǝʌ ɹo ǝɯɐu sʇᴉ ǝᵷuɐɥɔ ʎꞁqɐuosɐǝɹ ʇsnɯ noʎ 'ɯɐɹᵷoɹd sᴉɥʇ ɟo uoᴉsɹǝʌ pǝᴉɟᴉpoɯ ɐ ᵷuᴉʇnqᴉɹʇsᴉp uǝɥM
+   ɹǝpun) uoᴉsɹǝʌ ꞁɐuᴉᵷᴉɹo ǝɥʇ ɯoɹɟ pǝɥsᴉnᵷuᴉʇsᴉp ǝq uɐɔ ʇᴉ
+   uᴉ pǝuᴉɟǝp ǝɹɐ uoᴉsɹǝʌ puɐ ǝɯɐu ɯɐɹᵷoɹd ǝɥ⟘ ˙([(ɔ)ㄥ uoᴉʇɔǝS ƐʌꞀԀ⅁](../LICENSE#L372-L374)
+   ˙[`Metadata.java`](../XYML/src/main/java/space/minecraftstl/xyml/Metadata.java)
+2. ˙([(q)ㄥ uoᴉʇɔǝS ƐʌꞀԀ⅁](../LICENSE#L368-L370) ɹǝpun) ɯɐɹᵷoɹd ǝɥʇ ʎq pǝʎɐꞁdsᴉp sǝɔᴉʇou ʇɥᵷᴉɹʎdoɔ ǝʌoɯǝɹ ʇou ʇsnɯ noʎ
+
+˙sǝꞁᴉɟ ǝɔɹnos ꞁɐnpᴉʌᴉpuᴉ ɟo sǝɔᴉʇou ǝsuǝɔᴉꞁ puɐ ʇɥᵷᴉɹʎdoɔ ǝɥʇ uᴉ puɐ [ƎSNƎƆIꞀ](../LICENSE) uᴉ pǝpᴉʌoɹd ǝɹɐ sɯɹǝʇ ᵷuᴉsuǝɔᴉꞁ ǝʇǝꞁdɯoɔ ǝɥ⟘

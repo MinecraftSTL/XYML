@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.game.install.GameInstallSession;
 import space.minecraftstl.xyml.game.install.GameInstallStatus;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
+import space.minecraftstl.xyml.ui.swing.AnimatedTabbedPane;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
@@ -164,7 +165,7 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
     private final LoaderSelectionListener loaderSelectionListener = this::loaderSelectionChanged;
 
     /// Top-level tabs preserving the original game installer while exposing restored content categories.
-    private final JTabbedPane downloadCenterTabs = new JTabbedPane();
+    private final JTabbedPane downloadCenterTabs = new AnimatedTabbedPane();
 
     /// Version-ID query editor.
     private final JTextField searchField = new JTextField();
