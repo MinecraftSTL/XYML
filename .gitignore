@@ -30,7 +30,6 @@ language-subtag-registry
 /XYML/build/
 /XYMLCore/build/
 /XYMLBoot/build/
-/XYMLAIServer/build/
 /minecraft/libraries/XYMLTransformerDiscoveryService/build/
 /minecraft/libraries/XYMLMultiMCBootstrap/build/
 /buildSrc/build/

@@ -24,6 +24,9 @@ import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.jetbrains.annotations.NotNullByDefault;
 
+import java.io.InputStream;
+import java.io.OutputStream;
+
 /// Owns the official MCP SDK stdio transport and registered XYML capabilities.
 @NotNullByDefault
 public final class XYMLMcpServer implements AutoCloseable {
@@ -37,9 +40,22 @@ public final class XYMLMcpServer implements AutoCloseable {
     /// so launcher I/O never runs on the JavaFX Application Thread.
     ///
     /// @param service initialized launcher operation service
-    public XYMLMcpServer(XYMLMcpService service) {
+    public XYMLMcpServer(XYMLMcpOperations service) {
+        this(service, System.in, System.out);
+    }
+
+    /// Creates and starts a single-session MCP server on explicit standard-I/O streams.
+    ///
+    /// Supplying the protocol streams explicitly lets the launcher redirect its own console
+    /// output without redirecting JSON-RPC frames.
+    ///
+    /// @param service initialized launcher operation service
+    /// @param input protocol input stream
+    /// @param output protocol output stream
+    public XYMLMcpServer(XYMLMcpOperations service, InputStream input, OutputStream output) {
         XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(service);
-        StdioServerTransportProvider transport = new StdioServerTransportProvider(McpJsonDefaults.getMapper());
+        StdioServerTransportProvider transport = new StdioServerTransportProvider(
+                McpJsonDefaults.getMapper(), input, output);
         server = McpServer.sync(transport)
                 .serverInfo("xyml-ai-mcp-server", "1.0.0")
                 .capabilities(McpSchema.ServerCapabilities.builder()

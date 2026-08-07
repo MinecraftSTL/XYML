@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.setting.ProxyManager;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.util.CacheRepository;
 
+import java.io.PrintStream;
 import java.nio.file.Files;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
@@ -48,10 +49,13 @@ public final class Main {
     ///
     /// @param args reserved command-line arguments
     public static void main(String @Unmodifiable [] args) {
+        PrintStream protocolOutput = System.out;
+        System.setOut(System.err);
         try {
             initializeLauncherRuntime();
             XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
-            XYMLMcpServer server = new XYMLMcpServer(new XYMLMcpService(repository));
+            XYMLMcpServer server = new XYMLMcpServer(
+                    new XYMLMcpService(repository), System.in, protocolOutput);
             Runtime.getRuntime().addShutdownHook(new Thread(() -> shutdown(server), "XYML MCP shutdown"));
             Thread.currentThread().join();
         } catch (InterruptedException interrupted) {

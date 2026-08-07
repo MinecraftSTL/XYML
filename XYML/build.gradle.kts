@@ -197,6 +197,7 @@ tasks.shadowJar {
         exclude(dependency("net.java.dev.jna:jna:.*"))
         exclude(dependency("com.formdev:flatlaf.*:.*"))
         exclude(dependency("com.miglayout:.*:.*"))
+        exclude(dependency("io.modelcontextprotocol.sdk:.*:.*"))
         exclude(project(":XYMLBoot"))
     }
 
