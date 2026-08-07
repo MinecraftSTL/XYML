@@ -24,8 +24,11 @@ import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.jetbrains.annotations.NotNullByDefault;
 
+import java.io.FilterInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.concurrent.CountDownLatch;
 
 /// Owns the official MCP SDK stdio transport and registered XYML capabilities.
 @NotNullByDefault
@@ -33,6 +36,9 @@ public final class XYMLMcpServer implements AutoCloseable {
 
     /// Live synchronous MCP server wrapper.
     private final McpSyncServer server;
+
+    /// Signals that the client input stream reached EOF or the server was closed.
+    private final CountDownLatch transportClosed = new CountDownLatch(1);
 
     /// Creates and starts a single-session stdio MCP server.
     ///
@@ -55,7 +61,7 @@ public final class XYMLMcpServer implements AutoCloseable {
     public XYMLMcpServer(XYMLMcpOperations service, InputStream input, OutputStream output) {
         XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(service);
         StdioServerTransportProvider transport = new StdioServerTransportProvider(
-                McpJsonDefaults.getMapper(), input, output);
+                McpJsonDefaults.getMapper(), new EndOfInputStream(input, transportClosed), output);
         server = McpServer.sync(transport)
                 .serverInfo("xyml-ai-mcp-server", "1.0.0")
                 .capabilities(McpSchema.ServerCapabilities.builder()
@@ -67,10 +73,21 @@ public final class XYMLMcpServer implements AutoCloseable {
                 .build();
     }
 
+    /// Waits until the MCP client closes its input stream or this server is closed.
+    ///
+    /// @throws InterruptedException if the waiting thread is interrupted
+    public void awaitTermination() throws InterruptedException {
+        transportClosed.await();
+    }
+
     /// Closes the MCP session and stdio transport gracefully.
     @Override
     public void close() {
-        server.closeGracefully();
+        try {
+            server.closeGracefully();
+        } finally {
+            transportClosed.countDown();
+        }
     }
 
     /// Returns the SDK server for protocol-level tests and diagnostics.
@@ -78,5 +95,73 @@ public final class XYMLMcpServer implements AutoCloseable {
     /// @return live MCP server
     public McpSyncServer server() {
         return server;
+    }
+
+    /// Forwards protocol input while notifying the owner when the client disconnects.
+    @NotNullByDefault
+    private static final class EndOfInputStream extends FilterInputStream {
+
+        /// Latch completed when the wrapped stream ends or fails.
+        private final CountDownLatch completion;
+
+        /// Creates an EOF-aware stream wrapper.
+        ///
+        /// @param input underlying protocol input
+        /// @param completion latch to complete on disconnect
+        private EndOfInputStream(InputStream input, CountDownLatch completion) {
+            super(input);
+            this.completion = completion;
+        }
+
+        /// Reads one byte and records EOF or an input failure.
+        ///
+        /// @return byte value, or `-1` at EOF
+        /// @throws IOException if the wrapped stream cannot be read
+        @Override
+        public int read() throws IOException {
+            try {
+                int value = super.read();
+                if (value < 0) {
+                    completion.countDown();
+                }
+                return value;
+            } catch (IOException exception) {
+                completion.countDown();
+                throw exception;
+            }
+        }
+
+        /// Reads a byte range and records EOF or an input failure.
+        ///
+        /// @param bytes destination buffer
+        /// @param offset first destination index
+        /// @param length maximum number of bytes to read
+        /// @return number of bytes read, or `-1` at EOF
+        /// @throws IOException if the wrapped stream cannot be read
+        @Override
+        public int read(byte[] bytes, int offset, int length) throws IOException {
+            try {
+                int count = super.read(bytes, offset, length);
+                if (count < 0) {
+                    completion.countDown();
+                }
+                return count;
+            } catch (IOException exception) {
+                completion.countDown();
+                throw exception;
+            }
+        }
+
+        /// Closes the wrapped stream and records the disconnect.
+        ///
+        /// @throws IOException if the wrapped stream cannot be closed
+        @Override
+        public void close() throws IOException {
+            try {
+                super.close();
+            } finally {
+                completion.countDown();
+            }
+        }
     }
 }

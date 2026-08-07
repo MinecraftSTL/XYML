@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.util.CacheRepository;
 
 import java.io.PrintStream;
 import java.nio.file.Files;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
@@ -42,7 +43,7 @@ public final class Main {
     private Main() {
     }
 
-    /// Starts the stdio MCP server and waits until the client terminates the child process.
+    /// Starts the stdio MCP server and waits until the client closes the protocol stream.
     ///
     /// This entry point never writes application messages to stdout because stdout is reserved
     /// exclusively for newline-delimited MCP JSON-RPC frames.
@@ -56,8 +57,19 @@ public final class Main {
             XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
             XYMLMcpServer server = new XYMLMcpServer(
                     new XYMLMcpService(repository), System.in, protocolOutput);
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> shutdown(server), "XYML MCP shutdown"));
-            Thread.currentThread().join();
+            AtomicBoolean shutdownStarted = new AtomicBoolean();
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                if (shutdownStarted.compareAndSet(false, true)) {
+                    shutdown(server);
+                }
+            }, "XYML MCP shutdown"));
+            try {
+                server.awaitTermination();
+            } finally {
+                if (shutdownStarted.compareAndSet(false, true)) {
+                    shutdown(server);
+                }
+            }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
         } catch (Exception exception) {

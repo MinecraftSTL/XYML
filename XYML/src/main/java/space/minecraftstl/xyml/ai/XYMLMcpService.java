@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
+import space.minecraftstl.xyml.setting.property.InheritableProperty;
 
 import java.io.IOException;
 import java.net.URLDecoder;
@@ -55,7 +56,7 @@ import java.util.stream.Stream;
 /// Bridges the existing XYMLCore launcher services to MCP-safe structured operations.
 ///
 /// This class deliberately contains no new game or mod-management algorithms. It delegates to the
-/// repository, dependency manager, remote add-on repositories, and launch monitor already used by XYML.
+/// repository, mod manager, Java manager, and launch monitor already used by XYML.
 @NotNullByDefault
 public final class XYMLMcpService implements XYMLMcpOperations {
 
@@ -268,12 +269,32 @@ public final class XYMLMcpService implements XYMLMcpOperations {
         }
         GameInstanceID id = id(instanceId);
         GameSettings.Instance setting = writableSettings(id);
-        setting.getOverrideProperties().add(GameSettings.PROPERTY_MIN_MEMORY);
-        setting.minMemoryProperty().setValue(minMemory);
-        setting.getOverrideProperties().add(GameSettings.PROPERTY_MAX_MEMORY);
-        setting.maxMemoryProperty().setValue(maxMemory);
+        applyMemoryOverride(setting, GameSettings.PROPERTY_MIN_MEMORY, setting.minMemoryProperty(), minMemory);
+        applyMemoryOverride(setting, GameSettings.PROPERTY_MAX_MEMORY, setting.maxMemoryProperty(), maxMemory);
         repository.saveGameSettings(id);
         return getInstanceSettings(instanceId);
+    }
+
+    /// Applies one heap setting value while preserving the instance inheritance contract.
+    ///
+    /// A null value removes the instance override; it does not create an override whose value is
+    /// null, because effective settings resolve null direct values to their property defaults.
+    ///
+    /// @param setting instance settings to update
+    /// @param propertyName serialized override-property name
+    /// @param property property receiving a non-null override value
+    /// @param value requested value, or null to inherit
+    static void applyMemoryOverride(
+            GameSettings.Instance setting,
+            String propertyName,
+            InheritableProperty<@Nullable Integer> property,
+            @Nullable Integer value) {
+        if (value == null) {
+            setting.getOverrideProperties().remove(propertyName);
+        } else {
+            setting.getOverrideProperties().add(propertyName);
+            property.setValue(value);
+        }
     }
 
     /// Changes the raw JVM options string.
