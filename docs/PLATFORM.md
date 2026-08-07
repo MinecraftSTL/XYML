@@ -1,7 +1,7 @@
 # Platform Support Status
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-**English** | 中文 ([简体](PLATFORM_zh.md), [繁體](PLATFORM_zh_Hant.md))
+中文 ([简体](PLATFORM_zh.md), [繁體](PLATFORM_zh_Hant.md)) | **English**
 <!-- #END LANGUAGE_SWITCHER -->
 
 ## Launcher Compatibility

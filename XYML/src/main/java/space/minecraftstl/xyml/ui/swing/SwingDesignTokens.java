@@ -27,6 +27,9 @@ import java.util.Objects;
 /// @param cornerRadius the component corner radius in logical pixels
 @NotNullByDefault
 public record SwingDesignTokens(int cornerRadius) {
+    /// Largest FlatLaf checkbox arc that retains a rounded-square silhouette.
+    private static final int MAXIMUM_CHECK_BOX_ARC = 6;
+
     /// Creates validated Swing design tokens.
     ///
     /// @param cornerRadius the component corner radius in logical pixels
@@ -52,7 +55,7 @@ public record SwingDesignTokens(int cornerRadius) {
 
         defaults.put("Component.arc", cornerRadius);
         defaults.put("Button.arc", cornerRadius);
-        defaults.put("CheckBox.arc", cornerRadius);
+        defaults.put("CheckBox.arc", Math.min(cornerRadius, MAXIMUM_CHECK_BOX_ARC));
         defaults.put("TextComponent.arc", cornerRadius);
         defaults.put("ProgressBar.arc", cornerRadius);
         defaults.put("ScrollBar.thumbArc", cornerRadius);
