@@ -39,7 +39,7 @@ public final class XYMLMcpToolRegistry {
     /// Tool names that mutate or start processes and therefore require explicit confirmation.
     private static final @Unmodifiable List<String> CONFIRMATION_TOOLS = List.of(
             "remove_mods", "install_game_version", "install_modloader", "create_instance",
-            "install_local_modpack", "launch_game", "stop_game");
+            "install_local_modpack", "launch_game", "stop_game", "get_launch_status");
 
     /// Service receiving all launcher-specific operations.
     private final @Nullable XYMLMcpService service;
@@ -207,8 +207,8 @@ public final class XYMLMcpToolRegistry {
         tools.add(tool("stop_game", "[L3] High-impact termination of the tracked game process; requires confirmed=true.",
                 confirmedSchema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
                 arguments -> service().stopGame(requiredString(arguments, "instance_id"))));
-        tools.add(tool("get_launch_status", "[L3] Read-only process status, exit code, and XYML ExitType classification.",
-                schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
+        tools.add(tool("get_launch_status", "[L3] Process status query for a launch test; requires confirmed=true.",
+                confirmedSchema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
                 arguments -> service().getLaunchStatus(requiredString(arguments, "instance_id"))));
         return List.copyOf(tools);
     }

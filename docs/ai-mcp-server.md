@@ -37,7 +37,7 @@ Claude Desktop 配置示例（Windows 路径需要按实际 checkout 调整）�
 
 模组工具：`install_addon`、`install_local_addon`、`enable_mod`、`disable_mod`、`remove_mods`。
 
-高影响工具：`install_game_version`、`install_modloader`、`create_instance`、`install_local_modpack`、`launch_game`、`stop_game`、`get_launch_status`（状态查询本身只读，但与启动测试一起列出）。
+高影响工具：`install_game_version`、`install_modloader`、`create_instance`、`install_local_modpack`、`launch_game`、`stop_game`、`get_launch_status`。状态查询本身只读，但按启动测试策略同样要求 `confirmed: true`。
 
 ## Resources
 

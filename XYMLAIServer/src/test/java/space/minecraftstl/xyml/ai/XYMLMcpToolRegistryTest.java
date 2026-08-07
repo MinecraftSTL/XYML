@@ -57,7 +57,8 @@ public final class XYMLMcpToolRegistryTest {
         XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(null);
         List<McpSchema.Tool> tools = registry.toolSpecifications().stream()
                 .filter(specification -> specification.tool().name().equals("launch_game")
-                        || specification.tool().name().equals("remove_mods"))
+                        || specification.tool().name().equals("remove_mods")
+                        || specification.tool().name().equals("get_launch_status"))
                 .map(specification -> specification.tool())
                 .toList();
         for (McpSchema.Tool tool : tools) {
