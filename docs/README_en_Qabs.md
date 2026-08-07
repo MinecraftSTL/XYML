@@ -1,10 +1,11 @@
 <!-- #BEGIN COPY -->
 <!-- #PROPERTY NAME=TITLE -->
+<!-- #PROPERTY REPLACE='xOyz Minecraft Launcher' 'ɹǝɥɔunɐꞀ ʇɟɐɹɔǝuᴉW zʎOx' -->
 <div align="center">
     <img src="/XYML/src/main/resources/assets/img/icon@8x.png" alt="XYML Logo" width="64"/>
 </div>
 
-<h1 align="center">xOyz Minecraft Launcher</h1>
+<h1 align="center">ɹǝɥɔunɐꞀ ʇɟɐɹɔǝuᴉW zʎOx</h1>
 <!-- #END COPY -->
 
 <!-- #BEGIN COPY -->
@@ -12,6 +13,9 @@
 <div align="center">
 
 [![GitHub](https://img.shields.io/badge/GitHub-repo-blue?style=flat-square&logo=github)](https://github.com/MinecraftSTL/XYML)
+
+[![QQ Group](https://img.shields.io/badge/QQ-gray?style=flat-square&logo=qq&logoColor=ffffff)](https://qm.qq.com/cgi-bin/qm/qr?k=wz9sCQuIj4TiQBHUpeuBGM-pZ83f5ini&jump_from=webapi&authKey=VKucBpojFUOiDWF7OCbmvDI6Vfkjr+S1m4e7+unOBAuEfW/j1yXYTnf50c+z/NWs)
+[![Bilibili](https://img.shields.io/badge/Bilibili-gray?style=flat-square&logo=bilibili)](https://space.bilibili.com/2059457567)
 
 
 </div>
