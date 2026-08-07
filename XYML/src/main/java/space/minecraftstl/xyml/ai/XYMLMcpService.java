@@ -20,18 +20,9 @@ package space.minecraftstl.xyml.ai;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.addon.RemoteAddon;
-import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.mod.LocalModFile;
 import space.minecraftstl.xyml.addon.mod.ModManager;
-import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
-import space.minecraftstl.xyml.addon.repository.ModrinthRemoteAddonRepository;
 import space.minecraftstl.xyml.auth.AuthInfo;
-import space.minecraftstl.xyml.download.DefaultDependencyManager;
-import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.download.RemoteVersion;
-import space.minecraftstl.xyml.download.VersionList;
-import space.minecraftstl.xyml.game.CrashReportAnalyzer;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.LaunchOptions;
@@ -40,25 +31,19 @@ import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.launch.DefaultLauncher;
 import space.minecraftstl.xyml.launch.ProcessListener;
-import space.minecraftstl.xyml.modpack.Modpack;
-import space.minecraftstl.xyml.game.ModpackHelper;
-import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
-import space.minecraftstl.xyml.task.FileDownloadTask;
-import space.minecraftstl.xyml.task.Task;
 
 import java.io.IOException;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -72,7 +57,7 @@ import java.util.stream.Stream;
 /// This class deliberately contains no new game or mod-management algorithms. It delegates to the
 /// repository, dependency manager, remote add-on repositories, and launch monitor already used by XYML.
 @NotNullByDefault
-public final class XYMLMcpService {
+public final class XYMLMcpService implements XYMLMcpOperations {
 
     /// Maximum number of lines returned by one log request.
     private static final int MAX_LOG_LINES = 20_000;
@@ -85,11 +70,12 @@ public final class XYMLMcpService {
     private static final Pattern CRASH_RESOURCE = Pattern.compile(
             "^xyml://instances/([^/]+)/crash-reports/$");
 
+    /// URI matcher for an individual crash-report resource.
+    private static final Pattern CRASH_REPORT_RESOURCE = Pattern.compile(
+            "^xyml://instances/([^/]+)/crash-reports/([^/]+)$");
+
     /// Repository exposed by this server process.
     private final XYMLGameRepository repository;
-
-    /// Download provider selected by the running launcher.
-    private final DownloadProvider downloadProvider;
 
     /// Last known process state for each instance.
     private final Map<GameInstanceID, LaunchState> launchStates = new ConcurrentHashMap<>();
@@ -99,12 +85,12 @@ public final class XYMLMcpService {
     /// @param repository repository whose instances and settings are exposed
     public XYMLMcpService(XYMLGameRepository repository) {
         this.repository = Objects.requireNonNull(repository, "repository");
-        this.downloadProvider = DownloadProviders.getDownloadProvider();
     }
 
     /// Returns all installed instances and their root directories.
     ///
     /// @return immutable instance summaries
+    @Override
     public @Unmodifiable List<Map<String, Object>> listInstances() {
         repository.refresh();
         List<Map<String, Object>> result = new ArrayList<>();
@@ -121,6 +107,7 @@ public final class XYMLMcpService {
     ///
     /// @param instanceId instance identifier
     /// @return immutable effective-settings map
+    @Override
     public @Unmodifiable Map<String, Object> getInstanceSettings(String instanceId) {
         GameInstanceID id = id(instanceId);
         GameSettings.Effective effective = repository.getEffectiveGameSettings(id);
@@ -141,6 +128,7 @@ public final class XYMLMcpService {
     ///
     /// @param instanceId instance identifier
     /// @return absolute mods directory
+    @Override
     public String getModsDirectory(String instanceId) {
         return repository.getModsDirectory(id(instanceId)).toAbsolutePath().normalize().toString();
     }
@@ -150,6 +138,7 @@ public final class XYMLMcpService {
     /// @param instanceId instance identifier
     /// @param requestedLines requested number of lines
     /// @return log metadata and text
+    @Override
     public @Unmodifiable Map<String, Object> getLogs(String instanceId, int requestedLines) throws IOException {
         GameInstanceID id = id(instanceId);
         Path file = latestLog(id);
@@ -170,17 +159,17 @@ public final class XYMLMcpService {
     /// @param logText optional raw log text
     /// @param crashReportPath optional crash-report file path
     /// @return structured rule matches and extracted crash report
+    @Override
     public @Unmodifiable Map<String, Object> analyzeCrash(
             String instanceId,
             @Nullable String logText,
             @Nullable String crashReportPath) throws IOException {
         GameInstanceID id = id(instanceId);
         String rawLog = logText != null ? logText : readLog(id);
-        @Nullable String report = null;
-        if (crashReportPath != null && !crashReportPath.isBlank()) {
-            report = Files.readString(Path.of(crashReportPath), StandardCharsets.UTF_8);
-        }
-        Map<String, Object> analysis = analyzeCrashText(rawLog, report);
+        @Nullable String report = crashReportPath == null || crashReportPath.isBlank()
+                ? null
+                : readCrashReport(id, crashReportPath);
+        Map<String, Object> analysis = XYMLMcpCrashAnalyzer.analyze(rawLog, report);
         Map<String, Object> result = new LinkedHashMap<>(analysis);
         result.put("instance_id", id.id());
         return Map.copyOf(result);
@@ -194,45 +183,13 @@ public final class XYMLMcpService {
     /// @param logText raw log text
     /// @return structured rule matches and extracted crash report
     public static @Unmodifiable Map<String, Object> analyzeCrashText(String logText) {
-        return analyzeCrashText(logText, null);
-    }
-
-    /// Applies the existing crash analyzer to text and an optional explicit report.
-    private static @Unmodifiable Map<String, Object> analyzeCrashText(
-            String logText, @Nullable String explicitReport) {
-        @Nullable String report = explicitReport;
-        if (report == null) {
-            try {
-                report = CrashReportAnalyzer.findCrashReport(logText);
-            } catch (IOException | InvalidPathException ignored) {
-                report = null;
-            }
-            if (report == null) {
-                report = CrashReportAnalyzer.extractCrashReport(logText);
-            }
-        }
-        List<Map<String, Object>> matches = new ArrayList<>();
-        for (CrashReportAnalyzer.Result result : CrashReportAnalyzer.analyze(logText)) {
-            Map<String, Object> match = new LinkedHashMap<>();
-            match.put("rule", result.rule().name());
-            match.put("log", result.log());
-            Matcher matcher = result.matcher();
-            for (String group : result.rule().getGroupNames()) {
-                match.put(group, groupValue(matcher, group));
-            }
-            matches.add(Map.copyOf(match));
-        }
-        matches.sort(Comparator.comparing(value -> String.valueOf(value.get("rule"))));
-        return Map.of(
-                "matches", List.copyOf(matches),
-                "crash_report", report == null ? "" : report,
-                "keywords", List.copyOf(CrashReportAnalyzer.findKeywordsFromCrashReport(
-                        report == null ? "" : report)));
+        return XYMLMcpCrashAnalyzer.analyze(logText, null);
     }
 
     /// Lists Java runtimes already discovered by JavaManager.
     ///
     /// @return immutable runtime summaries
+    @Override
     public @Unmodifiable List<Map<String, Object>> listJavaRuntimes() throws InterruptedException {
         List<Map<String, Object>> result = new ArrayList<>();
         for (JavaRuntime runtime : JavaManager.getAllJava()) {
@@ -251,6 +208,7 @@ public final class XYMLMcpService {
     ///
     /// @param instanceId instance identifier
     /// @return immutable mod summaries
+    @Override
     public @Unmodifiable List<Map<String, Object>> listLocalMods(String instanceId) throws IOException {
         ModManager manager = repository.getModManager(id(instanceId));
         List<Map<String, Object>> result = new ArrayList<>();
@@ -266,114 +224,13 @@ public final class XYMLMcpService {
         return List.copyOf(result);
     }
 
-    /// Searches one remote add-on repository.
-    ///
-    /// @param source remote source name
-    /// @param type add-on type
-    /// @param query search text
-    /// @param gameVersion target game version
-    /// @param category optional category identifier
-    /// @param sort sort name
-    /// @param page zero-based page number
-    /// @param pageSize page size
-    /// @return immutable search result
-    public @Unmodifiable Map<String, Object> searchAddons(
-            String source,
-            String type,
-            String query,
-            String gameVersion,
-            @Nullable String category,
-            String sort,
-            int page,
-            int pageSize) throws IOException {
-        RemoteAddon.Source addonSource = addonSource(source);
-        RemoteAddon.Type addonType = addonType(type);
-        RemoteAddonRepository repo = requireRepository(addonSource, addonType);
-        @Nullable RemoteAddonRepository.Category categoryValue = category == null || category.isBlank()
-                ? null
-                : new RemoteAddonRepository.Category(null, category, List.of());
-        RemoteAddonRepository.SortType sortType = enumValue(RemoteAddonRepository.SortType.class, sort, "POPULARITY");
-        RemoteAddonRepository.SearchResult search = repo.search(
-                downloadProvider,
-                gameVersion,
-                categoryValue,
-                Math.max(0, page),
-                Math.max(1, Math.min(100, pageSize)),
-                query,
-                sortType,
-                RemoteAddonRepository.SortOrder.DESC);
-        List<Map<String, Object>> results = search.getResults().map(this::addonMap).toList();
-        return Map.of("source", addonSource.name().toLowerCase(Locale.ROOT),
-                "type", addonType.name().toLowerCase(Locale.ROOT),
-                "page", Math.max(0, page),
-                "total_pages", search.getTotalPages(),
-                "results", List.copyOf(results));
-    }
-
-    /// Returns versions published for one remote add-on project.
-    ///
-    /// @param source remote source name
-    /// @param type add-on type
-    /// @param projectId remote project identifier
-    /// @return immutable version summaries
-    public @Unmodifiable List<Map<String, Object>> getAddonVersions(
-            String source, String type, String projectId) throws IOException {
-        RemoteAddon.Source addonSource = addonSource(source);
-        RemoteAddonRepository repo = requireRepository(addonSource, addonType(type));
-        return repo.getRemoteVersionsById(downloadProvider, projectId).map(this::versionMap).toList();
-    }
-
-    /// Returns categories supported by one remote add-on source and type.
-    ///
-    /// @param source remote source name
-    /// @param type add-on type
-    /// @return immutable category summaries
-    public @Unmodifiable List<Map<String, Object>> getAddonCategories(String source, String type) throws IOException {
-        RemoteAddon.Source addonSource = addonSource(source);
-        RemoteAddonRepository repo = requireRepository(addonSource, addonType(type));
-        return repo.getCategories().map(category -> Map.of(
-                "id", category.id(),
-                "subcategories", List.copyOf(category.subcategories()))).toList();
-    }
-
-    /// Resolves a local add-on file to its remote version by its SHA-1.
-    ///
-    /// @param source remote source name
-    /// @param type add-on type
-    /// @param path local add-on path
-    /// @return matching version or an explicit not-found result
-    public @Unmodifiable Map<String, Object> getRemoteVersionByLocalFile(
-            String source, String type, String path) throws IOException {
-        RemoteAddon.Source addonSource = addonSource(source);
-        RemoteAddonRepository repo = requireRepository(addonSource, addonType(type));
-        @Nullable RemoteAddon.Version version = repo.getRemoteVersionByLocalFile(Path.of(path)).orElse(null);
-        return version == null
-                ? Map.of("found", false)
-                : Map.of("found", true, "version", versionMap(version));
-    }
-
-    /// Lists base game versions from the existing game version list.
-    ///
-    /// @return immutable version summaries
-    public @Unmodifiable List<Map<String, Object>> listRemoteGameVersions() {
-        return listVersions("game", "");
-    }
-
-    /// Lists versions for one loader and game version.
-    ///
-    /// @param loader loader identifier used by XYMLCore
-    /// @param gameVersion target game version
-    /// @return immutable loader-version summaries
-    public @Unmodifiable List<Map<String, Object>> listModloaderVersions(String loader, String gameVersion) {
-        return listVersions(loader, gameVersion);
-    }
-
     /// Changes the Java selection to a numeric version or executable path.
     ///
     /// @param instanceId instance identifier
     /// @param javaVersion numeric Java version, or blank when `javaPath` is used
     /// @param javaPath executable path, or blank when `javaVersion` is used
     /// @return resulting effective settings
+    @Override
     public @Unmodifiable Map<String, Object> setJavaVersion(
             String instanceId, @Nullable String javaVersion, @Nullable String javaPath) {
         GameInstanceID id = id(instanceId);
@@ -400,6 +257,7 @@ public final class XYMLMcpService {
     /// @param minMemory minimum heap, or null to inherit
     /// @param maxMemory maximum heap, or null to inherit
     /// @return resulting effective settings
+    @Override
     public @Unmodifiable Map<String, Object> setMemory(
             String instanceId, @Nullable Integer minMemory, @Nullable Integer maxMemory) {
         if (minMemory != null && minMemory < 0 || maxMemory != null && maxMemory <= 0) {
@@ -423,6 +281,7 @@ public final class XYMLMcpService {
     /// @param instanceId instance identifier
     /// @param options JVM options string
     /// @return resulting effective settings
+    @Override
     public @Unmodifiable Map<String, Object> setJvmOptions(String instanceId, String options) {
         GameInstanceID id = id(instanceId);
         GameSettings.Instance setting = writableSettings(id);
@@ -439,6 +298,7 @@ public final class XYMLMcpService {
     /// @param height optional height
     /// @param fullscreen optional fullscreen state
     /// @return resulting effective settings
+    @Override
     public @Unmodifiable Map<String, Object> setWindowOptions(
             String instanceId, @Nullable Integer width, @Nullable Integer height, @Nullable Boolean fullscreen) {
         if (width != null && width < 0 || height != null && height < 0) {
@@ -462,53 +322,12 @@ public final class XYMLMcpService {
         return getInstanceSettings(instanceId);
     }
 
-    /// Installs a selected remote add-on file into the instance mods directory.
-    ///
-    /// @param instanceId target instance
-    /// @param source remote source
-    /// @param type add-on type
-    /// @param projectId project identifier
-    /// @param versionId version identifier
-    /// @return installed file metadata
-    public @Unmodifiable Map<String, Object> installAddon(
-            String instanceId, String source, String type, String projectId, String versionId) throws Exception {
-        GameInstanceID id = id(instanceId);
-        RemoteAddon.Source addonSource = addonSource(source);
-        RemoteAddonRepository repo = requireRepository(addonSource, addonType(type));
-        RemoteAddon.File file = repo.getAddonFile(projectId, versionId);
-        Path mods = repository.getModsDirectory(id).toAbsolutePath().normalize();
-        String filename = Path.of(file.filename()).getFileName().toString();
-        Path destination = mods.resolve(filename).normalize();
-        if (!destination.getParent().equals(mods)) {
-            throw new IOException("Remote file name is not a direct mods file");
-        }
-        FileDownloadTask download = new FileDownloadTask(file.url(), destination, file.getIntegrityCheck());
-        download.test();
-        if (download.getException() != null) {
-            throw download.getException();
-        }
-        repository.getModManager(id).refresh();
-        return Map.of("path", destination.toString(), "filename", filename, "source", addonSource.name());
-    }
-
-    /// Copies a local mod into an instance using ModManager's existing validation.
-    ///
-    /// @param instanceId target instance
-    /// @param path local mod archive
-    /// @return installed path
-    public @Unmodifiable Map<String, Object> installLocalAddon(String instanceId, String path) throws IOException {
-        GameInstanceID id = id(instanceId);
-        Path source = Path.of(path).toAbsolutePath().normalize();
-        ModManager manager = repository.getModManager(id);
-        manager.addMod(source);
-        return Map.of("path", manager.getDirectory().resolve(source.getFileName()).toAbsolutePath().normalize().toString());
-    }
-
     /// Enables one mod file through ModManager's `.disabled` transition.
     ///
     /// @param instanceId target instance
     /// @param path mod file path
     /// @return resulting file path
+    @Override
     public String enableMod(String instanceId, String path) throws IOException {
         return transitionMod(id(instanceId), path, true).toString();
     }
@@ -518,6 +337,7 @@ public final class XYMLMcpService {
     /// @param instanceId target instance
     /// @param path mod file path
     /// @return resulting file path
+    @Override
     public String disableMod(String instanceId, String path) throws IOException {
         return transitionMod(id(instanceId), path, false).toString();
     }
@@ -527,6 +347,7 @@ public final class XYMLMcpService {
     /// @param instanceId target instance
     /// @param paths files to remove
     /// @return removed paths
+    @Override
     public @Unmodifiable List<String> removeMods(String instanceId, List<String> paths) throws IOException {
         GameInstanceID id = id(instanceId);
         ModManager manager = repository.getModManager(id);
@@ -548,89 +369,11 @@ public final class XYMLMcpService {
         return selected.stream().map(mod -> mod.getFile().toAbsolutePath().normalize().toString()).toList();
     }
 
-    /// Installs a local modpack through the format-specific Modpack provider.
-    ///
-    /// @param instanceId target/new instance identifier
-    /// @param path local zip or mrpack path
-    /// @return instance and source metadata
-    public @Unmodifiable Map<String, Object> installLocalModpack(String instanceId, String path) throws Exception {
-        GameInstanceID id = id(instanceId);
-        Path archive = Path.of(path).toAbsolutePath().normalize();
-        Modpack modpack = ModpackHelper.readModpackManifest(archive, StandardCharsets.UTF_8);
-        DefaultDependencyManager dependency = repository.getDependency();
-        Task<?> task = modpack.getInstallTask(dependency, archive, id, null);
-        runTask(task);
-        repository.refresh();
-        return Map.of("instance_id", id.id(), "path", archive.toString(), "name", modpack.getName());
-    }
-
-    /// Installs a base game version into an instance after explicit confirmation.
-    ///
-    /// @param instanceId target instance
-    /// @param gameVersion base version
-    /// @return resulting instance identifier
-    public @Unmodifiable Map<String, Object> installGameVersion(String instanceId, String gameVersion) throws Exception {
-        requireInstance(id(instanceId));
-        DefaultDependencyManager dependency = repository.getDependency();
-        runTask(dependency.newGameBuilder().name(id(instanceId)).gameVersion(gameVersion).buildAsync());
-        repository.refresh();
-        return Map.of("instance_id", instanceId, "game_version", gameVersion);
-    }
-
-    /// Installs a selected ModLoader version into an instance after explicit confirmation.
-    ///
-    /// @param instanceId target instance
-    /// @param gameVersion target game version
-    /// @param loader loader identifier
-    /// @param loaderVersion loader version
-    /// @return resulting instance identifier
-    public @Unmodifiable Map<String, Object> installModloader(
-            String instanceId, String gameVersion, String loader, String loaderVersion) throws Exception {
-        DefaultDependencyManager dependency = repository.getDependency();
-        runTask(dependency.newGameBuilder()
-                .name(id(instanceId))
-                .gameVersion(gameVersion)
-                .version(loader, loaderVersion)
-                .buildAsync());
-        repository.refresh();
-        return Map.of("instance_id", instanceId, "game_version", gameVersion,
-                "loader", loader, "loader_version", loaderVersion);
-    }
-
-    /// Creates a new instance and installs its requested game and optional loader.
-    ///
-    /// @param instanceId new instance identifier
-    /// @param gameVersion base game version
-    /// @param loader optional loader identifier
-    /// @param loaderVersion optional loader version
-    /// @return resulting instance identifier
-    public @Unmodifiable Map<String, Object> createInstance(
-            String instanceId,
-            String gameVersion,
-            @Nullable String loader,
-            @Nullable String loaderVersion) throws Exception {
-        GameInstanceID id = id(instanceId);
-        if (repository.hasInstance(id)) {
-            throw new IllegalArgumentException("Instance already exists: " + instanceId);
-        }
-        DefaultDependencyManager dependency = repository.getDependency();
-        var builder = dependency.newGameBuilder().name(id).gameVersion(gameVersion);
-        if (loader != null && !loader.isBlank()) {
-            if (loaderVersion == null || loaderVersion.isBlank()) {
-                throw new IllegalArgumentException("loaderVersion is required when loader is provided");
-            }
-            builder.version(loader, loaderVersion);
-        }
-        runTask(builder.buildAsync());
-        repository.refresh();
-        return Map.of("instance_id", instanceId, "game_version", gameVersion,
-                "loader", loader == null ? "" : loader);
-    }
-
     /// Starts an instance with the launcher-generated options and captures monitor state.
     ///
     /// @param instanceId target instance
     /// @return launch acceptance and process metadata
+    @Override
     public @Unmodifiable Map<String, Object> launchGame(String instanceId) throws Exception {
         GameInstanceID id = id(instanceId);
         GameInstanceManifest manifest = repository.getResolvedInstanceManifest(id).launchManifest();
@@ -650,13 +393,14 @@ public final class XYMLMcpService {
                 offlineAuth(id), options, state, true);
         state.process = launcher.launch();
         return Map.of("instance_id", id.id(), "started", true,
-                "running", state.process.isRunning(), "command", List.copyOf(state.process.getCommands()));
+                "running", state.process.isRunning());
     }
 
     /// Stops a running instance process if one is tracked.
     ///
     /// @param instanceId target instance
     /// @return whether a process was stopped
+    @Override
     public @Unmodifiable Map<String, Object> stopGame(String instanceId) {
         GameInstanceID id = id(instanceId);
         LaunchState state = launchStates.get(id);
@@ -671,6 +415,7 @@ public final class XYMLMcpService {
     ///
     /// @param instanceId target instance
     /// @return immutable launch state
+    @Override
     public @Unmodifiable Map<String, Object> getLaunchStatus(String instanceId) {
         GameInstanceID id = id(instanceId);
         LaunchState state = launchStates.get(id);
@@ -684,35 +429,35 @@ public final class XYMLMcpService {
                 "running", state.process != null && state.process.isRunning(),
                 "exit_code", exitCode == null ? nullValue() : exitCode,
                 "exit_type", exitType == null ? nullValue() : exitType.name(),
-                "logs", List.copyOf(state.logs));
+                "logs", state.logsSnapshot());
     }
 
     /// Reads a supported `xyml://` resource URI.
     ///
     /// @param uri resource URI
     /// @return resource URI, MIME type, and text
+    @Override
     public @Unmodifiable Map<String, String> readResource(String uri) throws IOException {
         Matcher logMatcher = LOG_RESOURCE.matcher(uri);
         if (logMatcher.matches()) {
-            GameInstanceID id = id(logMatcher.group(1));
+            GameInstanceID id = id(decodeSegment(logMatcher.group(1)));
             Path path = latestLog(id);
             return Map.of("uri", uri, "mime_type", "text/plain", "text", readIfPresent(path));
         }
         Matcher crashMatcher = CRASH_RESOURCE.matcher(uri);
         if (crashMatcher.matches()) {
-            GameInstanceID id = id(crashMatcher.group(1));
-            Path root = repository.getRunDirectory(id).resolve("crash-reports").toAbsolutePath().normalize();
-            Path path = latestCrashReport(root);
-            return Map.of("uri", uri, "mime_type", "text/plain", "text", readIfPresent(path));
+            GameInstanceID id = id(decodeSegment(crashMatcher.group(1)));
+            return Map.of("uri", uri, "mime_type", "text/uri-list",
+                    "text", listCrashReportUris(id));
+        }
+        Matcher reportMatcher = CRASH_REPORT_RESOURCE.matcher(uri);
+        if (reportMatcher.matches()) {
+            GameInstanceID id = id(decodeSegment(reportMatcher.group(1)));
+            String reportName = decodeSegment(reportMatcher.group(2));
+            return Map.of("uri", uri, "mime_type", "text/plain",
+                    "text", readCrashReport(id, reportName));
         }
         throw new IllegalArgumentException("Unsupported XYML resource URI: " + uri);
-    }
-
-    /// Returns the repository used by this service.
-    ///
-    /// @return repository reference
-    public XYMLGameRepository repository() {
-        return repository;
     }
 
     /// Resolves one identifier and verifies it is a valid XYML instance ID.
@@ -744,25 +489,55 @@ public final class XYMLMcpService {
         return Files.exists(latest) ? latest : run.resolve("latest.log");
     }
 
-    /// Finds the newest regular crash report in one instance's crash-report directory.
-    private static Path latestCrashReport(Path root) throws IOException {
+    /// Returns the normalized crash-report directory for an instance.
+    ///
+    /// @param id instance identifier
+    /// @return normalized crash-report directory
+    private Path crashReportRoot(GameInstanceID id) {
+        return repository.getRunDirectory(id).resolve("crash-reports").toAbsolutePath().normalize();
+    }
+
+    /// Lists direct crash-report files as MCP resource URIs.
+    ///
+    /// @param id instance identifier
+    /// @return newline-delimited resource URIs
+    /// @throws IOException if the directory cannot be read
+    private String listCrashReportUris(GameInstanceID id) throws IOException {
+        Path root = crashReportRoot(id);
         if (!Files.isDirectory(root)) {
-            return root.resolve("latest-crash-report.txt");
+            return "";
         }
+        String prefix = "xyml://instances/" + encodeSegment(id.id()) + "/crash-reports/";
         try (Stream<Path> paths = Files.list(root)) {
             return paths.filter(Files::isRegularFile)
-                    .max(Comparator.comparingLong(XYMLMcpService::lastModifiedMillis))
-                    .orElse(root.resolve("latest-crash-report.txt"));
+                    .map(Path::getFileName)
+                    .map(Path::toString)
+                    .sorted()
+                    .map(name -> prefix + encodeSegment(name))
+                    .reduce((left, right) -> left + "\n" + right)
+                    .orElse("");
         }
     }
 
-    /// Returns a file modification timestamp without hiding directory read failures.
-    private static long lastModifiedMillis(Path path) {
-        try {
-            return Files.getLastModifiedTime(path).toMillis();
-        } catch (IOException ignored) {
-            return Long.MIN_VALUE;
+    /// Reads one crash report after proving it belongs to the selected instance.
+    ///
+    /// @param id instance identifier
+    /// @param rawPath report file name or absolute path
+    /// @return UTF-8 report text
+    /// @throws IOException if the path escapes the instance or cannot be read
+    private String readCrashReport(GameInstanceID id, String rawPath) throws IOException {
+        Path root = crashReportRoot(id);
+        Path supplied = Path.of(rawPath);
+        Path candidate = supplied.isAbsolute() ? supplied.normalize() : root.resolve(supplied).normalize();
+        if (!root.equals(candidate.getParent()) || !Files.isRegularFile(candidate)) {
+            throw new IOException("Crash report is not a direct file in the instance crash-reports directory");
         }
+        Path realRoot = root.toRealPath();
+        Path realReport = candidate.toRealPath();
+        if (!realRoot.equals(realReport.getParent())) {
+            throw new IOException("Crash report resolves outside the instance crash-reports directory");
+        }
+        return Files.readString(realReport, StandardCharsets.UTF_8);
     }
 
     /// Reads an instance log, returning an empty string when it does not exist.
@@ -774,16 +549,6 @@ public final class XYMLMcpService {
     /// Reads a file as UTF-8 when it is a regular file.
     private String readIfPresent(Path path) throws IOException {
         return Files.isRegularFile(path) ? Files.readString(path, StandardCharsets.UTF_8) : "";
-    }
-
-    /// Safely obtains a named regex group from a crash rule.
-    private static String groupValue(Matcher matcher, String name) {
-        try {
-            @Nullable String value = matcher.group(name);
-            return value == null ? "" : value;
-        } catch (IllegalArgumentException ignored) {
-            return "";
-        }
     }
 
     /// Converts a nullable number to a JSON-safe value.
@@ -809,100 +574,20 @@ public final class XYMLMcpService {
         }
     }
 
-    /// Returns one enum value with a default for omitted or blank sort names.
-    private static <E extends Enum<E>> E enumValue(Class<E> type, @Nullable String value, String fallback) {
-        String normalized = value == null || value.isBlank() ? fallback : value;
-        try {
-            return Enum.valueOf(type, normalized.toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Unsupported value " + value + " for " + type.getSimpleName(), e);
-        }
+    /// Encodes one value for use as an MCP URI path segment.
+    ///
+    /// @param value raw segment value
+    /// @return percent-encoded segment
+    private static String encodeSegment(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
-    /// Converts a remote source name to the existing enum.
-    private static RemoteAddon.Source addonSource(String source) {
-        return enumValue(RemoteAddon.Source.class, source, "MODRINTH");
-    }
-
-    /// Converts an add-on type name to the existing enum.
-    private static RemoteAddon.Type addonType(String type) {
-        String normalized = type == null ? "MOD" : type.trim().replace('-', '_').replace(' ', '_');
-        if ("RESOURCEPACK".equalsIgnoreCase(normalized)) {
-            normalized = "RESOURCE_PACK";
-        } else if ("SHADERPACK".equalsIgnoreCase(normalized)) {
-            normalized = "SHADER_PACK";
-        }
-        return enumValue(RemoteAddon.Type.class, normalized, "MOD");
-    }
-
-    /// Selects a repository for one remote source and type.
-    private static RemoteAddonRepository requireRepository(RemoteAddon.Source source, RemoteAddon.Type type) {
-        @Nullable RemoteAddonRepository result = source.getRepoForType(type);
-        if (result == null) {
-            throw new IllegalArgumentException("The source does not support add-on type: " + type);
-        }
-        return result;
-    }
-
-    /// Converts one remote add-on to MCP-safe scalar data.
-    private Map<String, Object> addonMap(RemoteAddon addon) {
-        return Map.of("id", addonProjectId(addon), "slug", addon.slug(), "title", addon.title(), "author", addon.author(),
-                "description", addon.description(), "categories", List.copyOf(addon.categories()),
-                "page_url", addon.pageUrl(), "icon_url", addon.iconUrl(),
-                "type", addon.type() == null ? "" : addon.type().name());
-    }
-
-    /// Returns the source-specific project identifier used by installation APIs.
-    private static String addonProjectId(RemoteAddon addon) {
-        if (addon.data() instanceof ModrinthRemoteAddonRepository.ProjectSearchResult result) {
-            return result.projectId();
-        }
-        if (addon.data() instanceof CurseForgeRemoteAddonRepository.CurseAddon result) {
-            return Integer.toString(result.id());
-        }
-        return addon.slug();
-    }
-
-    /// Converts one remote version to MCP-safe scalar data.
-    private Map<String, Object> versionMap(RemoteAddon.Version version) {
-        RemoteAddon.File file = version.file();
-        return Map.of("project_id", version.projectId(), "version_id", version.version(),
-                "name", version.name(), "game_versions", List.copyOf(version.gameVersions()),
-                "loaders", version.loaders().stream().map(Enum::name).toList(),
-                "file_url", file == null ? "" : file.url(),
-                "filename", file == null ? "" : file.filename(),
-                "hashes", file == null ? Map.of() : Map.copyOf(file.hashes()),
-                "published_at", version.datePublished().toString());
-    }
-
-    /// Loads and maps one built-in version list.
-    private @Unmodifiable List<Map<String, Object>> listVersions(String id, String gameVersion) {
-        VersionList<?> versions = downloadProvider.getVersionListById(id);
-        runTaskUnchecked(versions.loadAsync(gameVersion));
-        List<Map<String, Object>> result = new ArrayList<>();
-        for (RemoteVersion version : versions.getVersions(gameVersion)) {
-            result.add(Map.of("id", version.getSelfVersion(), "game_version", version.getGameVersion(),
-                    "library", version.getLibraryId(), "type", version.getVersionType().name(),
-                    "release_date", version.getReleaseDate().toString(), "urls", List.copyOf(version.getUrls())));
-        }
-        return List.copyOf(result);
-    }
-
-    /// Runs an XYML task synchronously and propagates its failure.
-    private static void runTask(Task<?> task) throws Exception {
-        if (!task.test()) {
-            @Nullable Exception failure = task.getException();
-            throw failure == null ? new IllegalStateException("XYML task failed") : failure;
-        }
-    }
-
-    /// Runs an XYML task from a non-throwing version-list API.
-    private static void runTaskUnchecked(Task<?> task) {
-        try {
-            runTask(task);
-        } catch (Exception e) {
-            throw new IllegalStateException("Unable to load remote version list", e);
-        }
+    /// Decodes one MCP URI path segment.
+    ///
+    /// @param value percent-encoded segment
+    /// @return decoded segment
+    private static String decodeSegment(String value) {
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
 
     /// Resolves a mod path and applies an enable/disable transition.
@@ -940,8 +625,19 @@ public final class XYMLMcpService {
         /// Captures a decoded stdout or stderr line.
         @Override
         public void onLog(String log, boolean isErrorStream) {
-            if (logs.size() < MAX_LOG_LINES) {
-                logs.add((isErrorStream ? "[stderr] " : "") + log);
+            synchronized (logs) {
+                if (logs.size() < MAX_LOG_LINES) {
+                    logs.add((isErrorStream ? "[stderr] " : "") + log);
+                }
+            }
+        }
+
+        /// Returns an immutable snapshot of captured process output.
+        ///
+        /// @return immutable log snapshot
+        private @Unmodifiable List<String> logsSnapshot() {
+            synchronized (logs) {
+                return List.copyOf(logs);
             }
         }
 

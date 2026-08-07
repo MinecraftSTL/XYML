@@ -47,7 +47,10 @@ public final class XYMLMcpStdioHandshakeTest {
             XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(null);
             McpSyncServer server = McpServer.sync(transport)
                     .serverInfo("xyml-test", "1.0")
-                    .capabilities(McpSchema.ServerCapabilities.builder().tools(false).build())
+                    .capabilities(McpSchema.ServerCapabilities.builder()
+                            .tools(false)
+                            .resources(false, false)
+                            .build())
                     .tools(registry.toolSpecifications())
                     .resourceTemplates(registry.resourceTemplateSpecifications())
                     .build();
@@ -57,9 +60,13 @@ public final class XYMLMcpStdioHandshakeTest {
                         + "\"clientInfo\":{\"name\":\"test\",\"version\":\"1\"}}}");
                 writeMessage(clientInput, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}");
                 writeMessage(clientInput, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}");
+                writeMessage(clientInput, "{\"jsonrpc\":\"2.0\",\"id\":3,"
+                        + "\"method\":\"resources/templates/list\",\"params\":{}}");
                 String response = waitForOutput(serverOutput);
                 assertTrue(response.contains("\"list_instances\""));
                 assertTrue(response.contains("\"analyze_crash\""));
+                assertTrue(response.contains("\"crash_report_directory\""));
+                assertTrue(response.contains("\"crash_report\""));
             } finally {
                 server.closeGracefully();
             }
@@ -72,11 +79,12 @@ public final class XYMLMcpStdioHandshakeTest {
         output.flush();
     }
 
-    /// Waits briefly for the asynchronous stdio reader to produce a tools/list response.
+    /// Waits briefly for the asynchronous stdio reader to produce both list responses.
     private static String waitForOutput(ByteArrayOutputStream output) throws Exception {
         for (int attempt = 0; attempt < 40; attempt++) {
             String response = output.toString(StandardCharsets.UTF_8);
-            if (response.contains("\"list_instances\"")) {
+            if (response.contains("\"list_instances\"")
+                    && response.contains("\"crash_report_directory\"")) {
                 return response;
             }
             Thread.sleep(50L);

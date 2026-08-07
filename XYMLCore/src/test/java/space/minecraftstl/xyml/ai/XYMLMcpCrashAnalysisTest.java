@@ -33,8 +33,8 @@ public final class XYMLMcpCrashAnalysisTest {
     /// Confirms an OOM line produces a structured rule match and a JSON-safe keyword list.
     @Test
     public void analyzesOutOfMemoryLog() {
-        Map<String, Object> result = XYMLMcpService.analyzeCrashText(
-                "Exception in thread main java.lang.OutOfMemoryError: Java heap space");
+        Map<String, Object> result = XYMLMcpCrashAnalyzer.analyze(
+                "Exception in thread main java.lang.OutOfMemoryError: Java heap space", null);
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> matches = (List<Map<String, Object>>) result.get("matches");
         assertFalse(matches.isEmpty());
