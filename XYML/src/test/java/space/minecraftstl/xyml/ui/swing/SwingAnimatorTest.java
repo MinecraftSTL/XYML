@@ -19,18 +19,24 @@ package space.minecraftstl.xyml.ui.swing;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.setting.AnimationSpeedSettings;
 
+import javax.swing.SwingUtilities;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Tests policy, cancellation, easing, and monotonic progress logic without waiting for real timer frames.
+/// Tests policy, cancellation, easing, monotonic progress, and scheduled EDT frame delivery.
 @NotNullByDefault
 public final class SwingAnimatorTest {
     /// Off policy applies only the final frame and reports normal completion.
@@ -105,7 +111,45 @@ public final class SwingAnimatorTest {
                 () -> assertTrue(handle.isFinished()));
     }
 
-    /// Elapsed-time progress is clamped and independent of timer tick counts.
+    /// Scheduled delivery keeps every frame and completion callback on the EDT.
+    ///
+    /// @throws InterruptedException when the test thread is interrupted while awaiting completion
+    @Test
+    public void schedulerDeliversFramesOnEventDispatchThread() throws InterruptedException {
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 4);
+        CountDownLatch completed = new CountDownLatch(1);
+        AtomicBoolean callbacksOnEventDispatchThread = new AtomicBoolean(true);
+        AtomicInteger frameCount = new AtomicInteger();
+
+        AnimationHandle handle = animator.animate(
+                Duration.ofMillis(80L),
+                MotionPurpose.ESSENTIAL,
+                Easing.LINEAR,
+                value -> {
+                    frameCount.incrementAndGet();
+                    if (!SwingUtilities.isEventDispatchThread()) {
+                        callbacksOnEventDispatchThread.set(false);
+                    }
+                },
+                () -> {
+                    if (!SwingUtilities.isEventDispatchThread()) {
+                        callbacksOnEventDispatchThread.set(false);
+                    }
+                    completed.countDown();
+                });
+
+        try {
+            assertTrue(completed.await(2L, TimeUnit.SECONDS));
+            assertAll(
+                    () -> assertTrue(frameCount.get() >= 2),
+                    () -> assertTrue(callbacksOnEventDispatchThread.get()),
+                    () -> assertTrue(handle.isFinished()));
+        } finally {
+            animator.cancelAll();
+        }
+    }
+
+    /// Elapsed-time progress is clamped and independent of delivered frame counts.
     @Test
     public void normalizedProgressIsBounded() {
         assertAll(
@@ -114,6 +158,60 @@ public final class SwingAnimatorTest {
                 () -> assertEquals(0.5, SwingAnimator.normalizedProgress(50L, 100L)),
                 () -> assertEquals(1.0, SwingAnimator.normalizedProgress(100L, 100L)),
                 () -> assertEquals(1.0, SwingAnimator.normalizedProgress(150L, 100L)));
+    }
+
+    /// Finite speed percentages scale authored durations while the dedicated endpoint represents infinity.
+    @Test
+    public void scalesAuthoredDurationByAnimationSpeed() {
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 16, 160);
+
+        assertAll(
+                () -> assertEquals(160, animator.animationSpeedPercentage()),
+                () -> assertEquals(2_000L, SwingAnimator.scaledDurationNanos(1_000L, 50)),
+                () -> assertEquals(1_000L, SwingAnimator.scaledDurationNanos(1_000L, 100)),
+                () -> assertEquals(556L, SwingAnimator.scaledDurationNanos(1_000L, 180)),
+                () -> assertEquals(200L, SwingAnimator.scaledDurationNanos(1_000L, 500)),
+                () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(
+                        1_000L, AnimationSpeedSettings.INSTANT_PERCENTAGE)),
+                () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(
+                        1L, AnimationSpeedSettings.INSTANT_PERCENTAGE)),
+                () -> assertEquals(0L, SwingAnimator.scaledDurationNanos(
+                        0L, AnimationSpeedSettings.INSTANT_PERCENTAGE)));
+
+        animator.setAnimationSpeedPercentage(80);
+        assertEquals(80, animator.animationSpeedPercentage());
+        assertThrows(IllegalArgumentException.class, () -> animator.setAnimationSpeedPercentage(0));
+        assertThrows(IllegalArgumentException.class, () -> animator.setAnimationSpeedPercentage(110));
+    }
+
+    /// Selecting infinite speed finishes every active animation and suppresses intermediate frames thereafter.
+    @Test
+    public void infiniteSpeedFinishesActiveAndFutureAnimationsImmediately() {
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 10_000);
+        List<Double> activeFrames = new ArrayList<>();
+
+        AnimationHandle active = animator.animate(
+                Duration.ofSeconds(2L),
+                MotionPurpose.DECORATIVE,
+                Easing.LINEAR,
+                activeFrames::add,
+                () -> { });
+        animator.setAnimationSpeedPercentage(AnimationSpeedSettings.INSTANT_PERCENTAGE);
+
+        List<Double> futureFrames = new ArrayList<>();
+        AnimationHandle future = animator.animate(
+                Duration.ofSeconds(2L),
+                MotionPurpose.DECORATIVE,
+                Easing.LINEAR,
+                futureFrames::add,
+                () -> { });
+
+        assertAll(
+                () -> assertEquals(List.of(0.0, 1.0), activeFrames),
+                () -> assertTrue(active.isFinished()),
+                animator::animationsCompleteImmediately,
+                () -> assertEquals(List.of(1.0), futureFrames),
+                () -> assertTrue(future.isFinished()));
     }
 
     /// Every easing curve preserves exact start and end values after clamping.

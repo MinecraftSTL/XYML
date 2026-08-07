@@ -105,9 +105,9 @@ public final class SwingThemeManagerTest {
                 () -> assertEquals(ThemeVariant.LIGHT, manager.effectiveVariant()),
                 () -> assertInstanceOf(FlatLightLaf.class, UIManager.getLookAndFeel()),
                 () -> assertEquals(13, UIManager.getInt("Component.arc")),
-                () -> assertEquals(13, UIManager.getInt("CheckBox.arc")),
+                () -> assertEquals(6, UIManager.getInt("CheckBox.arc")),
                 () -> assertNotSame(initialCheckBoxIcon, updatedCheckBoxIcon),
-                () -> assertEquals(13, updatedCheckBoxIcon.getStyleableValue("arc")));
+                () -> assertEquals(6, updatedCheckBoxIcon.getStyleableValue("arc")));
 
         manager.update(ThemeBrightnessPreference.DARK, new SwingDesignTokens(13));
 
@@ -115,7 +115,7 @@ public final class SwingThemeManagerTest {
                 () -> assertEquals(ThemeVariant.DARK, manager.effectiveVariant()),
                 () -> assertInstanceOf(FlatDarkLaf.class, UIManager.getLookAndFeel()),
                 () -> assertEquals(13, UIManager.getInt("Component.arc")),
-                () -> assertEquals(13, UIManager.getInt("CheckBox.arc")));
+                () -> assertEquals(6, UIManager.getInt("CheckBox.arc")));
     }
 
     /// A requested launcher family is applied before first paint and survives later look-and-feel replacement.

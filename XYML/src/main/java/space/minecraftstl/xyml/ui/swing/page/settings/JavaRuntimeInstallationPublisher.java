@@ -26,11 +26,13 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.page.settings.JavaManagerRuntimeAcquisitionService.IncompleteInstallCleanup;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.Platform;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -52,7 +54,8 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// Neither the legacy archive installer nor the JSON writer opens a caller-visible final path. Final runtime and
 /// manifest paths are used only as atomic-move destinations, so a symbolic-link or hard-link replacement cannot
 /// redirect archive bytes or manifest bytes into an external file. Rollback quarantines a path before recursive
-/// deletion and proceeds only while the captured directory identity and random ownership token still match.
+/// deletion and proceeds only while a live directory identity lease plus the random marker's external hard-link
+/// lease still identify the original filesystem entries.
 @NotNullByDefault
 final class JavaRuntimeInstallationPublisher {
     /// Manifest update key carrying the random ownership token through the legacy installer result.
@@ -63,6 +66,9 @@ final class JavaRuntimeInstallationPublisher {
 
     /// Prefix for unpredictable staging directories created below the managed platform root.
     private static final String STAGING_DIRECTORY_PREFIX = ".xyml-java-stage-";
+
+    /// Prefix for hard-link leases that keep the original ownership-marker inode identifiable across replacement.
+    private static final String STAGING_LEASE_PREFIX = ".xyml-java-lease-";
 
     /// Prefix for manifest files written before publication.
     private static final String STAGING_MANIFEST_PREFIX = ".xyml-java-manifest-";
@@ -265,7 +271,10 @@ final class JavaRuntimeInstallationPublisher {
                 if (isCancelled()) {
                     throw new IOException("Managed Java installation was cancelled before commit");
                 }
-                setResult(runtimeFromPublished(published, stagedManifest));
+                JavaRuntime runtime = runtimeFromPublished(published, stagedManifest);
+                releaseOwnershipLease(published);
+                published.directoryIdentityLease().close();
+                setResult(runtime);
                 committed = true;
             } finally {
                 if (!committed) {
@@ -331,13 +340,20 @@ final class JavaRuntimeInstallationPublisher {
 
         String token = UUID.randomUUID().toString();
         Path markerFile = stagingDirectory.resolve(INSTALL_OWNER_MARKER_PREFIX + token);
+        @Nullable DirectoryIdentityLease directoryIdentityLease = null;
+        @Nullable Path markerLeaseFile = null;
+        @Nullable OwnedDirectory ownership = null;
         try {
+            directoryIdentityLease = DirectoryIdentityLease.open(
+                    stagingDirectory,
+                    CapturedIdentity.capture(stagingAttributes));
             Files.writeString(
                     markerFile,
                     token,
                     StandardCharsets.US_ASCII,
                     StandardOpenOption.CREATE_NEW,
                     StandardOpenOption.WRITE);
+            markerLeaseFile = createOwnershipLease(normalizedRoot, markerFile);
             BasicFileAttributes markerAttributes = Files.readAttributes(
                     markerFile,
                     BasicFileAttributes.class,
@@ -345,33 +361,38 @@ final class JavaRuntimeInstallationPublisher {
             if (!markerAttributes.isRegularFile() || markerAttributes.isSymbolicLink()) {
                 throw new IOException("Managed Java staging marker is not a regular file: " + markerFile);
             }
-            OwnedDirectory ownership = new OwnedDirectory(
+            ownership = new OwnedDirectory(
                     normalizedRoot,
                     stagingDirectory,
                     normalizedTarget,
                     normalizedManifest,
                     markerFile,
+                    markerLeaseFile,
                     token,
-                    rootAttributes.fileKey(),
-                    stagingAttributes.fileKey(),
-                    markerAttributes.fileKey(),
-                    rootAttributes.creationTime(),
-                    stagingAttributes.creationTime(),
-                    markerAttributes.creationTime());
+                    CapturedIdentity.capture(rootAttributes),
+                    CapturedIdentity.capture(stagingAttributes),
+                    CapturedIdentity.capture(markerAttributes),
+                    directoryIdentityLease);
             if (!isSameSafePlatformRoot(ownership) || !isOwnedDirectory(ownership)) {
                 throw new IOException("Managed Java staging ownership changed during creation");
             }
             return ownership;
         } catch (IOException | RuntimeException failure) {
-            cleanupIncompleteStaging(
-                    normalizedRoot,
-                    stagingDirectory,
-                    markerFile,
-                    token,
-                    rootAttributes.fileKey(),
-                    stagingAttributes.fileKey(),
-                    rootAttributes.creationTime(),
-                    stagingAttributes.creationTime());
+            if (ownership != null) {
+                cleanupOwnedDirectory(ownership);
+            } else {
+                cleanupIncompleteStaging(
+                        normalizedRoot,
+                        stagingDirectory,
+                        markerFile,
+                        markerLeaseFile,
+                        directoryIdentityLease,
+                        token,
+                        rootAttributes.fileKey(),
+                        stagingAttributes.fileKey(),
+                        rootAttributes.creationTime(),
+                        stagingAttributes.creationTime());
+            }
             throw failure;
         }
     }
@@ -461,6 +482,75 @@ final class JavaRuntimeInstallationPublisher {
         return JavaRuntime.of(binary, manifest.info(), true);
     }
 
+    /// Creates an unpredictable hard-link lease to the original ownership marker.
+    ///
+    /// Keeping a second link outside staging prevents inode reuse after a directory replacement. Providers that do
+    /// not support hard links cannot supply the proof required for safe rollback, so installation fails closed.
+    ///
+    /// @param platformRoot managed platform root
+    /// @param markerFile newly created ownership marker
+    /// @return new direct-child lease path linked to the marker
+    /// @throws IOException when a lease cannot be created and verified
+    private static Path createOwnershipLease(
+            Path platformRoot,
+            Path markerFile) throws IOException {
+        for (int attempt = 0; attempt < 16; attempt++) {
+            Path candidate = platformRoot.resolve(STAGING_LEASE_PREFIX + UUID.randomUUID());
+            try {
+                Files.createLink(candidate, markerFile);
+            } catch (FileAlreadyExistsException ignored) {
+                continue;
+            } catch (SecurityException | UnsupportedOperationException failure) {
+                throw new IOException("Managed Java staging requires hard-link ownership leases", failure);
+            }
+
+            boolean retained = false;
+            try {
+                BasicFileAttributes attributes = Files.readAttributes(
+                        candidate,
+                        BasicFileAttributes.class,
+                        LinkOption.NOFOLLOW_LINKS);
+                if (!attributes.isRegularFile()
+                        || attributes.isSymbolicLink()
+                        || !Files.isSameFile(markerFile, candidate)) {
+                    throw new IOException("Managed Java ownership lease does not identify its marker");
+                }
+                retained = true;
+                return candidate;
+            } finally {
+                if (!retained) {
+                    Files.deleteIfExists(candidate);
+                }
+            }
+        }
+        throw new IOException("Unable to reserve a managed Java ownership lease");
+    }
+
+    /// Removes an ownership lease as the final non-commit operation after publication validation.
+    ///
+    /// @param ownership fully published runtime ownership
+    /// @throws IOException when either linked path changed or atomic lease cleanup fails
+    private static void releaseOwnershipLease(OwnedDirectory ownership) throws IOException {
+        if (!isSameSafePlatformRoot(ownership) || !isOwnedDirectory(ownership)) {
+            throw new IOException("Managed Java ownership changed before lease release");
+        }
+        Path leaseFile = ownership.markerLeaseFile();
+        Path quarantine = leaseFile.resolveSibling(
+                leaseFile.getFileName() + ".release-" + UUID.randomUUID());
+        moveAtomically(leaseFile, quarantine);
+        OwnedDirectory quarantined = ownership.atMarkerLeaseFile(quarantine);
+        if (!isSameSafePlatformRoot(quarantined) || !isOwnedDirectory(quarantined)) {
+            restoreQuarantinedPath(quarantine, leaseFile);
+            throw new IOException("Managed Java ownership changed during lease release");
+        }
+        try {
+            Files.delete(quarantine);
+        } catch (IOException failure) {
+            restoreQuarantinedPath(quarantine, leaseFile);
+            throw failure;
+        }
+    }
+
     /// Creates one new manifest file without opening any pre-existing path.
     ///
     /// @param platformRoot managed platform root
@@ -542,10 +632,10 @@ final class JavaRuntimeInstallationPublisher {
     /// @param ownership current directory ownership
     static void cleanupOwnedDirectory(OwnedDirectory ownership) {
         Path directory = ownership.directory();
-        if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
-            return;
-        }
         try {
+            if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
+                return;
+            }
             if (!isOwnedDirectory(ownership)) {
                 LOG.warning("Leaving unowned Java directory during rollback: " + directory);
                 return;
@@ -556,12 +646,74 @@ final class JavaRuntimeInstallationPublisher {
             OwnedDirectory quarantined = ownership.atDirectory(quarantine);
             if (isOwnedDirectory(quarantined)) {
                 FileUtils.deleteDirectory(quarantine);
+                cleanupDetachedOwnershipLease(quarantined);
             } else {
                 restoreQuarantinedPath(quarantine, directory);
                 LOG.warning("Leaving replaced Java directory during rollback: " + directory);
             }
         } catch (IOException failure) {
             LOG.warning("Failed to roll back Java runtime directory " + directory, failure);
+        } finally {
+            ownership.directoryIdentityLease().close();
+        }
+    }
+
+    /// Removes a detached lease only after its captured inode and token remain stable through atomic quarantine.
+    ///
+    /// @param ownership ownership whose directory marker was just deleted
+    private static void cleanupDetachedOwnershipLease(OwnedDirectory ownership) {
+        Path leaseFile = ownership.markerLeaseFile();
+        if (!Files.exists(leaseFile, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        try {
+            if (!isOwnedLeaseFile(ownership, leaseFile)) {
+                LOG.warning("Leaving unowned Java ownership lease during rollback: " + leaseFile);
+                return;
+            }
+            Path quarantine = leaseFile.resolveSibling(
+                    leaseFile.getFileName() + ".rollback-" + UUID.randomUUID());
+            moveAtomically(leaseFile, quarantine);
+            if (isOwnedLeaseFile(ownership, quarantine)) {
+                Files.deleteIfExists(quarantine);
+            } else {
+                restoreQuarantinedPath(quarantine, leaseFile);
+                LOG.warning("Leaving replaced Java ownership lease during rollback: " + leaseFile);
+            }
+        } catch (IOException failure) {
+            LOG.warning("Failed to roll back Java ownership lease " + leaseFile, failure);
+        }
+    }
+
+    /// Checks one detached lease against the captured marker identity and random token.
+    ///
+    /// @param ownership captured ownership proof
+    /// @param leaseFile current or quarantined lease path
+    /// @return whether the lease still identifies the task-created marker inode
+    private static boolean isOwnedLeaseFile(
+            OwnedDirectory ownership,
+            Path leaseFile) {
+        try {
+            BasicFileAttributes before = Files.readAttributes(
+                    leaseFile,
+                    BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            if (!before.isRegularFile()
+                    || before.isSymbolicLink()
+                    || before.size() != ownership.token().length()
+                    || !ownership.markerIdentity().matches(before)) {
+                return false;
+            }
+            String token = Files.readString(leaseFile, StandardCharsets.US_ASCII);
+            BasicFileAttributes after = Files.readAttributes(
+                    leaseFile,
+                    BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            return ownership.token().equals(token)
+                    && sameStableIdentity(before, after)
+                    && ownership.markerIdentity().matches(after);
+        } catch (IOException | RuntimeException failure) {
+            return false;
         }
     }
 
@@ -578,11 +730,16 @@ final class JavaRuntimeInstallationPublisher {
         }
     }
 
-    /// Cleans a staging directory whose marker creation did not complete, using captured file keys only.
+    /// Cleans a staging directory whose ownership reservation did not complete.
+    ///
+    /// Recursive cleanup requires a verified hard-link lease. Without one, only an empty marker-free directory can
+    /// be removed; ambiguous contents are deliberately retained.
     ///
     /// @param platformRoot captured platform root
     /// @param stagingDirectory newly created staging directory
     /// @param markerFile attempted marker path
+    /// @param markerLeaseFile created marker lease, or null when lease creation failed
+    /// @param directoryIdentityLease live directory lease, or null when opening it failed
     /// @param token attempted marker token
     /// @param rootFileKey captured root key
     /// @param stagingFileKey captured staging key
@@ -592,13 +749,17 @@ final class JavaRuntimeInstallationPublisher {
             Path platformRoot,
             Path stagingDirectory,
             Path markerFile,
+            @Nullable Path markerLeaseFile,
+            @Nullable DirectoryIdentityLease directoryIdentityLease,
             String token,
             @Nullable Object rootFileKey,
             @Nullable Object stagingFileKey,
             FileTime rootCreationTime,
             FileTime stagingCreationTime) {
         try {
-            if (Files.exists(markerFile, LinkOption.NOFOLLOW_LINKS)) {
+            if (markerLeaseFile != null
+                    && Files.exists(markerFile, LinkOption.NOFOLLOW_LINKS)
+                    && Files.exists(markerLeaseFile, LinkOption.NOFOLLOW_LINKS)) {
                 BasicFileAttributes markerAttributes = Files.readAttributes(
                         markerFile,
                         BasicFileAttributes.class,
@@ -609,14 +770,20 @@ final class JavaRuntimeInstallationPublisher {
                         stagingDirectory,
                         platformRoot.resolve(STAGING_MANIFEST_PREFIX + "incomplete"),
                         markerFile,
+                        markerLeaseFile,
                         token,
-                        rootFileKey,
-                        stagingFileKey,
-                        markerAttributes.fileKey(),
-                        rootCreationTime,
-                        stagingCreationTime,
-                        markerAttributes.creationTime());
+                        new CapturedIdentity(rootFileKey, rootCreationTime),
+                        new CapturedIdentity(stagingFileKey, stagingCreationTime),
+                        CapturedIdentity.capture(markerAttributes),
+                        directoryIdentityLease == null
+                                ? DirectoryIdentityLease.unavailable(
+                                        new CapturedIdentity(stagingFileKey, stagingCreationTime))
+                                : directoryIdentityLease);
                 cleanupOwnedDirectory(ownership);
+                return;
+            }
+            if (Files.exists(markerFile, LinkOption.NOFOLLOW_LINKS)) {
+                LOG.warning("Leaving Java staging without a verifiable ownership lease: " + stagingDirectory);
                 return;
             }
             BasicFileAttributes attributes = Files.readAttributes(
@@ -631,25 +798,13 @@ final class JavaRuntimeInstallationPublisher {
                             attributes)) {
                 return;
             }
-            Path quarantine = stagingDirectory.resolveSibling(
-                    stagingDirectory.getFileName() + ".rollback-" + UUID.randomUUID());
-            moveAtomically(stagingDirectory, quarantine);
-            BasicFileAttributes quarantinedAttributes = Files.readAttributes(
-                    quarantine,
-                    BasicFileAttributes.class,
-                    LinkOption.NOFOLLOW_LINKS);
-            if (quarantinedAttributes.isDirectory()
-                    && !quarantinedAttributes.isSymbolicLink()
-                    && matchesCapturedIdentity(
-                            stagingFileKey,
-                            stagingCreationTime,
-                            quarantinedAttributes)) {
-                FileUtils.deleteDirectory(quarantine);
-            } else {
-                restoreQuarantinedPath(quarantine, stagingDirectory);
-            }
+            Files.delete(stagingDirectory);
         } catch (IOException failure) {
             LOG.warning("Failed to clean incomplete Java staging directory " + stagingDirectory, failure);
+        } finally {
+            if (directoryIdentityLease != null) {
+                directoryIdentityLease.close();
+            }
         }
     }
 
@@ -659,7 +814,11 @@ final class JavaRuntimeInstallationPublisher {
     /// @return whether the directory still belongs to this task
     private static boolean isOwnedDirectory(OwnedDirectory ownership) {
         Path markerFile = ownership.markerFile();
+        Path markerLeaseFile = ownership.markerLeaseFile();
         try {
+            if (!ownership.directoryIdentityLease().supports(ownership.directoryIdentity())) {
+                return false;
+            }
             BasicFileAttributes directoryBefore = Files.readAttributes(
                     ownership.directory(),
                     BasicFileAttributes.class,
@@ -668,24 +827,31 @@ final class JavaRuntimeInstallationPublisher {
                     markerFile,
                     BasicFileAttributes.class,
                     LinkOption.NOFOLLOW_LINKS);
+            BasicFileAttributes markerLeaseBefore = Files.readAttributes(
+                    markerLeaseFile,
+                    BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
             if (!directoryBefore.isDirectory()
                     || directoryBefore.isSymbolicLink()
                     || !markerBefore.isRegularFile()
                     || markerBefore.isSymbolicLink()
+                    || !markerLeaseBefore.isRegularFile()
+                    || markerLeaseBefore.isSymbolicLink()
                     || markerBefore.size() != ownership.token().length()
-                    || !matchesCapturedIdentity(
-                            ownership.directoryFileKey(),
-                            ownership.directoryCreationTime(),
-                            directoryBefore)
-                    || !matchesCapturedIdentity(
-                            ownership.markerFileKey(),
-                            ownership.markerCreationTime(),
-                            markerBefore)) {
+                    || markerLeaseBefore.size() != ownership.token().length()
+                    || !ownership.directoryIdentity().matches(directoryBefore)
+                    || !ownership.markerIdentity().matches(markerBefore)
+                    || !ownership.markerIdentity().matches(markerLeaseBefore)
+                    || !Files.isSameFile(markerFile, markerLeaseFile)) {
                 return false;
             }
             String markerToken = Files.readString(markerFile, StandardCharsets.US_ASCII);
             BasicFileAttributes markerAfter = Files.readAttributes(
                     markerFile,
+                    BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            BasicFileAttributes markerLeaseAfter = Files.readAttributes(
+                    markerLeaseFile,
                     BasicFileAttributes.class,
                     LinkOption.NOFOLLOW_LINKS);
             BasicFileAttributes directoryAfter = Files.readAttributes(
@@ -694,11 +860,10 @@ final class JavaRuntimeInstallationPublisher {
                     LinkOption.NOFOLLOW_LINKS);
             return ownership.token().equals(markerToken)
                     && sameStableIdentity(markerBefore, markerAfter)
+                    && sameStableIdentity(markerLeaseBefore, markerLeaseAfter)
+                    && Files.isSameFile(markerFile, markerLeaseFile)
                     && directoryAfter.isDirectory()
-                    && matchesCapturedIdentity(
-                            ownership.directoryFileKey(),
-                            ownership.directoryCreationTime(),
-                            directoryAfter);
+                    && ownership.directoryIdentity().matches(directoryAfter);
         } catch (IOException | RuntimeException failure) {
             return false;
         }
@@ -762,10 +927,7 @@ final class JavaRuntimeInstallationPublisher {
         try {
             requireExistingPathWithoutSymbolicLinks(ownership.platformRoot());
             BasicFileAttributes attributes = requireSafeDirectory(ownership.platformRoot());
-            return matchesCapturedIdentity(
-                    ownership.platformRootFileKey(),
-                    ownership.platformRootCreationTime(),
-                    attributes);
+            return ownership.platformRootIdentity().matches(attributes);
         } catch (IOException | RuntimeException failure) {
             return false;
         }
@@ -928,6 +1090,116 @@ final class JavaRuntimeInstallationPublisher {
                 && matchesKnownFileKey(before.fileKey(), after.fileKey());
     }
 
+    /// Keeps a directory inode allocated while Unix providers expose reusable file keys.
+    ///
+    /// Windows does not need the handle because its creation timestamp distinguishes replacements, and an open
+    /// directory stream would prevent the atomic publication move there.
+    @NotNullByDefault
+    private static final class DirectoryIdentityLease {
+        /// Whether the current provider requires an open stream to make its file key non-reusable.
+        private final boolean required;
+
+        /// Live directory stream retaining the inode, or null when no stream is required or opening failed.
+        private @Nullable DirectoryStream<Path> directoryStream;
+
+        /// Creates one directory identity lease in its current availability state.
+        ///
+        /// @param required whether an open stream is required
+        /// @param directoryStream live stream, or null when unavailable
+        private DirectoryIdentityLease(
+                boolean required,
+                @Nullable DirectoryStream<Path> directoryStream) {
+            this.required = required;
+            this.directoryStream = directoryStream;
+        }
+
+        /// Opens a directory stream when required to prevent provider file-key reuse.
+        ///
+        /// @param directory newly created staging directory
+        /// @param identity captured directory identity
+        /// @return live or explicitly unnecessary identity lease
+        /// @throws IOException when a required stream cannot be opened
+        private static DirectoryIdentityLease open(
+                Path directory,
+                CapturedIdentity identity) throws IOException {
+            if (!requiresOpenStream(identity)) {
+                return new DirectoryIdentityLease(false, null);
+            }
+            return new DirectoryIdentityLease(true, Files.newDirectoryStream(directory));
+        }
+
+        /// Creates an unavailable lease for conservative incomplete-staging cleanup.
+        ///
+        /// @param identity captured directory identity
+        /// @return lease that rejects ownership when an open stream was required
+        private static DirectoryIdentityLease unavailable(CapturedIdentity identity) {
+            return new DirectoryIdentityLease(requiresOpenStream(identity), null);
+        }
+
+        /// Checks whether this live state can support the captured provider identity.
+        ///
+        /// @param identity captured directory identity
+        /// @return whether required inode retention remains active
+        private synchronized boolean supports(CapturedIdentity identity) {
+            boolean currentlyRequired = requiresOpenStream(identity);
+            return currentlyRequired == required
+                    && (!required || directoryStream != null);
+        }
+
+        /// Closes an active directory stream, making later recursive cleanup fail closed.
+        private synchronized void close() {
+            @Nullable DirectoryStream<Path> currentStream = directoryStream;
+            directoryStream = null;
+            if (currentStream == null) {
+                return;
+            }
+            try {
+                currentStream.close();
+            } catch (IOException failure) {
+                LOG.warning("Failed to close managed Java directory identity lease", failure);
+            }
+        }
+
+        /// Determines whether the current operating system needs inode retention for this identity.
+        ///
+        /// @param identity captured directory identity
+        /// @return whether a live directory stream is required
+        private static boolean requiresOpenStream(CapturedIdentity identity) {
+            return identity.fileKey() != null
+                    && OperatingSystem.CURRENT_OS != OperatingSystem.WINDOWS;
+        }
+    }
+
+    /// Stable filesystem identity captured before an owned path is exposed to later task phases.
+    ///
+    /// @param fileKey provider file key, or null when unsupported
+    /// @param creationTime creation timestamp used when the provider supplies no file key
+    @NotNullByDefault
+    private record CapturedIdentity(
+            @Nullable Object fileKey,
+            FileTime creationTime) {
+        /// Requires a non-null creation timestamp for the cross-platform fallback.
+        private CapturedIdentity {
+            creationTime = Objects.requireNonNull(creationTime, "creationTime");
+        }
+
+        /// Captures identity from no-follow attributes.
+        ///
+        /// @param attributes current safe entry attributes
+        /// @return immutable identity
+        private static CapturedIdentity capture(BasicFileAttributes attributes) {
+            return new CapturedIdentity(attributes.fileKey(), attributes.creationTime());
+        }
+
+        /// Compares provider identity, falling back to creation time when file keys are unavailable.
+        ///
+        /// @param attributes current no-follow attributes
+        /// @return whether the captured identity still matches
+        private boolean matches(BasicFileAttributes attributes) {
+            return matchesCapturedIdentity(fileKey, creationTime, attributes);
+        }
+    }
+
     /// Immutable ownership proof for a staging, published, or quarantined runtime directory.
     ///
     /// @param platformRoot managed platform root
@@ -935,13 +1207,12 @@ final class JavaRuntimeInstallationPublisher {
     /// @param finalDirectory final runtime directory
     /// @param manifestFile final runtime manifest
     /// @param markerFile marker below the current directory
+    /// @param markerLeaseFile hard-link lease below the platform root
     /// @param token random marker and manifest token
-    /// @param platformRootFileKey captured root file key, or null when unsupported
-    /// @param directoryFileKey captured directory file key, or null when unsupported
-    /// @param markerFileKey captured marker file key, or null when unsupported
-    /// @param platformRootCreationTime captured root creation timestamp
-    /// @param directoryCreationTime captured directory creation timestamp
-    /// @param markerCreationTime captured marker creation timestamp
+    /// @param platformRootIdentity captured platform-root identity
+    /// @param directoryIdentity captured directory identity
+    /// @param markerIdentity captured marker and lease inode identity
+    /// @param directoryIdentityLease live directory inode-retention lease when required by the provider
     @NotNullByDefault
     static record OwnedDirectory(
             Path platformRoot,
@@ -949,34 +1220,31 @@ final class JavaRuntimeInstallationPublisher {
             Path finalDirectory,
             Path manifestFile,
             Path markerFile,
+            Path markerLeaseFile,
             String token,
-            @Nullable Object platformRootFileKey,
-            @Nullable Object directoryFileKey,
-            @Nullable Object markerFileKey,
-            FileTime platformRootCreationTime,
-            FileTime directoryCreationTime,
-            FileTime markerCreationTime) {
-        /// Normalizes paths and requires direct final children and a marker below the current directory.
+            CapturedIdentity platformRootIdentity,
+            CapturedIdentity directoryIdentity,
+            CapturedIdentity markerIdentity,
+            DirectoryIdentityLease directoryIdentityLease) {
+        /// Normalizes paths and requires direct final children plus marker and lease containment.
         OwnedDirectory {
             platformRoot = normalizedPath(platformRoot, "platformRoot");
             directory = normalizedPath(directory, "directory");
             finalDirectory = normalizedPath(finalDirectory, "finalDirectory");
             manifestFile = normalizedPath(manifestFile, "manifestFile");
             markerFile = normalizedPath(markerFile, "markerFile");
+            markerLeaseFile = normalizedPath(markerLeaseFile, "markerLeaseFile");
             token = Objects.requireNonNull(token, "token");
-            platformRootCreationTime = Objects.requireNonNull(
-                    platformRootCreationTime,
-                    "platformRootCreationTime");
-            directoryCreationTime = Objects.requireNonNull(
-                    directoryCreationTime,
-                    "directoryCreationTime");
-            markerCreationTime = Objects.requireNonNull(
-                    markerCreationTime,
-                    "markerCreationTime");
+            platformRootIdentity = Objects.requireNonNull(platformRootIdentity, "platformRootIdentity");
+            directoryIdentity = Objects.requireNonNull(directoryIdentity, "directoryIdentity");
+            markerIdentity = Objects.requireNonNull(markerIdentity, "markerIdentity");
+            directoryIdentityLease = Objects.requireNonNull(directoryIdentityLease, "directoryIdentityLease");
             if (token.isEmpty()
                     || !platformRoot.equals(finalDirectory.getParent())
                     || !platformRoot.equals(manifestFile.getParent())
-                    || !directory.equals(markerFile.getParent())) {
+                    || !directory.equals(markerFile.getParent())
+                    || !platformRoot.equals(markerLeaseFile.getParent())
+                    || markerFile.equals(markerLeaseFile)) {
                 throw new IllegalArgumentException("Invalid managed Java ownership proof");
             }
         }
@@ -993,13 +1261,31 @@ final class JavaRuntimeInstallationPublisher {
                     finalDirectory,
                     manifestFile,
                     normalizedReplacement.resolve(markerFile.getFileName()),
+                    markerLeaseFile,
                     token,
-                    platformRootFileKey,
-                    directoryFileKey,
-                    markerFileKey,
-                    platformRootCreationTime,
-                    directoryCreationTime,
-                    markerCreationTime);
+                    platformRootIdentity,
+                    directoryIdentity,
+                    markerIdentity,
+                    directoryIdentityLease);
+        }
+
+        /// Relocates the lease path while retaining captured marker identity.
+        ///
+        /// @param replacement replacement current lease file
+        /// @return ownership proof using the relocated lease
+        OwnedDirectory atMarkerLeaseFile(Path replacement) {
+            return new OwnedDirectory(
+                    platformRoot,
+                    directory,
+                    finalDirectory,
+                    manifestFile,
+                    markerFile,
+                    replacement,
+                    token,
+                    platformRootIdentity,
+                    directoryIdentity,
+                    markerIdentity,
+                    directoryIdentityLease);
         }
     }
 }

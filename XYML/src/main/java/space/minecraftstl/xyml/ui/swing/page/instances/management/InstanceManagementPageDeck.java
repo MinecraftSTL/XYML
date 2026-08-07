@@ -21,10 +21,13 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 
+import javax.swing.JComponent;
 import javax.swing.JPanel;
 import java.awt.CardLayout;
 import java.awt.Dimension;
+import java.awt.Graphics;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -55,6 +58,9 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
     /// Card layout controlling the currently visible management page.
     private final CardLayout cardLayout;
 
+    /// Snapshot-composited transition between user-selected management destinations.
+    private final SwingContentTransition contentTransition;
+
     /// Immutable destination-to-factory mapping copied during construction.
     private final @Unmodifiable Map<InstanceManagementPageId, PageFactory> factories;
 
@@ -81,6 +87,7 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
         super(new CardLayout());
         EdtDispatcher.requireEventDispatchThread();
         cardLayout = (CardLayout) getLayout();
+        contentTransition = new SwingContentTransition(this);
         EnumMap<InstanceManagementPageId, PageFactory> copiedFactories = copyFactories(factories);
         this.factories = Collections.unmodifiableMap(copiedFactories);
         availablePages = InstanceManagementPageId.orderedValues().stream()
@@ -109,19 +116,26 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
         if (destination == selectedPage) {
             return;
         }
+        SwingContentTransition.Direction direction = transitionDirection(selectedPage, destination);
+        @Nullable JComponent outgoingComponent = selectedComponent();
         @Nullable InstanceManagementPage loadedPage = loadedPages.get(destination);
         if (loadedPage == null) {
-            loadedPage = createAndActivate(destination);
+            contentTransition.transitionFrom(
+                    outgoingComponent,
+                    direction,
+                    () -> createAndActivate(destination));
         } else {
-            cardLayout.show(this, destination.name());
-            try {
-                loadedPage.activate();
-            } catch (RuntimeException | Error failure) {
-                restoreSelectedCard();
-                throw failure;
-            }
+            InstanceManagementPage destinationPage = loadedPage;
+            contentTransition.transitionFrom(outgoingComponent, direction, () -> {
+                cardLayout.show(this, destination.name());
+                try {
+                    destinationPage.activate();
+                } catch (RuntimeException | Error failure) {
+                    restoreSelectedCard();
+                    throw failure;
+                }
+            });
         }
-        cardLayout.show(this, destination.name());
         selectedPage = destination;
         revalidate();
         repaint();
@@ -150,6 +164,22 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
     int loadedPageCount() {
         EdtDispatcher.requireEventDispatchThread();
         return loadedPages.size();
+    }
+
+    /// Returns whether one management destination is currently fading into another.
+    ///
+    /// @return true while the cached outgoing frame remains active
+    boolean isTransitionRunning() {
+        EdtDispatcher.requireEventDispatchThread();
+        return contentTransition.isRunning();
+    }
+
+    /// Returns the direction used by the current or most recent management transition.
+    ///
+    /// @return spatial transition direction
+    SwingContentTransition.Direction contentTransitionDirection() {
+        EdtDispatcher.requireEventDispatchThread();
+        return contentTransition.direction();
     }
 
     /// Releases cached non-visible pages whose backing instance directories changed.
@@ -206,6 +236,39 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
         EdtDispatcher.executeAndWait(this::closeLoadedPages);
     }
 
+    /// Paints cached management destinations during a transition and otherwise paints the live page.
+    ///
+    /// @param graphics management deck graphics
+    @Override
+    protected void paintChildren(Graphics graphics) {
+        if (!contentTransition.paintFrames(graphics)) {
+            super.paintChildren(graphics);
+        }
+    }
+
+    /// Releases any cached transition frame before the management deck leaves the display hierarchy.
+    @Override
+    public void removeNotify() {
+        contentTransition.settle();
+        super.removeNotify();
+    }
+
+    /// Derives vertical motion from canonical navigation order.
+    ///
+    /// @param previous currently selected destination, or null before initial display
+    /// @param destination incoming supported destination
+    /// @return forward when the destination follows the previous page, otherwise backward
+    private SwingContentTransition.Direction transitionDirection(
+            @Nullable InstanceManagementPageId previous,
+            InstanceManagementPageId destination) {
+        if (previous == null) {
+            return SwingContentTransition.Direction.VERTICAL_FORWARD;
+        }
+        return availablePages.indexOf(destination) > availablePages.indexOf(previous)
+                ? SwingContentTransition.Direction.VERTICAL_FORWARD
+                : SwingContentTransition.Direction.VERTICAL_BACKWARD;
+    }
+
     /// Creates one destination, makes it visible, and runs its first selection action.
     ///
     /// @param destination supported unloaded destination
@@ -240,6 +303,18 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
         }
     }
 
+    /// Resolves the component currently represented by [#selectedPage].
+    ///
+    /// @return visible loaded component, or null before initial navigation
+    private @Nullable JComponent selectedComponent() {
+        @Nullable InstanceManagementPageId currentPage = selectedPage;
+        if (currentPage == null) {
+            return null;
+        }
+        @Nullable InstanceManagementPage current = loadedPages.get(currentPage);
+        return current == null ? null : current.component();
+    }
+
     /// Restores the previously selected card after a failed first visit.
     private void restoreSelectedCard() {
         @Nullable InstanceManagementPageId previousPage = selectedPage;
@@ -252,6 +327,7 @@ final class InstanceManagementPageDeck extends JPanel implements AutoCloseable {
 
     /// Releases loaded pages in reverse creation order and propagates the first cleanup failure.
     private void closeLoadedPages() {
+        contentTransition.settle();
         @Nullable Throwable firstFailure = null;
         for (int index = creationOrder.size() - 1; index >= 0; index--) {
             InstanceManagementPageId pageId = creationOrder.get(index);
