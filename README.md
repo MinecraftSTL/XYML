@@ -12,9 +12,7 @@
 
 ---
 
-**简体中文（默认）** | [English](docs/README.md) | [繁體中文](docs/README_zh_Hant.md) |
-[文言](docs/README_lzh.md) | [日本語](docs/README_ja.md) | [español](docs/README_es.md) |
-[русский](docs/README_ru.md) | [українська](docs/README_uk.md)
+**中文** (**简体**, [繁體](docs/README_zh_Hant.md), [文言](docs/README_lzh.md)) | English ([Standard](docs/README.md), [uʍoᗡ ǝpᴉsd∩](docs/README_en_Qabs.md)) | [日本語](docs/README_ja.md) | [español](docs/README_es.md) | [русский](docs/README_ru.md) | [українська](docs/README_uk.md)
 
 ## 简介
 

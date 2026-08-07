@@ -1,7 +1,7 @@
 # 本地化
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-[English](Localization.md) | **中文** (**简体**, [繁體](Localization_zh_Hant.md))
+**中文** (**简体**, [繁體](Localization_zh_Hant.md)) | [English](Localization.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
 XYML 为多种语言提供本地化支持。
@@ -309,7 +309,7 @@ XYML 总是会将 `zh-CN` 加入所有中文环境的搜索列表中，将 `zh-T
 随后执行 `./gradlew updateDocuments`，这两行内容会被自动替换为类似这样的跳转链接:
 
 ```markdown
-**English** (**Standard**, [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | 中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
+中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | **English** (**Standard**, [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 ```
 
 关于宏的更多内容，请见 [MacroProcessor.java](../buildSrc/src/main/java/space/minecraftstl/xyml/gradle/docs/MacroProcessor.java)。

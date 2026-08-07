@@ -1,7 +1,7 @@
 # 在地化
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-[English](Localization.md) | **中文** ([简体](Localization_zh.md), **繁體**)
+**中文** ([简体](Localization_zh.md), **繁體**) | [English](Localization.md)
 <!-- #END LANGUAGE_SWITCHER -->
 
 XYML 為多種語言提供在地化支援。
@@ -309,7 +309,7 @@ XYML 總是會將 `zh-CN` 加入所有中文環境的搜尋列表中，將 `zh-T
 隨後執行 `./gradlew updateDocuments`，這兩行內容會被自動取代為類似這樣的跳轉連結:
 
 ```markdown
-**English** (**Standard**, [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | 中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
+中文 ([简体](README_zh.md), [繁體](README_zh_Hant.md), [文言](README_lzh.md)) | **English** (**Standard**, [uʍoᗡ ǝpᴉsd∩](README_en_Qabs.md)) | [日本語](README_ja.md) | [español](README_es.md) | [русский](README_ru.md) | [українська](README_uk.md)
 ```
 
 關於巨集的更多內容，請見 [MacroProcessor.java](../buildSrc/src/main/java/space/minecraftstl/xyml/gradle/docs/MacroProcessor.java)。
