@@ -2,7 +2,8 @@ rootProject.name = "XYML"
 include(
     "XYML",
     "XYMLCore",
-    "XYMLBoot"
+    "XYMLBoot",
+    "XYMLAIServer"
 )
 
 val minecraftLibraries = listOf("XYMLTransformerDiscoveryService", "XYMLMultiMCBootstrap")
