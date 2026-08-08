@@ -200,6 +200,18 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Commits validated free-form download and proxy values.
     private final JButton confirmNetworkButton = new JButton(i18n("button.ok"));
 
+    /// Enables or disables the local AI MCP stdio entry point.
+    private final JCheckBox mcpEnabledBox = new JCheckBox(i18n("settings.mcp.enabled"));
+
+    /// Editable local MCP listener port reserved for port-capable transports.
+    private final JTextField mcpPortField = new JTextField();
+
+    /// Commits the local MCP port after validation.
+    private final JButton confirmMcpButton = new JButton(i18n("button.ok"));
+
+    /// Shows MCP port validation feedback.
+    private final JLabel mcpValidationLabel = new JLabel();
+
     /// Store subscription released when this panel is discarded.
     private final Subscription storeSubscription;
 
@@ -398,11 +410,13 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         setOpaque(false);
         configureGeneralControls();
         configureDownloadAndProxyControls();
+        configureMcpControls();
         SwingTransparency.revealBackgroundThroughTabs(tabs);
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
 
         tabs.addTab(i18n("settings.launcher.general"), createScrollPane(createGeneralPage()));
         tabs.addTab(i18n("settings.launcher.download"), createScrollPane(createDownloadAndProxyPage()));
+        tabs.addTab(i18n("settings.mcp.title"), createScrollPane(createMcpPage()));
         tabs.addTab(i18n("settings.launcher.appearance"), createScrollPane(createAppearancePage()));
         tabs.addTab(i18n("settings.type.global.preset.manage_all"), gameSettingsPresetsPanel);
         tabs.addTab(i18n("game_directory.title"), gameDirectoryManagementPanel);
@@ -524,6 +538,16 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         });
     }
 
+    /// Configures MCP enablement and explicit port persistence controls.
+    private void configureMcpControls() {
+        mcpEnabledBox.addActionListener(event -> {
+            if (!applyingSnapshot) {
+                store.setMcpEnabled(mcpEnabledBox.isSelected());
+            }
+        });
+        confirmMcpButton.addActionListener(event -> persistMcpInputs());
+    }
+
     /// Creates the general preferences page.
     ///
     /// @return fully configured general-preferences content
@@ -570,6 +594,20 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         page.add(createFieldRow(i18n("settings.launcher.proxy.password"), proxyPasswordField), "growx");
         page.add(createNetworkActionsRow(), "growx");
         page.add(networkValidationLabel, "growx");
+        return page;
+    }
+
+    /// Creates the local AI MCP server settings page.
+    ///
+    /// @return MCP settings content
+    private JPanel createMcpPage() {
+        JPanel page = createPage();
+        page.add(createHeading(i18n("settings.mcp.title")), "growx");
+        page.add(mcpEnabledBox, "growx");
+        page.add(createFieldRow(i18n("settings.mcp.port"), mcpPortField), "growx");
+        page.add(confirmMcpButton, "alignx right");
+        page.add(mcpValidationLabel, "growx");
+        page.add(new JLabel(i18n("settings.mcp.stdio_hint")), "growx");
         return page;
     }
 
@@ -1003,6 +1041,21 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         }
     }
 
+    /// Validates and persists the configured MCP port.
+    private void persistMcpInputs() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || applyingSnapshot) {
+            return;
+        }
+        @Nullable Integer port = parseMcpPort(mcpPortField.getText());
+        if (port == null) {
+            mcpValidationLabel.setText(i18n("input.number"));
+            return;
+        }
+        mcpValidationLabel.setText("");
+        store.setMcpPort(port);
+    }
+
     /// Parses a positive download-concurrency value.
     ///
     /// @param raw text-field value
@@ -1028,6 +1081,20 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         try {
             int parsed = Integer.parseInt(normalized);
             return parsed >= 0 && parsed <= 0xFFFF ? parsed : null;
+        } catch (NumberFormatException exception) {
+            return null;
+        }
+    }
+
+    /// Parses a legal local MCP port.
+    ///
+    /// @param raw text-field value
+    /// @return port from 1 through 65535, or null when invalid
+    private static @Nullable Integer parseMcpPort(String raw) {
+        String normalized = Objects.requireNonNull(raw, "raw").trim();
+        try {
+            int parsed = Integer.parseInt(normalized);
+            return parsed >= 1 && parsed <= 0xFFFF ? parsed : null;
         } catch (NumberFormatException exception) {
             return null;
         }
@@ -1104,6 +1171,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             proxyUsernameField.setText(snapshot.proxyUsername());
             proxyPasswordField.setText(snapshot.proxyPassword());
             networkValidationLabel.setText("");
+            mcpEnabledBox.setSelected(snapshot.mcpEnabled());
+            mcpPortField.setText(Integer.toString(snapshot.mcpPort()));
+            mcpValidationLabel.setText("");
 
             setInteractiveControlsEnabled(snapshot.writable());
             updateDownloadControlAvailability();
@@ -1138,6 +1208,10 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         proxyAuthenticationBox.setEnabled(interactive);
         confirmNetworkButton.setEnabled(interactive);
         networkValidationLabel.setEnabled(interactive);
+        mcpEnabledBox.setEnabled(interactive);
+        mcpPortField.setEnabled(interactive);
+        confirmMcpButton.setEnabled(interactive);
+        mcpValidationLabel.setEnabled(interactive);
         updateStatusLabel.setEnabled(!closed);
         cacheStatusLabel.setEnabled(!closed);
         updateMaintenanceControlAvailability();

@@ -17,60 +17,92 @@
  */
 package space.minecraftstl.xyml.ai;
 
-import io.modelcontextprotocol.json.McpJsonDefaults;
-import io.modelcontextprotocol.server.McpServer;
-import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
-import io.modelcontextprotocol.spec.McpSchema;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
-import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Exercises the official SDK stdio transport through initialize and tools/list.
+/// Exercises the lightweight stdio server through a complete MCP handshake and discovery sequence.
 @NotNullByDefault
 public final class XYMLMcpStdioHandshakeTest {
 
-    /// Confirms a newline-delimited MCP client can complete initialization and list tools.
+    /// Confirms a newline-delimited MCP client can initialize, list capabilities, and call a tool.
     @Test
-    public void completesInitializeAndListTools() throws Exception {
-        try (PipedInputStream serverInput = new PipedInputStream(8192);
-             PipedOutputStream clientInput = new PipedOutputStream(serverInput)) {
-            ByteArrayOutputStream serverOutput = new ByteArrayOutputStream();
-            StdioServerTransportProvider transport = new StdioServerTransportProvider(
-                    McpJsonDefaults.getMapper(), serverInput, serverOutput);
-            XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(null);
-            McpSyncServer server = McpServer.sync(transport)
-                    .serverInfo("xyml-test", "1.0")
-                    .capabilities(McpSchema.ServerCapabilities.builder()
-                            .tools(false)
-                            .resources(false, false)
-                            .build())
-                    .tools(registry.toolSpecifications())
-                    .resourceTemplates(registry.resourceTemplateSpecifications())
-                    .build();
-            try {
-                writeMessage(clientInput, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\","
+    public void completesInitializeAndDiscovery() {
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            try (PipedInputStream serverInput = new PipedInputStream(8192);
+                 PipedOutputStream clientWriter = new PipedOutputStream(serverInput);
+                 PipedInputStream clientReaderStream = new PipedInputStream(8192);
+                 PipedOutputStream serverOutput = new PipedOutputStream(clientReaderStream);
+                 BufferedReader clientReader = new BufferedReader(new InputStreamReader(
+                         clientReaderStream, StandardCharsets.UTF_8));
+                 XYMLMcpServer server = new XYMLMcpServer(null, serverInput, serverOutput)) {
+                writeMessage(clientWriter, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\","
                         + "\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},"
                         + "\"clientInfo\":{\"name\":\"test\",\"version\":\"1\"}}}");
-                writeMessage(clientInput, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}");
-                writeMessage(clientInput, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}");
-                writeMessage(clientInput, "{\"jsonrpc\":\"2.0\",\"id\":3,"
+                JsonObject initialization = readResponse(clientReader);
+                assertEquals("2025-06-18", initialization.getAsJsonObject("result")
+                        .get("protocolVersion").getAsString());
+                assertEquals("xyml-ai-mcp-server", initialization.getAsJsonObject("result")
+                        .getAsJsonObject("serverInfo").get("name").getAsString());
+
+                writeMessage(clientWriter,
+                        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}");
+                writeMessage(clientWriter,
+                        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}");
+                JsonObject tools = readResponse(clientReader).getAsJsonObject("result");
+                assertEquals(17, tools.getAsJsonArray("tools").size());
+                assertTrue(tools.toString().contains("analyze_crash"));
+
+                writeMessage(clientWriter, "{\"jsonrpc\":\"2.0\",\"id\":3,"
                         + "\"method\":\"resources/templates/list\",\"params\":{}}");
-                String response = waitForOutput(serverOutput);
-                assertTrue(response.contains("\"list_instances\""));
-                assertTrue(response.contains("\"analyze_crash\""));
-                assertTrue(response.contains("\"crash_report_directory\""));
-                assertTrue(response.contains("\"crash_report\""));
-            } finally {
-                server.closeGracefully();
+                JsonObject resources = readResponse(clientReader).getAsJsonObject("result");
+                assertEquals(3, resources.getAsJsonArray("resourceTemplates").size());
+                assertTrue(resources.toString().contains("crash_report_directory"));
+
+                writeMessage(clientWriter, "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\","
+                        + "\"params\":{\"name\":\"launch_game\",\"arguments\":{\"instance_id\":\"demo\","
+                        + "\"confirmed\":false,\"unused\":null}}}");
+                JsonObject callResult = readResponse(clientReader).getAsJsonObject("result");
+                assertTrue(callResult.get("isError").getAsBoolean());
+                assertFalse(callResult.getAsJsonArray("content").isEmpty());
+                assertTrue(callResult.getAsJsonObject("structuredContent").get("error")
+                        .getAsString().contains("confirmed=true"));
             }
-        }
+        });
+    }
+
+    /// Returns a JSON-RPC parse error for a top-level JSON string and keeps the session usable.
+    @Test
+    public void rejectsTopLevelJsonStringWithoutStoppingSession() {
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            try (PipedInputStream serverInput = new PipedInputStream(8192);
+                 PipedOutputStream clientWriter = new PipedOutputStream(serverInput);
+                 PipedInputStream clientReaderStream = new PipedInputStream(8192);
+                 PipedOutputStream serverOutput = new PipedOutputStream(clientReaderStream);
+                 BufferedReader clientReader = new BufferedReader(new InputStreamReader(
+                         clientReaderStream, StandardCharsets.UTF_8));
+                 XYMLMcpServer server = new XYMLMcpServer(null, serverInput, serverOutput)) {
+                writeMessage(clientWriter, "\"not-an-object\"");
+                JsonObject error = readResponse(clientReader).getAsJsonObject("error");
+                assertEquals(-32700, error.get("code").getAsInt());
+
+                writeMessage(clientWriter, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}");
+                assertTrue(readResponse(clientReader).has("result"));
+            }
+        });
     }
 
     /// Writes one stdio JSON-RPC frame and flushes it to the server.
@@ -79,16 +111,8 @@ public final class XYMLMcpStdioHandshakeTest {
         output.flush();
     }
 
-    /// Waits briefly for the asynchronous stdio reader to produce both list responses.
-    private static String waitForOutput(ByteArrayOutputStream output) throws Exception {
-        for (int attempt = 0; attempt < 40; attempt++) {
-            String response = output.toString(StandardCharsets.UTF_8);
-            if (response.contains("\"list_instances\"")
-                    && response.contains("\"crash_report_directory\"")) {
-                return response;
-            }
-            Thread.sleep(50L);
-        }
-        return output.toString(StandardCharsets.UTF_8);
+    /// Reads and parses one complete JSON-RPC response line.
+    private static JsonObject readResponse(BufferedReader input) throws Exception {
+        return JsonParser.parseString(input.readLine()).getAsJsonObject();
     }
 }

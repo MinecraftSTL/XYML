@@ -54,6 +54,11 @@ public final class Main {
         System.setOut(System.err);
         try {
             initializeLauncherRuntime();
+            if (!SettingsManager.settings().mcpEnabledProperty().get()) {
+                System.err.println("XYML MCP server is disabled in launcher settings.");
+                shutdownLauncherRuntime();
+                return;
+            }
             XYMLGameRepository repository = GameDirectoryManager.getSelectedRepository();
             XYMLMcpServer server = new XYMLMcpServer(
                     new XYMLMcpService(repository), System.in, protocolOutput);
@@ -99,7 +104,15 @@ public final class Main {
         try {
             server.close();
         } finally {
+            shutdownLauncherRuntime();
+        }
+    }
+
+    /// Flushes launcher settings and stops the headless launcher log service.
+    private static void shutdownLauncherRuntime() {
+        try {
             SettingsManager.shutdown();
+        } finally {
             LOG.shutdown();
         }
     }

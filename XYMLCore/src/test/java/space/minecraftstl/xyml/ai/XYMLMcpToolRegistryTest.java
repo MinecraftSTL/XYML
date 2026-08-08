@@ -17,8 +17,6 @@
  */
 package space.minecraftstl.xyml.ai;
 
-import io.modelcontextprotocol.json.McpJsonDefaults;
-import io.modelcontextprotocol.spec.McpSchema;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -31,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies the MCP contract independently from a configured XYML workspace.
+/// Verifies the SDK-independent MCP contract without a configured XYML workspace.
 @NotNullByDefault
 public final class XYMLMcpToolRegistryTest {
 
@@ -39,34 +37,32 @@ public final class XYMLMcpToolRegistryTest {
     @Test
     public void registersCompleteToolSurface() {
         XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(null);
-        List<io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification> specifications =
-                registry.toolSpecifications();
-        Set<String> names = specifications.stream().map(specification -> specification.tool().name())
+        List<XYMLMcpToolRegistry.ToolDefinition> definitions = registry.toolDefinitions();
+        Set<String> names = definitions.stream().map(XYMLMcpToolRegistry.ToolDefinition::name)
                 .collect(Collectors.toSet());
-        assertEquals(17, specifications.size());
+        assertEquals(17, definitions.size());
         assertEquals(17, names.size());
         assertTrue(names.containsAll(Set.of("list_instances", "analyze_crash", "set_java_version",
                 "enable_mod", "remove_mods", "launch_game", "get_launch_status")));
         assertFalse(names.contains("search_addons"));
         assertFalse(names.contains("create_instance"));
-        assertEquals(3, registry.resourceTemplateSpecifications().size());
+        assertEquals(3, registry.resourceTemplateDefinitions().size());
         assertEquals("xyml://instances/{instance_id}/logs/latest.log",
-                registry.resourceTemplateSpecifications().get(0).resourceTemplate().uriTemplate());
+                registry.resourceTemplateDefinitions().get(0).uriTemplate());
         assertEquals("xyml://instances/{instance_id}/crash-reports/{report_name}",
-                registry.resourceTemplateSpecifications().get(2).resourceTemplate().uriTemplate());
+                registry.resourceTemplateDefinitions().get(2).uriTemplate());
     }
 
     /// Ensures high-impact tools require a boolean confirmation in their JSON schema.
     @Test
     public void marksHighImpactToolsAsConfirmed() {
         XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(null);
-        List<McpSchema.Tool> tools = registry.toolSpecifications().stream()
-                .filter(specification -> specification.tool().name().equals("launch_game")
-                        || specification.tool().name().equals("remove_mods")
-                        || specification.tool().name().equals("get_launch_status"))
-                .map(specification -> specification.tool())
+        List<XYMLMcpToolRegistry.ToolDefinition> tools = registry.toolDefinitions().stream()
+                .filter(definition -> definition.name().equals("launch_game")
+                        || definition.name().equals("remove_mods")
+                        || definition.name().equals("get_launch_status"))
                 .toList();
-        for (McpSchema.Tool tool : tools) {
+        for (XYMLMcpToolRegistry.ToolDefinition tool : tools) {
             Map<String, Object> schema = tool.inputSchema();
             @SuppressWarnings("unchecked")
             List<String> required = (List<String>) schema.get("required");
@@ -79,20 +75,14 @@ public final class XYMLMcpToolRegistryTest {
         }
     }
 
-    /// Ensures the confirmation gate returns an MCP error without invoking a launcher service.
+    /// Ensures confirmation rejection never invokes an absent launcher service.
     @Test
-    public void rejectsUnconfirmedLaunch() throws Exception {
+    public void rejectsUnconfirmedLaunch() {
         XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(null);
-        McpSchema.CallToolRequest request = McpSchema.CallToolRequest.builder("launch_game")
-                .arguments(Map.of("instance_id", "demo", "confirmed", false)).build();
-        McpSchema.CallToolResult result = registry.toolSpecifications().stream()
-                .filter(specification -> specification.tool().name().equals("launch_game"))
-                .findFirst().orElseThrow().callHandler().apply(null, request);
-        assertTrue(Boolean.TRUE.equals(result.isError()));
-        assertFalse(result.content().isEmpty());
-        McpSchema.TextContent content = (McpSchema.TextContent) result.content().get(0);
-        @SuppressWarnings("unchecked")
-        Map<String, Object> error = McpJsonDefaults.getMapper().readValue(content.text(), Map.class);
-        assertEquals("launch_game", error.get("tool"));
+        XYMLMcpToolRegistry.ToolCallResult result = registry.call(
+                "launch_game", Map.of("instance_id", "demo", "confirmed", false));
+        assertTrue(result.error());
+        assertEquals("launch_game", result.structuredContent().get("tool"));
+        assertTrue(String.valueOf(result.structuredContent().get("error")).contains("confirmed=true"));
     }
 }
