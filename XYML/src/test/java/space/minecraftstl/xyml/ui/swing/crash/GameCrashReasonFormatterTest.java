@@ -20,6 +20,11 @@ package space.minecraftstl.xyml.ui.swing.crash;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
+import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
+import space.minecraftstl.xyml.game.analyzer.JREVersionAnalyzer;
+import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
+import space.minecraftstl.xyml.game.analyzer.ResultID;
+import space.minecraftstl.xyml.game.analyzer.TextSolver;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -68,6 +73,23 @@ class GameCrashReasonFormatterTest {
                 new GameCrashAnalysis(List.of(), Set.of("zeta", "alpha")));
 
         assertEquals(i18n("game.crash.reason.stacktrace", "alpha, zeta"), message);
+    }
+
+    /// Formats a limited diagnosis through its solver localization key and immutable arguments.
+    @Test
+    void formatsLimitedLogDiagnosis() {
+        AnalyzeResult<LogAnalyzable> result = new AnalyzeResult<>(
+                new JREVersionAnalyzer(),
+                ResultID.JRE_VERSION,
+                new TextSolver(
+                        "game.crash.reason.log.jre_version",
+                        List.of(17, 8),
+                        "Install Java 17."));
+
+        String message = new GameCrashReasonFormatter().format(
+                new GameCrashAnalysis(List.of(), List.of(result), Set.of()));
+
+        assertEquals(i18n("game.crash.reason.log.jre_version", 17, 8), message);
     }
 
     /// Finds exactly one requested rule in analyzer output.

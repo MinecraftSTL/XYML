@@ -427,7 +427,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         }
         CompletionStage<GameCrashAnalysis> stage;
         try {
-            stage = analysisService.analyze(model.capturedLogs(), model.latestLog());
+            stage = analysisService.analyze(model.logAnalyzable(), model.latestLog());
         } catch (RuntimeException failure) {
             applyAnalysisOnEdt(null, failure);
             return;

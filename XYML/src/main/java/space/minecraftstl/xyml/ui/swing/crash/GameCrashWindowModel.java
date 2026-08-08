@@ -24,13 +24,16 @@ import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.GameJavaVersion;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.game.Log;
+import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.platform.Architecture;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.SystemInfo;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -50,8 +53,8 @@ final class GameCrashWindowModel {
     /// Ordered immutable environment details shown beside the diagnosis.
     private final @Unmodifiable List<Detail> details;
 
-    /// Immutable snapshot of captured process-output entries.
-    private final @Unmodifiable List<Log> capturedLogs;
+    /// Immutable Core analysis context containing the captured process-output snapshot.
+    private final LogAnalyzable logAnalyzable;
 
     /// Path to the on-disk log written by the launched game.
     private final Path latestLog;
@@ -60,16 +63,16 @@ final class GameCrashWindowModel {
     ///
     /// @param exitType classified process-exit outcome
     /// @param details ordered environment details
-    /// @param capturedLogs captured in-memory process-output entries
+    /// @param logAnalyzable immutable Core log-analysis input
     /// @param latestLog path to the launched instance's latest log
     GameCrashWindowModel(
             ProcessListener.ExitType exitType,
             List<Detail> details,
-            List<Log> capturedLogs,
+            LogAnalyzable logAnalyzable,
             Path latestLog) {
         this.exitType = Objects.requireNonNull(exitType, "exitType");
         this.details = List.copyOf(Objects.requireNonNull(details, "details"));
-        this.capturedLogs = List.copyOf(Objects.requireNonNull(capturedLogs, "capturedLogs"));
+        this.logAnalyzable = Objects.requireNonNull(logAnalyzable, "logAnalyzable");
         this.latestLog = Objects.requireNonNull(latestLog, "latestLog");
     }
 
@@ -125,8 +128,22 @@ final class GameCrashWindowModel {
                 i18n("settings.game.java_directory"),
                 launchOptions.getJava().getBinary().toAbsolutePath().toString()));
 
+        @Nullable Integer requiredJavaVersion = requiredJavaVersion(gameVersion, manifest.javaVersion());
+        LogAnalyzable logAnalyzable = new LogAnalyzable(
+                gameVersion,
+                manifest.mainClass(),
+                exitType,
+                OperatingSystem.CURRENT_OS,
+                OperatingSystem.CODE_PAGE,
+                launchOptions.getGameDir(),
+                launchOptions.getJava().getBinary(),
+                requiredJavaVersion,
+                launchOptions.getJava().getParsedVersion(),
+                launchOptions.getJava().getBits(),
+                launchOptions.getMaxMemory(),
+                capturedLogs.stream().map(Log::getLog).toList());
         Path latestLog = repository.getRunDirectory(manifest.id()).resolve("logs/latest.log");
-        return new GameCrashWindowModel(exitType, details, capturedLogs, latestLog);
+        return new GameCrashWindowModel(exitType, details, logAnalyzable, latestLog);
     }
 
     /// Returns the classified process-exit outcome.
@@ -143,11 +160,11 @@ final class GameCrashWindowModel {
         return details;
     }
 
-    /// Returns the immutable captured process-log snapshot.
+    /// Returns the immutable Core launch-log analysis input.
     ///
-    /// @return captured logs in arrival order
-    @Unmodifiable List<Log> capturedLogs() {
-        return capturedLogs;
+    /// @return launch context and captured log snapshot
+    LogAnalyzable logAnalyzable() {
+        return logAnalyzable;
     }
 
     /// Returns the instance's latest-log path.
@@ -167,6 +184,25 @@ final class GameCrashWindowModel {
             return launchOptions.getJava().getVersion();
         }
         return launchOptions.getJava().getVersion() + " (" + architecture.getDisplayName() + ")";
+    }
+
+    /// Resolves the exact declared Java recommendation or the vanilla minimum for the detected game version.
+    ///
+    /// @param gameVersion detected Minecraft version, or null when unavailable
+    /// @param declaredVersion manifest-declared Java recommendation, or null when absent
+    /// @return recommended Java major version, or null when it cannot be determined safely
+    private static @Nullable Integer requiredJavaVersion(
+            @Nullable String gameVersion,
+            @Nullable GameJavaVersion declaredVersion) {
+        if (declaredVersion != null) {
+            return declaredVersion.majorVersion();
+        }
+        if (gameVersion == null) {
+            return null;
+        }
+        @Nullable GameJavaVersion minimumVersion = GameJavaVersion.getMinimumJavaVersion(
+                GameVersionNumber.asGameVersion(gameVersion));
+        return minimumVersion == null ? null : minimumVersion.majorVersion();
     }
 
     /// One localized label and selectable environment value.

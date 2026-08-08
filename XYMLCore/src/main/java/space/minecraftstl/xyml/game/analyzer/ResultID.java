@@ -15,23 +15,22 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.crash;
+package space.minecraftstl.xyml.game.analyzer;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 
-import java.nio.file.Path;
-import java.util.concurrent.CompletionStage;
-
-/// Analyzes both in-memory game output and the instance's latest on-disk log without UI dependencies.
+/// Stable identifiers for the deliberately limited launch-log causes.
 @NotNullByDefault
-interface GameCrashAnalysisService {
-    /// Starts both analysis sources and merges their rule and keyword results.
-    ///
-    /// @param logAnalyzable immutable launch context and captured-output snapshot
-    /// @param latestLog on-disk `logs/latest.log` path
-    /// @return asynchronous merged diagnosis
-    CompletionStage<GameCrashAnalysis> analyze(
-            LogAnalyzable logAnalyzable,
-            Path latestLog);
+public enum ResultID {
+    /// Windows legacy code-page handling failed around a non-ASCII launch path.
+    CODE_PAGE,
+
+    /// A 32-bit Java runtime could not reserve the configured heap.
+    JRE_32BIT,
+
+    /// The selected Java major version conflicts with verified launch evidence.
+    JRE_VERSION,
+
+    /// The operating system could not commit enough physical or virtual memory.
+    VIRTUAL_MEMORY
 }

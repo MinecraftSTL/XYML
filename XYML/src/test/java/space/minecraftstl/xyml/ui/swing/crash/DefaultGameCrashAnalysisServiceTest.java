@@ -22,6 +22,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
 import space.minecraftstl.xyml.game.Log;
+import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
+import space.minecraftstl.xyml.game.analyzer.ResultID;
+import space.minecraftstl.xyml.launch.ProcessListener;
+import space.minecraftstl.xyml.util.platform.Bits;
+import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
 import java.nio.charset.Charset;
 import java.nio.file.Files;
@@ -55,9 +60,9 @@ class DefaultGameCrashAnalysisServiceTest {
         try {
             DefaultGameCrashAnalysisService service = new DefaultGameCrashAnalysisService(executor);
             GameCrashAnalysis analysis = service.analyze(
-                            List.of(new Log(
+                            input(List.of(new Log(
                                     "captured marker java.lang.OutOfMemoryError\n"
-                                            + "The driver does not appear to support OpenGL")),
+                                            + "The driver does not appear to support OpenGL")), Bits.BIT_64),
                             latestLog)
                     .toCompletableFuture()
                     .get(5, TimeUnit.SECONDS);
@@ -84,7 +89,7 @@ class DefaultGameCrashAnalysisServiceTest {
         try {
             DefaultGameCrashAnalysisService service = new DefaultGameCrashAnalysisService(executor);
             GameCrashAnalysis analysis = service.analyze(
-                            List.of(new Log("Open J9 is not supported")),
+                            input(List.of(new Log("Open J9 is not supported")), Bits.BIT_64),
                             temporaryDirectory.resolve("missing.log"))
                     .toCompletableFuture()
                     .get(5, TimeUnit.SECONDS);
@@ -95,6 +100,56 @@ class DefaultGameCrashAnalysisServiceTest {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    /// Deduplicates the same limited diagnosis from both sources and replaces its established 32-bit rule.
+    ///
+    /// @throws Exception when bounded asynchronous completion fails
+    @Test
+    void limitedLogDiagnosisReplacesEquivalentCrashRule() throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            DefaultGameCrashAnalysisService service = new DefaultGameCrashAnalysisService(executor);
+            String failure = "Error occurred during initialization of VM\n"
+                    + "Could not reserve enough space for 3571712KB object heap";
+            Path latestLog = temporaryDirectory.resolve("latest-32-bit.log");
+            Files.writeString(latestLog, failure);
+            GameCrashAnalysis analysis = service.analyze(
+                            input(List.of(new Log(failure)), Bits.BIT_32),
+                            latestLog)
+                    .toCompletableFuture()
+                    .get(5, TimeUnit.SECONDS);
+
+            assertEquals(1, analysis.resultCount());
+            assertTrue(analysis.results().stream()
+                    .noneMatch(result -> result.rule() == CrashReportAnalyzer.Rule.JVM_32BIT));
+            assertEquals(List.of(ResultID.JRE_32BIT), analysis.logResults().stream()
+                    .map(result -> result.resultId())
+                    .toList());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    /// Adapts the Swing `Log` model into one deterministic immutable Core input.
+    ///
+    /// @param logs captured process-output entries
+    /// @param javaBits selected Java bitness
+    /// @return immutable launch-log analysis input
+    private static LogAnalyzable input(List<Log> logs, Bits javaBits) {
+        return new LogAnalyzable(
+                "1.20.4",
+                "net.minecraft.client.main.Main",
+                ProcessListener.ExitType.APPLICATION_ERROR,
+                OperatingSystem.WINDOWS,
+                936,
+                Path.of("C:/Games/Minecraft/.minecraft"),
+                Path.of("C:/Java/bin/javaw.exe"),
+                17,
+                17,
+                javaBits,
+                4096,
+                logs.stream().map(Log::getLog).toList());
     }
 
 }

@@ -15,23 +15,24 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.crash;
+package space.minecraftstl.xyml.game.analyzer;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 
-import java.nio.file.Path;
-import java.util.concurrent.CompletionStage;
+import java.util.Objects;
 
-/// Analyzes both in-memory game output and the instance's latest on-disk log without UI dependencies.
+/// Immutable diagnosis produced by one analyzer.
+///
+/// @param analyzer analyzer that established the cause
+/// @param resultId stable cause identifier used for ordering and deduplication
+/// @param solver actionable repair proposal
+/// @param <T> analyzable input type
 @NotNullByDefault
-interface GameCrashAnalysisService {
-    /// Starts both analysis sources and merges their rule and keyword results.
-    ///
-    /// @param logAnalyzable immutable launch context and captured-output snapshot
-    /// @param latestLog on-disk `logs/latest.log` path
-    /// @return asynchronous merged diagnosis
-    CompletionStage<GameCrashAnalysis> analyze(
-            LogAnalyzable logAnalyzable,
-            Path latestLog);
+public record AnalyzeResult<T>(Analyzer<T> analyzer, ResultID resultId, Solver solver) {
+    /// Validates every non-null diagnosis component.
+    public AnalyzeResult {
+        Objects.requireNonNull(analyzer, "analyzer");
+        Objects.requireNonNull(resultId, "resultId");
+        Objects.requireNonNull(solver, "solver");
+    }
 }

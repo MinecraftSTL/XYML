@@ -20,7 +20,10 @@ package space.minecraftstl.xyml.ui.swing.crash;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.game.Log;
+import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.launch.ProcessListener;
+import space.minecraftstl.xyml.util.platform.Bits;
+import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import java.net.URI;
@@ -105,7 +108,7 @@ class SwingGameCrashWindowTest {
         GameCrashWindowModel model = new GameCrashWindowModel(
                 ProcessListener.ExitType.APPLICATION_ERROR,
                 List.of(new GameCrashWindowModel.Detail("Instance", "Test")),
-                List.of(new Log("captured")),
+                testInput(),
                 Path.of("missing-latest.log"));
         return new SwingGameCrashWindow(
                 model,
@@ -116,6 +119,25 @@ class SwingGameCrashWindowTest {
                 false);
     }
 
+    /// Creates the immutable Core analysis input used by headless window lifecycle tests.
+    ///
+    /// @return deterministic launch-log analysis input
+    private static LogAnalyzable testInput() {
+        return new LogAnalyzable(
+                "1.20.4",
+                "net.minecraft.client.main.Main",
+                ProcessListener.ExitType.APPLICATION_ERROR,
+                OperatingSystem.WINDOWS,
+                936,
+                Path.of("C:/Games/Minecraft/.minecraft"),
+                Path.of("C:/Java/bin/javaw.exe"),
+                17,
+                17,
+                Bits.BIT_64,
+                4096,
+                List.of(new Log("captured").getLog()));
+    }
+
     /// Exposes a manually completed analysis future.
     @NotNullByDefault
     private static final class ControlledAnalysisService implements GameCrashAnalysisService {
@@ -124,12 +146,12 @@ class SwingGameCrashWindowTest {
 
         /// Returns the controlled future without touching its inputs.
         ///
-        /// @param capturedLogs immutable process-output snapshot
+        /// @param logAnalyzable immutable launch context and captured-output snapshot
         /// @param latestLog on-disk latest-log path
         /// @return manually completed diagnosis
         @Override
         public CompletionStage<GameCrashAnalysis> analyze(
-                List<Log> capturedLogs,
+                LogAnalyzable logAnalyzable,
                 Path latestLog) {
             return result;
         }
