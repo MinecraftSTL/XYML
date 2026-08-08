@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ai;
+package space.minecraftstl.xyml.mcp;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
@@ -52,7 +52,7 @@ public final class XYMLMcpServer implements AutoCloseable {
 
     /// Server identity advertised during MCP initialization.
     private static final @Unmodifiable Map<String, String> SERVER_INFO =
-            Map.of("name", "xyml-ai-mcp-server", "version", "1.0.0");
+            Map.of("name", "xyml-mcp-server", "version", "1.0.0");
 
     /// JSON codec shared by the reader and response writer.
     private final Gson gson = new Gson();
@@ -204,7 +204,6 @@ public final class XYMLMcpServer implements AutoCloseable {
         result.put("protocolVersion", requestedVersion == null ? "2025-06-18" : requestedVersion);
         result.put("capabilities", capabilities);
         result.put("serverInfo", SERVER_INFO);
-        result.put("instructions", "Use XYML tools to diagnose and test local Minecraft instances.");
         return Map.copyOf(result);
     }
 

@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ai;
+package space.minecraftstl.xyml.mcp;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -622,10 +622,10 @@ public final class XYMLMcpService implements XYMLMcpOperations {
         return enable ? manager.enableMod(path) : manager.disableMod(path);
     }
 
-    /// Creates an offline account for a deterministic AI launch test.
+    /// Creates an offline account for a deterministic launch test.
     private static AuthInfo offlineAuth(GameInstanceID id) {
         UUID uuid = UUID.nameUUIDFromBytes(id.id().getBytes(StandardCharsets.UTF_8));
-        return new AuthInfo("XYML-AI", uuid, "xyml-ai", AuthInfo.USER_TYPE_LEGACY, "{}");
+        return new AuthInfo("XYML-MCP", uuid, "xyml-mcp", AuthInfo.USER_TYPE_LEGACY, "{}");
     }
 
     /// Captures output and terminal state for one managed launch process.

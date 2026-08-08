@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ai;
+package space.minecraftstl.xyml.mcp;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -55,7 +55,7 @@ public final class XYMLMcpStdioHandshakeTest {
                 JsonObject initialization = readResponse(clientReader);
                 assertEquals("2025-06-18", initialization.getAsJsonObject("result")
                         .get("protocolVersion").getAsString());
-                assertEquals("xyml-ai-mcp-server", initialization.getAsJsonObject("result")
+                assertEquals("xyml-mcp-server", initialization.getAsJsonObject("result")
                         .getAsJsonObject("serverInfo").get("name").getAsString());
 
                 writeMessage(clientWriter,

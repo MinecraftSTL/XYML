@@ -32,19 +32,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests current launcher settings serialization behavior.
 @NotNullByDefault
 public final class LauncherSettingsTest {
-    /// Verifies that the MCP server is disabled by default and uses the documented port.
+    /// Verifies that the MCP server is disabled by default and has no port setting.
     @Test
     public void mcpServerDefaultsToDisabled() {
         LauncherSettings settings = new LauncherSettings();
 
         assertFalse(settings.mcpEnabledProperty().get());
-        assertEquals(LauncherSettings.DEFAULT_MCP_PORT, settings.mcpPortProperty().get());
-
         settings.mcpEnabledProperty().set(true);
-        settings.mcpPortProperty().set(23_969);
         JsonObject serialized = JsonParser.parseString(settings.toJson()).getAsJsonObject();
         assertTrue(serialized.get("mcpEnabled").getAsBoolean());
-        assertEquals(23_969, serialized.get("mcpPort").getAsInt());
+        assertFalse(serialized.has("mcpPort"));
+
+        LauncherSettings migrated = LauncherSettings.fromJson(JsonParser.parseString("{\"mcpPort\":23968}")
+                .getAsJsonObject());
+        assertFalse(JsonParser.parseString(migrated.toJson()).getAsJsonObject().has("mcpPort"));
     }
 
     /// Tests that launcher settings serialization preserves a patch-version schema and unknown fields.
