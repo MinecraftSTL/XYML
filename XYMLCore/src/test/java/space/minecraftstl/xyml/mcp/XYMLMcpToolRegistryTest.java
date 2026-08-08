@@ -33,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @NotNullByDefault
 public final class XYMLMcpToolRegistryTest {
 
-    /// Ensures every approved tool is present exactly once and resource templates are advertised.
+    /// Ensures every approved tool is present exactly once.
     @Test
     public void registersCompleteToolSurface() {
         XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(null);
@@ -46,11 +46,6 @@ public final class XYMLMcpToolRegistryTest {
                 "enable_mod", "remove_mods", "launch_game", "get_launch_status")));
         assertFalse(names.contains("search_addons"));
         assertFalse(names.contains("create_instance"));
-        assertEquals(3, registry.resourceTemplateDefinitions().size());
-        assertEquals("xyml://instances/{instance_id}/logs/latest.log",
-                registry.resourceTemplateDefinitions().get(0).uriTemplate());
-        assertEquals("xyml://instances/{instance_id}/crash-reports/{report_name}",
-                registry.resourceTemplateDefinitions().get(2).uriTemplate());
     }
 
     /// Ensures high-impact tools require a boolean confirmation in their JSON schema.

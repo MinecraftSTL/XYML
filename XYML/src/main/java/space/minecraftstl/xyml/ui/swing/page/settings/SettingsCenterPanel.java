@@ -62,6 +62,8 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Desktop;
 import java.awt.Font;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
@@ -200,8 +202,11 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Commits validated free-form download and proxy values.
     private final JButton confirmNetworkButton = new JButton(i18n("button.ok"));
 
-    /// Enables or disables the local MCP stdio entry point.
+    /// Enables or disables the local MCP HTTP server.
     private final JCheckBox mcpEnabledBox = new JCheckBox(i18n("settings.mcp.enabled"));
+
+    /// Local MCP HTTP listener port input.
+    private final JTextField mcpPortField = new JTextField();
 
     /// Store subscription released when this panel is discarded.
     private final Subscription storeSubscription;
@@ -536,6 +541,13 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 store.setMcpEnabled(mcpEnabledBox.isSelected());
             }
         });
+        mcpPortField.addActionListener(event -> persistMcpPort());
+        mcpPortField.addFocusListener(new FocusAdapter() {
+            @Override
+            public void focusLost(FocusEvent event) {
+                persistMcpPort();
+            }
+        });
     }
 
     /// Creates the general preferences page.
@@ -594,6 +606,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         JPanel page = createPage();
         page.add(createHeading(i18n("settings.mcp.title")), "growx");
         page.add(mcpEnabledBox, "growx");
+        page.add(createFieldRow(i18n("settings.mcp.port"), mcpPortField), "growx");
         return page;
     }
 
@@ -1057,6 +1070,30 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         }
     }
 
+    /// Validates and persists the local MCP listener port.
+    private void persistMcpPort() {
+        if (closed || applyingSnapshot) {
+            return;
+        }
+        @Nullable Integer port = parseMcpPort(mcpPortField.getText());
+        if (port != null) {
+            store.setMcpPort(port);
+        }
+    }
+
+    /// Parses a legal local MCP listener port.
+    ///
+    /// @param raw text-field value
+    /// @return port from 1 through 65535, or null when invalid
+    private static @Nullable Integer parseMcpPort(String raw) {
+        try {
+            int parsed = Integer.parseInt(Objects.requireNonNull(raw, "raw").trim());
+            return parsed >= 1 && parsed <= 0xFFFF ? parsed : null;
+        } catch (NumberFormatException exception) {
+            return null;
+        }
+    }
+
     /// Opens a trusted launcher metadata URL in the desktop browser.
     ///
     /// @param destination destination URI
@@ -1129,6 +1166,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             proxyPasswordField.setText(snapshot.proxyPassword());
             networkValidationLabel.setText("");
             mcpEnabledBox.setSelected(snapshot.mcpEnabled());
+            mcpPortField.setText(Integer.toString(snapshot.mcpPort()));
 
             setInteractiveControlsEnabled(snapshot.writable());
             updateDownloadControlAvailability();
@@ -1164,6 +1202,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         confirmNetworkButton.setEnabled(interactive);
         networkValidationLabel.setEnabled(interactive);
         mcpEnabledBox.setEnabled(interactive);
+        mcpPortField.setEnabled(interactive);
         updateStatusLabel.setEnabled(!closed);
         cacheStatusLabel.setEnabled(!closed);
         updateMaintenanceControlAvailability();

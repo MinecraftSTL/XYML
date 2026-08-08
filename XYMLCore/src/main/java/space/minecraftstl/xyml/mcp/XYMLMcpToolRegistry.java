@@ -156,19 +156,6 @@ public final class XYMLMcpToolRegistry {
         return tools;
     }
 
-    /// Returns templates for latest logs, crash-report listings, and individual reports.
-    ///
-    /// @return immutable resource templates
-    public @Unmodifiable List<ResourceTemplate> resourceTemplateDefinitions() {
-        return List.of(
-                new ResourceTemplate("xyml://instances/{instance_id}/logs/latest.log", "latest_log",
-                        "Latest game log for an XYML instance", "text/plain"),
-                new ResourceTemplate("xyml://instances/{instance_id}/crash-reports/", "crash_report_directory",
-                        "Resource URIs for crash reports in an XYML instance", "text/uri-list"),
-                new ResourceTemplate("xyml://instances/{instance_id}/crash-reports/{report_name}", "crash_report",
-                        "One crash report from an XYML instance", "text/plain"));
-    }
-
     /// Invokes one registered tool after validation and confirmation checks.
     ///
     /// @param name requested tool name
@@ -188,15 +175,6 @@ public final class XYMLMcpToolRegistry {
             return ToolCallResult.error(name, exception.getMessage() == null
                     ? exception.getClass().getSimpleName() : exception.getMessage());
         }
-    }
-
-    /// Reads an XYML resource on the shared I/O scheduler.
-    ///
-    /// @param uri resource URI
-    /// @return immutable URI, MIME type, and text map
-    /// @throws Exception if the launcher service cannot read the resource
-    public @Unmodifiable Map<String, String> readResource(String uri) throws Exception {
-        return callOnIo(() -> service().readResource(uri));
     }
 
     /// Serializes one structured tool result for MCP text content.
@@ -220,23 +198,6 @@ public final class XYMLMcpToolRegistry {
             Objects.requireNonNull(name, "name");
             Objects.requireNonNull(description, "description");
             inputSchema = Map.copyOf(inputSchema);
-        }
-    }
-
-    /// Public protocol-neutral resource template.
-    ///
-    /// @param uriTemplate resource URI template
-    /// @param name resource name
-    /// @param description resource description
-    /// @param mimeType expected MIME type
-    @NotNullByDefault
-    public record ResourceTemplate(String uriTemplate, String name, String description, String mimeType) {
-        /// Validates one resource template.
-        public ResourceTemplate {
-            Objects.requireNonNull(uriTemplate, "uriTemplate");
-            Objects.requireNonNull(name, "name");
-            Objects.requireNonNull(description, "description");
-            Objects.requireNonNull(mimeType, "mimeType");
         }
     }
 

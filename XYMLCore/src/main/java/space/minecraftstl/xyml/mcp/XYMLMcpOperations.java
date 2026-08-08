@@ -160,10 +160,4 @@ public interface XYMLMcpOperations {
     /// @return immutable launch status
     @Unmodifiable Map<String, Object> getLaunchStatus(String instanceId);
 
-    /// Reads a supported XYML resource URI.
-    ///
-    /// @param uri resource URI
-    /// @return immutable resource data
-    /// @throws IOException if the resource cannot be read
-    @Unmodifiable Map<String, String> readResource(String uri) throws IOException;
 }

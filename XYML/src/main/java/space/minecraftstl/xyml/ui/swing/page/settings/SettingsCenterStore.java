@@ -132,6 +132,11 @@ public interface SettingsCenterStore extends AutoCloseable {
     /// @param enabled whether the MCP entry point may serve requests
     void setMcpEnabled(boolean enabled);
 
+    /// Persists the local MCP server loopback port.
+    ///
+    /// @param port loopback TCP port in the range 1..65535
+    void setMcpPort(int port);
+
     /// Releases every store-owned listener.
     @Override
     void close();

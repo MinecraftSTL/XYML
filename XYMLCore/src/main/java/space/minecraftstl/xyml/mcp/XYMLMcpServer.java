@@ -21,188 +21,180 @@ import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
+import fi.iki.elonen.NanoHTTPD;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.task.Schedulers;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ExecutionException;
 
-/// Implements the MCP server subset needed by XYML over newline-delimited standard I/O.
+/// Serves XYML MCP tools through a loopback HTTP/SSE JSON-RPC endpoint.
 ///
-/// The implementation deliberately supports only stdio. It handles initialization, tool listing
-/// and calls, resource-template listing and reads, and ping without opening network listeners.
+/// The server exposes only `POST /mcp` and the `initialize`, `tools/list`, and `tools/call` methods.
+/// Its capability negotiation contains only the tools capability.
 @NotNullByDefault
-public final class XYMLMcpServer implements AutoCloseable {
+public final class XYMLMcpServer extends NanoHTTPD implements AutoCloseable {
+
+    /// HTTP path used for every JSON-RPC request.
+    public static final String MCP_PATH = "/mcp";
+
+    /// SSE media type emitted by successful and protocol-error responses.
+    private static final String SSE_MEDIA_TYPE = "text/event-stream; charset=utf-8";
 
     /// Server identity advertised during MCP initialization.
     private static final @Unmodifiable Map<String, String> SERVER_INFO =
             Map.of("name", "xyml-mcp-server", "version", "1.0.0");
 
-    /// JSON codec shared by the reader and response writer.
+    /// JSON codec shared by request decoding and response serialization.
     private final Gson gson = new Gson();
 
-    /// Registry supplying XYML tools and resources.
+    /// Registry supplying XYML tool definitions and invocations.
     private final XYMLMcpToolRegistry registry;
 
-    /// UTF-8 protocol input.
-    private final BufferedReader input;
-
-    /// UTF-8 protocol output.
-    private final BufferedWriter output;
-
-    /// Signals EOF, protocol failure, or explicit closure.
-    private final CountDownLatch terminated = new CountDownLatch(1);
-
-    /// Ensures close and reader termination run once.
-    private final AtomicBoolean closed = new AtomicBoolean();
-
-    /// Background protocol reader scheduled on the shared I/O executor.
-    private final Future<?> readerTask;
-
-    /// Creates and starts a single-session stdio MCP server.
+    /// Creates a loopback MCP server without starting its listener.
     ///
-    /// @param service initialized launcher operation service
-    public XYMLMcpServer(XYMLMcpOperations service) {
-        this(service, System.in, System.out);
-    }
-
-    /// Creates and starts a single-session MCP server on explicit standard-I/O streams.
-    ///
-    /// @param service initialized launcher operation service, or null for schema-only tests
-    /// @param protocolInput protocol input stream
-    /// @param protocolOutput protocol output stream
-    public XYMLMcpServer(@Nullable XYMLMcpOperations service, InputStream protocolInput, OutputStream protocolOutput) {
+    /// @param port loopback TCP port, or zero to select an available port
+    /// @param service initialized launcher operation service, or `null` for schema-only tests
+    public XYMLMcpServer(int port, @Nullable XYMLMcpOperations service) {
+        super("127.0.0.1", validatePort(port));
         registry = new XYMLMcpToolRegistry(service);
-        input = new BufferedReader(new InputStreamReader(
-                Objects.requireNonNull(protocolInput, "protocolInput"), StandardCharsets.UTF_8));
-        output = new BufferedWriter(new OutputStreamWriter(
-                Objects.requireNonNull(protocolOutput, "protocolOutput"), StandardCharsets.UTF_8));
-        readerTask = Schedulers.io().submit(this::readMessages);
     }
 
-    /// Waits until the MCP client closes its input stream or this server is closed.
+    /// Starts the loopback HTTP listener using NanoHTTPD's daemon mode.
     ///
-    /// @throws InterruptedException if the waiting thread is interrupted
-    public void awaitTermination() throws InterruptedException {
-        terminated.await();
+    /// @throws IOException when the configured port cannot be bound
+    public void startListener() throws IOException {
+        start(SOCKET_READ_TIMEOUT, true);
     }
 
-    /// Stops the stdio reader and releases any blocked termination waiter.
+    /// Handles a single HTTP request.
+    ///
+    /// Only JSON-RPC requests sent with `POST /mcp` are accepted. Responses contain one SSE
+    /// `data` event whose value is a JSON-RPC object. Notifications have no `id` and return HTTP
+    /// 204 without a response body.
+    ///
+    /// @param session incoming HTTP request
+    /// @return HTTP response for the request
+    @Override
+    public Response serve(IHTTPSession session) {
+        Objects.requireNonNull(session, "session");
+        if (session.getMethod() != Method.POST || !MCP_PATH.equals(session.getUri())) {
+            return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found");
+        }
+        try {
+            String body = readRequestBody(session);
+            @Nullable JsonObject response = Schedulers.io().submit(() -> handleRequest(body)).get();
+            return response == null
+                    ? newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
+                    : sseResponse(response);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return sseResponse(errorResponse(null, -32603, "Request handling was interrupted"));
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            return sseResponse(errorResponse(null, -32603, cause == null || cause.getMessage() == null
+                    ? "Request handling failed" : cause.getMessage()));
+        } catch (IOException exception) {
+            return sseResponse(errorResponse(null, -32700, "Unable to read JSON-RPC request"));
+        } catch (ResponseException exception) {
+            return sseResponse(errorResponse(null, -32700,
+                    Objects.requireNonNullElse(exception.getMessage(), "Unable to read JSON-RPC request")));
+        }
+    }
+
+    /// Reads the request body through NanoHTTPD's body parser.
+    ///
+    /// @param session incoming HTTP request
+    /// @return UTF-8 request body, or an empty string when no body was supplied
+    /// @throws IOException when the request body cannot be read
+    /// @throws ResponseException when NanoHTTPD rejects the request body
+    private static String readRequestBody(IHTTPSession session) throws IOException, ResponseException {
+        Map<String, String> files = new HashMap<>();
+        session.parseBody(files);
+        @Nullable String body = files.get("postData");
+        return body == null ? "" : body;
+    }
+
+    /// Stops the HTTP listener.
     @Override
     public void close() {
-        if (!closed.compareAndSet(false, true)) {
-            return;
-        }
-        readerTask.cancel(true);
-        try {
-            input.close();
-        } catch (IOException ignored) {
-            // The peer may already have closed its pipe.
-        } finally {
-            terminated.countDown();
-        }
+        stop();
     }
 
-    /// Reads complete newline-delimited JSON-RPC messages until EOF.
-    private void readMessages() {
-        try {
-            @Nullable String line;
-            while (!closed.get() && (line = input.readLine()) != null) {
-                if (!line.isBlank()) {
-                    handleLine(line);
-                }
-            }
-        } catch (IOException ignored) {
-            // Closing the client pipe or this server is a normal stdio lifecycle event.
-        } finally {
-            closed.set(true);
-            terminated.countDown();
-        }
-    }
-
-    /// Parses and dispatches one JSON-RPC line.
+    /// Parses, validates, and dispatches one JSON-RPC request body.
     ///
-    /// @param line complete UTF-8 JSON line
-    private void handleLine(String line) {
-        @Nullable JsonElement id = null;
+    /// @param body complete UTF-8 request body
+    /// @return response object, or `null` for a notification
+    private @Nullable JsonObject handleRequest(String body) {
+        final JsonElement parsed;
         try {
-            JsonObject request = gson.fromJson(line, JsonObject.class);
-            if (request == null) {
-                throw new JsonParseException("Request must be a JSON object");
-            }
-            id = request.get("id");
-            @Nullable String method = stringMember(request, "method");
-            if (method == null || method.isBlank()) {
-                throw new ProtocolException(-32600, "Request method is missing");
-            }
-            if (id == null || id.isJsonNull()) {
-                handleNotification(method);
-                return;
-            }
-            writeResult(id, dispatch(method, objectMember(request, "params")));
+            parsed = JsonParser.parseString(Objects.requireNonNull(body, "body"));
+        } catch (JsonParseException exception) {
+            return errorResponse(null, -32700, "Invalid JSON-RPC message");
+        }
+        if (!parsed.isJsonObject()) {
+            return errorResponse(null, -32600, "JSON-RPC request must be an object");
+        }
+
+        JsonObject request = parsed.getAsJsonObject();
+        boolean notification = !request.has("id");
+        @Nullable JsonElement id = request.get("id");
+        if (!isValidId(id, notification)) {
+            return errorResponse(null, -32600, "JSON-RPC id must be a string or number");
+        }
+        if (!isJsonRpcVersion(request)) {
+            return notification ? null : errorResponse(id, -32600, "jsonrpc must be 2.0");
+        }
+
+        @Nullable String method = stringMember(request, "method");
+        if (method == null || method.isBlank()) {
+            return notification ? null : errorResponse(id, -32600, "Request method is missing");
+        }
+
+        try {
+            Object result = dispatch(method, objectMember(request, "params"));
+            return notification ? null : resultResponse(Objects.requireNonNull(id, "request id"), result);
         } catch (ProtocolException exception) {
-            writeError(id, exception.code(), exception.getMessage());
-        } catch (JsonParseException | IllegalStateException exception) {
-            writeError(id, -32700, "Invalid JSON-RPC message: " + exception.getMessage());
+            return notification ? null : errorResponse(id, exception.code(), exception.getMessage());
         } catch (Exception exception) {
-            writeError(id, -32603, exception.getMessage() == null
-                    ? exception.getClass().getSimpleName() : exception.getMessage());
+            String message = exception.getMessage();
+            return notification ? null : errorResponse(id, -32603,
+                    message == null ? exception.getClass().getSimpleName() : message);
         }
     }
 
-    /// Handles supported client notifications.
+    /// Dispatches one request to the supported MCP method surface.
     ///
-    /// @param method notification method
-    private static void handleNotification(String method) {
-        // JSON-RPC notifications never receive a response. Unknown notifications are ignored for forward compatibility.
-    }
-
-    /// Dispatches one request to the minimal MCP method surface.
-    ///
-    /// @param method JSON-RPC method
+    /// @param method JSON-RPC method name
     /// @param params decoded parameter object
-    /// @return JSON-compatible result
+    /// @return JSON-compatible response result
     private Object dispatch(String method, JsonObject params) {
         return switch (method) {
             case "initialize" -> initialize(params);
-            case "ping" -> Map.of();
             case "tools/list" -> Map.of("tools", registry.toolDefinitions());
             case "tools/call" -> callTool(params);
-            case "resources/templates/list" -> Map.of("resourceTemplates",
-                    registry.resourceTemplateDefinitions());
-            case "resources/read" -> readResource(params);
             default -> throw new ProtocolException(-32601, "Unsupported method: " + method);
         };
     }
 
-    /// Negotiates the protocol version and advertises XYML capabilities.
+    /// Negotiates the protocol version and advertises only tools.
     ///
     /// @param params initialization parameters
-    /// @return initialization result
+    /// @return immutable initialization result
     private static @Unmodifiable Map<String, Object> initialize(JsonObject params) {
         @Nullable String requestedVersion = stringMember(params, "protocolVersion");
-        Map<String, Object> capabilities = Map.of(
-                "tools", Map.of("listChanged", false),
-                "resources", Map.of("subscribe", false, "listChanged", false));
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("protocolVersion", requestedVersion == null ? "2025-06-18" : requestedVersion);
-        result.put("capabilities", capabilities);
+        result.put("capabilities", Map.of("tools", Map.of("listChanged", false)));
         result.put("serverInfo", SERVER_INFO);
         return Map.copyOf(result);
     }
@@ -210,7 +202,7 @@ public final class XYMLMcpServer implements AutoCloseable {
     /// Invokes one tool and formats its MCP content envelope.
     ///
     /// @param params tool-call parameters
-    /// @return MCP tool-call result
+    /// @return immutable tool-call result
     private @Unmodifiable Map<String, Object> callTool(JsonObject params) {
         @Nullable String name = stringMember(params, "name");
         if (name == null || name.isBlank()) {
@@ -226,71 +218,89 @@ public final class XYMLMcpServer implements AutoCloseable {
         return Map.copyOf(response);
     }
 
-    /// Reads one resource and formats its MCP content envelope.
+    /// Creates a successful JSON-RPC response.
     ///
-    /// @param params resource-read parameters
-    /// @return MCP resource-read result
-    private @Unmodifiable Map<String, Object> readResource(JsonObject params) {
-        @Nullable String uri = stringMember(params, "uri");
-        if (uri == null || uri.isBlank()) {
-            throw new ProtocolException(-32602, "Resource URI is missing");
-        }
-        try {
-            Map<String, String> resource = registry.readResource(uri);
-            return Map.of("contents", List.of(Map.of(
-                    "uri", resource.getOrDefault("uri", uri),
-                    "mimeType", resource.getOrDefault("mime_type", "text/plain"),
-                    "text", resource.getOrDefault("text", ""))));
-        } catch (Exception exception) {
-            throw new ProtocolException(-32603, exception.getMessage() == null
-                    ? exception.getClass().getSimpleName() : exception.getMessage());
-        }
-    }
-
-    /// Writes one successful JSON-RPC response.
-    private void writeResult(JsonElement id, Object result) {
+    /// @param id request identifier
+    /// @param result JSON-compatible method result
+    /// @return JSON-RPC response object
+    private JsonObject resultResponse(JsonElement id, Object result) {
         JsonObject response = new JsonObject();
         response.addProperty("jsonrpc", "2.0");
         response.add("id", id.deepCopy());
         response.add("result", gson.toJsonTree(result));
-        writeMessage(response);
+        return response;
     }
 
-    /// Writes one JSON-RPC error response.
-    private void writeError(@Nullable JsonElement id, int code, String message) {
+    /// Creates a JSON-RPC error response.
+    ///
+    /// @param id request identifier, or `null` when unavailable
+    /// @param code JSON-RPC error code
+    /// @param message stable error description
+    /// @return JSON-RPC error object
+    private static JsonObject errorResponse(@Nullable JsonElement id, int code, String message) {
         JsonObject error = new JsonObject();
         error.addProperty("code", code);
-        error.addProperty("message", message);
+        error.addProperty("message", Objects.requireNonNull(message, "message"));
         JsonObject response = new JsonObject();
         response.addProperty("jsonrpc", "2.0");
         response.add("id", id == null ? null : id.deepCopy());
         response.add("error", error);
-        writeMessage(response);
+        return response;
     }
 
-    /// Serializes and flushes one newline-delimited JSON-RPC response.
-    private void writeMessage(JsonObject response) {
-        synchronized (output) {
-            try {
-                output.write(gson.toJson(response));
-                output.newLine();
-                output.flush();
-            } catch (IOException ignored) {
-                closed.set(true);
-                terminated.countDown();
-            }
+    /// Serializes a JSON-RPC response as one server-sent event.
+    ///
+    /// @param response response to serialize
+    /// @return HTTP JSON response
+    private Response sseResponse(JsonObject response) {
+        String event = "data: " + gson.toJson(response) + "\n\n";
+        Response result = newFixedLengthResponse(Response.Status.OK, SSE_MEDIA_TYPE, event);
+        result.addHeader("Cache-Control", "no-cache");
+        return result;
+    }
+
+    /// Returns whether a request has the exact JSON-RPC version marker.
+    ///
+    /// @param request decoded request object
+    /// @return whether the marker is `2.0`
+    private static boolean isJsonRpcVersion(JsonObject request) {
+        @Nullable JsonElement version = request.get("jsonrpc");
+        return version != null && version.isJsonPrimitive()
+                && version.getAsJsonPrimitive().isString() && "2.0".equals(version.getAsString());
+    }
+
+    /// Returns whether an identifier is valid for the request kind.
+    ///
+    /// @param id identifier element, or `null` when omitted
+    /// @param notification whether the request omitted its identifier
+    /// @return whether the identifier matches the JSON-RPC subset
+    private static boolean isValidId(@Nullable JsonElement id, boolean notification) {
+        if (notification) {
+            return true;
         }
+        return id != null && id.isJsonPrimitive()
+                && (id.getAsJsonPrimitive().isString() || id.getAsJsonPrimitive().isNumber());
     }
 
-    /// Returns a string object member, or null when absent or JSON null.
+    /// Returns a string member when it is present as a JSON string.
+    ///
+    /// @param object JSON object to inspect
+    /// @param name member name
+    /// @return string value, or `null` when absent or not a string
     private static @Nullable String stringMember(JsonObject object, String name) {
-        @Nullable JsonElement value = object.get(name);
-        return value == null || value.isJsonNull() ? null : value.getAsString();
+        @Nullable JsonElement value = object.get(Objects.requireNonNull(name, "name"));
+        return value == null || value.isJsonNull() || !value.isJsonPrimitive()
+                || !value.getAsJsonPrimitive().isString() ? null : value.getAsString();
     }
 
     /// Returns an object member or an empty object when absent.
+    ///
+    /// @param object JSON object to inspect
+    /// @param name member name
+    /// @return supplied object value or a new empty object
+    /// @throws ProtocolException when a present value is not an object
     private static JsonObject objectMember(JsonObject object, String name) {
-        @Nullable JsonElement value = object.get(name);
+        @Nullable JsonElement value = object.get(Objects.requireNonNull(name, "name"));
         if (value == null || value.isJsonNull()) {
             return new JsonObject();
         }
@@ -300,12 +310,27 @@ public final class XYMLMcpServer implements AutoCloseable {
         return value.getAsJsonObject();
     }
 
-    /// Converts an object member to a JSON-compatible immutable map.
+    /// Converts an object member to an immutable JSON-compatible map.
+    ///
+    /// @param object JSON object to inspect
+    /// @param name member name
+    /// @return immutable decoded map
     @SuppressWarnings("unchecked")
     private Map<String, Object> mapMember(JsonObject object, String name) {
         JsonObject value = objectMember(object, name);
-        Map<String, Object> decoded = gson.fromJson(value, Map.class);
+        @Nullable Map<String, Object> decoded = gson.fromJson(value, Map.class);
         return decoded == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(decoded));
+    }
+
+    /// Validates a configured TCP port.
+    ///
+    /// @param port TCP port, or zero for an automatic port
+    /// @return validated port
+    private static int validatePort(int port) {
+        if (port < 0 || port > 0xFFFF) {
+            throw new IllegalArgumentException("port must be in range 0..65535");
+        }
+        return port;
     }
 
     /// Internal JSON-RPC error with an explicit protocol code.
@@ -315,12 +340,17 @@ public final class XYMLMcpServer implements AutoCloseable {
         private final int code;
 
         /// Creates one protocol error.
+        ///
+        /// @param code JSON-RPC error code
+        /// @param message stable error description
         private ProtocolException(int code, String message) {
-            super(message);
+            super(Objects.requireNonNull(message, "message"));
             this.code = code;
         }
 
         /// Returns the JSON-RPC error code.
+        ///
+        /// @return error code
         private int code() {
             return code;
         }

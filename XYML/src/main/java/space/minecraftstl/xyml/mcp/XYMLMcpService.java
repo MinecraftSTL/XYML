@@ -37,8 +37,6 @@ import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.property.InheritableProperty;
 
 import java.io.IOException;
-import java.net.URLDecoder;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,9 +47,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 /// Bridges the existing XYMLCore launcher services to MCP-safe structured operations.
 ///
@@ -62,18 +57,6 @@ public final class XYMLMcpService implements XYMLMcpOperations {
 
     /// Maximum number of lines returned by one log request.
     private static final int MAX_LOG_LINES = 20_000;
-
-    /// URI matcher for a latest-log resource.
-    private static final Pattern LOG_RESOURCE = Pattern.compile(
-            "^xyml://instances/([^/]+)/logs/latest\\.log$");
-
-    /// URI matcher for one crash-report resource.
-    private static final Pattern CRASH_RESOURCE = Pattern.compile(
-            "^xyml://instances/([^/]+)/crash-reports/$");
-
-    /// URI matcher for an individual crash-report resource.
-    private static final Pattern CRASH_REPORT_RESOURCE = Pattern.compile(
-            "^xyml://instances/([^/]+)/crash-reports/([^/]+)$");
 
     /// Repository exposed by this server process.
     private final XYMLGameRepository repository;
@@ -453,34 +436,6 @@ public final class XYMLMcpService implements XYMLMcpOperations {
                 "logs", state.logsSnapshot());
     }
 
-    /// Reads a supported `xyml://` resource URI.
-    ///
-    /// @param uri resource URI
-    /// @return resource URI, MIME type, and text
-    @Override
-    public @Unmodifiable Map<String, String> readResource(String uri) throws IOException {
-        Matcher logMatcher = LOG_RESOURCE.matcher(uri);
-        if (logMatcher.matches()) {
-            GameInstanceID id = id(decodeSegment(logMatcher.group(1)));
-            Path path = latestLog(id);
-            return Map.of("uri", uri, "mime_type", "text/plain", "text", readIfPresent(path));
-        }
-        Matcher crashMatcher = CRASH_RESOURCE.matcher(uri);
-        if (crashMatcher.matches()) {
-            GameInstanceID id = id(decodeSegment(crashMatcher.group(1)));
-            return Map.of("uri", uri, "mime_type", "text/uri-list",
-                    "text", listCrashReportUris(id));
-        }
-        Matcher reportMatcher = CRASH_REPORT_RESOURCE.matcher(uri);
-        if (reportMatcher.matches()) {
-            GameInstanceID id = id(decodeSegment(reportMatcher.group(1)));
-            String reportName = decodeSegment(reportMatcher.group(2));
-            return Map.of("uri", uri, "mime_type", "text/plain",
-                    "text", readCrashReport(id, reportName));
-        }
-        throw new IllegalArgumentException("Unsupported XYML resource URI: " + uri);
-    }
-
     /// Resolves one identifier and verifies it is a valid XYML instance ID.
     private GameInstanceID id(String raw) {
         return new GameInstanceID(Objects.requireNonNull(raw, "instanceId"));
@@ -516,28 +471,6 @@ public final class XYMLMcpService implements XYMLMcpOperations {
     /// @return normalized crash-report directory
     private Path crashReportRoot(GameInstanceID id) {
         return repository.getRunDirectory(id).resolve("crash-reports").toAbsolutePath().normalize();
-    }
-
-    /// Lists direct crash-report files as MCP resource URIs.
-    ///
-    /// @param id instance identifier
-    /// @return newline-delimited resource URIs
-    /// @throws IOException if the directory cannot be read
-    private String listCrashReportUris(GameInstanceID id) throws IOException {
-        Path root = crashReportRoot(id);
-        if (!Files.isDirectory(root)) {
-            return "";
-        }
-        String prefix = "xyml://instances/" + encodeSegment(id.id()) + "/crash-reports/";
-        try (Stream<Path> paths = Files.list(root)) {
-            return paths.filter(Files::isRegularFile)
-                    .map(Path::getFileName)
-                    .map(Path::toString)
-                    .sorted()
-                    .map(name -> prefix + encodeSegment(name))
-                    .reduce((left, right) -> left + "\n" + right)
-                    .orElse("");
-        }
     }
 
     /// Reads one crash report after proving it belongs to the selected instance.
@@ -593,22 +526,6 @@ public final class XYMLMcpService implements XYMLMcpOperations {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(name + " must be a positive integer", e);
         }
-    }
-
-    /// Encodes one value for use as an MCP URI path segment.
-    ///
-    /// @param value raw segment value
-    /// @return percent-encoded segment
-    private static String encodeSegment(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
-    }
-
-    /// Decodes one MCP URI path segment.
-    ///
-    /// @param value percent-encoded segment
-    /// @return decoded segment
-    private static String decodeSegment(String value) {
-        return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
 
     /// Resolves a mod path and applies an enable/disable transition.

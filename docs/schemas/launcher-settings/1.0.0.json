@@ -177,6 +177,14 @@
     "proxyPassword": {
       "type": "string"
     },
+    "mcpEnabled": {
+      "type": "boolean"
+    },
+    "mcpPort": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
     "selectedGameDirectory": {
       "$ref": "#/$defs/gameDirectoryID"
     },
