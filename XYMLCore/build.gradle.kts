@@ -27,7 +27,6 @@ dependencies {
     api(libs.hello.nbt)
     api(libs.weburl)
     api(libs.uuid.tools)
-    api(libs.mcp)
     compileOnlyApi(libs.jetbrains.annotations)
 
     testImplementation(libs.jna.platform)

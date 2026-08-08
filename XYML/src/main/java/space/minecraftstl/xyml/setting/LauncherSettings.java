@@ -109,6 +109,9 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Default launcher animation speed percentage.
     public static final int DEFAULT_ANIMATION_SPEED_PERCENTAGE = AnimationSpeedSettings.DEFAULT_PERCENTAGE;
 
+    /// Default port displayed for the local MCP server configuration.
+    public static final int DEFAULT_MCP_PORT = 23_968;
+
     /// Gson instance used for launcher settings and related toolkit-neutral settings objects.
     public static final Gson SETTINGS_GSON = new GsonBuilder()
             .registerTypeAdapter(Path.class, PathTypeAdapter.INSTANCE)
@@ -594,6 +597,24 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Returns the proxy authentication password property.
     public StringProperty proxyPasswordProperty() {
         return proxyPassword;
+    }
+
+    /// Whether the local AI MCP server is enabled when its stdio entry point is launched.
+    @SerializedName("mcpEnabled")
+    private final BooleanProperty mcpEnabled = new SimpleBooleanProperty(false);
+
+    /// Returns the local AI MCP server enablement property.
+    public BooleanProperty mcpEnabledProperty() {
+        return mcpEnabled;
+    }
+
+    /// The configured local MCP listener port reserved for transports that support ports.
+    @SerializedName("mcpPort")
+    private final IntegerProperty mcpPort = new SimpleIntegerProperty(DEFAULT_MCP_PORT);
+
+    /// Returns the configured local MCP listener port property.
+    public IntegerProperty mcpPortProperty() {
+        return mcpPort;
     }
 
     /// The selected game directory ID.

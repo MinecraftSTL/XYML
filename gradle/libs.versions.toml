@@ -23,7 +23,6 @@ nayuki-qrcodegen = "1.8.0"
 jwebp = "0.2.0"
 weburl = "0.2.0"
 uuid-tools = "0.2.0"
-mcp = "2.0.0"
 
 # testing
 junit = "6.0.1"
@@ -60,7 +59,6 @@ nayuki-qrcodegen = { module = "io.nayuki:qrcodegen", version.ref = "nayuki-qrcod
 jwebp = { module = "org.glavo:webp", version.ref = "jwebp" }
 weburl = { module = "org.glavo:weburl", version.ref = "weburl" }
 uuid-tools = { module = "org.glavo:uuid-tools", version.ref = "uuid-tools" }
-mcp = { module = "io.modelcontextprotocol.sdk:mcp", version.ref = "mcp" }
 
 # testing
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }

@@ -26,11 +26,27 @@ import space.minecraftstl.xyml.util.gson.JsonSchema;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests current launcher settings serialization behavior.
 @NotNullByDefault
 public final class LauncherSettingsTest {
+    /// Verifies that the MCP server is disabled by default and uses the documented port.
+    @Test
+    public void mcpServerDefaultsToDisabled() {
+        LauncherSettings settings = new LauncherSettings();
+
+        assertFalse(settings.mcpEnabledProperty().get());
+        assertEquals(LauncherSettings.DEFAULT_MCP_PORT, settings.mcpPortProperty().get());
+
+        settings.mcpEnabledProperty().set(true);
+        settings.mcpPortProperty().set(23_969);
+        JsonObject serialized = JsonParser.parseString(settings.toJson()).getAsJsonObject();
+        assertTrue(serialized.get("mcpEnabled").getAsBoolean());
+        assertEquals(23_969, serialized.get("mcpPort").getAsInt());
+    }
+
     /// Tests that launcher settings serialization preserves a patch-version schema and unknown fields.
     @Test
     public void preservesPatchSchemaAndUnknownFields() {
