@@ -185,6 +185,12 @@ final class DefaultGameCrashAnalysisService implements GameCrashAnalysisService 
                 crashResults.remove(CrashReportAnalyzer.Rule.MEMORY_EXCEEDED);
                 crashResults.remove(CrashReportAnalyzer.Rule.OUT_OF_MEMORY);
             }
+            case FORGE_MISSING_DEPENDENCY -> crashResults.remove(CrashReportAnalyzer.Rule.FORGEMOD_RESOLUTION);
+            case FABRIC_MISSING_DEPENDENCY -> {
+                crashResults.remove(CrashReportAnalyzer.Rule.MOD_RESOLUTION);
+                crashResults.remove(CrashReportAnalyzer.Rule.MOD_RESOLUTION_MISSING);
+                crashResults.remove(CrashReportAnalyzer.Rule.FABRIC_WARNINGS);
+            }
         }
     }
 

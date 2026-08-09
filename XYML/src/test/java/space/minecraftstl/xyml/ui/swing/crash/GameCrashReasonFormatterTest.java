@@ -21,6 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
 import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
+import space.minecraftstl.xyml.game.analyzer.FabricMissingDependencyAnalyzer;
+import space.minecraftstl.xyml.game.analyzer.ForgeMissingDependencyAnalyzer;
 import space.minecraftstl.xyml.game.analyzer.JREVersionAnalyzer;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.game.analyzer.ResultID;
@@ -90,6 +92,35 @@ class GameCrashReasonFormatterTest {
                 new GameCrashAnalysis(List.of(), List.of(result), Set.of()));
 
         assertEquals(i18n("game.crash.reason.log.jre_version", 17, 8), message);
+    }
+
+    /// Formats both loader-specific dependency diagnoses through the shared Swing presentation path.
+    @Test
+    void formatsMissingDependencyDiagnoses() {
+        AnalyzeResult<LogAnalyzable> forgeResult = new AnalyzeResult<>(
+                new ForgeMissingDependencyAnalyzer(),
+                ResultID.FORGE_MISSING_DEPENDENCY,
+                new TextSolver(
+                        "game.crash.reason.log.forge_missing_dependency",
+                        List.of("vampirism (required by werewolves)"),
+                        "Forge reported a missing dependency."));
+        AnalyzeResult<LogAnalyzable> fabricResult = new AnalyzeResult<>(
+                new FabricMissingDependencyAnalyzer(),
+                ResultID.FABRIC_MISSING_DEPENDENCY,
+                new TextSolver(
+                        "game.crash.reason.log.fabric_missing_dependency",
+                        List.of("fabric-api (required by sodium-extra)"),
+                        "Fabric reported a missing dependency."));
+
+        String message = new GameCrashReasonFormatter().format(
+                new GameCrashAnalysis(List.of(), List.of(forgeResult, fabricResult), Set.of()));
+
+        assertTrue(message.contains(i18n(
+                "game.crash.reason.log.forge_missing_dependency",
+                "vampirism (required by werewolves)")));
+        assertTrue(message.contains(i18n(
+                "game.crash.reason.log.fabric_missing_dependency",
+                "fabric-api (required by sodium-extra)")));
     }
 
     /// Finds exactly one requested rule in analyzer output.

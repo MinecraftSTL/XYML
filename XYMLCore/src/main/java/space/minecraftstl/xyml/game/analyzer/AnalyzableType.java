@@ -30,6 +30,8 @@ public enum AnalyzableType {
             new JRE32BitAnalyzer(),
             new VirtualMemoryAnalyzer(),
             new JREVersionAnalyzer(),
+            new ForgeMissingDependencyAnalyzer(),
+            new FabricMissingDependencyAnalyzer(),
             new CodePageAnalyzer()));
 
     /// Immutable ordered analyzers registered for launch logs.

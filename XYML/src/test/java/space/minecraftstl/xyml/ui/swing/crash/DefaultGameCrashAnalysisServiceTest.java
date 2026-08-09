@@ -131,6 +131,61 @@ class DefaultGameCrashAnalysisServiceTest {
         }
     }
 
+    /// Replaces Forge's broad dependency rule with the structured missing-dependency diagnosis.
+    ///
+    /// @throws Exception when temporary I/O or bounded asynchronous completion fails
+    @Test
+    void forgeDependencyDiagnosisReplacesLegacyRule() throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            String failure = "Missing or unsupported mandatory dependencies:\n"
+                    + "\tMod ID: 'vampirism', Requested by: 'werewolves', Expected range: '[1.9.0-beta.1,)', "
+                    + "Actual version: '[MISSING]'";
+            Path latestLog = temporaryDirectory.resolve("latest-forge-dependency.log");
+            Files.writeString(latestLog, failure);
+            GameCrashAnalysis analysis = new DefaultGameCrashAnalysisService(executor)
+                    .analyze(input(List.of(new Log(failure)), Bits.BIT_64), latestLog)
+                    .toCompletableFuture()
+                    .get(5, TimeUnit.SECONDS);
+
+            assertEquals(1, analysis.resultCount());
+            assertTrue(analysis.results().stream()
+                    .noneMatch(result -> result.rule() == CrashReportAnalyzer.Rule.FORGEMOD_RESOLUTION));
+            assertEquals(List.of(ResultID.FORGE_MISSING_DEPENDENCY), analysis.logResults().stream()
+                    .map(result -> result.resultId())
+                    .toList());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    /// Replaces Fabric's broad dependency rule with the structured missing-dependency diagnosis.
+    ///
+    /// @throws Exception when temporary I/O or bounded asynchronous completion fails
+    @Test
+    void fabricDependencyDiagnosisReplacesLegacyRule() throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            String failure = "net.fabricmc.loader.discovery.ModResolutionException: "
+                    + "Could not find required mod: pca requires {fabric @ [>=0.39.2]}";
+            Path latestLog = temporaryDirectory.resolve("latest-fabric-dependency.log");
+            Files.writeString(latestLog, failure);
+            GameCrashAnalysis analysis = new DefaultGameCrashAnalysisService(executor)
+                    .analyze(input(List.of(new Log(failure)), Bits.BIT_64), latestLog)
+                    .toCompletableFuture()
+                    .get(5, TimeUnit.SECONDS);
+
+            assertEquals(1, analysis.resultCount());
+            assertTrue(analysis.results().stream()
+                    .noneMatch(result -> result.rule() == CrashReportAnalyzer.Rule.MOD_RESOLUTION_MISSING));
+            assertEquals(List.of(ResultID.FABRIC_MISSING_DEPENDENCY), analysis.logResults().stream()
+                    .map(result -> result.resultId())
+                    .toList());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     /// Adapts the Swing `Log` model into one deterministic immutable Core input.
     ///
     /// @param logs captured process-output entries

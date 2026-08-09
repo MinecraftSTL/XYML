@@ -32,5 +32,11 @@ public enum ResultID {
     JRE_VERSION,
 
     /// The operating system could not commit enough physical or virtual memory.
-    VIRTUAL_MEMORY
+    VIRTUAL_MEMORY,
+
+    /// Forge reported a required mod dependency whose actual version is missing.
+    FORGE_MISSING_DEPENDENCY,
+
+    /// Fabric reported a hard missing mod dependency.
+    FABRIC_MISSING_DEPENDENCY
 }

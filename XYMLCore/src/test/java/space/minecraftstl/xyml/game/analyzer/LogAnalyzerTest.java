@@ -234,6 +234,168 @@ class LogAnalyzerTest {
         assertTrue(LogAnalyzer.analyze(input).isEmpty());
     }
 
+    /// Detects Forge's explicit missing dependency entry from a real launch log.
+    ///
+    /// @throws IOException when the real regression log cannot be read
+    @Test
+    void detectsForgeMissingDependency() throws IOException {
+        LogAnalyzable input = input(
+                loadLines("/logs/forgemod_resolution.txt"),
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.FORGE_MISSING_DEPENDENCY,
+                ForgeMissingDependencyAnalyzer.class);
+        assertEquals(List.of("vampirism (required by werewolves)"), result.solver().messageArguments());
+    }
+
+    /// Rejects Forge's unsupported-version entry when no dependency is actually missing.
+    ///
+    /// @throws IOException when the real regression log cannot be read
+    @Test
+    void forgeMissingDependencyRejectsPresentIncompatibleVersion() throws IOException {
+        List<String> logLines = loadLines("/logs/forgemod_resolution.txt").stream()
+                .map(line -> line.replace("[MISSING]", "[1.8.0]"))
+                .toList();
+        LogAnalyzable input = input(
+                logLines,
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        assertTrue(LogAnalyzer.analyze(input).isEmpty());
+    }
+
+    /// Detects Fabric's old single-line missing dependency format from a real launch log.
+    ///
+    /// @throws IOException when the real regression log cannot be read
+    @Test
+    void detectsFabricMissingDependency() throws IOException {
+        LogAnalyzable input = input(
+                loadLines("/logs/fabric-mod-missing.txt"),
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.FABRIC_MISSING_DEPENDENCY,
+                FabricMissingDependencyAnalyzer.class);
+        assertEquals(List.of("fabric (required by pca)"), result.solver().messageArguments());
+    }
+
+    /// Detects multiple Fabric missing dependencies from the older resolution-list format.
+    ///
+    /// @throws IOException when the real regression log cannot be read
+    @Test
+    void detectsFabricMissingDependencyList() throws IOException {
+        LogAnalyzable input = input(
+                loadLines("/logs/mod_resolution.txt"),
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.FABRIC_MISSING_DEPENDENCY,
+                FabricMissingDependencyAnalyzer.class);
+        assertEquals(
+                List.of("fabricloader (required by test), fabric (required by test)"),
+                result.solver().messageArguments());
+    }
+
+    /// Detects the current Fabric loader's hard dependency format from a real launch log.
+    ///
+    /// @throws IOException when the real regression log cannot be read
+    @Test
+    void detectsCurrentFabricMissingDependency() throws IOException {
+        LogAnalyzable input = input(
+                loadLines("/logs/fabric_warnings2.txt"),
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.FABRIC_MISSING_DEPENDENCY,
+                FabricMissingDependencyAnalyzer.class);
+        assertTrue(result.solver().messageArguments().get(0).toString().contains("roughlyenoughitems"));
+    }
+
+    /// Detects missing dependencies from a localized current Fabric log via its machine-readable fix list.
+    ///
+    /// @throws IOException when the real regression log cannot be read
+    @Test
+    void detectsLocalizedCurrentFabricMissingDependency() throws IOException {
+        List<String> logLines = loadLines("/logs/fabric_warnings3.txt").stream()
+                .filter(line -> !line.contains("HARD_DEP"))
+                .toList();
+        LogAnalyzable input = input(
+                logLines,
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.FABRIC_MISSING_DEPENDENCY,
+                FabricMissingDependencyAnalyzer.class);
+        String summary = result.solver().messageArguments().get(0).toString();
+        assertTrue(summary.contains("fabric-api"));
+        assertTrue(summary.contains("sodium"));
+    }
+
+    /// Rejects Fabric conflict reports, optional recommendations, and environment requirements.
+    ///
+    /// @throws IOException when the real regression logs cannot be read
+    @Test
+    void fabricMissingDependencyRejectsAdjacentCauses() throws IOException {
+        for (String resource : List.of(
+                "/logs/fabric-mod-conflict.txt",
+                "/logs/fabric_warnings.txt",
+                "/logs/fabric-minecraft.txt",
+                "/logs/mod_resolution_collection.txt")) {
+            LogAnalyzable input = input(
+                    loadLines(resource),
+                    OperatingSystem.WINDOWS,
+                    936,
+                    ASCII_GAME_DIRECTORY,
+                    Bits.BIT_64,
+                    17,
+                    17,
+                    ProcessListener.ExitType.APPLICATION_ERROR);
+
+            assertTrue(LogAnalyzer.analyze(input).isEmpty(), resource);
+        }
+    }
+
     /// Reuses the established invalid-heap-size evidence when the selected runtime is verified as 32-bit.
     ///
     /// @throws IOException when the real regression log cannot be read
