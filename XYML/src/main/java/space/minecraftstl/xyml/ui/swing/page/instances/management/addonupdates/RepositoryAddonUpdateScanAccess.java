@@ -247,12 +247,12 @@ final class RepositoryAddonUpdateScanAccess implements AddonUpdateScanAccess {
     ///
     /// @param addon local add-on selected for update checking
     /// @return matching remote repository type
-    private static RemoteAddonRepository.Type repositoryType(LocalAddonFile addon) {
+    private static RemoteAddon.Type repositoryType(LocalAddonFile addon) {
         if (addon instanceof LocalModFile) {
-            return RemoteAddonRepository.Type.MOD;
+            return RemoteAddon.Type.MOD;
         }
         if (addon instanceof ResourcePackFile) {
-            return RemoteAddonRepository.Type.RESOURCE_PACK;
+            return RemoteAddon.Type.RESOURCE_PACK;
         }
         throw new IllegalArgumentException("Unsupported installed add-on: " + addon.getClass().getName());
     }

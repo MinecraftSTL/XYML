@@ -138,7 +138,7 @@ final class SwingRemoteWorldSaveTargetResolverTest {
                 "https://example.invalid/fixture-world",
                 "https://example.invalid/fixture-world.png",
                 new FixtureAddonData(),
-                RemoteAddonRepository.Type.WORLD);
+                RemoteAddon.Type.WORLD);
         return new RemoteAddonCatalogItem(
                 addon,
                 RemoteAddonCatalogKind.WORLD,
