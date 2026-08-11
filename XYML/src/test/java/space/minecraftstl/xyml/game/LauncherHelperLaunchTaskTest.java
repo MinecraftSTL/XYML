@@ -31,12 +31,15 @@ import space.minecraftstl.xyml.ui.swing.log.SwingGameLogWindow;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountReauthentication;
 import space.minecraftstl.xyml.util.CircularArrayList;
 import space.minecraftstl.xyml.util.Log4jLevel;
+import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.platform.ManagedProcess;
+import space.minecraftstl.xyml.util.platform.windows.WinReg;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -45,6 +48,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -197,6 +201,38 @@ final class LauncherHelperLaunchTaskTest {
                         () -> Task.completed(authInfo("Retry"))));
     }
 
+    /// Writes the DirectX preference once and preserves an existing per-executable choice.
+    @Test
+    void appliesHighPerformanceGpuPreferenceOnlyWhenMissing() {
+        Path javaBinary = Path.of("runtime", "bin", "javaw.exe");
+        String expectedPath = FileUtils.getAbsolutePath(javaBinary);
+        RecordingWinReg emptyRegistry = new RecordingWinReg(null);
+
+        LauncherHelper.applyHighPerformanceGpuPreference(emptyRegistry, javaBinary);
+
+        assertEquals(1, emptyRegistry.setCalls.get());
+        assertEquals(WinReg.HKEY.HKEY_CURRENT_USER, emptyRegistry.writtenRoot);
+        assertEquals("Software\\Microsoft\\DirectX\\UserGpuPreferences", emptyRegistry.writtenKey);
+        assertEquals(expectedPath, emptyRegistry.writtenValueName);
+        assertEquals("GpuPreference=2;", emptyRegistry.writtenValue);
+
+        RecordingWinReg configuredRegistry = new RecordingWinReg("GpuPreference=1;");
+        LauncherHelper.applyHighPerformanceGpuPreference(configuredRegistry, javaBinary);
+        assertEquals(0, configuredRegistry.setCalls.get());
+    }
+
+    /// Keeps registry availability and native query failures outside the launch-failure boundary.
+    @Test
+    void ignoresUnavailableOrFailingGpuPreferenceRegistry() {
+        Path javaBinary = Path.of("runtime", "bin", "javaw.exe");
+        RecordingWinReg failingRegistry = new RecordingWinReg(null);
+        failingRegistry.queryFailure = new IllegalStateException("registry unavailable");
+
+        assertDoesNotThrow(() -> LauncherHelper.applyHighPerformanceGpuPreference(null, javaBinary));
+        assertDoesNotThrow(() -> LauncherHelper.applyHighPerformanceGpuPreference(failingRegistry, javaBinary));
+        assertEquals(0, failingRegistry.setCalls.get());
+    }
+
     /// Creates deterministic authentication data for account-boundary tests.
     ///
     /// @param username visible profile name
@@ -208,6 +244,76 @@ final class LauncherHelperLaunchTaskTest {
                 "token-" + username,
                 AuthInfo.USER_TYPE_MSA,
                 "{}");
+    }
+
+    /// In-memory registry fixture recording one optional string write.
+    @NotNullByDefault
+    private static final class RecordingWinReg extends WinReg {
+        /// Existing queried value, or null when the preference is absent.
+        private final @Nullable Object existingValue;
+
+        /// Number of string-value writes.
+        private final AtomicInteger setCalls = new AtomicInteger();
+
+        /// Optional query failure used to verify launch isolation.
+        private @Nullable RuntimeException queryFailure;
+
+        /// Root supplied to the latest write.
+        private @Nullable HKEY writtenRoot;
+
+        /// Key supplied to the latest write.
+        private @Nullable String writtenKey;
+
+        /// Value name supplied to the latest write.
+        private @Nullable String writtenValueName;
+
+        /// String supplied to the latest write.
+        private @Nullable String writtenValue;
+
+        /// Creates a registry fixture with one optional existing value.
+        ///
+        /// @param existingValue queried value, or null
+        private RecordingWinReg(@Nullable Object existingValue) {
+            this.existingValue = existingValue;
+        }
+
+        /// Reports no standalone test keys.
+        @Override
+        public boolean exists(HKEY root, String key) {
+            return false;
+        }
+
+        /// Returns the configured value or throws the configured failure.
+        @Override
+        public @Nullable Object queryValue(HKEY root, String key, String valueName) {
+            if (queryFailure != null) {
+                throw queryFailure;
+            }
+            return existingValue;
+        }
+
+        /// Returns no child keys.
+        @Override
+        public List<String> querySubKeyNames(HKEY root, String key) {
+            return List.of();
+        }
+
+        /// Records one string-value write.
+        @Override
+        public boolean setValue(HKEY root, String key, String valueName, String value) {
+            writtenRoot = root;
+            writtenKey = key;
+            writtenValueName = valueName;
+            writtenValue = value;
+            setCalls.incrementAndGet();
+            return true;
+        }
+
+        /// Reports no deletion support because the launcher path does not delete preferences.
+        @Override
+        public boolean deleteValue(HKEY root, String key, String valueName) {
+            return false;
+        }
     }
 
     /// Account fixture that exposes a stable ID and records offline fallback calls.

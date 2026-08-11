@@ -1317,9 +1317,17 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                     index,
                     isSelected,
                     cellHasFocus);
+            setIcon(null);
             if (value instanceof RemoteAddon.Version version) {
                 String displayName = version.name().isBlank() ? version.version() : version.name();
-                setText(displayName + " (" + version.version() + ")");
+                @Nullable RemoteAddon.VersionType versionType = version.versionType();
+                if (versionType == null) {
+                    setText(displayName + " (" + version.version() + ")");
+                } else {
+                    setText(displayName + " (" + version.version() + ") - "
+                            + RemoteVersionChannelPresentation.label(versionType));
+                    setIcon(RemoteVersionChannelPresentation.icon(versionType));
+                }
             }
             return component;
         }

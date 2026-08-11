@@ -186,7 +186,8 @@ public final class LauncherGameSettingsPresetsStoreTest {
                 new GameSettingsPresetEditor.GraphicsSettings(
                         GraphicsAPI.VULKAN,
                         Renderer.OpenGL.ZINK,
-                        Renderer.Vulkan.LAVAPIPE),
+                        Renderer.Vulkan.LAVAPIPE,
+                        true),
                 new GameSettingsPresetEditor.NativeLibrarySettings(
                         true,
                         "C:/Games/XYML/natives",
@@ -280,6 +281,9 @@ public final class LauncherGameSettingsPresetsStoreTest {
                 () -> assertEquals(
                         expected.graphics().vulkanRenderer(),
                         actual.vulkanRendererProperty().getValue()),
+                () -> assertEquals(
+                        expected.graphics().highPerformance(),
+                        actual.highPerformanceProperty().getValue()),
                 () -> assertEquals(
                         expected.nativeLibraries().customDirectoryEnabled(),
                         actual.useCustomNativesProperty().getValue()),

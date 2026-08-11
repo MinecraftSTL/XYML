@@ -116,7 +116,7 @@ final class ResourcePackZipFile extends ResourcePackFile {
         }
         RemoteAddon.Version current = currentVersion.orElseThrow();
         @Unmodifiable List<RemoteAddon.Version> remoteVersions = repository
-                .getRemoteVersionsById(downloadProvider, current.modid())
+                .getRemoteVersionsById(downloadProvider, current.projectId())
                 .filter(version -> version.gameVersions().contains(gameVersion))
                 .filter(version -> version.datePublished().compareTo(current.datePublished()) > 0)
                 .sorted(Comparator.comparing(RemoteAddon.Version::datePublished).reversed())

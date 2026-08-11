@@ -103,6 +103,9 @@ public final class JavaManagementPanelTest {
                             panel, "javaManagementVendor", JTextField.class).getText()),
                     () -> assertEquals(java21.getBinary().toString(), findComponent(
                             panel, "javaManagementPath", JTextField.class).getText()),
+                    () -> assertEquals(
+                            "Oracle JDK 21.0.4 - " + java21.getArchitecture().getDisplayName(),
+                            JavaManagementPanel.runtimeDisplayText(java21)),
                     () -> assertInstanceOf(FlatSVGIcon.class, refresh.getIcon()),
                     () -> assertEquals("", refresh.getText()),
                     () -> assertEquals(i18n("button.refresh"), refresh.getToolTipText()));

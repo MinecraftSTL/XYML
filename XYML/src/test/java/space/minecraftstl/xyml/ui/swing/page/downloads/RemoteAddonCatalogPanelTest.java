@@ -39,6 +39,7 @@ import javax.swing.JList;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.Insets;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -100,6 +101,8 @@ final class RemoteAddonCatalogPanelTest {
                 assertFalse(list.isOpaque());
                 assertFalse(unselectedOpaque);
                 assertTrue(selectedOpaque);
+                Insets listInsets = list.getBorder().getBorderInsets(list);
+                assertEquals(9, listInsets.bottom);
             });
         } finally {
             @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
@@ -789,29 +792,29 @@ final class RemoteAddonCatalogPanelTest {
 
     /// Provides unused Core data contracts required to create a realistic fixture remote project.
     @NotNullByDefault
-    private static final class FixtureAddonData implements RemoteAddon.IMod {
+    private static final class FixtureAddonData implements RemoteAddon.IAddon {
         /// Rejects dependency resolution because the focused panel test supplies selected versions through its backend.
         ///
-        /// @param modRepository unused source repository
+        /// @param repo unused source repository
         /// @param downloadProvider unused Core download provider
         /// @return never returns normally
         /// @throws IOException always because dependencies are outside the fixture scope
         @Override
         public List<RemoteAddon> loadDependencies(
-                RemoteAddonRepository modRepository,
+                RemoteAddonRepository repo,
                 DownloadProvider downloadProvider) throws IOException {
             throw new IOException("Fixture dependencies are outside the catalog-panel test");
         }
 
         /// Rejects direct Core version resolution because the test backend owns fixture version responses.
         ///
-        /// @param modRepository unused source repository
+        /// @param repo unused source repository
         /// @param downloadProvider unused Core download provider
         /// @return never returns normally
         /// @throws IOException always because versions are supplied by the recording backend
         @Override
         public Stream<RemoteAddon.Version> loadVersions(
-                RemoteAddonRepository modRepository,
+                RemoteAddonRepository repo,
                 DownloadProvider downloadProvider) throws IOException {
             throw new IOException("Fixture versions are supplied by the recording backend");
         }

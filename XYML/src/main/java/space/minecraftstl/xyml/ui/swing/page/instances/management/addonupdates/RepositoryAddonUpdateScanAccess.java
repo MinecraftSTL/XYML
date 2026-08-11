@@ -187,7 +187,7 @@ final class RepositoryAddonUpdateScanAccess implements AddonUpdateScanAccess {
         Objects.requireNonNull(failures, "failures");
         Objects.requireNonNull(sourcePageResolver, "sourcePageResolver");
         try {
-            RemoteAddon.Source source = winner.targetVersion().self().getType();
+            RemoteAddon.Source source = winner.targetVersion().self().getSource();
             @Nullable URI sourcePage;
             try {
                 sourcePage = sourcePageResolver.apply(winner, source);
@@ -235,7 +235,7 @@ final class RepositoryAddonUpdateScanAccess implements AddonUpdateScanAccess {
             return null;
         }
         try {
-            String sourcePage = remoteRepository.getModById(downloadProvider, update.targetVersion().modid())
+            String sourcePage = remoteRepository.getAddonById(downloadProvider, update.targetVersion().projectId())
                     .pageUrl();
             return sourcePage.isBlank() ? null : URI.create(sourcePage);
         } catch (IOException | RuntimeException failure) {
