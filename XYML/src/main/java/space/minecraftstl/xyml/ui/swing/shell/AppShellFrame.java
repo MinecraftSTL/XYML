@@ -40,6 +40,7 @@ import javax.swing.Timer;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
 import java.awt.Color;
+import java.awt.Frame;
 import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
 import java.awt.event.WindowAdapter;
@@ -193,6 +194,7 @@ public final class AppShellFrame extends JFrame {
     /// failure instead of leaving a running process with no visible application window.
     public void open() {
         EdtDispatcher.executeAndWait(() -> {
+            setExtendedState(nonIconifiedState(getExtendedState()));
             setVisible(true);
             requestSystemThemeRefresh();
         });
@@ -202,8 +204,17 @@ public final class AppShellFrame extends JFrame {
     public void hideWindow() {
         EdtDispatcher.executeAndWait(() -> {
             systemThemeRefreshTimer.stop();
+            setExtendedState(nonIconifiedState(getExtendedState()));
             setVisible(false);
         });
+    }
+
+    /// Clears only the iconified bit while retaining maximized-axis state.
+    ///
+    /// @param extendedState current [Frame] state mask
+    /// @return state mask ready for a visibility transition
+    static int nonIconifiedState(int extendedState) {
+        return extendedState & ~Frame.ICONIFIED;
     }
 
     /// Enables or disables page interaction synchronously without hiding the application.

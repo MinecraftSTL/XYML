@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -58,7 +59,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @NotNullByDefault
 final class InstanceMaintenancePanelTest {
     /// Fixed instance identifier used by every focused page scenario.
-    private static final String INSTANCE_ID = "instance";
+    private static final GameInstanceID INSTANCE_ID = new GameInstanceID("instance");
 
     /// Loads no state during construction and maps local presence to precise command availability.
     @Test
@@ -311,7 +312,7 @@ final class InstanceMaintenancePanelTest {
         AtomicReference<@Nullable InstanceMaintenancePanel> result = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> result.set(new InstanceMaintenancePanel(
                 INSTANCE_ID,
-                Path.of("build", "maintenance-test", INSTANCE_ID),
+                Path.of("build", "maintenance-test", INSTANCE_ID.id()),
                 service,
                 launchActions,
                 InstanceMaintenanceStrings.english(),

@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.World;
 import space.minecraftstl.xyml.game.WorldArchiveImporter;
@@ -50,7 +51,7 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
     private final GameRepository repository;
 
     /// Stable managed instance identifier.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Deterministic case-insensitive order for raw directory labels.
     private static final Comparator<Path> DIRECTORY_ORDER = Comparator
@@ -61,9 +62,9 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
     ///
     /// @param repository managed game repository
     /// @param instanceId stable non-blank instance identifier
-    FileSystemWorldCatalogAccess(GameRepository repository, String instanceId) {
+    FileSystemWorldCatalogAccess(GameRepository repository, GameInstanceID instanceId) {
         this.repository = Objects.requireNonNull(repository, "repository");
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
     }
 
     /// Resolves the instance run directory and appends the conventional `saves` segment.

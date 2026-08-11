@@ -17,10 +17,12 @@
  */
 package space.minecraftstl.xyml.addon;
 
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
@@ -33,6 +35,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
+/// Manages one kind of local add-on for a specific installed game instance.
+@NotNullByDefault
 public abstract class LocalAddonManager<T extends LocalAddonFile> {
 
     public static final String DISABLED_EXTENSION = ".disabled";
@@ -47,23 +51,25 @@ public abstract class LocalAddonManager<T extends LocalAddonFile> {
     protected final Set<@NotNull T> localFiles = new LinkedHashSet<>();
 
     protected final GameRepository repository;
-    protected final String id;
+    protected final GameInstanceID instanceId;
 
     /// Creates an add-on manager scoped to one installed game instance.
     ///
     /// @param gameRepository repository containing the installed instance
     /// @param instanceId target installed instance identifier
-    public LocalAddonManager(GameRepository gameRepository, String instanceId) {
+    public LocalAddonManager(GameRepository gameRepository, GameInstanceID instanceId) {
         this.repository = gameRepository;
-        this.id = instanceId;
+        this.instanceId = instanceId;
     }
 
+    /// Returns the repository containing the managed instance.
     public GameRepository getRepository() {
         return repository;
     }
 
-    public String getInstanceId() {
-        return id;
+    /// Returns the managed instance identifier.
+    public GameInstanceID getInstanceId() {
+        return instanceId;
     }
 
     public abstract Path getDirectory();

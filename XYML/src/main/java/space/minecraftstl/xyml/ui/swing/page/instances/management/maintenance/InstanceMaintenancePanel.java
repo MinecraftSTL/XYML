@@ -22,6 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -63,7 +64,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @NotNullByDefault
 public final class InstanceMaintenancePanel extends JPanel implements AutoCloseable {
     /// Stable fixed instance identifier.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Instance run directory used only as the native script chooser's initial location.
     private final Path runDirectory;
@@ -148,7 +149,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     /// @param progressAnimationDuration non-negative determinate progress animation duration
     public InstanceMaintenancePanel(
             XYMLGameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             HomeLaunchCommand launchCommand,
             HomeLaunchScriptExportCommand exportCommand,
             TaskProgressStrings taskProgressStrings,
@@ -180,7 +181,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     /// @param progressAnimationDuration non-negative determinate progress animation duration
     public InstanceMaintenancePanel(
             XYMLGameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             InstanceMaintenanceLaunchActions launchActions,
             TaskProgressStrings taskProgressStrings,
             @Nullable SwingAnimator animator,
@@ -209,7 +210,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
     /// @param animator optional shared animator
     /// @param progressAnimationDuration non-negative progress animation duration
     InstanceMaintenancePanel(
-            String instanceId,
+            GameInstanceID instanceId,
             Path runDirectory,
             InstanceMaintenanceService service,
             InstanceMaintenanceLaunchActions launchActions,
@@ -220,7 +221,7 @@ public final class InstanceMaintenancePanel extends JPanel implements AutoClosea
             Duration progressAnimationDuration) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
         this.runDirectory = Objects.requireNonNull(runDirectory, "runDirectory").toAbsolutePath().normalize();
         this.service = Objects.requireNonNull(service, "service");
         this.launchActions = Objects.requireNonNull(launchActions, "launchActions");

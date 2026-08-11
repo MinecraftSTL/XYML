@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchRequest;
@@ -56,11 +57,11 @@ public final class CommandInstanceMaintenanceLaunchActions implements InstanceMa
     /// @param exportCommand application-owned script export command
     public CommandInstanceMaintenanceLaunchActions(
             XYMLGameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             HomeLaunchCommand launchCommand,
             HomeLaunchScriptExportCommand exportCommand) {
         XYMLGameRepository capturedRepository = Objects.requireNonNull(repository, "repository");
-        String capturedInstanceId = requireNonBlank(instanceId, "instanceId");
+        GameInstanceID capturedInstanceId = Objects.requireNonNull(instanceId, "instanceId");
         this.requestSupplier = () -> captureRequest(capturedRepository, capturedInstanceId);
         this.launchCommand = Objects.requireNonNull(launchCommand, "launchCommand");
         this.exportCommand = Objects.requireNonNull(exportCommand, "exportCommand");
@@ -113,7 +114,7 @@ public final class CommandInstanceMaintenanceLaunchActions implements InstanceMa
     /// @param repository repository containing the fixed instance
     /// @param instanceId fixed instance identifier
     /// @return immutable ordinary launch request
-    private static LaunchRequest captureRequest(XYMLGameRepository repository, String instanceId) {
+    private static LaunchRequest captureRequest(XYMLGameRepository repository, GameInstanceID instanceId) {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable Account account = Accounts.getSelectedAccount();
         if (account == null) {
@@ -122,7 +123,7 @@ public final class CommandInstanceMaintenanceLaunchActions implements InstanceMa
         return new LaunchRequest(
                 account.getAccountID().toString(),
                 repository.getGameDirectory().getId().toString(),
-                instanceId);
+                instanceId.id());
     }
 
     /// Rejects missing stable identities without rewriting them.

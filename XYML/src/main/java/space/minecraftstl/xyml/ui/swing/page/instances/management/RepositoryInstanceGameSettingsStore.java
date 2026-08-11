@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameSettings;
 
@@ -31,15 +32,15 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
     private final XYMLGameRepository repository;
 
     /// Stable non-blank instance identifier represented by this store.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Creates an adapter for one instance in the given repository.
     ///
     /// @param repository repository containing the managed instance
     /// @param instanceId stable non-blank instance identifier
-    public RepositoryInstanceGameSettingsStore(XYMLGameRepository repository, String instanceId) {
+    public RepositoryInstanceGameSettingsStore(XYMLGameRepository repository, GameInstanceID instanceId) {
         this.repository = Objects.requireNonNull(repository, "repository");
-        this.instanceId = requireNonBlank(instanceId, "instanceId");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
     }
 
     /// Reads all effective values together with each property's independent local inheritance state.
@@ -49,7 +50,7 @@ public final class RepositoryInstanceGameSettingsStore implements InstanceGameSe
     public InstanceGameSettingsSnapshot snapshot() {
         @Nullable GameSettings.Instance instance = repository.getInstanceGameSettings(instanceId);
         return InstanceGameSettingsMapper.snapshot(
-                repository.hasVersion(instanceId) && !repository.isInstanceGameSettingsReadOnly(instanceId),
+                repository.hasInstance(instanceId) && !repository.isInstanceGameSettingsReadOnly(instanceId),
                 instance,
                 repository.getEffectiveGameSettings(instanceId));
     }

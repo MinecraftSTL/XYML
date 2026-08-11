@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.importing;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Task;
@@ -188,7 +189,7 @@ public final class InstanceJsonImportPanel extends JPanel implements AutoCloseab
         final Task<@Nullable Void> task;
         try {
             task = Objects.requireNonNull(
-                    service.createImportTask(selectedSource, instanceId),
+                    service.createImportTask(selectedSource, new GameInstanceID(instanceId)),
                     "service returned null task");
         } catch (RuntimeException preparationFailure) {
             LOG.warning("Failed to create deferred instance JSON import task", preparationFailure);

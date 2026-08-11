@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
@@ -59,7 +60,7 @@ public final class InstanceManagementCoordinator implements AutoCloseable {
     private @Nullable InstanceManagementView currentView;
 
     /// Stable identifier matching the current view, or null while the list is visible.
-    private @Nullable String currentInstanceId;
+    private @Nullable GameInstanceID currentInstanceId;
 
     /// Reentrant external lifecycle invocation depth on the EDT.
     private int transitionDepth;
@@ -105,11 +106,8 @@ public final class InstanceManagementCoordinator implements AutoCloseable {
     ///
     /// @param instanceId stable non-blank repository identifier
     /// @return asynchronous EDT operation completion
-    public CompletionStage<@Nullable Void> open(String instanceId) {
+    public CompletionStage<@Nullable Void> open(GameInstanceID instanceId) {
         Objects.requireNonNull(instanceId, "instanceId");
-        if (instanceId.isBlank()) {
-            throw new IllegalArgumentException("instanceId must not be blank");
-        }
         if (closed.get()) {
             return CompletableFuture.failedFuture(
                     new IllegalStateException("Instance management coordinator is closed"));
@@ -135,7 +133,7 @@ public final class InstanceManagementCoordinator implements AutoCloseable {
     /// Returns the active stable identifier for focused integrations.
     ///
     /// @return active instance identifier, or null while the list is visible
-    public @Nullable String currentInstanceId() {
+    public @Nullable GameInstanceID currentInstanceId() {
         EdtDispatcher.requireEventDispatchThread();
         return currentInstanceId;
     }
@@ -177,7 +175,7 @@ public final class InstanceManagementCoordinator implements AutoCloseable {
     /// @param instanceId stable instance identifier
     /// @param result command completion
     private void openOnEventDispatchThread(
-            String instanceId,
+            GameInstanceID instanceId,
             CompletableFuture<@Nullable Void> result) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed.get()) {
@@ -212,7 +210,7 @@ public final class InstanceManagementCoordinator implements AutoCloseable {
     /// @param attachedGeneration captured host generation
     /// @return lifecycle failure, or null after success
     private @Nullable Throwable replaceCurrentView(
-            String instanceId,
+            GameInstanceID instanceId,
             InstanceManagementHost attachedHost,
             long attachedGeneration) {
         @Nullable InstanceManagementView previousView = currentView;
@@ -240,7 +238,7 @@ public final class InstanceManagementCoordinator implements AutoCloseable {
     /// @param attachedGeneration captured host generation
     /// @return lifecycle failure, or null after success
     private @Nullable Throwable createAndShow(
-            String instanceId,
+            GameInstanceID instanceId,
             InstanceManagementHost attachedHost,
             long attachedGeneration) {
         @Nullable InstanceManagementView createdView = null;
@@ -248,7 +246,7 @@ public final class InstanceManagementCoordinator implements AutoCloseable {
             createdView = Objects.requireNonNull(
                     viewFactory.create(instanceId, () -> returnToInstanceList()),
                     "instance management factory returned null");
-            String createdInstanceId = Objects.requireNonNull(
+            GameInstanceID createdInstanceId = Objects.requireNonNull(
                     createdView.instanceId(),
                     "instance management view returned null instanceId");
             if (!instanceId.equals(createdInstanceId)) {

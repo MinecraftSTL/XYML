@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
@@ -89,7 +90,7 @@ public final class SelectedRepositoryInstancesModel implements InstancesModel, A
     public SelectedRepositoryInstancesModel(
             Executor backgroundExecutor,
             Runnable addCommand,
-            Consumer<String> manageCommand,
+            Consumer<GameInstanceID> manageCommand,
             RepositoryInstancesStatusStrings statusStrings) {
         this(new ProductionSelectedModelSource(repository -> new RepositoryInstancesModel(
                         repository,
@@ -225,7 +226,7 @@ public final class SelectedRepositoryInstancesModel implements InstancesModel, A
     ///
     /// @param instanceId stable instance identifier
     @Override
-    public void selectInstance(String instanceId) {
+    public void selectInstance(GameInstanceID instanceId) {
         currentDelegate().selectInstance(Objects.requireNonNull(instanceId, "instanceId"));
     }
 

@@ -92,14 +92,14 @@ public record InstanceJsonImportStrings(
     public static InstanceJsonImportStrings english() {
         return new InstanceJsonImportStrings(
                 "Import instance JSON",
-                "Version JSON",
+                "Instance manifest JSON",
                 "Instance name",
                 "Import",
                 "Review the instance name, then start the import.",
                 "Preparing and downloading the instance...",
                 "Instance imported and selected.",
                 "Import cancelled.",
-                "The selected file is not a valid Minecraft version JSON.",
+                "The selected file is not a valid game instance manifest JSON.",
                 "Enter a valid instance name.",
                 "An instance with this name already exists.",
                 "Instance import failed.");

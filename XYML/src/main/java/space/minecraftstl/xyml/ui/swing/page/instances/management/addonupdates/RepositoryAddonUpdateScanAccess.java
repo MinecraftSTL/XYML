@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management.addonupdates;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.addon.LocalAddonFile;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
@@ -49,7 +50,7 @@ final class RepositoryAddonUpdateScanAccess implements AddonUpdateScanAccess {
     private final GameRepository repository;
 
     /// Stable target instance identifier.
-    private final String instanceId;
+    private final GameInstanceID instanceId;
 
     /// Launcher-configured provider used by every remote metadata request.
     private final DownloadProvider downloadProvider;
@@ -65,14 +66,11 @@ final class RepositoryAddonUpdateScanAccess implements AddonUpdateScanAccess {
     /// @param downloadProvider configured provider used for source requests
     RepositoryAddonUpdateScanAccess(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             DownloadProvider downloadProvider) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
         this.downloadProvider = Objects.requireNonNull(downloadProvider, "downloadProvider");
-        if (this.instanceId.isBlank()) {
-            throw new IllegalArgumentException("instanceId must not be blank");
-        }
     }
 
     /// Performs one fully explicit local scan and remote update check.

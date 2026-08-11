@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -807,7 +808,10 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         final Task<?> task;
         try {
             setStatus(strings.preparingInstallStatus());
-            task = installLauncher.createInstallTask(new RemoteModpackInstallRequest(item, version, instanceName));
+            task = installLauncher.createInstallTask(new RemoteModpackInstallRequest(
+                    item,
+                    version,
+                    new GameInstanceID(instanceName)));
         } catch (IOException | RuntimeException preparationFailure) {
             LOG.warning("Failed to prepare a selected remote modpack installation", preparationFailure);
             setStatus(strings.installFailedStatus());

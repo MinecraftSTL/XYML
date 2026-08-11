@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management.maintenance;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import java.util.Objects;
 
@@ -30,7 +31,7 @@ import java.util.Objects;
 /// @param generatedFilesPresent whether logs or crash reports exist in the shared or instance run directory
 @NotNullByDefault
 public record InstanceMaintenanceSnapshot(
-        String instanceId,
+        GameInstanceID instanceId,
         boolean modpack,
         boolean assetsPresent,
         boolean librariesPresent,
@@ -38,8 +39,5 @@ public record InstanceMaintenanceSnapshot(
     /// Validates the stable instance identity retained by this snapshot.
     public InstanceMaintenanceSnapshot {
         Objects.requireNonNull(instanceId, "instanceId");
-        if (instanceId.isBlank()) {
-            throw new IllegalArgumentException("instanceId must not be blank");
-        }
     }
 }

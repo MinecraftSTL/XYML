@@ -22,7 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.setting.InstanceIconType;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.ButtonGroup;
@@ -49,21 +49,21 @@ final class InstanceIconChooserDialog {
     private static final String ICON_TYPE_PROPERTY = "instanceIconType";
 
     /// Exact bundled choices exposed by the former JavaFX dialog, in its established order.
-    private static final @Unmodifiable List<InstanceIconType> BUILT_IN_TYPES = List.of(
-            InstanceIconType.GRASS,
-            InstanceIconType.CHEST,
-            InstanceIconType.CHICKEN,
-            InstanceIconType.COMMAND,
-            InstanceIconType.APRIL_FOOLS,
-            InstanceIconType.OPTIFINE,
-            InstanceIconType.CRAFT_TABLE,
-            InstanceIconType.FABRIC,
-            InstanceIconType.LEGACY_FABRIC,
-            InstanceIconType.FORGE,
-            InstanceIconType.CLEANROOM,
-            InstanceIconType.NEO_FORGE,
-            InstanceIconType.FURNACE,
-            InstanceIconType.QUILT);
+    private static final @Unmodifiable List<GameInstanceIconType> BUILT_IN_TYPES = List.of(
+            GameInstanceIconType.GRASS,
+            GameInstanceIconType.CHEST,
+            GameInstanceIconType.CHICKEN,
+            GameInstanceIconType.COMMAND,
+            GameInstanceIconType.APRIL_FOOLS,
+            GameInstanceIconType.OPTIFINE,
+            GameInstanceIconType.CRAFT_TABLE,
+            GameInstanceIconType.FABRIC,
+            GameInstanceIconType.LEGACY_FABRIC,
+            GameInstanceIconType.FORGE,
+            GameInstanceIconType.CLEANROOM,
+            GameInstanceIconType.NEO_FORGE,
+            GameInstanceIconType.FURNACE,
+            GameInstanceIconType.QUILT);
 
     /// Stable visible and assistive text supplied by the overview.
     private final InstanceOverviewStrings strings;
@@ -86,11 +86,11 @@ final class InstanceIconChooserDialog {
     /// @param hasCustomImage whether a custom image currently overrides the bundled type
     /// @param strings stable dialog text
     InstanceIconChooserDialog(
-            InstanceIconType currentType,
+            GameInstanceIconType currentType,
             boolean hasCustomImage,
             InstanceOverviewStrings strings) {
         EdtDispatcher.requireEventDispatchThread();
-        InstanceIconType validatedType = Objects.requireNonNull(currentType, "currentType");
+        GameInstanceIconType validatedType = Objects.requireNonNull(currentType, "currentType");
         this.strings = Objects.requireNonNull(strings, "strings");
         content.setName("instanceIconChooser");
         content.setOpaque(false);
@@ -101,10 +101,10 @@ final class InstanceIconChooserDialog {
         content.add(customButton, "w 64!, h 64!");
 
         List<JToggleButton> mutableButtons = new ArrayList<>(BUILT_IN_TYPES.size());
-        InstanceIconType activeBuiltIn = validatedType == InstanceIconType.DEFAULT
-                ? InstanceIconType.GRASS
+        GameInstanceIconType activeBuiltIn = validatedType == GameInstanceIconType.DEFAULT
+                ? GameInstanceIconType.GRASS
                 : validatedType;
-        for (InstanceIconType iconType : BUILT_IN_TYPES) {
+        for (GameInstanceIconType iconType : BUILT_IN_TYPES) {
             JToggleButton button = createBuiltInButton(iconType);
             button.setSelected(!hasCustomImage && iconType == activeBuiltIn);
             choices.add(button);
@@ -125,7 +125,7 @@ final class InstanceIconChooserDialog {
     /// @return completed icon selection, or `null` when either dialog is cancelled
     static @Nullable InstanceIconChoice show(
             Component owner,
-            InstanceIconType currentType,
+            GameInstanceIconType currentType,
             boolean hasCustomImage,
             InstanceOverviewStrings strings,
             Supplier<@Nullable Path> customFileChooser) {
@@ -154,7 +154,7 @@ final class InstanceIconChooserDialog {
     /// Returns the exact built-in type order.
     ///
     /// @return immutable list containing fourteen distinct selectable types
-    static @Unmodifiable List<InstanceIconType> builtInTypes() {
+    static @Unmodifiable List<GameInstanceIconType> builtInTypes() {
         return BUILT_IN_TYPES;
     }
 
@@ -174,7 +174,7 @@ final class InstanceIconChooserDialog {
         for (JToggleButton button : builtInButtons) {
             if (button.isSelected()) {
                 @Nullable Object property = button.getClientProperty(ICON_TYPE_PROPERTY);
-                if (property instanceof InstanceIconType iconType) {
+                if (property instanceof GameInstanceIconType iconType) {
                     return new InstanceIconChoice.BuiltIn(iconType);
                 }
             }
@@ -192,8 +192,8 @@ final class InstanceIconChooserDialog {
     ///
     /// @param iconType icon represented by the tile
     /// @return configured single-select toggle button
-    private static JToggleButton createBuiltInButton(InstanceIconType iconType) {
-        InstanceIconType validatedType = Objects.requireNonNull(iconType, "iconType");
+    private static JToggleButton createBuiltInButton(GameInstanceIconType iconType) {
+        GameInstanceIconType validatedType = Objects.requireNonNull(iconType, "iconType");
         JToggleButton button = new JToggleButton();
         String displayName = displayName(validatedType);
         configureTile(button, "instanceIcon" + validatedType.name(), displayName);
@@ -224,7 +224,7 @@ final class InstanceIconChooserDialog {
     ///
     /// @param iconType bundled icon type
     /// @return non-blank assistive display name
-    private static String displayName(InstanceIconType iconType) {
+    private static String displayName(GameInstanceIconType iconType) {
         return switch (Objects.requireNonNull(iconType, "iconType")) {
             case DEFAULT, GRASS -> i18n("swing.instance_icon.grass");
             case CHEST -> i18n("swing.instance_icon.chest");

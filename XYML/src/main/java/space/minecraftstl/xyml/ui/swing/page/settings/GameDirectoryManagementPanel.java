@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -32,6 +33,7 @@ import space.minecraftstl.xyml.util.PortablePath;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JLabel;
@@ -61,6 +63,12 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// backup-and-overwrite behavior.
 @NotNullByDefault
 public final class GameDirectoryManagementPanel extends JPanel implements AutoCloseable {
+    /// Outline icon used by inactive game-directory rows.
+    private static final Icon FOLDER_ICON = new FlatSVGIcon("assets/swing/icons/folder.svg", 20, 20);
+
+    /// Filled icon used by the process-wide current game-directory row.
+    private static final Icon SELECTED_FOLDER_ICON = new FlatSVGIcon("assets/swing/icons/folder-fill.svg", 20, 20);
+
     /// Model backing the effective local-first directory list.
     private final DefaultListModel<GameDirectoryManagementEntry> directoryListModel = new DefaultListModel<>();
 
@@ -307,7 +315,7 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
     /// @param entry rendered entry, or `null` while initializing
     /// @param selected whether the row is Swing-selected
     /// @return configured renderer component
-    private static JLabel renderDirectory(
+    static JLabel renderDirectory(
             JList<?> list,
             @Nullable GameDirectoryManagementEntry entry,
             boolean selected) {
@@ -317,6 +325,8 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
             text = marker + entry.displayName() + "\n" + entry.path().getPath();
         }
         JLabel label = new JLabel("<html>" + escapeHtml(text).replace("\n", "<br>") + "</html>");
+        label.setIcon(entry != null && entry.selected() ? SELECTED_FOLDER_ICON : FOLDER_ICON);
+        label.setIconTextGap(8);
         label.setOpaque(selected);
         label.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
         if (selected) {

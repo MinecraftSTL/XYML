@@ -24,6 +24,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.ManuallyCreatedModpackException;
 import space.minecraftstl.xyml.game.ModpackHelper;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.UnsupportedModpackException;
@@ -214,6 +215,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
             updateImportButton();
             return;
         }
+        GameInstanceID instanceId = new GameInstanceID(instanceName);
 
         final XYMLGameRepository repository;
         try {
@@ -223,7 +225,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
             setStatus(i18n("instance.empty"));
             return;
         }
-        if (repository.hasVersion(instanceName)) {
+        if (repository.hasInstance(instanceId)) {
             setStatus(i18n("install.new_game.already_exists"));
             return;
         }
@@ -237,7 +239,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
             Schedulers.io().execute(() -> inspectArchive(
                     repository,
                     selectedFile,
-                    instanceName,
+                    instanceId,
                     requestedRevision));
         } catch (RuntimeException schedulingFailure) {
             LOG.warning("Failed to schedule local modpack archive inspection", schedulingFailure);
@@ -249,17 +251,17 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
     ///
     /// @param repository destination repository captured from the current selection
     /// @param archive selected archive to inspect
-    /// @param instanceName validated destination instance name
+    /// @param instanceId validated destination instance identifier
     /// @param requestedRevision request identity captured before scheduling
     private void inspectArchive(
             XYMLGameRepository repository,
             Path archive,
-            String instanceName,
-        long requestedRevision) {
+            GameInstanceID instanceId,
+            long requestedRevision) {
         try {
             PreparedImport prepared = parseArchive(archive);
             SwingUiDispatcher.INSTANCE.dispatchOrRun(
-                    () -> startPreparedImport(repository, archive, instanceName, prepared, requestedRevision));
+                    () -> startPreparedImport(repository, archive, instanceId, prepared, requestedRevision));
         } catch (UnsupportedModpackException unsupported) {
             restoreInputAfterPreparationFailure(requestedRevision, i18n("modpack.unsupported"));
         } catch (RuntimeException unexpectedFailure) {
@@ -286,13 +288,13 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
     ///
     /// @param repository destination repository captured from the current selection
     /// @param archive selected local archive
-    /// @param instanceName validated destination instance name
+    /// @param instanceId validated destination instance identifier
     /// @param prepared recognized or manually assembled archive metadata
     /// @param requestedRevision request identity captured before scheduling
     private void startPreparedImport(
             XYMLGameRepository repository,
             Path archive,
-            String instanceName,
+            GameInstanceID instanceId,
             PreparedImport prepared,
             long requestedRevision) {
         EdtDispatcher.requireEventDispatchThread();
@@ -303,8 +305,11 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
         final Task<?> task;
         try {
             task = prepared.isManuallyCreated()
-                    ? ModpackHelper.getInstallManuallyCreatedModpackTask(archive, instanceName, StandardCharsets.UTF_8)
-                    : ModpackHelper.getInstallTask(repository, archive, instanceName, prepared.modpack(), "");
+                    ? ModpackHelper.getInstallManuallyCreatedModpackTask(
+                            archive,
+                            instanceId.id(),
+                            StandardCharsets.UTF_8)
+                    : ModpackHelper.getInstallTask(repository, archive, instanceId, prepared.modpack(), "");
         } catch (RuntimeException preparationFailure) {
             LOG.warning("Failed to create local modpack installation task", preparationFailure);
             restoreInputAfterPreparationFailure(requestedRevision, i18n("install.failed"));
@@ -318,7 +323,7 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
                 i18n("modpack.scan"));
         @Nullable Runnable terminalCleanup = prepared.isManuallyCreated()
                 ? null
-                : () -> repository.undoMark(instanceName);
+                : () -> repository.undoMark(instanceId);
         Subscription completionSubscription = executor.subscribeTaskListener(
                 new ImportCompletionListener(executor, terminalCleanup));
         activeExecutor = executor;

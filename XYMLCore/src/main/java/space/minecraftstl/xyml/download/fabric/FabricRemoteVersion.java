@@ -20,7 +20,8 @@ package space.minecraftstl.xyml.download.fabric;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.RemoteVersion;
-import space.minecraftstl.xyml.game.Version;
+import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.Task;
 
 import java.util.List;
@@ -38,7 +39,7 @@ public class FabricRemoteVersion extends RemoteVersion {
     }
 
     @Override
-    public Task<Version> getInstallTask(DefaultDependencyManager dependencyManager, Version baseVersion) {
+    public Task<GameInstancePatch> getInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest baseVersion) {
         return new FabricInstallTask(dependencyManager, baseVersion, this);
     }
 }

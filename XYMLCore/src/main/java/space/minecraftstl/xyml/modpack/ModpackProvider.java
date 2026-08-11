@@ -19,8 +19,8 @@ package space.minecraftstl.xyml.modpack;
 
 import com.google.gson.JsonParseException;
 import kala.compress.archivers.zip.ZipArchiveReader;
-import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.task.Task;
 
@@ -33,14 +33,9 @@ public interface ModpackProvider {
 
     String getName();
 
-    /// Creates the optional task that completes metadata and files for an installed modpack instance.
-    ///
-    /// @param dependencyManager dependency manager bound to the target game repository
-    /// @param instanceId target installed instance identifier
-    /// @return completion task, or `null` when this format requires no completion phase
-    @Nullable Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String instanceId);
+    Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId);
 
-    Task<?> createUpdateTask(DefaultDependencyManager dependencyManager, String name, Path zipFile, Modpack modpack) throws MismatchedModpackTypeException;
+    Task<?> createUpdateTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId, Path zipFile, Modpack modpack) throws MismatchedModpackTypeException;
 
     /**
      * @param zipFile the opened modpack zip file.

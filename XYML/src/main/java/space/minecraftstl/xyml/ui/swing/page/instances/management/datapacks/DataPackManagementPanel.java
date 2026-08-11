@@ -21,6 +21,7 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.addon.datapack.DataPack;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.World;
@@ -187,11 +188,11 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
     /// @param repository repository used to resolve the instance's effective run directory
     /// @param instanceId stable managed instance identifier
     /// @param executor caller-owned executor for Core and local filesystem work
-    public DataPackManagementPanel(GameRepository repository, String instanceId, Executor executor) {
+    public DataPackManagementPanel(GameRepository repository, GameInstanceID instanceId, Executor executor) {
         this(
                 new DefaultWorldCatalogModel(
                         Objects.requireNonNull(repository, "repository"),
-                        requireNonBlank(instanceId, "instanceId"),
+                        Objects.requireNonNull(instanceId, "instanceId"),
                         Objects.requireNonNull(executor, "executor"),
                         WorldCatalogStrings.localized()),
                 DataPackManagementStrings.localized(),

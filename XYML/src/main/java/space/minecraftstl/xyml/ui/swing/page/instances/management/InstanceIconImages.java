@@ -20,7 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.management;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.image.InstanceIconData;
-import space.minecraftstl.xyml.setting.InstanceIconType;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 
 import javax.swing.ImageIcon;
 import javax.swing.SwingUtilities;
@@ -41,8 +41,8 @@ final class InstanceIconImages {
     private static final Object BUILT_IN_PIXELS_LOCK = new Object();
 
     /// Immutable decoded pixels retained for every successfully preloaded bundled type.
-    private static final EnumMap<InstanceIconType, InstanceIconData> BUILT_IN_PIXELS =
-            new EnumMap<>(InstanceIconType.class);
+    private static final EnumMap<GameInstanceIconType, InstanceIconData> BUILT_IN_PIXELS =
+            new EnumMap<>(GameInstanceIconType.class);
 
     /// Prevents utility-class construction.
     private InstanceIconImages() {
@@ -55,7 +55,7 @@ final class InstanceIconImages {
     /// @throws IllegalStateException when called on the EDT or a mandatory bundled resource is unavailable
     static void preloadBuiltIns() {
         requireBackgroundThread();
-        for (InstanceIconType iconType : InstanceIconType.values()) {
+        for (GameInstanceIconType iconType : GameInstanceIconType.values()) {
             synchronized (BUILT_IN_PIXELS_LOCK) {
                 if (BUILT_IN_PIXELS.containsKey(iconType)) {
                     continue;
@@ -92,8 +92,8 @@ final class InstanceIconImages {
     /// @param iconType bundled icon type, including `DEFAULT`
     /// @param size required square output size in pixels
     /// @return exact-size in-memory Swing icon
-    static ImageIcon loadBuiltIn(InstanceIconType iconType, int size) {
-        InstanceIconType validatedType = Objects.requireNonNull(iconType, "iconType");
+    static ImageIcon loadBuiltIn(GameInstanceIconType iconType, int size) {
+        GameInstanceIconType validatedType = Objects.requireNonNull(iconType, "iconType");
         @Nullable InstanceIconData pixels;
         synchronized (BUILT_IN_PIXELS_LOCK) {
             pixels = BUILT_IN_PIXELS.get(validatedType);

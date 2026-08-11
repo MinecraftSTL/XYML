@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.auth.AccountID;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.LauncherHelper;
 import space.minecraftstl.xyml.game.QuickPlayOption;
 import space.minecraftstl.xyml.game.World;
@@ -244,7 +245,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
         XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
         return afterRepositoryReady(
                 repository.isLoaded(),
-                repository::refreshInstancesAsync,
+                repository::refreshAsync,
                 () -> createLoadedProductionTask(
                         request,
                         visibilityRegistrar,
@@ -278,7 +279,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
         XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
         return afterRepositoryReady(
                 repository.isLoaded(),
-                repository::refreshInstancesAsync,
+                repository::refreshAsync,
                 () -> createLoadedProductionLaunchScriptTask(
                         capturedRequest,
                         destination,
@@ -312,7 +313,8 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                     .orElseThrow(() -> new IllegalArgumentException("Unknown account: " + accountId));
             GameDirectoryID gameDirectoryId = GameDirectoryID.parse(request.gameDirectoryId());
             XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
-            if (!repository.isLoaded() || !repository.hasVersion(request.instanceId())) {
+            GameInstanceID instanceId = new GameInstanceID(request.instanceId());
+            if (!repository.isLoaded() || !repository.hasInstance(instanceId)) {
                 throw new IllegalArgumentException(
                         "Unknown instance " + request.instanceId() + " in " + gameDirectoryId);
             }
@@ -321,7 +323,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
             LauncherHelper helper = new LauncherHelper(
                     repository,
                     account,
-                    request.instanceId(),
+                    instanceId,
                     launchInteraction,
                     accountReauthentication);
             configureLaunchModes(request, helper::setQuickPlayOption, helper::setTestMode);
@@ -365,7 +367,8 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                     .orElseThrow(() -> new IllegalArgumentException("Unknown account: " + accountId));
             GameDirectoryID gameDirectoryId = GameDirectoryID.parse(capturedRequest.gameDirectoryId());
             XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
-            if (!repository.isLoaded() || !repository.hasVersion(capturedRequest.instanceId())) {
+            GameInstanceID instanceId = new GameInstanceID(capturedRequest.instanceId());
+            if (!repository.isLoaded() || !repository.hasInstance(instanceId)) {
                 throw new IllegalArgumentException(
                         "Unknown instance " + capturedRequest.instanceId() + " in " + gameDirectoryId);
             }
@@ -374,7 +377,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
             LauncherHelper helper = new LauncherHelper(
                     repository,
                     account,
-                    capturedRequest.instanceId(),
+                    instanceId,
                     launchInteraction,
                     accountReauthentication);
             configureLaunchModes(capturedRequest, helper::setQuickPlayOption, helper::setTestMode);
@@ -418,7 +421,7 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
         LaunchRequest capturedRequest = Objects.requireNonNull(request, "request");
         if (capturedRequest.quickPlaySingleplayer() != null
                 && !World.supportQuickPlay(GameVersionNumber.asGameVersion(
-                        targetRepository.getGameVersion(capturedRequest.instanceId())))) {
+                        targetRepository.getGameVersion(new GameInstanceID(capturedRequest.instanceId()))))) {
             throw new IllegalArgumentException("Single-player quick play requires Minecraft 1.20 or newer");
         }
     }

@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.util.PortablePath;
 
 import javax.swing.AbstractButton;
 import javax.swing.JCheckBox;
+import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JTextField;
 import java.awt.Component;
@@ -45,12 +46,33 @@ import java.util.function.Supplier;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Tests Swing game-directory selection and protected local management actions through the toolkit-neutral service.
 @NotNullByDefault
 public final class GameDirectoryManagementPanelTest {
+    /// Distinguishes the active game directory with a filled folder icon without adding a radio indicator.
+    @Test
+    public void rendersDynamicDirectoryIcons() {
+        JList<GameDirectoryManagementEntry> list = new JList<>();
+        JLabel selected = GameDirectoryManagementPanel.renderDirectory(
+                list,
+                entry("Current", ".minecraft", true),
+                true);
+        JLabel inactive = GameDirectoryManagementPanel.renderDirectory(
+                list,
+                entry("Other", "instances/other", false),
+                false);
+
+        assertAll(
+                () -> assertNotNull(selected.getIcon()),
+                () -> assertNotNull(inactive.getIcon()),
+                () -> assertNotSame(selected.getIcon(), inactive.getIcon()));
+    }
+
     /// Selects a real service entry and adds a prepared relative directory without running path preparation on the EDT.
     @Test
     public void selectsCurrentDirectoryAndAddsRelativeEntry() throws InterruptedException {

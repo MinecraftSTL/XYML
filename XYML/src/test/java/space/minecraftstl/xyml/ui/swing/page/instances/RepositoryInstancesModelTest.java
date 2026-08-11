@@ -23,7 +23,8 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.event.Event;
 import space.minecraftstl.xyml.event.EventManager;
-import space.minecraftstl.xyml.event.RefreshedInstancesEvent;
+import space.minecraftstl.xyml.event.RefreshedGameInstancesEvent;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
@@ -61,14 +62,17 @@ public final class RepositoryInstancesModelTest {
     /// A viewport request resolves only its captured range and delegates stable-ID commands.
     @Test
     public void resolvesOnlyRequestedRowsAndDelegatesCommands() {
-        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
+        EventManager<RefreshedGameInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
-        FakeRepository repository = new FakeRepository(events, List.of("alpha", "beta", "gamma"), "beta");
-        repository.setDetail("alpha", "1.20.1");
-        repository.setDetail("beta", "1.21.1");
-        repository.setDetail("gamma", "1.19.4");
+        FakeRepository repository = new FakeRepository(
+                events,
+                List.of(instanceId("alpha"), instanceId("beta"), instanceId("gamma")),
+                instanceId("beta"));
+        repository.setDetail(instanceId("alpha"), "1.20.1");
+        repository.setDetail(instanceId("beta"), "1.21.1");
+        repository.setDetail(instanceId("gamma"), "1.19.4");
         AtomicInteger additions = new AtomicInteger();
-        List<String> managedIds = new ArrayList<>();
+        List<GameInstanceID> managedIds = new ArrayList<>();
         RepositoryInstancesModel model = new RepositoryInstancesModel(
                 repository, events, executor, additions::incrementAndGet, managedIds::add, STATUS_STRINGS);
 
@@ -83,29 +87,34 @@ public final class RepositoryInstancesModelTest {
 
         executor.runNext();
         ChoicePage<InstanceListItem> page = stage.toCompletableFuture().join();
-        model.selectInstance("alpha");
+        model.selectInstance(instanceId("alpha"));
         model.addInstance();
         model.manageSelectedInstance();
 
         assertAll(
                 () -> assertEquals(new IndexRange(1, 3), page.range()),
-                () -> assertEquals(List.of("beta", "gamma"),
+                () -> assertEquals(List.of(instanceId("beta"), instanceId("gamma")),
                         page.items().stream().map(InstanceListItem::id).toList()),
-                () -> assertEquals(List.of("beta", "gamma"), repository.resolvedIds()),
-                () -> assertEquals(List.of("beta", "gamma"), repository.resolvedIconIds()),
-                () -> assertEquals("alpha", repository.selectedInstanceId()),
+                () -> assertEquals(List.of(instanceId("beta"), instanceId("gamma")), repository.resolvedIds()),
+                () -> assertEquals(
+                        List.of(instanceId("beta"), instanceId("gamma")),
+                        repository.resolvedIconIds()),
+                () -> assertEquals(instanceId("alpha"), repository.selectedInstanceId()),
                 () -> assertEquals(OptionalInt.of(0), model.snapshot().selectedIndex()),
                 () -> assertEquals(1, additions.get()),
-                () -> assertEquals(List.of("alpha"), managedIds));
+                () -> assertEquals(List.of(instanceId("alpha")), managedIds));
         model.close();
     }
 
     /// An icon event invalidates sparse rows without eagerly resolving icons outside a requested range.
     @Test
     public void iconChangeReloadsOnlyLaterViewportDemand() {
-        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
+        EventManager<RefreshedGameInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
-        FakeRepository repository = new FakeRepository(events, List.of("alpha", "beta", "gamma"), "alpha");
+        FakeRepository repository = new FakeRepository(
+                events,
+                List.of(instanceId("alpha"), instanceId("beta"), instanceId("gamma")),
+                instanceId("alpha"));
         RepositoryInstancesModel model = new RepositoryInstancesModel(
                 repository, events, executor, () -> { }, ignored -> { }, STATUS_STRINGS);
 
@@ -122,7 +131,9 @@ public final class RepositoryInstancesModelTest {
 
         assertAll(
                 () -> assertEquals(1L, model.snapshot().contentRevision()),
-                () -> assertEquals(List.of("alpha", "beta"), repository.resolvedIconIds()),
+                () -> assertEquals(
+                        List.of(instanceId("alpha"), instanceId("beta")),
+                        repository.resolvedIconIds()),
                 () -> assertFalse(initialIcon.equals(replacementIcon)));
         model.close();
     }
@@ -130,10 +141,17 @@ public final class RepositoryInstancesModelTest {
     /// A successful refresh event replaces exact source order and increments one content revision.
     @Test
     public void appliesRefreshEventAndNewSourceBoundary() {
-        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
+        EventManager<RefreshedGameInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
-        FakeRepository repository = new FakeRepository(events, List.of("alpha", "beta"), "alpha");
-        repository.prepareRefresh(List.of("beta", "gamma", "delta"), "gamma", true, false);
+        FakeRepository repository = new FakeRepository(
+                events,
+                List.of(instanceId("alpha"), instanceId("beta")),
+                instanceId("alpha"));
+        repository.prepareRefresh(
+                List.of(instanceId("beta"), instanceId("gamma"), instanceId("delta")),
+                instanceId("gamma"),
+                true,
+                false);
         RepositoryInstancesModel model = new RepositoryInstancesModel(
                 repository, events, executor, () -> { }, ignored -> { }, STATUS_STRINGS);
         List<InstancesSnapshot> transitions = new ArrayList<>();
@@ -162,10 +180,17 @@ public final class RepositoryInstancesModelTest {
     /// A refresh denied without an event still rebuilds from repository state on successful completion.
     @Test
     public void fallsBackWhenSuccessfulRefreshPublishesNoEvent() {
-        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
+        EventManager<RefreshedGameInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
-        FakeRepository repository = new FakeRepository(events, List.of("alpha"), "alpha");
-        repository.prepareRefresh(List.of("alpha", "beta"), "beta", false, false);
+        FakeRepository repository = new FakeRepository(
+                events,
+                List.of(instanceId("alpha")),
+                instanceId("alpha"));
+        repository.prepareRefresh(
+                List.of(instanceId("alpha"), instanceId("beta")),
+                instanceId("beta"),
+                false,
+                false);
         RepositoryInstancesModel model = new RepositoryInstancesModel(
                 repository, events, executor, () -> { }, ignored -> { }, STATUS_STRINGS);
 
@@ -183,10 +208,13 @@ public final class RepositoryInstancesModelTest {
     /// Refresh failure restores retry controls without mutating indexed content.
     @Test
     public void exposesRefreshFailureWithoutChangingRevision() {
-        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
+        EventManager<RefreshedGameInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
-        FakeRepository repository = new FakeRepository(events, List.of("alpha", "beta"), "beta");
-        repository.prepareRefresh(List.of("ignored"), null, false, true);
+        FakeRepository repository = new FakeRepository(
+                events,
+                List.of(instanceId("alpha"), instanceId("beta")),
+                instanceId("beta"));
+        repository.prepareRefresh(List.of(instanceId("ignored")), null, false, true);
         RepositoryInstancesModel model = new RepositoryInstancesModel(
                 repository, events, executor, () -> { }, ignored -> { }, STATUS_STRINGS);
 
@@ -206,9 +234,12 @@ public final class RepositoryInstancesModelTest {
     /// Closing removes the refresh listener, rejects commands, and makes queued range work cancellable.
     @Test
     public void closeStopsEventsAndCancelledLoads() {
-        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
+        EventManager<RefreshedGameInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
-        FakeRepository repository = new FakeRepository(events, List.of("alpha", "beta"), "alpha");
+        FakeRepository repository = new FakeRepository(
+                events,
+                List.of(instanceId("alpha"), instanceId("beta")),
+                instanceId("alpha"));
         RepositoryInstancesModel model = new RepositoryInstancesModel(
                 repository, events, executor, () -> { }, ignored -> { }, STATUS_STRINGS);
         LoadCancellation cancellation = new LoadCancellation();
@@ -217,10 +248,10 @@ public final class RepositoryInstancesModelTest {
 
         cancellation.cancel();
         model.close();
-        repository.replaceImmediately(List.of("gamma"), "gamma");
-        events.fireEvent(new RefreshedInstancesEvent(repository));
+        repository.replaceImmediately(List.of(instanceId("gamma")), instanceId("gamma"));
+        events.fireEvent(new RefreshedGameInstancesEvent(repository));
         repository.fireIconChanged();
-        repository.setSelectedInstanceId("beta");
+        repository.setSelectedInstanceId(instanceId("beta"));
         executor.runNext();
 
         assertAll(
@@ -233,7 +264,7 @@ public final class RepositoryInstancesModelTest {
     /// An unloaded model waits for the existing initial scan instead of starting a competing scan.
     @Test
     public void waitsForExistingInitialScan() {
-        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
+        EventManager<RefreshedGameInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
         FakeRepository repository = new FakeRepository(events, List.of(), null);
         repository.setLoaded(false);
@@ -246,9 +277,11 @@ public final class RepositoryInstancesModelTest {
                 () -> assertEquals("Loading", model.snapshot().statusText()),
                 () -> assertFalse(model.snapshot().refreshEnabled()));
 
-        repository.replaceImmediately(List.of("beta", "gamma"), "missing");
+        repository.replaceImmediately(
+                List.of(instanceId("beta"), instanceId("gamma")),
+                instanceId("missing"));
         repository.setLoaded(true);
-        events.fireEvent(new RefreshedInstancesEvent(repository));
+        events.fireEvent(new RefreshedGameInstancesEvent(repository));
 
         assertAll(
                 () -> assertEquals(2, model.snapshot().itemCount()),
@@ -256,7 +289,7 @@ public final class RepositoryInstancesModelTest {
                 () -> assertEquals(1L, model.snapshot().contentRevision()),
                 () -> assertEquals("Ready", model.snapshot().statusText()));
 
-        repository.setSelectedInstanceId("beta");
+        repository.setSelectedInstanceId(instanceId("beta"));
         assertEquals(OptionalInt.of(0), model.snapshot().selectedIndex());
         model.close();
     }
@@ -264,9 +297,12 @@ public final class RepositoryInstancesModelTest {
     /// A listener closing the model during the refreshing transition prevents repository I/O submission.
     @Test
     public void listenerClosePreventsRefreshIo() {
-        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
+        EventManager<RefreshedGameInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
-        FakeRepository repository = new FakeRepository(events, List.of("alpha"), "alpha");
+        FakeRepository repository = new FakeRepository(
+                events,
+                List.of(instanceId("alpha")),
+                instanceId("alpha"));
         RepositoryInstancesModel model = new RepositoryInstancesModel(
                 repository, events, executor, () -> { }, ignored -> { }, STATUS_STRINGS);
         model.subscribe(change -> {
@@ -286,16 +322,23 @@ public final class RepositoryInstancesModelTest {
     /// An external event updates content but does not release a model-owned refresh slot early.
     @Test
     public void externalEventDoesNotReleaseOwnedRefresh() {
-        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
+        EventManager<RefreshedGameInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
-        FakeRepository repository = new FakeRepository(events, List.of("alpha"), "alpha");
-        repository.prepareRefresh(List.of("gamma"), "gamma", false, false);
+        FakeRepository repository = new FakeRepository(
+                events,
+                List.of(instanceId("alpha")),
+                instanceId("alpha"));
+        repository.prepareRefresh(
+                List.of(instanceId("gamma")),
+                instanceId("gamma"),
+                false,
+                false);
         RepositoryInstancesModel model = new RepositoryInstancesModel(
                 repository, events, executor, () -> { }, ignored -> { }, STATUS_STRINGS);
 
         model.refreshInstances();
-        repository.replaceImmediately(List.of("beta"), "beta");
-        events.fireEvent(new RefreshedInstancesEvent(repository));
+        repository.replaceImmediately(List.of(instanceId("beta")), instanceId("beta"));
+        events.fireEvent(new RefreshedGameInstancesEvent(repository));
         model.refreshInstances();
 
         assertAll(
@@ -318,23 +361,34 @@ public final class RepositoryInstancesModelTest {
     /// An old revision load uses its captured detail even after a newer repository event replaces content.
     @Test
     public void oldRevisionLoadUsesCapturedDescriptor() {
-        EventManager<RefreshedInstancesEvent> events = new EventManager<>();
+        EventManager<RefreshedGameInstancesEvent> events = new EventManager<>();
         QueuedExecutor executor = new QueuedExecutor();
-        FakeRepository repository = new FakeRepository(events, List.of("alpha"), "alpha");
-        repository.setDetail("alpha", "1.20.1");
+        FakeRepository repository = new FakeRepository(
+                events,
+                List.of(instanceId("alpha")),
+                instanceId("alpha"));
+        repository.setDetail(instanceId("alpha"), "1.20.1");
         RepositoryInstancesModel model = new RepositoryInstancesModel(
                 repository, events, executor, () -> { }, ignored -> { }, STATUS_STRINGS);
         CompletionStage<ChoicePage<InstanceListItem>> oldLoad = model.load(
                 new IndexRange(0, 1), new LoadCancellation());
 
-        repository.setDetail("alpha", "1.21.1");
-        events.fireEvent(new RefreshedInstancesEvent(repository));
+        repository.setDetail(instanceId("alpha"), "1.21.1");
+        events.fireEvent(new RefreshedGameInstancesEvent(repository));
         executor.runNext();
 
         assertAll(
                 () -> assertEquals("1.20.1", oldLoad.toCompletableFuture().join().items().get(0).detail()),
                 () -> assertEquals(1L, model.snapshot().contentRevision()));
         model.close();
+    }
+
+    /// Creates one stable game-instance identifier from a fixture literal.
+    ///
+    /// @param value serialized fixture identifier
+    /// @return immutable fixture identifier
+    private static GameInstanceID instanceId(String value) {
+        return new GameInstanceID(value);
     }
 
     /// Deterministic executor that queues work until a test explicitly advances it.
@@ -375,34 +429,34 @@ public final class RepositoryInstancesModelTest {
     @NotNullByDefault
     private static final class FakeRepository implements RepositoryInstancesModel.RepositoryAccess {
         /// Event manager used to publish configured successful refreshes.
-        private final EventManager<RefreshedInstancesEvent> events;
+        private final EventManager<RefreshedGameInstancesEvent> events;
 
         /// Current immutable displayed IDs.
-        private volatile @Unmodifiable List<String> displayedIds;
+        private volatile @Unmodifiable List<GameInstanceID> displayedIds;
 
         /// Current selected ID, or null for none.
-        private volatile @Nullable String selectedId;
+        private volatile @Nullable GameInstanceID selectedId;
 
         /// Resolved game-version detail by stable instance ID.
-        private final Map<String, String> details = new HashMap<>();
+        private final Map<GameInstanceID, String> details = new HashMap<>();
 
         /// Toolkit-neutral selected-instance transition publisher.
-        private final ValueChangeSupport<String> selectionChanges = new ValueChangeSupport<>(this);
+        private final ValueChangeSupport<GameInstanceID> selectionChanges = new ValueChangeSupport<>(this);
 
         /// Repository-local icon transition publisher.
         private final EventManager<Event> iconEvents = new EventManager<>();
 
         /// IDs whose details were requested.
-        private final List<String> resolvedIds = new ArrayList<>();
+        private final List<GameInstanceID> resolvedIds = new ArrayList<>();
 
         /// IDs whose normalized icons were requested.
-        private final List<String> resolvedIconIds = new ArrayList<>();
+        private final List<GameInstanceID> resolvedIconIds = new ArrayList<>();
 
         /// IDs installed by the next successful refresh.
-        private @Unmodifiable List<String> nextDisplayedIds = List.of();
+        private @Unmodifiable List<GameInstanceID> nextDisplayedIds = List.of();
 
         /// Selection installed by the next successful refresh, or null for none.
-        private @Nullable String nextSelectedId;
+        private @Nullable GameInstanceID nextSelectedId;
 
         /// Whether the next successful refresh publishes its normal event.
         private boolean publishRefreshEvent = true;
@@ -422,9 +476,9 @@ public final class RepositoryInstancesModelTest {
         /// @param displayedIds initial immutable displayed IDs
         /// @param selectedId initial selected ID, or null for none
         private FakeRepository(
-                EventManager<RefreshedInstancesEvent> events,
-                @Unmodifiable List<String> displayedIds,
-                @Nullable String selectedId) {
+                EventManager<RefreshedGameInstancesEvent> events,
+                @Unmodifiable List<GameInstanceID> displayedIds,
+                @Nullable GameInstanceID selectedId) {
             this.events = events;
             this.displayedIds = List.copyOf(displayedIds);
             this.selectedId = selectedId;
@@ -446,7 +500,7 @@ public final class RepositoryInstancesModelTest {
         @Override
         public synchronized @Unmodifiable List<RepositoryInstancesModel.RepositoryEntry> displayedInstances() {
             List<RepositoryInstancesModel.RepositoryEntry> entries = new ArrayList<>();
-            for (String instanceId : displayedIds) {
+            for (GameInstanceID instanceId : displayedIds) {
                 Optional<String> capturedDetail = Optional.ofNullable(details.get(instanceId));
                 entries.add(new RepositoryInstancesModel.RepositoryEntry(
                         instanceId,
@@ -458,13 +512,13 @@ public final class RepositoryInstancesModelTest {
 
         /// Returns the current selected ID.
         @Override
-        public @Nullable String selectedInstanceId() {
+        public @Nullable GameInstanceID selectedInstanceId() {
             return selectedId;
         }
 
         /// Registers for fake repository selection transitions.
         @Override
-        public Subscription subscribeSelectedInstance(ValueChangeListener<String> listener) {
+        public Subscription subscribeSelectedInstance(ValueChangeListener<GameInstanceID> listener) {
             return selectionChanges.subscribe(listener);
         }
 
@@ -482,7 +536,7 @@ public final class RepositoryInstancesModelTest {
         /// @param instanceId stable instance ID
         /// @return immutable normalized icon pixels
         @Override
-        public synchronized InstanceIconData resolveIcon(String instanceId) {
+        public synchronized InstanceIconData resolveIcon(GameInstanceID instanceId) {
             resolvedIconIds.add(instanceId);
             int[] pixels = new int[InstanceIconData.PIXEL_COUNT];
             int color = 0xFF000000 | (instanceId.hashCode() & 0x00FFFFFF);
@@ -494,8 +548,8 @@ public final class RepositoryInstancesModelTest {
 
         /// Stores the selected ID.
         @Override
-        public void setSelectedInstanceId(String instanceId) {
-            @Nullable String previous = selectedId;
+        public void setSelectedInstanceId(GameInstanceID instanceId) {
+            @Nullable GameInstanceID previous = selectedId;
             selectedId = instanceId;
             selectionChanges.fireChange(previous, instanceId);
         }
@@ -506,7 +560,7 @@ public final class RepositoryInstancesModelTest {
         /// @param capturedDetail detail captured with the source revision
         /// @return captured detail
         private synchronized Optional<String> resolveCapturedDetail(
-                String instanceId,
+                GameInstanceID instanceId,
                 Optional<String> capturedDetail) {
             resolvedIds.add(instanceId);
             return capturedDetail;
@@ -522,7 +576,7 @@ public final class RepositoryInstancesModelTest {
             replaceImmediately(nextDisplayedIds, nextSelectedId);
             loaded = true;
             if (publishRefreshEvent) {
-                events.fireEvent(new RefreshedInstancesEvent(this));
+                events.fireEvent(new RefreshedGameInstancesEvent(this));
             }
         }
 
@@ -530,7 +584,7 @@ public final class RepositoryInstancesModelTest {
         ///
         /// @param instanceId stable instance ID
         /// @param detail resolved game version
-        private void setDetail(String instanceId, String detail) {
+        private void setDetail(GameInstanceID instanceId, String detail) {
             details.put(instanceId, detail);
         }
 
@@ -544,14 +598,14 @@ public final class RepositoryInstancesModelTest {
         /// Returns an immutable snapshot of detail-resolution calls.
         ///
         /// @return resolved stable IDs in call order
-        private synchronized @Unmodifiable List<String> resolvedIds() {
+        private synchronized @Unmodifiable List<GameInstanceID> resolvedIds() {
             return List.copyOf(resolvedIds);
         }
 
         /// Returns an immutable snapshot of icon-resolution calls.
         ///
         /// @return resolved stable IDs in call order
-        private synchronized @Unmodifiable List<String> resolvedIconIds() {
+        private synchronized @Unmodifiable List<GameInstanceID> resolvedIconIds() {
             return List.copyOf(resolvedIconIds);
         }
 
@@ -567,8 +621,8 @@ public final class RepositoryInstancesModelTest {
         /// @param publishEvent whether success publishes a refresh event
         /// @param fail whether refresh throws
         private void prepareRefresh(
-                @Unmodifiable List<String> displayedIds,
-                @Nullable String selectedId,
+                @Unmodifiable List<GameInstanceID> displayedIds,
+                @Nullable GameInstanceID selectedId,
                 boolean publishEvent,
                 boolean fail) {
             nextDisplayedIds = List.copyOf(displayedIds);
@@ -582,8 +636,8 @@ public final class RepositoryInstancesModelTest {
         /// @param displayedIds replacement immutable displayed IDs
         /// @param selectedId replacement selected ID, or null for none
         private void replaceImmediately(
-                @Unmodifiable List<String> displayedIds,
-                @Nullable String selectedId) {
+                @Unmodifiable List<GameInstanceID> displayedIds,
+                @Nullable GameInstanceID selectedId) {
             this.displayedIds = List.copyOf(displayedIds);
             this.selectedId = selectedId;
         }

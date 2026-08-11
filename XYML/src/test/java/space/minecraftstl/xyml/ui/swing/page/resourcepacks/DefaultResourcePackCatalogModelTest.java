@@ -1201,7 +1201,7 @@ public final class DefaultResourcePackCatalogModelTest {
                 new Class<?>[]{GameRepository.class},
                 (proxy, method, arguments) -> switch (method.getName()) {
                     case "getResourcePackDirectory", "getRunDirectory" -> root;
-                    case "getVersionJar" -> root.resolve("version.jar");
+                    case "getInstanceJar" -> root.resolve("version.jar");
                     case "getGameVersion" -> Optional.of("1.20.1");
                     case "toString" -> "LocalResourcePackRepository";
                     case "hashCode" -> System.identityHashCode(proxy);

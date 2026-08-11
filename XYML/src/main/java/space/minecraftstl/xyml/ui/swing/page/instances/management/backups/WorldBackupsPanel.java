@@ -21,6 +21,7 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
@@ -118,7 +119,7 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
     /// @param repository managed game repository
     /// @param instanceId stable managed instance identifier
     /// @param executor caller-owned background executor
-    public WorldBackupsPanel(GameRepository repository, String instanceId, Executor executor) {
+    public WorldBackupsPanel(GameRepository repository, GameInstanceID instanceId, Executor executor) {
         this(
                 new FileSystemWorldBackupCatalog(
                         Objects.requireNonNull(repository, "repository"),
@@ -153,6 +154,14 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
     public WorldBackupSnapshot displayedSnapshot() {
         EdtDispatcher.requireEventDispatchThread();
         return displayedSnapshot;
+    }
+
+    /// Returns the current lifecycle or empty-state text for focused tests.
+    ///
+    /// @return visible status text
+    String statusText() {
+        EdtDispatcher.requireEventDispatchThread();
+        return statusLabel.getText();
     }
 
     /// Starts the first shallow scan after the host selects this tab.
@@ -407,7 +416,9 @@ public final class WorldBackupsPanel extends JPanel implements AutoCloseable {
                     } else {
                         operationPending = false;
                         applySnapshot(snapshot);
-                        statusLabel.setText(Objects.requireNonNull(successStatus, "successStatus"));
+                        statusLabel.setText(snapshot.archives().isEmpty()
+                                ? i18n("world.backup.empty")
+                                : Objects.requireNonNull(successStatus, "successStatus"));
                         updateControls();
                     }
                 }));

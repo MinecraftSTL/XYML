@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.instances.importing;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
@@ -53,13 +54,13 @@ final class InstanceJsonImportPanelTest {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             AtomicReference<@Nullable Path> receivedSource = new AtomicReference<>();
-            AtomicReference<@Nullable String> receivedName = new AtomicReference<>();
+            AtomicReference<@Nullable GameInstanceID> receivedInstanceId = new AtomicReference<>();
             AtomicBoolean serviceCalledOnEdt = new AtomicBoolean();
             AtomicBoolean taskRanOnEdt = new AtomicBoolean(true);
             CountDownLatch taskRan = new CountDownLatch(1);
             InstanceJsonImportService service = (source, instanceId) -> {
                 receivedSource.set(source);
-                receivedName.set(instanceId);
+                receivedInstanceId.set(instanceId);
                 serviceCalledOnEdt.set(javax.swing.SwingUtilities.isEventDispatchThread());
                 return Task.<@Nullable Void>supplyAsync(executor, () -> {
                     taskRanOnEdt.set(javax.swing.SwingUtilities.isEventDispatchThread());
@@ -94,7 +95,7 @@ final class InstanceJsonImportPanelTest {
             assertTrue(serviceCalledOnEdt.get());
             assertFalse(taskRanOnEdt.get());
             assertEquals(Path.of("Example.JSON").toAbsolutePath().normalize(), receivedSource.get());
-            assertEquals("Imported Example", receivedName.get());
+            assertEquals(new GameInstanceID("Imported Example"), receivedInstanceId.get());
             awaitStatus(panelReference, InstanceJsonImportStrings.english().succeededStatus());
             Objects.requireNonNull(panelReference.get()).close();
         } finally {

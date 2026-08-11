@@ -81,6 +81,30 @@ final class InstanceManagementPageDeckTest {
         });
     }
 
+    /// Invalidating a cached directory-dependent page closes it and recreates it on the next visit.
+    @Test
+    void rebuildsInvalidatedNonVisiblePages() {
+        EdtDispatcher.executeAndWait(() -> {
+            AtomicInteger modCreations = new AtomicInteger();
+            AtomicInteger modCleanups = new AtomicInteger();
+            InstanceManagementPageDeck deck = new InstanceManagementPageDeck(Map.of(
+                    InstanceManagementPageId.OVERVIEW,
+                    () -> InstanceManagementPage.passive(new JPanel(), () -> { }),
+                    InstanceManagementPageId.MODS,
+                    countingPage(modCreations, new AtomicInteger(), modCleanups)));
+            deck.showPage(InstanceManagementPageId.MODS);
+            deck.showPage(InstanceManagementPageId.OVERVIEW);
+
+            deck.invalidatePages(List.of(InstanceManagementPageId.MODS));
+
+            assertFalse(deck.isLoaded(InstanceManagementPageId.MODS));
+            assertEquals(1, modCleanups.get());
+            deck.showPage(InstanceManagementPageId.MODS);
+            assertEquals(2, modCreations.get());
+            deck.close();
+        });
+    }
+
     /// Closing releases only loaded pages, in reverse creation order, and remains idempotent.
     @Test
     void closesOnlyLoadedPagesInReverseCreationOrder() {

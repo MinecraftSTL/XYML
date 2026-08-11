@@ -17,31 +17,32 @@
  */
 package space.minecraftstl.xyml.event;
 
-import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.util.ToStringBuilder;
+import org.jetbrains.annotations.NotNullByDefault;
 
-/// Fired before an installed game instance is removed from disk.
+/// Fired before an installed game instance is removed.
 ///
-/// Listeners may deny the event to cancel removal.
+/// This event is fired on the [space.minecraftstl.xyml.event.EventBus#EVENT_BUS]
 ///
 /// @author huangyuhui
 @NotNullByDefault
-public final class RemoveInstanceEvent extends Event {
+public class RemoveInstanceEvent extends Event {
 
-    /// Identifier of the instance being removed.
-    private final String instanceId;
+    /// Identifier of the instance scheduled for removal.
+    private final GameInstanceID instanceId;
 
     /// Creates an instance-removal event.
     ///
     /// @param source repository removing the instance
-    /// @param instanceId identifier of the instance being removed
-    public RemoveInstanceEvent(Object source, String instanceId) {
+    /// @param instanceId identifier of the instance scheduled for removal
+    public RemoveInstanceEvent(Object source, GameInstanceID instanceId) {
         super(source);
         this.instanceId = instanceId;
     }
 
-    /// Returns the identifier of the instance being removed.
-    public String getInstanceId() {
+    /// Returns the identifier of the instance scheduled for removal.
+    public GameInstanceID getInstanceId() {
         return instanceId;
     }
 

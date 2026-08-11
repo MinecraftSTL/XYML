@@ -21,6 +21,7 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -172,7 +173,7 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     /// @param quickPlayActions non-blocking launcher callbacks already bound to this instance
     public WorldCatalogPanel(
             GameRepository repository,
-            String instanceId,
+            GameInstanceID instanceId,
             Executor executor,
             WorldQuickPlayActions quickPlayActions) {
         this(

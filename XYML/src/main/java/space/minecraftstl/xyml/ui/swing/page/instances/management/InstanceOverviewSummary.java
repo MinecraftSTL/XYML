@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.instances.management;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import javax.swing.ImageIcon;
 import java.nio.file.Path;
@@ -32,7 +33,7 @@ import java.util.Objects;
 /// @param iconPreview decoded fixed-size instance icon
 @NotNullByDefault
 record InstanceOverviewSummary(
-        String instanceId,
+        GameInstanceID instanceId,
         String versionDetail,
         Path instanceRoot,
         Path gameDirectory,
@@ -44,8 +45,5 @@ record InstanceOverviewSummary(
         Objects.requireNonNull(instanceRoot, "instanceRoot");
         Objects.requireNonNull(gameDirectory, "gameDirectory");
         Objects.requireNonNull(iconPreview, "iconPreview");
-        if (instanceId.isBlank()) {
-            throw new IllegalArgumentException("instanceId must not be blank");
-        }
     }
 }

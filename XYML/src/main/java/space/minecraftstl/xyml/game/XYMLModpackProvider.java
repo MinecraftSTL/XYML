@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.game;
 
 import com.google.gson.JsonParseException;
 import kala.compress.archivers.zip.ZipArchiveReader;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.modpack.MismatchedModpackTypeException;
@@ -34,21 +35,32 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
 
+/// Parses and installs the native XYML modpack archive format.
+@NotNullByDefault
 public final class XYMLModpackProvider implements ModpackProvider {
+    /// Shared stateless provider instance.
     public static final XYMLModpackProvider INSTANCE = new XYMLModpackProvider();
 
+    /// Returns the provider identifier persisted in modpack metadata.
     @Override
     public String getName() {
         return "XYML";
     }
 
+    /// Returns no completion task because native archives contain their own completion data.
     @Override
-    public @Nullable Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, String instanceId) {
+    public @Nullable Task<?> createCompletionTask(
+            DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
         return null;
     }
 
+    /// Creates an update task for an installed native XYML modpack.
     @Override
-    public Task<?> createUpdateTask(DefaultDependencyManager dependencyManager, String name, Path zipFile, Modpack modpack) throws MismatchedModpackTypeException {
+    public Task<?> createUpdateTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceID instanceId,
+            Path zipFile,
+            Modpack modpack) throws MismatchedModpackTypeException {
         if (!(modpack.getManifest() instanceof XYMLModpackManifest))
             throw new MismatchedModpackTypeException(getName(), modpack.getManifest().getProvider().getName());
 
@@ -56,29 +68,37 @@ public final class XYMLModpackProvider implements ModpackProvider {
             throw new IllegalArgumentException("XYMLModpackProvider requires XYMLGameRepository");
         }
 
-        return new ModpackUpdateTask(dependencyManager.getGameRepository(), name, new XYMLModpackInstallTask(repository, zipFile, modpack, name));
+        return new ModpackUpdateTask(
+                dependencyManager.getGameRepository(),
+                instanceId,
+                new XYMLModpackInstallTask(repository, zipFile, modpack, instanceId));
     }
 
+    /// Reads native modpack metadata and derives the target Minecraft version from the bundled manifest.
     @Override
     public Modpack readManifest(ZipArchiveReader file, Path path, Charset encoding) throws IOException, JsonParseException {
         String manifestJson = CompressingUtils.readTextZipEntry(file, "modpack.json");
         Modpack manifest = JsonUtils.fromNonNullJson(manifestJson, XYMLModpack.class).setEncoding(encoding);
         String gameJson = CompressingUtils.readTextZipEntry(file, "minecraft/pack.json");
-        Version game = JsonUtils.fromNonNullJson(gameJson, Version.class);
-        if (game.getJar() == null)
+        GameInstanceManifest game = JsonUtils.fromNonNullJson(gameJson, GameInstanceManifest.class);
+        if (game.jar() == null)
             if (StringUtils.isBlank(manifest.getVersion()))
                 throw new JsonParseException("Cannot recognize the game version of modpack " + file + ".");
             else
                 manifest.setManifest(XYMLModpackManifest.INSTANCE);
         else
-            manifest.setManifest(XYMLModpackManifest.INSTANCE).setGameVersion(game.getJar());
+            manifest.setManifest(XYMLModpackManifest.INSTANCE).setGameVersion(game.jar().id());
         return manifest;
     }
 
+    /// Native modpack metadata that delegates installation back to this provider.
+    @NotNullByDefault
     private final static class XYMLModpack extends Modpack {
+        /// Creates an installation task for the chosen destination instance.
         @Override
-        public Task<?> getInstallTask(DefaultDependencyManager dependencyManager, Path zipFile, String name, String iconUrl) {
-            return new XYMLModpackInstallTask((XYMLGameRepository) dependencyManager.getGameRepository(), zipFile, this, name);
+        public Task<?> getInstallTask(DefaultDependencyManager dependencyManager, Path zipFile, GameInstanceID instanceId, String iconUrl) {
+            return new XYMLModpackInstallTask(
+                    (XYMLGameRepository) dependencyManager.getGameRepository(), zipFile, this, instanceId);
         }
     }
 

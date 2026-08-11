@@ -17,7 +17,6 @@
  */
 package space.minecraftstl.xyml;
 
-import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.SwingUtils;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.setting.SambaException;
@@ -94,7 +93,7 @@ public final class EntryPoint {
     ///
     /// @param exitCode process exit status
     public static void exit(int exitCode) {
-        FileSaver.shutdown();
+        SettingsManager.shutdown();
         LOG.shutdown();
         System.exit(exitCode);
     }
@@ -107,23 +106,6 @@ public final class EntryPoint {
                 System.getProperties().putIfAbsent("sun.java2d.metal", "true");
             } else {
                 System.getProperties().putIfAbsent("sun.java2d.opengl", "true");
-            }
-        }
-
-        @Nullable String animationFrameRate = System.getenv("XYML_ANIMATION_FRAME_RATE");
-        if (animationFrameRate != null) {
-            LOG.info("XYML_ANIMATION_FRAME_RATE: " + animationFrameRate);
-
-            try {
-                int framesPerSecond = Integer.parseInt(animationFrameRate);
-                if (framesPerSecond <= 0)
-                    throw new NumberFormatException(animationFrameRate);
-                int frameDelayMillis = Math.max(1, Math.round(1000.0f / framesPerSecond));
-                System.getProperties().putIfAbsent(
-                        "xyml.swing.animationFrameDelayMillis",
-                        Integer.toString(frameDelayMillis));
-            } catch (NumberFormatException e) {
-                LOG.warning("Invalid animation frame rate: " + animationFrameRate);
             }
         }
 

@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Verifies that the Swing page does not index the filesystem until its host activates the tab.
 @NotNullByDefault
@@ -54,6 +55,7 @@ final class WorldBackupsPanelTest {
 
             assertEquals(1, catalog.loadCalls.get());
             assertEquals(snapshot, panel.displayedSnapshot());
+            assertEquals(i18n("world.backup.empty"), panel.statusText());
         });
         EdtDispatcher.executeAndWait(() -> Objects.requireNonNull(reference.get(), "panel").close());
     }

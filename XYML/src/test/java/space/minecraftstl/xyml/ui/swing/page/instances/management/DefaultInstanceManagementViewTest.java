@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
@@ -127,7 +128,7 @@ final class DefaultInstanceManagementViewTest {
                     homeModel(),
                     repository(),
                     ignored -> repositoryRoot.resolve("schematics"),
-                    "instance",
+                    new GameInstanceID("instance"),
                     executor,
                     presentation.schematicManagement(),
                     presentation.schematics(),
@@ -199,7 +200,7 @@ final class DefaultInstanceManagementViewTest {
 
             view.close();
             view.close();
-            assertEquals("instance", view.instanceId());
+            assertEquals(new GameInstanceID("instance"), view.instanceId());
         } finally {
             @Nullable DefaultInstanceManagementView view = viewReference.get();
             if (view != null) {
@@ -244,13 +245,14 @@ final class DefaultInstanceManagementViewTest {
                     GameDirectoryID.generate(),
                     LocalizedText.plain("Maintenance test"),
                     PortablePath.of(repositoryRoot.toString())));
-            repository.refreshInstances();
-            assertTrue(repository.hasVersion("instance"));
+            GameInstanceID instanceId = new GameInstanceID("instance");
+            repository.refresh();
+            assertTrue(repository.hasInstance(instanceId));
             EdtDispatcher.executeAndWait(() -> viewReference.set(new DefaultInstanceManagementView(
                     homeModel(),
                     repository,
                     ignored -> repositoryRoot.resolve("schematics"),
-                    "instance",
+                    instanceId,
                     executor,
                     presentation.schematicManagement(),
                     presentation.schematics(),

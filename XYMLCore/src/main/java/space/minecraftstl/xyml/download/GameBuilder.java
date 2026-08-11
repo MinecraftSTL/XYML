@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.download;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 
 import java.util.ArrayList;
@@ -33,8 +35,9 @@ import java.util.Objects;
 /// therefore cannot distinguish different loaders that publish the same version string.
 @NotNullByDefault
 public abstract class GameBuilder {
-    /// Target instance identifier used for the generated instance directory.
-    protected String name = "";
+
+    /// Target instance identifier, or null until configured by the caller.
+    protected @Nullable GameInstanceID name;
 
     /// Selected base Minecraft version identifier.
     protected String gameVersion = "";
@@ -45,10 +48,8 @@ public abstract class GameBuilder {
     /// Selected remote library installers in the exact caller-supplied order.
     protected final List<RemoteVersion> remoteVersions = new ArrayList<>();
 
-    /// Returns the target instance identifier.
-    ///
-    /// @return exact target instance identifier
-    public String getName() {
+    /// Returns the target instance identifier, or null before it is configured.
+    public @Nullable GameInstanceID getName() {
         return name;
     }
 
@@ -56,7 +57,7 @@ public abstract class GameBuilder {
     ///
     /// @param name identifier of the new game instance
     /// @return this builder
-    public GameBuilder name(String name) {
+    public GameBuilder name(GameInstanceID name) {
         this.name = Objects.requireNonNull(name);
         return this;
     }

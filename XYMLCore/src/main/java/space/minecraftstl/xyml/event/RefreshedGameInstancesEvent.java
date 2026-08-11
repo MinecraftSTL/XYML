@@ -19,17 +19,18 @@ package space.minecraftstl.xyml.event;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-/// Fired after an installed-instance repository has replaced its instance snapshot.
+/// Fired after all installed game instances in a `.minecraft` folder have been loaded.
+///
+/// This event is fired on [EventBus#EVENT_BUS].
 ///
 /// @author huangyuhui
 @NotNullByDefault
-public final class RefreshedInstancesEvent extends Event {
+public final class RefreshedGameInstancesEvent extends Event {
 
-    /// Creates an instance-refresh-completed event.
+    /// Creates an instances-refreshed event.
     ///
-    /// @param source repository that completed the refresh
-    public RefreshedInstancesEvent(Object source) {
+    /// @param source repository that loaded the instances
+    public RefreshedGameInstancesEvent(Object source) {
         super(source);
     }
-
 }

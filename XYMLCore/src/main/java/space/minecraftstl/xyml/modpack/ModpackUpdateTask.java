@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.modpack;
 
 import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
@@ -29,20 +30,20 @@ import java.util.Collections;
 public class ModpackUpdateTask extends Task<Void> {
 
     private final DefaultGameRepository repository;
-    private final String id;
+    private final GameInstanceID id;
     private final Task<?> updateTask;
     private final Path backupFolder;
 
-    public ModpackUpdateTask(DefaultGameRepository repository, String id, Task<?> updateTask) {
+    public ModpackUpdateTask(DefaultGameRepository repository, GameInstanceID instanceId, Task<?> updateTask) {
         this.repository = repository;
-        this.id = id;
+        this.id = instanceId;
         this.updateTask = updateTask;
 
         Path backup = repository.getBaseDirectory().resolve("backup");
         while (true) {
             int num = (int)(Math.random() * 10000000);
-            if (!Files.exists(backup.resolve(id + "-" + num))) {
-                backupFolder = backup.resolve(id + "-" + num);
+            if (!Files.exists(backup.resolve(instanceId + "-" + num))) {
+                backupFolder = backup.resolve(instanceId + "-" + num);
                 break;
             }
         }
@@ -55,7 +56,7 @@ public class ModpackUpdateTask extends Task<Void> {
 
     @Override
     public void execute() throws Exception {
-        FileUtils.copyDirectory(repository.getVersionRoot(id), backupFolder);
+        FileUtils.copyDirectory(repository.getInstanceRoot(id), backupFolder);
     }
 
     @Override
@@ -71,9 +72,9 @@ public class ModpackUpdateTask extends Task<Void> {
             // Restore backup
             repository.removeInstanceFromDisk(id);
 
-            FileUtils.copyDirectory(backupFolder, repository.getVersionRoot(id));
+            FileUtils.copyDirectory(backupFolder, repository.getInstanceRoot(id));
 
-            repository.refreshInstancesAsync().start();
+            repository.refreshAsync().start();
         }
     }
 }

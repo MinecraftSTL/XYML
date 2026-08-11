@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.downloads;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+import space.minecraftstl.xyml.game.GameInstanceID;
 
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -32,13 +33,13 @@ import java.util.Objects;
 /// never move either form of target outside its normalized parent directory.
 ///
 /// @param kind acquisition category
-/// @param instanceId stable selected instance identifier or save-as target label
+/// @param instanceId stable selected instance identifier, or null for an explicit save-as target
 /// @param directory normalized directory receiving the downloaded artifact
 /// @param exactDestination exact user-selected destination, or null to use the provider filename
 @NotNullByDefault
 public record RemoteAddonInstallTarget(
         RemoteAddonCatalogKind kind,
-        String instanceId,
+        @Nullable GameInstanceID instanceId,
         Path directory,
         @Nullable Path exactDestination) {
     /// Creates a managed-directory target whose final filename comes from provider metadata.
@@ -48,7 +49,7 @@ public record RemoteAddonInstallTarget(
     /// @param directory normalized directory where the add-on file will be installed
     public RemoteAddonInstallTarget(
             RemoteAddonCatalogKind kind,
-            String instanceId,
+            GameInstanceID instanceId,
             Path directory) {
         this(kind, instanceId, directory, null);
     }
@@ -56,9 +57,16 @@ public record RemoteAddonInstallTarget(
     /// Validates the target snapshot and normalizes its paths once.
     public RemoteAddonInstallTarget {
         kind = Objects.requireNonNull(kind, "kind");
-        instanceId = requireNonBlank(instanceId, "instanceId");
         directory = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
-        if (exactDestination != null) {
+        if (exactDestination == null) {
+            instanceId = Objects.requireNonNull(instanceId, "instanceId");
+        } else {
+            if (kind != RemoteAddonCatalogKind.WORLD) {
+                throw new IllegalArgumentException("Only world downloads support an exact save-as destination");
+            }
+            if (instanceId != null) {
+                throw new IllegalArgumentException("A save-as target must not claim an installed instance");
+            }
             exactDestination = exactDestination.toAbsolutePath().normalize();
             @Nullable Path parent = exactDestination.getParent();
             if (parent == null || !directory.equals(parent)) {
@@ -84,7 +92,7 @@ public record RemoteAddonInstallTarget(
         }
         return new RemoteAddonInstallTarget(
                 RemoteAddonCatalogKind.WORLD,
-                fileName.toString(),
+                null,
                 parent,
                 normalized);
     }
