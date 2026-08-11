@@ -56,16 +56,11 @@ import space.minecraftstl.xyml.util.platform.*;
 
 import java.awt.Component;
 import java.io.File;
-import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryPoolMXBean;
 import java.net.CookieHandler;
 import java.net.CookieManager;
 import java.net.URI;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -145,22 +140,7 @@ public final class Launcher {
         LOG.info("Headless Graphics Environment: " + java.awt.GraphicsEnvironment.isHeadless());
 
         try {
-            try {
-                SettingsManager.init();
-                initializeSettingsRuntime();
-            } catch (SambaException e) {
-                SwingStartupSafetyDialogs.showMessage(WARNING, i18n("fatal.samba"));
-            } catch (IOException e) {
-                LOG.error("Failed to load config", e);
-                checkConfigInTempDir();
-                checkConfigOwner();
-                SwingStartupSafetyDialogs.showMessage(
-                        ERROR,
-                        i18n(
-                                "fatal.config_loading_failure",
-                                SettingsManager.localConfigDirectory()));
-                EntryPoint.exit(1);
-            }
+            initializeSettingsRuntime();
 
             if (Metadata.SKIP_OFFLINE_USERNAME_CHECK) {
                 LOG.warning(Metadata.SKIP_OFFLINE_USERNAME_CHECK_ENVIRONMENT_VARIABLE
@@ -477,44 +457,6 @@ public final class Launcher {
                         5)) {
             EntryPoint.exit(0);
         }
-    }
-
-    /// Offers a Unix ownership repair command when the configuration directory is not writable.
-    private static void checkConfigOwner() {
-        if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS)
-            return;
-
-        String userName = Objects.requireNonNullElse(System.getProperty("user.name"), "");
-        Path configDirectory = SettingsManager.localConfigDirectory();
-        if (!Files.exists(configDirectory)) {
-            return;
-        }
-
-        String owner;
-        try {
-            owner = Files.getOwner(configDirectory).getName();
-        } catch (IOException ioe) {
-            LOG.warning("Failed to get file owner", ioe);
-            return;
-        }
-
-        if (Files.isWritable(configDirectory) || userName.equals("root") || userName.equals(owner))
-            return;
-
-        ArrayList<String> files = new ArrayList<>();
-        files.add(configDirectory.toString());
-        if (Files.exists(Metadata.XYML_USER_HOME))
-            files.add(Metadata.XYML_USER_HOME.toString());
-
-        Path mcDir = Paths.get(".minecraft").toAbsolutePath().normalize();
-        if (Files.exists(mcDir))
-            files.add(mcDir.toString());
-
-        String command = new CommandBuilder().addAll("sudo", "chown", "-R", userName).addAll(files).toString();
-        SwingStartupSafetyDialogs.offerCopyAndExit(
-                i18n("fatal.config_loading_failure.unix", owner, command),
-                command);
-        EntryPoint.exit(1);
     }
 
     /// Releases the Swing runtime, schedulers, pending saves, and logger once.
