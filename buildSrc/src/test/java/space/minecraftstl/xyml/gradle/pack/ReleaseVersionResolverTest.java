@@ -55,10 +55,10 @@ final class ReleaseVersionResolverTest {
                 ReleaseType.DEV, "1.0.1", "1.0.1.3.2.9", null, true));
     }
 
-    /// Produces a non-release placeholder only for local non-stable builds.
+    /// Appends an empty feature component after a complete local development version.
     @Test
-    void derivesLocalDevelopmentSnapshot() {
-        assertEquals("1.0.0.0.0.SNAPSHOT", ReleaseVersionResolver.resolve(
+    void derivesLocalFeatureBuildVersion() {
+        assertEquals("1.0.0.0.0.0.", ReleaseVersionResolver.resolve(
                 ReleaseType.DEV, "1.0.0", null, null, false));
         assertThrows(IllegalArgumentException.class, () -> ReleaseVersionResolver.resolve(
                 ReleaseType.DEV, "1.0.0", null, null, true));
