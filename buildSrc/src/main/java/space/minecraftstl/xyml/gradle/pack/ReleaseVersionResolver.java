@@ -43,9 +43,9 @@ public final class ReleaseVersionResolver {
     /// @param channel target release channel
     /// @param stableVersion current three-component stable baseline
     /// @param explicitVersion complete release version, or `null` to derive it
-    /// @param buildNumber positive decimal CI build number, or `null` for a local snapshot
+    /// @param buildNumber positive decimal CI build number, or `null` for a local feature build
     /// @param official whether missing CI version inputs must fail the build
-    /// @return validated release version or local snapshot version
+    /// @return validated release version or local feature-build version
     /// @throws IllegalArgumentException when any supplied version value violates the release model
     public static String resolve(
             ReleaseType channel,
@@ -79,7 +79,7 @@ public final class ReleaseVersionResolver {
             throw new IllegalArgumentException(
                     "Official " + channel.getName() + " builds require RELEASE_VERSION or BUILD_NUMBER");
         }
-        return derivedVersion(channel, stableVersion, "SNAPSHOT");
+        return derivedVersion(channel, stableVersion, "0") + ".";
     }
 
     /// Validates an exact channel version.
@@ -101,7 +101,7 @@ public final class ReleaseVersionResolver {
     ///
     /// @param channel non-stable release channel
     /// @param stableVersion stable version prefix
-    /// @param lastComponent positive build number or `SNAPSHOT`
+    /// @param lastComponent positive build number or local zero placeholder
     /// @return version with the exact channel depth
     private static String derivedVersion(ReleaseType channel, String stableVersion, String lastComponent) {
         StringBuilder version = new StringBuilder(stableVersion);
