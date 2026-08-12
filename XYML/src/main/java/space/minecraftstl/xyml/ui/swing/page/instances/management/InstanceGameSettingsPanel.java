@@ -256,7 +256,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
             "instanceGameSettingsVulkanRenderer",
             new JComboBox<>());
 
-    /// Windows high-performance GPU preference.
+    /// Cross-platform high-performance GPU preference.
     private final InheritedControl<JCheckBox> highPerformanceGpuControl = inheritedControl(
             "instanceGameSettingsHighPerformanceGpu",
             new JCheckBox());
@@ -722,10 +722,9 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
         section.add(graphicsBackendRow, "span 3, growx");
         section.add(openGlRendererRow, "span 3, growx");
         section.add(vulkanRendererRow, "span 3, growx");
-        addBooleanControlRowWithSubtitle(
+        addBooleanControlRow(
                 section,
                 i18n("settings.advanced.renderer.gpu_preferences"),
-                i18n("settings.advanced.windows_only"),
                 highPerformanceGpuControl);
         content.add(section, "growx");
         return content;

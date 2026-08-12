@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.event.Event;
 import space.minecraftstl.xyml.event.EventManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
+import space.minecraftstl.xyml.launch.HighPerformanceGpuEnvironment;
 import space.minecraftstl.xyml.modpack.ModAdviser;
 import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
@@ -821,6 +822,22 @@ public final class XYMLGameRepository extends DefaultGameRepository {
             maxMemory = vs.getMaxMemory();
         }
 
+        Renderer renderer = vs.getRenderer(gameVersionNumber);
+        Map<String, String> environmentVariables = new LinkedHashMap<>(
+                HighPerformanceGpuEnvironment.resolve(
+                        vs.getInheritable(GameSettings::highPerformanceProperty),
+                        renderer,
+                        OperatingSystem.CURRENT_OS,
+                        SystemInfo.getGraphicsCards()));
+        environmentVariables.putAll(
+                Lang.mapOf(StringUtils.tokenize(vs.getInheritable(GameSettings::environmentVariablesProperty))
+                        .stream()
+                        .map(it -> {
+                            int idx = it.indexOf('=');
+                            return idx >= 0 ? pair(it.substring(0, idx), it.substring(idx + 1)) : pair(it, "");
+                        })
+                        .collect(Collectors.toList())));
+
         LaunchOptions.Builder builder = new LaunchOptions.Builder()
                 .setInstanceId(instanceId)
                 .setGameDir(gameDir)
@@ -833,16 +850,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
                 .setMaxMemory(maxMemory)
                 .setMinMemory(vs.getInheritable(GameSettings::minMemoryProperty))
                 .setMetaspace(Lang.toIntOrNull(vs.getInheritable(GameSettings::permSizeProperty)))
-                .setEnvironmentVariables(
-                        Lang.mapOf(StringUtils.tokenize(vs.getInheritable(GameSettings::environmentVariablesProperty))
-                                .stream()
-                                .map(it -> {
-                                    int idx = it.indexOf('=');
-                                    return idx >= 0 ? pair(it.substring(0, idx), it.substring(idx + 1)) : pair(it, "");
-                                })
-                                .collect(Collectors.toList())
-                        )
-                )
+                .setEnvironmentVariables(environmentVariables)
                 .setWidth(vs.getWidth())
                 .setHeight(vs.getHeight())
                 .setFullscreen(vs.getInheritable(GameSettings::windowTypeProperty) == GameWindowType.FULLSCREEN)
@@ -856,7 +864,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
                 .setNativesDir(vs.getInheritable(GameSettings::nativesDirectoryProperty))
                 .setProcessPriority(vs.getInheritable(GameSettings::processPriorityProperty))
                 .setGraphicsBackend(vs.getInheritable(GameSettings::graphicsBackendProperty))
-                .setRenderer(vs.getRenderer(gameVersionNumber))
+                .setRenderer(renderer)
                 .setEnableDebugLogOutput(vs.getInheritable(GameSettings::enableDebugLogOutputProperty))
                 .setAllowAutoAgent(vs.getInheritable(GameSettings::allowAutoAgentProperty))
                 .setDisableAutoGameOptions(vs.getInheritable(GameSettings::disableAutoGameOptionsProperty))
