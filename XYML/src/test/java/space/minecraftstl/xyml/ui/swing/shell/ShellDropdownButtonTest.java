@@ -24,10 +24,13 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
+import javax.swing.JPopupMenu;
 import java.awt.Color;
 import java.awt.Graphics2D;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -76,6 +79,52 @@ public final class ShellDropdownButtonTest {
             }
             FlatLightLaf.setup();
         });
+    }
+
+    /// A popup auto-hidden during an invoker click stays closed when the button action fires on release.
+    @Test
+    public void keepsAutomaticallyDismissedPopupClosed() {
+        EdtDispatcher.executeAndWait(() -> {
+            ShellDropdownButton button = new ShellDropdownButton();
+            TestPopupMenu popup = new TestPopupMenu();
+            AtomicInteger openCount = new AtomicInteger();
+            button.setSize(220, 36);
+            button.bindPopup(popup, () -> {
+                openCount.incrementAndGet();
+                popup.setVisible(true);
+            });
+
+            button.doClick();
+            assertAll(
+                    () -> assertTrue(popup.isVisible()),
+                    () -> assertEquals(1, openCount.get()));
+
+            popup.setVisible(false);
+            button.processMouseEvent(mouseEvent(button, MouseEvent.MOUSE_PRESSED));
+            button.processMouseEvent(mouseEvent(button, MouseEvent.MOUSE_RELEASED));
+
+            assertAll(
+                    () -> assertFalse(popup.isVisible()),
+                    () -> assertEquals(1, openCount.get()));
+        });
+    }
+
+    /// Creates one primary-button event inside the dropdown bounds.
+    ///
+    /// @param button event target
+    /// @param eventId pressed or released event identifier
+    /// @return configured mouse event
+    private static MouseEvent mouseEvent(ShellDropdownButton button, int eventId) {
+        return new MouseEvent(
+                button,
+                eventId,
+                System.currentTimeMillis(),
+                0,
+                button.getWidth() / 2,
+                button.getHeight() / 2,
+                1,
+                false,
+                MouseEvent.BUTTON1);
     }
 
     /// Paints one selector over a known opaque background.
@@ -138,5 +187,36 @@ public final class ShellDropdownButtonTest {
             }
         }
         return false;
+    }
+
+    /// Headless popup fake that publishes the same visibility callbacks as `JPopupMenu`.
+    @NotNullByDefault
+    private static final class TestPopupMenu extends JPopupMenu {
+        /// Simulated popup visibility.
+        private boolean popupVisible;
+
+        /// Returns simulated visibility without creating a native popup window.
+        ///
+        /// @return whether the fake popup is visible
+        @Override
+        public boolean isVisible() {
+            return popupVisible;
+        }
+
+        /// Publishes visibility callbacks without requiring a displayable invoker.
+        ///
+        /// @param visible requested popup visibility
+        @Override
+        public void setVisible(boolean visible) {
+            if (popupVisible == visible) {
+                return;
+            }
+            if (visible) {
+                firePopupMenuWillBecomeVisible();
+            } else {
+                firePopupMenuWillBecomeInvisible();
+            }
+            popupVisible = visible;
+        }
     }
 }

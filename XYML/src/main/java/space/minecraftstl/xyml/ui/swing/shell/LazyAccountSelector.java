@@ -308,7 +308,7 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
         valueButton.setName("shellAccountValue");
         valueButton.setIcon(new FlatSVGIcon("assets/swing/icons/nav-accounts.svg", 18, 18));
         valueButton.setIconTextGap(8);
-        valueButton.addActionListener(event -> showPopup());
+        valueButton.bindPopup(popup, this::showPopup);
         valueButton.getAccessibleContext().setAccessibleName(selectorLabel);
 
         add(valueButton, BorderLayout.CENTER);
