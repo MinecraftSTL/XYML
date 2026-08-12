@@ -97,14 +97,17 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Smallest supported Swing component corner radius in logical pixels.
     public static final int MINIMUM_CORNER_RADIUS = 0;
 
-    /// Largest supported radius for controls whose minimum stable height is forty logical pixels.
-    public static final int MAXIMUM_CORNER_RADIUS = 20;
+    /// Largest supported component corner radius, half the hard-coded shell selector height.
+    public static final int MAXIMUM_CORNER_RADIUS = 18;
 
     /// Persisted corner-radius adjustment increment in logical pixels.
     public static final int CORNER_RADIUS_STEP = 1;
 
     /// Default derived from the launcher's predominant six-pixel surface radius.
     public static final int DEFAULT_CORNER_RADIUS = 6;
+
+    /// Default launcher animation speed percentage.
+    public static final int DEFAULT_ANIMATION_SPEED_PERCENTAGE = AnimationSpeedSettings.DEFAULT_PERCENTAGE;
 
     /// Gson instance used for launcher settings and related toolkit-neutral settings objects.
     public static final Gson SETTINGS_GSON = new GsonBuilder()
@@ -480,6 +483,16 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Returns the UI animation disable property.
     public BooleanProperty animationDisabledProperty() {
         return animationDisabled;
+    }
+
+    /// Percentage applied to authored Swing animation speeds.
+    @SerializedName("animationSpeedPercentage")
+    private final IntegerProperty animationSpeedPercentage =
+            new SimpleIntegerProperty(DEFAULT_ANIMATION_SPEED_PERCENTAGE);
+
+    /// Returns the adjustable Swing animation-speed percentage property.
+    public IntegerProperty animationSpeedPercentageProperty() {
+        return animationSpeedPercentage;
     }
 
     // Networks

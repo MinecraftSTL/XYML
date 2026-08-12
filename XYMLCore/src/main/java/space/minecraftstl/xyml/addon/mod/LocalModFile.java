@@ -310,7 +310,7 @@ public final class LocalModFile extends LocalAddonFile implements Comparable<Loc
     /// @throws IOException if remote metadata cannot be loaded
     @Override
     public @Nullable AddonUpdate checkUpdates(DownloadProvider downloadProvider, String gameVersion, RemoteAddon.Source source) throws IOException {
-        @Nullable RemoteAddonRepository repository = source.getRepoForType(RemoteAddonRepository.Type.MOD);
+        @Nullable RemoteAddonRepository repository = source.getRepoForType(RemoteAddon.Type.MOD);
         if (repository == null) return null;
         Optional<RemoteAddon.Version> currentVersion = repository.getRemoteVersionByLocalFile(file);
         if (currentVersion.isEmpty()) return null;
@@ -323,7 +323,13 @@ public final class LocalModFile extends LocalAddonFile implements Comparable<Loc
                 .sorted(Comparator.comparing(RemoteAddon.Version::datePublished).reversed())
                 .toList();
         if (remoteVersions.isEmpty()) return null;
-        return new AddonUpdate(this, currentVersion.get(), remoteVersions.get(0), true);
+        return new AddonUpdate(
+                source,
+                RemoteAddon.Type.MOD,
+                this,
+                currentVersion.get(),
+                remoteVersions.get(0),
+                true);
     }
 
     /// Orders files by their stable names without regard to case.

@@ -22,7 +22,9 @@ import space.minecraftstl.xyml.addon.repository.CurseForgeRemoteAddonRepository;
 import space.minecraftstl.xyml.addon.repository.ModrinthRemoteAddonRepository;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.task.FileDownloadTask;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -31,8 +33,26 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
-public record RemoteAddon(String slug, String author, String title, String description, List<String> categories,
-                          String pageUrl, String iconUrl, IAddon data, RemoteAddonRepository.Type repoType) {
+/// Immutable remote project metadata shared by provider catalogs and installed-add-on updates.
+///
+/// @param slug provider project slug
+/// @param author project author display name
+/// @param title project display title
+/// @param description provider description
+/// @param categories immutable provider category snapshot
+/// @param pageUrl public project page
+/// @param iconUrl public icon URL
+/// @param data provider-specific operations
+/// @param type add-on type, or `null` when a provider result has no mapped type
+@NotNullByDefault
+public record RemoteAddon(String slug, String author, String title, String description,
+                          @Unmodifiable List<String> categories,
+                          String pageUrl, String iconUrl, IAddon data, @Nullable Type type) {
+
+    /// Defensively snapshots provider-owned category metadata.
+    public RemoteAddon {
+        categories = List.copyOf(categories);
+    }
 
     public static final RemoteAddon BROKEN = new RemoteAddon("", "", "RemoteAddon.BROKEN", "", Collections.emptyList(), "", "", new IAddon() {
         @Override
@@ -44,7 +64,7 @@ public record RemoteAddon(String slug, String author, String title, String descr
         public Stream<Version> loadVersions(RemoteAddonRepository repo, DownloadProvider downloadProvider) throws IOException {
             throw new IOException();
         }
-    }, RemoteAddonRepository.Type.MOD);
+    }, Type.MOD);
 
     public enum VersionType {
         Release,
@@ -67,23 +87,23 @@ public record RemoteAddon(String slug, String author, String title, String descr
 
         private final DependencyType type;
 
-        private final @Nullable RemoteAddonRepository remoteAddonRepository;
+        private final @Nullable Source source;
 
         private final @Nullable String id;
 
         private transient RemoteAddon remoteAddon = null;
 
-        private Dependency(DependencyType type, @Nullable RemoteAddonRepository remoteAddonRepository, @Nullable String id) {
+        private Dependency(DependencyType type, @Nullable Source source, @Nullable String id) {
             this.type = type;
-            this.remoteAddonRepository = remoteAddonRepository;
+            this.source = source;
             this.id = id;
         }
 
-        public static Dependency ofGeneral(DependencyType type, RemoteAddonRepository remoteAddonRepository, String id) {
+        public static Dependency ofGeneral(DependencyType type, Source source, String id) {
             if (type == DependencyType.BROKEN) {
                 return ofBroken();
             } else {
-                return new Dependency(type, remoteAddonRepository, id);
+                return new Dependency(type, source, id);
             }
         }
 
@@ -99,8 +119,8 @@ public record RemoteAddon(String slug, String author, String title, String descr
         }
 
         @Nullable
-        public RemoteAddonRepository getRemoteModRepository() {
-            return this.remoteAddonRepository;
+        public Source getSource() {
+            return this.source;
         }
 
         @Nullable
@@ -113,7 +133,7 @@ public record RemoteAddon(String slug, String author, String title, String descr
                 if (this.type == DependencyType.BROKEN) {
                     this.remoteAddon = RemoteAddon.BROKEN;
                 } else {
-                    this.remoteAddon = this.remoteAddonRepository.resolveDependency(downloadProvider, this.id);
+                    this.remoteAddon = this.source.getCommonRepo().resolveDependency(downloadProvider, this.id);
                 }
             }
             return this.remoteAddon;
@@ -127,14 +147,14 @@ public record RemoteAddon(String slug, String author, String title, String descr
             Dependency that = (Dependency) o;
 
             if (type != that.type) return false;
-            if (!remoteAddonRepository.equals(that.remoteAddonRepository)) return false;
+            if (source != that.source) return false;
             return id.equals(that.id);
         }
 
         @Override
         public int hashCode() {
             int result = type.hashCode();
-            result = 31 * result + remoteAddonRepository.hashCode();
+            result = 31 * result + source.hashCode();
             result = 31 * result + id.hashCode();
             return result;
         }
@@ -142,6 +162,7 @@ public record RemoteAddon(String slug, String author, String title, String descr
 
     public enum Source {
         CURSEFORGE(
+                CurseForgeRemoteAddonRepository.COMMON,
                 CurseForgeRemoteAddonRepository.MODS,
                 CurseForgeRemoteAddonRepository.RESOURCE_PACKS,
                 CurseForgeRemoteAddonRepository.SHADERS,
@@ -150,6 +171,7 @@ public record RemoteAddon(String slug, String author, String title, String descr
                 CurseForgeRemoteAddonRepository.CUSTOMIZATIONS
         ),
         MODRINTH(
+                ModrinthRemoteAddonRepository.COMMON,
                 ModrinthRemoteAddonRepository.MODS,
                 ModrinthRemoteAddonRepository.RESOURCE_PACKS,
                 ModrinthRemoteAddonRepository.SHADER_PACKS,
@@ -158,15 +180,16 @@ public record RemoteAddon(String slug, String author, String title, String descr
                 null
         );
 
-        public final RemoteAddonRepository modRepo;
-        public final RemoteAddonRepository resourcePackRepo;
-        public final RemoteAddonRepository shaderPackRepo;
-        public final RemoteAddonRepository worldRepo;
-        public final RemoteAddonRepository modpackRepo;
-        public final RemoteAddonRepository customizationRepo;
+        private final RemoteAddonRepository commonRepo;
+        private final RemoteAddonRepository modRepo;
+        private final RemoteAddonRepository resourcePackRepo;
+        private final RemoteAddonRepository shaderPackRepo;
+        private final RemoteAddonRepository worldRepo;
+        private final RemoteAddonRepository modpackRepo;
+        private final RemoteAddonRepository customizationRepo;
 
         @Nullable
-        public RemoteAddonRepository getRepoForType(RemoteAddonRepository.Type type) {
+        public RemoteAddonRepository getRepoForType(Type type) {
             return switch (type) {
                 case MOD -> modRepo;
                 case RESOURCE_PACK -> resourcePackRepo;
@@ -177,7 +200,12 @@ public record RemoteAddon(String slug, String author, String title, String descr
             };
         }
 
+        public RemoteAddonRepository getCommonRepo() {
+            return commonRepo;
+        }
+
         Source(
+                RemoteAddonRepository commonRepo,
                 RemoteAddonRepository modRepo,
                 RemoteAddonRepository resourcePackRepo,
                 RemoteAddonRepository shaderPackRepo,
@@ -185,6 +213,7 @@ public record RemoteAddon(String slug, String author, String title, String descr
                 RemoteAddonRepository modpackRepo,
                 RemoteAddonRepository customizationRepo
         ) {
+            this.commonRepo = commonRepo;
             this.modRepo = modRepo;
             this.resourcePackRepo = resourcePackRepo;
             this.shaderPackRepo = shaderPackRepo;
@@ -192,6 +221,15 @@ public record RemoteAddon(String slug, String author, String title, String descr
             this.modpackRepo = modpackRepo;
             this.customizationRepo = customizationRepo;
         }
+    }
+
+    public enum Type {
+        MOD,
+        MODPACK,
+        RESOURCE_PACK,
+        SHADER_PACK,
+        WORLD,
+        CUSTOMIZATION
     }
 
     public interface IAddon {
@@ -204,9 +242,31 @@ public record RemoteAddon(String slug, String author, String title, String descr
         Source getSource();
     }
 
-    public record Version(IVersion self, String projectId, String name, String version, String changelog,
-                          Instant datePublished, VersionType versionType, File file, List<Dependency> dependencies,
-                          List<String> gameVersions, List<ModLoaderType> loaders) {
+    /// Immutable provider version metadata. Changelog text is loaded on demand through the repository.
+    ///
+    /// @param self provider-specific version value
+    /// @param versionId provider version identifier used by follow-up APIs
+    /// @param projectId provider project identifier
+    /// @param name display name
+    /// @param version display version
+    /// @param datePublished publication timestamp
+    /// @param versionType release channel
+    /// @param file downloadable artifact
+    /// @param dependencies immutable provider dependency snapshot
+    /// @param gameVersions immutable compatible game-version snapshot
+    /// @param loaders immutable compatible loader snapshot
+    @NotNullByDefault
+    public record Version(IVersion self, String versionId, String projectId, String name, String version,
+                          Instant datePublished, VersionType versionType, File file,
+                          @Unmodifiable List<Dependency> dependencies,
+                          @Unmodifiable List<String> gameVersions,
+                          @Unmodifiable List<ModLoaderType> loaders) {
+        /// Defensively snapshots provider-owned collections.
+        public Version {
+            dependencies = List.copyOf(dependencies);
+            gameVersions = List.copyOf(gameVersions);
+            loaders = List.copyOf(loaders);
+        }
     }
 
     public record File(Map<String, String> hashes, String url, String filename) {

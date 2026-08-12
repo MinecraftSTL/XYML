@@ -17,35 +17,28 @@
  */
 package space.minecraftstl.xyml.gradle.docs;
 
+import org.jetbrains.annotations.NotNullByDefault;
+
 import java.util.List;
 import java.util.Locale;
 
+/// A locale supported by generated project documentation.
+///
 /// @author Glavo
+@NotNullByDefault
 public enum DocumentLocale {
-    ENGLISH(Locale.ENGLISH, "") {
-        @Override
-        public String getSubLanguageDisplayName() {
-            return "Standard";
-        }
-
-        @Override
-        public List<DocumentLocale> getCandidates() {
-            return List.of(ENGLISH);
-        }
-    },
-    ENGLISH_UPSIDE_DOWN(Locale.forLanguageTag("en-Qabs"), "en-Qabs") {
-        @Override
-        public String getSubLanguageDisplayName() {
-            return "uʍoᗡ ǝpᴉsd∩";
-        }
-    },
+    /// Simplified Chinese documentation.
     SIMPLIFIED_CHINESE(Locale.forLanguageTag("zh-Hans"), "zh"),
+
+    /// Traditional Chinese documentation.
     TRADITIONAL_CHINESE("zh-Hant") {
         @Override
         public List<DocumentLocale> getCandidates() {
             return List.of(TRADITIONAL_CHINESE, SIMPLIFIED_CHINESE, ENGLISH);
         }
     },
+
+    /// Literary Chinese documentation.
     WENYAN("lzh") {
         @Override
         public String getLanguageDisplayName() {
@@ -62,9 +55,38 @@ public enum DocumentLocale {
             return List.of(WENYAN, TRADITIONAL_CHINESE, SIMPLIFIED_CHINESE, ENGLISH);
         }
     },
+
+    /// Standard English documentation.
+    ENGLISH(Locale.ENGLISH, "") {
+        @Override
+        public String getSubLanguageDisplayName() {
+            return "Standard";
+        }
+
+        @Override
+        public List<DocumentLocale> getCandidates() {
+            return List.of(ENGLISH);
+        }
+    },
+
+    /// Upside-down English documentation.
+    ENGLISH_UPSIDE_DOWN(Locale.forLanguageTag("en-Qabs"), "en-Qabs") {
+        @Override
+        public String getSubLanguageDisplayName() {
+            return "uʍoᗡ ǝpᴉsd∩";
+        }
+    },
+
+    /// Japanese documentation.
     JAPANESE("ja"),
+
+    /// Spanish documentation.
     SPANISH("es"),
+
+    /// Russian documentation.
     RUSSIAN("ru"),
+
+    /// Ukrainian documentation.
     UKRAINIAN("uk"),
     ;
 

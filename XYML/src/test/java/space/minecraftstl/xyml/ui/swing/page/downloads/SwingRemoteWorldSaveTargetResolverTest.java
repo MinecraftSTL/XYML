@@ -138,7 +138,7 @@ final class SwingRemoteWorldSaveTargetResolverTest {
                 "https://example.invalid/fixture-world",
                 "https://example.invalid/fixture-world.png",
                 new FixtureAddonData(),
-                RemoteAddonRepository.Type.WORLD);
+                RemoteAddon.Type.WORLD);
         return new RemoteAddonCatalogItem(
                 addon,
                 RemoteAddonCatalogKind.WORLD,
@@ -152,10 +152,10 @@ final class SwingRemoteWorldSaveTargetResolverTest {
     private static RemoteAddon.Version fixtureVersion(String fileName) {
         return new RemoteAddon.Version(
                 () -> RemoteAddon.Source.CURSEFORGE,
+                "1.0.0",
                 "fixture-world",
                 "Fixture World 1.0",
                 "1.0.0",
-                "",
                 Instant.EPOCH,
                 RemoteAddon.VersionType.Release,
                 new RemoteAddon.File(

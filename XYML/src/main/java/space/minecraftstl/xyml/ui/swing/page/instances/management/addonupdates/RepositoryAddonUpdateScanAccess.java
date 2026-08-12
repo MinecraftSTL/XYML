@@ -24,9 +24,7 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.addon.LocalAddonFile;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
-import space.minecraftstl.xyml.addon.mod.LocalModFile;
 import space.minecraftstl.xyml.addon.mod.ModManager;
-import space.minecraftstl.xyml.addon.resourcepack.ResourcePackFile;
 import space.minecraftstl.xyml.addon.resourcepack.ResourcePackManager;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.game.GameRepository;
@@ -153,7 +151,7 @@ final class RepositoryAddonUpdateScanAccess implements AddonUpdateScanAccess {
                     sourceFailures,
                     updates,
                     failures,
-                    (update, source) -> resolveSourcePage(addon, update, source));
+                    this::resolveSourcePage);
         } else if (!sourceFailures.isEmpty()) {
             failures.add(new AddonUpdateCheckFailure(
                     addon.getFileName(),
@@ -187,14 +185,15 @@ final class RepositoryAddonUpdateScanAccess implements AddonUpdateScanAccess {
         Objects.requireNonNull(failures, "failures");
         Objects.requireNonNull(sourcePageResolver, "sourcePageResolver");
         try {
-            RemoteAddon.Source source = winner.targetVersion().self().getSource();
+            AddonUpdateItem updateItem = AddonUpdateItem.from(winner, null);
+            RemoteAddon.Source source = winner.source();
             @Nullable URI sourcePage;
             try {
                 sourcePage = sourcePageResolver.apply(winner, source);
             } catch (RuntimeException failure) {
                 sourcePage = null;
             }
-            updates.add(AddonUpdateItem.from(winner, sourcePage));
+            updates.add(sourcePage == null ? updateItem : AddonUpdateItem.from(winner, sourcePage));
         } catch (RuntimeException failure) {
             List<String> details = new ArrayList<>(sourceFailures);
             details.add("Selected update: " + describeFailure(failure));
@@ -217,44 +216,27 @@ final class RepositoryAddonUpdateScanAccess implements AddonUpdateScanAccess {
                 .isBefore(candidate.targetVersion().datePublished());
     }
 
-    /// Resolves an exact remote project page only after a matching update already exists.
+    /// Resolves an exact remote version page only after a matching update already exists.
     ///
     /// A failed project-page lookup never discards a valid update result; it only disables the
     /// optional source-page command for that row.
     ///
-    /// @param addon local add-on identifying the remote repository type
     /// @param update accepted update candidate
     /// @param source source that supplied the accepted candidate
     /// @return project page URI, or `null` when no reliable page is available
     private @Nullable URI resolveSourcePage(
-            LocalAddonFile addon,
             LocalAddonFile.AddonUpdate update,
             RemoteAddon.Source source) {
-        @Nullable RemoteAddonRepository remoteRepository = source.getRepoForType(repositoryType(addon));
+        @Nullable RemoteAddonRepository remoteRepository = source.getRepoForType(update.repoType());
         if (remoteRepository == null) {
             return null;
         }
         try {
-            String sourcePage = remoteRepository.getAddonById(downloadProvider, update.targetVersion().projectId())
-                    .pageUrl();
+            String sourcePage = remoteRepository.getVersionPageUrl(update.targetVersion());
             return sourcePage.isBlank() ? null : URI.create(sourcePage);
         } catch (IOException | RuntimeException failure) {
             return null;
         }
-    }
-
-    /// Maps the supported local file implementation to its matching remote catalog type.
-    ///
-    /// @param addon local add-on selected for update checking
-    /// @return matching remote repository type
-    private static RemoteAddonRepository.Type repositoryType(LocalAddonFile addon) {
-        if (addon instanceof LocalModFile) {
-            return RemoteAddonRepository.Type.MOD;
-        }
-        if (addon instanceof ResourcePackFile) {
-            return RemoteAddonRepository.Type.RESOURCE_PACK;
-        }
-        throw new IllegalArgumentException("Unsupported installed add-on: " + addon.getClass().getName());
     }
 
     /// Converts a recoverable source exception to a concise non-blank row detail.

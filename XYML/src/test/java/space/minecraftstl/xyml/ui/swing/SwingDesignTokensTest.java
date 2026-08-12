@@ -38,37 +38,41 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests validation and FlatLaf mapping for adjustable Swing design tokens.
 @NotNullByDefault
 public final class SwingDesignTokensTest {
-    /// Negative radii are rejected instead of being silently normalized.
+    /// Invalid radii are rejected instead of being silently normalized or overflowing their arc diameter.
     @Test
     public void cornerRadiusMustNotBeNegative() {
-        assertThrows(IllegalArgumentException.class, () -> new SwingDesignTokens(-1));
+        assertAll(
+                () -> assertThrows(IllegalArgumentException.class, () -> new SwingDesignTokens(-1)),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new SwingDesignTokens(Integer.MAX_VALUE / 2 + 1)));
     }
 
-    /// One configured radius is applied consistently to every supported FlatLaf arc key.
+    /// One configured radius becomes an arc diameter for every supported FlatLaf key.
     @Test
     public void appliesCornerRadiusToFlatLafDefaults() {
         UIDefaults defaults = new UIDefaults();
-        new SwingDesignTokens(11).applyTo(defaults);
+        new SwingDesignTokens(5).applyTo(defaults);
 
         assertAll(
-                () -> assertEquals(11, defaults.getInt("Component.arc")),
-                () -> assertEquals(11, defaults.getInt("Button.arc")),
-                () -> assertEquals(11, defaults.getInt("CheckBox.arc")),
-                () -> assertEquals(11, defaults.getInt("TextComponent.arc")),
-                () -> assertEquals(11, defaults.getInt("ProgressBar.arc")),
-                () -> assertEquals(11, defaults.getInt("ScrollBar.thumbArc")),
-                () -> assertEquals(11, defaults.getInt("ScrollBar.trackArc")));
+                () -> assertEquals(10, defaults.getInt("Component.arc")),
+                () -> assertEquals(10, defaults.getInt("Button.arc")),
+                () -> assertEquals(6, defaults.getInt("CheckBox.arc")),
+                () -> assertEquals(10, defaults.getInt("TextComponent.arc")),
+                () -> assertEquals(10, defaults.getInt("ProgressBar.arc")),
+                () -> assertEquals(10, defaults.getInt("ScrollBar.thumbArc")),
+                () -> assertEquals(10, defaults.getInt("ScrollBar.trackArc")));
     }
 
-    /// FlatLaf's default checkbox icon reads the dedicated arc value installed by the design tokens.
+    /// FlatLaf's default checkbox icon reads the bounded dedicated arc at the largest launcher setting.
     @Test
-    public void appliesCornerRadiusToFlatLafCheckBoxIcon() {
+    public void limitsCornerRadiusForFlatLafCheckBoxIcon() {
         UIDefaults defaults = UIManager.getDefaults();
         @Nullable Object previousArc = defaults.get("CheckBox.arc");
         try {
-            new SwingDesignTokens(9).applyTo(defaults);
+            new SwingDesignTokens(LauncherSettings.MAXIMUM_CORNER_RADIUS).applyTo(defaults);
 
-            assertEquals(9, new FlatCheckBoxIcon().getStyleableValue("arc"));
+            assertEquals(6, new FlatCheckBoxIcon().getStyleableValue("arc"));
         } finally {
             if (previousArc == null) {
                 defaults.remove("CheckBox.arc");
@@ -78,18 +82,15 @@ public final class SwingDesignTokensTest {
         }
     }
 
-    /// Checkbox painting stays visible and contained when the configured arc exceeds half or all of its side length.
+    /// Checkbox painting stays a visible rounded square at the largest launcher radius.
     @Test
     public void largeCornerRadiusRendersWithinCheckBoxBounds() {
         assertTrue(FlatLightLaf.setup());
         FlatCheckBoxIcon dimensionProbe = new FlatCheckBoxIcon();
         int sideLength = Math.min(dimensionProbe.getIconWidth(), dimensionProbe.getIconHeight());
-        int greaterThanHalfSide = sideLength / 2 + 1;
 
-        assertTrue(greaterThanHalfSide > sideLength / 2.0);
-        assertCheckBoxStatesRenderWithinBounds(greaterThanHalfSide);
-        assertTrue(LauncherSettings.MAXIMUM_CORNER_RADIUS > sideLength);
-        assertCheckBoxStatesRenderWithinBounds(LauncherSettings.MAXIMUM_CORNER_RADIUS);
+        assertTrue(LauncherSettings.MAXIMUM_CORNER_RADIUS >= sideLength);
+        assertCheckBoxStatesRenderWithinBounds(LauncherSettings.MAXIMUM_CORNER_RADIUS, 6);
     }
 
     /// Radius changes create a new immutable token value without changing the original.
@@ -101,15 +102,18 @@ public final class SwingDesignTokensTest {
         assertEquals(9, original.withCornerRadius(9).cornerRadius());
     }
 
-    /// Paints representative checkbox states and checks that the requested arc remains effective.
-    private static void assertCheckBoxStatesRenderWithinBounds(int configuredArc) {
+    /// Paints representative checkbox states and checks that the bounded arc remains effective.
+    ///
+    /// @param requestedRadius requested component radius
+    /// @param expectedCheckBoxArc bounded checkbox arc
+    private static void assertCheckBoxStatesRenderWithinBounds(int requestedRadius, int expectedCheckBoxArc) {
         UIDefaults defaults = UIManager.getDefaults();
         @Nullable Object previousArc = defaults.get("CheckBox.arc");
         try {
-            new SwingDesignTokens(configuredArc).applyTo(defaults);
+            new SwingDesignTokens(requestedRadius).applyTo(defaults);
             FlatCheckBoxIcon icon = new FlatCheckBoxIcon();
 
-            assertEquals(configuredArc, icon.getStyleableValue("arc"));
+            assertEquals(expectedCheckBoxArc, icon.getStyleableValue("arc"));
             assertRenderedWithinBounds(renderCheckBoxIcon(icon, false, true), icon);
             assertRenderedWithinBounds(renderCheckBoxIcon(icon, true, true), icon);
             assertRenderedWithinBounds(renderCheckBoxIcon(icon, true, false), icon);

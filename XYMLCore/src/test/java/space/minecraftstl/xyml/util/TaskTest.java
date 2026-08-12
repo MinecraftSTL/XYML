@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.util;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskListener;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Assertions;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -46,6 +48,76 @@ public class TaskTest {
         )).whenComplete(Assertions::assertNull).test());
 
         assertInstanceOf(Error.class, throwable.get(), "Error has not been thrown to uncaught exception handler");
+    }
+
+    /// Out-of-memory errors complete both task implementations exactly once before reaching the global handler.
+    @Test
+    public void testOutOfMemoryErrorLifecycle() {
+        OutOfMemoryError normalTaskError = new OutOfMemoryError("normal task");
+        assertOutOfMemoryErrorLifecycle(Task.runAsync(() -> {
+            throw normalTaskError;
+        }), normalTaskError);
+
+        OutOfMemoryError futureTaskError = new OutOfMemoryError("completable future task");
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        future.completeExceptionally(futureTaskError);
+        assertOutOfMemoryErrorLifecycle(Task.fromCompletableFuture(future), futureTaskError);
+    }
+
+    /// Verifies one OOM task's terminal callbacks, recorded exception wrapper, and original global failure.
+    ///
+    /// @param task task implementation under test
+    /// @param error exact error raised by the task
+    private static void assertOutOfMemoryErrorLifecycle(Task<?> task, OutOfMemoryError error) {
+        AtomicInteger doneCount = new AtomicInteger();
+        AtomicReference<@Nullable Boolean> doneFailed = new AtomicReference<>();
+        AtomicInteger failedCount = new AtomicInteger();
+        AtomicReference<@Nullable Throwable> failedThrowable = new AtomicReference<>();
+        AtomicInteger stopCount = new AtomicInteger();
+        AtomicReference<@Nullable Boolean> stopSuccess = new AtomicReference<>();
+        AtomicReference<@Nullable Throwable> uncaught = new AtomicReference<>();
+
+        task.onDone().register(event -> {
+            doneCount.incrementAndGet();
+            doneFailed.set(event.isFailed());
+        });
+        TaskExecutor executor = task.executor(new TaskListener() {
+            /// Captures the task-level failure callback.
+            @Override
+            public void onFailed(Task<?> failedTask, Throwable throwable) {
+                failedCount.incrementAndGet();
+                failedThrowable.set(throwable);
+            }
+
+            /// Captures the executor-level terminal callback.
+            @Override
+            public void onStop(boolean success, TaskExecutor taskExecutor) {
+                stopCount.incrementAndGet();
+                stopSuccess.set(success);
+            }
+        });
+
+        @Nullable Thread.UncaughtExceptionHandler previousHandler = Thread.getDefaultUncaughtExceptionHandler();
+        try {
+            Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> uncaught.set(throwable));
+            assertFalse(executor.test());
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(previousHandler);
+        }
+
+        assertAll(
+                () -> assertEquals(1, doneCount.get()),
+                () -> assertEquals(Boolean.TRUE, doneFailed.get()),
+                () -> assertEquals(1, failedCount.get()),
+                () -> assertSame(error, failedThrowable.get()),
+                () -> assertEquals(1, stopCount.get()),
+                () -> assertEquals(Boolean.FALSE, stopSuccess.get()),
+                () -> assertEquals(Task.TaskState.FAILED, task.getState()),
+                () -> assertNotNull(task.getException()),
+                () -> assertSame(error, task.getException().getCause()),
+                () -> assertNotNull(executor.getException()),
+                () -> assertSame(error, executor.getException().getCause()),
+                () -> assertSame(error, uncaught.get()));
     }
 
     /// Failure completion receives the original exception.

@@ -365,6 +365,8 @@ final class AddonUpdatesPanelTest {
         TestLocalAddonFile localAddonFile = new TestLocalAddonFile(localPath);
         RemoteAddon.IVersion source = () -> RemoteAddon.Source.MODRINTH;
         LocalAddonFile.AddonUpdate update = new LocalAddonFile.AddonUpdate(
+                RemoteAddon.Source.MODRINTH,
+                RemoteAddon.Type.MOD,
                 localAddonFile,
                 version(source, "Current", "1.0.0", "current.jar"),
                 version(source, "Target", "1.1.0", "target.jar"),
@@ -386,10 +388,10 @@ final class AddonUpdatesPanelTest {
             String fileName) {
         return new RemoteAddon.Version(
                 source,
+                version,
                 "example-project",
                 name,
                 version,
-                "",
                 Instant.EPOCH,
                 RemoteAddon.VersionType.Release,
                 new RemoteAddon.File(

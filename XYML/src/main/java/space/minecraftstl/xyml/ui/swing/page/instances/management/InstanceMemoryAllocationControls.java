@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.platform.SystemInfo;
 import space.minecraftstl.xyml.util.platform.hardware.PhysicalMemoryStatus;
 
@@ -358,7 +359,7 @@ final class InstanceMemoryAllocationControls {
     /// @return automatic allocation in bytes
     private long automaticAllocation() {
         return memoryStatus.hasAvailable()
-                ? XYMLGameRepository.getAutoAllocatedMemory(memoryStatus.available())
+                ? XYMLGameRepository.getAutoAllocatedMemory(memoryStatus.available(), Platform.SYSTEM_PLATFORM)
                 : (long) GameSettings.SUGGESTED_MEMORY * BYTES_PER_MIB;
     }
 

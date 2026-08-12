@@ -92,9 +92,9 @@ public final class SwingThemeManagerTest {
                 () -> assertTrue(manager.isInitialized()),
                 () -> assertEquals(ThemeVariant.LIGHT, manager.effectiveVariant()),
                 () -> assertInstanceOf(FlatLightLaf.class, UIManager.getLookAndFeel()),
-                () -> assertEquals(4, UIManager.getInt("Component.arc")),
-                () -> assertEquals(4, UIManager.getInt("CheckBox.arc")),
-                () -> assertEquals(4, initialCheckBoxIcon.getStyleableValue("arc")));
+                () -> assertEquals(8, UIManager.getInt("Component.arc")),
+                () -> assertEquals(6, UIManager.getInt("CheckBox.arc")),
+                () -> assertEquals(6, initialCheckBoxIcon.getStyleableValue("arc")));
 
         manager.update(ThemeBrightnessPreference.LIGHT, new SwingDesignTokens(13));
         FlatCheckBoxIcon updatedCheckBoxIcon = assertInstanceOf(
@@ -104,18 +104,18 @@ public final class SwingThemeManagerTest {
         assertAll(
                 () -> assertEquals(ThemeVariant.LIGHT, manager.effectiveVariant()),
                 () -> assertInstanceOf(FlatLightLaf.class, UIManager.getLookAndFeel()),
-                () -> assertEquals(13, UIManager.getInt("Component.arc")),
-                () -> assertEquals(13, UIManager.getInt("CheckBox.arc")),
+                () -> assertEquals(26, UIManager.getInt("Component.arc")),
+                () -> assertEquals(6, UIManager.getInt("CheckBox.arc")),
                 () -> assertNotSame(initialCheckBoxIcon, updatedCheckBoxIcon),
-                () -> assertEquals(13, updatedCheckBoxIcon.getStyleableValue("arc")));
+                () -> assertEquals(6, updatedCheckBoxIcon.getStyleableValue("arc")));
 
         manager.update(ThemeBrightnessPreference.DARK, new SwingDesignTokens(13));
 
         assertAll(
                 () -> assertEquals(ThemeVariant.DARK, manager.effectiveVariant()),
                 () -> assertInstanceOf(FlatDarkLaf.class, UIManager.getLookAndFeel()),
-                () -> assertEquals(13, UIManager.getInt("Component.arc")),
-                () -> assertEquals(13, UIManager.getInt("CheckBox.arc")));
+                () -> assertEquals(26, UIManager.getInt("Component.arc")),
+                () -> assertEquals(6, UIManager.getInt("CheckBox.arc")));
     }
 
     /// A requested launcher family is applied before first paint and survives later look-and-feel replacement.

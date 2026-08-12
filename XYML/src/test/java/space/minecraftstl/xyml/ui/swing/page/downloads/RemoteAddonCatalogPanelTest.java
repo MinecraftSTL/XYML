@@ -611,7 +611,7 @@ final class RemoteAddonCatalogPanelTest {
                 "https://example.invalid/fixture-mod",
                 "https://example.invalid/fixture-mod.png",
                 new FixtureAddonData(),
-                RemoteAddonRepository.Type.MOD);
+                RemoteAddon.Type.MOD);
     }
 
     /// Creates one installable remote Mod version for selected-version handoff tests.
@@ -620,10 +620,10 @@ final class RemoteAddonCatalogPanelTest {
     private static RemoteAddon.Version fixtureVersion() {
         return new RemoteAddon.Version(
                 () -> RemoteAddon.Source.MODRINTH,
+                "1.0.0",
                 "fixture-mod",
                 "Fixture Mod 1.0",
                 "1.0.0",
-                "",
                 Instant.EPOCH,
                 RemoteAddon.VersionType.Release,
                 new RemoteAddon.File(

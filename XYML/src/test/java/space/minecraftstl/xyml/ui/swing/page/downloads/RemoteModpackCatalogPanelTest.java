@@ -461,7 +461,7 @@ final class RemoteModpackCatalogPanelTest {
                 "https://example.invalid/fixture-pack",
                 "https://example.invalid/fixture-pack.png",
                 new FixtureAddonData(),
-                RemoteAddonRepository.Type.MODPACK);
+                RemoteAddon.Type.MODPACK);
     }
 
     /// Creates an installable source version for selected-version handoff verification.
@@ -470,10 +470,10 @@ final class RemoteModpackCatalogPanelTest {
     private static RemoteAddon.Version fixtureVersion() {
         return new RemoteAddon.Version(
                 () -> RemoteAddon.Source.MODRINTH,
+                "1.0.0",
                 "fixture-pack",
                 "Fixture Pack 1.0",
                 "1.0.0",
-                "",
                 Instant.EPOCH,
                 RemoteAddon.VersionType.Release,
                 new RemoteAddon.File(Map.of(), "https://example.invalid/fixture-pack.mrpack", "fixture-pack.mrpack"),

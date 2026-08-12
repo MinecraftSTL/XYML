@@ -106,7 +106,7 @@ final class ResourcePackZipFile extends ResourcePackFile {
             String gameVersion,
             RemoteAddon.Source source) throws IOException {
         @Nullable RemoteAddonRepository repository = source.getRepoForType(
-                RemoteAddonRepository.Type.RESOURCE_PACK);
+                RemoteAddon.Type.RESOURCE_PACK);
         if (repository == null) {
             return null;
         }
@@ -123,6 +123,12 @@ final class ResourcePackZipFile extends ResourcePackFile {
                 .toList();
         return remoteVersions.isEmpty()
                 ? null
-                : new AddonUpdate(this, current, remoteVersions.get(0), false);
+                : new AddonUpdate(
+                        source,
+                        RemoteAddon.Type.RESOURCE_PACK,
+                        this,
+                        current,
+                        remoteVersions.get(0),
+                        false);
     }
 }

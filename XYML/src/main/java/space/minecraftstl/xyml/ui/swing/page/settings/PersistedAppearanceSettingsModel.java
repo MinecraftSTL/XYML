@@ -23,6 +23,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChange;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.setting.AnimationSpeedSettings;
 import space.minecraftstl.xyml.theme.ResolvedTheme;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
@@ -32,6 +33,7 @@ import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /// Maps persisted appearance values to the Swing settings page and active UI runtime.
@@ -143,6 +145,16 @@ public final class PersistedAppearanceSettingsModel
         store.setAnimationsDisabled(!enabled);
     }
 
+    /// Persists one launcher-supported discrete animation speed.
+    @Override
+    public void setAnimationSpeedPercentage(int percentage) {
+        requireWritable();
+        if (!AnimationSpeedSettings.isSupportedPercentage(percentage)) {
+            throw new IllegalArgumentException("Unsupported animation speed percentage: " + percentage);
+        }
+        store.setAnimationSpeedPercentage(percentage);
+    }
+
     /// Persists one validated complete theme-color configuration.
     ///
     /// @param themeColor complete replacement theme-color settings
@@ -200,6 +212,7 @@ public final class PersistedAppearanceSettingsModel
                 raw.maximumCornerRadius(),
                 raw.cornerRadiusStep(),
                 !raw.animationsDisabled(),
+                raw.animationSpeed(),
                 raw.themeColor(),
                 raw.background(),
                 raw.writable());
@@ -215,18 +228,26 @@ public final class PersistedAppearanceSettingsModel
             SwingAnimator animator) {
         Objects.requireNonNull(themeManager, "themeManager");
         Objects.requireNonNull(animator, "animator");
-        return snapshot -> SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
-            SwingDesignTokens tokens = new SwingDesignTokens(snapshot.cornerRadius());
-            @Nullable ResolvedTheme currentTheme = themeManager.resolvedTheme();
-            if (currentTheme == null) {
-                themeManager.update(snapshot.brightnessPreference(), tokens);
-            } else {
-                themeManager.update(currentTheme, tokens, snapshot.brightnessPreference());
-            }
-            animator.setMotionPolicy(snapshot.animationsEnabled()
-                    ? MotionPolicy.FULL
-                    : MotionPolicy.OFF);
-        });
+        AtomicLong latestGeneration = new AtomicLong();
+        return snapshot -> {
+            long generation = latestGeneration.incrementAndGet();
+            SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+                if (generation != latestGeneration.get()) {
+                    return;
+                }
+                SwingDesignTokens tokens = new SwingDesignTokens(snapshot.cornerRadius());
+                @Nullable ResolvedTheme currentTheme = themeManager.resolvedTheme();
+                if (currentTheme == null) {
+                    themeManager.update(snapshot.brightnessPreference(), tokens);
+                } else {
+                    themeManager.update(currentTheme, tokens, snapshot.brightnessPreference());
+                }
+                animator.setAnimationSpeedPercentage(snapshot.animationSpeed().percentage());
+                animator.setMotionPolicy(snapshot.animationsEnabled()
+                        ? MotionPolicy.FULL
+                        : MotionPolicy.OFF);
+            });
+        };
     }
 
     /// Releases the optional runtime lifecycle and preserves checked failures as unchecked model-close failures.

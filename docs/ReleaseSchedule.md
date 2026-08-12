@@ -1,7 +1,7 @@
 # xOyz Minecraft Launcher Release Model
 
 <!-- #BEGIN LANGUAGE_SWITCHER -->
-**English** | 中文 ([简体](ReleaseSchedule_zh.md), [繁體](ReleaseSchedule_zh_Hant.md))
+中文 ([简体](ReleaseSchedule_zh.md), [繁體](ReleaseSchedule_zh_Hant.md)) | **English**
 <!-- #END LANGUAGE_SWITCHER -->
 
 This document defines the XYML release model beginning with `1.0.0`.

@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
+import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.SwingThemeManager;
 import space.minecraftstl.xyml.ui.swing.SystemThemeDetector;
@@ -76,6 +77,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -86,6 +88,8 @@ import java.util.Set;
 import java.util.HashSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -107,6 +111,51 @@ public final class AppShellPanelTest {
 
     /// Fixed screenshot height matching the shell's preferred height.
     private static final int RENDER_HEIGHT = AppShellPanel.PREFERRED_HEIGHT;
+
+    /// Sidebar preloading starts only after the main page is ready and follows physical navigation order.
+    ///
+    /// @throws InterruptedException when the test thread is interrupted while awaiting incremental preloading
+    @Test
+    public void preloadsSidebarPagesIncrementallyAfterMainPage() throws InterruptedException {
+        List<ShellPageId> creationOrder = new ArrayList<>();
+        CountDownLatch pagesCreated = new CountDownLatch(ShellPageId.values().length);
+        AtomicReference<@Nullable JComponent> mainPage = new AtomicReference<>();
+        EnumMap<ShellPageId, ShellPageFactory<? extends JComponent>> factories =
+                new EnumMap<>(ShellPageId.class);
+        for (ShellPageId page : ShellPageId.values()) {
+            factories.put(page, () -> {
+                creationOrder.add(page);
+                pagesCreated.countDown();
+                return samplePage(page);
+            });
+        }
+        AppShellPanel panel = createPanel(factories, new TestHomeModel());
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                mainPage.set(panel.activePage());
+                assertEquals(List.of(ShellPageId.INSTANCES), creationOrder);
+                assertEquals(ShellPageId.values().length - 1L, pagesCreated.getCount());
+                panel.startSidebarPagePreloading();
+                assertEquals(List.of(ShellPageId.INSTANCES), creationOrder);
+            });
+            assertTrue(pagesCreated.await(5L, TimeUnit.SECONDS));
+
+            EdtDispatcher.executeAndWait(() -> assertAll(
+                    () -> assertEquals(
+                            List.of(
+                                    ShellPageId.INSTANCES,
+                                    ShellPageId.ACCOUNTS,
+                                    ShellPageId.DOWNLOADS,
+                                    ShellPageId.SETTINGS),
+                            creationOrder),
+                    () -> assertEquals(ShellPageId.values().length, panel.cachedPageCount()),
+                    () -> assertNull(panel.selectedPage()),
+                    () -> assertSame(mainPage.get(), panel.activePage())));
+        } finally {
+            panel.close();
+        }
+    }
 
     /// Instance management is created first, retained below overlays, and reused after returning.
     @Test
@@ -222,6 +271,59 @@ public final class AppShellPanelTest {
         }
     }
 
+    /// Instance management and transient destinations share the same animated top-level page deck.
+    @Test
+    public void transitionsIntoAndOutOfPersistentInstanceManagement() {
+        SwingAnimator animator = new SwingAnimator(MotionPolicy.FULL, 10_000);
+        AppShellPanel panel = createPanel(
+                pageFactories(creationCounts()),
+                new TestHomeModel(),
+                testAccountsModel(),
+                animator,
+                Duration.ofSeconds(2L));
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                panel.pageDeck().setSize(720, 520);
+                panel.pageDeck().doLayout();
+                JComponent instancesPage = Objects.requireNonNull(panel.activePage(), "instances page");
+                panel.navigateTo(ShellPageId.DOWNLOADS);
+                JComponent downloadsPage = Objects.requireNonNull(panel.activePage(), "downloads page");
+                assertAll(
+                        () -> assertEquals(1, panel.pageDeck().getComponentCount()),
+                        () -> assertNull(instancesPage.getParent()),
+                        () -> assertSame(panel.pageDeck(), downloadsPage.getParent()),
+                        () -> assertEquals(
+                                SwingContentTransition.Direction.VERTICAL_FORWARD,
+                                panel.pageDeck().transitionDirection()),
+                        () -> assertTrue(panel.pageDeck().isTransitionRunning()));
+
+                animator.setMotionPolicy(MotionPolicy.OFF);
+                animator.setMotionPolicy(MotionPolicy.FULL);
+                panel.pageDeck().doLayout();
+                panel.navigateTo(ShellPageId.INSTANCES);
+                assertAll(
+                        () -> assertSame(instancesPage, panel.activePage()),
+                        () -> assertEquals(1, panel.pageDeck().getComponentCount()),
+                        () -> assertSame(panel.pageDeck(), instancesPage.getParent()),
+                        () -> assertNull(downloadsPage.getParent()),
+                        () -> assertEquals(
+                                SwingContentTransition.Direction.VERTICAL_BACKWARD,
+                                panel.pageDeck().transitionDirection()),
+                        () -> assertTrue(panel.pageDeck().isTransitionRunning()));
+
+                animator.setMotionPolicy(MotionPolicy.OFF);
+                assertAll(
+                        () -> assertEquals(1, panel.pageDeck().getComponentCount()),
+                        () -> assertFalse(downloadsPage.isVisible()),
+                        () -> assertTrue(instancesPage.isVisible()),
+                        () -> assertFalse(panel.pageDeck().isTransitionRunning()));
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
     /// The title bar restores brand identity before directory, account, instance, launch, and native controls.
     @Test
     public void laysOutTitleBarWorkflowInStableOrder() {
@@ -244,10 +346,29 @@ public final class AppShellPanelTest {
                         () -> assertSame(toolbar.instanceSelector(), components[4]),
                         () -> assertSame(toolbar.launchButton(), components[5]),
                         () -> assertSame(toolbar.winWindowButtonsPlaceholder(), components[6]),
+                        () -> assertEquals(
+                                toolbar.brandLabel().getPreferredSize().width,
+                                toolbar.brandLabel().getWidth()),
                         () -> assertTrue(rightEdge(toolbar.brandLabel()) <= toolbar.gameDirectorySelector().getX()),
                         () -> assertTrue(rightEdge(toolbar.gameDirectorySelector()) <= toolbar.accountSelector().getX()),
+                        () -> assertEquals(
+                                toolbar.gameDirectorySelector().getX() - rightEdge(toolbar.brandLabel()),
+                                toolbar.accountSelector().getX() - rightEdge(toolbar.gameDirectorySelector())),
                         () -> assertTrue(rightEdge(toolbar.accountSelector()) <= toolbar.instanceSelector().getX()),
                         () -> assertTrue(rightEdge(toolbar.instanceSelector()) <= toolbar.launchButton().getX()),
+                        () -> assertEquals(
+                                toolbar.launchButton().getPreferredSize().width,
+                                toolbar.launchButton().getWidth()),
+                        () -> assertEquals(36, toolbar.launchButton().getHeight()),
+                        () -> assertEquals(
+                                toolbar.gameDirectorySelector().getHeight(),
+                                toolbar.launchButton().getHeight()),
+                        () -> assertEquals(
+                                toolbar.accountSelector().getHeight(),
+                                toolbar.launchButton().getHeight()),
+                        () -> assertEquals(
+                                toolbar.instanceSelector().getHeight(),
+                                toolbar.launchButton().getHeight()),
                         () -> assertTrue(toolbar.instanceSelector().getX() > toolbar.getWidth() / 2),
                         () -> assertTrue(toolbar.brandLabel().getX() >= 12),
                         () -> assertEquals(Boolean.TRUE, toolbar.getClientProperty(
@@ -334,6 +455,36 @@ public final class AppShellPanelTest {
                 assertAll(
                         () -> assertNull(panel.selectedPage()),
                         () -> assertFalse(panel.navigationButton(ShellPageId.INSTANCES).isSelected()));
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
+    /// A long development version keeps both leading selectors immediately after the complete brand title.
+    @Test
+    public void positionsLeadingSelectorsAfterVariableLengthVersionTitle() {
+        AppShellPanel panel = createPanel(creationCounts());
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                panel.setSize(new Dimension(RENDER_WIDTH, RENDER_HEIGHT));
+                ShellToolbarPanel toolbar = panel.toolbar();
+                toolbar.brandLabel().setText("XYML 1.0.1-dev.20260803+build.1234567890");
+                layoutTree(panel);
+
+                int brandDirectoryGap = toolbar.gameDirectorySelector().getX() - rightEdge(toolbar.brandLabel());
+                int directoryAccountGap = toolbar.accountSelector().getX()
+                        - rightEdge(toolbar.gameDirectorySelector());
+                assertAll(
+                        () -> assertEquals(
+                                toolbar.brandLabel().getPreferredSize().width,
+                                toolbar.brandLabel().getWidth()),
+                        () -> assertTrue(brandDirectoryGap > 0),
+                        () -> assertEquals(directoryAccountGap, brandDirectoryGap),
+                        () -> assertTrue(rightEdge(toolbar.brandLabel()) <= toolbar.gameDirectorySelector().getX()),
+                        () -> assertTrue(rightEdge(toolbar.gameDirectorySelector()) <= toolbar.accountSelector().getX()),
+                        () -> assertTrue(rightEdge(toolbar.accountSelector()) <= toolbar.instanceSelector().getX()));
             });
         } finally {
             panel.close();
@@ -536,6 +687,28 @@ public final class AppShellPanelTest {
             Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> factories,
             HomeModel homeModel,
             AccountsModel accountsModel) {
+        return createPanel(
+                factories,
+                homeModel,
+                accountsModel,
+                new SwingAnimator(MotionPolicy.OFF, 16),
+                Duration.ZERO);
+    }
+
+    /// Creates a shell around caller-selected factories, models, and page-transition timing.
+    ///
+    /// @param factories complete page factories
+    /// @param homeModel caller-owned launcher model
+    /// @param accountsModel caller-owned lazy account model
+    /// @param animator caller-owned shared animator
+    /// @param pageTransitionDuration non-negative top-level page transition duration
+    /// @return initialized shell panel
+    private static AppShellPanel createPanel(
+            Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> factories,
+            HomeModel homeModel,
+            AccountsModel accountsModel,
+            SwingAnimator animator,
+            Duration pageTransitionDuration) {
         AtomicReference<@Nullable AppShellPanel> result = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> {
             SwingThemeManager themeManager = new SwingThemeManager(
@@ -555,8 +728,8 @@ public final class AppShellPanelTest {
                             ShellRecentSelections.transientSelections()),
                     testHomeStrings(),
                     TaskProgressStrings.english(),
-                    new SwingAnimator(MotionPolicy.OFF, 16),
-                    Duration.ZERO,
+                    animator,
+                    pageTransitionDuration,
                     Duration.ZERO));
         });
         return Objects.requireNonNull(result.get());
