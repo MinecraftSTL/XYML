@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.platform.hardware.PhysicalMemoryStatus;
 
 import javax.swing.JComponent;
@@ -42,6 +43,18 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// Verifies the restored manual memory slider and physical-memory summary.
 @NotNullByDefault
 final class InstanceMemoryAllocationControlsTest {
+    /// Caps automatic allocation for 32-bit game runtimes without constraining 64-bit runtimes.
+    @Test
+    void capsAutomaticAllocationFor32BitRuntime() {
+        long mebibyte = 1_024L * 1_024L;
+        long available = 4L * 1_024L * mebibyte;
+
+        assertEquals(768L * mebibyte,
+                XYMLGameRepository.getAutoAllocatedMemory(available, Platform.WINDOWS_X86));
+        assertTrue(XYMLGameRepository.getAutoAllocatedMemory(available, Platform.WINDOWS_X86_64)
+                > 768L * mebibyte);
+    }
+
     /// Keeps the text field and slider synchronized and renders the detected memory status.
     @Test
     void synchronizesManualAllocationAndStatus() {
@@ -128,7 +141,7 @@ final class InstanceMemoryAllocationControlsTest {
                     "instanceGameSettingsAllocatedMemory",
                     JLabel.class);
 
-            long automaticBytes = XYMLGameRepository.getAutoAllocatedMemory(4L * gibibyte);
+            long automaticBytes = XYMLGameRepository.getAutoAllocatedMemory(4L * gibibyte, Platform.SYSTEM_PLATFORM);
             assertEquals(i18n(
                     "settings.memory.allocate",
                     automaticBytes / (double) gibibyte), allocated.getText());
@@ -174,7 +187,7 @@ final class InstanceMemoryAllocationControlsTest {
                     Objects.requireNonNull(componentReference.get(), "component"),
                     "instanceGameSettingsAllocatedMemory",
                     JLabel.class);
-            long automaticBytes = XYMLGameRepository.getAutoAllocatedMemory(4L * gibibyte);
+            long automaticBytes = XYMLGameRepository.getAutoAllocatedMemory(4L * gibibyte, Platform.SYSTEM_PLATFORM);
             assertTrue(selector.isInherited());
             assertFalse(selector.automaticButton().isSelected());
             assertEquals(i18n(

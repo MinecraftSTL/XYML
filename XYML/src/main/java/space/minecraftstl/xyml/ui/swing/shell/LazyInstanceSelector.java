@@ -353,6 +353,10 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
         if (closed) {
             return;
         }
+        if (popup.isVisible()) {
+            popup.setVisible(false);
+            return;
+        }
         restoreSelection(synchronizeOrder(displayedSnapshot));
         Dimension size = preparePopupSize();
         if (displayedSnapshot.itemCount() > 0) {

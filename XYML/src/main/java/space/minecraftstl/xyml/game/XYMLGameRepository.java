@@ -52,7 +52,9 @@ import space.minecraftstl.xyml.util.gson.JsonSchema;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.platform.Bits;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
+import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.platform.SystemInfo;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
@@ -812,7 +814,9 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         if (autoMemory) {
             maxMemory = noJVMOptions
                     ? null
-                    : Math.toIntExact(getAutoAllocatedMemory(SystemInfo.getPhysicalMemoryStatus().available()) / 1024L / 1024L);
+                    : Math.toIntExact(getAutoAllocatedMemory(
+                    SystemInfo.getPhysicalMemoryStatus().available(),
+                    javaVersion.getPlatform()) / 1024L / 1024L);
         } else {
             maxMemory = vs.getMaxMemory();
         }
@@ -985,8 +989,9 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// Calculates the recommended game heap from currently available physical memory.
     ///
     /// @param available available physical memory in bytes
+    /// @param platform platform used to launch the game
     /// @return recommended heap size in bytes
-    public static long getAutoAllocatedMemory(long available) {
+    public static long getAutoAllocatedMemory(long available, Platform platform) {
         long usable = available - 512 * 1024 * 1024; // Reserve 512 MiB memory for off-heap memory and XYML itself
         if (usable <= 0) {
             return available;
@@ -1000,7 +1005,9 @@ public final class XYMLGameRepository extends DefaultGameRepository {
             suggested = Math.min(
                     (long) (threshold * 0.8 + (usable - threshold) * 0.2),
                     16L * 1024 * 1024 * 1024);
-        return suggested;
+        return platform.getBits() == Bits.BIT_32
+                ? Math.min(suggested, 768L * 1024 * 1024)
+                : suggested;
     }
 
     /// Builds the launch proxy option from validated launcher settings.
