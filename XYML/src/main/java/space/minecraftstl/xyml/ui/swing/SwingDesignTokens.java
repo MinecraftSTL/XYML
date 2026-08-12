@@ -27,8 +27,8 @@ import java.util.Objects;
 /// @param cornerRadius the component corner radius in logical pixels
 @NotNullByDefault
 public record SwingDesignTokens(int cornerRadius) {
-    /// Largest FlatLaf checkbox arc that retains a rounded-square silhouette.
-    private static final int MAXIMUM_CHECK_BOX_ARC = 6;
+    /// Largest FlatLaf checkbox arc diameter that retains a rounded-square silhouette.
+    private static final int MAXIMUM_CHECK_BOX_ARC_DIAMETER = 6;
 
     /// Creates validated Swing design tokens.
     ///
@@ -36,6 +36,9 @@ public record SwingDesignTokens(int cornerRadius) {
     public SwingDesignTokens {
         if (cornerRadius < 0) {
             throw new IllegalArgumentException("cornerRadius must not be negative");
+        }
+        if (cornerRadius > Integer.MAX_VALUE / 2) {
+            throw new IllegalArgumentException("cornerRadius is too large to convert to an arc diameter");
         }
     }
 
@@ -53,12 +56,13 @@ public record SwingDesignTokens(int cornerRadius) {
     public void applyTo(UIDefaults defaults) {
         Objects.requireNonNull(defaults);
 
-        defaults.put("Component.arc", cornerRadius);
-        defaults.put("Button.arc", cornerRadius);
-        defaults.put("CheckBox.arc", Math.min(cornerRadius, MAXIMUM_CHECK_BOX_ARC));
-        defaults.put("TextComponent.arc", cornerRadius);
-        defaults.put("ProgressBar.arc", cornerRadius);
-        defaults.put("ScrollBar.thumbArc", cornerRadius);
-        defaults.put("ScrollBar.trackArc", cornerRadius);
+        int arcDiameter = cornerRadius * 2;
+        defaults.put("Component.arc", arcDiameter);
+        defaults.put("Button.arc", arcDiameter);
+        defaults.put("CheckBox.arc", Math.min(arcDiameter, MAXIMUM_CHECK_BOX_ARC_DIAMETER));
+        defaults.put("TextComponent.arc", arcDiameter);
+        defaults.put("ProgressBar.arc", arcDiameter);
+        defaults.put("ScrollBar.thumbArc", arcDiameter);
+        defaults.put("ScrollBar.trackArc", arcDiameter);
     }
 }

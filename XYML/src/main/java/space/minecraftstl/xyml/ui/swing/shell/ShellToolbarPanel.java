@@ -260,7 +260,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
             }
         });
         launchButton.getAccessibleContext().setAccessibleName(homeStrings.launchAction());
-        add(launchButton, "grow, h 40!");
+        add(launchButton, "grow, h 36!");
         add(winWindowButtonsPlaceholder, "growy");
     }
 

@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Objects;
 import java.util.stream.IntStream;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -38,10 +39,14 @@ public final class LauncherAppearanceSettingsTest {
     public void usesDefaultAppearanceValues() {
         LauncherSettings settings = new LauncherSettings();
 
-        assertEquals(LauncherSettings.DEFAULT_CORNER_RADIUS, settings.cornerRadiusProperty().get());
-        assertEquals(
-                LauncherSettings.DEFAULT_ANIMATION_SPEED_PERCENTAGE,
-                settings.animationSpeedPercentageProperty().get());
+        assertAll(
+                () -> assertEquals(
+                        LauncherSettings.DEFAULT_CORNER_RADIUS,
+                        settings.cornerRadiusProperty().get()),
+                () -> assertEquals(18, LauncherSettings.MAXIMUM_CORNER_RADIUS),
+                () -> assertEquals(
+                        LauncherSettings.DEFAULT_ANIMATION_SPEED_PERCENTAGE,
+                        settings.animationSpeedPercentageProperty().get()));
     }
 
     /// Changed appearance values survive launcher-settings JSON serialization and deserialization.
