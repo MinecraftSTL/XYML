@@ -55,6 +55,9 @@ final class ShellDropdownButton extends JButton implements PopupMenuListener {
     /// Whether the current mouse release must leave an automatically hidden popup closed.
     private boolean suppressPopupOpenOnRelease;
 
+    /// Whether the bound popup is expanded and the disclosure chevron must point upward.
+    private boolean popupExpanded;
+
     /// Creates one left-aligned popup button.
     ShellDropdownButton() {
         setOpaque(false);
@@ -110,6 +113,8 @@ final class ShellDropdownButton extends JButton implements PopupMenuListener {
     @Override
     public void popupMenuWillBecomeVisible(PopupMenuEvent event) {
         popupHiddenDuringCurrentDispatch = false;
+        popupExpanded = true;
+        repaint();
     }
 
     /// Records an automatic dismissal until the current input dispatch finishes.
@@ -140,8 +145,10 @@ final class ShellDropdownButton extends JButton implements PopupMenuListener {
             copy.setColor(getForeground());
             int centerX = getComponentOrientation().isLeftToRight() ? getWidth() - 15 : 15;
             int centerY = getHeight() / 2;
-            copy.drawLine(centerX - 4, centerY - 2, centerX, centerY + 2);
-            copy.drawLine(centerX, centerY + 2, centerX + 4, centerY - 2);
+            int edgeY = centerY + (popupExpanded ? 2 : -2);
+            int pointY = centerY + (popupExpanded ? -2 : 2);
+            copy.drawLine(centerX - 4, edgeY, centerX, pointY);
+            copy.drawLine(centerX, pointY, centerX + 4, edgeY);
         } finally {
             copy.dispose();
         }
@@ -159,6 +166,8 @@ final class ShellDropdownButton extends JButton implements PopupMenuListener {
 
     /// Retains one popup dismissal through the rest of the current AWT event dispatch.
     private void recordPopupDismissal() {
+        popupExpanded = false;
+        repaint();
         popupHiddenDuringCurrentDispatch = true;
         SwingUtilities.invokeLater(() -> popupHiddenDuringCurrentDispatch = false);
     }
