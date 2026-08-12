@@ -109,6 +109,34 @@ public final class ShellDropdownButtonTest {
         });
     }
 
+    /// The disclosure chevron points down while collapsed and up while the bound popup is visible.
+    @Test
+    public void pointsDisclosureChevronTowardPopupState() {
+        EdtDispatcher.executeAndWait(() -> {
+            assertTrue(FlatLightLaf.setup());
+            ShellDropdownButton button = new ShellDropdownButton();
+            TestPopupMenu popup = new TestPopupMenu();
+            button.setSize(220, 36);
+            button.bindPopup(popup, () -> popup.setVisible(true));
+
+            BufferedImage collapsed = render(button);
+            popup.setVisible(true);
+            BufferedImage expanded = render(button);
+            popup.setVisible(false);
+            BufferedImage collapsedAgain = render(button);
+            int centerX = button.getWidth() - 15;
+            int centerY = button.getHeight() / 2;
+            Color foreground = button.getForeground();
+
+            assertAll(
+                    () -> assertTrue(colorDistance(collapsed.getRGB(centerX, centerY + 2), foreground)
+                            < colorDistance(collapsed.getRGB(centerX, centerY - 2), foreground)),
+                    () -> assertTrue(colorDistance(expanded.getRGB(centerX, centerY - 2), foreground)
+                            < colorDistance(expanded.getRGB(centerX, centerY + 2), foreground)),
+                    () -> assertEquals(0, differingPixelCount(collapsed, collapsedAgain)));
+        });
+    }
+
     /// Creates one primary-button event inside the dropdown bounds.
     ///
     /// @param button event target
@@ -153,6 +181,18 @@ public final class ShellDropdownButtonTest {
     /// @return center ARGB pixel
     private static int centerPixel(BufferedImage image) {
         return image.getRGB(image.getWidth() / 2, image.getHeight() / 2);
+    }
+
+    /// Measures RGB distance from one rendered pixel to a reference color.
+    ///
+    /// @param argb rendered pixel
+    /// @param reference comparison color
+    /// @return summed absolute RGB channel distance
+    private static int colorDistance(int argb, Color reference) {
+        Color pixel = new Color(argb, true);
+        return Math.abs(pixel.getRed() - reference.getRed())
+                + Math.abs(pixel.getGreen() - reference.getGreen())
+                + Math.abs(pixel.getBlue() - reference.getBlue());
     }
 
     /// Counts pixels changed by one interaction-state transition.
