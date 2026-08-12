@@ -294,7 +294,7 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
         valueButton.setName("shellInstanceValue");
         valueButton.setIcon(new FlatSVGIcon("assets/swing/icons/nav-instances.svg", 18, 18));
         valueButton.setIconTextGap(8);
-        valueButton.addActionListener(event -> showPopup());
+        valueButton.bindPopup(popup, this::showPopup);
         valueButton.getAccessibleContext().setAccessibleName(selectorLabel);
         add(valueButton, BorderLayout.CENTER);
 
@@ -351,10 +351,6 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
     private void showPopup() {
         EdtDispatcher.requireEventDispatchThread();
         if (closed) {
-            return;
-        }
-        if (popup.isVisible()) {
-            popup.setVisible(false);
             return;
         }
         restoreSelection(synchronizeOrder(displayedSnapshot));

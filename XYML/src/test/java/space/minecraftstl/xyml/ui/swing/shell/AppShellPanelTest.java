@@ -359,6 +359,16 @@ public final class AppShellPanelTest {
                         () -> assertEquals(
                                 toolbar.launchButton().getPreferredSize().width,
                                 toolbar.launchButton().getWidth()),
+                        () -> assertEquals(36, toolbar.launchButton().getHeight()),
+                        () -> assertEquals(
+                                toolbar.gameDirectorySelector().getHeight(),
+                                toolbar.launchButton().getHeight()),
+                        () -> assertEquals(
+                                toolbar.accountSelector().getHeight(),
+                                toolbar.launchButton().getHeight()),
+                        () -> assertEquals(
+                                toolbar.instanceSelector().getHeight(),
+                                toolbar.launchButton().getHeight()),
                         () -> assertTrue(toolbar.instanceSelector().getX() > toolbar.getWidth() / 2),
                         () -> assertTrue(toolbar.brandLabel().getX() >= 12),
                         () -> assertEquals(Boolean.TRUE, toolbar.getClientProperty(
