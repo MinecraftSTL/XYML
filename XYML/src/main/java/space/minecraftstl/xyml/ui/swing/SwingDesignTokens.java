@@ -60,6 +60,11 @@ public record SwingDesignTokens(int cornerRadius) {
         defaults.put("Component.arc", arcDiameter);
         defaults.put("Button.arc", arcDiameter);
         defaults.put("CheckBox.arc", Math.min(arcDiameter, MAXIMUM_CHECK_BOX_ARC_DIAMETER));
+        defaults.put("ComboBox.borderCornerRadius", cornerRadius);
+        defaults.put("ComboBox.selectionArc", arcDiameter);
+        defaults.put("List.selectionArc", arcDiameter);
+        defaults.put("Popup.borderCornerRadius", cornerRadius);
+        defaults.put("PopupMenu.borderCornerRadius", cornerRadius);
         defaults.put("TextComponent.arc", arcDiameter);
         defaults.put("ProgressBar.arc", arcDiameter);
         defaults.put("ScrollBar.thumbArc", arcDiameter);

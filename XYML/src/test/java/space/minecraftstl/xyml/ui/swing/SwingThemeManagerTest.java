@@ -94,6 +94,8 @@ public final class SwingThemeManagerTest {
                 () -> assertInstanceOf(FlatLightLaf.class, UIManager.getLookAndFeel()),
                 () -> assertEquals(8, UIManager.getInt("Component.arc")),
                 () -> assertEquals(6, UIManager.getInt("CheckBox.arc")),
+                () -> assertEquals(4, UIManager.getInt("PopupMenu.borderCornerRadius")),
+                () -> assertEquals(8, UIManager.getInt("List.selectionArc")),
                 () -> assertEquals(6, initialCheckBoxIcon.getStyleableValue("arc")));
 
         manager.update(ThemeBrightnessPreference.LIGHT, new SwingDesignTokens(13));
@@ -106,6 +108,8 @@ public final class SwingThemeManagerTest {
                 () -> assertInstanceOf(FlatLightLaf.class, UIManager.getLookAndFeel()),
                 () -> assertEquals(26, UIManager.getInt("Component.arc")),
                 () -> assertEquals(6, UIManager.getInt("CheckBox.arc")),
+                () -> assertEquals(13, UIManager.getInt("PopupMenu.borderCornerRadius")),
+                () -> assertEquals(26, UIManager.getInt("List.selectionArc")),
                 () -> assertNotSame(initialCheckBoxIcon, updatedCheckBoxIcon),
                 () -> assertEquals(6, updatedCheckBoxIcon.getStyleableValue("arc")));
 
