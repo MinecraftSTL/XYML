@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.shell;
 
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
+import com.formdev.flatlaf.util.UIScale;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -359,6 +360,10 @@ public final class AppShellPanelTest {
                         () -> assertEquals(
                                 toolbar.launchButton().getPreferredSize().width,
                                 toolbar.launchButton().getWidth()),
+                        () -> assertEquals(
+                                UIScale.scale(ShellToolbarPanel.LAUNCH_WINDOW_CONTROLS_GAP),
+                                toolbar.winWindowButtonsPlaceholder().getX()
+                                        - rightEdge(toolbar.launchButton())),
                         () -> assertEquals(36, toolbar.launchButton().getHeight()),
                         () -> assertEquals(
                                 toolbar.gameDirectorySelector().getHeight(),
