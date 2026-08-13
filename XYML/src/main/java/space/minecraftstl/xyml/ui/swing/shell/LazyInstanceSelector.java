@@ -33,11 +33,10 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstanceListItem;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesSnapshot;
 
-import javax.swing.JButton;
+import javax.swing.BorderFactory;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.event.ListDataEvent;
@@ -65,7 +64,7 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
     private static final int MINIMUM_POPUP_WIDTH = 320;
 
     /// Height reserved for each explicit popup command.
-    static final int COMMAND_HEIGHT = 42;
+    static final int COMMAND_HEIGHT = PopupCommandButton.HEIGHT;
 
     /// Space retained around a popup inside its current screen work area.
     private static final int POPUP_SCREEN_MARGIN = 16;
@@ -74,13 +73,13 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
     private final ShellDropdownButton valueButton = new ShellDropdownButton();
 
     /// Popup hosting explicit commands and the measured lazy list.
-    private final JPopupMenu popup = new JPopupMenu();
+    private final RoundedPopupMenu popup = new RoundedPopupMenu();
 
     /// Switches the popup body between the lazy list and an explicit empty state.
     private final CardLayout choiceLayout = new CardLayout();
 
     /// Stable body hosting either instance rows or the empty state.
-    private final JPanel choiceHost = new JPanel(choiceLayout);
+    private final RoundedChoicePanel choiceHost = new RoundedChoicePanel(choiceLayout);
 
     /// Stable-ID projection applying per-directory recent-use ordering.
     private final OrderedChoiceDataSource<InstanceListItem> orderedSource;
@@ -92,10 +91,10 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
     private final JLabel emptyLabel = new JLabel();
 
     /// Top command opening the new-game workflow.
-    private final JButton addButton = new JButton();
+    private final PopupCommandButton addButton;
 
     /// Bottom command opening complete instance management.
-    private final JButton manageButton = new JButton();
+    private final PopupCommandButton manageButton;
 
     /// Current selected-directory instance model.
     private final InstancesModel model;
@@ -155,7 +154,9 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
     /// @param selectorLabel accessible selector label
     /// @param emptyLabelText localized empty-instance state
     /// @param addLabel localized new-game command label
+    /// @param addDetail localized new-game explanation
     /// @param managementLabel localized instance-management command label
+    /// @param managementDetail localized instance-management explanation
     /// @param navigateCommand shell navigation command
     LazyInstanceSelector(
             InstancesModel model,
@@ -163,7 +164,9 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
             String selectorLabel,
             String emptyLabelText,
             String addLabel,
+            String addDetail,
             String managementLabel,
+            String managementDetail,
             Consumer<ShellPageId> navigateCommand) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
@@ -173,11 +176,17 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
         orderedSource = new OrderedChoiceDataSource<>(model);
         choiceList = new ViewportChoiceList<>(orderedSource, new InstanceListCellRenderer());
         displayedSnapshot = model.snapshot();
+        addButton = new PopupCommandButton(
+                Objects.requireNonNull(addLabel, "addLabel"),
+                Objects.requireNonNull(addDetail, "addDetail"),
+                new FlatSVGIcon("assets/swing/icons/add.svg", 24, 24));
+        manageButton = new PopupCommandButton(
+                Objects.requireNonNull(managementLabel, "managementLabel"),
+                Objects.requireNonNull(managementDetail, "managementDetail"),
+                new FlatSVGIcon("assets/swing/icons/format-list-bulleted.svg", 24, 24));
         configureComponents(
                 Objects.requireNonNull(selectorLabel, "selectorLabel"),
-                Objects.requireNonNull(emptyLabelText, "emptyLabelText"),
-                Objects.requireNonNull(addLabel, "addLabel"),
-                Objects.requireNonNull(managementLabel, "managementLabel"));
+                Objects.requireNonNull(emptyLabelText, "emptyLabelText"));
         modelSubscription = model.subscribe(this::modelChanged);
         applySnapshot(displayedSnapshot);
     }
@@ -226,14 +235,14 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
     /// Returns the explicit new-game command for focused popup tests.
     ///
     /// @return stable add button
-    JButton addButton() {
+    PopupCommandButton addButton() {
         return addButton;
     }
 
     /// Returns the explicit instance-management command for focused popup tests.
     ///
     /// @return stable management button
-    JButton manageButton() {
+    PopupCommandButton manageButton() {
         return manageButton;
     }
 
@@ -250,16 +259,19 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
     Dimension preparePopupSize() {
         EdtDispatcher.requireEventDispatchThread();
         int rowCount = displayedSnapshot.itemCount();
+        Insets popupInsets = popup.getInsets();
+        int popupVerticalInsets = popupInsets.top + popupInsets.bottom;
         int listBudget = Math.max(
                 InstanceListCellRenderer.ROW_HEIGHT,
-                availablePopupHeight() - COMMAND_HEIGHT * 2);
+                availablePopupHeight() - COMMAND_HEIGHT * 2 - popupVerticalInsets);
         int availableRows = Math.max(1, listBudget / InstanceListCellRenderer.ROW_HEIGHT);
         int displayedRows = Math.min(Math.max(1, rowCount), availableRows);
         int listHeight = displayedRows * InstanceListCellRenderer.ROW_HEIGHT;
         int popupWidth = Math.max(MINIMUM_POPUP_WIDTH, getWidth());
-        choiceList.setPreferredSize(new Dimension(popupWidth, listHeight));
+        int contentWidth = Math.max(0, popupWidth - popupInsets.left - popupInsets.right);
+        choiceList.setPreferredSize(new Dimension(contentWidth, listHeight));
         choiceLayout.show(choiceHost, rowCount == 0 ? "empty" : "instances");
-        Dimension size = new Dimension(popupWidth, listHeight + COMMAND_HEIGHT * 2);
+        Dimension size = new Dimension(popupWidth, listHeight + COMMAND_HEIGHT * 2 + popupVerticalInsets);
         popup.setPopupSize(size);
         return size;
     }
@@ -285,26 +297,20 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
     /// Builds the compact selector and reusable three-part popup.
     private void configureComponents(
             String selectorLabel,
-            String emptyLabelText,
-            String addLabel,
-            String managementLabel) {
+            String emptyLabelText) {
         setOpaque(false);
         setName("shellInstanceSelector");
 
         valueButton.setName("shellInstanceValue");
         valueButton.setIcon(new FlatSVGIcon("assets/swing/icons/nav-instances.svg", 18, 18));
         valueButton.setIconTextGap(8);
-        valueButton.addActionListener(event -> showPopup());
+        valueButton.bindPopup(popup, this::showPopup);
         valueButton.getAccessibleContext().setAccessibleName(selectorLabel);
         add(valueButton, BorderLayout.CENTER);
 
         popup.setName("shellInstancePopup");
         popup.setLayout(new BorderLayout());
         addButton.setName("shellInstanceAdd");
-        addButton.setText(addLabel);
-        addButton.setIcon(new FlatSVGIcon("assets/swing/icons/add.svg", 18, 18));
-        addButton.setHorizontalAlignment(SwingConstants.LEFT);
-        addButton.putClientProperty("JButton.buttonType", "toolBarButton");
         addButton.addActionListener(event -> {
             if (!closed) {
                 popup.setVisible(false);
@@ -314,6 +320,7 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
         popup.add(addButton, BorderLayout.NORTH);
 
         choiceHost.setName("shellInstanceChoices");
+        choiceList.setBorder(BorderFactory.createEmptyBorder());
         choiceHost.add(choiceList, "instances");
         emptyLabel.setName("shellInstanceEmpty");
         emptyLabel.setText(emptyLabelText);
@@ -334,10 +341,6 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
         choiceList.getChoiceModel().addListDataListener(listDataListener);
 
         manageButton.setName("shellInstanceManagement");
-        manageButton.setText(managementLabel);
-        manageButton.setIcon(new FlatSVGIcon("assets/swing/icons/format-list-bulleted.svg", 18, 18));
-        manageButton.setHorizontalAlignment(SwingConstants.LEFT);
-        manageButton.putClientProperty("JButton.buttonType", "toolBarButton");
         manageButton.addActionListener(event -> {
             if (!closed) {
                 popup.setVisible(false);
@@ -369,15 +372,26 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
         @Nullable GraphicsConfiguration configuration = getGraphicsConfiguration();
         if (configuration == null || !isShowing()) {
             int localHeight = getRootPane() == null ? 0 : getRootPane().getHeight() - getHeight();
-            return Math.max(COMMAND_HEIGHT * 2 + InstanceListCellRenderer.ROW_HEIGHT, localHeight);
+            return Math.max(minimumPopupHeight(), localHeight);
         }
         Rectangle screen = configuration.getBounds();
         Insets screenInsets = Toolkit.getDefaultToolkit().getScreenInsets(configuration);
         int workBottom = screen.y + screen.height - screenInsets.bottom;
         int anchorBottom = getLocationOnScreen().y + getHeight();
         return Math.max(
-                COMMAND_HEIGHT * 2 + InstanceListCellRenderer.ROW_HEIGHT,
+                minimumPopupHeight(),
                 workBottom - anchorBottom - POPUP_SCREEN_MARGIN);
+    }
+
+    /// Returns the complete popup height needed for commands, one choice row, and outer spacing.
+    ///
+    /// @return minimum usable popup height
+    private int minimumPopupHeight() {
+        Insets popupInsets = popup.getInsets();
+        return COMMAND_HEIGHT * 2
+                + InstanceListCellRenderer.ROW_HEIGHT
+                + popupInsets.top
+                + popupInsets.bottom;
     }
 
     /// Receives a repository or selection transition and coalesces it onto the EDT.

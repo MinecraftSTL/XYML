@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.platform.SystemInfo;
 import space.minecraftstl.xyml.util.platform.hardware.PhysicalMemoryStatus;
 
@@ -358,7 +359,7 @@ final class InstanceMemoryAllocationControls {
     /// @return automatic allocation in bytes
     private long automaticAllocation() {
         return memoryStatus.hasAvailable()
-                ? XYMLGameRepository.getAutoAllocatedMemory(memoryStatus.available())
+                ? XYMLGameRepository.getAutoAllocatedMemory(memoryStatus.available(), Platform.SYSTEM_PLATFORM)
                 : (long) GameSettings.SUGGESTED_MEMORY * BYTES_PER_MIB;
     }
 
@@ -404,7 +405,7 @@ final class InstanceMemoryAllocationControls {
             repaint();
         }
 
-        /// Paints a rounded track, requested-allocation segment, and current-use segment.
+        /// Paints a theme-shaped track, requested-allocation segment, and current-use segment.
         ///
         /// @param graphics Swing graphics context
         @Override
@@ -414,7 +415,7 @@ final class InstanceMemoryAllocationControls {
                 copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 int width = getWidth();
                 int height = getHeight();
-                int arc = Math.max(1, height);
+                int arc = Math.max(0, Math.min(height, UIManager.getInt("ProgressBar.arc")));
                 RoundRectangle2D track = new RoundRectangle2D.Double(0, 0, width, height, arc, arc);
                 copy.setColor(uiColor("ProgressBar.background", new Color(0x808080)));
                 copy.fill(track);

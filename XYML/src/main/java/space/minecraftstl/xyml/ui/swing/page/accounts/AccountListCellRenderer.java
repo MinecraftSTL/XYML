@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
+import space.minecraftstl.xyml.ui.swing.choice.RoundedListSelectionPainter;
 
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
@@ -30,7 +31,6 @@ import javax.swing.JPanel;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingConstants;
 import javax.swing.UIManager;
-import javax.swing.border.Border;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -68,6 +68,18 @@ public final class AccountListCellRenderer extends JPanel
 
     /// Secondary account-provider and storage label.
     private final JLabel detailLabel = new JLabel();
+
+    /// List whose UI paints the current selection background, or `null` before first configuration.
+    private @Nullable JList<?> selectionOwner;
+
+    /// Logical row represented during the next paint.
+    private int selectionIndex = -1;
+
+    /// Whether the represented row is selected.
+    private boolean selected;
+
+    /// Whether the represented row owns keyboard focus.
+    private boolean focused;
 
     /// Creates one reusable stable renderer hierarchy.
     public AccountListCellRenderer() {
@@ -111,7 +123,11 @@ public final class AccountListCellRenderer extends JPanel
             boolean selected,
             boolean focused) {
         applyComponentOrientation(list.getComponentOrientation());
-        configurePalette(list, selected, focused);
+        selectionOwner = list;
+        selectionIndex = index;
+        this.selected = selected;
+        this.focused = focused;
+        configurePalette(list, selected);
         Font font = list.getFont();
         nameLabel.setFont(font.deriveFont(Font.BOLD));
         detailLabel.setFont(font.deriveFont(Math.max(9.0F, font.getSize2D() - 1.0F)));
@@ -138,6 +154,27 @@ public final class AccountListCellRenderer extends JPanel
         return this;
     }
 
+    /// Paints the list-owned rounded selection before the transparent renderer hierarchy.
+    ///
+    /// @param graphics destination graphics
+    @Override
+    protected void paintComponent(Graphics graphics) {
+        @Nullable JList<?> owner = selectionOwner;
+        if (selected && owner != null) {
+            RoundedListSelectionPainter.paintSelectedBackground(
+                    owner,
+                    graphics,
+                    selectionIndex,
+                    getWidth(),
+                    getHeight(),
+                    getBackground());
+        }
+        if (focused && owner != null) {
+            RoundedListSelectionPainter.paintFocusOutline(owner, graphics, getWidth(), getHeight());
+        }
+        super.paintComponent(graphics);
+    }
+
     /// Assigns child bounds before Swing's renderer pane paints this reusable complex component.
     ///
     /// A renderer is not a normal child of the list hierarchy, so offscreen and first-frame painting
@@ -155,26 +192,18 @@ public final class AccountListCellRenderer extends JPanel
     ///
     /// @param list owning list and palette source
     /// @param selected whether the row is selected
-    /// @param focused whether the row has keyboard focus
     private void configurePalette(
             JList<? extends ChoiceListEntry<AccountListItem>> list,
-            boolean selected,
-            boolean focused) {
-        setOpaque(selected);
+            boolean selected) {
+        setOpaque(false);
         Color background = selected ? list.getSelectionBackground() : list.getBackground();
         Color foreground = selected ? list.getSelectionForeground() : list.getForeground();
         setBackground(background);
         setForeground(foreground);
         nameLabel.setForeground(foreground);
         detailLabel.setForeground(foreground);
-        @Nullable Border lafBorder = UIManager.getBorder(focused
-                ? "List.focusCellHighlightBorder"
-                : "List.cellNoFocusBorder");
-        Border focusBorder = lafBorder == null
-                ? BorderFactory.createEmptyBorder(1, 1, 1, 1)
-                : lafBorder;
         setBorder(BorderFactory.createCompoundBorder(
-                focusBorder,
+                RoundedListSelectionPainter.createCellInsetsBorder(list),
                 BorderFactory.createEmptyBorder(7, 10, 7, 10)));
     }
 
@@ -191,7 +220,7 @@ public final class AccountListCellRenderer extends JPanel
             this.error = error;
         }
 
-        /// Paints one fixed rounded placeholder and state mark.
+        /// Paints one theme-shaped placeholder and state mark.
         ///
         /// @param component palette source
         /// @param graphics destination graphics
@@ -205,7 +234,10 @@ public final class AccountListCellRenderer extends JPanel
                 @Nullable Color themed = UIManager.getColor(error ? "Actions.Red" : "Label.disabledForeground");
                 Color marker = themed == null ? Color.GRAY : themed;
                 copy.setColor(new Color(marker.getRed(), marker.getGreen(), marker.getBlue(), 48));
-                copy.fillRoundRect(x, y, getIconWidth(), getIconHeight(), 6, 6);
+                int arc = Math.max(0, Math.min(
+                        Math.min(getIconWidth(), getIconHeight()),
+                        UIManager.getInt("Component.arc")));
+                copy.fillRoundRect(x, y, getIconWidth(), getIconHeight(), arc, arc);
                 copy.setColor(marker);
                 if (error) {
                     copy.drawString("!", x + 18, y + 25);

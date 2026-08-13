@@ -23,8 +23,8 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.JList;
 import javax.swing.JLabel;
 import javax.swing.ListCellRenderer;
-import javax.swing.UIManager;
 import java.awt.Component;
+import java.awt.Graphics;
 
 /// A single reusable list-style renderer for loaded, loading, and failed choice rows.
 ///
@@ -35,13 +35,24 @@ public final class ChoiceEntryRenderer<T extends Object>
     /// The provider used to localize loaded values.
     private final ChoiceTextProvider<T> textProvider;
 
+    /// List whose UI paints the current selection background, or `null` before first configuration.
+    private @Nullable JList<?> selectionOwner;
+
+    /// Logical row represented during the next paint.
+    private int selectionIndex = -1;
+
+    /// Whether the represented row is selected.
+    private boolean selected;
+
+    /// Whether the represented row owns keyboard focus.
+    private boolean focused;
+
     /// Creates a reusable renderer.
     ///
     /// @param textProvider the provider of labels for loaded values
     public ChoiceEntryRenderer(ChoiceTextProvider<T> textProvider) {
         this.textProvider = textProvider;
         setOpaque(false);
-        setBorder(UIManager.getBorder("List.cellNoFocusBorder"));
     }
 
     /// Configures this one renderer instance for the requested logical row.
@@ -61,12 +72,14 @@ public final class ChoiceEntryRenderer<T extends Object>
             boolean cellHasFocus) {
         setComponentOrientation(list.getComponentOrientation());
         setFont(list.getFont());
-        setOpaque(isSelected);
+        selectionOwner = list;
+        selectionIndex = index;
+        selected = isSelected;
+        focused = cellHasFocus;
+        setOpaque(false);
         setBackground(isSelected ? list.getSelectionBackground() : list.getBackground());
         setForeground(isSelected ? list.getSelectionForeground() : list.getForeground());
-        setBorder(UIManager.getBorder(cellHasFocus
-                ? "List.focusCellHighlightBorder"
-                : "List.cellNoFocusBorder"));
+        setBorder(RoundedListSelectionPainter.createCellInsetsBorder(list));
         setToolTipText(null);
 
         @Nullable T value = entry.value();
@@ -83,5 +96,26 @@ public final class ChoiceEntryRenderer<T extends Object>
             setEnabled(false);
         }
         return this;
+    }
+
+    /// Paints the list-owned rounded selection before the transparent label content.
+    ///
+    /// @param graphics destination graphics
+    @Override
+    protected void paintComponent(Graphics graphics) {
+        @Nullable JList<?> owner = selectionOwner;
+        if (selected && owner != null) {
+            RoundedListSelectionPainter.paintSelectedBackground(
+                    owner,
+                    graphics,
+                    selectionIndex,
+                    getWidth(),
+                    getHeight(),
+                    getBackground());
+        }
+        if (focused && owner != null) {
+            RoundedListSelectionPainter.paintFocusOutline(owner, graphics, getWidth(), getHeight());
+        }
+        super.paintComponent(graphics);
     }
 }

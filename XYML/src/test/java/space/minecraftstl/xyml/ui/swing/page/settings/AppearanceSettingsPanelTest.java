@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import com.formdev.flatlaf.FlatLightLaf;
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -30,6 +32,7 @@ import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 
 import javax.swing.AbstractButton;
 import javax.swing.JButton;
@@ -38,6 +41,7 @@ import javax.swing.JLabel;
 import javax.swing.JSlider;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
+import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -47,13 +51,14 @@ import java.awt.image.BufferedImage;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests appearance commands, worker-thread refresh, measured radius bounds, and off-screen rendering.
@@ -190,38 +195,33 @@ public final class AppearanceSettingsPanelTest {
         });
     }
 
-    /// The appearance restart row sits below the slider and activates only after the radius leaves its baseline.
+    /// The appearance refresh row sits below the slider and refreshes component trees without restarting.
     @Test
-    public void showsCornerRadiusRestartActionBelowSlider() {
+    public void refreshesCornerRadiusComponentsBelowSlider() {
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
                 ThemeBrightnessPreference.SYSTEM, 6, true, true));
         AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
-        SettingsRestartStrings restartStrings = new SettingsRestartStrings(
-                "Applies After Restart",
-                "Changes saved. Restart to apply them.",
-                "Restart Now",
-                "Restarting",
-                "Restart failed");
-        CompletableFuture<@Nullable Void> restartCompletion = new CompletableFuture<>();
+        CornerRadiusRefreshStrings refreshStrings = new CornerRadiusRefreshStrings(
+                "Changes apply live. Refresh if needed.",
+                "Refresh to update remaining components.",
+                "Refresh Interface");
+        AtomicInteger refreshCalls = new AtomicInteger();
 
         onEventDispatchThread(() -> {
-            panel.attachCornerRadiusRestartPanel(
-                    restartStrings,
-                    owner -> restartCompletion,
-                    active -> { });
+            panel.attachCornerRadiusRefreshPanel(refreshStrings, refreshCalls::incrementAndGet);
             panel.setSize(new Dimension(760, 900));
             layoutRecursively(panel);
 
-            SettingsRestartPanel restartPanel = findComponent(
+            CornerRadiusRefreshPanel refreshPanel = findComponent(
                     panel,
-                    "appearanceCornerRadiusRestart",
-                    SettingsRestartPanel.class);
+                    "appearanceCornerRadiusRefresh",
+                    CornerRadiusRefreshPanel.class);
             JSlider slider = findComponent(panel, "appearanceCornerRadius", JSlider.class);
-            JButton restart = findComponent(restartPanel, "settingsRestartAction", JButton.class);
-            JLabel status = findComponent(restartPanel, "settingsRestartStatus", JLabel.class);
-            Point restartLocation = SwingUtilities.convertPoint(
-                    restartPanel.getParent(),
-                    restartPanel.getLocation(),
+            JButton refresh = findComponent(refreshPanel, "cornerRadiusRefreshAction", JButton.class);
+            JLabel status = findComponent(refreshPanel, "cornerRadiusRefreshStatus", JLabel.class);
+            Point refreshLocation = SwingUtilities.convertPoint(
+                    refreshPanel.getParent(),
+                    refreshPanel.getLocation(),
                     panel);
             Point sliderLocation = SwingUtilities.convertPoint(
                     slider.getParent(),
@@ -229,27 +229,31 @@ public final class AppearanceSettingsPanelTest {
                     panel);
             assertAll(
                     () -> assertTrue(
-                            restartLocation.y >= sliderLocation.y + slider.getHeight(),
-                            () -> "restart=" + restartLocation + ", slider=" + sliderLocation),
-                    () -> assertEquals(sliderLocation.x, restartLocation.x),
-                    () -> assertFalse(restart.isEnabled()),
-                    () -> assertEquals(restartStrings.promptText(), status.getText()));
+                            refreshLocation.y >= sliderLocation.y + slider.getHeight(),
+                            () -> "refresh=" + refreshLocation + ", slider=" + sliderLocation),
+                    () -> assertEquals(sliderLocation.x, refreshLocation.x),
+                    () -> assertFalse(refresh.isEnabled()),
+                    () -> assertEquals(refreshStrings.promptText(), status.getText()),
+                    () -> assertNull(refresh.getText()),
+                    () -> assertEquals(refreshStrings.actionText(), refresh.getToolTipText()),
+                    () -> assertEquals(
+                            refreshStrings.actionText(),
+                            refresh.getAccessibleContext().getAccessibleName()),
+                    () -> assertTrue(refresh.getIcon() instanceof FlatSVGIcon));
 
             slider.setValue(9);
             assertAll(
-                    () -> assertTrue(restart.isEnabled()),
-                    () -> assertEquals(restartStrings.requiredText(), status.getText()));
-
-            restart.doClick();
-            assertAll(
-                    () -> assertFalse(slider.isEnabled()),
-                    () -> assertFalse(restart.isEnabled()),
-                    () -> assertEquals(restartStrings.inProgressText(), status.getText()));
-            restartCompletion.completeExceptionally(new IllegalStateException("expected restart failure"));
-            assertAll(
                     () -> assertTrue(slider.isEnabled()),
-                    () -> assertTrue(restart.isEnabled()),
-                    () -> assertEquals(restartStrings.failedText(), status.getText()));
+                    () -> assertTrue(refresh.isEnabled()),
+                    () -> assertEquals(refreshStrings.requiredText(), status.getText()));
+
+            refresh.doClick();
+            assertAll(
+                    () -> assertEquals(1, refreshCalls.get()),
+                    () -> assertTrue(slider.isEnabled()),
+                    () -> assertFalse(refresh.isEnabled()),
+                    () -> assertFalse(refreshPanel.isRefreshRequired()),
+                    () -> assertEquals(refreshStrings.promptText(), status.getText()));
             panel.close();
         });
     }
@@ -472,6 +476,44 @@ public final class AppearanceSettingsPanelTest {
                     () -> assertEquals(ThemeColor.DEFAULT.color(), customColor.color()));
             panel.close();
         });
+    }
+
+    /// The theme-color swatch paints only its rounded FlatLaf surface without an opaque rectangular backing.
+    @Test
+    public void paintsThemeColorSwatchWithoutSquareCornerHighlight() {
+        BufferedImage rendered = onEventDispatchThread(() -> {
+            assertTrue(FlatLightLaf.setup());
+            new SwingDesignTokens(12).applyTo(UIManager.getDefaults());
+            FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                    ThemeBrightnessPreference.SYSTEM, 12, true, true));
+            AppearanceSettingsPanel panel = new AppearanceSettingsPanel(model, STRINGS);
+            JButton swatch = findComponent(panel, "appearanceCustomThemeColorChooser", JButton.class);
+            swatch.setEnabled(true);
+            swatch.setSize(swatch.getPreferredSize());
+            assertFalse(swatch.isOpaque());
+
+            BufferedImage image = new BufferedImage(
+                    swatch.getWidth(),
+                    swatch.getHeight(),
+                    BufferedImage.TYPE_INT_ARGB);
+            Graphics2D graphics = image.createGraphics();
+            try {
+                swatch.printAll(graphics);
+            } finally {
+                graphics.dispose();
+                panel.close();
+            }
+            return image;
+        });
+
+        int lastX = rendered.getWidth() - 1;
+        int lastY = rendered.getHeight() - 1;
+        assertAll(
+                () -> assertEquals(0, alpha(rendered.getRGB(0, 0))),
+                () -> assertEquals(0, alpha(rendered.getRGB(lastX, 0))),
+                () -> assertEquals(0, alpha(rendered.getRGB(0, lastY))),
+                () -> assertEquals(0, alpha(rendered.getRGB(lastX, lastY))),
+                () -> assertTrue(alpha(rendered.getRGB(rendered.getWidth() / 2, rendered.getHeight() / 2)) > 0));
     }
 
     /// Disabling a custom-color override remains possible while the inactive text field contains invalid text.
@@ -770,6 +812,14 @@ public final class AppearanceSettingsPanelTest {
             }
         }
         return colors;
+    }
+
+    /// Returns the unsigned alpha component of one packed ARGB pixel.
+    ///
+    /// @param argb packed pixel value
+    /// @return alpha from zero through 255
+    private static int alpha(int argb) {
+        return argb >>> 24;
     }
 
     /// Thread-safe fake model that applies commands by publishing replacement snapshots.

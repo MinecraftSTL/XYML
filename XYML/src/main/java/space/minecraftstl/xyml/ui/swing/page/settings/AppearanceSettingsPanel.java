@@ -64,7 +64,6 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -104,8 +103,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// Current radius value displayed beside the slider.
     private final JLabel cornerRadiusValue = new JLabel();
 
-    /// Transparent host positioned directly below the corner-radius slider for restart status and action.
-    private final JPanel cornerRadiusRestartHost = new JPanel(new MigLayout(
+    /// Transparent host positioned directly below the corner-radius slider for refresh status and action.
+    private final JPanel cornerRadiusRefreshHost = new JPanel(new MigLayout(
             "insets 0, fillx",
             "[grow,fill]",
             "[]"));
@@ -179,8 +178,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// Whether a restart action currently blocks appearance edits.
     private boolean restartInProgress;
 
-    /// Appearance-specific restart status and action, attached by the owning settings center.
-    private @Nullable SettingsRestartPanel cornerRadiusRestartPanel;
+    /// Appearance-specific refresh status and action, attached by the owning settings center.
+    private @Nullable CornerRadiusRefreshPanel cornerRadiusRefreshPanel;
 
     /// Whether model resources have been released.
     private boolean closed;
@@ -298,43 +297,36 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         return themeColorFromControls();
     }
 
-    /// Attaches the restart status row beneath the corner-radius slider.
+    /// Attaches the component-tree refresh row beneath the corner-radius slider.
     ///
-    /// The appearance page owns the attached row after this call. Its callback first disables appearance controls,
-    /// then notifies the settings center so the remaining settings pages use the same restart lock.
+    /// The appearance page owns the attached row after this call. Radius changes already update the active design
+    /// tokens; the explicit action refreshes any component delegates that retained an earlier visual state.
     ///
-    /// @param strings localized restart text for appearance changes
-    /// @param restartCommand launcher restart lifecycle command
-    /// @param restartActivity callback receiving restart-in-progress transitions
-    void attachCornerRadiusRestartPanel(
-            SettingsRestartStrings strings,
-            SettingsRestartCommand restartCommand,
-            Consumer<Boolean> restartActivity) {
+    /// @param strings localized refresh text for corner-radius changes
+    /// @param refreshAction synchronous component-tree refresh action
+    void attachCornerRadiusRefreshPanel(
+            CornerRadiusRefreshStrings strings,
+            Runnable refreshAction) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed) {
-            throw new IllegalStateException("Cannot attach restart controls after close");
+            throw new IllegalStateException("Cannot attach refresh controls after close");
         }
-        if (cornerRadiusRestartPanel != null) {
-            throw new IllegalStateException("Corner-radius restart controls are already attached");
+        if (cornerRadiusRefreshPanel != null) {
+            throw new IllegalStateException("Corner-radius refresh controls are already attached");
         }
-        Consumer<Boolean> validatedActivity = Objects.requireNonNull(restartActivity, "restartActivity");
-        SettingsRestartPanel panel = new SettingsRestartPanel(
+        CornerRadiusRefreshPanel panel = new CornerRadiusRefreshPanel(
                 Objects.requireNonNull(strings, "strings"),
-                Objects.requireNonNull(restartCommand, "restartCommand"),
-                active -> {
-                    setRestartInProgress(active);
-                    validatedActivity.accept(active);
-                });
-        panel.setName("appearanceCornerRadiusRestart");
-        cornerRadiusRestartPanel = panel;
-        cornerRadiusRestartHost.add(panel, "growx");
+                Objects.requireNonNull(refreshAction, "refreshAction"));
+        panel.setName("appearanceCornerRadiusRefresh");
+        cornerRadiusRefreshPanel = panel;
+        cornerRadiusRefreshHost.add(panel, "growx");
         @Nullable AppearanceSettingsSnapshot snapshot = displayedSnapshot;
         if (snapshot != null) {
             panel.updateCornerRadius(snapshot.cornerRadius());
         }
         panel.setAvailable(snapshot != null && snapshot.writable() && !restartInProgress);
-        cornerRadiusRestartHost.revalidate();
-        cornerRadiusRestartHost.repaint();
+        cornerRadiusRefreshHost.revalidate();
+        cornerRadiusRefreshHost.repaint();
     }
 
     /// Updates appearance-control availability while any settings restart is being prepared.
@@ -354,8 +346,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
             if (!closed) {
                 closed = true;
                 modelSubscription.unsubscribe();
-                if (cornerRadiusRestartPanel != null) {
-                    cornerRadiusRestartPanel.close();
+                if (cornerRadiusRefreshPanel != null) {
+                    cornerRadiusRefreshPanel.close();
                 }
                 if (themePackManagementPanel != null) {
                     themePackManagementPanel.close();
@@ -500,7 +492,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         target.setToolTipText(backgroundStrings.chooseColorLabel());
         target.getAccessibleContext().setAccessibleName(backgroundStrings.chooseColorLabel());
         target.setPreferredSize(new Dimension(34, 30));
-        target.setOpaque(true);
+        target.setOpaque(false);
     }
 
     /// Attaches listeners that publish one complete background replacement per accepted user action.
@@ -619,8 +611,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
 
         row.add(label, "growx");
         row.add(control, "wmin 260, growx, wrap");
-        cornerRadiusRestartHost.setOpaque(false);
-        row.add(cornerRadiusRestartHost, "cell 1 1, growx, gaptop 2");
+        cornerRadiusRefreshHost.setOpaque(false);
+        row.add(cornerRadiusRefreshHost, "cell 1 1, growx, gaptop 2");
         return row;
     }
 
@@ -1002,8 +994,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
             cornerRadiusSlider.setSnapToTicks(true);
             cornerRadiusSlider.setValue(snapshot.cornerRadius());
             cornerRadiusValue.setText(Integer.toString(snapshot.cornerRadius()));
-            if (cornerRadiusRestartPanel != null) {
-                cornerRadiusRestartPanel.updateCornerRadius(snapshot.cornerRadius());
+            if (cornerRadiusRefreshPanel != null) {
+                cornerRadiusRefreshPanel.updateCornerRadius(snapshot.cornerRadius());
             }
             animationsEnabled.setSelected(snapshot.animationsEnabled());
             AnimationSpeedSettings speed = snapshot.animationSpeed();
@@ -1044,8 +1036,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// @param enabled whether controls may issue persistence commands
     private void setControlsEnabled(boolean enabled) {
         boolean interactive = enabled && !restartInProgress;
-        if (cornerRadiusRestartPanel != null) {
-            cornerRadiusRestartPanel.setAvailable(interactive);
+        if (cornerRadiusRefreshPanel != null) {
+            cornerRadiusRefreshPanel.setAvailable(interactive);
         }
         for (JToggleButton button : themeButtons.values()) {
             button.setEnabled(interactive);

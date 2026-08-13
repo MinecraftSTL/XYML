@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
+import space.minecraftstl.xyml.ui.swing.choice.RoundedListSelectionPainter;
 
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
@@ -32,7 +33,6 @@ import javax.swing.JPanel;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingConstants;
 import javax.swing.UIManager;
-import javax.swing.border.Border;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -75,6 +75,18 @@ public final class InstanceListCellRenderer extends JPanel
 
     /// Weak EDT-confined cache of immutable pixels converted to Swing icons.
     private final Map<InstanceIconData, Icon> iconCache = new WeakHashMap<>();
+
+    /// List whose UI paints the current selection background, or `null` before first configuration.
+    private @Nullable JList<?> selectionOwner;
+
+    /// Logical row represented during the next paint.
+    private int selectionIndex = -1;
+
+    /// Whether the represented row is selected.
+    private boolean selected;
+
+    /// Whether the represented row owns keyboard focus.
+    private boolean focused;
 
     /// Creates the stable reusable instance renderer hierarchy.
     public InstanceListCellRenderer() {
@@ -119,7 +131,11 @@ public final class InstanceListCellRenderer extends JPanel
             boolean isSelected,
             boolean cellHasFocus) {
         applyComponentOrientation(list.getComponentOrientation());
-        configurePalette(list, isSelected, cellHasFocus);
+        selectionOwner = list;
+        selectionIndex = index;
+        selected = isSelected;
+        focused = cellHasFocus;
+        configurePalette(list, isSelected);
 
         Font baseFont = list.getFont();
         nameLabel.setFont(baseFont.deriveFont(Font.BOLD));
@@ -145,30 +161,43 @@ public final class InstanceListCellRenderer extends JPanel
         return this;
     }
 
+    /// Paints the list-owned rounded selection before the transparent renderer hierarchy.
+    ///
+    /// @param graphics destination graphics
+    @Override
+    protected void paintComponent(Graphics graphics) {
+        @Nullable JList<?> owner = selectionOwner;
+        if (selected && owner != null) {
+            RoundedListSelectionPainter.paintSelectedBackground(
+                    owner,
+                    graphics,
+                    selectionIndex,
+                    getWidth(),
+                    getHeight(),
+                    getBackground());
+        }
+        if (focused && owner != null) {
+            RoundedListSelectionPainter.paintFocusOutline(owner, graphics, getWidth(), getHeight());
+        }
+        super.paintComponent(graphics);
+    }
+
     /// Applies list-owned theme colors and focus decoration to this renderer hierarchy.
     ///
     /// @param list owning list and palette source
     /// @param selected whether the row is selected
-    /// @param focused whether the row has keyboard focus
     private void configurePalette(
             JList<? extends ChoiceListEntry<InstanceListItem>> list,
-            boolean selected,
-            boolean focused) {
+            boolean selected) {
         Color background = selected ? list.getSelectionBackground() : list.getBackground();
         Color foreground = selected ? list.getSelectionForeground() : list.getForeground();
-        setOpaque(selected);
+        setOpaque(false);
         setBackground(background);
         setForeground(foreground);
         nameLabel.setForeground(foreground);
         detailLabel.setForeground(foreground);
-        @Nullable Border lafBorder = UIManager.getBorder(focused
-                ? "List.focusCellHighlightBorder"
-                : "List.cellNoFocusBorder");
-        Border focusBorder = lafBorder == null
-                ? BorderFactory.createEmptyBorder(1, 1, 1, 1)
-                : lafBorder;
         setBorder(BorderFactory.createCompoundBorder(
-                focusBorder,
+                RoundedListSelectionPainter.createCellInsetsBorder(list),
                 BorderFactory.createEmptyBorder(7, 10, 7, 10)));
     }
 
@@ -227,10 +256,13 @@ public final class InstanceListCellRenderer extends JPanel
                         RenderingHints.KEY_ANTIALIASING,
                         RenderingHints.VALUE_ANTIALIAS_ON);
                 Color marker = stateColor(component, error);
+                int arc = Math.max(0, Math.min(
+                        Math.min(getIconWidth(), getIconHeight()),
+                        UIManager.getInt("Component.arc")));
                 copy.setColor(withAlpha(marker, 48));
-                copy.fillRoundRect(x, y, getIconWidth(), getIconHeight(), 8, 8);
+                copy.fillRoundRect(x, y, getIconWidth(), getIconHeight(), arc, arc);
                 copy.setColor(withAlpha(marker, 180));
-                copy.drawRoundRect(x, y, getIconWidth() - 1, getIconHeight() - 1, 8, 8);
+                copy.drawRoundRect(x, y, getIconWidth() - 1, getIconHeight() - 1, arc, arc);
                 if (error) {
                     paintErrorMark(copy, marker, x, y);
                 } else {

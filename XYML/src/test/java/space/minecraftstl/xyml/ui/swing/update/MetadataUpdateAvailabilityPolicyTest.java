@@ -79,18 +79,18 @@ class MetadataUpdateAvailabilityPolicyTest {
         assertFalse(legacyBeta.isUpdateAvailable(remote("1.0.0", UpdateChannel.BETA, false)));
     }
 
-    /// Suppresses offers for source placeholders and snapshot development versions.
+    /// Suppresses offers for source placeholders and local feature-build versions.
     @Test
     void suppressesDevelopmentPlaceholders() {
         MetadataUpdateAvailabilityPolicy placeholder = new MetadataUpdateAvailabilityPolicy(
                 "@develop@",
                 UpdateChannel.DEV);
-        MetadataUpdateAvailabilityPolicy snapshot = new MetadataUpdateAvailabilityPolicy(
-                "1.0.0.0.0.SNAPSHOT",
+        MetadataUpdateAvailabilityPolicy featureBuild = new MetadataUpdateAvailabilityPolicy(
+                "1.0.0.0.0.0.",
                 UpdateChannel.DEV);
 
         assertFalse(placeholder.isUpdateAvailable(remote("99.0", UpdateChannel.STABLE, true)));
-        assertFalse(snapshot.isUpdateAvailable(remote("99.0", UpdateChannel.STABLE, true)));
+        assertFalse(featureBuild.isUpdateAvailable(remote("99.0", UpdateChannel.STABLE, true)));
     }
 
     /// Builds one deterministic remote-version fixture.

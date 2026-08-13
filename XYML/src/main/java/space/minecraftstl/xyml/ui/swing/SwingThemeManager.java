@@ -21,6 +21,11 @@ import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 import com.formdev.flatlaf.icons.FlatCheckBoxIcon;
+import com.formdev.flatlaf.icons.FlatWindowCloseIcon;
+import com.formdev.flatlaf.icons.FlatWindowIconifyIcon;
+import com.formdev.flatlaf.icons.FlatWindowMaximizeIcon;
+import com.formdev.flatlaf.icons.FlatWindowRestoreIcon;
+import com.formdev.flatlaf.util.SystemInfo;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -30,6 +35,7 @@ import space.minecraftstl.xyml.theme.ResolvedTheme;
 import space.minecraftstl.xyml.theme.ThemeBrightness;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeColor;
+import space.minecraftstl.xyml.ui.swing.shell.RoundedComboBoxUI;
 
 import javax.swing.Icon;
 import javax.swing.JComponent;
@@ -39,17 +45,26 @@ import javax.swing.plaf.FontUIResource;
 import javax.swing.plaf.UIResource;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Dialog;
 import java.awt.Font;
+import java.awt.Frame;
 import java.awt.Window;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /// Initializes FlatLaf and applies live theme or design-token changes to all Swing windows.
 @NotNullByDefault
 public final class SwingThemeManager {
     /// Client property marking components whose domain-specific font family must not follow launcher chrome.
     private static final String FIXED_FONT_FAMILY_PROPERTY = "xyml.fixedFontFamily";
+
+    /// Logical side length of each Windows minimize, maximize, restore, and close button.
+    static final int WINDOWS_TITLE_PANE_BUTTON_SIZE = 36;
+
+    /// Logical trailing margin between the Windows caption-button group and the window edge.
+    static final int WINDOWS_TITLE_PANE_BUTTON_TRAILING_MARGIN = 8;
 
     /// Serializes complete native-window appearance replacements.
     private final Object windowAppearanceLock = new Object();
@@ -377,7 +392,7 @@ public final class SwingThemeManager {
 
         if (installLookAndFeel) {
             @Nullable Map<String, String> previousExtraDefaults = FlatLaf.getGlobalExtraDefaults();
-            applyAccentExtraDefault(accentColor, previousExtraDefaults);
+            applyGlobalExtraDefaults(accentColor, previousExtraDefaults);
             LookAndFeel lookAndFeel = switch (resolvedVariant) {
                 case LIGHT -> new FlatLightLaf();
                 case DARK -> new FlatDarkLaf();
@@ -391,6 +406,8 @@ public final class SwingThemeManager {
         }
 
         designTokens.applyTo(UIManager.getDefaults());
+        applyWindowsTitlePaneDesignTokens(designTokens);
+        UIManager.put("ComboBoxUI", RoundedComboBoxUI.class.getName());
         @Nullable Font replacementFont = applyDefaultFont();
         // FlatLaf caches the checkbox icon after first resolution, including the arc read at construction time.
         @Nullable Icon currentCheckBoxIcon = UIManager.getIcon("CheckBox.icon");
@@ -402,6 +419,49 @@ public final class SwingThemeManager {
         initialized = true;
         FlatLaf.updateUI();
         updateOpenWindowFonts(previousDefaultFont, replacementFont);
+        updateOpenWindowCornerPreferences(designTokens.cornerRadius());
+    }
+
+    /// Synchronizes native frame and dialog corners after a live launcher-radius change.
+    ///
+    /// Lightweight popup windows retain their component-defined shapes and are intentionally excluded.
+    ///
+    /// @param cornerRadius current launcher component radius
+    private static void updateOpenWindowCornerPreferences(int cornerRadius) {
+        for (Window window : Window.getWindows()) {
+            if (window.isDisplayable() && (window instanceof Frame || window instanceof Dialog)) {
+                WindowsNativeUtils.applyWindowCornerPreference(window, cornerRadius);
+            }
+        }
+    }
+
+    /// Applies the launcher radius to Windows caption controls and refreshes FlatLaf's cached icon painters.
+    ///
+    /// @param tokens current launcher design tokens
+    private static void applyWindowsTitlePaneDesignTokens(SwingDesignTokens tokens) {
+        if (!SystemInfo.isWindows) {
+            return;
+        }
+        UIManager.put("TitlePane.buttonArc", tokens.cornerRadius() * 2);
+        replaceCachedFlatLafIcon("TitlePane.iconifyIcon", FlatWindowIconifyIcon.class, FlatWindowIconifyIcon::new);
+        replaceCachedFlatLafIcon("TitlePane.maximizeIcon", FlatWindowMaximizeIcon.class, FlatWindowMaximizeIcon::new);
+        replaceCachedFlatLafIcon("TitlePane.restoreIcon", FlatWindowRestoreIcon.class, FlatWindowRestoreIcon::new);
+        replaceCachedFlatLafIcon("TitlePane.closeIcon", FlatWindowCloseIcon.class, FlatWindowCloseIcon::new);
+    }
+
+    /// Replaces one resolved FlatLaf icon while preserving caller-supplied custom icon implementations.
+    ///
+    /// @param key UI defaults key containing the icon
+    /// @param defaultType exact FlatLaf implementation eligible for replacement
+    /// @param replacementFactory constructor for an icon that reads the current UI defaults
+    private static void replaceCachedFlatLafIcon(
+            String key,
+            Class<? extends Icon> defaultType,
+            Supplier<? extends Icon> replacementFactory) {
+        @Nullable Icon currentIcon = UIManager.getIcon(key);
+        if (currentIcon != null && currentIcon.getClass() == defaultType) {
+            UIManager.put(key, replacementFactory.get());
+        }
     }
 
     /// Installs the requested family while preserving the look-and-feel font style and logical size.
@@ -482,11 +542,11 @@ public final class SwingThemeManager {
         return normalized.isEmpty() ? null : normalized;
     }
 
-    /// Replaces only FlatLaf's global accent variable while preserving unrelated caller defaults.
+    /// Applies launcher-owned FlatLaf defaults while preserving unrelated caller defaults.
     ///
     /// @param accentColor explicit accent, or `null` to restore platform-default accent resolution
     /// @param previousExtraDefaults defaults installed before this update, or `null`
-    private static void applyAccentExtraDefault(
+    private static void applyGlobalExtraDefaults(
             @Nullable ThemeColor accentColor,
             @Nullable Map<String, String> previousExtraDefaults) {
         Map<String, String> extraDefaults = previousExtraDefaults != null
@@ -496,6 +556,14 @@ public final class SwingThemeManager {
             extraDefaults.remove("@accentColor");
         } else {
             extraDefaults.put("@accentColor", accentColor.color());
+        }
+        if (SystemInfo.isWindows) {
+            String buttonSize = Integer.toString(WINDOWS_TITLE_PANE_BUTTON_SIZE);
+            extraDefaults.put("TitlePane.buttonSize", buttonSize + "," + buttonSize);
+            extraDefaults.put(
+                    "TitlePane.buttonsMargins",
+                    "0,0,0," + WINDOWS_TITLE_PANE_BUTTON_TRAILING_MARGIN);
+            extraDefaults.put("TitlePane.buttonsFillVertically", Boolean.FALSE.toString());
         }
         FlatLaf.setGlobalExtraDefaults(Map.copyOf(extraDefaults));
     }

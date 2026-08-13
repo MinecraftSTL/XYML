@@ -39,13 +39,23 @@ val stableVersion = System.getenv("STABLE_VERSION")?.takeIf { it.isNotBlank() }
     ?: "1.0.0"
 val explicitReleaseVersion = System.getenv("RELEASE_VERSION")?.takeIf { it.isNotBlank() }
 val buildNumber = System.getenv("BUILD_NUMBER")?.takeIf { it.isNotBlank() }
+val currentBranchName = sequenceOf("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "CHANGE_BRANCH", "BRANCH_NAME")
+    .mapNotNull { variable -> System.getenv(variable)?.takeIf { it.isNotBlank() } }
+    .firstOrNull()
+    ?: runCatching {
+        providers.exec {
+            commandLine("git", "branch", "--show-current")
+            isIgnoreExitValue = true
+        }.standardOutput.asText.get().trim().takeIf { it.isNotEmpty() }
+    }.getOrNull()
 
 version = ReleaseVersionResolver.resolve(
     currentReleaseType,
     stableVersion,
     explicitReleaseVersion,
     buildNumber,
-    isOfficial
+    isOfficial,
+    currentBranchName
 )
 
 val microsoftAuthId = System.getenv("MICROSOFT_AUTH_ID") ?: ""
@@ -832,8 +842,10 @@ tasks.register("validateReleaseMetadata") {
     description = "Validates and prints the canonical XYML release channel and version."
     inputs.property("releaseChannel", currentReleaseType.getName())
     inputs.property("releaseVersion", project.version.toString())
+    inputs.property("gitBranch", currentBranchName ?: "<detached-or-unknown>")
 
     doLast {
+        logger.lifecycle("XYML Git branch: ${currentBranchName ?: "<detached-or-unknown>"}")
         logger.lifecycle("XYML release channel: ${currentReleaseType.getName()}")
         logger.lifecycle("XYML release version: ${project.version}")
     }

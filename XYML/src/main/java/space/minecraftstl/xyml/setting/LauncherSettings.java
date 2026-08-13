@@ -97,7 +97,7 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Smallest supported Swing component corner radius in logical pixels.
     public static final int MINIMUM_CORNER_RADIUS = 0;
 
-    /// Largest supported radius for controls whose minimum stable height is forty logical pixels.
+    /// Largest supported component corner radius in logical pixels.
     public static final int MAXIMUM_CORNER_RADIUS = 20;
 
     /// Persisted corner-radius adjustment increment in logical pixels.

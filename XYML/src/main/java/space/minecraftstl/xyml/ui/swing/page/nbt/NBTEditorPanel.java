@@ -372,7 +372,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         details.add(new JLabel(), "skip");
         applyButton.setName("nbtEditorApply");
         applyButton.setText(strings.applyText());
-        applyButton.putClientProperty("JButton.buttonType", "roundRect");
         applyButton.addActionListener(event -> applySelectedValue());
         applyButton.getAccessibleContext().setAccessibleName(strings.applyText());
         details.add(applyButton, "right, h 36!, wrap");

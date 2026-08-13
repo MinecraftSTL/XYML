@@ -17,19 +17,25 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
+import com.formdev.flatlaf.FlatLightLaf;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 
+import javax.swing.AbstractButton;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
 import java.net.URI;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
@@ -76,6 +82,9 @@ public final class ShellNavigationRailTest {
             int helpY = SwingUtilities.convertPoint(help, 0, 0, rail).y;
 
             assertAll(
+                    () -> assertButtonSize(settings),
+                    () -> assertButtonSize(officialGroup),
+                    () -> assertButtonSize(help),
                     () -> assertTrue(settingsY > rail.getHeight() / 2),
                     () -> assertTrue(officialGroupY > settingsY),
                     () -> assertTrue(helpY > officialGroupY),
@@ -131,6 +140,62 @@ public final class ShellNavigationRailTest {
                 () -> assertEquals("https", destination.getScheme()),
                 () -> assertEquals("github.com", destination.getHost()),
                 () -> assertEquals("/MinecraftSTL/XYML/issues/new/choose", destination.getPath()));
+    }
+
+    /// A radius of 18 paints the selected background across the exact 40-pixel square without toolbar insets.
+    @Test
+    public void rendersRoundedNavigationButtonAsFortyPixelSquare() {
+        assertTrue(FlatLightLaf.setup());
+        new SwingDesignTokens(18).applyTo(UIManager.getDefaults());
+
+        EdtDispatcher.executeAndWait(() -> {
+            ShellNavigationRail rail = new ShellNavigationRail(
+                    ShellPagePresentations.englishFallback(),
+                    ignored -> { },
+                    ignored -> { });
+            ShellNavigationButton button = rail.button(ShellPageId.ACCOUNTS);
+            rail.setSelectedPage(ShellPageId.ACCOUNTS);
+            button.setSize(ShellNavigationRail.BUTTON_SIZE, ShellNavigationRail.BUTTON_SIZE);
+
+            BufferedImage image = new BufferedImage(
+                    ShellNavigationRail.BUTTON_SIZE,
+                    ShellNavigationRail.BUTTON_SIZE,
+                    BufferedImage.TYPE_INT_ARGB);
+            Graphics2D graphics = image.createGraphics();
+            try {
+                button.paint(graphics);
+            } finally {
+                graphics.dispose();
+            }
+
+            int center = ShellNavigationRail.BUTTON_SIZE / 2;
+            int last = ShellNavigationRail.BUTTON_SIZE - 1;
+            assertAll(
+                    () -> assertButtonSize(button),
+                    () -> assertTrue(alphaAt(image, center, 0) > 0),
+                    () -> assertTrue(alphaAt(image, center, last) > 0),
+                    () -> assertTrue(alphaAt(image, 0, center) > 0),
+                    () -> assertTrue(alphaAt(image, last, center) > 0));
+        });
+    }
+
+    /// Verifies the exact component geometry shared by every navigation-rail action.
+    ///
+    /// @param button navigation-rail button to measure after layout
+    private static void assertButtonSize(AbstractButton button) {
+        assertAll(
+                () -> assertEquals(ShellNavigationRail.BUTTON_SIZE, button.getWidth()),
+                () -> assertEquals(ShellNavigationRail.BUTTON_SIZE, button.getHeight()));
+    }
+
+    /// Returns the alpha channel at one rendered pixel.
+    ///
+    /// @param image rendered button image
+    /// @param x horizontal pixel coordinate
+    /// @param y vertical pixel coordinate
+    /// @return alpha value from zero through 255
+    private static int alphaAt(BufferedImage image, int x, int y) {
+        return image.getRGB(x, y) >>> 24;
     }
 
     /// Recursively lays out a test component tree without opening a native window.

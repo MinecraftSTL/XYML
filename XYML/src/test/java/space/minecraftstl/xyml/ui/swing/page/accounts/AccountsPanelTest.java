@@ -80,7 +80,7 @@ public final class AccountsPanelTest {
             "Account error",
             "No accounts");
 
-    /// Account list containers and unselected rows leave the window background visible.
+    /// Account list containers and renderer rows leave rounded selection corners transparent.
     @Test
     public void keepsAccountContentBackgroundTransparent() {
         FakeAccountsModel model = FakeAccountsModel.immediate(items(2), snapshot(0, 2, 0L));
@@ -111,7 +111,7 @@ public final class AccountsPanelTest {
                     () -> assertFalse(panel.choiceList().getViewport().isOpaque()),
                     () -> assertFalse(list.isOpaque()),
                     () -> assertFalse(unselectedOpaque),
-                    () -> assertTrue(selectedRow.isOpaque()));
+                    () -> assertFalse(selectedRow.isOpaque()));
             panel.close();
         });
     }

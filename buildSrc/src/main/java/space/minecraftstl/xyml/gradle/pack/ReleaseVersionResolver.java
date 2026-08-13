@@ -23,12 +23,13 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Arrays;
 import java.util.regex.Pattern;
 
-/// Resolves and validates XYML versions for the four release channels.
+/// Resolves and validates XYML versions for the four release channels and marks feature-branch builds.
 ///
 /// Stable, beta, alpha, and development releases contain exactly three, four, five, and six canonical decimal
 /// components respectively. An explicit release version is used for promotions whose parent counters are already
 /// known. A build number supplies the last component for ordinary channel builds, with zero placeholders for parent
-/// channels that have not yet produced a candidate.
+/// channels that have not yet produced a candidate. Only `main`, `beta`, `alpha`, and `dev` are release branches;
+/// every other or unknown branch receives a trailing empty component.
 @NotNullByDefault
 public final class ReleaseVersionResolver {
     /// Canonical non-negative decimal component without leading zeroes.
@@ -43,43 +44,43 @@ public final class ReleaseVersionResolver {
     /// @param channel target release channel
     /// @param stableVersion current three-component stable baseline
     /// @param explicitVersion complete release version, or `null` to derive it
-    /// @param buildNumber positive decimal CI build number, or `null` for a local snapshot
+    /// @param buildNumber positive decimal CI build number, or `null` for a local build
     /// @param official whether missing CI version inputs must fail the build
-    /// @return validated release version or local snapshot version
+    /// @param branchName current Git branch name, or `null` when it cannot be determined
+    /// @return validated release version, marked with a trailing empty component outside the four release branches
     /// @throws IllegalArgumentException when any supplied version value violates the release model
     public static String resolve(
             ReleaseType channel,
             String stableVersion,
             @Nullable String explicitVersion,
             @Nullable String buildNumber,
-            boolean official) {
+            boolean official,
+            @Nullable String branchName) {
         validateVersion(ReleaseType.STABLE, stableVersion);
 
+        String resolvedVersion;
         if (explicitVersion != null) {
             validateVersion(channel, explicitVersion);
             if (!hasStablePrefix(explicitVersion, stableVersion)) {
                 throw new IllegalArgumentException(
                         "Release version " + explicitVersion + " does not use stable baseline " + stableVersion);
             }
-            return explicitVersion;
-        }
-
-        if (channel == ReleaseType.STABLE) {
-            return stableVersion;
-        }
-
-        if (buildNumber != null) {
+            resolvedVersion = explicitVersion;
+        } else if (channel == ReleaseType.STABLE) {
+            resolvedVersion = stableVersion;
+        } else if (buildNumber != null) {
             if (!DECIMAL_COMPONENT.matcher(buildNumber).matches() || "0".equals(buildNumber)) {
                 throw new IllegalArgumentException("BUILD_NUMBER must be a positive canonical decimal component");
             }
-            return derivedVersion(channel, stableVersion, buildNumber);
+            resolvedVersion = derivedVersion(channel, stableVersion, buildNumber);
+        } else {
+            if (official) {
+                throw new IllegalArgumentException(
+                        "Official " + channel.getName() + " builds require RELEASE_VERSION or BUILD_NUMBER");
+            }
+            resolvedVersion = derivedVersion(channel, stableVersion, "0");
         }
-
-        if (official) {
-            throw new IllegalArgumentException(
-                    "Official " + channel.getName() + " builds require RELEASE_VERSION or BUILD_NUMBER");
-        }
-        return derivedVersion(channel, stableVersion, "SNAPSHOT");
+        return isReleaseBranch(branchName) ? resolvedVersion : resolvedVersion + ".";
     }
 
     /// Validates an exact channel version.
@@ -101,7 +102,7 @@ public final class ReleaseVersionResolver {
     ///
     /// @param channel non-stable release channel
     /// @param stableVersion stable version prefix
-    /// @param lastComponent positive build number or `SNAPSHOT`
+    /// @param lastComponent positive build number or local zero placeholder
     /// @return version with the exact channel depth
     private static String derivedVersion(ReleaseType channel, String stableVersion, String lastComponent) {
         StringBuilder version = new StringBuilder(stableVersion);
@@ -118,5 +119,19 @@ public final class ReleaseVersionResolver {
     /// @return whether the first three components match exactly
     private static boolean hasStablePrefix(String releaseVersion, String stableVersion) {
         return releaseVersion.equals(stableVersion) || releaseVersion.startsWith(stableVersion + ".");
+    }
+
+    /// Returns whether a branch owns one of the four release channels.
+    ///
+    /// Branch names are exact and case-sensitive, matching Git branch semantics and the repository release model.
+    /// An unavailable branch is treated as a feature branch so it cannot be mistaken for a release artifact.
+    ///
+    /// @param branchName current Git branch name, or `null` when unavailable
+    /// @return whether the branch is `main`, `beta`, `alpha`, or `dev`
+    private static boolean isReleaseBranch(@Nullable String branchName) {
+        return branchName != null && switch (branchName) {
+            case "main", "beta", "alpha", "dev" -> true;
+            default -> false;
+        };
     }
 }

@@ -99,6 +99,6 @@ public final class MetadataUpdateAvailabilityPolicy implements UpdateAvailabilit
     /// @return whether the version denotes a development build
     static boolean isDevelopmentVersion(String version) {
         Objects.requireNonNull(version, "version");
-        return version.contains("@") || version.contains("SNAPSHOT");
+        return version.contains("@") || version.contains("SNAPSHOT") || version.endsWith(".");
     }
 }

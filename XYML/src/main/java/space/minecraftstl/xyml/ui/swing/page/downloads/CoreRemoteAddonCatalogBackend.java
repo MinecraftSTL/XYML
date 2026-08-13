@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.downloads;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
@@ -25,6 +26,7 @@ import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.setting.DownloadProviders;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.List;
 import java.util.Objects;
 
@@ -99,5 +101,22 @@ public final class CoreRemoteAddonCatalogBackend implements RemoteAddonCatalogBa
         return selected.addon().data().loadVersions(
                 selected.source().repository(selected.kind()),
                 downloadProvider).toList();
+    }
+
+    /// {@inheritDoc}
+    @Override
+    public @Nullable String loadChangelog(RemoteAddonCatalogItem item, RemoteAddon.Version version) throws IOException {
+        RemoteAddonCatalogItem selected = Objects.requireNonNull(item, "item");
+        RemoteAddon.Version selectedVersion = Objects.requireNonNull(version, "version");
+        RemoteAddonRepository repository = selected.source().repository(selected.kind());
+        return repository.getAddonChangelog(downloadProvider, selectedVersion.projectId(), selectedVersion.versionId());
+    }
+
+    /// {@inheritDoc}
+    @Override
+    public URI versionPage(RemoteAddonCatalogItem item, RemoteAddon.Version version) throws IOException {
+        RemoteAddonCatalogItem selected = Objects.requireNonNull(item, "item");
+        return URI.create(selected.source().repository(selected.kind())
+                .getVersionPageUrl(Objects.requireNonNull(version, "version")));
     }
 }

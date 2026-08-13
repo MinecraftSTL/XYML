@@ -48,6 +48,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// Renders brand identity and launch workflow controls inside the full-window title bar.
 @NotNullByDefault
 final class ShellToolbarPanel extends JPanel implements AutoCloseable {
+    /// Logical gap between the launch command and trailing native window controls.
+    static final int LAUNCH_WINDOW_CONTROLS_GAP = 8;
+
     /// Self-drawn launcher icon and native-window title replacement.
     private final JLabel brandLabel = new JLabel();
 
@@ -113,7 +116,8 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
         super(new MigLayout(
                 "insets 0, fillx",
                 "[]12[pref!]8[190!,shrink 90]8[168!,shrink 80]push"
-                        + "[238!,shrink 100]8[pref!,shrink 60]2[]",
+                        + "[238!,shrink 100]8[pref!,shrink 60]"
+                        + LAUNCH_WINDOW_CONTROLS_GAP + "[]",
                 "[grow,fill]"));
         EdtDispatcher.requireEventDispatchThread();
         this.homeModel = Objects.requireNonNull(homeModel, "homeModel");
@@ -127,7 +131,9 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
                 homeStrings.instanceLabel(),
                 homeStrings.missingInstanceLabel(),
                 homeStrings.addInstanceAction(),
+                i18n("swing.shell.instance_add_detail"),
                 i18n("instance.manage"),
+                i18n("swing.shell.instance_manage_detail"),
                 navigation);
         accountSelector = new LazyAccountSelector(
                 Objects.requireNonNull(accountsModel, "accountsModel"),
@@ -135,13 +141,16 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
                 homeStrings.accountLabel(),
                 homeStrings.missingAccountLabel(),
                 i18n("account.create"),
+                i18n("swing.shell.account_add_detail"),
                 i18n("account.manage"),
+                i18n("swing.shell.account_manage_detail"),
                 navigation);
         gameDirectorySelector = new LazyGameDirectorySelector(
                 gameDirectories,
                 histories,
                 i18n("game_directory.title"),
                 i18n("game_directory.manage"),
+                i18n("swing.shell.directory_manage_detail"),
                 Objects.requireNonNull(manageDirectoriesCommand, "manageDirectoriesCommand"),
                 Objects.requireNonNull(revealDefaultPageCommand, "revealDefaultPageCommand"));
 
@@ -260,7 +269,7 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
             }
         });
         launchButton.getAccessibleContext().setAccessibleName(homeStrings.launchAction());
-        add(launchButton, "grow, h 40!");
+        add(launchButton, "grow, h 36!");
         add(winWindowButtonsPlaceholder, "growy");
     }
 

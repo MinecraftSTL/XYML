@@ -97,7 +97,7 @@ final class RemoteModpackCatalogPanelTest {
                 assertFalse(panel.choiceList().getViewport().isOpaque());
                 assertFalse(list.isOpaque());
                 assertFalse(unselectedOpaque);
-                assertTrue(selectedOpaque);
+                assertFalse(selectedOpaque);
             });
         } finally {
             @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
@@ -470,10 +470,10 @@ final class RemoteModpackCatalogPanelTest {
     private static RemoteAddon.Version fixtureVersion() {
         return new RemoteAddon.Version(
                 () -> RemoteAddon.Source.MODRINTH,
+                "1.0.0",
                 "fixture-pack",
                 "Fixture Pack 1.0",
                 "1.0.0",
-                "",
                 Instant.EPOCH,
                 RemoteAddon.VersionType.Release,
                 new RemoteAddon.File(Map.of(), "https://example.invalid/fixture-pack.mrpack", "fixture-pack.mrpack"),

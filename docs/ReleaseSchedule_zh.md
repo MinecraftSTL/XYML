@@ -94,6 +94,6 @@ Github Release 只发布稳定版，官网发布稳定版和公测版。内测�
 - `BUILD_NUMBER`：未指定 `RELEASE_VERSION` 时，普通 CI 构建使用的最后一段正十进制数字。
 - `STABLE_VERSION`：可选，用于覆盖 `config/project.properties` 中的 `stableVersion`。
 
-正式构建会拒绝缺失或格式错误的发布输入。本地构建默认生成六段开发快照，例如 `1.0.0.0.0.SNAPSHOT`。
+正式构建会拒绝缺失或格式错误的发布输入。`main`、`beta`、`alpha` 和 `dev` 分支的构建保持解析后的渠道版本不变；其他所有分支的构建都会追加一个空段。例如，使用默认开发版渠道的本地功能分支构建为 `1.0.0.0.0.0.`。
 
 Github Release 发布工作流只能从 `main` 运行，只创建稳定版 Release 并更新稳定版升级描述文件，不发布公测版、内测版或开发版。官网分发按上表执行。

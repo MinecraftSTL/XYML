@@ -41,7 +41,7 @@ import java.util.Locale;
 @NotNullByDefault
 public record ThemeColor(String name, String color) {
     /// Default launcher color.
-    public static final ThemeColor DEFAULT = new ThemeColor("blue", "#5C6BC0");
+    public static final ThemeColor DEFAULT = new ThemeColor("blue", "#5555FF");
 
     /// Built-in named color specifications accepted by current settings.
     public static final @Unmodifiable List<ThemeColor> STANDARD_COLORS = List.of(

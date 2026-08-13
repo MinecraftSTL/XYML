@@ -98,7 +98,9 @@ The build accepts these release inputs:
 - `BUILD_NUMBER`: the final positive decimal component used for an ordinary CI build when `RELEASE_VERSION` is absent.
 - `STABLE_VERSION`: an optional override of `stableVersion` in `config/project.properties`.
 
-Official builds reject missing or malformed release inputs. Local builds default to a six-component Dev snapshot such as `1.0.0.0.0.SNAPSHOT`.
+Official builds reject missing or malformed release inputs. Builds on `main`, `beta`, `alpha`, and `dev` keep the
+resolved channel version unchanged. Builds on every other branch append an empty component; with the default Dev
+channel, for example, a local feature build is `1.0.0.0.0.0.`.
 
 The Github Release publishing workflow runs only from `main`. It creates a Stable release and updates only the Stable
 channel descriptor; it does not publish Beta, Alpha, or Dev releases. Official-website distribution follows the table

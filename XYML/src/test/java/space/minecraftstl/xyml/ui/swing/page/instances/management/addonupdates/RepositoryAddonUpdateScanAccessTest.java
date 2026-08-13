@@ -48,6 +48,8 @@ final class RepositoryAddonUpdateScanAccessTest {
     void malformedWinnerBecomesFileFailureWithoutDiscardingSourceFailures() {
         TestLocalAddonFile localAddon = new TestLocalAddonFile(Path.of("addons", "broken.jar"));
         LocalAddonFile.AddonUpdate winner = new LocalAddonFile.AddonUpdate(
+                RemoteAddon.Source.MODRINTH,
+                RemoteAddon.Type.MOD,
                 localAddon,
                 version(RemoteAddon.Source.CURSEFORGE, "1.0.0", Instant.parse("2026-01-01T00:00:00Z")),
                 version(null, "1.1.0", Instant.parse("2026-02-01T00:00:00Z")),
@@ -141,6 +143,8 @@ final class RepositoryAddonUpdateScanAccessTest {
     /// @return valid update fixture
     private static LocalAddonFile.AddonUpdate update(TestLocalAddonFile localAddon) {
         return new LocalAddonFile.AddonUpdate(
+                RemoteAddon.Source.MODRINTH,
+                RemoteAddon.Type.MOD,
                 localAddon,
                 version(RemoteAddon.Source.CURSEFORGE, "1.0.0", Instant.parse("2026-01-01T00:00:00Z")),
                 version(RemoteAddon.Source.MODRINTH, "1.1.0", Instant.parse("2026-02-01T00:00:00Z")),
@@ -160,10 +164,10 @@ final class RepositoryAddonUpdateScanAccessTest {
         @Nullable RemoteAddon.IVersion self = source == null ? null : () -> source;
         return new RemoteAddon.Version(
                 self,
+                number,
                 "normal-project",
                 "Normal Project",
                 number,
-                "",
                 published,
                 RemoteAddon.VersionType.Release,
                 new RemoteAddon.File(Map.of(), "https://example.invalid/normal.jar", "normal.jar"),

@@ -29,6 +29,7 @@ import javax.swing.UIDefaults;
 import javax.swing.UIManager;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -38,26 +39,82 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Tests validation and FlatLaf mapping for adjustable Swing design tokens.
 @NotNullByDefault
 public final class SwingDesignTokensTest {
-    /// Negative radii are rejected instead of being silently normalized.
+    /// Invalid radii are rejected instead of being silently normalized or overflowing their arc diameter.
     @Test
     public void cornerRadiusMustNotBeNegative() {
-        assertThrows(IllegalArgumentException.class, () -> new SwingDesignTokens(-1));
+        assertAll(
+                () -> assertThrows(IllegalArgumentException.class, () -> new SwingDesignTokens(-1)),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> new SwingDesignTokens(Integer.MAX_VALUE / 2 + 1)));
     }
 
-    /// One configured radius is applied consistently to every supported FlatLaf arc key.
+    /// One configured radius becomes an arc diameter for every supported FlatLaf key.
     @Test
     public void appliesCornerRadiusToFlatLafDefaults() {
         UIDefaults defaults = new UIDefaults();
         new SwingDesignTokens(5).applyTo(defaults);
 
         assertAll(
-                () -> assertEquals(5, defaults.getInt("Component.arc")),
-                () -> assertEquals(5, defaults.getInt("Button.arc")),
-                () -> assertEquals(5, defaults.getInt("CheckBox.arc")),
-                () -> assertEquals(5, defaults.getInt("TextComponent.arc")),
-                () -> assertEquals(5, defaults.getInt("ProgressBar.arc")),
-                () -> assertEquals(5, defaults.getInt("ScrollBar.thumbArc")),
-                () -> assertEquals(5, defaults.getInt("ScrollBar.trackArc")));
+                () -> assertEquals(10, defaults.getInt("Component.arc")),
+                () -> assertEquals(10, defaults.getInt("Button.arc")),
+                () -> assertEquals(6, defaults.getInt("CheckBox.arc")),
+                () -> assertEquals(5, defaults.getInt("ComboBox.borderCornerRadius")),
+                () -> assertEquals(10, defaults.getInt("ComboBox.selectionArc")),
+                () -> assertEquals(10, defaults.getInt("List.selectionArc")),
+                () -> assertEquals(10, defaults.getInt("MenuBar.selectionArc")),
+                () -> assertEquals(10, defaults.getInt("MenuItem.selectionArc")),
+                () -> assertEquals(5, defaults.getInt("Popup.borderCornerRadius")),
+                () -> assertEquals(5, defaults.getInt("PopupMenu.borderCornerRadius")),
+                () -> assertEquals(10, defaults.getInt("TextComponent.arc")),
+                () -> assertEquals(10, defaults.getInt("ProgressBar.arc")),
+                () -> assertEquals(10, defaults.getInt("ScrollBar.thumbArc")),
+                () -> assertEquals(10, defaults.getInt("ScrollBar.trackArc")),
+                () -> assertEquals(10, defaults.getInt("ScrollPane.arc")),
+                () -> assertEquals(10, defaults.getInt("TabbedPane.tabArc")),
+                () -> assertEquals(10, defaults.getInt("TabbedPane.tabSelectionArc")),
+                () -> assertEquals(10, defaults.getInt("TabbedPane.cardTabArc")),
+                () -> assertEquals(10, defaults.getInt("TabbedPane.buttonArc")),
+                () -> assertEquals(10, defaults.getInt("TabbedPane.closeArc")),
+                () -> assertEquals(10, defaults.getInt("TitlePane.buttonArc")),
+                () -> assertEquals(10, defaults.getInt("ToolBar.hoverButtonGroupArc")),
+                () -> assertEquals(5, defaults.getInt("ToolTip.borderCornerRadius")),
+                () -> assertEquals(10, defaults.getInt("Tree.selectionArc")));
+    }
+
+    /// A zero radius disables every rounded rectangular surface managed by the launcher theme.
+    @Test
+    public void zeroCornerRadiusDisablesAllFlatLafRoundedSurfaces() {
+        UIDefaults defaults = new UIDefaults();
+        new SwingDesignTokens(0).applyTo(defaults);
+
+        for (String key : List.of(
+                "Component.arc",
+                "Button.arc",
+                "CheckBox.arc",
+                "ComboBox.borderCornerRadius",
+                "ComboBox.selectionArc",
+                "List.selectionArc",
+                "MenuBar.selectionArc",
+                "MenuItem.selectionArc",
+                "Popup.borderCornerRadius",
+                "PopupMenu.borderCornerRadius",
+                "TextComponent.arc",
+                "ProgressBar.arc",
+                "ScrollBar.thumbArc",
+                "ScrollBar.trackArc",
+                "ScrollPane.arc",
+                "TabbedPane.tabArc",
+                "TabbedPane.tabSelectionArc",
+                "TabbedPane.cardTabArc",
+                "TabbedPane.buttonArc",
+                "TabbedPane.closeArc",
+                "TitlePane.buttonArc",
+                "ToolBar.hoverButtonGroupArc",
+                "ToolTip.borderCornerRadius",
+                "Tree.selectionArc")) {
+            assertEquals(0, defaults.getInt(key), key);
+        }
     }
 
     /// FlatLaf's default checkbox icon reads the bounded dedicated arc at the largest launcher setting.
@@ -100,13 +157,13 @@ public final class SwingDesignTokensTest {
 
     /// Paints representative checkbox states and checks that the bounded arc remains effective.
     ///
-    /// @param requestedArc requested component arc
+    /// @param requestedRadius requested component radius
     /// @param expectedCheckBoxArc bounded checkbox arc
-    private static void assertCheckBoxStatesRenderWithinBounds(int requestedArc, int expectedCheckBoxArc) {
+    private static void assertCheckBoxStatesRenderWithinBounds(int requestedRadius, int expectedCheckBoxArc) {
         UIDefaults defaults = UIManager.getDefaults();
         @Nullable Object previousArc = defaults.get("CheckBox.arc");
         try {
-            new SwingDesignTokens(requestedArc).applyTo(defaults);
+            new SwingDesignTokens(requestedRadius).applyTo(defaults);
             FlatCheckBoxIcon icon = new FlatCheckBoxIcon();
 
             assertEquals(expectedCheckBoxArc, icon.getStyleableValue("arc"));
