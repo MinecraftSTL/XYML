@@ -492,7 +492,7 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         target.setToolTipText(backgroundStrings.chooseColorLabel());
         target.getAccessibleContext().setAccessibleName(backgroundStrings.chooseColorLabel());
         target.setPreferredSize(new Dimension(34, 30));
-        target.setOpaque(true);
+        target.setOpaque(false);
     }
 
     /// Attaches listeners that publish one complete background replacement per accepted user action.

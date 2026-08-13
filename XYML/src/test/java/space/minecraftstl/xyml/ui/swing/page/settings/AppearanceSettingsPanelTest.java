@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import com.formdev.flatlaf.FlatLightLaf;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -31,6 +32,7 @@ import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 
 import javax.swing.AbstractButton;
 import javax.swing.JButton;
@@ -39,6 +41,7 @@ import javax.swing.JLabel;
 import javax.swing.JSlider;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
+import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -470,6 +473,44 @@ public final class AppearanceSettingsPanelTest {
         });
     }
 
+    /// The theme-color swatch paints only its rounded FlatLaf surface without an opaque rectangular backing.
+    @Test
+    public void paintsThemeColorSwatchWithoutSquareCornerHighlight() {
+        BufferedImage rendered = onEventDispatchThread(() -> {
+            assertTrue(FlatLightLaf.setup());
+            new SwingDesignTokens(12).applyTo(UIManager.getDefaults());
+            FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
+                    ThemeBrightnessPreference.SYSTEM, 12, true, true));
+            AppearanceSettingsPanel panel = new AppearanceSettingsPanel(model, STRINGS);
+            JButton swatch = findComponent(panel, "appearanceCustomThemeColorChooser", JButton.class);
+            swatch.setEnabled(true);
+            swatch.setSize(swatch.getPreferredSize());
+            assertFalse(swatch.isOpaque());
+
+            BufferedImage image = new BufferedImage(
+                    swatch.getWidth(),
+                    swatch.getHeight(),
+                    BufferedImage.TYPE_INT_ARGB);
+            Graphics2D graphics = image.createGraphics();
+            try {
+                swatch.printAll(graphics);
+            } finally {
+                graphics.dispose();
+                panel.close();
+            }
+            return image;
+        });
+
+        int lastX = rendered.getWidth() - 1;
+        int lastY = rendered.getHeight() - 1;
+        assertAll(
+                () -> assertEquals(0, alpha(rendered.getRGB(0, 0))),
+                () -> assertEquals(0, alpha(rendered.getRGB(lastX, 0))),
+                () -> assertEquals(0, alpha(rendered.getRGB(0, lastY))),
+                () -> assertEquals(0, alpha(rendered.getRGB(lastX, lastY))),
+                () -> assertTrue(alpha(rendered.getRGB(rendered.getWidth() / 2, rendered.getHeight() / 2)) > 0));
+    }
+
     /// Disabling a custom-color override remains possible while the inactive text field contains invalid text.
     @Test
     public void invalidCustomColorDoesNotBlockReturningToThemeColor() {
@@ -766,6 +807,14 @@ public final class AppearanceSettingsPanelTest {
             }
         }
         return colors;
+    }
+
+    /// Returns the unsigned alpha component of one packed ARGB pixel.
+    ///
+    /// @param argb packed pixel value
+    /// @return alpha from zero through 255
+    private static int alpha(int argb) {
+        return argb >>> 24;
     }
 
     /// Thread-safe fake model that applies commands by publishing replacement snapshots.
