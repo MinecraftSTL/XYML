@@ -122,6 +122,48 @@ final class ShellFileDropHandlerTest {
         assertNull(target.getTransferHandler());
     }
 
+    /// Filters a multi-file transfer while retaining independently removable text routing.
+    @Test
+    void composesFilteredFileListsAndTextRoutes() {
+        JPanel target = new JPanel();
+        AtomicReference<@Nullable @Unmodifiable List<Path>> imported = new AtomicReference<>();
+        AtomicReference<@Nullable String> openedText = new AtomicReference<>();
+        ShellFileDropHandler.RouteRegistration files = ShellFileDropHandler.registerFiles(
+                target,
+                path -> path.getFileName().toString().endsWith(".jar"),
+                imported::set);
+        ShellFileDropHandler.RouteRegistration text = ShellFileDropHandler.registerText(
+                target,
+                value -> value.startsWith("authlib-injector:"),
+                openedText::set);
+        TransferHandler handler = Objects.requireNonNull(target.getTransferHandler());
+
+        TransferHandler.TransferSupport mixedFiles = support(List.of(
+                new File("first.jar"),
+                new File("notes.txt"),
+                new File("second.jar")));
+        assertTrue(handler.canImport(mixedFiles));
+        assertTrue(handler.importData(mixedFiles));
+        assertEquals(
+                List.of(
+                        Path.of("first.jar").toAbsolutePath().normalize(),
+                        Path.of("second.jar").toAbsolutePath().normalize()),
+                imported.get());
+
+        TransferHandler.TransferSupport textSupport = new TransferHandler.TransferSupport(
+                target,
+                new StringTransferable(" authlib-injector:yggdrasil-server:value "));
+        assertTrue(handler.canImport(textSupport));
+        assertTrue(handler.importData(textSupport));
+        assertEquals("authlib-injector:yggdrasil-server:value", openedText.get());
+
+        files.close();
+        assertFalse(handler.canImport(mixedFiles));
+        assertEquals(handler, target.getTransferHandler());
+        text.close();
+        assertNull(target.getTransferHandler());
+    }
+
     /// Creates a Swing transfer wrapper for one immutable local-file list.
     ///
     /// @param files local files exposed by the payload

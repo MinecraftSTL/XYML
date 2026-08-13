@@ -71,12 +71,17 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
+import javax.swing.TransferHandler;
 import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -567,6 +572,29 @@ public final class AppShellPanelTest {
         }
     }
 
+    /// Modpack drops are accepted only while instance management or downloads is exposed.
+    @Test
+    public void limitsModpackDropsToInstancesAndDownloads() {
+        AppShellPanel panel = createPanel(creationCounts());
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+                assertTrue(handler.canImport(fileTransfer(panel, new File("example.mrpack"))));
+
+                panel.navigateTo(ShellPageId.ACCOUNTS);
+                assertFalse(handler.canImport(fileTransfer(panel, new File("example.zip"))));
+
+                panel.navigateTo(ShellPageId.DOWNLOADS);
+                assertTrue(handler.canImport(fileTransfer(panel, new File("example.zip"))));
+
+                panel.navigateTo(ShellPageId.SETTINGS);
+                assertFalse(handler.canImport(fileTransfer(panel, new File("example.mrpack"))));
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
     /// Launcher selection lock disables account switching and its management footer together.
     @Test
     public void disablesAccountSelectorWithSelectionCommands() {
@@ -788,6 +816,50 @@ public final class AppShellPanelTest {
             counts.put(page, new AtomicInteger());
         }
         return counts;
+    }
+
+    /// Creates one local-file transfer wrapper for shell route assertions.
+    ///
+    /// @param component transfer target
+    /// @param file local file payload
+    /// @return transfer support exposing the Java file-list flavor
+    private static TransferHandler.TransferSupport fileTransfer(JComponent component, File file) {
+        return new TransferHandler.TransferSupport(component, new FileTransferable(file));
+    }
+
+    /// Immutable one-file transferable used by shell routing tests.
+    @NotNullByDefault
+    private static final class FileTransferable implements Transferable {
+        /// Local file payload.
+        private final File file;
+
+        /// Creates one local-file payload.
+        ///
+        /// @param file local file
+        private FileTransferable(File file) {
+            this.file = Objects.requireNonNull(file, "file");
+        }
+
+        /// Returns the single supported transfer flavor.
+        @Override
+        public DataFlavor @Unmodifiable [] getTransferDataFlavors() {
+            return new DataFlavor[]{DataFlavor.javaFileListFlavor};
+        }
+
+        /// Reports whether the requested flavor is the Java file-list flavor.
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor flavor) {
+            return DataFlavor.javaFileListFlavor.equals(flavor);
+        }
+
+        /// Returns an immutable one-file list.
+        @Override
+        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+            if (!isDataFlavorSupported(flavor)) {
+                throw new UnsupportedFlavorException(flavor);
+            }
+            return List.of(file);
+        }
     }
 
     /// Creates complete lazy sample-page factories for shell and frame tests.

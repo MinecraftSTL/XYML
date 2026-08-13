@@ -21,6 +21,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.ModpackHelper;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingButtonRippleSupport;
@@ -28,6 +29,7 @@ import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadCategoryPanel;
 import space.minecraftstl.xyml.ui.swing.page.settings.SettingsCenterPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
@@ -104,6 +106,9 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
     /// Root-level click-origin feedback shared by every current and lazily added button.
     private final SwingButtonRippleSupport buttonRippleSupport;
+
+    /// Shell route accepting modpack archives only on instance-management and download pages.
+    private final ShellFileDropHandler.RouteRegistration modpackDropRegistration;
 
     /// Current decoded background and native-transparency paint state.
     private WindowBackgroundVisual windowBackground = initialWindowBackground();
@@ -191,6 +196,10 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         pageDeck.showPage(instancesPage, false);
         updateSelection(null);
         buttonRippleSupport = new SwingButtonRippleSupport(this, animator, BUTTON_RIPPLE_DURATION);
+        modpackDropRegistration = ShellFileDropHandler.register(
+                this,
+                this::supportsDroppedModpack,
+                this::openDroppedModpack);
     }
 
     /// Replaces the renderer-ready background and schedules repainting.
@@ -438,12 +447,40 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         return pageCache.cachedPageCount();
     }
 
+    /// Returns whether the current top-level page accepts a modpack archive drop.
+    ///
+    /// @param path dropped local path
+    /// @return whether the path is a modpack and the shell is on instances or downloads
+    private boolean supportsDroppedModpack(java.nio.file.Path path) {
+        ShellPageId page = selectedPage();
+        return ModpackHelper.isFileModpackByExtension(path)
+                && (page == null || page == ShellPageId.INSTANCES || page == ShellPageId.DOWNLOADS);
+    }
+
+    /// Opens the local modpack importer after moving to the downloads page when necessary.
+    ///
+    /// @param archive dropped local modpack archive
+    private void openDroppedModpack(java.nio.file.Path archive) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || !supportsDroppedModpack(archive)) {
+            return;
+        }
+        if (selectedPage() != ShellPageId.DOWNLOADS) {
+            navigateTo(ShellPageId.DOWNLOADS);
+        }
+        JComponent downloadsPage = pageCache.getOrCreate(ShellPageId.DOWNLOADS);
+        if (downloadsPage instanceof DownloadCategoryPanel downloads) {
+            downloads.openDroppedModpack(archive);
+        }
+    }
+
     /// Closes all created destination pages from any caller thread.
     @Override
     public void close() {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             if (!closed) {
                 closed = true;
+                modpackDropRegistration.close();
                 setTransferHandler(null);
                 @Nullable Throwable failure = null;
                 failure = attemptClose(failure, toolbar);
