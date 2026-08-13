@@ -43,6 +43,10 @@ stable     dev             alpha          beta        stable
 
 For example, beta `3.17.0.1` normally lands in stable `3.17.1`, not stable `3.17.0`. If an emergency fix advances stable to `3.17.1` first, the candidate may first appear in stable `3.17.2`. The stable version is selected when the beta is actually promoted, based on both its changes and the then-current stable version.
 
+A patch that promotes Beta to `main` or publishes a Stable hotfix must update `stableVersion` in
+`config/project.properties` to the selected stable version. The subsequent `main -> beta -> alpha -> dev`
+synchronization must carry that stable baseline to every release branch.
+
 ## Branch Model
 
 | Branch | Channel | Role |
@@ -74,14 +78,16 @@ The release-policy workflow validates adjacent branch flow before merge and audi
 
 Update frequency increases from Stable to Beta, Alpha, and Dev.
 
-| Channel | GitHub download | Other download locations | Feedback entry |
+| Channel | Github Release | Official website | Feedback entry |
 | --- | --- | --- | --- |
-| Stable | Public | Published | Public |
-| Beta | Public | May be published | Public |
-| Alpha | Public prerelease | Not published | Restricted testing program |
-| Dev | Public prerelease | Not published | Restricted testing program |
+| Stable | Published | Published | Public |
+| Beta | Not published | Published | Public |
+| Alpha | Not published | Not published | Restricted testing program |
+| Dev | Not published | Not published | Restricted testing program |
 
-Alpha and Dev artifacts are intentionally downloadable from GitHub Releases. Public availability of the binaries does not open their feedback intake: reports for those channels are accepted only through the restricted testing program, and the public bug form is reserved for current Stable and Beta releases.
+Only Stable artifacts are published through Github Release. The official website publishes Stable and Beta artifacts.
+Alpha and Dev artifacts are not distributed publicly, and reports for those channels are accepted only through the
+restricted testing program. The public bug form is reserved for current Stable and Beta releases.
 
 ## Building and Publishing
 
@@ -96,4 +102,6 @@ Official builds reject missing or malformed release inputs. Builds on `main`, `b
 resolved channel version unchanged. Builds on every other branch append an empty component; with the default Dev
 channel, for example, a local feature build is `1.0.0.0.0.0.`.
 
-The GitHub publishing workflow must run from the branch matching its selected channel. It creates a public release, marks Beta, Alpha, and Dev as prereleases, and updates the channel-specific update descriptor. Only Stable and Beta artifacts are handed to non-GitHub distribution jobs.
+The Github Release publishing workflow runs only from `main`. It creates a Stable release and updates only the Stable
+channel descriptor; it does not publish Beta, Alpha, or Dev releases. Official-website distribution follows the table
+above.

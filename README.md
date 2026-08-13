@@ -38,7 +38,7 @@ XYML 是由 MinecraftSTL 独立维护的下游项目，并非 HMCL 的官方发�
 
 ## 下载与发布
 
-请从 [GitHub Releases](https://github.com/MinecraftSTL/XYML/releases) 获取 XYML 的正式构建。XYML 采用稳定版、公测版、内测版和开发版四级发布渠道；各渠道的版本格式、测试范围、反馈方式和晋升顺序见[发布模型](docs/ReleaseSchedule_zh.md)。
+请从 [Github Release](https://github.com/MinecraftSTL/XYML/releases) 获取 XYML 稳定版；官网发布稳定版和公测版。XYML 采用稳定版、公测版、内测版和开发版四级发布渠道；各渠道的版本格式、测试范围、反馈方式和晋升顺序见[发布模型](docs/ReleaseSchedule_zh.md)。
 
 ## 参与贡献
 
