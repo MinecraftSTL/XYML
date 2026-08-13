@@ -33,11 +33,11 @@ import space.minecraftstl.xyml.ui.swing.page.instances.InstanceListItem;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesSnapshot;
 
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.event.ListDataEvent;
@@ -74,13 +74,13 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
     private final ShellDropdownButton valueButton = new ShellDropdownButton();
 
     /// Popup hosting explicit commands and the measured lazy list.
-    private final JPopupMenu popup = new JPopupMenu();
+    private final RoundedPopupMenu popup = new RoundedPopupMenu();
 
     /// Switches the popup body between the lazy list and an explicit empty state.
     private final CardLayout choiceLayout = new CardLayout();
 
     /// Stable body hosting either instance rows or the empty state.
-    private final JPanel choiceHost = new JPanel(choiceLayout);
+    private final RoundedChoicePanel choiceHost = new RoundedChoicePanel(choiceLayout);
 
     /// Stable-ID projection applying per-directory recent-use ordering.
     private final OrderedChoiceDataSource<InstanceListItem> orderedSource;
@@ -314,6 +314,7 @@ final class LazyInstanceSelector extends JPanel implements AutoCloseable {
         popup.add(addButton, BorderLayout.NORTH);
 
         choiceHost.setName("shellInstanceChoices");
+        choiceList.setBorder(BorderFactory.createEmptyBorder());
         choiceHost.add(choiceList, "instances");
         emptyLabel.setName("shellInstanceEmpty");
         emptyLabel.setText(emptyLabelText);

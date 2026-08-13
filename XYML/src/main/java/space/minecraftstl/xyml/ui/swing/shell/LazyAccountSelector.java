@@ -33,11 +33,11 @@ import space.minecraftstl.xyml.ui.swing.page.accounts.AccountListItem;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsModel;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsSnapshot;
 
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.event.ListDataEvent;
@@ -76,13 +76,13 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
     private final ShellDropdownButton valueButton = new ShellDropdownButton();
 
     /// Popup hosting the measured lazy list and explicit account-management command.
-    private final JPopupMenu popup = new JPopupMenu();
+    private final RoundedPopupMenu popup = new RoundedPopupMenu();
 
     /// Switches the popup body between the lazy list and an explicit empty state.
     private final CardLayout choiceLayout = new CardLayout();
 
     /// Stable popup body hosting either account rows or the empty-state label.
-    private final JPanel choiceHost = new JPanel(choiceLayout);
+    private final RoundedChoicePanel choiceHost = new RoundedChoicePanel(choiceLayout);
 
     /// Existing viewport-driven list used without eager row materialization.
     private final ViewportChoiceList<AccountListItem> choiceList;
@@ -329,6 +329,7 @@ final class LazyAccountSelector extends JPanel implements AutoCloseable {
         addButton.getAccessibleContext().setAccessibleName(addLabel);
         popup.add(addButton, BorderLayout.NORTH);
         choiceHost.setName("shellAccountChoices");
+        choiceList.setBorder(BorderFactory.createEmptyBorder());
         choiceHost.add(choiceList, "accounts");
         emptyLabel.setName("shellAccountEmpty");
         emptyLabel.setText(emptyLabelText);

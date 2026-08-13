@@ -28,13 +28,13 @@ import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementEnt
 import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementSnapshot;
 
+import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JList;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
@@ -76,7 +76,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     private final ShellDropdownButton valueButton = new ShellDropdownButton();
 
     /// Reusable popup hosting MRU entries and the complete-list command.
-    private final JPopupMenu popup = new JPopupMenu();
+    private final RoundedPopupMenu popup = new RoundedPopupMenu();
 
     /// Exact in-memory directory rows in selector order.
     private final DefaultListModel<GameDirectoryManagementEntry> listModel = new DefaultListModel<>();
@@ -86,6 +86,9 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
 
     /// Smooth-wheel scroll container for the bounded MRU directory list.
     private final JScrollPane directoryScrollPane = new JScrollPane(list);
+
+    /// Rounded host clipping the complete directory single-choice region.
+    private final RoundedChoicePanel choiceHost = new RoundedChoicePanel(new BorderLayout());
 
     /// Bottom command opening the complete directory list.
     private final JButton manageButton = new JButton();
@@ -237,6 +240,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         list.setFixedCellHeight(ROW_HEIGHT);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setCellRenderer(new DirectoryRenderer());
+        list.setOpaque(false);
         list.addListSelectionListener(event -> {
             if (!closed && !applyingSnapshot && !event.getValueIsAdjusting()) {
                 submitSelection();
@@ -246,8 +250,13 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         directoryScrollPane.putClientProperty(
                 FlatClientProperties.SCROLL_PANE_SMOOTH_SCROLLING,
                 Boolean.TRUE);
+        directoryScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        directoryScrollPane.setOpaque(false);
+        directoryScrollPane.getViewport().setOpaque(false);
         directoryScrollPane.getVerticalScrollBar().setUnitIncrement(ROW_HEIGHT);
-        popup.add(directoryScrollPane, BorderLayout.CENTER);
+        choiceHost.setName("shellGameDirectoryChoices");
+        choiceHost.add(directoryScrollPane, BorderLayout.CENTER);
+        popup.add(choiceHost, BorderLayout.CENTER);
 
         manageButton.setName("shellGameDirectoryManagement");
         manageButton.setText(manageLabel);
@@ -316,6 +325,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
                 boolean selected,
                 boolean focused) {
             Component component = super.getListCellRendererComponent(owner, value, index, selected, focused);
+            setOpaque(selected);
             if (value instanceof GameDirectoryManagementEntry entry) {
                 setText(entry.displayName());
                 setToolTipText(entry.path().getPath());
