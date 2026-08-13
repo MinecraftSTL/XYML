@@ -70,6 +70,10 @@ public final class RoundedPopupMenuTest {
 
             Insets insets = popup.getInsets();
             assertEquals(1, insets.left);
+            assertEquals(18, UIManager.getInt("PopupMenu.borderCornerRadius"));
+            assertEquals(
+                    UIManager.getInt("PopupMenu.borderCornerRadius") + insets.left,
+                    RoundedPopupMenu.outerCornerRadius());
             assertEquals(insets.left, insets.top);
             assertEquals(insets.left, insets.right);
             assertEquals(insets.left, insets.bottom);
@@ -105,6 +109,7 @@ public final class RoundedPopupMenuTest {
 
             new SwingDesignTokens(0).applyTo(UIManager.getDefaults());
             BufferedImage square = render(popup);
+            assertEquals(0, RoundedPopupMenu.outerCornerRadius());
             assertEquals(255, square.getRGB(0, 0) >>> 24);
         });
     }

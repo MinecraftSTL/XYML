@@ -111,7 +111,7 @@ final class RoundedPopupMenu extends JPopupMenu {
     ///
     /// @param graphics destination graphics
     private void paintRoundedBorder(Graphics2D graphics) {
-        int radius = cornerRadius();
+        int radius = outerCornerRadius();
         @Nullable Color borderColor = UIManager.getColor("PopupMenu.borderColor");
         if (borderColor == null || getWidth() <= 1 || getHeight() <= 1) {
             return;
@@ -161,7 +161,7 @@ final class RoundedPopupMenu extends JPopupMenu {
             return;
         }
         resetPopupWindowShape();
-        popupWindow.setShape(cornerRadius() == 0
+        popupWindow.setShape(outerCornerRadius() == 0
                 ? null
                 : createOutline(popupWindow.getWidth(), popupWindow.getHeight()));
         shapedWindow = popupWindow;
@@ -182,7 +182,7 @@ final class RoundedPopupMenu extends JPopupMenu {
     /// @param height outline height
     /// @return exact outline for painting or native shaping
     private Shape createOutline(int width, int height) {
-        int radius = cornerRadius();
+        int radius = outerCornerRadius();
         if (radius == 0) {
             return new Rectangle2D.Double(0.0, 0.0, width, height);
         }
@@ -190,10 +190,13 @@ final class RoundedPopupMenu extends JPopupMenu {
         return new RoundRectangle2D.Double(0.0, 0.0, width, height, diameter, diameter);
     }
 
-    /// Returns the non-negative popup corner radius currently installed by the theme manager.
+    /// Returns the outer radius that stays concentric with content inset from the popup edge.
     ///
-    /// @return current logical radius
-    private static int cornerRadius() {
-        return Math.max(0, UIManager.getInt("PopupMenu.borderCornerRadius"));
+    /// A zero content radius deliberately keeps the popup rectangular instead of introducing a one-pixel curve.
+    ///
+    /// @return current outer logical radius
+    static int outerCornerRadius() {
+        int contentRadius = Math.max(0, UIManager.getInt("PopupMenu.borderCornerRadius"));
+        return contentRadius == 0 ? 0 : contentRadius + OUTER_INSET;
     }
 }
