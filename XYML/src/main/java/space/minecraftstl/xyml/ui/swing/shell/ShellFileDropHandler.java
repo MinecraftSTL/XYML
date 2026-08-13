@@ -31,6 +31,7 @@ import java.awt.Component;
 import java.awt.Container;
 import java.io.File;
 import java.io.IOException;
+import java.io.Reader;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -46,6 +47,9 @@ import java.util.function.Predicate;
 /// precedence, then filtered file-list routes, then text routes.
 @NotNullByDefault
 public final class ShellFileDropHandler extends TransferHandler {
+    /// Maximum browser text payload inspected synchronously by one drop operation.
+    private static final int MAX_TRANSFER_TEXT_LENGTH = 16 * 1024;
+
     /// Ordered single-file routes confined to the Swing event-dispatch thread.
     private final List<Route> routes = new ArrayList<>();
 
@@ -360,19 +364,95 @@ public final class ShellFileDropHandler extends TransferHandler {
         }
     }
 
-    /// Extracts trimmed browser or desktop text from the standard string flavor.
+    /// Extracts trimmed browser or desktop text from standard String, URI-list, or plain-text flavors.
     private static @Nullable String extractText(Transferable transferable) {
         Objects.requireNonNull(transferable, "transferable");
-        if (!transferable.isDataFlavorSupported(DataFlavor.stringFlavor)) {
+        if (transferable.isDataFlavorSupported(DataFlavor.stringFlavor)) {
+            try {
+                Object transferred = transferable.getTransferData(DataFlavor.stringFlavor);
+                if (transferred instanceof String text
+                        && text.length() <= MAX_TRANSFER_TEXT_LENGTH
+                        && !text.isBlank()) {
+                    return text.trim();
+                }
+            } catch (IOException | UnsupportedFlavorException | RuntimeException ignored) {
+                // Browser-specific text flavors may still provide the same payload below.
+            }
+        }
+        @Nullable DataFlavor uriListFlavor = findTextFlavor(transferable, "text/uri-list");
+        if (uriListFlavor != null) {
+            @Nullable String uriList = readTextFlavor(transferable, uriListFlavor);
+            @Nullable String firstUri = firstUriListEntry(uriList);
+            if (firstUri != null) {
+                return firstUri;
+            }
+        }
+        @Nullable DataFlavor plainTextFlavor = findTextFlavor(transferable, "text/plain");
+        if (plainTextFlavor != null) {
+            @Nullable String plainText = readTextFlavor(transferable, plainTextFlavor);
+            if (plainText != null && !plainText.isBlank()) {
+                return plainText.trim();
+            }
+        }
+        return null;
+    }
+
+    /// Finds the first transfer flavor with one exact MIME type.
+    ///
+    /// @param transferable platform transfer payload
+    /// @param mimeType MIME type without parameters
+    /// @return matching flavor, or null when absent
+    private static @Nullable DataFlavor findTextFlavor(
+            Transferable transferable,
+            String mimeType) {
+        for (DataFlavor flavor : Objects.requireNonNull(
+                transferable,
+                "transferable").getTransferDataFlavors()) {
+            if (flavor.isMimeTypeEqual(Objects.requireNonNull(mimeType, "mimeType"))) {
+                return flavor;
+            }
+        }
+        return null;
+    }
+
+    /// Reads one text flavor through the platform's charset-aware reader with a bounded size.
+    ///
+    /// @param transferable platform transfer payload
+    /// @param flavor supported text flavor
+    /// @return decoded text, or null for malformed, unsupported, or oversized data
+    private static @Nullable String readTextFlavor(
+            Transferable transferable,
+            DataFlavor flavor) {
+        try (Reader reader = Objects.requireNonNull(flavor, "flavor")
+                .getReaderForText(Objects.requireNonNull(transferable, "transferable"))) {
+            StringBuilder text = new StringBuilder();
+            char[] buffer = new char[1024];
+            int count;
+            while ((count = reader.read(buffer)) >= 0) {
+                if (text.length() + count > MAX_TRANSFER_TEXT_LENGTH) {
+                    return null;
+                }
+                text.append(buffer, 0, count);
+            }
+            return text.toString();
+        } catch (IOException | UnsupportedFlavorException | RuntimeException ignored) {
             return null;
         }
-        try {
-            Object transferred = transferable.getTransferData(DataFlavor.stringFlavor);
-            if (transferred instanceof String text && !text.isBlank()) {
-                return text.trim();
+    }
+
+    /// Selects the first non-comment URI from the desktop URI-list transfer format.
+    ///
+    /// @param uriList decoded URI-list text, or null
+    /// @return first trimmed URI, or null when the list is empty
+    private static @Nullable String firstUriListEntry(@Nullable String uriList) {
+        if (uriList == null) {
+            return null;
+        }
+        for (String line : uriList.lines().toList()) {
+            String candidate = line.trim();
+            if (!candidate.isEmpty() && !candidate.startsWith("#")) {
+                return candidate;
             }
-        } catch (IOException | UnsupportedFlavorException | RuntimeException ignored) {
-            // Unsupported text payloads are not importable.
         }
         return null;
     }

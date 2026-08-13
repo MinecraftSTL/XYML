@@ -27,13 +27,16 @@ import javax.swing.TransferHandler;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -194,6 +197,43 @@ final class ShellFileDropHandlerTest {
         assertNull(shell.getTransferHandler());
     }
 
+    /// Browser URI-list and plain-text flavors reach the same text route when String flavor is absent.
+    @Test
+    void importsBrowserSpecificTextFlavors() throws ClassNotFoundException {
+        JPanel target = new JPanel();
+        List<String> opened = new ArrayList<>();
+        String endpoint = "https://home.minecraftstl.space:8880/api/yggdrasil";
+        ShellFileDropHandler.RouteRegistration route = ShellFileDropHandler.registerText(
+                target,
+                endpoint::equals,
+                opened::add);
+        TransferHandler handler = Objects.requireNonNull(target.getTransferHandler());
+        DataFlavor uriList = new DataFlavor("text/uri-list;class=java.lang.String");
+        DataFlavor plainText = new DataFlavor(
+                "text/plain;charset=UTF-8;class=java.io.InputStream");
+
+        TransferHandler.TransferSupport uriSupport = new TransferHandler.TransferSupport(
+                target,
+                new TextFlavorTransferable(
+                        uriList,
+                        () -> "# browser metadata\r\n" + endpoint + "\r\n"));
+        TransferHandler.TransferSupport plainSupport = new TransferHandler.TransferSupport(
+                target,
+                new TextFlavorTransferable(
+                        plainText,
+                        () -> new ByteArrayInputStream(
+                                (" " + endpoint + " ").getBytes(StandardCharsets.UTF_8))));
+
+        assertTrue(handler.canImport(uriSupport));
+        assertTrue(handler.importData(uriSupport));
+        assertTrue(handler.canImport(plainSupport));
+        assertTrue(handler.importData(plainSupport));
+        assertEquals(List.of(endpoint, endpoint), opened);
+
+        route.close();
+        assertNull(target.getTransferHandler());
+    }
+
     /// Creates a Swing transfer wrapper for one immutable local-file list.
     ///
     /// @param files local files exposed by the payload
@@ -289,6 +329,55 @@ final class ShellFileDropHandlerTest {
                 throw new UnsupportedFlavorException(flavor);
             }
             return value;
+        }
+    }
+
+    /// Immutable single-flavor browser text transferable.
+    @NotNullByDefault
+    private static final class TextFlavorTransferable implements Transferable {
+        /// Browser-specific text flavor.
+        private final DataFlavor flavor;
+
+        /// Factory producing a fresh payload for every transfer request.
+        private final Supplier<Object> valueSupplier;
+
+        /// Creates one browser text payload.
+        ///
+        /// @param flavor exposed text flavor
+        /// @param valueSupplier fresh payload factory matching the flavor's representation class
+        private TextFlavorTransferable(DataFlavor flavor, Supplier<Object> valueSupplier) {
+            this.flavor = Objects.requireNonNull(flavor, "flavor");
+            this.valueSupplier = Objects.requireNonNull(valueSupplier, "valueSupplier");
+        }
+
+        /// Returns the single browser text flavor.
+        ///
+        /// @return defensive flavor array
+        @Override
+        public DataFlavor @Unmodifiable [] getTransferDataFlavors() {
+            return new DataFlavor[]{flavor};
+        }
+
+        /// Reports whether the requested flavor is the configured browser flavor.
+        ///
+        /// @param requestedFlavor requested flavor
+        /// @return whether the flavor is supported
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor requestedFlavor) {
+            return flavor.equals(Objects.requireNonNull(requestedFlavor, "requestedFlavor"));
+        }
+
+        /// Returns the configured browser payload.
+        ///
+        /// @param requestedFlavor requested flavor
+        /// @return configured payload
+        /// @throws UnsupportedFlavorException when the requested flavor is unsupported
+        @Override
+        public Object getTransferData(DataFlavor requestedFlavor) throws UnsupportedFlavorException {
+            if (!isDataFlavorSupported(requestedFlavor)) {
+                throw new UnsupportedFlavorException(requestedFlavor);
+            }
+            return Objects.requireNonNull(valueSupplier.get(), "valueSupplier returned null");
         }
     }
 }
