@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -42,6 +43,8 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JColorChooser;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -51,8 +54,10 @@ import javax.swing.JSlider;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.UIManager;
+import javax.swing.colorchooser.AbstractColorChooserPanel;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.event.FocusAdapter;
@@ -64,6 +69,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -801,16 +807,13 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         return chooser;
     }
 
-    /// Opens a native color chooser and commits a canonical hexadecimal expression.
+    /// Opens a color chooser and commits a canonical hexadecimal expression.
     ///
     /// @param field target primary background color field
     private void chooseColor(JTextField field) {
         JTextField target = Objects.requireNonNull(field, "field");
         Color initial = Objects.requireNonNullElse(parseDisplayColor(target.getText()), Color.WHITE);
-        @Nullable Color selected = JColorChooser.showDialog(
-                this,
-                backgroundStrings.chooseColorLabel(),
-                initial);
+        @Nullable Color selected = showColorChooser(initial);
         if (selected != null) {
             target.setText(String.format(
                     Locale.ROOT,
@@ -822,15 +825,12 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         }
     }
 
-    /// Opens the native color chooser and commits a canonical custom launcher accent seed.
+    /// Opens the color chooser and commits a canonical custom launcher accent seed.
     private void chooseThemeColor() {
         Color initial = Objects.requireNonNullElse(
                 parseDisplayColor(customThemeColorField.getText()),
                 Color.decode(ThemeColor.DEFAULT.color()));
-        @Nullable Color selected = JColorChooser.showDialog(
-                this,
-                backgroundStrings.chooseColorLabel(),
-                initial);
+        @Nullable Color selected = showColorChooser(initial);
         if (selected != null) {
             customThemeColorField.setText(String.format(
                     Locale.ROOT,
@@ -839,6 +839,57 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
                     selected.getGreen(),
                     selected.getBlue()));
             commitThemeColor();
+        }
+    }
+
+    /// Opens a standard modal chooser whose color diagrams do not inherit text-component rounding.
+    ///
+    /// @param initial initially selected color
+    /// @return selected color, or null when the dialog is cancelled or closed
+    private @Nullable Color showColorChooser(Color initial) {
+        JColorChooser chooser = new JColorChooser(Objects.requireNonNull(initial, "initial"));
+        for (AbstractColorChooserPanel chooserPanel : chooser.getChooserPanels()) {
+            chooserPanel.setColorTransparencySelectionEnabled(true);
+        }
+        configureSquareColorChooserDiagrams(chooser);
+        AtomicReference<@Nullable Color> selected = new AtomicReference<>();
+        JDialog dialog = JColorChooser.createDialog(
+                this,
+                backgroundStrings.chooseColorLabel(),
+                true,
+                chooser,
+                event -> selected.set(chooser.getColor()),
+                null);
+        try {
+            dialog.setVisible(true);
+            return selected.get();
+        } finally {
+            dialog.dispose();
+        }
+    }
+
+    /// Prevents FlatLaf's text-field border from rounding the selection panel and vertical color slider.
+    ///
+    /// JDK color chooser panels reuse a formatted text field's border for both diagram controls. The explicit
+    /// client property keeps those controls rectangular without changing text fields or launcher-wide radius tokens.
+    ///
+    /// @param chooser color chooser whose diagram controls should remain rectangular
+    static void configureSquareColorChooserDiagrams(JColorChooser chooser) {
+        configureSquareColorChooserDiagramDescendants(Objects.requireNonNull(chooser, "chooser"));
+    }
+
+    /// Applies the square geometry override to every JDK color diagram below one hierarchy node.
+    ///
+    /// @param component current hierarchy node
+    private static void configureSquareColorChooserDiagramDescendants(Component component) {
+        if (component instanceof JComponent swingComponent
+                && "javax.swing.colorchooser.DiagramComponent".equals(component.getClass().getName())) {
+            swingComponent.putClientProperty(FlatClientProperties.COMPONENT_ROUND_RECT, Boolean.FALSE);
+        }
+        if (component instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                configureSquareColorChooserDiagramDescendants(child);
+            }
         }
     }
 

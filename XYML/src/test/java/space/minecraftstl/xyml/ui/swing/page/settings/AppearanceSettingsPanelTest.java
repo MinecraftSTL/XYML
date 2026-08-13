@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLightLaf;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -35,12 +36,15 @@ import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 
 import javax.swing.AbstractButton;
 import javax.swing.JButton;
+import javax.swing.JColorChooser;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JSlider;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
 import javax.swing.UIManager;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -515,6 +519,21 @@ public final class AppearanceSettingsPanelTest {
                 () -> assertTrue(alpha(rendered.getRGB(rendered.getWidth() / 2, rendered.getHeight() / 2)) > 0));
     }
 
+    /// Color diagrams remain rectangular even when launcher-wide text fields use a visible corner radius.
+    @Test
+    public void keepsColorSelectionPanelAndVerticalSliderSquare() {
+        onEventDispatchThread(() -> {
+            assertTrue(FlatLightLaf.setup());
+            new SwingDesignTokens(12).applyTo(UIManager.getDefaults());
+            assertTrue(UIManager.getInt("TextComponent.arc") > 0);
+            JColorChooser chooser = new JColorChooser(Color.RED);
+
+            AppearanceSettingsPanel.configureSquareColorChooserDiagrams(chooser);
+
+            assertTrue(assertSquareColorChooserDiagrams(chooser) >= 2);
+        });
+    }
+
     /// Disabling a custom-color override remains possible while the inactive text field contains invalid text.
     @Test
     public void invalidCustomColorDoesNotBlockReturningToThemeColor() {
@@ -705,6 +724,27 @@ public final class AppearanceSettingsPanelTest {
             }
         }
         return null;
+    }
+
+    /// Verifies every JDK color diagram in a hierarchy explicitly opts out of FlatLaf rounding.
+    ///
+    /// @param root hierarchy root
+    /// @return number of matching selection panels and vertical sliders
+    private static int assertSquareColorChooserDiagrams(Container root) {
+        int diagramCount = 0;
+        for (Component child : root.getComponents()) {
+            if (child instanceof JComponent swingChild
+                    && "javax.swing.colorchooser.DiagramComponent".equals(child.getClass().getName())) {
+                assertEquals(
+                        Boolean.FALSE,
+                        swingChild.getClientProperty(FlatClientProperties.COMPONENT_ROUND_RECT));
+                diagramCount++;
+            }
+            if (child instanceof Container container) {
+                diagramCount += assertSquareColorChooserDiagrams(container);
+            }
+        }
+        return diagramCount;
     }
 
     /// Runs a value-producing operation synchronously on the EDT.
