@@ -35,6 +35,7 @@ import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
+import java.awt.Insets;
 import java.awt.Shape;
 import java.awt.Window;
 import java.awt.image.BufferedImage;
@@ -51,6 +52,36 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 /// Verifies exact-radius shell popup rendering without creating a native window.
 @NotNullByDefault
 public final class RoundedPopupMenuTest {
+    /// Maximum-radius popup layouts keep auxiliary buttons equally far from every outer edge.
+    @Test
+    public void givesAuxiliaryButtonsUniformOuterSpacingAtMaximumRadius() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            assertTrue(FlatLightLaf.setup());
+            new SwingDesignTokens(18).applyTo(UIManager.getDefaults());
+            RoundedPopupMenu popup = new RoundedPopupMenu();
+            popup.setLayout(new BorderLayout());
+            JButton topButton = new JButton("create");
+            JButton bottomButton = new JButton("manage");
+            popup.add(topButton, BorderLayout.NORTH);
+            popup.add(new JPanel(), BorderLayout.CENTER);
+            popup.add(bottomButton, BorderLayout.SOUTH);
+            popup.setSize(new Dimension(240, 180));
+            popup.doLayout();
+
+            Insets insets = popup.getInsets();
+            assertEquals(1, insets.left);
+            assertEquals(insets.left, insets.top);
+            assertEquals(insets.left, insets.right);
+            assertEquals(insets.left, insets.bottom);
+            assertEquals(insets.top, topButton.getY());
+            assertEquals(insets.left, topButton.getX());
+            assertEquals(insets.right, popup.getWidth() - topButton.getX() - topButton.getWidth());
+            assertEquals(insets.left, bottomButton.getX());
+            assertEquals(insets.right, popup.getWidth() - bottomButton.getX() - bottomButton.getWidth());
+            assertEquals(insets.bottom, popup.getHeight() - bottomButton.getY() - bottomButton.getHeight());
+        });
+    }
+
     /// Popup painting clips opaque child content to the configured outer radius and responds to zero radius.
     @Test
     public void clipsCompletePopupContentToCurrentRadius() throws Exception {

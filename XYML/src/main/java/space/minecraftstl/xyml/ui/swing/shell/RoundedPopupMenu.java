@@ -21,6 +21,7 @@ import com.formdev.flatlaf.FlatClientProperties;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.BorderFactory;
 import javax.swing.JPopupMenu;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
@@ -45,6 +46,9 @@ import java.awt.geom.RoundRectangle2D;
 /// logical radius to the heavyweight popup window when shaped windows are available.
 @NotNullByDefault
 final class RoundedPopupMenu extends JPopupMenu {
+    /// Uniform space between popup content and the custom-painted outer border.
+    private static final int OUTER_INSET = 1;
+
     /// Popup window shaped for the current display, or `null` while hidden or rendered as a lightweight popup.
     private @Nullable Window shapedWindow;
 
@@ -103,33 +107,32 @@ final class RoundedPopupMenu extends JPopupMenu {
         }
     }
 
-    /// Paints a curved popup outline instead of FlatLaf's rectangular menu border.
-    ///
-    /// @param graphics destination graphics
-    @Override
-    protected void paintBorder(Graphics graphics) {
-        if (cornerRadius() == 0) {
-            super.paintBorder(graphics);
-        }
-    }
-
-    /// Paints the curved outline after all popup children so they cannot cover it.
+    /// Paints the current straight or curved outline after all popup children so they cannot cover it.
     ///
     /// @param graphics destination graphics
     private void paintRoundedBorder(Graphics2D graphics) {
         int radius = cornerRadius();
         @Nullable Color borderColor = UIManager.getColor("PopupMenu.borderColor");
-        if (radius == 0 || borderColor == null || getWidth() <= 1 || getHeight() <= 1) {
+        if (borderColor == null || getWidth() <= 1 || getHeight() <= 1) {
             return;
         }
         graphics.setColor(borderColor);
         graphics.setStroke(new BasicStroke(1.0F));
-        double diameter = Math.min(radius * 2.0, Math.min(getWidth() - 1.0, getHeight() - 1.0));
-        graphics.draw(new RoundRectangle2D.Double(
+        Rectangle2D bounds = new Rectangle2D.Double(
                 0.5,
                 0.5,
                 getWidth() - 1.0,
-                getHeight() - 1.0,
+                getHeight() - 1.0);
+        if (radius == 0) {
+            graphics.draw(bounds);
+            return;
+        }
+        double diameter = Math.min(radius * 2.0, Math.min(getWidth() - 1.0, getHeight() - 1.0));
+        graphics.draw(new RoundRectangle2D.Double(
+                bounds.getX(),
+                bounds.getY(),
+                bounds.getWidth(),
+                bounds.getHeight(),
                 diameter,
                 diameter));
     }
@@ -137,6 +140,7 @@ final class RoundedPopupMenu extends JPopupMenu {
     /// Keeps FlatLaf from replacing the requested radius with the Windows fixed-radius native border.
     private void configurePopupRendering() {
         setOpaque(false);
+        setBorder(BorderFactory.createEmptyBorder(OUTER_INSET, OUTER_INSET, OUTER_INSET, OUTER_INSET));
         putClientProperty(FlatClientProperties.POPUP_BORDER_CORNER_RADIUS, 0);
         putClientProperty(FlatClientProperties.POPUP_DROP_SHADOW_PAINTED, Boolean.FALSE);
         putClientProperty(FlatClientProperties.POPUP_FORCE_HEAVY_WEIGHT, Boolean.TRUE);
