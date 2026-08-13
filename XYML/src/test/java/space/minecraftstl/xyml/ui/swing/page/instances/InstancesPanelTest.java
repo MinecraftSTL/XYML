@@ -143,7 +143,7 @@ public final class InstancesPanelTest {
                     ChoiceListEntry.loading(0),
                     0,
                     true,
-                    false);
+                    true);
             selectedRow.setSize(new Dimension(320, InstanceListCellRenderer.ROW_HEIGHT));
             layoutRecursively(selectedRow);
             BufferedImage selectedImage = render(selectedRow);
@@ -163,6 +163,9 @@ public final class InstancesPanelTest {
                     () -> assertFalse(selectedRow.isOpaque()),
                     () -> assertEquals(0, selectedImage.getRGB(0, 0) >>> 24),
                     () -> assertEquals(0, selectedImage.getRGB(selectedImage.getWidth() - 1, 0) >>> 24),
+                    () -> assertEquals(
+                            Objects.requireNonNull(UIManager.getColor("List.cellFocusColor")).getRGB(),
+                            selectedImage.getRGB(0, selectedImage.getHeight() / 2)),
                     () -> assertEquals(
                             list.getSelectionBackground().getRGB(),
                             selectedImage.getRGB(selectedImage.getWidth() - 2, selectedImage.getHeight() / 2)),

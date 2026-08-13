@@ -40,7 +40,6 @@ import javax.swing.JScrollPane;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.UIManager;
-import javax.swing.border.Border;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -369,6 +368,9 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         /// Whether the represented row is selected.
         private boolean selected;
 
+        /// Whether the represented row owns keyboard focus.
+        private boolean focused;
+
         /// Creates one reusable directory renderer with stable row geometry.
         private DirectoryRenderer() {
             super(new BorderLayout(12, 0));
@@ -414,7 +416,8 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
             selectionOwner = owner;
             selectionIndex = index;
             this.selected = selected;
-            configurePalette(owner, selected, focused);
+            this.focused = focused;
+            configurePalette(owner, selected);
 
             Font font = owner.getFont();
             nameLabel.setFont(font.deriveFont(Font.BOLD));
@@ -442,6 +445,9 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
                         getHeight(),
                         getBackground());
             }
+            if (focused && owner != null) {
+                RoundedListSelectionPainter.paintFocusOutline(owner, graphics, getWidth(), getHeight());
+            }
             super.paintComponent(graphics);
         }
 
@@ -459,11 +465,9 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         ///
         /// @param owner owning list and palette source
         /// @param selected whether the row is selected
-        /// @param focused whether the row owns keyboard focus
         private void configurePalette(
                 JList<? extends GameDirectoryManagementEntry> owner,
-                boolean selected,
-                boolean focused) {
+                boolean selected) {
             Color background = selected ? owner.getSelectionBackground() : owner.getBackground();
             Color foreground = selected ? owner.getSelectionForeground() : owner.getForeground();
             @Nullable Color disabledForeground = UIManager.getColor("Label.disabledForeground");
@@ -471,14 +475,8 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
             setForeground(foreground);
             nameLabel.setForeground(foreground);
             pathLabel.setForeground(selected || disabledForeground == null ? foreground : disabledForeground);
-            @Nullable Border lafBorder = UIManager.getBorder(focused
-                    ? "List.focusCellHighlightBorder"
-                    : "List.cellNoFocusBorder");
-            Border focusBorder = lafBorder == null
-                    ? BorderFactory.createEmptyBorder(1, 1, 1, 1)
-                    : lafBorder;
             setBorder(BorderFactory.createCompoundBorder(
-                    focusBorder,
+                    RoundedListSelectionPainter.createCellInsetsBorder(owner),
                     BorderFactory.createEmptyBorder(7, 10, 7, 10)));
         }
     }

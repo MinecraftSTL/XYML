@@ -33,7 +33,6 @@ import javax.swing.JPanel;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingConstants;
 import javax.swing.UIManager;
-import javax.swing.border.Border;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -86,6 +85,9 @@ public final class InstanceListCellRenderer extends JPanel
     /// Whether the represented row is selected.
     private boolean selected;
 
+    /// Whether the represented row owns keyboard focus.
+    private boolean focused;
+
     /// Creates the stable reusable instance renderer hierarchy.
     public InstanceListCellRenderer() {
         super(new BorderLayout(12, 0));
@@ -132,7 +134,8 @@ public final class InstanceListCellRenderer extends JPanel
         selectionOwner = list;
         selectionIndex = index;
         selected = isSelected;
-        configurePalette(list, isSelected, cellHasFocus);
+        focused = cellHasFocus;
+        configurePalette(list, isSelected);
 
         Font baseFont = list.getFont();
         nameLabel.setFont(baseFont.deriveFont(Font.BOLD));
@@ -173,6 +176,9 @@ public final class InstanceListCellRenderer extends JPanel
                     getHeight(),
                     getBackground());
         }
+        if (focused && owner != null) {
+            RoundedListSelectionPainter.paintFocusOutline(owner, graphics, getWidth(), getHeight());
+        }
         super.paintComponent(graphics);
     }
 
@@ -180,11 +186,9 @@ public final class InstanceListCellRenderer extends JPanel
     ///
     /// @param list owning list and palette source
     /// @param selected whether the row is selected
-    /// @param focused whether the row has keyboard focus
     private void configurePalette(
             JList<? extends ChoiceListEntry<InstanceListItem>> list,
-            boolean selected,
-            boolean focused) {
+            boolean selected) {
         Color background = selected ? list.getSelectionBackground() : list.getBackground();
         Color foreground = selected ? list.getSelectionForeground() : list.getForeground();
         setOpaque(false);
@@ -192,14 +196,8 @@ public final class InstanceListCellRenderer extends JPanel
         setForeground(foreground);
         nameLabel.setForeground(foreground);
         detailLabel.setForeground(foreground);
-        @Nullable Border lafBorder = UIManager.getBorder(focused
-                ? "List.focusCellHighlightBorder"
-                : "List.cellNoFocusBorder");
-        Border focusBorder = lafBorder == null
-                ? BorderFactory.createEmptyBorder(1, 1, 1, 1)
-                : lafBorder;
         setBorder(BorderFactory.createCompoundBorder(
-                focusBorder,
+                RoundedListSelectionPainter.createCellInsetsBorder(list),
                 BorderFactory.createEmptyBorder(7, 10, 7, 10)));
     }
 

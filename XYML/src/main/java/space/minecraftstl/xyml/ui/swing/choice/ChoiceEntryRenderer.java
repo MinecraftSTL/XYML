@@ -23,7 +23,6 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.JList;
 import javax.swing.JLabel;
 import javax.swing.ListCellRenderer;
-import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Graphics;
 
@@ -45,13 +44,15 @@ public final class ChoiceEntryRenderer<T extends Object>
     /// Whether the represented row is selected.
     private boolean selected;
 
+    /// Whether the represented row owns keyboard focus.
+    private boolean focused;
+
     /// Creates a reusable renderer.
     ///
     /// @param textProvider the provider of labels for loaded values
     public ChoiceEntryRenderer(ChoiceTextProvider<T> textProvider) {
         this.textProvider = textProvider;
         setOpaque(false);
-        setBorder(UIManager.getBorder("List.cellNoFocusBorder"));
     }
 
     /// Configures this one renderer instance for the requested logical row.
@@ -74,12 +75,11 @@ public final class ChoiceEntryRenderer<T extends Object>
         selectionOwner = list;
         selectionIndex = index;
         selected = isSelected;
+        focused = cellHasFocus;
         setOpaque(false);
         setBackground(isSelected ? list.getSelectionBackground() : list.getBackground());
         setForeground(isSelected ? list.getSelectionForeground() : list.getForeground());
-        setBorder(UIManager.getBorder(cellHasFocus
-                ? "List.focusCellHighlightBorder"
-                : "List.cellNoFocusBorder"));
+        setBorder(RoundedListSelectionPainter.createCellInsetsBorder(list));
         setToolTipText(null);
 
         @Nullable T value = entry.value();
@@ -112,6 +112,9 @@ public final class ChoiceEntryRenderer<T extends Object>
                     getWidth(),
                     getHeight(),
                     getBackground());
+        }
+        if (focused && owner != null) {
+            RoundedListSelectionPainter.paintFocusOutline(owner, graphics, getWidth(), getHeight());
         }
         super.paintComponent(graphics);
     }

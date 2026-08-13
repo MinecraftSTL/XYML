@@ -140,7 +140,7 @@ public final class AccountListCellRendererTest {
                 () -> assertTrue(countPixelsDifferentFrom(rendered, avatarBounds, background) > 300));
     }
 
-    /// Selection uses a rounded full-row highlight without a redundant traditional radio marker.
+    /// Selection and keyboard focus share a rounded full-row outline without a traditional radio marker.
     @Test
     public void highlightsSelectedAccountWithoutRadioMarker() {
         AccountListCellRenderer renderer = onEdt(AccountListCellRenderer::new);
@@ -155,7 +155,7 @@ public final class AccountListCellRendererTest {
                     ChoiceListEntry.loading(0),
                     0,
                     true,
-                    false);
+                    true);
             selected.setSize(320, AccountListCellRenderer.ROW_HEIGHT);
             layoutRecursively((Container) selected);
             BufferedImage rendered = render((javax.swing.JComponent) selected);
@@ -164,6 +164,9 @@ public final class AccountListCellRendererTest {
                     () -> assertEquals(list.getSelectionBackground(), selected.getBackground()),
                     () -> assertEquals(0, rendered.getRGB(0, 0) >>> 24),
                     () -> assertEquals(0, rendered.getRGB(rendered.getWidth() - 1, 0) >>> 24),
+                    () -> assertEquals(
+                            Objects.requireNonNull(UIManager.getColor("List.cellFocusColor")).getRGB(),
+                            rendered.getRGB(0, rendered.getHeight() / 2)),
                     () -> assertEquals(
                             list.getSelectionBackground().getRGB(),
                             rendered.getRGB(rendered.getWidth() - 2, rendered.getHeight() / 2)),

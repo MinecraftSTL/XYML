@@ -935,6 +935,40 @@ public final class AppShellPanelTest {
                 () -> assertEquals(40, Objects.requireNonNull(icon.getIcon()).getIconHeight()),
                 () -> assertEquals(entry.path().getPath(), path.getText()),
                 () -> assertEquals(UIManager.getColor("Label.disabledForeground"), path.getForeground()));
+
+        JComponent focusedComponent = (JComponent) list.getCellRenderer().getListCellRendererComponent(
+                list,
+                entry,
+                0,
+                true,
+                true);
+        focusedComponent.setSize(320, LazyGameDirectorySelector.ROW_HEIGHT);
+        layoutTree(focusedComponent);
+        BufferedImage focusedImage = renderComponent(focusedComponent);
+        assertAll(
+                () -> assertEquals(0, focusedImage.getRGB(0, 0) >>> 24),
+                () -> assertEquals(0, focusedImage.getRGB(focusedImage.getWidth() - 1, 0) >>> 24),
+                () -> assertEquals(
+                        Objects.requireNonNull(UIManager.getColor("List.cellFocusColor")).getRGB(),
+                        focusedImage.getRGB(0, focusedImage.getHeight() / 2)));
+    }
+
+    /// Paints one fixed-size component into a transparent image.
+    ///
+    /// @param component configured component
+    /// @return rendered pixels
+    private static BufferedImage renderComponent(JComponent component) {
+        BufferedImage image = new BufferedImage(
+                component.getWidth(),
+                component.getHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            component.paint(graphics);
+        } finally {
+            graphics.dispose();
+        }
+        return image;
     }
 
     /// Returns one deterministically named label from a renderer hierarchy.
