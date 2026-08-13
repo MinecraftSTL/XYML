@@ -174,7 +174,7 @@ final class LinuxGPUDetector {
                 }
 
             } else if (builder.getVendor() == HardwareVendor.INTEL) {
-                builder.setType(pciDevice == 20 ? GraphicsCard.Type.Integrated : GraphicsCard.Type.Discrete);
+                builder.setType(LinuxIntelGpuClassifier.classify(pciDomain, pciBus, pciDevice, pciFunc));
             }
         } catch (Throwable ignored) {
         }
