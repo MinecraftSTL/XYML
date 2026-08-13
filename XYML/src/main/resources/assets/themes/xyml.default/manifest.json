@@ -32,7 +32,7 @@
     }
   ],
   "theme": {
-    "color": "#6B69D6",
+    "color": "#5555FF",
     "background": {
       "type": "image",
       "path": "assets/background-light.png"

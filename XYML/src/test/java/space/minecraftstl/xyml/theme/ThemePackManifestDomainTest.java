@@ -52,7 +52,7 @@ public final class ThemePackManifestDomainTest {
         ThemeAppearance light = theme.resolve(new ThemeResolveContext(ThemeBrightness.LIGHT, "windows", "zh"));
         ThemeAppearance dark = theme.resolve(new ThemeResolveContext(ThemeBrightness.DARK, "windows", "zh"));
 
-        assertEquals("#6B69D6", Objects.requireNonNull(light.color()).resolveFallback().color());
+        assertEquals("#5555FF", Objects.requireNonNull(light.color()).resolveFallback().color());
         assertEquals(
                 "assets/background-light.png",
                 ((ThemeBackground.Image) Objects.requireNonNull(light.background()).source()).path());
