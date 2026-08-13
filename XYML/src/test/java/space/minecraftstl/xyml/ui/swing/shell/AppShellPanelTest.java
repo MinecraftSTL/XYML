@@ -572,14 +572,17 @@ public final class AppShellPanelTest {
         }
     }
 
-    /// Modpack drops are accepted only while instance management or downloads is exposed.
+    /// Modpack drops are accepted only on the default instance-management workspace or downloads.
     @Test
-    public void limitsModpackDropsToInstancesAndDownloads() {
+    public void limitsModpackDropsToDefaultWorkspaceAndDownloads() {
         AppShellPanel panel = createPanel(creationCounts());
         try {
             EdtDispatcher.executeAndWait(() -> {
                 TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
                 assertTrue(handler.canImport(fileTransfer(panel, new File("example.mrpack"))));
+
+                panel.navigateTo(ShellPageId.INSTANCES);
+                assertFalse(handler.canImport(fileTransfer(panel, new File("example.zip"))));
 
                 panel.navigateTo(ShellPageId.ACCOUNTS);
                 assertFalse(handler.canImport(fileTransfer(panel, new File("example.zip"))));

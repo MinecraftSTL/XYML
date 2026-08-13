@@ -459,11 +459,11 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Returns whether the current top-level page accepts a modpack archive drop.
     ///
     /// @param path dropped local path
-    /// @return whether the path is a modpack and the shell is on instances or downloads
+    /// @return whether the path is a modpack and the shell is on the default workspace or downloads
     private boolean supportsDroppedModpack(java.nio.file.Path path) {
         ShellPageId page = selectedPage();
         return ModpackHelper.isFileModpackByExtension(path)
-                && (page == null || page == ShellPageId.INSTANCES || page == ShellPageId.DOWNLOADS);
+                && (page == null || page == ShellPageId.DOWNLOADS);
     }
 
     /// Opens the local modpack importer after moving to the downloads page when necessary.
