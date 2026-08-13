@@ -45,6 +45,7 @@ import javax.swing.JComboBox;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
 import java.io.IOException;
@@ -69,6 +70,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.ui.swing.SwingFileTransferTestSupport.fileTransfer;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Tests Java runtime cards, lifecycle actions, native interaction paths, and close barriers.
@@ -558,6 +560,46 @@ public final class JavaManagementPanelTest {
         onEventDispatchThread(() -> {
             assertEquals(installedRuntime, panel.selectedRuntime());
             panel.close();
+        });
+    }
+
+    /// A dropped runtime archive opens the existing acquisition card and starts its inspection flow.
+    @Test
+    public void droppedArchiveOpensAcquisitionAndStartsInspection() throws InterruptedException {
+        Path archive = Path.of("dropped-runtime.TAR.GZ").toAbsolutePath().normalize();
+        LocalJavaArchiveInspection inspection = new LocalJavaArchiveInspection(
+                archive,
+                "dropped-runtime",
+                "dropped-runtime",
+                new JavaInfo(Platform.WINDOWS_X86_64, "21", "Test"),
+                1024L,
+                "0".repeat(64));
+        FakeJavaRuntimeManagementService service = new FakeJavaRuntimeManagementService(
+                snapshot(true, List.of(), List.of()));
+        FakeJavaRuntimeAcquisitionService acquisitionService = new FakeJavaRuntimeAcquisitionService();
+        acquisitionService.archiveInspection.set(inspection);
+        JavaManagementPanel panel = onEventDispatchThread(() -> new JavaManagementPanel(
+                service,
+                acquisitionService,
+                new FakeJavaManagementInteractions()));
+
+        onEventDispatchThread(() -> {
+            TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+            assertTrue(handler.canImport(fileTransfer(panel, List.of(archive))));
+            assertFalse(handler.canImport(fileTransfer(panel, List.of(Path.of("runtime.tgz")))));
+            assertTrue(handler.importData(fileTransfer(panel, List.of(archive))));
+        });
+        awaitCondition(() -> acquisitionService.inspectionCalls.get() == 1 && onEventDispatchThread(() ->
+                findComponent(panel, "javaManagementAcquireView", JPanel.class).isVisible()));
+
+        onEventDispatchThread(() -> {
+            assertEquals(archive, acquisitionService.lastInspectedArchive.get());
+            assertEquals(archive.toString(), findComponent(
+                    panel,
+                    "javaManagementAcquireArchivePath",
+                    JTextField.class).getText());
+            panel.close();
+            assertNull(panel.getTransferHandler());
         });
     }
 
