@@ -1,19 +1,10 @@
-name: Publish XYML Release
+name: Publish XYML Stable Release
 
 on:
   workflow_dispatch:
     inputs:
-      channel:
-        description: Release channel
-        required: true
-        type: choice
-        options:
-          - stable
-          - beta
-          - alpha
-          - dev
       version:
-        description: Complete decimal version for the selected channel
+        description: Complete decimal Stable version
         required: true
         type: string
 
@@ -21,32 +12,28 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-${{ inputs.channel }}
+  group: publish-stable
   cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     env:
-      RELEASE_CHANNEL: ${{ inputs.channel }}
+      RELEASE_CHANNEL: stable
       RELEASE_VERSION: ${{ inputs.version }}
       BUILD_NUMBER: ${{ github.run_number }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Checkout selected release branch
+      - name: Checkout main
         uses: actions/checkout@v6
 
       - name: Validate branch ownership
         shell: bash
         run: |
-          case "${RELEASE_CHANNEL}:${GITHUB_REF_NAME}" in
-            stable:main|beta:beta|alpha:alpha|dev:dev)
-              ;;
-            *)
-              echo "${RELEASE_CHANNEL} releases must run from their matching branch" >&2
-              exit 1
-              ;;
-          esac
+          if [[ "${GITHUB_REF_NAME}" != main ]]; then
+            echo "Stable releases must run from main" >&2
+            exit 1
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -88,11 +75,7 @@ jobs:
             exit 1
           fi
 
-          if [[ "${RELEASE_CHANNEL}" == stable || "${RELEASE_CHANNEL}" == beta ]]; then
-            feedback="Feedback: https://github.com/MinecraftSTL/XYML/issues/new/choose"
-          else
-            feedback="Feedback is accepted only through the restricted testing program."
-          fi
+          feedback="Feedback: https://github.com/MinecraftSTL/XYML/issues/new/choose"
           printf 'Channel: %s\n\n%s\n' "${RELEASE_CHANNEL}" "${feedback}" > release-notes.txt
 
           asset_url="https://github.com/MinecraftSTL/XYML/releases/download/v${RELEASE_VERSION}/XYML-${RELEASE_VERSION}.jar"
@@ -107,16 +90,11 @@ jobs:
       - name: Publish public GitHub release
         shell: bash
         run: |
-          prerelease=()
-          if [[ "${RELEASE_CHANNEL}" != stable ]]; then
-            prerelease+=(--prerelease)
-          fi
           gh release create "v${RELEASE_VERSION}" \
             XYML/build/libs/XYML-${RELEASE_VERSION}.* \
             --target "${GITHUB_SHA}" \
             --title "XYML ${RELEASE_VERSION} (${RELEASE_CHANNEL})" \
-            --notes-file release-notes.txt \
-            "${prerelease[@]}"
+            --notes-file release-notes.txt
 
       - name: Update channel descriptor
         shell: bash
