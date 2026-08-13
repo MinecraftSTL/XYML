@@ -43,7 +43,7 @@ public final class LauncherAppearanceSettingsTest {
                 () -> assertEquals(
                         LauncherSettings.DEFAULT_CORNER_RADIUS,
                         settings.cornerRadiusProperty().get()),
-                () -> assertEquals(18, LauncherSettings.MAXIMUM_CORNER_RADIUS),
+                () -> assertEquals(20, LauncherSettings.MAXIMUM_CORNER_RADIUS),
                 () -> assertEquals(
                         LauncherSettings.DEFAULT_ANIMATION_SPEED_PERCENTAGE,
                         settings.animationSpeedPercentageProperty().get()));

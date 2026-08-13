@@ -22,6 +22,7 @@ import com.formdev.flatlaf.FlatLightLaf;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 
 import javax.swing.JButton;
@@ -57,7 +58,7 @@ public final class RoundedPopupMenuTest {
     public void givesAuxiliaryButtonsUniformOuterSpacingAtMaximumRadius() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             assertTrue(FlatLightLaf.setup());
-            new SwingDesignTokens(18).applyTo(UIManager.getDefaults());
+            new SwingDesignTokens(LauncherSettings.MAXIMUM_CORNER_RADIUS).applyTo(UIManager.getDefaults());
             RoundedPopupMenu popup = new RoundedPopupMenu();
             popup.setLayout(new BorderLayout());
             JButton topButton = new JButton("create");
@@ -70,7 +71,9 @@ public final class RoundedPopupMenuTest {
 
             Insets insets = popup.getInsets();
             assertEquals(1, insets.left);
-            assertEquals(18, UIManager.getInt("PopupMenu.borderCornerRadius"));
+            assertEquals(
+                    LauncherSettings.MAXIMUM_CORNER_RADIUS,
+                    UIManager.getInt("PopupMenu.borderCornerRadius"));
             assertEquals(
                     UIManager.getInt("PopupMenu.borderCornerRadius") + insets.left,
                     RoundedPopupMenu.outerCornerRadius());
