@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.image.InstanceIconData;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
+import space.minecraftstl.xyml.ui.swing.choice.RoundedListSelectionPainter;
 
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
@@ -76,6 +77,15 @@ public final class InstanceListCellRenderer extends JPanel
     /// Weak EDT-confined cache of immutable pixels converted to Swing icons.
     private final Map<InstanceIconData, Icon> iconCache = new WeakHashMap<>();
 
+    /// List whose UI paints the current selection background, or `null` before first configuration.
+    private @Nullable JList<?> selectionOwner;
+
+    /// Logical row represented during the next paint.
+    private int selectionIndex = -1;
+
+    /// Whether the represented row is selected.
+    private boolean selected;
+
     /// Creates the stable reusable instance renderer hierarchy.
     public InstanceListCellRenderer() {
         super(new BorderLayout(12, 0));
@@ -119,6 +129,9 @@ public final class InstanceListCellRenderer extends JPanel
             boolean isSelected,
             boolean cellHasFocus) {
         applyComponentOrientation(list.getComponentOrientation());
+        selectionOwner = list;
+        selectionIndex = index;
+        selected = isSelected;
         configurePalette(list, isSelected, cellHasFocus);
 
         Font baseFont = list.getFont();
@@ -145,6 +158,24 @@ public final class InstanceListCellRenderer extends JPanel
         return this;
     }
 
+    /// Paints the list-owned rounded selection before the transparent renderer hierarchy.
+    ///
+    /// @param graphics destination graphics
+    @Override
+    protected void paintComponent(Graphics graphics) {
+        @Nullable JList<?> owner = selectionOwner;
+        if (selected && owner != null) {
+            RoundedListSelectionPainter.paintSelectedBackground(
+                    owner,
+                    graphics,
+                    selectionIndex,
+                    getWidth(),
+                    getHeight(),
+                    getBackground());
+        }
+        super.paintComponent(graphics);
+    }
+
     /// Applies list-owned theme colors and focus decoration to this renderer hierarchy.
     ///
     /// @param list owning list and palette source
@@ -156,7 +187,7 @@ public final class InstanceListCellRenderer extends JPanel
             boolean focused) {
         Color background = selected ? list.getSelectionBackground() : list.getBackground();
         Color foreground = selected ? list.getSelectionForeground() : list.getForeground();
-        setOpaque(selected);
+        setOpaque(false);
         setBackground(background);
         setForeground(foreground);
         nameLabel.setForeground(foreground);

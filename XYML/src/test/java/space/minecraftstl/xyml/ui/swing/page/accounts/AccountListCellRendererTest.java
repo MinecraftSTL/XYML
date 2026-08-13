@@ -25,8 +25,10 @@ import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.auth.offline.Skin;
 import space.minecraftstl.xyml.auth.yggdrasil.TextureModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 
+import com.formdev.flatlaf.FlatLightLaf;
 import com.sun.net.httpserver.HttpServer;
 import javax.imageio.ImageIO;
 import javax.swing.Icon;
@@ -34,6 +36,8 @@ import javax.swing.ImageIcon;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JRadioButton;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Color;
 import java.awt.Container;
@@ -136,22 +140,33 @@ public final class AccountListCellRendererTest {
                 () -> assertTrue(countPixelsDifferentFrom(rendered, avatarBounds, background) > 300));
     }
 
-    /// Selection uses the complete row highlight without a redundant traditional radio marker.
+    /// Selection uses a rounded full-row highlight without a redundant traditional radio marker.
     @Test
     public void highlightsSelectedAccountWithoutRadioMarker() {
         AccountListCellRenderer renderer = onEdt(AccountListCellRenderer::new);
         JList<ChoiceListEntry<AccountListItem>> list = onEdt(JList::new);
 
         runOnEdt(() -> {
+            assertTrue(FlatLightLaf.setup());
+            new SwingDesignTokens(12).applyTo(UIManager.getDefaults());
+            SwingUtilities.updateComponentTreeUI(list);
             Component selected = renderer.getListCellRendererComponent(
                     list,
                     ChoiceListEntry.loading(0),
                     0,
                     true,
                     false);
+            selected.setSize(320, AccountListCellRenderer.ROW_HEIGHT);
+            layoutRecursively((Container) selected);
+            BufferedImage rendered = render((javax.swing.JComponent) selected);
             assertAll(
-                    () -> assertTrue(((javax.swing.JComponent) selected).isOpaque()),
+                    () -> assertFalse(((javax.swing.JComponent) selected).isOpaque()),
                     () -> assertEquals(list.getSelectionBackground(), selected.getBackground()),
+                    () -> assertEquals(0, rendered.getRGB(0, 0) >>> 24),
+                    () -> assertEquals(0, rendered.getRGB(rendered.getWidth() - 1, 0) >>> 24),
+                    () -> assertEquals(
+                            list.getSelectionBackground().getRGB(),
+                            rendered.getRGB(rendered.getWidth() - 2, rendered.getHeight() / 2)),
                     () -> assertFalse(containsComponentType(renderer, JRadioButton.class)));
 
             Component unselected = renderer.getListCellRendererComponent(
@@ -162,6 +177,24 @@ public final class AccountListCellRendererTest {
                     false);
             assertFalse(((javax.swing.JComponent) unselected).isOpaque());
         });
+    }
+
+    /// Paints one fixed-size renderer into a transparent image.
+    ///
+    /// @param component configured renderer
+    /// @return rendered pixels
+    private static BufferedImage render(javax.swing.JComponent component) {
+        BufferedImage image = new BufferedImage(
+                component.getWidth(),
+                component.getHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            component.paint(graphics);
+        } finally {
+            graphics.dispose();
+        }
+        return image;
     }
 
     /// A blocked remote texture request never blocks the EDT and eventually paints the downloaded head.

@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceLoadStatus;
+import space.minecraftstl.xyml.ui.swing.choice.RoundedListSelectionPainter;
 
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
@@ -69,6 +70,15 @@ public final class AccountListCellRenderer extends JPanel
     /// Secondary account-provider and storage label.
     private final JLabel detailLabel = new JLabel();
 
+    /// List whose UI paints the current selection background, or `null` before first configuration.
+    private @Nullable JList<?> selectionOwner;
+
+    /// Logical row represented during the next paint.
+    private int selectionIndex = -1;
+
+    /// Whether the represented row is selected.
+    private boolean selected;
+
     /// Creates one reusable stable renderer hierarchy.
     public AccountListCellRenderer() {
         super(new BorderLayout(12, 0));
@@ -111,6 +121,9 @@ public final class AccountListCellRenderer extends JPanel
             boolean selected,
             boolean focused) {
         applyComponentOrientation(list.getComponentOrientation());
+        selectionOwner = list;
+        selectionIndex = index;
+        this.selected = selected;
         configurePalette(list, selected, focused);
         Font font = list.getFont();
         nameLabel.setFont(font.deriveFont(Font.BOLD));
@@ -138,6 +151,24 @@ public final class AccountListCellRenderer extends JPanel
         return this;
     }
 
+    /// Paints the list-owned rounded selection before the transparent renderer hierarchy.
+    ///
+    /// @param graphics destination graphics
+    @Override
+    protected void paintComponent(Graphics graphics) {
+        @Nullable JList<?> owner = selectionOwner;
+        if (selected && owner != null) {
+            RoundedListSelectionPainter.paintSelectedBackground(
+                    owner,
+                    graphics,
+                    selectionIndex,
+                    getWidth(),
+                    getHeight(),
+                    getBackground());
+        }
+        super.paintComponent(graphics);
+    }
+
     /// Assigns child bounds before Swing's renderer pane paints this reusable complex component.
     ///
     /// A renderer is not a normal child of the list hierarchy, so offscreen and first-frame painting
@@ -160,7 +191,7 @@ public final class AccountListCellRenderer extends JPanel
             JList<? extends ChoiceListEntry<AccountListItem>> list,
             boolean selected,
             boolean focused) {
-        setOpaque(selected);
+        setOpaque(false);
         Color background = selected ? list.getSelectionBackground() : list.getBackground();
         Color foreground = selected ? list.getSelectionForeground() : list.getForeground();
         setBackground(background);

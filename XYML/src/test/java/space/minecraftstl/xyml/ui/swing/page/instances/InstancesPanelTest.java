@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.MotionPolicy;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
+import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
@@ -50,6 +51,7 @@ import javax.swing.JTextField;
 import javax.swing.ListCellRenderer;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -115,7 +117,7 @@ public final class InstancesPanelTest {
         });
     }
 
-    /// Instance list containers and unselected rows leave the window background visible.
+    /// Instance list containers and rounded row corners leave the window background visible.
     @Test
     public void keepsInstanceContentBackgroundTransparent() {
         FakeInstancesModel model = FakeInstancesModel.immediate(items(2), snapshot(0, 2, 0L));
@@ -124,7 +126,10 @@ public final class InstancesPanelTest {
         InstancesPanel panel = onEventDispatchThread(() -> new InstancesPanel(model, STRINGS, coordinator));
 
         onEventDispatchThread(() -> {
+            assertTrue(FlatLightLaf.setup());
+            new SwingDesignTokens(12).applyTo(UIManager.getDefaults());
             JList<ChoiceListEntry<InstanceListItem>> list = panel.choiceList().getList();
+            SwingUtilities.updateComponentTreeUI(list);
             ListCellRenderer<? super ChoiceListEntry<InstanceListItem>> renderer = list.getCellRenderer();
             JComponent unselectedRow = (JComponent) renderer.getListCellRendererComponent(
                     list,
@@ -139,6 +144,9 @@ public final class InstancesPanelTest {
                     0,
                     true,
                     false);
+            selectedRow.setSize(new Dimension(320, InstanceListCellRenderer.ROW_HEIGHT));
+            layoutRecursively(selectedRow);
+            BufferedImage selectedImage = render(selectedRow);
 
             assertAll(
                     () -> assertFalse(panel.isOpaque()),
@@ -152,7 +160,12 @@ public final class InstancesPanelTest {
                     () -> assertFalse(panel.choiceList().getViewport().isOpaque()),
                     () -> assertFalse(list.isOpaque()),
                     () -> assertFalse(unselectedOpaque),
-                    () -> assertTrue(selectedRow.isOpaque()),
+                    () -> assertFalse(selectedRow.isOpaque()),
+                    () -> assertEquals(0, selectedImage.getRGB(0, 0) >>> 24),
+                    () -> assertEquals(0, selectedImage.getRGB(selectedImage.getWidth() - 1, 0) >>> 24),
+                    () -> assertEquals(
+                            list.getSelectionBackground().getRGB(),
+                            selectedImage.getRGB(selectedImage.getWidth() - 2, selectedImage.getHeight() / 2)),
                     () -> assertFalse(containsComponentType(
                             (Container) selectedRow,
                             JRadioButton.class)));
@@ -908,6 +921,24 @@ public final class InstancesPanelTest {
                 layoutRecursively(nested);
             }
         }
+    }
+
+    /// Paints one fixed-size component into a transparent image.
+    ///
+    /// @param component configured component
+    /// @return rendered pixels
+    private static BufferedImage render(JComponent component) {
+        BufferedImage image = new BufferedImage(
+                component.getWidth(),
+                component.getHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            component.paint(graphics);
+        } finally {
+            graphics.dispose();
+        }
+        return image;
     }
 
     /// Collects all pixel colors painted into an image.
