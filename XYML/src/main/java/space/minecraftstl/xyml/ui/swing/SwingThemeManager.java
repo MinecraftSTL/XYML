@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.theme.ResolvedTheme;
 import space.minecraftstl.xyml.theme.ThemeBrightness;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeColor;
+import space.minecraftstl.xyml.ui.swing.shell.RoundedComboBoxUI;
 
 import javax.swing.Icon;
 import javax.swing.JComponent;
@@ -393,6 +394,7 @@ public final class SwingThemeManager {
         }
 
         designTokens.applyTo(UIManager.getDefaults());
+        UIManager.put("ComboBoxUI", RoundedComboBoxUI.class.getName());
         @Nullable Font replacementFont = applyDefaultFont();
         // FlatLaf caches the checkbox icon after first resolution, including the arc read at construction time.
         @Nullable Icon currentCheckBoxIcon = UIManager.getIcon("CheckBox.icon");
