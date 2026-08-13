@@ -40,10 +40,15 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
+import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Rectangle;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
+import java.io.File;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -61,6 +66,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Headless tests for the independent Swing Mod page and production constructor boundary.
@@ -160,6 +166,33 @@ public final class ModCatalogPanelTest {
 
         assertTrue(model.closed());
         assertNotNull(panelReference.get());
+    }
+
+    /// A page-scoped drop filters unsupported files, imports supported Mods, and detaches on close.
+    @Test
+    public void importsSupportedDroppedModsOnlyWhileOpen() throws Exception {
+        RecordingModel model = new RecordingModel(items(4));
+        RecordingInteractions interactions = new RecordingInteractions();
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+            TransferHandler.TransferSupport transfer = fileTransfer(panel, List.of(
+                    new File("first.jar"),
+                    new File("notes.txt"),
+                    new File("second.litemod")));
+
+            assertTrue(handler.canImport(transfer));
+            assertTrue(handler.importData(transfer));
+            assertEquals(
+                    List.of(
+                            Path.of("first.jar").toAbsolutePath().normalize(),
+                            Path.of("second.litemod").toAbsolutePath().normalize()),
+                    model.imports().get(0));
+
+            panel.close();
+            assertNull(panel.getTransferHandler());
+        });
     }
 
     /// Logical select-all and batch commands use stable keys without loading off-screen rows.
@@ -310,6 +343,52 @@ public final class ModCatalogPanelTest {
                     true));
         }
         return List.copyOf(items);
+    }
+
+    /// Creates one local-file-list transfer wrapper for page drop tests.
+    ///
+    /// @param component transfer target
+    /// @param files local file payload
+    /// @return transfer support exposing the Java file-list flavor
+    private static TransferHandler.TransferSupport fileTransfer(
+            JPanel component,
+            @Unmodifiable List<File> files) {
+        return new TransferHandler.TransferSupport(component, new FileListTransferable(files));
+    }
+
+    /// Immutable file-list transferable for page drop tests.
+    @NotNullByDefault
+    private static final class FileListTransferable implements Transferable {
+        /// Immutable local files.
+        private final @Unmodifiable List<File> files;
+
+        /// Creates one file-list payload.
+        ///
+        /// @param files local files to expose
+        private FileListTransferable(@Unmodifiable List<File> files) {
+            this.files = List.copyOf(files);
+        }
+
+        /// Returns the supported Java file-list flavor.
+        @Override
+        public DataFlavor @Unmodifiable [] getTransferDataFlavors() {
+            return new DataFlavor[]{DataFlavor.javaFileListFlavor};
+        }
+
+        /// Reports whether the requested flavor is supported.
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor flavor) {
+            return DataFlavor.javaFileListFlavor.equals(flavor);
+        }
+
+        /// Returns the immutable local files.
+        @Override
+        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+            if (!isDataFlavorSupported(flavor)) {
+                throw new UnsupportedFlavorException(flavor);
+            }
+            return files;
+        }
     }
 
     /// Creates a dynamic real repository boundary that exposes only the production constructor path.

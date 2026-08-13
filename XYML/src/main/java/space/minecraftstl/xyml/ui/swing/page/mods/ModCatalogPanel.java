@@ -22,6 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.addon.mod.ModManager;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -29,6 +30,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
@@ -168,6 +170,9 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// Owned model subscription.
     private final Subscription modelSubscription;
 
+    /// Page-scoped filtered Mod file-list route.
+    private final ShellFileDropHandler.RouteRegistration dropRegistration;
+
     /// Last snapshot rendered by this panel.
     private ModCatalogSnapshot displayedSnapshot;
 
@@ -252,6 +257,10 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             }
         });
         applySnapshot(displayedSnapshot);
+        dropRegistration = ShellFileDropHandler.registerFiles(
+                this,
+                this::supportsDroppedMod,
+                this::importDroppedMods);
         model.loadIfNeeded();
     }
 
@@ -824,6 +833,24 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         }
     }
 
+    /// Returns whether this writable page accepts one dropped Mod path.
+    ///
+    /// @param source normalized dropped path
+    /// @return whether the path has a supported Mod suffix and the catalog can write
+    private boolean supportsDroppedMod(Path source) {
+        return currentWritableSnapshot() != null && ModManager.isFileNameMod(source);
+    }
+
+    /// Imports all supported Mod paths delivered by the page-scoped drop route.
+    ///
+    /// @param sources immutable supported paths in transfer order
+    private void importDroppedMods(@Unmodifiable List<Path> sources) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!sources.isEmpty() && currentWritableSnapshot() != null) {
+            observeFailure(model.importMods(sources));
+        }
+    }
+
     /// Schedules creation and opening of the managed Mod directory.
     private void openDirectory() {
         observeFailure(interactions.openDirectory(modsDirectory));
@@ -940,6 +967,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         closed = true;
+        dropRegistration.close();
         searchField.setEnabled(false);
         filterBox.setEnabled(false);
         refreshButton.setEnabled(false);
