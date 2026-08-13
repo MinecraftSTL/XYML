@@ -55,9 +55,9 @@ changes can be tracked and evaluated for XYML.
 
 ## Downloads and Releases
 
-Download official XYML builds from [GitHub Releases](https://github.com/MinecraftSTL/XYML/releases). XYML uses four
-release channels: stable, beta, alpha, and dev. Their version formats, test audiences, feedback policies, and promotion
-order are documented in the [release model](ReleaseSchedule.md).
+Download XYML Stable builds from [Github Release](https://github.com/MinecraftSTL/XYML/releases). The official website
+publishes Stable and Beta builds. XYML uses four release channels: stable, beta, alpha, and dev. Their version formats,
+test audiences, feedback policies, and promotion order are documented in the [release model](ReleaseSchedule.md).
 
 ## Contributing
 
