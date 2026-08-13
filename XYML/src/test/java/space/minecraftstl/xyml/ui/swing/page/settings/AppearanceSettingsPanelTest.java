@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -47,7 +48,7 @@ import java.awt.image.BufferedImage;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -190,38 +191,33 @@ public final class AppearanceSettingsPanelTest {
         });
     }
 
-    /// The appearance restart row sits below the slider and activates only after the radius leaves its baseline.
+    /// The appearance refresh row sits below the slider and refreshes component trees without restarting.
     @Test
-    public void showsCornerRadiusRestartActionBelowSlider() {
+    public void refreshesCornerRadiusComponentsBelowSlider() {
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
                 ThemeBrightnessPreference.SYSTEM, 6, true, true));
         AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
-        SettingsRestartStrings restartStrings = new SettingsRestartStrings(
-                "Applies After Restart",
-                "Changes saved. Restart to apply them.",
-                "Restart Now",
-                "Restarting",
-                "Restart failed");
-        CompletableFuture<@Nullable Void> restartCompletion = new CompletableFuture<>();
+        CornerRadiusRefreshStrings refreshStrings = new CornerRadiusRefreshStrings(
+                "Changes apply live. Refresh if needed.",
+                "Refresh to update remaining components.",
+                "Refresh Interface");
+        AtomicInteger refreshCalls = new AtomicInteger();
 
         onEventDispatchThread(() -> {
-            panel.attachCornerRadiusRestartPanel(
-                    restartStrings,
-                    owner -> restartCompletion,
-                    active -> { });
+            panel.attachCornerRadiusRefreshPanel(refreshStrings, refreshCalls::incrementAndGet);
             panel.setSize(new Dimension(760, 900));
             layoutRecursively(panel);
 
-            SettingsRestartPanel restartPanel = findComponent(
+            CornerRadiusRefreshPanel refreshPanel = findComponent(
                     panel,
-                    "appearanceCornerRadiusRestart",
-                    SettingsRestartPanel.class);
+                    "appearanceCornerRadiusRefresh",
+                    CornerRadiusRefreshPanel.class);
             JSlider slider = findComponent(panel, "appearanceCornerRadius", JSlider.class);
-            JButton restart = findComponent(restartPanel, "settingsRestartAction", JButton.class);
-            JLabel status = findComponent(restartPanel, "settingsRestartStatus", JLabel.class);
-            Point restartLocation = SwingUtilities.convertPoint(
-                    restartPanel.getParent(),
-                    restartPanel.getLocation(),
+            JButton refresh = findComponent(refreshPanel, "cornerRadiusRefreshAction", JButton.class);
+            JLabel status = findComponent(refreshPanel, "cornerRadiusRefreshStatus", JLabel.class);
+            Point refreshLocation = SwingUtilities.convertPoint(
+                    refreshPanel.getParent(),
+                    refreshPanel.getLocation(),
                     panel);
             Point sliderLocation = SwingUtilities.convertPoint(
                     slider.getParent(),
@@ -229,27 +225,27 @@ public final class AppearanceSettingsPanelTest {
                     panel);
             assertAll(
                     () -> assertTrue(
-                            restartLocation.y >= sliderLocation.y + slider.getHeight(),
-                            () -> "restart=" + restartLocation + ", slider=" + sliderLocation),
-                    () -> assertEquals(sliderLocation.x, restartLocation.x),
-                    () -> assertFalse(restart.isEnabled()),
-                    () -> assertEquals(restartStrings.promptText(), status.getText()));
+                            refreshLocation.y >= sliderLocation.y + slider.getHeight(),
+                            () -> "refresh=" + refreshLocation + ", slider=" + sliderLocation),
+                    () -> assertEquals(sliderLocation.x, refreshLocation.x),
+                    () -> assertFalse(refresh.isEnabled()),
+                    () -> assertEquals(refreshStrings.promptText(), status.getText()),
+                    () -> assertEquals(refreshStrings.actionText(), refresh.getText()),
+                    () -> assertTrue(refresh.getIcon() instanceof FlatSVGIcon));
 
             slider.setValue(9);
             assertAll(
-                    () -> assertTrue(restart.isEnabled()),
-                    () -> assertEquals(restartStrings.requiredText(), status.getText()));
-
-            restart.doClick();
-            assertAll(
-                    () -> assertFalse(slider.isEnabled()),
-                    () -> assertFalse(restart.isEnabled()),
-                    () -> assertEquals(restartStrings.inProgressText(), status.getText()));
-            restartCompletion.completeExceptionally(new IllegalStateException("expected restart failure"));
-            assertAll(
                     () -> assertTrue(slider.isEnabled()),
-                    () -> assertTrue(restart.isEnabled()),
-                    () -> assertEquals(restartStrings.failedText(), status.getText()));
+                    () -> assertTrue(refresh.isEnabled()),
+                    () -> assertEquals(refreshStrings.requiredText(), status.getText()));
+
+            refresh.doClick();
+            assertAll(
+                    () -> assertEquals(1, refreshCalls.get()),
+                    () -> assertTrue(slider.isEnabled()),
+                    () -> assertFalse(refresh.isEnabled()),
+                    () -> assertFalse(refreshPanel.isRefreshRequired()),
+                    () -> assertEquals(refreshStrings.promptText(), status.getText()));
             panel.close();
         });
     }

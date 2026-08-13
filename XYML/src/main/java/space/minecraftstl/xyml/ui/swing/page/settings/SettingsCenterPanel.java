@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import com.formdev.flatlaf.FlatLaf;
 import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
 
 import net.miginfocom.swing.MigLayout;
@@ -310,10 +311,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 localizedRestartStrings(),
                 restartCommand,
                 this::restartActivityChanged);
-        appearancePanel.attachCornerRadiusRestartPanel(
-                localizedDelayedEffectRestartStrings(),
-                restartCommand,
-                this::restartActivityChanged);
+        appearancePanel.attachCornerRadiusRefreshPanel(
+                localizedCornerRadiusRefreshStrings(),
+                FlatLaf::updateUI);
         fontSettingsPanel = fontStore == null
                 ? null
                 : new FontSettingsPanel(
@@ -1203,6 +1203,16 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// @return localized delayed-effect restart presentation
     private static SettingsRestartStrings localizedDelayedEffectRestartStrings() {
         return localizedRestartStrings("settings.take_effect_after_restart");
+    }
+
+    /// Creates localized copy for explicitly refreshing components after a live corner-radius change.
+    ///
+    /// @return localized corner-radius refresh presentation
+    private static CornerRadiusRefreshStrings localizedCornerRadiusRefreshStrings() {
+        return new CornerRadiusRefreshStrings(
+                i18n("settings.corner_radius.refresh.prompt"),
+                i18n("settings.corner_radius.refresh.required"),
+                i18n("settings.corner_radius.refresh.action"));
     }
 
     /// Creates localized restart copy from one prompt key and the shared restart action keys.
