@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
 
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -101,7 +102,7 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
     private final JButton exploreDirectoriesButton = new JButton();
 
     /// Retained popup containing direct game, add-on, save, and diagnostic folder commands.
-    private final JPopupMenu directoryMenu = new JPopupMenu();
+    private final JPopupMenu directoryMenu = new RoundedPopupMenu();
 
     /// Refreshes the repository and recalculates displayed metadata.
     private final JButton refreshButton = new JButton();

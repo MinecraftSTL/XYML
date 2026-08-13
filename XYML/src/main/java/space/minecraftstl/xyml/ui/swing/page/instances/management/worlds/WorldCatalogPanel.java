@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
@@ -1215,7 +1216,17 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         if (selected == null || !selected.readable() || !ChunkBaseWorldTools.supports(selected)) {
             return;
         }
-        JPopupMenu menu = new JPopupMenu();
+        JPopupMenu menu = createChunkBaseMenu(selected);
+        menu.show(chunkBaseButton, 0, chunkBaseButton.getHeight());
+    }
+
+    /// Creates the exact-radius menu of Chunk Base destinations supported by one selected world.
+    ///
+    /// @param selected readable world whose version determines available destinations
+    /// @return configured rounded popup menu
+    JPopupMenu createChunkBaseMenu(WorldCatalogItem selected) {
+        WorldCatalogItem world = Objects.requireNonNull(selected, "selected");
+        JPopupMenu menu = new RoundedPopupMenu();
         addChunkBaseMenuItem(menu, "worldsChunkBaseSeedMap", "world.chunkbase.seed_map", ChunkBaseTool.SEED_MAP);
         addChunkBaseMenuItem(menu, "worldsChunkBaseStronghold", "world.chunkbase.stronghold", ChunkBaseTool.STRONGHOLD);
         addChunkBaseMenuItem(
@@ -1223,10 +1234,10 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
                 "worldsChunkBaseNetherFortress",
                 "world.chunkbase.nether_fortress",
                 ChunkBaseTool.NETHER_FORTRESS);
-        if (ChunkBaseWorldTools.supportsEndCity(selected)) {
+        if (ChunkBaseWorldTools.supportsEndCity(world)) {
             addChunkBaseMenuItem(menu, "worldsChunkBaseEndCity", "world.chunkbase.end_city", ChunkBaseTool.END_CITY);
         }
-        menu.show(chunkBaseButton, 0, chunkBaseButton.getHeight());
+        return menu;
     }
 
     /// Adds one localized Chunk Base destination to the current popup menu.

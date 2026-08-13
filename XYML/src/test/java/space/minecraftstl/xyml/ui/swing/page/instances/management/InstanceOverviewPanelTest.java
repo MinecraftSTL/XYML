@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
 
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -112,6 +113,7 @@ final class InstanceOverviewPanelTest {
                 assertNull(interactions.failureDetail.get());
 
                 JPopupMenu directoryMenu = panel.directoryMenu();
+                assertTrue(directoryMenu instanceof RoundedPopupMenu);
                 JMenuItem mods = findNamed(directoryMenu, "instanceOverviewBrowseMods", JMenuItem.class);
                 JMenuItem logs = findNamed(directoryMenu, "instanceOverviewBrowseLogs", JMenuItem.class);
                 assertNotNull(mods);
