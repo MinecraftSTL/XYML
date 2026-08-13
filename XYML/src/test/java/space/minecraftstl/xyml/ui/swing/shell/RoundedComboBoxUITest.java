@@ -30,6 +30,7 @@ import javax.swing.ListCellRenderer;
 import javax.swing.UIManager;
 import java.awt.Color;
 import java.awt.Graphics2D;
+import java.awt.Insets;
 import java.awt.image.BufferedImage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -85,20 +86,47 @@ public final class RoundedComboBoxUITest {
         }
     }
 
-    /// The popup support keeps combo and menu outer radii concentric and square at zero.
+    /// Compact settings rows use their actual limited radius plus the real element-to-popup spacing.
     @Test
-    public void computesConcentricPopupRadii() {
+    public void computesPopupRadiusFromEndpointGeometryAndSpacing() {
         assertTrue(FlatLightLaf.setup());
-        @Nullable Object previousRadius = UIManager.get("ComboBox.borderCornerRadius");
+        @Nullable Object previousArc = UIManager.get("ComboBox.selectionArc");
+        @Nullable Object previousPopupInsets = UIManager.get("ComboBox.popupInsets");
+        @Nullable Object previousSelectionInsets = UIManager.get("ComboBox.selectionInsets");
         try {
-            UIManager.put("ComboBox.borderCornerRadius", LauncherSettings.MAXIMUM_CORNER_RADIUS);
-            assertEquals(LauncherSettings.MAXIMUM_CORNER_RADIUS + 1,
-                    RoundedPopupSupport.outerCornerRadius("ComboBox.borderCornerRadius"));
+            UIManager.put("ComboBox.selectionArc", LauncherSettings.MAXIMUM_CORNER_RADIUS * 2);
+            UIManager.put("ComboBox.popupInsets", new Insets(0, 0, 0, 0));
+            UIManager.put("ComboBox.selectionInsets", new Insets(0, 0, 0, 0));
+            RoundedComboBoxUI compactUi = new RoundedComboBoxUI();
+            JComboBox<String> compactBox = new JComboBox<>(new String[] {"stable", "beta"});
+            compactBox.setUI(compactUi);
+            RoundedComboBoxUI.RoundedComboPopup compactPopup = compactUi.roundedPopup();
+            compactPopup.popupList().setFixedCellWidth(180);
+            compactPopup.popupList().setFixedCellHeight(28);
+            compactPopup.popupList().setSize(180, 56);
+            double compactElementRadius = 28.0 / 2.0;
+            double compactSpacing = compactPopup.getInsets().top;
+            assertEquals(compactElementRadius + compactSpacing, compactPopup.outerCornerRadius());
 
-            UIManager.put("ComboBox.borderCornerRadius", 0);
-            assertEquals(0, RoundedPopupSupport.outerCornerRadius("ComboBox.borderCornerRadius"));
+            UIManager.put("ComboBox.popupInsets", new Insets(3, 3, 3, 3));
+            UIManager.put("ComboBox.selectionInsets", new Insets(2, 2, 2, 2));
+            RoundedComboBoxUI insetUi = new RoundedComboBoxUI();
+            JComboBox<String> insetBox = new JComboBox<>(new String[] {"stable", "beta"});
+            insetBox.setUI(insetUi);
+            RoundedComboBoxUI.RoundedComboPopup insetPopup = insetUi.roundedPopup();
+            insetPopup.popupList().setFixedCellWidth(180);
+            insetPopup.popupList().setFixedCellHeight(40);
+            insetPopup.popupList().setSize(180, 80);
+            double insetElementRadius = (40.0 - 2.0 - 2.0) / 2.0;
+            double insetSpacing = insetPopup.getInsets().top + 3.0 + 2.0;
+            assertEquals(insetElementRadius + insetSpacing, insetPopup.outerCornerRadius());
+
+            UIManager.put("ComboBox.selectionArc", 0);
+            assertEquals(0.0, insetPopup.outerCornerRadius());
         } finally {
-            restoreDefault("ComboBox.borderCornerRadius", previousRadius);
+            restoreDefault("ComboBox.selectionArc", previousArc);
+            restoreDefault("ComboBox.popupInsets", previousPopupInsets);
+            restoreDefault("ComboBox.selectionInsets", previousSelectionInsets);
         }
     }
 

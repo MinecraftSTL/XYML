@@ -38,6 +38,7 @@ import java.awt.Window;
 import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
 import java.util.Objects;
+import java.util.function.DoubleSupplier;
 
 /// Applies an exact launcher radius to one popup's Swing surface and heavyweight native window.
 ///
@@ -51,8 +52,8 @@ final class RoundedPopupSupport {
     /// Popup whose component and native window are controlled by this support object.
     private final JPopupMenu popup;
 
-    /// UI defaults key containing the inner content radius.
-    private final String cornerRadiusKey;
+    /// Supplies the current outer radius in component coordinates.
+    private final DoubleSupplier outerCornerRadiusSupplier;
 
     /// Popup window shaped for the current display, or `null` while hidden or lightweight.
     private @Nullable Window shapedWindow;
@@ -62,8 +63,18 @@ final class RoundedPopupSupport {
     /// @param popup popup to configure and shape
     /// @param cornerRadiusKey UI defaults key containing the inner radius
     RoundedPopupSupport(JPopupMenu popup, String cornerRadiusKey) {
+        this(popup, () -> outerCornerRadius(cornerRadiusKey));
+    }
+
+    /// Creates exact-radius support using geometry supplied by the owning popup.
+    ///
+    /// @param popup popup to configure and shape
+    /// @param outerCornerRadiusSupplier current outer radius in component coordinates
+    RoundedPopupSupport(JPopupMenu popup, DoubleSupplier outerCornerRadiusSupplier) {
         this.popup = Objects.requireNonNull(popup, "popup");
-        this.cornerRadiusKey = Objects.requireNonNull(cornerRadiusKey, "cornerRadiusKey");
+        this.outerCornerRadiusSupplier = Objects.requireNonNull(
+                outerCornerRadiusSupplier,
+                "outerCornerRadiusSupplier");
     }
 
     /// Configures transparent exact-radius painting and forces a dedicated heavyweight popup window.
@@ -97,7 +108,7 @@ final class RoundedPopupSupport {
     ///
     /// @param graphics clipped popup graphics
     void paintRoundedBorder(Graphics2D graphics) {
-        int radius = outerCornerRadius();
+        double radius = outerCornerRadius();
         @Nullable Color borderColor = UIManager.getColor("PopupMenu.borderColor");
         if (borderColor == null || popup.getWidth() <= 1 || popup.getHeight() <= 1) {
             return;
@@ -146,8 +157,8 @@ final class RoundedPopupSupport {
     /// A zero content radius deliberately keeps the popup rectangular.
     ///
     /// @return current outer logical radius
-    int outerCornerRadius() {
-        return outerCornerRadius(cornerRadiusKey);
+    double outerCornerRadius() {
+        return Math.max(0.0, outerCornerRadiusSupplier.getAsDouble());
     }
 
     /// Computes the concentric outer radius for one configured popup key.
@@ -157,6 +168,17 @@ final class RoundedPopupSupport {
     static int outerCornerRadius(String cornerRadiusKey) {
         int contentRadius = Math.max(0, UIManager.getInt(Objects.requireNonNull(cornerRadiusKey, "cornerRadiusKey")));
         return contentRadius == 0 ? 0 : contentRadius + OUTER_INSET;
+    }
+
+    /// Computes an outer radius concentric with one inset element.
+    ///
+    /// @param elementCornerRadius actual painted element radius
+    /// @param spacing distance from the element bounds to the outer bounds
+    /// @return zero for a square element, otherwise element radius plus non-negative spacing
+    static double concentricOuterCornerRadius(double elementCornerRadius, double spacing) {
+        return elementCornerRadius <= 0.0
+                ? 0.0
+                : elementCornerRadius + Math.max(0.0, spacing);
     }
 
     /// Applies the current radius to the dedicated heavyweight popup window.
@@ -174,7 +196,7 @@ final class RoundedPopupSupport {
             return;
         }
         resetPopupWindowShape();
-        popupWindow.setShape(outerCornerRadius() == 0
+        popupWindow.setShape(outerCornerRadius() == 0.0
                 ? null
                 : createOutline(popupWindow.getWidth(), popupWindow.getHeight()));
         shapedWindow = popupWindow;
@@ -195,8 +217,8 @@ final class RoundedPopupSupport {
     /// @param height outline height
     /// @return exact outline for painting or native shaping
     private Shape createOutline(int width, int height) {
-        int radius = outerCornerRadius();
-        if (radius == 0) {
+        double radius = outerCornerRadius();
+        if (radius == 0.0) {
             return new Rectangle2D.Double(0.0, 0.0, width, height);
         }
         double diameter = Math.min(radius * 2.0, Math.min(width, height));

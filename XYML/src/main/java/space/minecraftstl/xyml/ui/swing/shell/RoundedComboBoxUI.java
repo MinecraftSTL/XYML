@@ -18,17 +18,21 @@
 package space.minecraftstl.xyml.ui.swing.shell;
 
 import com.formdev.flatlaf.ui.FlatComboBoxUI;
+import com.formdev.flatlaf.util.UIScale;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.border.Border;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JList;
+import javax.swing.UIManager;
 import javax.swing.plaf.ComponentUI;
-import javax.swing.plaf.basic.ComboPopup;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Insets;
+import java.awt.Rectangle;
 import java.util.Objects;
 
 /// FlatLaf combo-box delegate whose popup and every selected option follow the exact launcher radius.
@@ -47,8 +51,15 @@ public final class RoundedComboBoxUI extends FlatComboBoxUI {
     ///
     /// @return exact-radius combo popup
     @Override
-    protected ComboPopup createPopup() {
+    protected RoundedComboPopup createPopup() {
         return new RoundedComboPopup(comboBox);
+    }
+
+    /// Returns the installed rounded popup for package-level geometry verification.
+    ///
+    /// @return popup owned by this installed UI delegate
+    RoundedComboPopup roundedPopup() {
+        return (RoundedComboPopup) popup;
     }
 
     /// FlatLaf popup retaining its behavior while replacing lossy platform radius handling.
@@ -122,10 +133,114 @@ public final class RoundedComboBoxUI extends FlatComboBoxUI {
         private RoundedPopupSupport roundedSupport() {
             @Nullable RoundedPopupSupport current = roundedSupport;
             if (current == null) {
-                current = new RoundedPopupSupport(this, "ComboBox.borderCornerRadius");
+                current = new RoundedPopupSupport(this, this::outerCornerRadius);
                 roundedSupport = current;
             }
             return current;
+        }
+
+        /// Computes the outer radius from the first and last elements' actual painted radius and shared spacing.
+        ///
+        /// FlatLaf limits an element radius to half of its rendered bounds. The popup must use that limited radius,
+        /// rather than the larger configured value, to keep its outline concentric with compact settings rows.
+        ///
+        /// @return zero for square elements, otherwise actual element radius plus element-to-popup spacing
+        double outerCornerRadius() {
+            int selectionArc = Math.max(0, UIManager.getInt("ComboBox.selectionArc"));
+            if (selectionArc == 0) {
+                return 0.0;
+            }
+            Insets selectionInsets = scaledSelectionInsets();
+            double configuredRadius = UIScale.scale(selectionArc / 2.0F);
+            double elementRadius = actualElementCornerRadius(configuredRadius, selectionInsets);
+            return RoundedPopupSupport.concentricOuterCornerRadius(elementRadius, elementSpacing(selectionInsets));
+        }
+
+        /// Returns the popup list for package-level geometry verification.
+        ///
+        /// @return list whose first and last row geometry controls the popup radius
+        JList<?> popupList() {
+            return list;
+        }
+
+        /// Limits the configured radius to the actual selection bounds of both endpoint rows.
+        ///
+        /// @param configuredRadius scaled configured element radius
+        /// @param selectionInsets scaled insets applied while painting an element selection
+        /// @return smallest actual endpoint radius
+        private double actualElementCornerRadius(double configuredRadius, Insets selectionInsets) {
+            int itemCount = list.getModel().getSize();
+            if (itemCount == 0) {
+                return configuredRadius;
+            }
+            @Nullable Rectangle firstBounds = list.getCellBounds(0, 0);
+            @Nullable Rectangle lastBounds = list.getCellBounds(itemCount - 1, itemCount - 1);
+            return Math.min(
+                    limitedElementCornerRadius(configuredRadius, firstBounds, selectionInsets),
+                    limitedElementCornerRadius(configuredRadius, lastBounds, selectionInsets));
+        }
+
+        /// Limits one endpoint radius exactly as FlatLaf limits its painted selection path.
+        ///
+        /// @param configuredRadius scaled configured element radius
+        /// @param cellBounds endpoint cell bounds, or `null` before list geometry is available
+        /// @param selectionInsets scaled insets applied while painting an element selection
+        /// @return actual radius visible within the endpoint cell
+        private static double limitedElementCornerRadius(
+                double configuredRadius,
+                @Nullable Rectangle cellBounds,
+                Insets selectionInsets) {
+            if (cellBounds == null) {
+                return configuredRadius;
+            }
+            int selectionWidth = cellBounds.width - selectionInsets.left - selectionInsets.right;
+            int selectionHeight = cellBounds.height - selectionInsets.top - selectionInsets.bottom;
+            if (selectionHeight <= 0 || cellBounds.width > 0 && selectionWidth <= 0) {
+                return 0.0;
+            }
+            double limitingSize = cellBounds.width > 0
+                    ? Math.min(selectionWidth, selectionHeight)
+                    : selectionHeight;
+            return Math.min(configuredRadius, limitingSize / 2.0);
+        }
+
+        /// Returns the common structural spacing between an endpoint selection and the popup outline.
+        ///
+        /// @param selectionInsets scaled insets applied while painting an element selection
+        /// @return smallest non-negative spacing shared by all four sides
+        private double elementSpacing(Insets selectionInsets) {
+            Insets popupInsets = getInsets();
+            Insets scrollerInsets = scroller.getInsets();
+            Insets viewportInsets = scroller.getViewport().getInsets();
+            Insets listInsets = list.getInsets();
+            Insets viewportBorderInsets = borderInsets(scroller.getViewportBorder());
+            int top = popupInsets.top + scrollerInsets.top + viewportBorderInsets.top
+                    + viewportInsets.top + listInsets.top + selectionInsets.top;
+            int left = popupInsets.left + scrollerInsets.left + viewportBorderInsets.left
+                    + viewportInsets.left + listInsets.left + selectionInsets.left;
+            int bottom = popupInsets.bottom + scrollerInsets.bottom + viewportBorderInsets.bottom
+                    + viewportInsets.bottom + listInsets.bottom + selectionInsets.bottom;
+            int right = popupInsets.right + scrollerInsets.right + viewportBorderInsets.right
+                    + viewportInsets.right + listInsets.right + selectionInsets.right;
+            return Math.max(0, Math.min(Math.min(top, bottom), Math.min(left, right)));
+        }
+
+        /// Returns scaled selection insets matching FlatLaf's list painter.
+        ///
+        /// @return non-null scaled selection insets
+        private static Insets scaledSelectionInsets() {
+            @Nullable Insets configuredInsets = UIManager.getInsets("ComboBox.selectionInsets");
+            return configuredInsets == null
+                    ? new Insets(0, 0, 0, 0)
+                    : UIScale.scale(configuredInsets);
+        }
+
+        /// Returns one border's effective insets without requiring callers to handle a missing border.
+        ///
+        /// @param border optional viewport border
+        /// @return effective non-null border insets
+        private Insets borderInsets(@Nullable Border border) {
+            return border == null ? new Insets(0, 0, 0, 0) : border.getBorderInsets(scroller);
         }
     }
 }
