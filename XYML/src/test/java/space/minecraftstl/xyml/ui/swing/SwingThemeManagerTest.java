@@ -31,9 +31,11 @@ import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.theme.ThemeColorStyle;
 import space.minecraftstl.xyml.theme.ThemeContrast;
+import space.minecraftstl.xyml.ui.swing.shell.RoundedComboBoxUI;
 
 import javax.swing.Icon;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.UIManager;
@@ -136,7 +138,12 @@ public final class SwingThemeManagerTest {
                 () -> assertInstanceOf(FlatLightLaf.class, UIManager.getLookAndFeel()),
                 () -> assertEquals(8, UIManager.getInt("Component.arc")),
                 () -> assertEquals(6, UIManager.getInt("CheckBox.arc")),
+                () -> assertEquals(4, UIManager.getInt("PopupMenu.borderCornerRadius")),
+                () -> assertEquals(8, UIManager.getInt("List.selectionArc")),
+                () -> assertEquals(RoundedComboBoxUI.class.getName(), UIManager.getString("ComboBoxUI")),
                 () -> assertEquals(6, initialCheckBoxIcon.getStyleableValue("arc")));
+
+        assertTrue(new JComboBox<>().getUI() instanceof RoundedComboBoxUI);
 
         manager.update(ThemeBrightnessPreference.LIGHT, new SwingDesignTokens(13));
         FlatCheckBoxIcon updatedCheckBoxIcon = assertInstanceOf(
@@ -148,6 +155,8 @@ public final class SwingThemeManagerTest {
                 () -> assertInstanceOf(FlatLightLaf.class, UIManager.getLookAndFeel()),
                 () -> assertEquals(26, UIManager.getInt("Component.arc")),
                 () -> assertEquals(6, UIManager.getInt("CheckBox.arc")),
+                () -> assertEquals(13, UIManager.getInt("PopupMenu.borderCornerRadius")),
+                () -> assertEquals(26, UIManager.getInt("List.selectionArc")),
                 () -> assertNotSame(initialCheckBoxIcon, updatedCheckBoxIcon),
                 () -> assertEquals(6, updatedCheckBoxIcon.getStyleableValue("arc")));
 

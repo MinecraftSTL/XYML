@@ -161,6 +161,7 @@ final class ShellDropdownButton extends JButton implements PopupMenuListener {
             currentPopup.setVisible(false);
             return;
         }
+        SwingUtilities.updateComponentTreeUI(currentPopup);
         Objects.requireNonNull(popupOpenCommand, "popup open command is not bound").run();
     }
 

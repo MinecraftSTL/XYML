@@ -61,7 +61,9 @@ public final class LazyAccountSelectorTest {
                     "Account",
                     "No account",
                     "Add account",
+                    "Sign in or add an offline account",
                     "Account list",
+                    "Open account management",
                     ignored -> { });
             selectorReference.set(selector);
             assertNull(model.requestedRange());

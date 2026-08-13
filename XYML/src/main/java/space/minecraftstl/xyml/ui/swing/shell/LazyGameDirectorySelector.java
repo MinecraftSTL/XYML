@@ -24,24 +24,30 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.setting.GameDirectoryID;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.choice.RoundedListSelectionPainter;
 import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementEntry;
 import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementService;
 import space.minecraftstl.xyml.ui.swing.page.settings.GameDirectoryManagementSnapshot;
 
-import javax.swing.DefaultListCellRenderer;
+import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
 import javax.swing.Icon;
-import javax.swing.JButton;
+import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.ListCellRenderer;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
+import javax.swing.UIManager;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.GraphicsConfiguration;
+import java.awt.Graphics;
+import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
@@ -55,16 +61,16 @@ import java.util.Objects;
 @NotNullByDefault
 final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     /// Outline icon used by inactive popup rows.
-    private static final Icon FOLDER_ICON = new FlatSVGIcon("assets/swing/icons/folder.svg", 18, 18);
+    private static final Icon FOLDER_ICON = new FlatSVGIcon("assets/swing/icons/folder.svg", 40, 40);
 
     /// Filled icon used by the process-wide current popup row.
-    private static final Icon SELECTED_FOLDER_ICON = new FlatSVGIcon("assets/swing/icons/folder-fill.svg", 18, 18);
+    private static final Icon SELECTED_FOLDER_ICON = new FlatSVGIcon("assets/swing/icons/folder-fill.svg", 40, 40);
 
-    /// Stable list row height used to derive visible rows from actual popup space.
-    private static final int ROW_HEIGHT = 38;
+    /// Stable list row height shared with account and instance selector rows.
+    static final int ROW_HEIGHT = 64;
 
     /// Height of each explicit popup command row.
-    private static final int COMMAND_HEIGHT = 42;
+    static final int COMMAND_HEIGHT = PopupCommandButton.HEIGHT;
 
     /// Minimum popup width retaining readable directory names.
     private static final int MINIMUM_POPUP_WIDTH = 300;
@@ -76,7 +82,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     private final ShellDropdownButton valueButton = new ShellDropdownButton();
 
     /// Reusable popup hosting MRU entries and the complete-list command.
-    private final JPopupMenu popup = new JPopupMenu();
+    private final RoundedPopupMenu popup = new RoundedPopupMenu();
 
     /// Exact in-memory directory rows in selector order.
     private final DefaultListModel<GameDirectoryManagementEntry> listModel = new DefaultListModel<>();
@@ -87,8 +93,11 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     /// Smooth-wheel scroll container for the bounded MRU directory list.
     private final JScrollPane directoryScrollPane = new JScrollPane(list);
 
+    /// Rounded host clipping the complete directory single-choice region.
+    private final RoundedChoicePanel choiceHost = new RoundedChoicePanel(new BorderLayout());
+
     /// Bottom command opening the complete directory list.
-    private final JButton manageButton = new JButton();
+    private final PopupCommandButton manageButton;
 
     /// Directory selection service.
     private final GameDirectoryManagementService service;
@@ -111,6 +120,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     /// @param recentSelections persistent compact-selector history
     /// @param selectorLabel accessible selector label
     /// @param manageLabel localized complete-list action
+    /// @param manageDetail localized complete-list explanation
     /// @param manageCommand command opening the complete directory list
     /// @param revealInstancesCommand command revealing the persistent instances page after selection
     LazyGameDirectorySelector(
@@ -118,6 +128,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
             ShellRecentSelections recentSelections,
             String selectorLabel,
             String manageLabel,
+            String manageDetail,
             Runnable manageCommand,
             Runnable revealInstancesCommand) {
         super(new BorderLayout());
@@ -125,9 +136,12 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         this.service = Objects.requireNonNull(service, "service");
         this.recentSelections = Objects.requireNonNull(recentSelections, "recentSelections");
         this.revealInstancesCommand = Objects.requireNonNull(revealInstancesCommand, "revealInstancesCommand");
+        manageButton = new PopupCommandButton(
+                Objects.requireNonNull(manageLabel, "manageLabel"),
+                Objects.requireNonNull(manageDetail, "manageDetail"),
+                new FlatSVGIcon("assets/swing/icons/format-list-bulleted.svg", 24, 24));
         configureComponents(
                 Objects.requireNonNull(selectorLabel, "selectorLabel"),
-                Objects.requireNonNull(manageLabel, "manageLabel"),
                 Objects.requireNonNull(manageCommand, "manageCommand"));
     }
 
@@ -186,7 +200,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     /// Returns the complete-list command for focused popup tests.
     ///
     /// @return stable management button
-    JButton manageButton() {
+    PopupCommandButton manageButton() {
         return manageButton;
     }
 
@@ -202,6 +216,24 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     /// @return stable smooth-scrolling popup container
     JScrollPane directoryScrollPane() {
         return directoryScrollPane;
+    }
+
+    /// Returns the popup size after deriving it from current item count and available geometry.
+    ///
+    /// @return current popup size
+    Dimension preparePopupSize() {
+        EdtDispatcher.requireEventDispatchThread();
+        Insets popupInsets = popup.getInsets();
+        int popupVerticalInsets = popupInsets.top + popupInsets.bottom;
+        int listBudget = Math.max(
+                ROW_HEIGHT,
+                availablePopupHeight() - COMMAND_HEIGHT - popupVerticalInsets);
+        int visibleRows = Math.min(Math.max(1, listModel.size()), Math.max(1, listBudget / ROW_HEIGHT));
+        int width = Math.max(MINIMUM_POPUP_WIDTH, getWidth());
+        int popupHeight = visibleRows * ROW_HEIGHT + COMMAND_HEIGHT + popupVerticalInsets;
+        Dimension size = new Dimension(width, popupHeight);
+        popup.setPopupSize(size);
+        return size;
     }
 
     /// Releases popup interaction.
@@ -220,7 +252,6 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
     /// Builds the single-button selector and two-part popup.
     private void configureComponents(
             String selectorLabel,
-            String manageLabel,
             Runnable manageCommand) {
         setName("shellGameDirectorySelector");
         setOpaque(false);
@@ -237,6 +268,7 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         list.setFixedCellHeight(ROW_HEIGHT);
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setCellRenderer(new DirectoryRenderer());
+        list.setOpaque(false);
         list.addListSelectionListener(event -> {
             if (!closed && !applyingSnapshot && !event.getValueIsAdjusting()) {
                 submitSelection();
@@ -246,14 +278,15 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         directoryScrollPane.putClientProperty(
                 FlatClientProperties.SCROLL_PANE_SMOOTH_SCROLLING,
                 Boolean.TRUE);
+        directoryScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        directoryScrollPane.setOpaque(false);
+        directoryScrollPane.getViewport().setOpaque(false);
         directoryScrollPane.getVerticalScrollBar().setUnitIncrement(ROW_HEIGHT);
-        popup.add(directoryScrollPane, BorderLayout.CENTER);
+        choiceHost.setName("shellGameDirectoryChoices");
+        choiceHost.add(directoryScrollPane, BorderLayout.CENTER);
+        popup.add(choiceHost, BorderLayout.CENTER);
 
         manageButton.setName("shellGameDirectoryManagement");
-        manageButton.setText(manageLabel);
-        manageButton.setIcon(new FlatSVGIcon("assets/swing/icons/format-list-bulleted.svg", 18, 18));
-        manageButton.setHorizontalAlignment(SwingConstants.LEFT);
-        manageButton.putClientProperty("JButton.buttonType", "toolBarButton");
         manageButton.addActionListener(event -> {
             if (!closed) {
                 popup.setVisible(false);
@@ -269,11 +302,9 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         if (closed) {
             return;
         }
-        int listBudget = Math.max(ROW_HEIGHT, availablePopupHeight() - COMMAND_HEIGHT);
-        int visibleRows = Math.min(Math.max(1, listModel.size()), Math.max(1, listBudget / ROW_HEIGHT));
-        int width = Math.max(MINIMUM_POPUP_WIDTH, getWidth());
-        popup.setPopupSize(new Dimension(width, visibleRows * ROW_HEIGHT + COMMAND_HEIGHT));
+        Dimension size = preparePopupSize();
         popup.show(this, 0, getHeight());
+        popup.setPopupSize(size);
     }
 
     /// Returns the actual vertical screen space below this selector.
@@ -281,15 +312,23 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         @Nullable GraphicsConfiguration configuration = getGraphicsConfiguration();
         if (configuration == null || !isShowing()) {
             int localHeight = getRootPane() == null ? 0 : getRootPane().getHeight() - getHeight();
-            return Math.max(COMMAND_HEIGHT + ROW_HEIGHT, localHeight);
+            return Math.max(minimumPopupHeight(), localHeight);
         }
         Rectangle screen = configuration.getBounds();
         Insets insets = Toolkit.getDefaultToolkit().getScreenInsets(configuration);
         int workBottom = screen.y + screen.height - insets.bottom;
         int anchorBottom = getLocationOnScreen().y + getHeight();
         return Math.max(
-                COMMAND_HEIGHT + ROW_HEIGHT,
+                minimumPopupHeight(),
                 workBottom - anchorBottom - POPUP_SCREEN_MARGIN);
+    }
+
+    /// Returns the complete popup height needed for one choice row, its command, and outer spacing.
+    ///
+    /// @return minimum usable popup height
+    private int minimumPopupHeight() {
+        Insets popupInsets = popup.getInsets();
+        return COMMAND_HEIGHT + ROW_HEIGHT + popupInsets.top + popupInsets.bottom;
     }
 
     /// Commits one exact stable directory selection.
@@ -304,29 +343,141 @@ final class LazyGameDirectorySelector extends JPanel implements AutoCloseable {
         revealInstancesCommand.run();
     }
 
-    /// Renders a directory name and path without a redundant radio indicator.
+    /// Renders a directory name and path in the same two-line, 64-pixel geometry as other toolbar selectors.
     @NotNullByDefault
-    private static final class DirectoryRenderer extends DefaultListCellRenderer {
-        /// Configures one in-memory directory row.
+    private static final class DirectoryRenderer extends JPanel
+            implements ListCellRenderer<GameDirectoryManagementEntry> {
+        /// Fixed folder-icon host aligned with other selector media slots.
+        private final JLabel iconLabel = new JLabel();
+
+        /// Primary directory display name.
+        private final JLabel nameLabel = new JLabel();
+
+        /// Weaker persisted directory path.
+        private final JLabel pathLabel = new JLabel();
+
+        /// Two-line text host laid out explicitly for renderer-pane painting.
+        private final JPanel labels = new JPanel(new GridLayout(2, 1, 0, 2));
+
+        /// Owning list used for rounded selection painting, or `null` before first configuration.
+        private @Nullable JList<?> selectionOwner;
+
+        /// Selected row index used by FlatLaf selection geometry.
+        private int selectionIndex = -1;
+
+        /// Whether the represented row is selected.
+        private boolean selected;
+
+        /// Whether the represented row owns keyboard focus.
+        private boolean focused;
+
+        /// Creates one reusable directory renderer with stable row geometry.
+        private DirectoryRenderer() {
+            super(new BorderLayout(12, 0));
+            setOpaque(false);
+            setPreferredSize(new Dimension(280, ROW_HEIGHT));
+
+            Dimension iconSize = new Dimension(40, 40);
+            iconLabel.setName("gameDirectoryListIcon");
+            iconLabel.setPreferredSize(iconSize);
+            iconLabel.setMinimumSize(iconSize);
+            iconLabel.setMaximumSize(iconSize);
+            iconLabel.setHorizontalAlignment(SwingConstants.CENTER);
+            iconLabel.setVerticalAlignment(SwingConstants.CENTER);
+
+            labels.setOpaque(false);
+            nameLabel.setName("gameDirectoryListName");
+            pathLabel.setName("gameDirectoryListPath");
+            nameLabel.setVerticalAlignment(SwingConstants.BOTTOM);
+            pathLabel.setVerticalAlignment(SwingConstants.TOP);
+            labels.add(nameLabel);
+            labels.add(pathLabel);
+
+            add(iconLabel, BorderLayout.LINE_START);
+            add(labels, BorderLayout.CENTER);
+        }
+
+        /// Configures one in-memory directory row and its path detail.
+        ///
+        /// @param owner owning list
+        /// @param value represented directory
+        /// @param index row index
+        /// @param selected whether the row is selected
+        /// @param focused whether the row owns keyboard focus
+        /// @return reusable renderer component
         @Override
         public Component getListCellRendererComponent(
-                JList<?> owner,
-                @Nullable Object value,
+                JList<? extends GameDirectoryManagementEntry> owner,
+                GameDirectoryManagementEntry value,
                 int index,
                 boolean selected,
                 boolean focused) {
-            Component component = super.getListCellRendererComponent(owner, value, index, selected, focused);
-            if (value instanceof GameDirectoryManagementEntry entry) {
-                setText(entry.displayName());
-                setToolTipText(entry.path().getPath());
-                setIcon(entry.selected() ? SELECTED_FOLDER_ICON : FOLDER_ICON);
-                setIconTextGap(8);
-            } else {
-                setText("");
-                setToolTipText(null);
-                setIcon(null);
+            applyComponentOrientation(owner.getComponentOrientation());
+            selectionOwner = owner;
+            selectionIndex = index;
+            this.selected = selected;
+            this.focused = focused;
+            configurePalette(owner, selected);
+
+            Font font = owner.getFont();
+            nameLabel.setFont(font.deriveFont(Font.BOLD));
+            pathLabel.setFont(font.deriveFont(Math.max(9.0F, font.getSize2D() - 1.0F)));
+            nameLabel.setText(value.displayName());
+            pathLabel.setText(value.path().getPath());
+            iconLabel.setIcon(value.selected() ? SELECTED_FOLDER_ICON : FOLDER_ICON);
+            setToolTipText(value.path().getPath());
+            prepareRendererLayout(owner);
+            return this;
+        }
+
+        /// Paints the list-owned rounded selection before the transparent renderer hierarchy.
+        ///
+        /// @param graphics destination graphics
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            @Nullable JList<?> owner = selectionOwner;
+            if (selected && owner != null) {
+                RoundedListSelectionPainter.paintSelectedBackground(
+                        owner,
+                        graphics,
+                        selectionIndex,
+                        getWidth(),
+                        getHeight(),
+                        getBackground());
             }
-            return component;
+            if (focused && owner != null) {
+                RoundedListSelectionPainter.paintFocusOutline(owner, graphics, getWidth(), getHeight());
+            }
+            super.paintComponent(graphics);
+        }
+
+        /// Assigns nested child bounds before Swing's renderer pane paints this reusable hierarchy.
+        ///
+        /// @param owner owning list whose current width determines the row surface
+        private void prepareRendererLayout(JList<?> owner) {
+            int width = Math.max(getPreferredSize().width, owner.getWidth());
+            setSize(width, ROW_HEIGHT);
+            doLayout();
+            labels.doLayout();
+        }
+
+        /// Applies list-owned colors, including a weaker unselected path foreground.
+        ///
+        /// @param owner owning list and palette source
+        /// @param selected whether the row is selected
+        private void configurePalette(
+                JList<? extends GameDirectoryManagementEntry> owner,
+                boolean selected) {
+            Color background = selected ? owner.getSelectionBackground() : owner.getBackground();
+            Color foreground = selected ? owner.getSelectionForeground() : owner.getForeground();
+            @Nullable Color disabledForeground = UIManager.getColor("Label.disabledForeground");
+            setBackground(background);
+            setForeground(foreground);
+            nameLabel.setForeground(foreground);
+            pathLabel.setForeground(selected || disabledForeground == null ? foreground : disabledForeground);
+            setBorder(BorderFactory.createCompoundBorder(
+                    RoundedListSelectionPainter.createCellInsetsBorder(owner),
+                    BorderFactory.createEmptyBorder(7, 10, 7, 10)));
         }
     }
 }

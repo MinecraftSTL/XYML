@@ -88,6 +88,7 @@ public final class ShellDropdownButtonTest {
             ShellDropdownButton button = new ShellDropdownButton();
             TestPopupMenu popup = new TestPopupMenu();
             AtomicInteger openCount = new AtomicInteger();
+            int initialUpdateCount = popup.updateCount();
             button.setSize(220, 36);
             button.bindPopup(popup, () -> {
                 openCount.incrementAndGet();
@@ -97,7 +98,8 @@ public final class ShellDropdownButtonTest {
             button.doClick();
             assertAll(
                     () -> assertTrue(popup.isVisible()),
-                    () -> assertEquals(1, openCount.get()));
+                    () -> assertEquals(1, openCount.get()),
+                    () -> assertEquals(initialUpdateCount + 1, popup.updateCount()));
 
             popup.setVisible(false);
             button.processMouseEvent(mouseEvent(button, MouseEvent.MOUSE_PRESSED));
@@ -235,6 +237,16 @@ public final class ShellDropdownButtonTest {
         /// Simulated popup visibility.
         private boolean popupVisible;
 
+        /// Look-and-feel refreshes observed by this popup.
+        private int updates;
+
+        /// Records an explicit refresh after construction.
+        @Override
+        public void updateUI() {
+            super.updateUI();
+            updates++;
+        }
+
         /// Returns simulated visibility without creating a native popup window.
         ///
         /// @return whether the fake popup is visible
@@ -257,6 +269,13 @@ public final class ShellDropdownButtonTest {
                 firePopupMenuWillBecomeInvisible();
             }
             popupVisible = visible;
+        }
+
+        /// Returns all observed look-and-feel refreshes.
+        ///
+        /// @return update count
+        private int updateCount() {
+            return updates;
         }
     }
 }

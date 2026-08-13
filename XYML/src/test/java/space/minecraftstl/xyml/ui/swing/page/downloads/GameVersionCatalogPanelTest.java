@@ -90,6 +90,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -144,6 +145,7 @@ public final class GameVersionCatalogPanelTest {
 
         assertEquals(0, model.lazyLoads.get());
         onEventDispatchThread(() -> {
+            assertNull(findButton(panel, "gameVersionsInstall").getClientProperty("JButton.buttonType"));
             panel.addNotify();
             panel.removeNotify();
             panel.addNotify();

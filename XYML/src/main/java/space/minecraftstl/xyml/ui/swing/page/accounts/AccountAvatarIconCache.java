@@ -31,6 +31,9 @@ import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JList;
 import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+import java.awt.Component;
+import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -91,23 +94,10 @@ final class AccountAvatarIconCache {
     /// Replaces an unexpected source-and-fallback failure with a stable non-null marker.
     ///
     /// @param failure avatar decoding failure
-    /// @return fixed failure icon retained in the cache
-    private static Icon failureIcon(Throwable failure) {
+    /// @return theme-responsive failure icon retained in the cache
+    static Icon failureIcon(Throwable failure) {
         Objects.requireNonNull(failure, "failure");
-        BufferedImage image = new BufferedImage(ICON_SIZE, ICON_SIZE, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D graphics = image.createGraphics();
-        try {
-            graphics.setRenderingHint(
-                    RenderingHints.KEY_ANTIALIASING,
-                    RenderingHints.VALUE_ANTIALIAS_ON);
-            graphics.setColor(new java.awt.Color(180, 64, 64, 48));
-            graphics.fillRoundRect(0, 0, ICON_SIZE, ICON_SIZE, 6, 6);
-            graphics.setColor(new java.awt.Color(180, 64, 64));
-            graphics.drawString("!", 18, 25);
-        } finally {
-            graphics.dispose();
-        }
-        return new ImageIcon(image);
+        return FailureIcon.INSTANCE;
     }
 
     /// Loads one detached skin source, falls back to the UUID-derived bundled skin, and extracts its head.
@@ -239,6 +229,56 @@ final class AccountAvatarIconCache {
             graphics.dispose();
         }
         return new ImageIcon(head);
+    }
+
+    /// Theme-responsive marker used when both the configured and bundled avatar sources fail.
+    @NotNullByDefault
+    private static final class FailureIcon implements Icon {
+        /// Shared stateless marker retained by failed avatar futures.
+        private static final FailureIcon INSTANCE = new FailureIcon();
+
+        /// Prevents duplicate instances of the stateless failure marker.
+        private FailureIcon() {
+        }
+
+        /// Paints the marker using the current component arc so live radius updates remain visible.
+        ///
+        /// @param component optional painting component
+        /// @param graphics destination graphics
+        /// @param x horizontal origin
+        /// @param y vertical origin
+        @Override
+        public void paintIcon(@Nullable Component component, Graphics graphics, int x, int y) {
+            Graphics2D copy = (Graphics2D) Objects.requireNonNull(graphics, "graphics").create();
+            try {
+                copy.setRenderingHint(
+                        RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                copy.setColor(new java.awt.Color(180, 64, 64, 48));
+                int arc = Math.max(0, Math.min(ICON_SIZE, UIManager.getInt("Component.arc")));
+                copy.fillRoundRect(x, y, ICON_SIZE, ICON_SIZE, arc, arc);
+                copy.setColor(new java.awt.Color(180, 64, 64));
+                copy.drawString("!", x + 18, y + 25);
+            } finally {
+                copy.dispose();
+            }
+        }
+
+        /// Returns the stable marker width.
+        ///
+        /// @return avatar-slot width
+        @Override
+        public int getIconWidth() {
+            return ICON_SIZE;
+        }
+
+        /// Returns the stable marker height.
+        ///
+        /// @return avatar-slot height
+        @Override
+        public int getIconHeight() {
+            return ICON_SIZE;
+        }
     }
 
     /// Validates one decoded or reader-reported image against supported Minecraft skin layouts.

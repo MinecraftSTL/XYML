@@ -51,6 +51,7 @@ import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstanceListItem;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstanceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstanceSearchEntry;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesSnapshot;
@@ -65,10 +66,12 @@ import javax.imageio.ImageIO;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
+import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -388,8 +391,19 @@ public final class AppShellPanelTest {
                         () -> assertEquals(
                                 AccountListCellRenderer.ROW_HEIGHT
                                         + LazyAccountSelector.ADD_HEADER_HEIGHT
-                                        + LazyAccountSelector.MANAGEMENT_FOOTER_HEIGHT,
+                                        + LazyAccountSelector.MANAGEMENT_FOOTER_HEIGHT
+                                        + 2,
                                 toolbar.accountSelector().preparePopupSize().height),
+                        () -> assertEquals(
+                                LazyGameDirectorySelector.ROW_HEIGHT
+                                        + LazyGameDirectorySelector.COMMAND_HEIGHT
+                                        + 2,
+                                toolbar.gameDirectorySelector().preparePopupSize().height),
+                        () -> assertEquals(
+                                LazyInstanceSelector.COMMAND_HEIGHT * 2
+                                        + InstanceListCellRenderer.ROW_HEIGHT
+                                        + 2,
+                                toolbar.instanceSelector().preparePopupSize().height),
                         () -> assertEquals("XYML", toolbar.brandLabel().getText()),
                         () -> assertNotNull(toolbar.brandLabel().getIcon()),
                         () -> assertEquals(testHomeStrings().launchAction(),
@@ -421,11 +435,35 @@ public final class AppShellPanelTest {
                         () -> assertEquals(testHomeStrings().addInstanceAction(),
                                 toolbar.instanceSelector().addButton().getText()),
                         () -> assertEquals(
+                                space.minecraftstl.xyml.util.i18n.I18n.i18n(
+                                        "swing.shell.instance_add_detail"),
+                                toolbar.instanceSelector().addButton().detailText()),
+                        () -> assertEquals(
                                 space.minecraftstl.xyml.util.i18n.I18n.i18n("account.create"),
                                 toolbar.accountSelector().addButton().getText()),
                         () -> assertEquals(
                                 space.minecraftstl.xyml.util.i18n.I18n.i18n("game_directory.manage"),
                                 toolbar.gameDirectorySelector().manageButton().getText()),
+                        () -> assertEquals(
+                                space.minecraftstl.xyml.util.i18n.I18n.i18n(
+                                        "swing.shell.directory_manage_detail"),
+                                toolbar.gameDirectorySelector().manageButton().detailText()),
+                        () -> assertEquals(
+                                toolbar.accountSelector().addButton().getPreferredSize().height,
+                                toolbar.gameDirectorySelector().manageButton().getPreferredSize().height),
+                        () -> assertEquals(
+                                toolbar.accountSelector().addButton().getPreferredSize().height,
+                                toolbar.instanceSelector().addButton().getPreferredSize().height),
+                        () -> assertEquals(
+                                AccountListCellRenderer.ROW_HEIGHT,
+                                toolbar.gameDirectorySelector().directoryList().getFixedCellHeight()),
+                        () -> assertEquals(
+                                AccountListCellRenderer.ROW_HEIGHT,
+                                InstanceListCellRenderer.ROW_HEIGHT),
+                        () -> assertEquals(
+                                AccountListCellRenderer.ROW_HEIGHT,
+                                PopupCommandButton.HEIGHT),
+                        () -> assertDirectoryRendererShowsPath(toolbar.gameDirectorySelector()),
                         () -> assertEquals(
                                 2,
                                 toolbar.gameDirectorySelector().manageButton().getParent().getComponentCount()),
@@ -518,7 +556,8 @@ public final class AppShellPanelTest {
                         () -> assertEquals(
                                 AccountListCellRenderer.ROW_HEIGHT
                                         + LazyAccountSelector.ADD_HEADER_HEIGHT
-                                        + LazyAccountSelector.MANAGEMENT_FOOTER_HEIGHT,
+                                        + LazyAccountSelector.MANAGEMENT_FOOTER_HEIGHT
+                                        + 2,
                                 popupSize.height));
                 selector.manageButton().doClick();
                 assertEquals(ShellPageId.ACCOUNTS, panel.selectedPage());
@@ -876,6 +915,105 @@ public final class AppShellPanelTest {
     /// @return platform placeholder policy string
     private static Object placeholderPolicy(JComponent placeholder) {
         return placeholder.getClientProperty(FlatClientProperties.FULL_WINDOW_CONTENT_BUTTONS_PLACEHOLDER);
+    }
+
+    /// Verifies the directory selector renderer exposes a large icon and path detail in stable row geometry.
+    ///
+    /// @param selector configured one-entry directory selector
+    private static void assertDirectoryRendererShowsPath(LazyGameDirectorySelector selector) {
+        JList<GameDirectoryManagementEntry> list = selector.directoryList();
+        GameDirectoryManagementEntry entry = Objects.requireNonNull(list.getModel().getElementAt(0));
+        Component rendererComponent = list.getCellRenderer().getListCellRendererComponent(
+                list,
+                entry,
+                0,
+                false,
+                false);
+        assertInstanceOf(Container.class, rendererComponent);
+        JLabel icon = findNamedLabel((Container) rendererComponent, "gameDirectoryListIcon");
+        JLabel path = findNamedLabel((Container) rendererComponent, "gameDirectoryListPath");
+        assertAll(
+                () -> assertEquals(LazyGameDirectorySelector.ROW_HEIGHT,
+                        rendererComponent.getPreferredSize().height),
+                () -> assertNotNull(icon.getIcon()),
+                () -> assertEquals(40, Objects.requireNonNull(icon.getIcon()).getIconWidth()),
+                () -> assertEquals(40, Objects.requireNonNull(icon.getIcon()).getIconHeight()),
+                () -> assertEquals(entry.path().getPath(), path.getText()),
+                () -> assertEquals(UIManager.getColor("Label.disabledForeground"), path.getForeground()));
+
+        JComponent focusedComponent = (JComponent) list.getCellRenderer().getListCellRendererComponent(
+                list,
+                entry,
+                0,
+                true,
+                true);
+        focusedComponent.setSize(320, LazyGameDirectorySelector.ROW_HEIGHT);
+        layoutTree(focusedComponent);
+        BufferedImage focusedImage = renderComponent(focusedComponent);
+        assertAll(
+                () -> assertEquals(0, focusedImage.getRGB(0, 0) >>> 24),
+                () -> assertEquals(0, focusedImage.getRGB(focusedImage.getWidth() - 1, 0) >>> 24),
+                () -> assertEquals(
+                        Objects.requireNonNull(UIManager.getColor("List.cellFocusColor")).getRGB(),
+                        focusedImage.getRGB(0, focusedImage.getHeight() / 2)));
+    }
+
+    /// Paints one fixed-size component into a transparent image.
+    ///
+    /// @param component configured component
+    /// @return rendered pixels
+    private static BufferedImage renderComponent(JComponent component) {
+        BufferedImage image = new BufferedImage(
+                component.getWidth(),
+                component.getHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            component.paint(graphics);
+        } finally {
+            graphics.dispose();
+        }
+        return image;
+    }
+
+    /// Returns one deterministically named label from a renderer hierarchy.
+    ///
+    /// @param root renderer root
+    /// @param name stable component name
+    /// @return matching label
+    private static JLabel findNamedLabel(Container root, String name) {
+        for (Component child : root.getComponents()) {
+            if (child instanceof JLabel label && name.equals(label.getName())) {
+                return label;
+            }
+            if (child instanceof Container nested) {
+                @Nullable JLabel match = findNamedLabelOrNull(nested, name);
+                if (match != null) {
+                    return match;
+                }
+            }
+        }
+        throw new AssertionError("Missing label: " + name);
+    }
+
+    /// Returns one nested named label, or `null` when this subtree does not contain it.
+    ///
+    /// @param root subtree root
+    /// @param name stable component name
+    /// @return matching label or `null`
+    private static @Nullable JLabel findNamedLabelOrNull(Container root, String name) {
+        for (Component child : root.getComponents()) {
+            if (child instanceof JLabel label && name.equals(label.getName())) {
+                return label;
+            }
+            if (child instanceof Container nested) {
+                @Nullable JLabel match = findNamedLabelOrNull(nested, name);
+                if (match != null) {
+                    return match;
+                }
+            }
+        }
+        return null;
     }
 
     /// Recursively lays out a non-displayable Swing tree after assigning its fixed test size.

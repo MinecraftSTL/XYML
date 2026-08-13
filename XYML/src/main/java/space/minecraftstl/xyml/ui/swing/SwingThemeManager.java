@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.theme.ResolvedTheme;
 import space.minecraftstl.xyml.theme.ThemeBrightness;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeColor;
+import space.minecraftstl.xyml.ui.swing.shell.RoundedComboBoxUI;
 
 import javax.swing.Icon;
 import javax.swing.JComponent;
@@ -44,7 +45,9 @@ import javax.swing.plaf.FontUIResource;
 import javax.swing.plaf.UIResource;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Dialog;
 import java.awt.Font;
+import java.awt.Frame;
 import java.awt.Window;
 import java.util.HashMap;
 import java.util.Map;
@@ -404,6 +407,7 @@ public final class SwingThemeManager {
 
         designTokens.applyTo(UIManager.getDefaults());
         applyWindowsTitlePaneDesignTokens(designTokens);
+        UIManager.put("ComboBoxUI", RoundedComboBoxUI.class.getName());
         @Nullable Font replacementFont = applyDefaultFont();
         // FlatLaf caches the checkbox icon after first resolution, including the arc read at construction time.
         @Nullable Icon currentCheckBoxIcon = UIManager.getIcon("CheckBox.icon");
@@ -415,6 +419,20 @@ public final class SwingThemeManager {
         initialized = true;
         FlatLaf.updateUI();
         updateOpenWindowFonts(previousDefaultFont, replacementFont);
+        updateOpenWindowCornerPreferences(designTokens.cornerRadius());
+    }
+
+    /// Synchronizes native frame and dialog corners after a live launcher-radius change.
+    ///
+    /// Lightweight popup windows retain their component-defined shapes and are intentionally excluded.
+    ///
+    /// @param cornerRadius current launcher component radius
+    private static void updateOpenWindowCornerPreferences(int cornerRadius) {
+        for (Window window : Window.getWindows()) {
+            if (window.isDisplayable() && (window instanceof Frame || window instanceof Dialog)) {
+                WindowsNativeUtils.applyWindowCornerPreference(window, cornerRadius);
+            }
+        }
     }
 
     /// Applies the launcher radius to Windows caption controls and refreshes FlatLaf's cached icon painters.

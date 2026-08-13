@@ -153,9 +153,12 @@ public final class PersistedAppearanceSettingsModelTest {
         FakeStore writableStore = new FakeStore(raw("light", 6, false, true));
         PersistedAppearanceSettingsModel writable =
                 new PersistedAppearanceSettingsModel(writableStore, ignored -> { });
-        assertThrows(IllegalArgumentException.class, () -> writable.setCornerRadius(19));
+        writable.setCornerRadius(LauncherSettings.MAXIMUM_CORNER_RADIUS);
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> writable.setCornerRadius(LauncherSettings.MAXIMUM_CORNER_RADIUS + 1));
         assertThrows(IllegalArgumentException.class, () -> writable.setAnimationSpeedPercentage(205));
-        assertEquals(6, writableStore.snapshot().cornerRadius());
+        assertEquals(LauncherSettings.MAXIMUM_CORNER_RADIUS, writableStore.snapshot().cornerRadius());
         assertEquals(100, writableStore.snapshot().animationSpeed().percentage());
         writable.close();
 
