@@ -595,6 +595,28 @@ public final class AppShellPanelTest {
         }
     }
 
+    /// Authlib-injector server text is accepted on every top-level shell page.
+    @Test
+    public void acceptsAuthlibServerDropOnEveryPage() {
+        AppShellPanel panel = createPanel(creationCounts());
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+                for (ShellPageId page : ShellPageId.values()) {
+                    panel.navigateTo(page);
+                    assertTrue(
+                            handler.canImport(textTransfer(
+                                    panel,
+                                    "https://home.minecraftstl.space:8880/api/yggdrasil")),
+                            page.toString());
+                }
+                assertFalse(handler.canImport(textTransfer(panel, "https://example.com/ordinary-page")));
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
     /// Launcher selection lock disables account switching and its management footer together.
     @Test
     public void disablesAccountSelectorWithSelectionCommands() {
@@ -827,6 +849,15 @@ public final class AppShellPanelTest {
         return new TransferHandler.TransferSupport(component, new FileTransferable(file));
     }
 
+    /// Creates one text transfer wrapper for global shell route assertions.
+    ///
+    /// @param component transfer target
+    /// @param text transferred text
+    /// @return transfer support exposing the string flavor
+    private static TransferHandler.TransferSupport textTransfer(JComponent component, String text) {
+        return new TransferHandler.TransferSupport(component, new StringTransferable(text));
+    }
+
     /// Immutable one-file transferable used by shell routing tests.
     @NotNullByDefault
     private static final class FileTransferable implements Transferable {
@@ -859,6 +890,41 @@ public final class AppShellPanelTest {
                 throw new UnsupportedFlavorException(flavor);
             }
             return List.of(file);
+        }
+    }
+
+    /// Immutable string transferable used by global shell route tests.
+    @NotNullByDefault
+    private static final class StringTransferable implements Transferable {
+        /// Transferred string.
+        private final String text;
+
+        /// Creates one string payload.
+        ///
+        /// @param text transferred string
+        private StringTransferable(String text) {
+            this.text = Objects.requireNonNull(text, "text");
+        }
+
+        /// Returns the supported string flavor.
+        @Override
+        public DataFlavor @Unmodifiable [] getTransferDataFlavors() {
+            return new DataFlavor[]{DataFlavor.stringFlavor};
+        }
+
+        /// Reports whether the requested flavor is supported.
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor flavor) {
+            return DataFlavor.stringFlavor.equals(flavor);
+        }
+
+        /// Returns the transferred text.
+        @Override
+        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+            if (!isDataFlavorSupported(flavor)) {
+                throw new UnsupportedFlavorException(flavor);
+            }
+            return text;
         }
     }
 

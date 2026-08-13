@@ -164,6 +164,36 @@ final class ShellFileDropHandlerTest {
         assertNull(target.getTransferHandler());
     }
 
+    /// A child page's file handler inherits a global text route from its shell ancestor.
+    @Test
+    void inheritsTextRoutesFromAncestorHandler() {
+        JPanel shell = new JPanel();
+        JPanel page = new JPanel();
+        shell.add(page);
+        AtomicReference<@Nullable String> openedText = new AtomicReference<>();
+        ShellFileDropHandler.RouteRegistration globalText = ShellFileDropHandler.registerText(
+                shell,
+                value -> value.startsWith("authlib-injector:"),
+                openedText::set);
+        ShellFileDropHandler.RouteRegistration pageFiles = ShellFileDropHandler.registerFiles(
+                page,
+                path -> path.getFileName().toString().endsWith(".jar"),
+                ignored -> { });
+        TransferHandler pageHandler = Objects.requireNonNull(page.getTransferHandler());
+        TransferHandler.TransferSupport support = new TransferHandler.TransferSupport(
+                page,
+                new StringTransferable("authlib-injector:yggdrasil-server:value"));
+
+        assertTrue(pageHandler.canImport(support));
+        assertTrue(pageHandler.importData(support));
+        assertEquals("authlib-injector:yggdrasil-server:value", openedText.get());
+
+        pageFiles.close();
+        globalText.close();
+        assertNull(page.getTransferHandler());
+        assertNull(shell.getTransferHandler());
+    }
+
     /// Creates a Swing transfer wrapper for one immutable local-file list.
     ///
     /// @param files local files exposed by the payload

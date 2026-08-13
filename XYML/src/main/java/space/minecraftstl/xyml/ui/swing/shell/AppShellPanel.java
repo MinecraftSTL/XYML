@@ -21,12 +21,14 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.auth.authlibinjector.AuthlibInjectorUrl;
 import space.minecraftstl.xyml.game.ModpackHelper;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingButtonRippleSupport;
 import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsPanel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.DownloadCategoryPanel;
@@ -109,6 +111,9 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
 
     /// Shell route accepting modpack archives only on instance-management and download pages.
     private final ShellFileDropHandler.RouteRegistration modpackDropRegistration;
+
+    /// Global route accepting authlib-injector server text on every shell page.
+    private final ShellFileDropHandler.RouteRegistration authlibDropRegistration;
 
     /// Current decoded background and native-transparency paint state.
     private WindowBackgroundVisual windowBackground = initialWindowBackground();
@@ -200,6 +205,10 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 this,
                 this::supportsDroppedModpack,
                 this::openDroppedModpack);
+        authlibDropRegistration = ShellFileDropHandler.registerText(
+                this,
+                text -> AuthlibInjectorUrl.parse(text).isPresent(),
+                this::openDroppedAuthlibServer);
     }
 
     /// Replaces the renderer-ready background and schedules repainting.
@@ -474,12 +483,29 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         }
     }
 
+    /// Opens the existing account server-management workflow for decoded dropped text.
+    ///
+    /// @param transferText canonical integration URI or direct Yggdrasil endpoint
+    private void openDroppedAuthlibServer(String transferText) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        AuthlibInjectorUrl.parse(transferText).ifPresent(endpoint -> {
+            JComponent accountsPage = pageCache.getOrCreate(ShellPageId.ACCOUNTS);
+            if (accountsPage instanceof AccountsPanel accounts) {
+                accounts.openDroppedAuthlibServer(this, endpoint);
+            }
+        });
+    }
+
     /// Closes all created destination pages from any caller thread.
     @Override
     public void close() {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             if (!closed) {
                 closed = true;
+                authlibDropRegistration.close();
                 modpackDropRegistration.close();
                 setTransferHandler(null);
                 @Nullable Throwable failure = null;

@@ -21,6 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Optional;
 
 import static space.minecraftstl.xyml.util.io.NetworkUtils.decodeURL;
@@ -49,12 +51,43 @@ public final class AuthlibInjectorUrl {
             return Optional.empty();
         }
 
-        String @Unmodifiable [] elements = text.split(":", 3);
+        String normalized = text.trim();
+        String @Unmodifiable [] elements = normalized.split(":", 3);
         if (elements.length == 3
                 && SCHEME.equals(elements[0])
                 && PATH_YGGDRASIL_SERVER.equals(elements[1])) {
             return Optional.of(decodeURL(elements[2]));
         }
+        if (isDirectYggdrasilEndpoint(normalized)) {
+            return Optional.of(normalized);
+        }
         return Optional.empty();
+    }
+
+    /// Returns whether plain browser text is an explicit HTTP Yggdrasil API endpoint.
+    ///
+    /// Direct URLs are intentionally narrower than the launcher integration URI so dragging an
+    /// arbitrary web page cannot unexpectedly open the server-registration workflow.
+    ///
+    /// @param text trimmed transfer text
+    /// @return whether the text is an absolute HTTP endpoint ending in `/api/yggdrasil`
+    private static boolean isDirectYggdrasilEndpoint(String text) {
+        try {
+            URI uri = new URI(text);
+            String scheme = uri.getScheme();
+            if (!("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme))
+                    || uri.getHost() == null
+                    || uri.getUserInfo() != null
+                    || uri.getFragment() != null) {
+                return false;
+            }
+            String path = uri.getPath();
+            while (path.length() > 1 && path.endsWith("/")) {
+                path = path.substring(0, path.length() - 1);
+            }
+            return path.endsWith("/api/yggdrasil");
+        } catch (URISyntaxException ignored) {
+            return false;
+        }
     }
 }

@@ -27,6 +27,8 @@ import javax.swing.TransferHandler;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.Component;
+import java.awt.Container;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -200,7 +202,7 @@ public final class ShellFileDropHandler extends TransferHandler {
             return true;
         }
         @Nullable String text = extractText(support.getTransferable());
-        return text != null && findTextRoute(text) != null;
+        return text != null && findTextRoute(support.getComponent(), text) != null;
     }
 
     /// Delivers the payload to the first matching route by route-kind precedence.
@@ -240,7 +242,7 @@ public final class ShellFileDropHandler extends TransferHandler {
         }
         @Nullable String text = extractText(transferable);
         if (text != null) {
-            @Nullable TextRoute textRoute = findTextRoute(text);
+            @Nullable TextRoute textRoute = findTextRoute(support.getComponent(), text);
             if (textRoute != null) {
                 try {
                     textRoute.openCommand().accept(text);
@@ -298,7 +300,27 @@ public final class ShellFileDropHandler extends TransferHandler {
     }
 
     /// Returns the first route accepting transferred text.
-    private @Nullable TextRoute findTextRoute(String text) {
+    private @Nullable TextRoute findTextRoute(Component transferTarget, String text) {
+        @Nullable TextRoute localRoute = findLocalTextRoute(text);
+        if (localRoute != null) {
+            return localRoute;
+        }
+        @Nullable Container ancestor = Objects.requireNonNull(transferTarget, "transferTarget").getParent();
+        while (ancestor != null) {
+            if (ancestor instanceof JComponent component
+                    && component.getTransferHandler() instanceof ShellFileDropHandler handler) {
+                @Nullable TextRoute inheritedRoute = handler.findLocalTextRoute(text);
+                if (inheritedRoute != null) {
+                    return inheritedRoute;
+                }
+            }
+            ancestor = ancestor.getParent();
+        }
+        return null;
+    }
+
+    /// Returns the first local route accepting transferred text.
+    private @Nullable TextRoute findLocalTextRoute(String text) {
         for (TextRoute route : List.copyOf(textRoutes)) {
             try {
                 if (route.supportedText().test(text)) {

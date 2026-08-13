@@ -36,11 +36,27 @@ public final class AuthlibInjectorUrlTest {
                         .orElseThrow());
     }
 
+    /// Accepts the direct HTTPS endpoint carried by browser drag buttons.
+    @Test
+    public void parsesDirectBrowserEndpoint() {
+        assertEquals(
+                "https://home.minecraftstl.space:8880/api/yggdrasil",
+                AuthlibInjectorUrl.parse(
+                                "  https://home.minecraftstl.space:8880/api/yggdrasil  ")
+                        .orElseThrow());
+        assertEquals(
+                "http://example.com/api/yggdrasil/",
+                AuthlibInjectorUrl.parse("http://example.com/api/yggdrasil/").orElseThrow());
+    }
+
     /// Rejects absent text and unsupported integration paths.
     @Test
     public void rejectsUnsupportedPayloads() {
         assertTrue(AuthlibInjectorUrl.parse(null).isEmpty());
         assertTrue(AuthlibInjectorUrl.parse("authlib-injector:unsupported:value").isEmpty());
         assertTrue(AuthlibInjectorUrl.parse("https://example.com/api").isEmpty());
+        assertTrue(AuthlibInjectorUrl.parse("https://example.com/api/yggdrasil/other").isEmpty());
+        assertTrue(AuthlibInjectorUrl.parse("https://user@example.com/api/yggdrasil").isEmpty());
+        assertTrue(AuthlibInjectorUrl.parse("javascript:alert(1)").isEmpty());
     }
 }
