@@ -405,7 +405,7 @@ final class InstanceMemoryAllocationControls {
             repaint();
         }
 
-        /// Paints a rounded track, requested-allocation segment, and current-use segment.
+        /// Paints a theme-shaped track, requested-allocation segment, and current-use segment.
         ///
         /// @param graphics Swing graphics context
         @Override
@@ -415,7 +415,7 @@ final class InstanceMemoryAllocationControls {
                 copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 int width = getWidth();
                 int height = getHeight();
-                int arc = Math.max(1, height);
+                int arc = Math.max(0, Math.min(height, UIManager.getInt("ProgressBar.arc")));
                 RoundRectangle2D track = new RoundRectangle2D.Double(0, 0, width, height, arc, arc);
                 copy.setColor(uiColor("ProgressBar.background", new Color(0x808080)));
                 copy.fill(track);

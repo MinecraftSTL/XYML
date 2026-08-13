@@ -17,9 +17,11 @@
  */
 package space.minecraftstl.xyml.ui.swing;
 
+import com.formdev.flatlaf.util.SystemInfo;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
+import com.sun.jna.ptr.IntByReference;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.Metadata;
@@ -27,6 +29,7 @@ import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.io.JarUtils;
 import space.minecraftstl.xyml.util.platform.NativeUtils;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
+import space.minecraftstl.xyml.util.platform.windows.Dwmapi;
 import space.minecraftstl.xyml.util.platform.windows.IPropertyStore;
 import space.minecraftstl.xyml.util.platform.windows.Shell32;
 import space.minecraftstl.xyml.util.platform.windows.WinTypes;
@@ -41,6 +44,15 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// Integrates XYML's Swing process and native windows with Windows AppUserModel metadata.
 @NotNullByDefault
 public final class WindowsNativeUtils {
+    /// Windows 11 DWM attribute selecting a top-level window's native corner treatment.
+    private static final int DWM_WINDOW_CORNER_PREFERENCE_ATTRIBUTE = 33;
+
+    /// DWM preference that restores the platform's default native window corners.
+    private static final int DWM_WINDOW_CORNER_DEFAULT = 0;
+
+    /// DWM preference that forces a top-level native window to retain square corners.
+    private static final int DWM_WINDOW_CORNER_DO_NOT_ROUND = 1;
+
     /// Prevents construction of this platform utility holder.
     private WindowsNativeUtils() {
     }
@@ -100,6 +112,42 @@ public final class WindowsNativeUtils {
         }
     }
 
+    /// Synchronizes a displayable window's native corners with the launcher component radius.
+    ///
+    /// Windows versions before Windows 11 do not expose this DWM preference and need no explicit reset.
+    /// Native integration failures are logged without preventing the Swing window from opening.
+    ///
+    /// @param window displayable native Swing window
+    /// @param cornerRadius non-negative launcher component radius
+    public static void applyWindowCornerPreference(Window window, int cornerRadius) {
+        Window target = Objects.requireNonNull(window, "window");
+        int preference = nativeWindowCornerPreference(cornerRadius);
+        @Nullable Dwmapi dwmapi = availableDwm();
+        if (dwmapi == null || !SystemInfo.isWindows_11_orLater || !target.isDisplayable()) {
+            return;
+        }
+
+        try {
+            @Nullable Pointer nativeHandle = Native.getComponentPointer(target);
+            if (nativeHandle == null || Pointer.nativeValue(nativeHandle) == 0L) {
+                LOG.warning("Failed to get Swing window handle for the DWM corner preference");
+                return;
+            }
+            IntByReference value = new IntByReference(preference);
+            int result = dwmapi.DwmSetWindowAttribute(
+                    new WinTypes.HANDLE(nativeHandle),
+                    DWM_WINDOW_CORNER_PREFERENCE_ATTRIBUTE,
+                    value,
+                    Integer.BYTES);
+            if (result < 0) {
+                LOG.warning("Failed to set the DWM window corner preference, HRESULT=0x"
+                        + Integer.toHexString(result));
+            }
+        } catch (Throwable failure) {
+            LOG.warning("Failed to set the DWM window corner preference", failure);
+        }
+    }
+
     /// Removes relaunch metadata before a Swing window hides or releases its native peer.
     ///
     /// @param window displayable native Swing window
@@ -133,6 +181,29 @@ public final class WindowsNativeUtils {
             return null;
         }
         return Shell32.INSTANCE;
+    }
+
+    /// Returns the loaded Windows desktop-composition API when native integration is available.
+    ///
+    /// @return loaded DWM API, or `null` outside supported Windows processes
+    private static @Nullable Dwmapi availableDwm() {
+        if (OperatingSystem.CURRENT_OS != OperatingSystem.WINDOWS || !NativeUtils.USE_JNA) {
+            return null;
+        }
+        return Dwmapi.INSTANCE;
+    }
+
+    /// Maps the launcher radius to the matching DWM window-corner preference.
+    ///
+    /// @param cornerRadius non-negative launcher component radius
+    /// @return DWM corner-preference enum value
+    static int nativeWindowCornerPreference(int cornerRadius) {
+        if (cornerRadius < 0) {
+            throw new IllegalArgumentException("cornerRadius must not be negative");
+        }
+        return cornerRadius == 0
+                ? DWM_WINDOW_CORNER_DO_NOT_ROUND
+                : DWM_WINDOW_CORNER_DEFAULT;
     }
 
     /// Resolves relaunch metadata only for the native executable distribution.

@@ -63,11 +63,23 @@ public record SwingDesignTokens(int cornerRadius) {
         defaults.put("ComboBox.borderCornerRadius", cornerRadius);
         defaults.put("ComboBox.selectionArc", arcDiameter);
         defaults.put("List.selectionArc", arcDiameter);
+        defaults.put("MenuBar.selectionArc", arcDiameter);
+        defaults.put("MenuItem.selectionArc", arcDiameter);
         defaults.put("Popup.borderCornerRadius", cornerRadius);
         defaults.put("PopupMenu.borderCornerRadius", cornerRadius);
         defaults.put("TextComponent.arc", arcDiameter);
         defaults.put("ProgressBar.arc", arcDiameter);
         defaults.put("ScrollBar.thumbArc", arcDiameter);
         defaults.put("ScrollBar.trackArc", arcDiameter);
+        defaults.put("ScrollPane.arc", arcDiameter);
+        defaults.put("TabbedPane.tabArc", arcDiameter);
+        defaults.put("TabbedPane.tabSelectionArc", arcDiameter);
+        defaults.put("TabbedPane.cardTabArc", arcDiameter);
+        defaults.put("TabbedPane.buttonArc", arcDiameter);
+        defaults.put("TabbedPane.closeArc", arcDiameter);
+        defaults.put("TitlePane.buttonArc", arcDiameter);
+        defaults.put("ToolBar.hoverButtonGroupArc", arcDiameter);
+        defaults.put("ToolTip.borderCornerRadius", cornerRadius);
+        defaults.put("Tree.selectionArc", arcDiameter);
     }
 }

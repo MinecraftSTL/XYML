@@ -222,7 +222,7 @@ public final class AccountListCellRenderer extends JPanel
             this.error = error;
         }
 
-        /// Paints one fixed rounded placeholder and state mark.
+        /// Paints one theme-shaped placeholder and state mark.
         ///
         /// @param component palette source
         /// @param graphics destination graphics
@@ -236,7 +236,10 @@ public final class AccountListCellRenderer extends JPanel
                 @Nullable Color themed = UIManager.getColor(error ? "Actions.Red" : "Label.disabledForeground");
                 Color marker = themed == null ? Color.GRAY : themed;
                 copy.setColor(new Color(marker.getRed(), marker.getGreen(), marker.getBlue(), 48));
-                copy.fillRoundRect(x, y, getIconWidth(), getIconHeight(), 6, 6);
+                int arc = Math.max(0, Math.min(
+                        Math.min(getIconWidth(), getIconHeight()),
+                        UIManager.getInt("Component.arc")));
+                copy.fillRoundRect(x, y, getIconWidth(), getIconHeight(), arc, arc);
                 copy.setColor(marker);
                 if (error) {
                     copy.drawString("!", x + 18, y + 25);

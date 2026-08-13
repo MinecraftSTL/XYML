@@ -258,10 +258,13 @@ public final class InstanceListCellRenderer extends JPanel
                         RenderingHints.KEY_ANTIALIASING,
                         RenderingHints.VALUE_ANTIALIAS_ON);
                 Color marker = stateColor(component, error);
+                int arc = Math.max(0, Math.min(
+                        Math.min(getIconWidth(), getIconHeight()),
+                        UIManager.getInt("Component.arc")));
                 copy.setColor(withAlpha(marker, 48));
-                copy.fillRoundRect(x, y, getIconWidth(), getIconHeight(), 8, 8);
+                copy.fillRoundRect(x, y, getIconWidth(), getIconHeight(), arc, arc);
                 copy.setColor(withAlpha(marker, 180));
-                copy.drawRoundRect(x, y, getIconWidth() - 1, getIconHeight() - 1, 8, 8);
+                copy.drawRoundRect(x, y, getIconWidth() - 1, getIconHeight() - 1, arc, arc);
                 if (error) {
                     paintErrorMark(copy, marker, x, y);
                 } else {

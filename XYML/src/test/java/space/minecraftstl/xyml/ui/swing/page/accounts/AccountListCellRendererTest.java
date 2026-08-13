@@ -179,6 +179,26 @@ public final class AccountListCellRendererTest {
         });
     }
 
+    /// A cached avatar failure marker follows live radius updates instead of retaining its creation-time shape.
+    @Test
+    public void cachedFailureMarkerTracksLiveCornerRadius() {
+        @Nullable Object previousArc = UIManager.get("Component.arc");
+        Icon marker = AccountAvatarIconCache.failureIcon(new IllegalStateException("avatar fixture"));
+        try {
+            UIManager.put("Component.arc", 24);
+            assertEquals(0, iconImage(marker).getRGB(0, 0) >>> 24);
+
+            UIManager.put("Component.arc", 0);
+            assertTrue(iconImage(marker).getRGB(0, 0) >>> 24 > 0);
+        } finally {
+            if (previousArc == null) {
+                UIManager.getDefaults().remove("Component.arc");
+            } else {
+                UIManager.put("Component.arc", previousArc);
+            }
+        }
+    }
+
     /// Paints one fixed-size renderer into a transparent image.
     ///
     /// @param component configured renderer
