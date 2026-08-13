@@ -15,26 +15,26 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.ui.swing.page.settings;
+package space.minecraftstl.xyml.util.platform.linux;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.util.platform.hardware.GraphicsCard;
 
-import java.util.Objects;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/// Localized text for the optional interface refresh after a live corner-radius change.
-///
-/// @param promptText explanation shown while the current component trees match the selected radius
-/// @param requiredText explanation shown when remaining components may need a refresh
-/// @param actionText refresh button label
+/// Verifies Intel GPU classification from Linux PCI addresses.
 @NotNullByDefault
-public record CornerRadiusRefreshStrings(
-        String promptText,
-        String requiredText,
-        String actionText) {
-    /// Validates every localized refresh string.
-    public CornerRadiusRefreshStrings {
-        Objects.requireNonNull(promptText, "promptText");
-        Objects.requireNonNull(requiredText, "requiredText");
-        Objects.requireNonNull(actionText, "actionText");
+final class LinuxIntelGpuClassifierTest {
+    /// The conventional Intel integrated graphics function is classified as integrated.
+    @Test
+    void classifiesConventionalIntegratedAddress() {
+        assertEquals(GraphicsCard.Type.Integrated, LinuxIntelGpuClassifier.classify(0, 0, 2, 0));
+    }
+
+    /// An Intel adapter at the device number used by the former heuristic remains discrete.
+    @Test
+    void rejectsFormerDeviceNumberHeuristic() {
+        assertEquals(GraphicsCard.Type.Discrete, LinuxIntelGpuClassifier.classify(0, 0, 20, 0));
     }
 }

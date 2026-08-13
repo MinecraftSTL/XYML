@@ -17,8 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLightLaf;
-import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -36,12 +36,15 @@ import space.minecraftstl.xyml.ui.swing.SwingDesignTokens;
 
 import javax.swing.AbstractButton;
 import javax.swing.JButton;
+import javax.swing.JColorChooser;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JSlider;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
 import javax.swing.UIManager;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -51,14 +54,13 @@ import java.awt.image.BufferedImage;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests appearance commands, worker-thread refresh, measured radius bounds, and off-screen rendering.
@@ -195,33 +197,38 @@ public final class AppearanceSettingsPanelTest {
         });
     }
 
-    /// The appearance refresh row sits below the slider and refreshes component trees without restarting.
+    /// The appearance restart row sits below the slider and activates only after the radius leaves its baseline.
     @Test
-    public void refreshesCornerRadiusComponentsBelowSlider() {
+    public void showsCornerRadiusRestartActionBelowSlider() {
         FakeAppearanceSettingsModel model = new FakeAppearanceSettingsModel(snapshot(
                 ThemeBrightnessPreference.SYSTEM, 6, true, true));
         AppearanceSettingsPanel panel = onEventDispatchThread(() -> new AppearanceSettingsPanel(model, STRINGS));
-        CornerRadiusRefreshStrings refreshStrings = new CornerRadiusRefreshStrings(
-                "Changes apply live. Refresh if needed.",
-                "Refresh to update remaining components.",
-                "Refresh Interface");
-        AtomicInteger refreshCalls = new AtomicInteger();
+        SettingsRestartStrings restartStrings = new SettingsRestartStrings(
+                "Applies After Restart",
+                "Changes saved. Restart to apply them.",
+                "Restart Now",
+                "Restarting",
+                "Restart failed");
+        CompletableFuture<@Nullable Void> restartCompletion = new CompletableFuture<>();
 
         onEventDispatchThread(() -> {
-            panel.attachCornerRadiusRefreshPanel(refreshStrings, refreshCalls::incrementAndGet);
+            panel.attachCornerRadiusRestartPanel(
+                    restartStrings,
+                    owner -> restartCompletion,
+                    active -> { });
             panel.setSize(new Dimension(760, 900));
             layoutRecursively(panel);
 
-            CornerRadiusRefreshPanel refreshPanel = findComponent(
+            SettingsRestartPanel restartPanel = findComponent(
                     panel,
-                    "appearanceCornerRadiusRefresh",
-                    CornerRadiusRefreshPanel.class);
+                    "appearanceCornerRadiusRestart",
+                    SettingsRestartPanel.class);
             JSlider slider = findComponent(panel, "appearanceCornerRadius", JSlider.class);
-            JButton refresh = findComponent(refreshPanel, "cornerRadiusRefreshAction", JButton.class);
-            JLabel status = findComponent(refreshPanel, "cornerRadiusRefreshStatus", JLabel.class);
-            Point refreshLocation = SwingUtilities.convertPoint(
-                    refreshPanel.getParent(),
-                    refreshPanel.getLocation(),
+            JButton restart = findComponent(restartPanel, "settingsRestartAction", JButton.class);
+            JLabel status = findComponent(restartPanel, "settingsRestartStatus", JLabel.class);
+            Point restartLocation = SwingUtilities.convertPoint(
+                    restartPanel.getParent(),
+                    restartPanel.getLocation(),
                     panel);
             Point sliderLocation = SwingUtilities.convertPoint(
                     slider.getParent(),
@@ -229,31 +236,27 @@ public final class AppearanceSettingsPanelTest {
                     panel);
             assertAll(
                     () -> assertTrue(
-                            refreshLocation.y >= sliderLocation.y + slider.getHeight(),
-                            () -> "refresh=" + refreshLocation + ", slider=" + sliderLocation),
-                    () -> assertEquals(sliderLocation.x, refreshLocation.x),
-                    () -> assertFalse(refresh.isEnabled()),
-                    () -> assertEquals(refreshStrings.promptText(), status.getText()),
-                    () -> assertNull(refresh.getText()),
-                    () -> assertEquals(refreshStrings.actionText(), refresh.getToolTipText()),
-                    () -> assertEquals(
-                            refreshStrings.actionText(),
-                            refresh.getAccessibleContext().getAccessibleName()),
-                    () -> assertTrue(refresh.getIcon() instanceof FlatSVGIcon));
+                            restartLocation.y >= sliderLocation.y + slider.getHeight(),
+                            () -> "restart=" + restartLocation + ", slider=" + sliderLocation),
+                    () -> assertEquals(sliderLocation.x, restartLocation.x),
+                    () -> assertFalse(restart.isEnabled()),
+                    () -> assertEquals(restartStrings.promptText(), status.getText()));
 
             slider.setValue(9);
             assertAll(
-                    () -> assertTrue(slider.isEnabled()),
-                    () -> assertTrue(refresh.isEnabled()),
-                    () -> assertEquals(refreshStrings.requiredText(), status.getText()));
+                    () -> assertTrue(restart.isEnabled()),
+                    () -> assertEquals(restartStrings.requiredText(), status.getText()));
 
-            refresh.doClick();
+            restart.doClick();
             assertAll(
-                    () -> assertEquals(1, refreshCalls.get()),
+                    () -> assertFalse(slider.isEnabled()),
+                    () -> assertFalse(restart.isEnabled()),
+                    () -> assertEquals(restartStrings.inProgressText(), status.getText()));
+            restartCompletion.completeExceptionally(new IllegalStateException("expected restart failure"));
+            assertAll(
                     () -> assertTrue(slider.isEnabled()),
-                    () -> assertFalse(refresh.isEnabled()),
-                    () -> assertFalse(refreshPanel.isRefreshRequired()),
-                    () -> assertEquals(refreshStrings.promptText(), status.getText()));
+                    () -> assertTrue(restart.isEnabled()),
+                    () -> assertEquals(restartStrings.failedText(), status.getText()));
             panel.close();
         });
     }
@@ -516,6 +519,21 @@ public final class AppearanceSettingsPanelTest {
                 () -> assertTrue(alpha(rendered.getRGB(rendered.getWidth() / 2, rendered.getHeight() / 2)) > 0));
     }
 
+    /// Color diagrams remain rectangular even when launcher-wide text fields use a visible corner radius.
+    @Test
+    public void keepsColorSelectionPanelAndVerticalSliderSquare() {
+        onEventDispatchThread(() -> {
+            assertTrue(FlatLightLaf.setup());
+            new SwingDesignTokens(12).applyTo(UIManager.getDefaults());
+            assertTrue(UIManager.getInt("TextComponent.arc") > 0);
+            JColorChooser chooser = new JColorChooser(Color.RED);
+
+            AppearanceSettingsPanel.configureSquareColorChooserDiagrams(chooser);
+
+            assertTrue(assertSquareColorChooserDiagrams(chooser) >= 2);
+        });
+    }
+
     /// Disabling a custom-color override remains possible while the inactive text field contains invalid text.
     @Test
     public void invalidCustomColorDoesNotBlockReturningToThemeColor() {
@@ -706,6 +724,27 @@ public final class AppearanceSettingsPanelTest {
             }
         }
         return null;
+    }
+
+    /// Verifies every JDK color diagram in a hierarchy explicitly opts out of FlatLaf rounding.
+    ///
+    /// @param root hierarchy root
+    /// @return number of matching selection panels and vertical sliders
+    private static int assertSquareColorChooserDiagrams(Container root) {
+        int diagramCount = 0;
+        for (Component child : root.getComponents()) {
+            if (child instanceof JComponent swingChild
+                    && "javax.swing.colorchooser.DiagramComponent".equals(child.getClass().getName())) {
+                assertEquals(
+                        Boolean.FALSE,
+                        swingChild.getClientProperty(FlatClientProperties.COMPONENT_ROUND_RECT));
+                diagramCount++;
+            }
+            if (child instanceof Container container) {
+                diagramCount += assertSquareColorChooserDiagrams(container);
+            }
+        }
+        return diagramCount;
     }
 
     /// Runs a value-producing operation synchronously on the EDT.

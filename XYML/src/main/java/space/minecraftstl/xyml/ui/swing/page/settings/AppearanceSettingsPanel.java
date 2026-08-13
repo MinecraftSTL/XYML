@@ -17,6 +17,7 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.settings;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -42,6 +43,8 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JColorChooser;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -51,8 +54,10 @@ import javax.swing.JSlider;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.UIManager;
+import javax.swing.colorchooser.AbstractColorChooserPanel;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.event.FocusAdapter;
@@ -64,6 +69,8 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -103,8 +110,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// Current radius value displayed beside the slider.
     private final JLabel cornerRadiusValue = new JLabel();
 
-    /// Transparent host positioned directly below the corner-radius slider for refresh status and action.
-    private final JPanel cornerRadiusRefreshHost = new JPanel(new MigLayout(
+    /// Transparent host positioned directly below the corner-radius slider for restart status and action.
+    private final JPanel cornerRadiusRestartHost = new JPanel(new MigLayout(
             "insets 0, fillx",
             "[grow,fill]",
             "[]"));
@@ -178,8 +185,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// Whether a restart action currently blocks appearance edits.
     private boolean restartInProgress;
 
-    /// Appearance-specific refresh status and action, attached by the owning settings center.
-    private @Nullable CornerRadiusRefreshPanel cornerRadiusRefreshPanel;
+    /// Appearance-specific restart status and action, attached by the owning settings center.
+    private @Nullable SettingsRestartPanel cornerRadiusRestartPanel;
 
     /// Whether model resources have been released.
     private boolean closed;
@@ -297,36 +304,43 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         return themeColorFromControls();
     }
 
-    /// Attaches the component-tree refresh row beneath the corner-radius slider.
+    /// Attaches the restart status row beneath the corner-radius slider.
     ///
-    /// The appearance page owns the attached row after this call. Radius changes already update the active design
-    /// tokens; the explicit action refreshes any component delegates that retained an earlier visual state.
+    /// The appearance page owns the attached row after this call. Its callback first disables appearance controls,
+    /// then notifies the settings center so the remaining settings pages use the same restart lock.
     ///
-    /// @param strings localized refresh text for corner-radius changes
-    /// @param refreshAction synchronous component-tree refresh action
-    void attachCornerRadiusRefreshPanel(
-            CornerRadiusRefreshStrings strings,
-            Runnable refreshAction) {
+    /// @param strings localized restart text for appearance changes
+    /// @param restartCommand launcher restart lifecycle command
+    /// @param restartActivity callback receiving restart-in-progress transitions
+    void attachCornerRadiusRestartPanel(
+            SettingsRestartStrings strings,
+            SettingsRestartCommand restartCommand,
+            Consumer<Boolean> restartActivity) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed) {
-            throw new IllegalStateException("Cannot attach refresh controls after close");
+            throw new IllegalStateException("Cannot attach restart controls after close");
         }
-        if (cornerRadiusRefreshPanel != null) {
-            throw new IllegalStateException("Corner-radius refresh controls are already attached");
+        if (cornerRadiusRestartPanel != null) {
+            throw new IllegalStateException("Corner-radius restart controls are already attached");
         }
-        CornerRadiusRefreshPanel panel = new CornerRadiusRefreshPanel(
+        Consumer<Boolean> validatedActivity = Objects.requireNonNull(restartActivity, "restartActivity");
+        SettingsRestartPanel panel = new SettingsRestartPanel(
                 Objects.requireNonNull(strings, "strings"),
-                Objects.requireNonNull(refreshAction, "refreshAction"));
-        panel.setName("appearanceCornerRadiusRefresh");
-        cornerRadiusRefreshPanel = panel;
-        cornerRadiusRefreshHost.add(panel, "growx");
+                Objects.requireNonNull(restartCommand, "restartCommand"),
+                active -> {
+                    setRestartInProgress(active);
+                    validatedActivity.accept(active);
+                });
+        panel.setName("appearanceCornerRadiusRestart");
+        cornerRadiusRestartPanel = panel;
+        cornerRadiusRestartHost.add(panel, "growx");
         @Nullable AppearanceSettingsSnapshot snapshot = displayedSnapshot;
         if (snapshot != null) {
             panel.updateCornerRadius(snapshot.cornerRadius());
         }
         panel.setAvailable(snapshot != null && snapshot.writable() && !restartInProgress);
-        cornerRadiusRefreshHost.revalidate();
-        cornerRadiusRefreshHost.repaint();
+        cornerRadiusRestartHost.revalidate();
+        cornerRadiusRestartHost.repaint();
     }
 
     /// Updates appearance-control availability while any settings restart is being prepared.
@@ -346,8 +360,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
             if (!closed) {
                 closed = true;
                 modelSubscription.unsubscribe();
-                if (cornerRadiusRefreshPanel != null) {
-                    cornerRadiusRefreshPanel.close();
+                if (cornerRadiusRestartPanel != null) {
+                    cornerRadiusRestartPanel.close();
                 }
                 if (themePackManagementPanel != null) {
                     themePackManagementPanel.close();
@@ -611,8 +625,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
 
         row.add(label, "growx");
         row.add(control, "wmin 260, growx, wrap");
-        cornerRadiusRefreshHost.setOpaque(false);
-        row.add(cornerRadiusRefreshHost, "cell 1 1, growx, gaptop 2");
+        cornerRadiusRestartHost.setOpaque(false);
+        row.add(cornerRadiusRestartHost, "cell 1 1, growx, gaptop 2");
         return row;
     }
 
@@ -793,16 +807,13 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         return chooser;
     }
 
-    /// Opens a native color chooser and commits a canonical hexadecimal expression.
+    /// Opens a color chooser and commits a canonical hexadecimal expression.
     ///
     /// @param field target primary background color field
     private void chooseColor(JTextField field) {
         JTextField target = Objects.requireNonNull(field, "field");
         Color initial = Objects.requireNonNullElse(parseDisplayColor(target.getText()), Color.WHITE);
-        @Nullable Color selected = JColorChooser.showDialog(
-                this,
-                backgroundStrings.chooseColorLabel(),
-                initial);
+        @Nullable Color selected = showColorChooser(initial);
         if (selected != null) {
             target.setText(String.format(
                     Locale.ROOT,
@@ -814,15 +825,12 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
         }
     }
 
-    /// Opens the native color chooser and commits a canonical custom launcher accent seed.
+    /// Opens the color chooser and commits a canonical custom launcher accent seed.
     private void chooseThemeColor() {
         Color initial = Objects.requireNonNullElse(
                 parseDisplayColor(customThemeColorField.getText()),
                 Color.decode(ThemeColor.DEFAULT.color()));
-        @Nullable Color selected = JColorChooser.showDialog(
-                this,
-                backgroundStrings.chooseColorLabel(),
-                initial);
+        @Nullable Color selected = showColorChooser(initial);
         if (selected != null) {
             customThemeColorField.setText(String.format(
                     Locale.ROOT,
@@ -831,6 +839,57 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
                     selected.getGreen(),
                     selected.getBlue()));
             commitThemeColor();
+        }
+    }
+
+    /// Opens a standard modal chooser whose color diagrams do not inherit text-component rounding.
+    ///
+    /// @param initial initially selected color
+    /// @return selected color, or null when the dialog is cancelled or closed
+    private @Nullable Color showColorChooser(Color initial) {
+        JColorChooser chooser = new JColorChooser(Objects.requireNonNull(initial, "initial"));
+        for (AbstractColorChooserPanel chooserPanel : chooser.getChooserPanels()) {
+            chooserPanel.setColorTransparencySelectionEnabled(true);
+        }
+        configureSquareColorChooserDiagrams(chooser);
+        AtomicReference<@Nullable Color> selected = new AtomicReference<>();
+        JDialog dialog = JColorChooser.createDialog(
+                this,
+                backgroundStrings.chooseColorLabel(),
+                true,
+                chooser,
+                event -> selected.set(chooser.getColor()),
+                null);
+        try {
+            dialog.setVisible(true);
+            return selected.get();
+        } finally {
+            dialog.dispose();
+        }
+    }
+
+    /// Prevents FlatLaf's text-field border from rounding the selection panel and vertical color slider.
+    ///
+    /// JDK color chooser panels reuse a formatted text field's border for both diagram controls. The explicit
+    /// client property keeps those controls rectangular without changing text fields or launcher-wide radius tokens.
+    ///
+    /// @param chooser color chooser whose diagram controls should remain rectangular
+    static void configureSquareColorChooserDiagrams(JColorChooser chooser) {
+        configureSquareColorChooserDiagramDescendants(Objects.requireNonNull(chooser, "chooser"));
+    }
+
+    /// Applies the square geometry override to every JDK color diagram below one hierarchy node.
+    ///
+    /// @param component current hierarchy node
+    private static void configureSquareColorChooserDiagramDescendants(Component component) {
+        if (component instanceof JComponent swingComponent
+                && "javax.swing.colorchooser.DiagramComponent".equals(component.getClass().getName())) {
+            swingComponent.putClientProperty(FlatClientProperties.COMPONENT_ROUND_RECT, Boolean.FALSE);
+        }
+        if (component instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                configureSquareColorChooserDiagramDescendants(child);
+            }
         }
     }
 
@@ -994,8 +1053,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
             cornerRadiusSlider.setSnapToTicks(true);
             cornerRadiusSlider.setValue(snapshot.cornerRadius());
             cornerRadiusValue.setText(Integer.toString(snapshot.cornerRadius()));
-            if (cornerRadiusRefreshPanel != null) {
-                cornerRadiusRefreshPanel.updateCornerRadius(snapshot.cornerRadius());
+            if (cornerRadiusRestartPanel != null) {
+                cornerRadiusRestartPanel.updateCornerRadius(snapshot.cornerRadius());
             }
             animationsEnabled.setSelected(snapshot.animationsEnabled());
             AnimationSpeedSettings speed = snapshot.animationSpeed();
@@ -1036,8 +1095,8 @@ public final class AppearanceSettingsPanel extends JPanel implements AutoCloseab
     /// @param enabled whether controls may issue persistence commands
     private void setControlsEnabled(boolean enabled) {
         boolean interactive = enabled && !restartInProgress;
-        if (cornerRadiusRefreshPanel != null) {
-            cornerRadiusRefreshPanel.setAvailable(interactive);
+        if (cornerRadiusRestartPanel != null) {
+            cornerRadiusRestartPanel.setAvailable(interactive);
         }
         for (JToggleButton button : themeButtons.values()) {
             button.setEnabled(interactive);
