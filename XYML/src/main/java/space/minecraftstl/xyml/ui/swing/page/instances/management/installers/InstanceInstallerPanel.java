@@ -38,8 +38,10 @@ import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.GameLoaderKind;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionListener;
 import space.minecraftstl.xyml.ui.swing.page.downloads.loaders.LoaderSelectionWizardPanel;
+import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.util.io.FileUtils;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -60,6 +62,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -156,6 +159,9 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     /// Exact terminal listener registration owned by the current task, or null while idle.
     private @Nullable Subscription activeCompletionSubscription;
 
+    /// Page-scoped single-file route for local loader installers.
+    private final ShellFileDropHandler.RouteRegistration dropRegistration;
+
     /// Creates a production panel for an existing XYML repository instance without loading any state.
     ///
     /// @param repository repository containing the instance
@@ -216,6 +222,10 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         configureComponents();
         loaderWizard.addSelectionListener(loaderSelectionListener);
         updateControls();
+        dropRegistration = ShellFileDropHandler.register(
+                this,
+                this::supportsDroppedInstaller,
+                this::installDroppedOffline);
     }
 
     /// Returns the localized outer tab title used by the containing instance-management view.
@@ -594,6 +604,28 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
         }
     }
 
+    /// Returns whether this ready page accepts one dropped offline installer.
+    ///
+    /// @param installer normalized dropped path
+    /// @return whether the path has a supported installer suffix and no operation is active
+    private boolean supportsDroppedInstaller(Path installer) {
+        String extension = FileUtils.getExtension(Objects.requireNonNull(installer, "installer"))
+                .toLowerCase(Locale.ROOT);
+        return isReadyForMutation() && ("jar".equals(extension) || "exe".equals(extension));
+    }
+
+    /// Starts the existing offline installer task for one accepted dropped path.
+    ///
+    /// @param installer normalized supported installer path
+    private void installDroppedOffline(Path installer) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (supportsDroppedInstaller(installer)) {
+            startTask(
+                    () -> service.installOffline(instanceId, installer),
+                    i18n("install.installer.install_offline"));
+        }
+    }
+
     /// Starts an online Core task with exactly the original remote-version objects retained by the loader selector.
     private void installSelectedRemoteVersions() {
         EdtDispatcher.requireEventDispatchThread();
@@ -843,6 +875,7 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
     /// Cancels the active task again defensively, closes owned resources, and disables every component on the EDT.
     private void closeOnEventDispatchThread() {
         EdtDispatcher.requireEventDispatchThread();
+        dropRegistration.close();
         ++snapshotRevision;
         snapshotLoading = false;
         displayedSnapshot = null;

@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
@@ -37,6 +38,7 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
+import javax.swing.TransferHandler;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import java.awt.Component;
@@ -67,10 +69,15 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.ui.swing.SwingFileTransferTestSupport.fileTransfer;
 
 /// Headless Swing tests for schematic browser loading, geometry, navigation, details, and closure.
 @NotNullByDefault
 public final class SchematicBrowserPanelTest {
+    /// Temporary regular files used by shape-aware drop tests.
+    @TempDir
+    private Path temporaryDirectory;
+
     /// Localized file-operation text used by focused panel tests.
     private static final SchematicBrowserActionStrings ACTION_STRINGS = new SchematicBrowserActionStrings(
             "Import",
@@ -540,6 +547,36 @@ public final class SchematicBrowserPanelTest {
                     () -> assertEquals(List.of(row.path()), model.deletedPaths()),
                     () -> assertSame(row, interactions.confirmedTargets.get(0)));
             panel.close();
+        });
+    }
+
+    /// A ready page imports supported dropped Litematica files and ignores adjacent payloads.
+    @Test
+    public void importsSupportedDroppedSchematicsOnlyWhileWritable() throws Exception {
+        Path root = temporaryDirectory.resolve("schematics").toAbsolutePath().normalize();
+        Path first = Files.createFile(temporaryDirectory.resolve("first.litematic"));
+        Path unsupported = Files.createFile(temporaryDirectory.resolve("notes.txt"));
+        Path second = Files.createFile(temporaryDirectory.resolve("SECOND.LITEMATIC"));
+        SchematicBrowserSnapshot ready = snapshot(
+                root, root, OptionalInt.of(0), 1L, SchematicBrowserStatus.READY, null, false);
+        FakeSchematicBrowserModel model = FakeSchematicBrowserModel.immediate(List.of(), ready);
+        SchematicBrowserPanel panel = onEventDispatchThread(() -> new SchematicBrowserPanel(
+                model,
+                STRINGS,
+                new FakeSchematicBrowserInteractions()));
+
+        onEventDispatchThread(() -> {
+            TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+            TransferHandler.TransferSupport transfer = fileTransfer(
+                    panel,
+                    List.of(first, unsupported, second));
+
+            assertTrue(handler.canImport(transfer));
+            assertTrue(handler.importData(transfer));
+            assertEquals(List.of(List.of(first, second)), model.importedFiles());
+
+            panel.close();
+            assertNull(panel.getTransferHandler());
         });
     }
 
