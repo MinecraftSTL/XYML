@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.shell;
 
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLightLaf;
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -61,8 +62,17 @@ public final class RoundedPopupMenuTest {
             new SwingDesignTokens(LauncherSettings.MAXIMUM_CORNER_RADIUS).applyTo(UIManager.getDefaults());
             RoundedPopupMenu popup = new RoundedPopupMenu();
             popup.setLayout(new BorderLayout());
-            JButton topButton = new JButton("create");
-            JButton bottomButton = new JButton("manage");
+            PopupCommandButton topButton = new PopupCommandButton(
+                    "Create",
+                    "Install or import a game instance",
+                    new FlatSVGIcon("assets/swing/icons/add.svg", 24, 24));
+            PopupCommandButton bottomButton = new PopupCommandButton(
+                    "Manage",
+                    "Open instance management",
+                    new FlatSVGIcon(
+                            "assets/swing/icons/format-list-bulleted.svg",
+                            24,
+                            24));
             popup.add(topButton, BorderLayout.NORTH);
             popup.add(new JPanel(), BorderLayout.CENTER);
             popup.add(bottomButton, BorderLayout.SOUTH);
@@ -86,6 +96,10 @@ public final class RoundedPopupMenuTest {
             assertEquals(insets.left, bottomButton.getX());
             assertEquals(insets.right, popup.getWidth() - bottomButton.getX() - bottomButton.getWidth());
             assertEquals(insets.bottom, popup.getHeight() - bottomButton.getY() - bottomButton.getHeight());
+            assertEquals(PopupCommandButton.HEIGHT, topButton.getHeight());
+            assertEquals(PopupCommandButton.HEIGHT, bottomButton.getHeight());
+            assertTrue(topButton.detailText().length() > 0);
+            assertTrue(bottomButton.detailText().length() > 0);
         });
     }
 

@@ -127,7 +127,9 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
                 homeStrings.instanceLabel(),
                 homeStrings.missingInstanceLabel(),
                 homeStrings.addInstanceAction(),
+                i18n("swing.shell.instance_add_detail"),
                 i18n("instance.manage"),
+                i18n("swing.shell.instance_manage_detail"),
                 navigation);
         accountSelector = new LazyAccountSelector(
                 Objects.requireNonNull(accountsModel, "accountsModel"),
@@ -135,13 +137,16 @@ final class ShellToolbarPanel extends JPanel implements AutoCloseable {
                 homeStrings.accountLabel(),
                 homeStrings.missingAccountLabel(),
                 i18n("account.create"),
+                i18n("swing.shell.account_add_detail"),
                 i18n("account.manage"),
+                i18n("swing.shell.account_manage_detail"),
                 navigation);
         gameDirectorySelector = new LazyGameDirectorySelector(
                 gameDirectories,
                 histories,
                 i18n("game_directory.title"),
                 i18n("game_directory.manage"),
+                i18n("swing.shell.directory_manage_detail"),
                 Objects.requireNonNull(manageDirectoriesCommand, "manageDirectoriesCommand"),
                 Objects.requireNonNull(revealDefaultPageCommand, "revealDefaultPageCommand"));
 
