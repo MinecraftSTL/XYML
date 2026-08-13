@@ -58,7 +58,6 @@ import java.util.function.Supplier;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Tests appearance commands, worker-thread refresh, measured radius bounds, and off-screen rendering.
@@ -234,11 +233,7 @@ public final class AppearanceSettingsPanelTest {
                     () -> assertEquals(sliderLocation.x, refreshLocation.x),
                     () -> assertFalse(refresh.isEnabled()),
                     () -> assertEquals(refreshStrings.promptText(), status.getText()),
-                    () -> assertNull(refresh.getText()),
-                    () -> assertEquals(refreshStrings.actionText(), refresh.getToolTipText()),
-                    () -> assertEquals(
-                            refreshStrings.actionText(),
-                            refresh.getAccessibleContext().getAccessibleName()),
+                    () -> assertEquals(refreshStrings.actionText(), refresh.getText()),
                     () -> assertTrue(refresh.getIcon() instanceof FlatSVGIcon));
 
             slider.setValue(9);

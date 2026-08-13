@@ -26,7 +26,6 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import java.awt.Dimension;
 import java.util.Objects;
 
 /// Offers an explicit Swing component-tree refresh after live corner-radius changes.
@@ -73,11 +72,8 @@ final class CornerRadiusRefreshPanel extends JPanel implements AutoCloseable {
         setName("cornerRadiusRefreshPanel");
         statusLabel.setName("cornerRadiusRefreshStatus");
         refreshButton.setName("cornerRadiusRefreshAction");
-        refreshButton.setText(null);
+        refreshButton.setText(strings.actionText());
         refreshButton.setIcon(new FlatSVGIcon("assets/swing/icons/refresh.svg", 16, 16));
-        refreshButton.setToolTipText(strings.actionText());
-        refreshButton.getAccessibleContext().setAccessibleName(strings.actionText());
-        refreshButton.setPreferredSize(new Dimension(34, 30));
         refreshButton.addActionListener(event -> requestRefresh());
         add(statusLabel, "growx");
         add(refreshButton);
