@@ -62,10 +62,15 @@ public final class AboutPanelTest {
                 () -> assertEquals(expectedAcknowledgementTitles(), acknowledgements.stream()
                         .map(AboutPanel.AboutEntry::title)
                         .toList()),
-                () -> assertNull(acknowledgements.get(10).externalLink()),
                 () -> assertEquals(
                         URI.create("https://github.com/mcmod-info-mirror"),
-                        acknowledgements.get(11).externalLink()),
+                        acknowledgements.get(10).externalLink()),
+                () -> assertEquals(
+                        URI.create("https://github.com/MinecraftSTL/XYML/graphs/contributors"),
+                        acknowledgements.get(12).externalLink()),
+                () -> assertEquals(
+                        URI.create("https://github.com/HMCL-dev/HMCL/graphs/contributors"),
+                        acknowledgements.get(13).externalLink()),
                 () -> assertTrue(allConfiguredImagesExist(acknowledgements)));
     }
 
@@ -76,10 +81,13 @@ public final class AboutPanelTest {
                 AboutPanel.loadListResource(AboutPanel.DEPENDENCIES_RESOURCE);
 
         assertAll(
-                () -> assertEquals(15, dependencies.size()),
+                () -> assertEquals(13, dependencies.size()),
                 () -> assertEquals("Gson", dependencies.get(0).title()),
-                () -> assertEquals("uuid-tools", dependencies.get(14).title()),
+                () -> assertEquals("uuid-tools", dependencies.get(12).title()),
                 () -> assertNotNull(dependencies.get(0).externalLink()),
+                () -> assertFalse(dependencies.stream()
+                        .map(AboutPanel.AboutEntry::title)
+                        .anyMatch(title -> title.equals("Terracotta") || title.equals("EasyTier"))),
                 () -> assertTrue(allConfiguredImagesExist(dependencies)));
     }
 
@@ -95,7 +103,7 @@ public final class AboutPanelTest {
         assertAll(
                 () -> assertEquals(8, panel.getComponentCount()),
                 () -> assertEquals(16, panel.acknowledgements().size()),
-                () -> assertEquals(15, panel.dependencies().size()),
+                () -> assertEquals(13, panel.dependencies().size()),
                 () -> assertFalse(panel.isOpaque()),
                 () -> assertNull(opened.get()));
     }
@@ -153,10 +161,10 @@ public final class AboutPanelTest {
                 "gamerteam",
                 "Red_lnn",
                 i18n("about.thanks_to.mcmod"),
-                i18n("about.thanks_to.mcbbs"),
                 i18n("about.thanks_to.mcim"),
                 i18n("about.thanks_to.8mi-tech"),
                 i18n("about.thanks_to.contributors"),
+                i18n("about.thanks_to.upstream_contributors"),
                 "IMMC\u6210\u5458",
                 i18n("about.thanks_to.users"));
     }
