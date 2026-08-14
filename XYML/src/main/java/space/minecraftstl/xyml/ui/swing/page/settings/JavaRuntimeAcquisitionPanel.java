@@ -1306,7 +1306,9 @@ public final class JavaRuntimeAcquisitionPanel extends JPanel implements AutoClo
             TransferSupport transferSupport = Objects.requireNonNull(support, "support");
             return !closed
                     && !busy
-                    && transferredArchive(transferSupport.getTransferable()) != null;
+                    && transferSupport.isDataFlavorSupported(DataFlavor.javaFileListFlavor)
+                    && (transferSupport.isDrop()
+                            || transferredArchive(transferSupport.getTransferable()) != null);
         }
 
         /// Selects and forwards the exact supported archive carried by the transfer.
