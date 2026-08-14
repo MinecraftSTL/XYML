@@ -225,92 +225,64 @@ final class ShellFileDropHandlerTest {
         assertNull(shell.getTransferHandler());
     }
 
-    /// Browser URI-list and plain-text flavors reach the same text route when String flavor is absent.
+    /// Browser plain text reaches the protocol route when the Java String flavor is absent.
     @Test
-    void importsBrowserSpecificTextFlavors() throws ClassNotFoundException {
+    void importsBrowserPlainTextFlavor() throws ClassNotFoundException {
         JPanel target = new JPanel();
         List<String> opened = new ArrayList<>();
-        String endpoint = "https://home.minecraftstl.space:8880/api/yggdrasil";
+        String payload = "authlib-injector:yggdrasil-server:https%3A%2F%2Fexample.com%2Fapi";
         ShellFileDropHandler.RouteRegistration route = ShellFileDropHandler.registerText(
                 target,
-                endpoint::equals,
+                payload::equals,
                 opened::add);
         TransferHandler handler = Objects.requireNonNull(target.getTransferHandler());
-        DataFlavor uriList = new DataFlavor("text/uri-list;class=java.lang.String");
         DataFlavor plainText = new DataFlavor(
                 "text/plain;charset=UTF-8;class=java.io.InputStream");
 
-        TransferHandler.TransferSupport uriSupport = new TransferHandler.TransferSupport(
-                target,
-                new TextFlavorTransferable(
-                        uriList,
-                        () -> "# browser metadata\r\n" + endpoint + "\r\n"));
         TransferHandler.TransferSupport plainSupport = new TransferHandler.TransferSupport(
                 target,
                 new TextFlavorTransferable(
                         plainText,
                         () -> new ByteArrayInputStream(
-                                (" " + endpoint + " ").getBytes(StandardCharsets.UTF_8))));
+                                (" " + payload + " ").getBytes(StandardCharsets.UTF_8))));
 
-        assertTrue(handler.canImport(uriSupport));
-        assertTrue(handler.importData(uriSupport));
         assertTrue(handler.canImport(plainSupport));
         assertTrue(handler.importData(plainSupport));
-        assertEquals(List.of(endpoint, endpoint), opened);
+        assertEquals(List.of(payload), opened);
 
         route.close();
         assertNull(target.getTransferHandler());
     }
 
-    /// Browser HTML clipboard metadata takes precedence over the visible button label on Windows.
+    /// HTML attributes and URI lists are not guessed as launcher protocol text.
     @Test
-    void importsBrowserButtonClipboardAttribute() throws ClassNotFoundException {
+    void rejectsNonProtocolBrowserMetadata() throws ClassNotFoundException {
         JPanel target = new JPanel();
-        AtomicReference<@Nullable String> opened = new AtomicReference<>();
         String endpoint = "https://home.minecraftstl.space:8880/api/yggdrasil";
         ShellFileDropHandler.RouteRegistration route = ShellFileDropHandler.registerText(
                 target,
-                endpoint::equals,
-                opened::set);
+                ignored -> true,
+                ignored -> { });
         TransferHandler handler = Objects.requireNonNull(target.getTransferHandler());
         DataFlavor html = new DataFlavor(
                 "text/html;charset=UTF-8;class=java.io.InputStream");
-        TransferHandler.TransferSupport support = new TransferHandler.TransferSupport(
+        DataFlavor uriList = new DataFlavor("text/uri-list;class=java.lang.String");
+        TransferHandler.TransferSupport htmlSupport = new TransferHandler.TransferSupport(
                 target,
-                new BrowserButtonTransferable(
+                new TextFlavorTransferable(
                         html,
-                        "<button draggable=\"true\" data-clipboard-text=\"" + endpoint
-                                + "\">Drag this button</button>",
-                        "Drag this button"));
-
-        assertTrue(handler.canImport(support));
-        assertTrue(handler.importData(support));
-        assertEquals(endpoint, opened.get());
-
-        route.close();
-        assertNull(target.getTransferHandler());
-    }
-
-    /// Browser markup carried only by the generic String flavor still exposes its clipboard endpoint.
-    @Test
-    void importsBrowserButtonMarkupFromGenericStringFlavor() {
-        JPanel target = new JPanel();
-        AtomicReference<@Nullable String> opened = new AtomicReference<>();
-        String endpoint = "https://home.minecraftstl.space:8880/api/yggdrasil";
-        ShellFileDropHandler.RouteRegistration route = ShellFileDropHandler.registerText(
+                        () -> new ByteArrayInputStream(
+                                ("<button draggable=\"true\" data-clipboard-text=\"" + endpoint
+                                        + "\">Drag this button</button>")
+                                        .getBytes(StandardCharsets.UTF_8))));
+        TransferHandler.TransferSupport uriSupport = new TransferHandler.TransferSupport(
                 target,
-                endpoint::equals,
-                opened::set);
-        TransferHandler handler = Objects.requireNonNull(target.getTransferHandler());
-        TransferHandler.TransferSupport support = new TransferHandler.TransferSupport(
-                target,
-                new StringTransferable(
-                        "<button draggable=\"true\" data-clipboard-text=\"" + endpoint
-                                + "\">Drag this button</button>"));
+                new TextFlavorTransferable(uriList, () -> endpoint));
 
-        assertTrue(handler.canImport(support));
-        assertTrue(handler.importData(support));
-        assertEquals(endpoint, opened.get());
+        assertFalse(handler.canImport(htmlSupport));
+        assertFalse(handler.importData(htmlSupport));
+        assertFalse(handler.canImport(uriSupport));
+        assertFalse(handler.importData(uriSupport));
 
         route.close();
         assertNull(target.getTransferHandler());
@@ -533,66 +505,6 @@ final class ShellFileDropHandlerTest {
                 throw new UnsupportedFlavorException(requestedFlavor);
             }
             return Objects.requireNonNull(valueSupplier.get(), "valueSupplier returned null");
-        }
-    }
-
-    /// Browser payload exposing visible String text beside an HTML clipboard attribute.
-    @NotNullByDefault
-    private static final class BrowserButtonTransferable implements Transferable {
-        /// HTML input-stream flavor used by Chromium-family browsers on Windows.
-        private final DataFlavor htmlFlavor;
-
-        /// Serialized dragged element.
-        private final String html;
-
-        /// Visible button label exposed as the generic String flavor.
-        private final String visibleText;
-
-        /// Creates one two-representation browser button payload.
-        ///
-        /// @param htmlFlavor browser HTML flavor
-        /// @param html serialized dragged element
-        /// @param visibleText visible generic text
-        private BrowserButtonTransferable(
-                DataFlavor htmlFlavor,
-                String html,
-                String visibleText) {
-            this.htmlFlavor = Objects.requireNonNull(htmlFlavor, "htmlFlavor");
-            this.html = Objects.requireNonNull(html, "html");
-            this.visibleText = Objects.requireNonNull(visibleText, "visibleText");
-        }
-
-        /// Returns generic text first to prove extraction uses representation semantics, not flavor order.
-        ///
-        /// @return defensive flavor array
-        @Override
-        public DataFlavor @Unmodifiable [] getTransferDataFlavors() {
-            return new DataFlavor[]{DataFlavor.stringFlavor, htmlFlavor};
-        }
-
-        /// Reports whether generic text or browser HTML was requested.
-        ///
-        /// @param flavor requested flavor
-        /// @return whether this payload supports the flavor
-        @Override
-        public boolean isDataFlavorSupported(DataFlavor flavor) {
-            return DataFlavor.stringFlavor.equals(flavor) || htmlFlavor.equals(flavor);
-        }
-
-        /// Returns the matching in-memory browser representation.
-        ///
-        /// @param flavor requested flavor
-        /// @return String label or fresh HTML input stream
-        /// @throws UnsupportedFlavorException when the flavor is unsupported
-        @Override
-        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
-            if (DataFlavor.stringFlavor.equals(flavor)) {
-                return visibleText;
-            }
-            if (htmlFlavor.equals(flavor)) {
-                return new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8));
-            }
-            throw new UnsupportedFlavorException(flavor);
         }
     }
 

@@ -17,8 +17,6 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Element;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -53,10 +51,10 @@ import java.util.function.Predicate;
 /// precedence, then filtered file-list routes, then text routes.
 @NotNullByDefault
 public final class ShellFileDropHandler extends TransferHandler {
-    /// Maximum browser text payload inspected synchronously by one drop operation.
+    /// Maximum text payload inspected synchronously by one drop operation.
     private static final int MAX_TRANSFER_TEXT_LENGTH = 64 * 1024;
 
-    /// Maximum distinct browser representations considered for one drop.
+    /// Maximum distinct plain-text representations considered for one drop.
     private static final int MAX_TRANSFER_TEXT_CANDIDATES = 16;
 
     /// Ordered single-file routes confined to the Swing event-dispatch thread.
@@ -524,33 +522,23 @@ public final class ShellFileDropHandler extends TransferHandler {
         return javaUrlPath == null ? List.of() : List.of(javaUrlPath);
     }
 
-    /// Extracts ordered browser or desktop text representations without allowing one to hide another.
+    /// Extracts ordered standard String and plain-text representations without allowing one to hide another.
     private static @Unmodifiable List<String> extractTextCandidates(Transferable transferable) {
         Transferable payload = Objects.requireNonNull(transferable, "transferable");
         Set<String> candidates = new LinkedHashSet<>();
-        for (String html : readTextFlavors(payload, "text/html")) {
-            addTextRepresentationCandidates(candidates, html);
-        }
-        addCandidate(candidates, readJavaUrlFlavor(payload));
-        for (String uriList : readTextFlavors(payload, "text/uri-list")) {
-            addUriListCandidates(candidates, uriList);
-        }
-        for (String uriList : readTextFlavors(payload, "text/x-moz-url")) {
-            addUriListCandidates(candidates, uriList);
-        }
         @Nullable DataFlavor stringFlavor = findMatchingFlavor(payload, DataFlavor.stringFlavor);
         if (stringFlavor != null) {
             try {
                 Object transferred = payload.getTransferData(stringFlavor);
                 if (transferred instanceof String text) {
-                    addTextRepresentationCandidates(candidates, text);
+                    addCandidate(candidates, text);
                 }
             } catch (IOException | UnsupportedFlavorException | RuntimeException ignored) {
-                // Browser-specific text flavors may still provide the same payload below.
+                // A standard plain-text flavor may still provide the same payload below.
             }
         }
         for (String plainText : readTextFlavors(payload, "text/plain")) {
-            addTextRepresentationCandidates(candidates, plainText);
+            addCandidate(candidates, plainText);
         }
         return List.copyOf(candidates);
     }
@@ -582,7 +570,7 @@ public final class ShellFileDropHandler extends TransferHandler {
         return false;
     }
 
-    /// Returns whether a deferred payload might contain browser or desktop text.
+    /// Returns whether a deferred payload might contain standard protocol text.
     ///
     /// @param transferable deferred platform payload
     /// @return whether the payload advertises a supported text representation
@@ -591,7 +579,7 @@ public final class ShellFileDropHandler extends TransferHandler {
         return hasPotentialTextFlavor(payload.getTransferDataFlavors());
     }
 
-    /// Returns whether one advertised flavor might contain browser or desktop text.
+    /// Returns whether one advertised flavor might contain standard protocol text.
     ///
     /// @param flavors advertised platform flavors
     /// @return whether the flavor list contains a supported text representation
@@ -601,8 +589,7 @@ public final class ShellFileDropHandler extends TransferHandler {
             return true;
         }
         for (DataFlavor flavor : advertised) {
-            if (flavor.isFlavorTextType()
-                    || flavor.isMimeTypeEqual("application/x-java-url")) {
+            if (flavor.isMimeTypeEqual("text/plain")) {
                 return true;
             }
         }
@@ -736,62 +723,10 @@ public final class ShellFileDropHandler extends TransferHandler {
         return null;
     }
 
-    /// Adds browser HTML clipboard attributes and links before generic visible text.
-    ///
-    /// @param candidates ordered bounded candidate collection
-    /// @param html decoded HTML transfer fragment, or null
-    private static void addHtmlCandidates(Set<String> candidates, @Nullable String html) {
-        if (html == null || html.isBlank()) {
-            return;
-        }
-        try {
-            Element body = Jsoup.parseBodyFragment(html).body();
-            for (Element element : body.select("[data-clipboard-text]")) {
-                addCandidate(candidates, element.attr("data-clipboard-text"));
-            }
-            for (Element element : body.select("a[href]")) {
-                addCandidate(candidates, element.attr("href"));
-            }
-        } catch (RuntimeException ignored) {
-            // Malformed browser markup cannot prevent plain-text representations from being tried.
-        }
-    }
-
-    /// Extracts structured browser markup before retaining its raw string representation.
-    ///
-    /// Chromium-family browsers can expose dragged HTML through the generic Java String or plain-text
-    /// flavor instead of `text/html` on Windows. Trying the same bounded parser for every textual
-    /// representation preserves the button's `data-clipboard-text` endpoint in those variants.
-    ///
-    /// @param candidates ordered bounded candidate collection
-    /// @param representation decoded browser representation, or null
-    private static void addTextRepresentationCandidates(
-            Set<String> candidates,
-            @Nullable String representation) {
-        addHtmlCandidates(candidates, representation);
-        addCandidate(candidates, representation);
-    }
-
-    /// Adds every non-comment line from URI-list and Mozilla URL transfers.
-    ///
-    /// @param candidates ordered bounded candidate collection
-    /// @param uriList decoded line-oriented URL list, or null
-    private static void addUriListCandidates(Set<String> candidates, @Nullable String uriList) {
-        if (uriList == null) {
-            return;
-        }
-        for (String line : uriList.lines().toList()) {
-            String candidate = line.trim();
-            if (!candidate.isEmpty() && !candidate.startsWith("#")) {
-                addCandidate(candidates, candidate);
-            }
-        }
-    }
-
     /// Adds one trimmed bounded representation while preserving the first occurrence.
     ///
     /// @param candidates ordered bounded candidate collection
-    /// @param candidate browser representation, or null
+    /// @param candidate text representation, or null
     private static void addCandidate(Set<String> candidates, @Nullable String candidate) {
         if (candidate == null || candidates.size() >= MAX_TRANSFER_TEXT_CANDIDATES) {
             return;

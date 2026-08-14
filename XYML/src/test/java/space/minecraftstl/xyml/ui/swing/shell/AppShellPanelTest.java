@@ -641,6 +641,7 @@ public final class AppShellPanelTest {
     /// Authlib-injector server text is accepted on every top-level shell page.
     @Test
     public void acceptsAuthlibServerDropOnEveryPage() {
+        String payload = "authlib-injector:yggdrasil-server:https%3A%2F%2Fexample.com%2Fapi";
         AppShellPanel panel = createPanel(creationCounts());
         try {
             EdtDispatcher.executeAndWait(() -> {
@@ -648,9 +649,7 @@ public final class AppShellPanelTest {
                 for (ShellPageId page : ShellPageId.values()) {
                     panel.navigateTo(page);
                     assertTrue(
-                            handler.canImport(textTransfer(
-                                    panel,
-                                    "https://home.minecraftstl.space:8880/api/yggdrasil")),
+                            handler.canImport(textTransfer(panel, payload)),
                             page.toString());
                 }
                 assertFalse(handler.canImport(textTransfer(panel, "https://example.com/ordinary-page")));
@@ -663,14 +662,13 @@ public final class AppShellPanelTest {
     /// Authlib server dialogs are not entered until the native drop callback has returned to Windows.
     @Test
     public void defersAuthlibWorkflowUntilAfterNativeDropCallback() {
+        String payload = "authlib-injector:yggdrasil-server:https%3A%2F%2Fexample.com%2Fapi";
         EnumMap<ShellPageId, AtomicInteger> creationCounts = creationCounts();
         AppShellPanel panel = createPanel(creationCounts);
         try {
             EdtDispatcher.executeAndWait(() -> {
                 TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
-                assertTrue(handler.importData(textTransfer(
-                        panel,
-                        "https://home.minecraftstl.space:8880/api/yggdrasil")));
+                assertTrue(handler.importData(textTransfer(panel, payload)));
                 assertFalse(panel.isPageCached(ShellPageId.ACCOUNTS));
             });
             EdtDispatcher.executeAndWait(() -> { });
