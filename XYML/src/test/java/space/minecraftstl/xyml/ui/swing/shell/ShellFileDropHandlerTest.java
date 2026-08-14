@@ -27,6 +27,7 @@ import javax.swing.TransferHandler;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.dnd.InvalidDnDOperationException;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
@@ -35,6 +36,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -234,6 +236,108 @@ final class ShellFileDropHandlerTest {
         assertNull(target.getTransferHandler());
     }
 
+    /// Browser HTML clipboard metadata takes precedence over the visible button label on Windows.
+    @Test
+    void importsBrowserButtonClipboardAttribute() throws ClassNotFoundException {
+        JPanel target = new JPanel();
+        AtomicReference<@Nullable String> opened = new AtomicReference<>();
+        String endpoint = "https://home.minecraftstl.space:8880/api/yggdrasil";
+        ShellFileDropHandler.RouteRegistration route = ShellFileDropHandler.registerText(
+                target,
+                endpoint::equals,
+                opened::set);
+        TransferHandler handler = Objects.requireNonNull(target.getTransferHandler());
+        DataFlavor html = new DataFlavor(
+                "text/html;charset=UTF-8;class=java.io.InputStream");
+        TransferHandler.TransferSupport support = new TransferHandler.TransferSupport(
+                target,
+                new BrowserButtonTransferable(
+                        html,
+                        "<button draggable=\"true\" data-clipboard-text=\"" + endpoint
+                                + "\">Drag this button</button>",
+                        "Drag this button"));
+
+        assertTrue(handler.canImport(support));
+        assertTrue(handler.importData(support));
+        assertEquals(endpoint, opened.get());
+
+        route.close();
+        assertNull(target.getTransferHandler());
+    }
+
+    /// Desktop URI lists import local files while ignoring unrelated web URLs in the same payload.
+    @Test
+    void importsLocalFileUriLists() throws ClassNotFoundException {
+        JPanel target = new JPanel();
+        AtomicReference<@Nullable @Unmodifiable List<Path>> imported = new AtomicReference<>();
+        ShellFileDropHandler.RouteRegistration route = ShellFileDropHandler.registerFiles(
+                target,
+                path -> path.getFileName().toString().endsWith(".jar"),
+                imported::set);
+        TransferHandler handler = Objects.requireNonNull(target.getTransferHandler());
+        DataFlavor uriList = new DataFlavor("text/uri-list;class=java.lang.String");
+        File first = new File("first.jar");
+        File second = new File("second.jar");
+        TransferHandler.TransferSupport support = new TransferHandler.TransferSupport(
+                target,
+                new TextFlavorTransferable(
+                        uriList,
+                        () -> "# desktop metadata\r\n"
+                                + first.toURI().toASCIIString()
+                                + "\r\nhttps://example.com/ignored\r\n"
+                                + second.toURI().toASCIIString()
+                                + "\r\n"));
+
+        assertTrue(handler.canImport(support));
+        assertTrue(handler.importData(support));
+        assertEquals(
+                List.of(
+                        first.toPath().toAbsolutePath().normalize(),
+                        second.toPath().toAbsolutePath().normalize()),
+                imported.get());
+
+        route.close();
+        assertNull(target.getTransferHandler());
+    }
+
+    /// Native drag-over checks advertised flavors without requesting a deferred Windows OLE payload.
+    @Test
+    void acceptsDeferredNativeDropFlavorsWithoutReadingPayload() {
+        JPanel shell = new JPanel();
+        JPanel page = new JPanel();
+        shell.add(page);
+        AtomicBoolean fileRead = new AtomicBoolean();
+        AtomicBoolean textRead = new AtomicBoolean();
+        ShellFileDropHandler.RouteRegistration globalText = ShellFileDropHandler.registerText(
+                shell,
+                text -> text.startsWith("authlib-injector:"),
+                ignored -> { });
+        ShellFileDropHandler.RouteRegistration pageFiles = ShellFileDropHandler.registerFiles(
+                page,
+                path -> path.getFileName().toString().endsWith(".jar"),
+                ignored -> { });
+        ShellFileDropHandler handler = (ShellFileDropHandler) Objects.requireNonNull(
+                page.getTransferHandler());
+
+        assertTrue(handler.canImportDropFlavors(
+                page,
+                new DeferredTransferable(
+                        new DataFlavor[]{DataFlavor.javaFileListFlavor},
+                        fileRead)));
+        assertTrue(handler.canImportDropFlavors(
+                page,
+                new DeferredTransferable(
+                        new DataFlavor[]{DataFlavor.stringFlavor},
+                        textRead)));
+        assertFalse(fileRead.get());
+        assertFalse(textRead.get());
+
+        pageFiles.close();
+        globalText.close();
+        assertNull(page.getTransferHandler());
+        assertNull(shell.getTransferHandler());
+    }
+
     /// Creates a Swing transfer wrapper for one immutable local-file list.
     ///
     /// @param files local files exposed by the payload
@@ -378,6 +482,124 @@ final class ShellFileDropHandlerTest {
                 throw new UnsupportedFlavorException(requestedFlavor);
             }
             return Objects.requireNonNull(valueSupplier.get(), "valueSupplier returned null");
+        }
+    }
+
+    /// Browser payload exposing visible String text beside an HTML clipboard attribute.
+    @NotNullByDefault
+    private static final class BrowserButtonTransferable implements Transferable {
+        /// HTML input-stream flavor used by Chromium-family browsers on Windows.
+        private final DataFlavor htmlFlavor;
+
+        /// Serialized dragged element.
+        private final String html;
+
+        /// Visible button label exposed as the generic String flavor.
+        private final String visibleText;
+
+        /// Creates one two-representation browser button payload.
+        ///
+        /// @param htmlFlavor browser HTML flavor
+        /// @param html serialized dragged element
+        /// @param visibleText visible generic text
+        private BrowserButtonTransferable(
+                DataFlavor htmlFlavor,
+                String html,
+                String visibleText) {
+            this.htmlFlavor = Objects.requireNonNull(htmlFlavor, "htmlFlavor");
+            this.html = Objects.requireNonNull(html, "html");
+            this.visibleText = Objects.requireNonNull(visibleText, "visibleText");
+        }
+
+        /// Returns generic text first to prove extraction uses representation semantics, not flavor order.
+        ///
+        /// @return defensive flavor array
+        @Override
+        public DataFlavor @Unmodifiable [] getTransferDataFlavors() {
+            return new DataFlavor[]{DataFlavor.stringFlavor, htmlFlavor};
+        }
+
+        /// Reports whether generic text or browser HTML was requested.
+        ///
+        /// @param flavor requested flavor
+        /// @return whether this payload supports the flavor
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor flavor) {
+            return DataFlavor.stringFlavor.equals(flavor) || htmlFlavor.equals(flavor);
+        }
+
+        /// Returns the matching in-memory browser representation.
+        ///
+        /// @param flavor requested flavor
+        /// @return String label or fresh HTML input stream
+        /// @throws UnsupportedFlavorException when the flavor is unsupported
+        @Override
+        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+            if (DataFlavor.stringFlavor.equals(flavor)) {
+                return visibleText;
+            }
+            if (htmlFlavor.equals(flavor)) {
+                return new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8));
+            }
+            throw new UnsupportedFlavorException(flavor);
+        }
+    }
+
+    /// Deferred native payload that fails if drag-over attempts to read it before drop acceptance.
+    @NotNullByDefault
+    private static final class DeferredTransferable implements Transferable {
+        /// Native flavors advertised before data access becomes legal.
+        private final DataFlavor @Unmodifiable [] flavors;
+
+        /// Records an illegal early data request.
+        private final AtomicBoolean readRequested;
+
+        /// Creates one deferred native transfer.
+        ///
+        /// @param flavors advertised native flavors
+        /// @param readRequested early-read recorder
+        private DeferredTransferable(
+                DataFlavor @Unmodifiable [] flavors,
+                AtomicBoolean readRequested) {
+            this.flavors = Objects.requireNonNull(flavors, "flavors").clone();
+            this.readRequested = Objects.requireNonNull(readRequested, "readRequested");
+        }
+
+        /// Returns a defensive copy of the deferred flavors.
+        ///
+        /// @return defensive flavor array
+        @Override
+        public DataFlavor @Unmodifiable [] getTransferDataFlavors() {
+            return flavors.clone();
+        }
+
+        /// Reports whether one flavor is advertised without reading its data.
+        ///
+        /// @param flavor requested flavor
+        /// @return whether the flavor is advertised
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor flavor) {
+            for (DataFlavor candidate : flavors) {
+                if (candidate.equals(Objects.requireNonNull(flavor, "flavor"))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// Rejects data access until a real drop target has accepted the native operation.
+        ///
+        /// @param flavor requested flavor
+        /// @return never returns
+        /// @throws UnsupportedFlavorException when the flavor is not advertised
+        /// @throws InvalidDnDOperationException for every advertised early read
+        @Override
+        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+            if (!isDataFlavorSupported(flavor)) {
+                throw new UnsupportedFlavorException(flavor);
+            }
+            readRequested.set(true);
+            throw new InvalidDnDOperationException("Native payload is deferred until drop acceptance");
         }
     }
 }
