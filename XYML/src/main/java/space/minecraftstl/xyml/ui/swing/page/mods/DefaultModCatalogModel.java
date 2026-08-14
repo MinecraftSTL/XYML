@@ -32,11 +32,15 @@ import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import javax.swing.SwingUtilities;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -237,6 +241,33 @@ public final class DefaultModCatalogModel implements ModCatalogModel {
         publish(transition);
     }
 
+    /// Classifies conflicts from the complete current index and earlier paths in the same batch.
+    @Override
+    public @Unmodifiable List<Path> findImportConflicts(@Unmodifiable List<Path> sources) {
+        @Unmodifiable List<Path> normalizedSources = ModImportFileOperations.normalizeSources(sources);
+        synchronized (stateLock) {
+            requireOpen();
+            ModCatalogSnapshot snapshot = state.snapshot();
+            if (snapshot.status() != ModCatalogStatus.READY) {
+                throw new IllegalStateException("Mod catalog index is not ready");
+            }
+            if (snapshot.writeStatus() == ModCatalogWriteStatus.BUSY) {
+                throw new IllegalStateException("Another Mod mutation is already running");
+            }
+            Set<String> occupiedKeys = new HashSet<>();
+            for (ModCatalogEntry entry : state.allEntries()) {
+                occupiedKeys.add(entry.localKey().toLowerCase(Locale.ROOT));
+            }
+            List<Path> conflicts = new ArrayList<>();
+            for (Path source : normalizedSources) {
+                if (!occupiedKeys.add(ModImportFileOperations.normalizedLocalKey(source))) {
+                    conflicts.add(source);
+                }
+            }
+            return List.copyOf(conflicts);
+        }
+    }
+
     /// Starts one serialized Core enabled-state rename.
     @Override
     public CompletionStage<ModCatalogSnapshot> setModEnabled(String localKey, boolean enabled) {
@@ -269,10 +300,12 @@ public final class DefaultModCatalogModel implements ModCatalogModel {
 
     /// Starts one serialized preflighted Core import.
     @Override
-    public CompletionStage<ModCatalogSnapshot> importMods(@Unmodifiable List<Path> sources) {
+    public CompletionStage<ModCatalogSnapshot> importMods(
+            @Unmodifiable List<Path> sources,
+            @Unmodifiable Map<Path, ModImportConflictAction> conflictActions) {
         ModCatalogMutation mutation;
         try {
-            mutation = new ModCatalogMutation.Import(List.copyOf(sources));
+            mutation = new ModCatalogMutation.Import(sources, conflictActions);
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }

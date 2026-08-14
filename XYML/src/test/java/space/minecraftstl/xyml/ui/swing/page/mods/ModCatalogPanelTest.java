@@ -51,6 +51,7 @@ import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -144,6 +145,7 @@ public final class ModCatalogPanelTest {
             assertEquals("mod-1:false", model.enabledCommands().get(0));
             findButton(panel, "modsImport").doClick();
             assertEquals(List.of(Path.of("incoming.jar")), model.imports().get(0));
+            assertEquals(Map.of(), model.importConflictActions().get(0));
             findButton(panel, "modsOpenDirectory").doClick();
             assertEquals(1, interactions.openCount());
             findButton(panel, "modsReveal").doClick();
@@ -163,6 +165,51 @@ public final class ModCatalogPanelTest {
 
         assertTrue(model.closed());
         assertNotNull(panelReference.get());
+    }
+
+    /// Same-key imports prompt for a decision and submit that exact decision with the source batch.
+    @Test
+    public void resolvesImportConflictsBeforeSubmittingMutation() throws Exception {
+        RecordingModel model = new RecordingModel(items(1));
+        RecordingInteractions interactions = new RecordingInteractions();
+        Path conflict = Path.of("incoming.jar").toAbsolutePath().normalize();
+        model.replaceImportConflicts(List.of(conflict));
+        interactions.replaceImportConflictAction(ModImportConflictAction.KEEP);
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            findButton(panel, "modsImport").doClick();
+
+            assertEquals(List.of(conflict), interactions.importConflictSources());
+            assertEquals(List.of(Path.of("incoming.jar")), model.imports().get(0));
+            assertEquals(
+                    Map.of(conflict, ModImportConflictAction.KEEP),
+                    model.importConflictActions().get(0));
+            panel.close();
+        });
+    }
+
+    /// A conflict discovered during background preflight returns to the same choice flow and retries.
+    @Test
+    public void resolvesLateImportConflictAndRetriesMutation() throws Exception {
+        RecordingModel model = new RecordingModel(items(1));
+        RecordingInteractions interactions = new RecordingInteractions();
+        Path conflict = Path.of("incoming.jar").toAbsolutePath().normalize();
+        model.replaceLateImportConflict(conflict);
+        interactions.replaceImportConflictAction(ModImportConflictAction.SKIP);
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            findButton(panel, "modsImport").doClick();
+
+            assertEquals(List.of(conflict), interactions.importConflictSources());
+            assertEquals(2, model.imports().size());
+            assertEquals(Map.of(), model.importConflictActions().get(0));
+            assertEquals(
+                    Map.of(conflict, ModImportConflictAction.SKIP),
+                    model.importConflictActions().get(1));
+            panel.close();
+        });
     }
 
     /// A page event queued before deletion cannot reselect a row that has left the current logical index.
@@ -505,6 +552,16 @@ public final class ModCatalogPanelTest {
         /// Import commands.
         private final List<@Unmodifiable List<Path>> imports = new ArrayList<>();
 
+        /// Conflict decisions matching import commands.
+        private final List<@Unmodifiable Map<Path, ModImportConflictAction>>
+                importConflictActions = new ArrayList<>();
+
+        /// Import sources classified as conflicting before submission.
+        private @Unmodifiable List<Path> importConflicts = List.of();
+
+        /// Conflict surfaced only when an import without its decision reaches the fake backend.
+        private @Nullable Path lateImportConflict;
+
         /// Deleted stable keys.
         private final List<String> deletedKeys = new ArrayList<>();
 
@@ -609,6 +666,12 @@ public final class ModCatalogPanelTest {
                     snapshot.refreshEnabled());
         }
 
+        /// Returns configured normalized import conflicts.
+        @Override
+        public @Unmodifiable List<Path> findImportConflicts(@Unmodifiable List<Path> sources) {
+            return importConflicts;
+        }
+
         /// Records one enabled-state command.
         @Override
         public CompletionStage<ModCatalogSnapshot> setModEnabled(String localKey, boolean enabled) {
@@ -628,8 +691,15 @@ public final class ModCatalogPanelTest {
 
         /// Records one import command.
         @Override
-        public CompletionStage<ModCatalogSnapshot> importMods(@Unmodifiable List<Path> sources) {
+        public CompletionStage<ModCatalogSnapshot> importMods(
+                @Unmodifiable List<Path> sources,
+                @Unmodifiable Map<Path, ModImportConflictAction> conflictActions) {
             imports.add(List.copyOf(sources));
+            importConflictActions.add(Map.copyOf(conflictActions));
+            @Nullable Path conflict = lateImportConflict;
+            if (conflict != null && !conflictActions.containsKey(conflict)) {
+                return CompletableFuture.failedFuture(new ModImportConflictException(conflict));
+            }
             return CompletableFuture.completedFuture(snapshot);
         }
 
@@ -750,6 +820,28 @@ public final class ModCatalogPanelTest {
             return List.copyOf(imports);
         }
 
+        /// Returns conflict decisions matching recorded imports.
+        ///
+        /// @return immutable decision maps
+        private @Unmodifiable List<@Unmodifiable Map<Path, ModImportConflictAction>>
+                importConflictActions() {
+            return List.copyOf(importConflictActions);
+        }
+
+        /// Replaces the deterministic pre-import conflict classification.
+        ///
+        /// @param conflicts normalized conflicting sources
+        private void replaceImportConflicts(@Unmodifiable List<Path> conflicts) {
+            importConflicts = List.copyOf(conflicts);
+        }
+
+        /// Configures one conflict that appears only during asynchronous import preflight.
+        ///
+        /// @param conflict normalized conflicting source
+        private void replaceLateImportConflict(Path conflict) {
+            lateImportConflict = conflict.toAbsolutePath().normalize();
+        }
+
         /// Returns deleted keys.
         ///
         /// @return immutable keys
@@ -787,10 +879,23 @@ public final class ModCatalogPanelTest {
         /// Selected counts presented for batch deletion confirmation.
         private final List<Integer> batchDeleteCounts = new ArrayList<>();
 
+        /// Sources presented for import conflict resolution.
+        private final List<Path> importConflictSources = new ArrayList<>();
+
+        /// Deterministic import conflict response.
+        private ModImportConflictAction importConflictAction = ModImportConflictAction.REPLACE;
+
         /// Returns one deterministic import choice.
         @Override
         public @Unmodifiable List<Path> chooseImportFiles(Component owner, Path currentDirectory) {
             return List.of(Path.of("incoming.jar"));
+        }
+
+        /// Records and resolves one import conflict.
+        @Override
+        public @Nullable ModImportConflictAction resolveImportConflict(Component owner, Path source) {
+            importConflictSources.add(source);
+            return importConflictAction;
         }
 
         /// Confirms every deterministic deletion.
@@ -845,6 +950,20 @@ public final class ModCatalogPanelTest {
         /// @return immutable confirmation counts
         private @Unmodifiable List<Integer> batchDeleteCounts() {
             return List.copyOf(batchDeleteCounts);
+        }
+
+        /// Returns immutable sources presented for import conflict resolution.
+        ///
+        /// @return immutable conflict sources
+        private @Unmodifiable List<Path> importConflictSources() {
+            return List.copyOf(importConflictSources);
+        }
+
+        /// Replaces the deterministic conflict response.
+        ///
+        /// @param action new response
+        private void replaceImportConflictAction(ModImportConflictAction action) {
+            importConflictAction = action;
         }
     }
 }

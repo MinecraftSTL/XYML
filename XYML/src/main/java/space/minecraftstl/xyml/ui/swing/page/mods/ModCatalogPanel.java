@@ -57,7 +57,9 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -843,9 +845,73 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// Opens the chooser and submits selected archives as one serialized import.
     private void chooseAndImport() {
         List<Path> sources = interactions.chooseImportFiles(this, modsDirectory);
-        if (!sources.isEmpty()) {
-            observeFailure(model.importMods(sources));
+        if (sources.isEmpty()) {
+            return;
         }
+        try {
+            @Unmodifiable List<Path> conflicts = model.findImportConflicts(sources);
+            Map<Path, ModImportConflictAction> conflictActions = new LinkedHashMap<>();
+            for (Path conflict : conflicts) {
+                if (conflictActions.containsKey(conflict)) {
+                    continue;
+                }
+                @Nullable ModImportConflictAction action = interactions.resolveImportConflict(
+                        this, conflict);
+                if (action == null) {
+                    return;
+                }
+                conflictActions.put(conflict, action);
+            }
+            submitImport(sources, conflictActions);
+        } catch (RuntimeException failure) {
+            interactions.showFailure(this, actionStrings.errorTitle(), failureDetail(failure));
+        }
+    }
+
+    /// Submits one resolved import and prompts again if disk state introduced a later conflict.
+    ///
+    /// @param sources original import sources
+    /// @param conflictActions conflict decisions collected so far
+    private void submitImport(
+            @Unmodifiable List<Path> sources,
+            @Unmodifiable Map<Path, ModImportConflictAction> conflictActions) {
+        @Unmodifiable List<Path> capturedSources = List.copyOf(sources);
+        @Unmodifiable Map<Path, ModImportConflictAction> capturedActions = Map.copyOf(conflictActions);
+        model.importMods(capturedSources, capturedActions).whenComplete(
+                (@Nullable ModCatalogSnapshot ignored, @Nullable Throwable failure) -> {
+                    if (failure == null) {
+                        return;
+                    }
+                    Throwable cause = unwrapFailure(failure);
+                    EdtDispatcher.execute(() -> handleImportFailure(
+                            capturedSources, capturedActions, cause));
+                });
+    }
+
+    /// Resolves a late disk conflict or presents an ordinary import failure.
+    ///
+    /// @param sources original import sources
+    /// @param conflictActions conflict decisions collected so far
+    /// @param failure unwrapped import failure
+    private void handleImportFailure(
+            @Unmodifiable List<Path> sources,
+            @Unmodifiable Map<Path, ModImportConflictAction> conflictActions,
+            Throwable failure) {
+        if (closed) {
+            return;
+        }
+        if (failure instanceof ModImportConflictException conflict
+                && !conflictActions.containsKey(conflict.source())) {
+            @Nullable ModImportConflictAction action = interactions.resolveImportConflict(
+                    this, conflict.source());
+            if (action != null) {
+                Map<Path, ModImportConflictAction> replacement = new LinkedHashMap<>(conflictActions);
+                replacement.put(conflict.source(), action);
+                submitImport(sources, replacement);
+            }
+            return;
+        }
+        interactions.showFailure(this, actionStrings.errorTitle(), failureDetail(failure));
     }
 
     /// Schedules creation and opening of the managed Mod directory.
@@ -903,14 +969,23 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// @param failure asynchronous failure
     /// @return original message or type name
     private static String failureDetail(Throwable failure) {
-        Throwable current = failure;
-        if (current instanceof CompletionException && current.getCause() != null) {
-            current = Objects.requireNonNull(current.getCause());
-        }
+        Throwable current = unwrapFailure(failure);
         @Nullable String message = current.getMessage();
         return message == null || message.isBlank()
                 ? current.getClass().getSimpleName()
                 : message;
+    }
+
+    /// Removes asynchronous completion wrappers while preserving the original failure object.
+    ///
+    /// @param failure asynchronous failure
+    /// @return first non-completion cause
+    private static Throwable unwrapFailure(Throwable failure) {
+        Throwable current = Objects.requireNonNull(failure, "failure");
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = Objects.requireNonNull(current.getCause());
+        }
+        return current;
     }
 
     /// Configures one fixed-size bundled SVG icon command.

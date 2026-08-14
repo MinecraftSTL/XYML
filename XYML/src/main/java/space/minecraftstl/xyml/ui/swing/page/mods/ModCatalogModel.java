@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletionStage;
 
 /// Supplies one searchable, filtered, viewport-driven installed-Mod catalog.
@@ -78,6 +79,14 @@ public interface ModCatalogModel extends ViewportChoiceDataSource<ModCatalogItem
     /// Clears the current stable selection.
     void clearSelection();
 
+    /// Classifies source paths whose local keys conflict with installed or earlier selected Mods.
+    ///
+    /// This method reads only the current immutable index and performs no disk access.
+    ///
+    /// @param sources candidate import sources
+    /// @return immutable normalized conflicting sources in candidate order
+    @Unmodifiable List<Path> findImportConflicts(@Unmodifiable List<Path> sources);
+
     /// Enables or disables one indexed Mod and refreshes the exact catalog afterward.
     ///
     /// @param localKey rename-stable target key
@@ -97,8 +106,11 @@ public interface ModCatalogModel extends ViewportChoiceDataSource<ModCatalogItem
     /// Imports valid local Mod archives and refreshes the exact catalog afterward.
     ///
     /// @param sources source files captured defensively
+    /// @param conflictActions explicit decisions for sources previously reported as conflicting
     /// @return asynchronous terminal snapshot
-    CompletionStage<ModCatalogSnapshot> importMods(@Unmodifiable List<Path> sources);
+    CompletionStage<ModCatalogSnapshot> importMods(
+            @Unmodifiable List<Path> sources,
+            @Unmodifiable Map<Path, ModImportConflictAction> conflictActions);
 
     /// Permanently deletes one indexed current Mod and refreshes afterward.
     ///
