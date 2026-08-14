@@ -25,6 +25,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -120,6 +121,10 @@ public final class AppShellPanelTest {
 
     /// Fixed screenshot height matching the shell's preferred height.
     private static final int RENDER_HEIGHT = AppShellPanel.PREFERRED_HEIGHT;
+
+    /// Temporary local files used by native drop-routing tests.
+    @TempDir
+    private Path temporaryDirectory;
 
     /// Sidebar preloading starts only after the main page is ready and follows physical navigation order.
     ///
@@ -598,6 +603,41 @@ public final class AppShellPanelTest {
         }
     }
 
+    /// A dropped modpack closes every side page before opening its installer after the native drop callback.
+    ///
+    /// @throws IOException when the temporary archive fixture cannot be created
+    @Test
+    public void droppedModpackReturnsToDefaultWorkspaceAndDefersInstallerWindow() throws IOException {
+        Path archive = Files.createFile(temporaryDirectory.resolve("example.mrpack"));
+        AtomicReference<@Nullable Component> installerOwner = new AtomicReference<>();
+        AtomicReference<@Nullable Path> installerArchive = new AtomicReference<>();
+        AppShellPanel panel = createPanelWithModpackLauncher(
+                pageFactories(creationCounts()),
+                (owner, droppedArchive) -> {
+                    installerOwner.set(owner);
+                    installerArchive.set(droppedArchive);
+                });
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                panel.navigateTo(ShellPageId.DOWNLOADS);
+                TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+
+                assertTrue(handler.importData(fileTransfer(panel, archive.toFile())));
+                assertNull(panel.selectedPage());
+                assertNull(installerArchive.get());
+            });
+            EdtDispatcher.executeAndWait(() -> { });
+
+            assertAll(
+                    () -> assertSame(panel, installerOwner.get()),
+                    () -> assertEquals(archive.toAbsolutePath().normalize(), installerArchive.get()),
+                    () -> assertNull(panel.selectedPage()));
+        } finally {
+            panel.close();
+        }
+    }
+
     /// Authlib-injector server text is accepted on every top-level shell page.
     @Test
     public void acceptsAuthlibServerDropOnEveryPage() {
@@ -828,6 +868,43 @@ public final class AppShellPanelTest {
                     animator,
                     pageTransitionDuration,
                     Duration.ZERO));
+        });
+        return Objects.requireNonNull(result.get());
+    }
+
+    /// Creates a shell with an injected dropped-modpack window boundary.
+    ///
+    /// @param factories complete page factories
+    /// @param droppedModpackInstallLauncher injected installer-window recorder
+    /// @return initialized shell panel
+    private static AppShellPanel createPanelWithModpackLauncher(
+            Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> factories,
+            AppShellPanel.DroppedModpackInstallLauncher droppedModpackInstallLauncher) {
+        AtomicReference<@Nullable AppShellPanel> result = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            SwingThemeManager themeManager = new SwingThemeManager(
+                    ThemeBrightnessPreference.LIGHT,
+                    new SwingDesignTokens(8),
+                    SystemThemeDetector.lightFallback());
+            themeManager.initialize();
+            result.set(new AppShellPanel(
+                    "XYML",
+                    factories,
+                    ShellPagePresentations.englishFallback(),
+                    new ShellToolbarModels(
+                            new TestHomeModel(),
+                            testInstancesModel(),
+                            testAccountsModel(),
+                            testGameDirectories(),
+                            ShellRecentSelections.transientSelections()),
+                    testHomeStrings(),
+                    TaskProgressStrings.english(),
+                    new SwingAnimator(MotionPolicy.OFF, 16),
+                    Duration.ZERO,
+                    Duration.ZERO,
+                    Objects.requireNonNull(
+                            droppedModpackInstallLauncher,
+                            "droppedModpackInstallLauncher")));
         });
         return Objects.requireNonNull(result.get());
     }
