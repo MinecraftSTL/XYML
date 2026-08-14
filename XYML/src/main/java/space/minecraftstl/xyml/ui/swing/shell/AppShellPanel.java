@@ -119,6 +119,9 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
     /// Global route accepting authlib-injector server text on every shell page.
     private final ShellFileDropHandler.RouteRegistration authlibDropRegistration;
 
+    /// Lifecycle preventing generic child controls from hiding launcher-specific native drops.
+    private final ShellDefaultDropTargetSuppressor defaultDropTargetSuppressor;
+
     /// Current decoded background and native-transparency paint state.
     private WindowBackgroundVisual windowBackground = initialWindowBackground();
 
@@ -257,6 +260,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
                 this,
                 text -> AuthlibInjectorUrl.parse(text).isPresent(),
                 this::openDroppedAuthlibServer);
+        defaultDropTargetSuppressor = ShellDefaultDropTargetSuppressor.install(this);
     }
 
     /// Replaces the renderer-ready background and schedules repainting.
@@ -539,12 +543,14 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         if (closed) {
             return;
         }
-        AuthlibInjectorUrl.parse(transferText).ifPresent(endpoint -> {
-            JComponent accountsPage = pageCache.getOrCreate(ShellPageId.ACCOUNTS);
-            if (accountsPage instanceof AccountsPanel accounts) {
-                accounts.openDroppedAuthlibServer(this, endpoint);
+        AuthlibInjectorUrl.parse(transferText).ifPresent(endpoint -> SwingUtilities.invokeLater(() -> {
+            if (!closed) {
+                JComponent accountsPage = pageCache.getOrCreate(ShellPageId.ACCOUNTS);
+                if (accountsPage instanceof AccountsPanel accounts) {
+                    accounts.openDroppedAuthlibServer(this, endpoint);
+                }
             }
-        });
+        }));
     }
 
     /// Closes all created destination pages from any caller thread.
@@ -553,6 +559,7 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             if (!closed) {
                 closed = true;
+                defaultDropTargetSuppressor.close();
                 authlibDropRegistration.close();
                 modpackDropRegistration.close();
                 setTransferHandler(null);

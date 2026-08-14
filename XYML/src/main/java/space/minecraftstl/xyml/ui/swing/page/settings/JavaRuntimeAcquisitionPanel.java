@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceDataSource;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
@@ -1304,11 +1305,12 @@ public final class JavaRuntimeAcquisitionPanel extends JPanel implements AutoClo
         @Override
         public boolean canImport(TransferSupport support) {
             TransferSupport transferSupport = Objects.requireNonNull(support, "support");
-            return !closed
+            return ShellFileDropHandler.canImportAncestorText(transferSupport)
+                    || (!closed
                     && !busy
                     && transferSupport.isDataFlavorSupported(DataFlavor.javaFileListFlavor)
                     && (transferSupport.isDrop()
-                            || transferredArchive(transferSupport.getTransferable()) != null);
+                            || transferredArchive(transferSupport.getTransferable()) != null));
         }
 
         /// Selects and forwards the exact supported archive carried by the transfer.
@@ -1318,6 +1320,9 @@ public final class JavaRuntimeAcquisitionPanel extends JPanel implements AutoClo
         @Override
         public boolean importData(TransferSupport support) {
             TransferSupport transferSupport = Objects.requireNonNull(support, "support");
+            if (ShellFileDropHandler.importAncestorText(transferSupport)) {
+                return true;
+            }
             if (!canImport(transferSupport)) {
                 return false;
             }

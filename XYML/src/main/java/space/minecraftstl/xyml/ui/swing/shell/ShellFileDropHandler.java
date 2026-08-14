@@ -165,6 +165,57 @@ public final class ShellFileDropHandler extends TransferHandler {
         return Objects.requireNonNull(result.get(), "text route registration was not created");
     }
 
+    /// Reports whether a custom child transfer handler can delegate text to a shell ancestor.
+    ///
+    /// Native drop-over inspection uses advertised flavors only, preserving deferred Windows OLE
+    /// payloads until the operation has been accepted. Programmatic transfers validate the actual
+    /// decoded candidates before reporting support.
+    ///
+    /// @param support proposed transfer targeting a custom child handler
+    /// @return whether an ancestor text route can inspect or accepts the payload
+    public static boolean canImportAncestorText(TransferSupport support) {
+        TransferSupport transferSupport = Objects.requireNonNull(support, "support");
+        Component transferTarget = transferSupport.getComponent();
+        @Nullable ShellFileDropHandler ancestorHandler = findAncestorHandler(transferTarget);
+        if (ancestorHandler == null || !ancestorHandler.hasReachableTextRoute(transferTarget)) {
+            return false;
+        }
+        if (transferSupport.isDrop()) {
+            return hasPotentialTextFlavor(transferSupport.getDataFlavors());
+        }
+        for (String text : extractTextCandidates(transferSupport.getTransferable())) {
+            if (ancestorHandler.findTextRoute(transferTarget, text) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Delivers decoded text from a custom child transfer handler to its first matching ancestor route.
+    ///
+    /// @param support accepted transfer targeting a custom child handler
+    /// @return whether an ancestor route command completed successfully
+    public static boolean importAncestorText(TransferSupport support) {
+        TransferSupport transferSupport = Objects.requireNonNull(support, "support");
+        Component transferTarget = transferSupport.getComponent();
+        @Nullable ShellFileDropHandler ancestorHandler = findAncestorHandler(transferTarget);
+        if (ancestorHandler == null) {
+            return false;
+        }
+        for (String text : extractTextCandidates(transferSupport.getTransferable())) {
+            @Nullable TextRoute textRoute = ancestorHandler.findTextRoute(transferTarget, text);
+            if (textRoute != null) {
+                try {
+                    textRoute.openCommand().accept(text);
+                    return true;
+                } catch (RuntimeException ignored) {
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+
     /// Adds one route to the target's shared handler on the Swing event-dispatch thread.
     ///
     /// @param target component receiving local-file drops
@@ -343,6 +394,22 @@ public final class ShellFileDropHandler extends TransferHandler {
         return false;
     }
 
+    /// Returns the nearest ancestor component using the composable shell drop handler.
+    ///
+    /// @param transferTarget custom child transfer target
+    /// @return nearest compatible ancestor handler, or null when detached from the shell
+    private static @Nullable ShellFileDropHandler findAncestorHandler(Component transferTarget) {
+        @Nullable Container ancestor = Objects.requireNonNull(transferTarget, "transferTarget").getParent();
+        while (ancestor != null) {
+            if (ancestor instanceof JComponent component
+                    && component.getTransferHandler() instanceof ShellFileDropHandler handler) {
+                return handler;
+            }
+            ancestor = ancestor.getParent();
+        }
+        return null;
+    }
+
     /// Returns the first matching route without allowing one malformed predicate to break Swing DnD.
     ///
     /// @param path normalized absolute transfer path
@@ -461,22 +528,30 @@ public final class ShellFileDropHandler extends TransferHandler {
     private static @Unmodifiable List<String> extractTextCandidates(Transferable transferable) {
         Transferable payload = Objects.requireNonNull(transferable, "transferable");
         Set<String> candidates = new LinkedHashSet<>();
-        addHtmlCandidates(candidates, readFirstTextFlavor(payload, "text/html"));
+        for (String html : readTextFlavors(payload, "text/html")) {
+            addTextRepresentationCandidates(candidates, html);
+        }
         addCandidate(candidates, readJavaUrlFlavor(payload));
-        addUriListCandidates(candidates, readFirstTextFlavor(payload, "text/uri-list"));
-        addUriListCandidates(candidates, readFirstTextFlavor(payload, "text/x-moz-url"));
+        for (String uriList : readTextFlavors(payload, "text/uri-list")) {
+            addUriListCandidates(candidates, uriList);
+        }
+        for (String uriList : readTextFlavors(payload, "text/x-moz-url")) {
+            addUriListCandidates(candidates, uriList);
+        }
         @Nullable DataFlavor stringFlavor = findMatchingFlavor(payload, DataFlavor.stringFlavor);
         if (stringFlavor != null) {
             try {
                 Object transferred = payload.getTransferData(stringFlavor);
                 if (transferred instanceof String text) {
-                    addCandidate(candidates, text);
+                    addTextRepresentationCandidates(candidates, text);
                 }
             } catch (IOException | UnsupportedFlavorException | RuntimeException ignored) {
                 // Browser-specific text flavors may still provide the same payload below.
             }
         }
-        addCandidate(candidates, readFirstTextFlavor(payload, "text/plain"));
+        for (String plainText : readTextFlavors(payload, "text/plain")) {
+            addTextRepresentationCandidates(candidates, plainText);
+        }
         return List.copyOf(candidates);
     }
 
@@ -576,18 +651,34 @@ public final class ShellFileDropHandler extends TransferHandler {
     private static @Nullable String readFirstTextFlavor(
             Transferable transferable,
             String mimeType) {
+        @Unmodifiable List<String> representations = readTextFlavors(transferable, mimeType);
+        return representations.isEmpty() ? null : representations.get(0);
+    }
+
+    /// Reads every decodable text flavor with one exact MIME type in advertised order.
+    ///
+    /// @param transferable platform transfer payload
+    /// @param mimeType MIME type without parameters
+    /// @return immutable bounded decoded representations
+    private static @Unmodifiable List<String> readTextFlavors(
+            Transferable transferable,
+            String mimeType) {
+        List<String> representations = new ArrayList<>();
         for (DataFlavor flavor : Objects.requireNonNull(
                 transferable,
                 "transferable").getTransferDataFlavors()) {
+            if (representations.size() >= MAX_TRANSFER_TEXT_CANDIDATES) {
+                break;
+            }
             if (!flavor.isMimeTypeEqual(Objects.requireNonNull(mimeType, "mimeType"))) {
                 continue;
             }
             @Nullable String text = readTextFlavor(transferable, flavor);
             if (text != null) {
-                return text;
+                representations.add(text);
             }
         }
-        return null;
+        return List.copyOf(representations);
     }
 
     /// Reads one text flavor through the platform's charset-aware reader with a bounded size.
@@ -664,6 +755,21 @@ public final class ShellFileDropHandler extends TransferHandler {
         } catch (RuntimeException ignored) {
             // Malformed browser markup cannot prevent plain-text representations from being tried.
         }
+    }
+
+    /// Extracts structured browser markup before retaining its raw string representation.
+    ///
+    /// Chromium-family browsers can expose dragged HTML through the generic Java String or plain-text
+    /// flavor instead of `text/html` on Windows. Trying the same bounded parser for every textual
+    /// representation preserves the button's `data-clipboard-text` endpoint in those variants.
+    ///
+    /// @param candidates ordered bounded candidate collection
+    /// @param representation decoded browser representation, or null
+    private static void addTextRepresentationCandidates(
+            Set<String> candidates,
+            @Nullable String representation) {
+        addHtmlCandidates(candidates, representation);
+        addCandidate(candidates, representation);
     }
 
     /// Adds every non-comment line from URI-list and Mozilla URL transfers.

@@ -199,6 +199,32 @@ final class ShellFileDropHandlerTest {
         assertNull(shell.getTransferHandler());
     }
 
+    /// A non-composable child handler can explicitly forward browser text to the global shell route.
+    @Test
+    void delegatesTextFromCustomChildHandlerToAncestorRoute() {
+        JPanel shell = new JPanel();
+        JPanel customChild = new JPanel();
+        shell.add(customChild);
+        AtomicReference<@Nullable String> openedText = new AtomicReference<>();
+        ShellFileDropHandler.RouteRegistration globalText = ShellFileDropHandler.registerText(
+                shell,
+                value -> value.startsWith("authlib-injector:"),
+                openedText::set);
+        customChild.setTransferHandler(new AncestorTextDelegatingTransferHandler());
+        TransferHandler childHandler = Objects.requireNonNull(customChild.getTransferHandler());
+        TransferHandler.TransferSupport support = new TransferHandler.TransferSupport(
+                customChild,
+                new StringTransferable("authlib-injector:yggdrasil-server:value"));
+
+        assertTrue(childHandler.canImport(support));
+        assertTrue(childHandler.importData(support));
+        assertEquals("authlib-injector:yggdrasil-server:value", openedText.get());
+
+        customChild.setTransferHandler(null);
+        globalText.close();
+        assertNull(shell.getTransferHandler());
+    }
+
     /// Browser URI-list and plain-text flavors reach the same text route when String flavor is absent.
     @Test
     void importsBrowserSpecificTextFlavors() throws ClassNotFoundException {
@@ -256,6 +282,31 @@ final class ShellFileDropHandlerTest {
                         "<button draggable=\"true\" data-clipboard-text=\"" + endpoint
                                 + "\">Drag this button</button>",
                         "Drag this button"));
+
+        assertTrue(handler.canImport(support));
+        assertTrue(handler.importData(support));
+        assertEquals(endpoint, opened.get());
+
+        route.close();
+        assertNull(target.getTransferHandler());
+    }
+
+    /// Browser markup carried only by the generic String flavor still exposes its clipboard endpoint.
+    @Test
+    void importsBrowserButtonMarkupFromGenericStringFlavor() {
+        JPanel target = new JPanel();
+        AtomicReference<@Nullable String> opened = new AtomicReference<>();
+        String endpoint = "https://home.minecraftstl.space:8880/api/yggdrasil";
+        ShellFileDropHandler.RouteRegistration route = ShellFileDropHandler.registerText(
+                target,
+                endpoint::equals,
+                opened::set);
+        TransferHandler handler = Objects.requireNonNull(target.getTransferHandler());
+        TransferHandler.TransferSupport support = new TransferHandler.TransferSupport(
+                target,
+                new StringTransferable(
+                        "<button draggable=\"true\" data-clipboard-text=\"" + endpoint
+                                + "\">Drag this button</button>"));
 
         assertTrue(handler.canImport(support));
         assertTrue(handler.importData(support));
@@ -542,6 +593,28 @@ final class ShellFileDropHandlerTest {
                 return new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8));
             }
             throw new UnsupportedFlavorException(flavor);
+        }
+    }
+
+    /// Minimal custom child handler delegating only ancestor-owned text routes.
+    @NotNullByDefault
+    private static final class AncestorTextDelegatingTransferHandler extends TransferHandler {
+        /// Reports whether an ancestor text route can accept this payload.
+        ///
+        /// @param support proposed transfer
+        /// @return whether ancestor text routing is available
+        @Override
+        public boolean canImport(TransferSupport support) {
+            return ShellFileDropHandler.canImportAncestorText(Objects.requireNonNull(support, "support"));
+        }
+
+        /// Delivers accepted text to the ancestor route.
+        ///
+        /// @param support accepted transfer
+        /// @return whether the ancestor command completed
+        @Override
+        public boolean importData(TransferSupport support) {
+            return ShellFileDropHandler.importAncestorText(Objects.requireNonNull(support, "support"));
         }
     }
 

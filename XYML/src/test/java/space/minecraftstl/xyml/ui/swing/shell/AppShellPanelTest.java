@@ -660,6 +660,29 @@ public final class AppShellPanelTest {
         }
     }
 
+    /// Authlib server dialogs are not entered until the native drop callback has returned to Windows.
+    @Test
+    public void defersAuthlibWorkflowUntilAfterNativeDropCallback() {
+        EnumMap<ShellPageId, AtomicInteger> creationCounts = creationCounts();
+        AppShellPanel panel = createPanel(creationCounts);
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+                assertTrue(handler.importData(textTransfer(
+                        panel,
+                        "https://home.minecraftstl.space:8880/api/yggdrasil")));
+                assertFalse(panel.isPageCached(ShellPageId.ACCOUNTS));
+            });
+            EdtDispatcher.executeAndWait(() -> { });
+
+            assertAll(
+                    () -> assertTrue(panel.isPageCached(ShellPageId.ACCOUNTS)),
+                    () -> assertEquals(1, creationCounts.get(ShellPageId.ACCOUNTS).get()));
+        } finally {
+            panel.close();
+        }
+    }
+
     /// Launcher selection lock disables account switching and its management footer together.
     @Test
     public void disablesAccountSelectorWithSelectionCommands() {
