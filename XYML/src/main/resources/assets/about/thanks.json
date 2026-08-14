@@ -42,18 +42,6 @@
     "externalLink" : "https://github.com/ShulkerSakura"
   },
   {
-    "image" : "/assets/img/gamerteam.png",
-    "title" : "gamerteam",
-    "subtitleLocalized" : "about.thanks_to.gamerteam.statement",
-    "externalLink" : "https://github.com/ZhaiSoul"
-  },
-  {
-    "image" : "/assets/img/red_lnn.png",
-    "title" : "Red_lnn",
-    "subtitleLocalized" : "about.thanks_to.red_lnn.statement",
-    "externalLink" : "https://redlnn.top"
-  },
-  {
     "image" : "/assets/img/mcmod.png",
     "titleLocalized" : "about.thanks_to.mcmod",
     "subtitleLocalized" : "about.thanks_to.mcmod.statement",

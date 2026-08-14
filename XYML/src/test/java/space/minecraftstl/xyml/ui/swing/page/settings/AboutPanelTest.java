@@ -58,19 +58,19 @@ public final class AboutPanelTest {
                 AboutPanel.loadListResource(AboutPanel.THANKS_RESOURCE);
 
         assertAll(
-                () -> assertEquals(16, acknowledgements.size()),
+                () -> assertEquals(14, acknowledgements.size()),
                 () -> assertEquals(expectedAcknowledgementTitles(), acknowledgements.stream()
                         .map(AboutPanel.AboutEntry::title)
                         .toList()),
                 () -> assertEquals(
                         URI.create("https://github.com/mcmod-info-mirror"),
-                        acknowledgements.get(10).externalLink()),
+                        acknowledgements.get(8).externalLink()),
                 () -> assertEquals(
                         URI.create("https://github.com/MinecraftSTL/XYML/graphs/contributors"),
-                        acknowledgements.get(12).externalLink()),
+                        acknowledgements.get(10).externalLink()),
                 () -> assertEquals(
                         URI.create("https://github.com/HMCL-dev/HMCL/graphs/contributors"),
-                        acknowledgements.get(13).externalLink()),
+                        acknowledgements.get(11).externalLink()),
                 () -> assertTrue(allConfiguredImagesExist(acknowledgements)));
     }
 
@@ -102,7 +102,7 @@ public final class AboutPanelTest {
         AboutPanel panel = Objects.requireNonNull(panelRef.get());
         assertAll(
                 () -> assertEquals(8, panel.getComponentCount()),
-                () -> assertEquals(16, panel.acknowledgements().size()),
+                () -> assertEquals(14, panel.acknowledgements().size()),
                 () -> assertEquals(13, panel.dependencies().size()),
                 () -> assertFalse(panel.isOpaque()),
                 () -> assertNull(opened.get()));
@@ -158,8 +158,6 @@ public final class AboutPanelTest {
                 "Zkitefly",
                 "Burning_TNT",
                 "ShulkerSakura",
-                "gamerteam",
-                "Red_lnn",
                 i18n("about.thanks_to.mcmod"),
                 i18n("about.thanks_to.mcim"),
                 i18n("about.thanks_to.8mi-tech"),
