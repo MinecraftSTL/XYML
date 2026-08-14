@@ -20,8 +20,10 @@ package space.minecraftstl.xyml.download.fabric;
 import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.download.VersionList;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -31,6 +33,8 @@ import java.util.stream.Collectors;
 
 import static space.minecraftstl.xyml.util.gson.JsonUtils.listTypeOf;
 
+/// Loads Fabric game and loader versions from the Fabric metadata service.
+@NotNullByDefault
 public final class FabricVersionList extends VersionList<FabricRemoteVersion> {
     private final DownloadProvider downloadProvider;
 
@@ -65,42 +69,28 @@ public final class FabricVersionList extends VersionList<FabricRemoteVersion> {
     private static final String LOADER_META_URL = "https://meta.fabricmc.net/v2/versions/loader";
     private static final String GAME_META_URL = "https://meta.fabricmc.net/v2/versions/game";
 
+    /// Loads version identifiers from a Fabric metadata endpoint.
+    ///
+    /// @param metaUrl the metadata endpoint URL
+    /// @return the version identifiers returned by the endpoint
+    /// @throws IOException if the metadata cannot be downloaded
     private List<String> getGameVersions(String metaUrl) throws IOException {
         String json = NetworkUtils.doGet(downloadProvider.injectURLWithCandidates(metaUrl));
         return JsonUtils.GSON.fromJson(json, listTypeOf(GameVersion.class))
-                .stream().map(GameVersion::getVersion).collect(Collectors.toList());
+                .stream().map(GameVersion::version).collect(Collectors.toList());
     }
 
     private static String getLaunchMetaUrl(String gameVersion, String loaderVersion) {
         return String.format("https://meta.fabricmc.net/v2/versions/loader/%s/%s", gameVersion, loaderVersion);
     }
 
-    private static class GameVersion {
-        private final String version;
-        private final String maven;
-        private final boolean stable;
-
-        public GameVersion() {
-            this("", null, false);
-        }
-
-        public GameVersion(String version, String maven, boolean stable) {
-            this.version = version;
-            this.maven = maven;
-            this.stable = stable;
-        }
-
-        public String getVersion() {
-            return version;
-        }
-
-        @Nullable
-        public String getMaven() {
-            return maven;
-        }
-
-        public boolean isStable() {
-            return stable;
-        }
+    /// Describes a game version returned by the Fabric metadata service.
+    ///
+    /// @param version the game version identifier
+    /// @param maven the optional Maven coordinate
+    /// @param stable whether the version is stable
+    @JsonSerializable
+    @NotNullByDefault
+    private record GameVersion(String version, @Nullable String maven, boolean stable) {
     }
 }
