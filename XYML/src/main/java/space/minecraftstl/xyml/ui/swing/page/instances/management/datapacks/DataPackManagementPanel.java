@@ -34,6 +34,8 @@ import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCa
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogStrings;
+import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.util.io.FileUtils;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -56,6 +58,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -186,6 +189,9 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
     /// Subscription for world-index state changes, released together with the owned model.
     private final Subscription worldSubscription;
 
+    /// Page-scoped filtered ZIP route for the currently selected world's data packs.
+    private final ShellFileDropHandler.RouteRegistration dropRegistration;
+
     /// Prevents late background callbacks from mutating released Swing controls.
     private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -262,6 +268,10 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
             }
         });
         applyWorldSnapshot(displayedWorldSnapshot);
+        dropRegistration = ShellFileDropHandler.registerFiles(
+                this,
+                this::supportsDroppedDataPack,
+                this::importDroppedDataPacks);
     }
 
     /// Returns the visible tab title.
@@ -699,28 +709,65 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
         if (archive == null) {
             return;
         }
+        scheduleDataPackInstallation(context, List.of(archive));
+    }
+
+    /// Returns whether the selected world can receive one dropped data-pack ZIP.
+    ///
+    /// @param archive normalized dropped path
+    /// @return whether a supported world is selected and the path has the ZIP suffix
+    private boolean supportsDroppedDataPack(Path archive) {
+        return usableSelectedWorld() != null
+                && "zip".equals(FileUtils.getExtension(
+                        Objects.requireNonNull(archive, "archive")).toLowerCase(Locale.ROOT));
+    }
+
+    /// Installs every accepted dropped data pack in transfer order as one page operation.
+    ///
+    /// @param archives immutable accepted ZIP paths
+    private void importDroppedDataPacks(@Unmodifiable List<Path> archives) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable SelectedWorld context = usableSelectedWorld();
+        if (context != null && !archives.isEmpty()) {
+            scheduleDataPackInstallation(context, archives);
+        }
+    }
+
+    /// Schedules one selected-world installation operation for immutable archive paths.
+    ///
+    /// @param context stable selected-world data-pack context
+    /// @param archives immutable chooser-selected or dropped ZIP paths
+    private void scheduleDataPackInstallation(
+            SelectedWorld context,
+            @Unmodifiable List<Path> archives) {
+        @Unmodifiable List<Path> selectedArchives = List.copyOf(archives);
         beginDataPackOperation();
-        Path selectedArchive = archive;
         try {
-            executor.execute(() -> installDataPackOnExecutor(context, selectedArchive));
+            executor.execute(() -> installDataPacksOnExecutor(context, selectedArchives));
         } catch (RuntimeException failure) {
             finishDataPackOperation(context, failure);
         }
     }
 
-    /// Installs one selected ZIP through the Core DataPack API outside the EDT.
+    /// Installs selected ZIPs through the Core DataPack API outside the EDT.
     ///
     /// @param context stable selected-world data-pack context
-    /// @param archive selected local ZIP path
-    private void installDataPackOnExecutor(SelectedWorld context, Path archive) {
+    /// @param archives immutable selected local ZIP paths
+    private void installDataPacksOnExecutor(
+            SelectedWorld context,
+            @Unmodifiable List<Path> archives) {
         try {
             requireBackgroundThread();
-            Path normalizedArchive = Objects.requireNonNull(archive, "archive").toAbsolutePath().normalize();
-            if (!Files.isRegularFile(normalizedArchive)) {
-                throw new IOException(i18n("swing.datapack_management.archive_missing", normalizedArchive));
-            }
             Files.createDirectories(context.dataPackDirectory());
-            context.dataPack().installPack(normalizedArchive, context.world().getGameVersion());
+            for (Path archive : archives) {
+                Path normalizedArchive = Objects.requireNonNull(archive, "archive")
+                        .toAbsolutePath()
+                        .normalize();
+                if (!Files.isRegularFile(normalizedArchive)) {
+                    throw new IOException(i18n("swing.datapack_management.archive_missing", normalizedArchive));
+                }
+                context.dataPack().installPack(normalizedArchive, context.world().getGameVersion());
+            }
             finishDataPackOperation(context, null);
         } catch (IOException | RuntimeException failure) {
             finishDataPackOperation(context, failure);
@@ -978,6 +1025,7 @@ public final class DataPackManagementPanel extends JPanel implements AutoCloseab
     /// Releases all listeners and owned model resources on the Swing event-dispatch thread.
     private void closeOnEventDispatchThread() {
         searchTimer.stop();
+        dropRegistration.close();
         worldSubscription.unsubscribe();
         worldChoiceList.getList().removeListSelectionListener(worldSelectionListener);
         worldChoiceList.getChoiceModel().removeListDataListener(worldRowsListener);

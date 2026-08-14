@@ -21,6 +21,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.game.ModpackHelper;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -29,6 +30,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JButton;
@@ -75,6 +77,9 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
 
     /// Feedback for the latest external browse or directory-reveal request.
     private final JLabel statusLabel;
+
+    /// Page-scoped local-modpack file-drop route.
+    private final ShellFileDropHandler.RouteRegistration modpackDropRegistration;
 
     /// Whether this panel no longer accepts user actions or worker-to-EDT feedback.
     private volatile boolean closed;
@@ -130,6 +135,10 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         statusLabel = new JLabel("", SwingConstants.LEADING);
         statusLabel.setName("downloadsCategoryStatus");
         add(statusLabel, "growx, h 24!");
+        modpackDropRegistration = ShellFileDropHandler.register(
+                this,
+                ModpackHelper::isFileModpackByExtension,
+                this::openDroppedModpack);
     }
 
     /// Returns the stable category tab host.
@@ -139,10 +148,23 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         return categoryTabs;
     }
 
+    /// Selects the local-modpack category and displays a dropped archive.
+    ///
+    /// @param archive local modpack archive
+    public void openDroppedModpack(Path archive) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        categoryTabs.setSelectedIndex(DownloadCategory.MODPACK.ordinal());
+        localModpackImporter.acceptDroppedArchive(archive);
+    }
+
     /// Cancels and releases the local importer, then rejects late desktop-action feedback.
     @Override
     public void close() {
         closed = true;
+        modpackDropRegistration.close();
         modsCatalog.close();
         resourcePackCatalog.close();
         shaderPackCatalog.close();

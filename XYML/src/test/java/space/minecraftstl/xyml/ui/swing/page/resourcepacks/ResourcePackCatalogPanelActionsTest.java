@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
@@ -33,9 +34,16 @@ import javax.swing.AbstractButton;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -56,12 +64,17 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Headless tests for resource-pack commands, write-state gating, and asynchronous feedback.
 @NotNullByDefault
 public final class ResourcePackCatalogPanelActionsTest {
+    /// Temporary source files used by shape-aware resource-pack drop tests.
+    @TempDir
+    private Path temporaryDirectory;
+
     /// Localized catalog presentation used by the action-focused panel tests.
     private static final ResourcePackCatalogStrings STRINGS = new ResourcePackCatalogStrings(
             "Resource packs",
@@ -161,6 +174,47 @@ public final class ResourcePackCatalogPanelActionsTest {
                     () -> assertEquals(2, interactions.importChooserCalls),
                     () -> assertEquals(List.of(selectedSources), model.importedSources()));
             panel.close();
+        });
+    }
+
+    /// A page-scoped drop accepts ZIPs and pack directories, filters other paths, and detaches on close.
+    @Test
+    public void importsSupportedDroppedResourcePacksOnlyWhileOpen() throws IOException {
+        Path archive = Files.createFile(temporaryDirectory.resolve("archive.zip"));
+        Path directory = Files.createDirectory(temporaryDirectory.resolve("directory-pack"));
+        Files.createFile(directory.resolve("pack.mcmeta"));
+        Path unsupported = Files.createFile(temporaryDirectory.resolve("notes.txt"));
+        FakeResourcePackCatalogModel model = new FakeResourcePackCatalogModel(
+                List.of(),
+                snapshot(
+                        OptionalInt.empty(),
+                        OptionalInt.of(0),
+                        1L,
+                        ResourcePackCatalogStatus.READY,
+                        "No resource packs",
+                        ResourcePackCatalogWriteStatus.IDLE,
+                        "",
+                        false,
+                        true));
+        ResourcePackCatalogPanel panel = onEventDispatchThread(() -> new ResourcePackCatalogPanel(
+                model,
+                STRINGS,
+                ACTION_STRINGS,
+                new FakeResourcePackCatalogInteractions(),
+                temporaryDirectory.resolve("installed")));
+
+        onEventDispatchThread(() -> {
+            TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+            TransferHandler.TransferSupport transfer = fileTransfer(panel, List.of(
+                    archive.toFile(),
+                    unsupported.toFile(),
+                    directory.toFile()));
+            assertTrue(handler.canImport(transfer));
+            assertTrue(handler.importData(transfer));
+            assertEquals(List.of(List.of(archive, directory)), model.importedSources());
+
+            panel.close();
+            assertNull(panel.getTransferHandler());
         });
     }
 
@@ -683,6 +737,52 @@ public final class ResourcePackCatalogPanelActionsTest {
     /// @return normalized absolute path
     private static Path testPath(String path) {
         return Path.of(path).toAbsolutePath().normalize();
+    }
+
+    /// Creates one local-file-list transfer wrapper for page drop tests.
+    ///
+    /// @param component transfer target
+    /// @param files local file payload
+    /// @return transfer support exposing the Java file-list flavor
+    private static TransferHandler.TransferSupport fileTransfer(
+            ResourcePackCatalogPanel component,
+            @Unmodifiable List<File> files) {
+        return new TransferHandler.TransferSupport(component, new FileListTransferable(files));
+    }
+
+    /// Immutable file-list transferable for resource-pack drop tests.
+    @NotNullByDefault
+    private static final class FileListTransferable implements Transferable {
+        /// Immutable local files.
+        private final @Unmodifiable List<File> files;
+
+        /// Creates one file-list payload.
+        ///
+        /// @param files local files to expose
+        private FileListTransferable(@Unmodifiable List<File> files) {
+            this.files = List.copyOf(files);
+        }
+
+        /// Returns the supported Java file-list flavor.
+        @Override
+        public DataFlavor @Unmodifiable [] getTransferDataFlavors() {
+            return new DataFlavor[]{DataFlavor.javaFileListFlavor};
+        }
+
+        /// Reports whether the requested flavor is supported.
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor flavor) {
+            return DataFlavor.javaFileListFlavor.equals(flavor);
+        }
+
+        /// Returns the immutable local files.
+        @Override
+        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+            if (!isDataFlavorSupported(flavor)) {
+                throw new UnsupportedFlavorException(flavor);
+            }
+            return files;
+        }
     }
 
     /// Assigns viewport geometry and synchronously materializes its demanded rows.

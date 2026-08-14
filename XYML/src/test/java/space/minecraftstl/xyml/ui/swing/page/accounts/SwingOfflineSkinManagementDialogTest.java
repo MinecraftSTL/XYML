@@ -20,16 +20,23 @@ package space.minecraftstl.xyml.ui.swing.page.accounts;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.auth.offline.Skin;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
+import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JTextField;
+import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -38,12 +45,18 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static space.minecraftstl.xyml.ui.swing.SwingFileTransferTestSupport.fileTransfer;
 
 /// Exercises provider persistence and read-only control behavior in the native offline skin dialog.
 @NotNullByDefault
 public final class SwingOfflineSkinManagementDialogTest {
+    /// Temporary valid skin image fixture.
+    @TempDir
+    private Path temporaryDirectory;
+
     /// LittleSkin and a valid custom endpoint are persisted exactly after explicit Save commands.
     @Test
     public void persistsSelectedProviderSources() {
@@ -116,6 +129,47 @@ public final class SwingOfflineSkinManagementDialogTest {
             } finally {
                 dialog.close();
             }
+        });
+    }
+
+    /// A dropped PNG switches to the local source and enters the existing image-validation flow.
+    @Test
+    public void stagesDroppedPngAsLocalSkin() throws IOException {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+        Path skin = temporaryDirectory.resolve("Dropped.PNG");
+        ImageIO.write(new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB), "png", skin.toFile());
+        FakeOfflineSkinStore store = new FakeOfflineSkinStore(true);
+
+        EdtDispatcher.executeAndWait(() -> {
+            SwingOfflineSkinManagementDialog dialog = new SwingOfflineSkinManagementDialog(
+                    null,
+                    store,
+                    "offline-1",
+                    Runnable::run);
+            JComponent preview = findNamed(
+                    dialog.getContentPane(),
+                    "offlineSkinPreview",
+                    JComponent.class);
+            try {
+                TransferHandler handler = Objects.requireNonNull(preview.getTransferHandler());
+
+                assertTrue(handler.importData(fileTransfer(preview, List.of(skin))));
+                assertEquals(
+                        Skin.Type.LOCAL_FILE,
+                        findNamed(
+                                dialog.getContentPane(),
+                                "offlineSkinSourceType",
+                                JComboBox.class).getSelectedItem());
+                assertEquals(
+                        skin.toString(),
+                        findNamed(
+                                dialog.getContentPane(),
+                                "offlineSkinLocalFile",
+                                JTextField.class).getText());
+            } finally {
+                dialog.close();
+            }
+            assertNull(preview.getTransferHandler());
         });
     }
 

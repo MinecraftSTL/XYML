@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.shell.AppShellFrame;
 import space.minecraftstl.xyml.ui.swing.shell.AppShellPanel;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
+import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
@@ -39,7 +40,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-/// Installs the composable shell route for single Minecraft version JSON imports.
+/// Installs the composable instance-workspace route for single Minecraft version JSON imports.
 ///
 /// The launcher performs lexical extension matching only. It captures the currently selected
 /// repository when creating a modeless import window, then delegates parsing and all task creation
@@ -144,7 +145,7 @@ public final class SwingInstanceJsonImportLauncher implements AutoCloseable {
         this.windowFactory = Objects.requireNonNull(windowFactory, "windowFactory");
         dropRegistration = ShellFileDropHandler.register(
                 this.shellPanel,
-                SwingInstanceJsonImportLauncher::supports,
+                this::supportsOnInstanceWorkspace,
                 this::open);
     }
 
@@ -155,6 +156,17 @@ public final class SwingInstanceJsonImportLauncher implements AutoCloseable {
     public static boolean supports(Path path) {
         return "json".equals(FileUtils.getExtension(
                 Objects.requireNonNull(path, "path")).toLowerCase(Locale.ROOT));
+    }
+
+    /// Returns whether one JSON path is accepted on the default workspace or explicit instance-list page.
+    ///
+    /// @param path normalized dropped path
+    /// @return whether this route accepts the path on the current shell page
+    private boolean supportsOnInstanceWorkspace(Path path) {
+        @Nullable ShellPageId selectedPage = shellPanel.selectedPage();
+        return !closed
+                && (selectedPage == null || selectedPage == ShellPageId.INSTANCES)
+                && supports(Objects.requireNonNull(path, "path"));
     }
 
     /// Closes any current import window and removes only this launcher's drop route.
@@ -182,7 +194,7 @@ public final class SwingInstanceJsonImportLauncher implements AutoCloseable {
         Path normalizedSource = Objects.requireNonNull(source, "source")
                 .toAbsolutePath()
                 .normalize();
-        if (closed || !supports(normalizedSource)) {
+        if (!supportsOnInstanceWorkspace(normalizedSource)) {
             return;
         }
         @Nullable ImportWindow currentWindow = importWindow;

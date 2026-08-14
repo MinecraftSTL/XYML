@@ -46,6 +46,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -70,10 +71,47 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.ui.swing.SwingFileTransferTestSupport.fileTransfer;
 
 /// Verifies native world quick-play controls, immutable folder capture, and asynchronous completion handling.
 @NotNullByDefault
 final class WorldCatalogPanelQuickPlayTest {
+    /// A ready world page opens the existing import flow for one dropped ZIP and detaches on close.
+    @Test
+    void importsSupportedDroppedWorldArchiveOnlyOnThisPage() {
+        Path worldPath = Path.of("build", "test-worlds", "existing").toAbsolutePath().normalize();
+        Path archive = Path.of("build", "imports", "Dropped-World.ZIP").toAbsolutePath().normalize();
+        WorldCatalogItem world = new WorldCatalogItem(
+                worldPath,
+                "existing",
+                "Existing World",
+                1L,
+                "1.21.1",
+                false,
+                null);
+        ImportRecordingWorldCatalogModel model = new ImportRecordingWorldCatalogModel(world, archive);
+        ImportRecordingInteractions interactions = new ImportRecordingInteractions();
+
+        EdtDispatcher.executeAndWait(() -> {
+            WorldCatalogPanel panel = new WorldCatalogPanel(
+                    model,
+                    WorldCatalogStrings.english(),
+                    interactions,
+                    WorldQuickPlayActions.unavailable());
+            TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+            TransferHandler.TransferSupport supported = fileTransfer(panel, List.of(archive));
+
+            assertTrue(handler.canImport(supported));
+            assertFalse(handler.canImport(fileTransfer(panel, List.of(Path.of("world.rar")))));
+            assertTrue(handler.importData(supported));
+            assertEquals(archive, model.inspectedArchive);
+            assertEquals("Imported World", model.installedName);
+
+            panel.close();
+            assertNull(panel.getTransferHandler());
+        });
+    }
+
     /// Quick launch and script generation keep preparation off the component model and restore controls on completion.
     @Test
     void delegatesQuickPlayAndScriptWithoutBlockingTheEdt() throws IOException {
@@ -730,6 +768,199 @@ final class WorldCatalogPanelQuickPlayTest {
         /// @return reset world, or null before reset
         private @Nullable WorldCatalogItem resetIconWorld() {
             return resetIconWorld;
+        }
+    }
+
+    /// Ready one-row model that records the complete world-import handoff.
+    @NotNullByDefault
+    private static final class ImportRecordingWorldCatalogModel implements WorldCatalogModel {
+        /// Existing row used only to provide a saves directory.
+        private final WorldCatalogItem world;
+
+        /// Supported archive expected from the drop route.
+        private final Path archive;
+
+        /// Stable ready snapshot.
+        private final WorldCatalogSnapshot snapshot = new WorldCatalogSnapshot(
+                OptionalInt.of(1), 0L, WorldCatalogStatus.READY, "1 world", "", true, true, false);
+
+        /// Exact inspected archive, or null before import.
+        private @Nullable Path inspectedArchive;
+
+        /// Exact installed target name, or null before confirmation.
+        private @Nullable String installedName;
+
+        /// Creates one import-recording model.
+        ///
+        /// @param world existing local row
+        /// @param archive expected dropped archive
+        private ImportRecordingWorldCatalogModel(WorldCatalogItem world, Path archive) {
+            this.world = Objects.requireNonNull(world, "world");
+            this.archive = Objects.requireNonNull(archive, "archive");
+        }
+
+        /// Returns the stable ready snapshot.
+        @Override
+        public WorldCatalogSnapshot snapshot() {
+            return snapshot;
+        }
+
+        /// Creates a no-op model subscription.
+        @Override
+        public Subscription subscribe(ValueChangeListener<WorldCatalogSnapshot> listener) {
+            Objects.requireNonNull(listener, "listener");
+            return Subscription.create(() -> { });
+        }
+
+        /// Returns the existing row's parent directory.
+        @Override
+        public Path savesDirectory() {
+            return Objects.requireNonNull(world.path().getParent());
+        }
+
+        /// Performs no lazy loading because the model is ready.
+        @Override
+        public void loadIfNeeded() {
+        }
+
+        /// Performs no refresh because the model is immutable.
+        @Override
+        public void refresh() {
+        }
+
+        /// Records and accepts the expected dropped archive.
+        @Override
+        public CompletionStage<WorldCatalogImport> inspectImport(Path source) {
+            inspectedArchive = Objects.requireNonNull(source, "source");
+            assertEquals(archive, inspectedArchive);
+            return CompletableFuture.completedFuture(new WorldCatalogImport(source, "Imported World"));
+        }
+
+        /// Records the confirmed target name.
+        @Override
+        public CompletionStage<WorldCatalogSnapshot> installWorld(
+                WorldCatalogImport candidate,
+                String targetName) {
+            assertEquals(archive, candidate.source());
+            installedName = Objects.requireNonNull(targetName, "targetName");
+            return CompletableFuture.completedFuture(snapshot);
+        }
+
+        /// Rejects unused deletion.
+        @Override
+        public CompletionStage<WorldCatalogSnapshot> deleteWorld(WorldCatalogItem selectedWorld) {
+            return CompletableFuture.failedFuture(new UnsupportedOperationException());
+        }
+
+        /// Returns the exact one-row count.
+        @Override
+        public OptionalInt exactItemCount() {
+            return OptionalInt.of(1);
+        }
+
+        /// Supplies the existing row for any non-empty viewport request.
+        @Override
+        public CompletionStage<ChoicePage<WorldCatalogItem>> load(
+                IndexRange desiredRange,
+                LoadCancellation cancellation) {
+            cancellation.throwIfCancelled();
+            @Unmodifiable List<WorldCatalogItem> items = desiredRange.isEmpty()
+                    ? List.of()
+                    : List.of(world);
+            return CompletableFuture.completedFuture(new ChoicePage<>(
+                    desiredRange,
+                    items,
+                    OptionalInt.of(1),
+                    desiredRange.endExclusive() == 1));
+        }
+
+        /// Releases no resources because the fixture owns none.
+        @Override
+        public void close() {
+        }
+    }
+
+    /// Interaction boundary that accepts the import model's suggested world name.
+    @NotNullByDefault
+    private static final class ImportRecordingInteractions implements WorldCatalogInteractions {
+        /// Returns no chooser path because this test enters through drag and drop.
+        @Override
+        public @Nullable Path chooseWorldArchive(Component owner, Path currentDirectory) {
+            return null;
+        }
+
+        /// Accepts the model's suggested name.
+        @Override
+        public String chooseWorldName(Component owner, WorldCatalogImport world) {
+            return world.suggestedName();
+        }
+
+        /// Rejects unused deletion.
+        @Override
+        public boolean confirmDelete(Component owner, WorldCatalogItem world) {
+            return false;
+        }
+
+        /// Returns no copy target for this focused test.
+        @Override
+        public @Nullable String chooseCopyName(Component owner, WorldCatalogItem world) {
+            return null;
+        }
+
+        /// Returns no export target for this focused test.
+        @Override
+        public @Nullable Path chooseExportArchive(Component owner, WorldCatalogItem world) {
+            return null;
+        }
+
+        /// Returns no icon source for this focused test.
+        @Override
+        public @Nullable Path chooseWorldIcon(Component owner, WorldCatalogItem world) {
+            return null;
+        }
+
+        /// Performs no direct level-data opening.
+        @Override
+        public void openLevelData(Component owner, Path levelDataPath) {
+        }
+
+        /// Performs no clipboard write.
+        @Override
+        public void copyText(Component owner, String text) {
+        }
+
+        /// Returns no script target for this focused test.
+        @Override
+        public @Nullable Path chooseLaunchScriptDestination(Component owner, WorldCatalogItem world) {
+            return null;
+        }
+
+        /// Performs no script success reporting.
+        @Override
+        public void launchScriptSucceeded(Component owner, Path scriptFile) {
+        }
+
+        /// Completes unused directory opening immediately.
+        @Override
+        public CompletionStage<@Nullable Void> openDirectory(Path directory) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        /// Completes unused Chunk Base opening immediately.
+        @Override
+        public CompletionStage<@Nullable Void> openChunkBase(WorldCatalogItem world, ChunkBaseTool tool) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        /// Fails the focused test on unexpected visible errors.
+        @Override
+        public void showFailure(Component owner, String title, String detail) {
+            throw new AssertionError(detail);
+        }
+
+        /// Releases no resources.
+        @Override
+        public void close() {
         }
     }
 

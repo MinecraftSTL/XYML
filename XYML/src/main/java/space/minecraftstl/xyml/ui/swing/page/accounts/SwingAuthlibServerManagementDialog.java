@@ -145,9 +145,27 @@ final class SwingAuthlibServerManagementDialog extends JDialog implements AutoCl
 
     /// Opens the modal dialog and releases resources when the user closes it.
     void open() {
+        open(null);
+    }
+
+    /// Opens the modal dialog with one dropped endpoint prefilled and resolving in the background.
+    ///
+    /// @param initialEndpoint endpoint supplied by launcher drag-and-drop integration
+    void openForEndpoint(String initialEndpoint) {
+        open(Objects.requireNonNull(initialEndpoint, "initialEndpoint"));
+    }
+
+    /// Opens the modal workflow with an optional initial endpoint.
+    ///
+    /// @param initialEndpoint endpoint to prefill and resolve, or null for ordinary management
+    private void open(@Nullable String initialEndpoint) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed.get()) {
             throw new IllegalStateException("Authlib-injector server dialog is closed");
+        }
+        if (initialEndpoint != null) {
+            endpoint.setText(initialEndpoint);
+            resolveEndpoint();
         }
         pack();
         setMinimumSize(new Dimension(720, 470));
