@@ -596,7 +596,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             updateSelectionActions();
             return;
         }
-        @Nullable ModCatalogItem selected = singleSelectedItem();
+        @Nullable ModCatalogItem selected = currentSingleSelectedItem();
         if (selected != null) {
             model.selectMod(selected.localKey());
         }
@@ -609,12 +609,36 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         if (closed || synchronizing) {
             return;
         }
-        @Nullable ModCatalogItem selected = singleSelectedItem();
+        @Nullable ModCatalogItem selected = currentSingleSelectedItem();
         if (selected != null) {
             model.selectMod(selected.localKey());
         }
         showDetails(selected);
         updateSelectionActions();
+    }
+
+    /// Returns the loaded single selection only when it still matches the model's current row identity.
+    ///
+    /// A background mutation can commit a replacement index before the EDT applies its snapshot. Any
+    /// page completion already queued on the EDT still belongs to the old visual generation and must
+    /// not submit its stale key back to the strict model selection API.
+    ///
+    /// @return current loaded selection, or `null` after clearing a stale selection
+    private @Nullable ModCatalogItem currentSingleSelectedItem() {
+        JList<?> list = choiceList.getList();
+        int selectedIndex = list.getSelectedIndex();
+        @Nullable ModCatalogItem selected = singleSelectedItem();
+        if (selected == null) {
+            return null;
+        }
+        @Unmodifiable List<String> currentKeys = model.filteredLocalKeys();
+        if (selectedIndex < 0
+                || selectedIndex >= currentKeys.size()
+                || !currentKeys.get(selectedIndex).equals(selected.localKey())) {
+            list.clearSelection();
+            return null;
+        }
+        return selected;
     }
 
     /// Applies one immutable model snapshot to Swing state.

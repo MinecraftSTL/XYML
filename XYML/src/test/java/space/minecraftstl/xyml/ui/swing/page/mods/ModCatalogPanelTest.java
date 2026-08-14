@@ -40,6 +40,8 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
+import javax.swing.event.ListDataEvent;
+import javax.swing.event.ListDataListener;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -58,6 +60,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -160,6 +163,41 @@ public final class ModCatalogPanelTest {
 
         assertTrue(model.closed());
         assertNotNull(panelReference.get());
+    }
+
+    /// A page event queued before deletion cannot reselect a row that has left the current logical index.
+    @Test
+    public void ignoresLoadedRowsThatLeftCurrentLogicalIndex() throws Exception {
+        RecordingModel model = new RecordingModel(items(2));
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(
+                    model, STRINGS, ACTION_STRINGS, new RecordingInteractions());
+            panel.setSize(new Dimension(900, 620));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+
+            JList<?> list = panel.choiceList().getList();
+            list.setSelectedIndex(1);
+            assertEquals(List.of("mod-1"), model.selectedKeys());
+
+            model.replaceFilteredLocalKeys(List.of("mod-0"));
+            ListDataEvent stalePageEvent = new ListDataEvent(
+                    panel.choiceList().getChoiceModel(),
+                    ListDataEvent.CONTENTS_CHANGED,
+                    1,
+                    1);
+            assertDoesNotThrow(() -> {
+                for (ListDataListener listener
+                        : panel.choiceList().getChoiceModel().getListDataListeners()) {
+                    listener.contentsChanged(stalePageEvent);
+                }
+            });
+
+            assertTrue(list.isSelectionEmpty());
+            assertEquals(List.of("mod-1"), model.selectedKeys());
+            panel.close();
+        });
     }
 
     /// Logical select-all and batch commands use stable keys without loading off-screen rows.
@@ -437,6 +475,9 @@ public final class ModCatalogPanelTest {
         /// Immutable public source rows.
         private final @Unmodifiable List<ModCatalogItem> items;
 
+        /// Current logical row identities, which may advance before the fake visual source.
+        private @Unmodifiable List<String> filteredLocalKeys;
+
         /// Snapshot transition support.
         private final ValueChangeSupport<ModCatalogSnapshot> changes = new ValueChangeSupport<>(this);
 
@@ -481,6 +522,7 @@ public final class ModCatalogPanelTest {
         /// @param items immutable source rows
         private RecordingModel(@Unmodifiable List<ModCatalogItem> items) {
             this.items = List.copyOf(items);
+            filteredLocalKeys = items.stream().map(ModCatalogItem::localKey).toList();
             snapshot = new ModCatalogSnapshot(
                     OptionalInt.empty(),
                     OptionalInt.of(items.size()),
@@ -516,7 +558,7 @@ public final class ModCatalogPanelTest {
         /// Returns immutable stable keys matching the fake's logical list order.
         @Override
         public @Unmodifiable List<String> filteredLocalKeys() {
-            return items.stream().map(ModCatalogItem::localKey).toList();
+            return filteredLocalKeys;
         }
 
         /// Keeps the already-ready fake source unchanged.
@@ -544,6 +586,9 @@ public final class ModCatalogPanelTest {
         /// Records one stable selection.
         @Override
         public void selectMod(String localKey) {
+            if (!filteredLocalKeys.contains(localKey)) {
+                throw new IllegalArgumentException("Unknown filtered Mod: " + localKey);
+            }
             selectedKeys.add(localKey);
         }
 
@@ -640,6 +685,13 @@ public final class ModCatalogPanelTest {
         /// @return rows
         private @Unmodifiable List<ModCatalogItem> items() {
             return items;
+        }
+
+        /// Advances logical row identities without replacing already loaded visual rows.
+        ///
+        /// @param localKeys replacement logical identities
+        private void replaceFilteredLocalKeys(@Unmodifiable List<String> localKeys) {
+            filteredLocalKeys = List.copyOf(localKeys);
         }
 
         /// Returns requested viewport ranges.
