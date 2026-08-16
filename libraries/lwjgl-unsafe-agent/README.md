@@ -8,6 +8,12 @@ However, due to limitations in JDK's optimization capabilities, some methods in 
 
 This project provides an Agent that modifies the bytecode of these methods to ensure they can be correctly inlined, thereby improving performance.
 
+## XYML monorepo fork
+
+This directory is the namespaced XYML fork of upstream version 2.0. It is built and published independently as
+`space.minecraftstl.xyml:lwjgl-unsafe-agent`, with its artifact version following the XYML release version. The
+agent itself requires Java 25; integrating it does not raise the Java compatibility level of other XYML modules.
+
 ## Usage
 
 First, download the latest release from the [release page](https://github.com/HMCL-dev/lwjgl-unsafe-agent/releases).

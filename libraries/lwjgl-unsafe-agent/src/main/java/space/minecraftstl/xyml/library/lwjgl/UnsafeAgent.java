@@ -13,10 +13,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.lwjgl;
+// Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
+package space.minecraftstl.xyml.library.lwjgl;
+
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.PrintStream;
-import java.lang.classfile.*;
+import java.lang.classfile.AccessFlags;
+import java.lang.classfile.ClassBuilder;
+import java.lang.classfile.ClassElement;
+import java.lang.classfile.ClassFile;
+import java.lang.classfile.CodeBuilder;
+import java.lang.classfile.CodeModel;
+import java.lang.classfile.MethodElement;
+import java.lang.classfile.MethodModel;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.instrument.ClassFileTransformer;
@@ -31,101 +43,165 @@ import java.util.stream.Collectors;
 
 import static java.lang.constant.ConstantDescs.*;
 
+/// Installs the Java 25 transformer that replaces LWJGL `MemoryUtil` accessors with direct Unsafe calls.
+@NotNullByDefault
 public final class UnsafeAgent {
-
-    private static void log(String msg, PrintStream out) {
-        out.println("[lwjgl-unsafe-agent] " + msg);
+    /// Prevents construction of the static agent entry-point class.
+    private UnsafeAgent() {
     }
 
-    public static void premain(String agentArgs, Instrumentation inst) {
-        init(inst);
+    /// Writes an agent diagnostic using its stable prefix.
+    ///
+    /// @param message diagnostic message
+    /// @param output destination stream
+    private static void log(String message, PrintStream output) {
+        output.println("[lwjgl-unsafe-agent] " + message);
     }
 
-    public static void agentmain(String agentArgs, Instrumentation inst) {
-        init(inst);
+    /// Installs the transformer before the target application's main method starts.
+    ///
+    /// @param ignoredAgentArguments optional JVM agent argument, currently unused
+    /// @param instrumentation JVM instrumentation service
+    public static void premain(@Nullable String ignoredAgentArguments, Instrumentation instrumentation) {
+        init(instrumentation);
     }
 
-    private static void init(Instrumentation inst) {
+    /// Installs the transformer when the agent is attached to a running JVM.
+    ///
+    /// @param ignoredAgentArguments optional JVM agent argument, currently unused
+    /// @param instrumentation JVM instrumentation service
+    public static void agentmain(@Nullable String ignoredAgentArguments, Instrumentation instrumentation) {
+        init(instrumentation);
+    }
+
+    /// Registers the transformer and reports both the XYML artifact and locked upstream versions.
+    ///
+    /// @param instrumentation JVM instrumentation service
+    private static void init(Instrumentation instrumentation) {
         log("LWJGL Unsafe Agent version: " + BuildConfig.PROJECT_VERSION, System.out);
+        log("Upstream version: " + BuildConfig.UPSTREAM_VERSION, System.out);
 
-        inst.addTransformer(new MemoryUtilTransformer(inst));
+        instrumentation.addTransformer(new MemoryUtilTransformer(instrumentation));
     }
 
+    /// Rewrites matching static `MemoryUtil` methods as their class is loaded.
+    @NotNullByDefault
     private static final class MemoryUtilTransformer implements ClassFileTransformer {
+        /// Internal JVM name of the only class this transformer accepts.
         private static final String MEMORY_UTIL_CLASS = "org/lwjgl/system/MemoryUtil";
-        private static final ClassDesc CD_Unsafe = ClassDesc.of("jdk.internal.misc.Unsafe");
 
+        /// Descriptor of the Java base Unsafe implementation called by rewritten methods.
+        private static final ClassDesc UNSAFE_CLASS_DESCRIPTOR = ClassDesc.of("jdk.internal.misc.Unsafe");
+
+        /// Instrumentation service used to export the internal Unsafe package to the target module.
         private final Instrumentation instrumentation;
 
+        /// Creates a transformer bound to the active instrumentation service.
+        ///
+        /// @param instrumentation JVM instrumentation service
         MemoryUtilTransformer(Instrumentation instrumentation) {
             this.instrumentation = instrumentation;
         }
 
+        /// Emits the replacement bytecode for one supported MemoryUtil method signature.
+        @NotNullByDefault
         private abstract static class MemoryMethodBody implements Consumer<CodeBuilder> {
-            protected static final MethodTypeDesc MTD_getUnsafe = MethodTypeDesc.of(CD_Unsafe);
+            /// Descriptor for the static `Unsafe.getUnsafe()` call.
+            protected static final MethodTypeDesc GET_UNSAFE_METHOD_TYPE =
+                    MethodTypeDesc.of(UNSAFE_CLASS_DESCRIPTOR);
 
+            /// Descriptor the MemoryUtil method must have before it can be rewritten.
             protected final MethodTypeDesc type;
+
+            /// Unsafe method invoked by the replacement body.
             protected final String unsafeMethod;
 
+            /// Creates a replacement body for a specific signature and Unsafe method.
+            ///
+            /// @param type MemoryUtil method type
+            /// @param unsafeMethod Unsafe method name
             private MemoryMethodBody(MethodTypeDesc type, String unsafeMethod) {
                 this.type = type;
                 this.unsafeMethod = unsafeMethod;
             }
 
+            /// Emits a primitive or address read followed by the matching return instruction.
+            @NotNullByDefault
             static final class Get extends MemoryMethodBody {
+                /// Primitive return type used by the Unsafe read.
                 private final ClassDesc primaryType;
+
+                /// Return-instruction emitter for the primitive type.
                 private final Consumer<CodeBuilder> emitReturn;
 
+                /// Creates a primitive read replacement.
+                ///
+                /// @param primaryType primitive return type
+                /// @param unsafeMethod Unsafe read method name
+                /// @param emitReturn primitive return-instruction emitter
                 private Get(ClassDesc primaryType, String unsafeMethod, Consumer<CodeBuilder> emitReturn) {
                     super(MethodTypeDesc.of(primaryType, CD_long), unsafeMethod);
                     this.primaryType = primaryType;
                     this.emitReturn = emitReturn;
                 }
 
+                /// {@inheritDoc}
                 @Override
                 public void accept(CodeBuilder codeBuilder) {
                     // Push the Unsafe instance
-                    codeBuilder.invokestatic(CD_Unsafe, "getUnsafe", MTD_getUnsafe);
+                    codeBuilder.invokestatic(UNSAFE_CLASS_DESCRIPTOR, "getUnsafe", GET_UNSAFE_METHOD_TYPE);
 
                     // Push the address parameter (slot 0, type long)
                     codeBuilder.lload(0);
 
                     // Get method: invoke getXxx and return the value
-                    codeBuilder.invokevirtual(CD_Unsafe, unsafeMethod,
+                    codeBuilder.invokevirtual(UNSAFE_CLASS_DESCRIPTOR, unsafeMethod,
                             MethodTypeDesc.of(primaryType, CD_long));
                     emitReturn.accept(codeBuilder);
                 }
             }
 
+            /// Emits a primitive or address write followed by a void return.
+            @NotNullByDefault
             static final class Put extends MemoryMethodBody {
+                /// Primitive value type used by the Unsafe write.
                 private final ClassDesc primaryType;
+
+                /// Local-variable load emitter for the primitive value.
                 private final ObjIntConsumer<CodeBuilder> loadValue;
 
+                /// Creates a primitive write replacement.
+                ///
+                /// @param primaryType primitive value type
+                /// @param unsafeMethod Unsafe write method name
+                /// @param loadValue local-variable load emitter
                 private Put(ClassDesc primaryType, String unsafeMethod, ObjIntConsumer<CodeBuilder> loadValue) {
                     super(MethodTypeDesc.of(CD_void, CD_long, primaryType), unsafeMethod);
                     this.primaryType = primaryType;
                     this.loadValue = loadValue;
                 }
 
+                /// {@inheritDoc}
                 @Override
                 public void accept(CodeBuilder codeBuilder) {
 
                     // Push the Unsafe instance
-                    codeBuilder.invokestatic(CD_Unsafe, "getUnsafe", MTD_getUnsafe);
+                    codeBuilder.invokestatic(UNSAFE_CLASS_DESCRIPTOR, "getUnsafe", GET_UNSAFE_METHOD_TYPE);
 
                     // Push the address parameter (slot 0, type long)
                     codeBuilder.lload(0);
 
                     // Put method: load value parameter (slot 2) and invoke putXxx
                     loadValue.accept(codeBuilder, 2);
-                    codeBuilder.invokevirtual(CD_Unsafe, unsafeMethod,
+                    codeBuilder.invokevirtual(UNSAFE_CLASS_DESCRIPTOR, unsafeMethod,
                             MethodTypeDesc.of(CD_void, CD_long, primaryType));
                     codeBuilder.return_();
                 }
             }
         }
 
-        private final Map<String, MemoryMethodBody> bodies = Map.ofEntries(
+        /// Immutable lookup from supported MemoryUtil method name to its replacement body.
+        private final @Unmodifiable Map<String, MemoryMethodBody> bodies = Map.ofEntries(
                 // memGetXxx
                 Map.entry("memGetByte", new MemoryMethodBody.Get(CD_byte, "getByte", CodeBuilder::ireturn)),
                 Map.entry("memGetShort", new MemoryMethodBody.Get(CD_short, "getShort", CodeBuilder::ireturn)),
@@ -145,19 +221,21 @@ public final class UnsafeAgent {
                 Map.entry("memPutAddress", new MemoryMethodBody.Put(CD_long, "putAddress", CodeBuilder::lload))
         );
 
+        /// {@inheritDoc}
         @Override
-        public byte[] transform(Module module,
-                                ClassLoader loader, String className,
-                                Class<?> classBeingRedefined,
-                                ProtectionDomain protectionDomain,
-                                byte[] classfileBuffer) {
+        public byte @Nullable [] transform(Module module,
+                                           @Nullable ClassLoader loader,
+                                           @Nullable String className,
+                                           @Nullable Class<?> classBeingRedefined,
+                                           @Nullable ProtectionDomain protectionDomain,
+                                           byte[] classfileBuffer) {
             if (!MEMORY_UTIL_CLASS.equals(className)) {
                 return null;
             }
 
             try {
                 Module javaBase = Object.class.getModule();
-                String miscPackage = CD_Unsafe.packageName();
+                String miscPackage = UNSAFE_CLASS_DESCRIPTOR.packageName();
                 if (!javaBase.isExported(miscPackage, module)) {
                     instrumentation.redefineModule(javaBase,
                             Set.of(),
@@ -194,6 +272,10 @@ public final class UnsafeAgent {
             }
         }
 
+        /// Copies a class element or replaces a recognized method body.
+        ///
+        /// @param classBuilder destination class builder
+        /// @param classElement source class element
         private void transform(ClassBuilder classBuilder, ClassElement classElement) {
             if (classElement instanceof MethodModel methodModel) {
                 String methodName = methodModel.methodName().stringValue();

@@ -23,6 +23,7 @@ root build.
 
 ## XYML modifications
 
-This import commit contains no source or namespace changes. The following integration commit records package
-renaming, Java 25 build isolation, generated version metadata, agent manifest changes, embedded-resource wiring, and
-process-level transformation verification here.
+The import commit contains no source or namespace changes. The integration commit renames the package to
+`space.minecraftstl.xyml.library.lwjgl`, isolates Java 25 to this project, generates version metadata, rewrites the
+agent manifest, embeds the independently built project JAR into XYML, and adds process-level transformation
+verification. Modified upstream Java retains its Apache-2.0 header and carries a MinecraftSTL modification notice.

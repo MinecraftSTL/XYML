@@ -13,6 +13,7 @@ import java.security.KeyFactory
 import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.PKCS8EncodedKeySpec
+import java.util.jar.JarInputStream
 import java.util.jar.Manifest
 import java.util.zip.ZipFile
 
@@ -21,11 +22,11 @@ plugins {
 }
 
 tasks.named("build") {
-    dependsOn(":hello-nbt:build")
+    dependsOn(":hello-nbt:build", ":lwjgl-unsafe-agent:build")
 }
 
 tasks.named("check") {
-    dependsOn(":hello-nbt:check")
+    dependsOn(":hello-nbt:check", ":lwjgl-unsafe-agent:check")
 }
 
 base {
@@ -63,7 +64,7 @@ dependencies {
     testImplementation(libs.jimfs)
 
     embedResources(libs.authlib.injector)
-    embedResources(libs.lwjgl.unsafe.agent)
+    embedResources(project(":lwjgl-unsafe-agent"))
 }
 
 fun digest(algorithm: String, bytes: ByteArray): ByteArray = MessageDigest.getInstance(algorithm).digest(bytes)
@@ -139,7 +140,7 @@ val xymlProperties = buildList {
     add("xyml.microsoft.auth.id" to microsoftAuthId)
     add("xyml.curseforge.apikey" to curseForgeApiKey)
     add("xyml.authlib-injector.version" to libs.authlib.injector.get().version!!)
-    add("xyml.lwjgl-unsafe-agent.version" to libs.lwjgl.unsafe.agent.get().version!!)
+    add("xyml.lwjgl-unsafe-agent.version" to rootProject.extra["xymlReleaseVersion"] as String)
 }
 
 val xymlPropertiesFile = layout.buildDirectory.file("xyml.properties")
@@ -211,6 +212,8 @@ tasks.shadowJar {
     }
 }
 
+val embeddedAgentEntry = "assets/lwjgl-unsafe-agent-${project.version}.jar"
+
 val requiredOfflineLibraryEntries = listOf(
     "com/formdev/flatlaf/FlatLaf.class",
     "com/formdev/flatlaf/FlatLaf.properties",
@@ -231,6 +234,7 @@ val requiredOfflineLibraryEntries = listOf(
     "space/minecraftstl/xyml/library/nbt/chunk/ChunkRegion.class",
     "space/minecraftstl/xyml/library/nbt/io/NBTCodec.class",
     "space/minecraftstl/xyml/library/nbt/tag/CompoundTag.class",
+    embeddedAgentEntry,
 )
 
 val requiredOfflineSwingIconEntries = listOf(
@@ -418,6 +422,32 @@ val verifyOfflineUiArtifact = tasks.register("verifyOfflineUiArtifact") {
             if (forbiddenEntries.isNotEmpty()) {
                 throw GradleException("Retained removed UI entries: ${forbiddenEntries.joinToString()}")
             }
+
+            val embeddedAgent = jar.getEntry(embeddedAgentEntry)
+                ?: throw GradleException("Missing locally built agent: $embeddedAgentEntry")
+            JarInputStream(jar.getInputStream(embeddedAgent)).use { agentJar ->
+                val attributes = agentJar.manifest?.mainAttributes
+                    ?: throw GradleException("Embedded agent has no manifest")
+                val agentClass = "space.minecraftstl.xyml.library.lwjgl.UnsafeAgent"
+                if (attributes.getValue("Premain-Class") != agentClass
+                    || attributes.getValue("Agent-Class") != agentClass
+                ) {
+                    throw GradleException("Embedded agent does not use the XYML namespace")
+                }
+                if (attributes.getValue("Lwjgl-Unsafe-Agent-Upstream-Version") != "2.0") {
+                    throw GradleException("Embedded agent does not record upstream version 2.0")
+                }
+                val agentEntries = generateSequence { agentJar.nextJarEntry }
+                    .map { it.name }
+                    .toSet()
+                if ("space/minecraftstl/xyml/library/lwjgl/UnsafeAgent.class" !in agentEntries) {
+                    throw GradleException("Embedded agent is missing the namespaced entry point")
+                }
+                if (agentEntries.any { it.startsWith("org/glavo/lwjgl/") }) {
+                    throw GradleException("Embedded agent retains the legacy org.glavo.lwjgl package")
+                }
+            }
+
             val manifestEntry = jar.getEntry("META-INF/MANIFEST.MF")
                 ?: throw GradleException("Launcher artifact has no manifest")
             val runtimeAddOpens = jar.getInputStream(manifestEntry).use { input ->

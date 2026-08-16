@@ -14,7 +14,6 @@ jna = "5.18.1"
 pci-ids = "0.4.0"
 java-info = "1.0"
 authlib-injector = "1.2.8"
-lwjgl-unsafe-agent = "2.0"
 flatlaf = "3.7.2"
 miglayout = "11.4.3"
 terracotta = "0.4.2"
@@ -51,7 +50,6 @@ jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
 pci-ids = { module = "org.glavo:pci-ids", version.ref = "pci-ids" }
 java-info = { module = "org.glavo:java-info", version.ref = "java-info" }
 authlib-injector = { module = "org.glavo.hmcl:authlib-injector", version.ref = "authlib-injector" }
-lwjgl-unsafe-agent = { module = "org.glavo:lwjgl-unsafe-agent", version.ref = "lwjgl-unsafe-agent" }
 flatlaf = { module = "com.formdev:flatlaf", version.ref = "flatlaf" }
 flatlaf-extras = { module = "com.formdev:flatlaf-extras", version.ref = "flatlaf" }
 miglayout-swing = { module = "com.miglayout:miglayout-swing", version.ref = "miglayout" }
