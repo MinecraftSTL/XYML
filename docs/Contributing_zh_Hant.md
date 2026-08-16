@@ -76,6 +76,32 @@ OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
 
 構建出的 XYML 程式檔位於根目錄下的 `XYML/build/libs` 子目錄中。
 
+### IDEA Gradle 建置流程
+
+將倉庫作為 Gradle 專案匯入後，開啟 Gradle 工具視窗並展開 `XYML > Tasks > XYML workflows`。該分類包含以下入口：
+
+| 任務 | 行為 |
+| --- | --- |
+| `buildMain` | 擷取並建置最新的 `origin/main` 提交。 |
+| `buildBeta` | 擷取並建置最新的 `origin/beta` 提交。 |
+| `buildAlpha` | 擷取並建置最新的 `origin/alpha` 提交。 |
+| `buildDev` | 擷取並建置最新的 `origin/dev` 提交。 |
+| `build` | 發佈分支呼叫上方對應任務；功能分支或游離提交直接建置目前工作樹。 |
+| `clean` | 只清理目前工作樹，不檢查或擷取任何分支。 |
+| `run` | 使用與 `build` 相同的分支路由，但改為執行 XYML。 |
+
+四個渠道任務會同時重新整理 `main`、`beta`、`alpha` 和 `dev`，再於臨時的游離 worktree 中建置所選提交，
+不會切換 IDEA 目前工作樹。在 Windows 上，GitHub 擷取會使用已啟用的 Windows 系統代理。成功的渠道建置產物會連同
+`build-info.properties` 複製到 `build/channel-builds/<branch>`；功能分支產物仍位於 `XYML/build/libs`。
+
+如需在不存取 GitHub 的情況下測試現有遠端追蹤引用，可明確關閉重新整理：
+
+```powershell
+.\gradlew.bat buildMain '-Pxyml.branchBuild.fetch=false'
+```
+
+Windows 系統代理無法使用時，也可以透過 `-Pxyml.branchBuild.gitProxy=<proxy-url>` 明確指定代理。
+
 ## 除錯選項
 
 > [!WARNING]
