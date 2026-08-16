@@ -1,4 +1,13 @@
+/*
+ * HMCLauncher for Windows
+ * Copyright (C) 2025 huangyuhui and contributors
+ * Modified by MinecraftSTL in 2026 for XYMLL.
+ * SPDX-License-Identifier: GPL-3.0-only
+ * See ../README.md for the GPLv3 Section 7 additional terms.
+ */
 #pragma once
+
+#include <windows.h>
 
 #include <cstdint>
 #include <cstdlib>
@@ -25,7 +34,7 @@ struct HLJavaVersion {
   std::strong_ordering operator<=>(const HLJavaVersion &other) const = default;
 
   [[nodiscard]] bool IsAcceptable() const {
-    return major >= HMCL_EXPECTED_JAVA_MAJOR_VERSION;
+    return major >= XYML_EXPECTED_JAVA_MAJOR_VERSION;
   }
 
   [[nodiscard]] std::wstring ToWString() const {
@@ -48,6 +57,7 @@ struct HLJavaOptions {
   HLPath workdir;
   std::wstring jarPath;
   std::optional<std::wstring> jvmOptions;
+  std::wstring appArguments;
 };
 
 struct HLJavaList {
@@ -57,8 +67,8 @@ struct HLJavaList {
   bool TryAdd(const HLPath &javaExecutable);
 };
 
-bool HLLaunchJVM(const HLPath &javaExecutablePath, const HLJavaOptions &options,
-                 const std::optional<HLJavaVersion> &version = std::nullopt);
+std::optional<DWORD> HLLaunchJVM(const HLPath &javaExecutablePath, const HLJavaOptions &options,
+                                const std::optional<HLJavaVersion> &version = std::nullopt);
 
 void HLSearchJavaInDir(HLJavaList &result, const HLPath &basedir, LPCWSTR javaExecutableName);
 

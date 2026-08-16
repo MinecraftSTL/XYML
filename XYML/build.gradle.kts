@@ -22,11 +22,11 @@ plugins {
 }
 
 tasks.named("build") {
-    dependsOn(":hello-nbt:build", ":lwjgl-unsafe-agent:build", ":mesa-loader-windows:build")
+    dependsOn(":hello-nbt:build", ":lwjgl-unsafe-agent:build", ":mesa-loader-windows:build", ":XYMLL:build")
 }
 
 tasks.named("check") {
-    dependsOn(":hello-nbt:check", ":lwjgl-unsafe-agent:check", ":mesa-loader-windows:check")
+    dependsOn(":hello-nbt:check", ":lwjgl-unsafe-agent:check", ":mesa-loader-windows:check", ":XYMLL:check")
 }
 
 base {
@@ -41,14 +41,8 @@ version = rootProject.extra["xymlReleaseVersion"] as String
 val microsoftAuthId = System.getenv("MICROSOFT_AUTH_ID") ?: ""
 val curseForgeApiKey = System.getenv("CURSEFORGE_API_KEY") ?: ""
 
-// The bundled stub preserves the upstream launcher code and copyright metadata;
-// only its Windows icon resources differ for this fork.
-val launcherExe = System.getenv("XYML_LAUNCHER_EXE")
-    ?.takeIf { it.isNotBlank() }
-    ?.let { file(it) }
-    ?: layout.projectDirectory.file("image/XYMLLauncher.windows.stub").asFile
-
 val embedResources = configurations.register("embedResources")
+val xymlLauncherExecutable = configurations.register("xymlLauncherExecutable")
 
 dependencies {
     implementation(project(":XYMLCore"))
@@ -65,6 +59,10 @@ dependencies {
 
     embedResources(libs.authlib.injector)
     embedResources(project(":lwjgl-unsafe-agent"))
+    xymlLauncherExecutable(project(mapOf(
+        "path" to ":XYMLL",
+        "configuration" to "xymlLauncherExecutable",
+    )))
 }
 
 fun digest(algorithm: String, bytes: ByteArray): ByteArray = MessageDigest.getInstance(algorithm).digest(bytes)
@@ -168,6 +166,7 @@ val jarPath = tasks.jar.get().archiveFile.get().asFile
 
 tasks.shadowJar {
     dependsOn(createPropertiesFile)
+    dependsOn(xymlLauncherExecutable)
 
     archiveClassifier.set(null as String?)
 
@@ -201,8 +200,8 @@ tasks.shadowJar {
     )
 
     into("assets") {
-        from(launcherExe) {
-            rename { "XYMLLauncher.exe" }
+        from(xymlLauncherExecutable) {
+            rename { "XYMLL.exe" }
         }
     }
 
@@ -215,6 +214,8 @@ tasks.shadowJar {
 val embeddedAgentEntry = "assets/lwjgl-unsafe-agent-${project.version}.jar"
 
 val requiredOfflineLibraryEntries = listOf(
+    "assets/XYMLL.exe",
+    "assets/XYMLL.sh",
     "com/formdev/flatlaf/FlatLaf.class",
     "com/formdev/flatlaf/FlatLaf.properties",
     "com/formdev/flatlaf/FlatLightLaf.properties",
@@ -432,6 +433,16 @@ val verifyOfflineUiArtifact = tasks.register("verifyOfflineUiArtifact") {
                 .toList()
             if (bundledMesaEntries.isNotEmpty()) {
                 throw GradleException("Locally built Mesa artifacts must not be embedded: ${bundledMesaEntries.joinToString()}")
+            }
+
+            val nativeLauncherEntry = jar.getEntry("assets/XYMLL.exe")
+                ?: throw GradleException("Missing locally built XYMLL executable")
+            val expectedNativeLauncher = xymlLauncherExecutable.get().singleFile
+            val embeddedNativeLauncherDigest = jar.getInputStream(nativeLauncherEntry).use { input ->
+                digest("SHA-256", input.readBytes())
+            }
+            if (!embeddedNativeLauncherDigest.contentEquals(digest("SHA-256", expectedNativeLauncher.readBytes()))) {
+                throw GradleException("Embedded XYMLL executable does not match the native project output")
             }
 
             val embeddedAgent = jar.getEntry(embeddedAgentEntry)
@@ -911,8 +922,8 @@ val makeExecutables = tasks.register("makeExecutables") {
         ZipFile(jarPath).use { zipFile ->
             for (extension in extensions) {
                 val output = artifactFile(extension)
-                val entry = zipFile.getEntry("assets/XYMLLauncher.$extension")
-                    ?: throw GradleException("XYMLLauncher.$extension not found")
+                val entry = zipFile.getEntry("assets/XYMLL.$extension")
+                    ?: throw GradleException("XYMLL.$extension not found")
 
                 output.outputStream().use { outputStream ->
                     zipFile.getInputStream(entry).use { it.copyTo(outputStream) }

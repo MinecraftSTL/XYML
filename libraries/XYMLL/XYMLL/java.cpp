@@ -1,4 +1,12 @@
+/*
+ * HMCLauncher for Windows
+ * Copyright (C) 2025 huangyuhui and contributors
+ * Modified by MinecraftSTL in 2026 for XYMLL.
+ * SPDX-License-Identifier: GPL-3.0-only
+ * See ../README.md for the GPLv3 Section 7 additional terms.
+ */
 #include <windows.h>
+#include <cstdlib>
 #include <cwctype>
 #include <format>
 #include <vector>
@@ -61,8 +69,8 @@ HLJavaVersion HLJavaVersion::FromString(const std::wstring &versionString) {
   };
 }
 
-bool HLLaunchJVM(const HLPath &javaExecutablePath, const HLJavaOptions &options,
-                 const std::optional<HLJavaVersion> &version) {
+std::optional<DWORD> HLLaunchJVM(const HLPath &javaExecutablePath, const HLJavaOptions &options,
+                                const std::optional<HLJavaVersion> &) {
   std::wstring command;
   command += '"';
   command += javaExecutablePath.path;
@@ -76,19 +84,37 @@ bool HLLaunchJVM(const HLPath &javaExecutablePath, const HLJavaOptions &options,
   command += L" -jar \"";
   command += options.jarPath;
   command += L'"';
+  if (!options.appArguments.empty()) {
+    command += L' ';
+    command += options.appArguments;
+  }
 
   STARTUPINFOW startupInfo{.cb = sizeof(STARTUPINFOW)};
   PROCESS_INFORMATION processInformation{};
 
-  BOOL result = CreateProcessW(nullptr, &command[0], nullptr, nullptr, false, NORMAL_PRIORITY_CLASS, nullptr,
+  BOOL result = CreateProcessW(nullptr, command.data(), nullptr, nullptr, false, NORMAL_PRIORITY_CLASS, nullptr,
                                options.workdir.path.c_str(), &startupInfo, &processInformation);
-  if (result) {
-    HLDebugLog(L"Successfully launched HMCL with " + javaExecutablePath.path);
-  } else {
-    HLDebugLog(L"Failed to launch HMCL with " + javaExecutablePath.path);
+  if (!result) {
+    HLDebugLog(L"Failed to launch XYML with " + javaExecutablePath.path);
+    return std::nullopt;
   }
 
-  return result;
+  HLDebugLog(L"Successfully launched XYML with " + javaExecutablePath.path);
+  CloseHandle(processInformation.hThread);
+  if (WaitForSingleObject(processInformation.hProcess, INFINITE) == WAIT_FAILED) {
+    HLDebugLog(L"Failed while waiting for XYML to exit");
+    CloseHandle(processInformation.hProcess);
+    return std::nullopt;
+  }
+
+  DWORD exitCode = EXIT_FAILURE;
+  if (!GetExitCodeProcess(processInformation.hProcess, &exitCode)) {
+    HLDebugLog(L"Failed to read the XYML exit code");
+    CloseHandle(processInformation.hProcess);
+    return std::nullopt;
+  }
+  CloseHandle(processInformation.hProcess);
+  return exitCode;
 }
 
 void HLSearchJavaInDir(HLJavaList &result, const HLPath &basedir, LPCWSTR javaExecutableName) {

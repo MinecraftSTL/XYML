@@ -1,3 +1,10 @@
+/*
+ * HMCLauncher for Windows
+ * Copyright (C) 2025 huangyuhui and contributors
+ * Modified by MinecraftSTL in 2026 for XYMLL.
+ * SPDX-License-Identifier: GPL-3.0-only
+ * See ../README.md for the GPLv3 Section 7 additional terms.
+ */
 #include <windows.h>
 #include <cstdlib>
 #include <algorithm>
@@ -12,8 +19,8 @@
 #include "platform.h"
 #include "java.h"
 
-int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) {
-  HLVerboseOutput = HLGetEnvVar(L"HMCL_LAUNCHER_VERBOSE_OUTPUT").value_or(L"") != L"false";
+int APIENTRY wWinMain(HINSTANCE, HINSTANCE, LPWSTR lpCmdLine, int) {
+  HLVerboseOutput = HLGetEnvVar(L"XYML_LAUNCHER_VERBOSE_OUTPUT").value_or(L"") != L"false";
 
   LPCWSTR javaExecutableName;
   if (HLAttachConsole()) {
@@ -27,7 +34,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmd
   const bool isARM64 = arch == HLArchitecture::ARM64;
   const bool isX86 = arch == HLArchitecture::X86;
 
-  const auto i18n = HLI18N::Instance();
+  const auto i18n = XYMLLI18N::Instance();
   const auto selfPath = HLGetSelfPath();
   if (!selfPath.has_value()) {
     HLDebugLog(L"Failed to get self path");
@@ -37,8 +44,10 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmd
 
   const HLJavaOptions options = {.workdir = selfPath.value().first,
                                  .jarPath = selfPath.value().second,
-                                 .jvmOptions = HLGetEnvVar(L"HMCL_JAVA_OPTS")};
-  HLDebugLog(std::format(L"*** HMCL Launcher {} ***", HMCL_LAUNCHER_VERSION));
+                                 .jvmOptions = HLGetEnvVar(L"XYML_JAVA_OPTS"),
+                                 .appArguments = lpCmdLine == nullptr ? L"" : lpCmdLine};
+  HLDebugLog(std::format(L"*** XYMLL {} (based on HMCLauncher {}) ***", XYMLL_VERSION,
+                         XYMLL_UPSTREAM_VERSION));
   if (isX64) {
     HLDebugLog(L"System Architecture: x86-64");
   } else if (isARM64) {
@@ -53,23 +62,23 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmd
     HLDebugLog(std::format(L"JVM Options: {}", options.jvmOptions.value()));
   }
 
-  // If HMCL_JAVA_HOME is set, it should always be used
+  // If XYML_JAVA_HOME is set, it should always be used
   {
-    const auto hmclJavaHome = HLGetEnvPath(L"HMCL_JAVA_HOME");
-    if (hmclJavaHome.has_value() && !hmclJavaHome.value().path.empty()) {
-      HLDebugLog(L"HMCL_JAVA_HOME: " + hmclJavaHome.value().path);
-      HLPath javaExecutablePath = hmclJavaHome.value() / L"bin" / javaExecutableName;
+    const auto xymlJavaHome = HLGetEnvPath(L"XYML_JAVA_HOME");
+    if (xymlJavaHome.has_value() && !xymlJavaHome.value().path.empty()) {
+      HLDebugLog(L"XYML_JAVA_HOME: " + xymlJavaHome.value().path);
+      HLPath javaExecutablePath = xymlJavaHome.value() / L"bin" / javaExecutableName;
       if (javaExecutablePath.IsRegularFile()) {
-        if (HLLaunchJVM(javaExecutablePath, options, std::nullopt)) {
-          return EXIT_SUCCESS;
+        if (const auto exitCode = HLLaunchJVM(javaExecutablePath, options, std::nullopt); exitCode.has_value()) {
+          return static_cast<int>(exitCode.value());
         }
       } else {
-        HLDebugLog(std::format(L"Invalid HMCL_JAVA_HOME: {}", hmclJavaHome.value().path));
+        HLDebugLog(std::format(L"Invalid XYML_JAVA_HOME: {}", xymlJavaHome.value().path));
       }
-      MessageBoxW(nullptr, i18n.errorInvalidHMCLJavaHome, nullptr, MB_OK | MB_ICONERROR);
+      MessageBoxW(nullptr, i18n.errorInvalidXYMLJavaHome, nullptr, MB_OK | MB_ICONERROR);
       return EXIT_FAILURE;
     } else {
-      HLDebugLogVerbose(L"HMCL_JAVA_HOME: Not Found");
+      HLDebugLogVerbose(L"XYML_JAVA_HOME: Not Found");
     }
   }
 
@@ -87,8 +96,8 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmd
     javaExecutablePath /= javaExecutableName;
     if (javaExecutablePath.IsRegularFile()) {
       HLDebugLog(std::format(L"Bundled JRE: {}", javaExecutablePath.path));
-      if (HLLaunchJVM(javaExecutablePath, options, std::nullopt)) {
-        return EXIT_SUCCESS;
+      if (const auto exitCode = HLLaunchJVM(javaExecutablePath, options, std::nullopt); exitCode.has_value()) {
+        return static_cast<int>(exitCode.value());
       }
     } else {
       HLDebugLogVerbose(std::format(L"Bundled JRE: Not Found"));
@@ -107,15 +116,15 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmd
 
   HLJavaList javaRuntimes;
   {
-    HLPath hmclJavaDir = options.workdir / L".hmcl\\java";
+    HLPath xymlJavaDir = options.workdir / L".xyml\\java";
     if (isARM64) {
-      hmclJavaDir /= L"windows-arm64";
+      xymlJavaDir /= L"windows-arm64";
     } else if (isX64) {
-      hmclJavaDir /= L"windows-x86_64";
+      xymlJavaDir /= L"windows-x86_64";
     } else {
-      hmclJavaDir /= L"windows-x86";
+      xymlJavaDir /= L"windows-x86";
     }
-    HLSearchJavaInDir(javaRuntimes, hmclJavaDir, javaExecutableName);
+    HLSearchJavaInDir(javaRuntimes, xymlJavaDir, javaExecutableName);
   }
 
   if (javaHome.has_value() && !javaHome.value().path.empty()) {
@@ -133,15 +142,15 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmd
   {
     const auto appDataPath = HLGetEnvPath(L"APPDATA");
     if (appDataPath.has_value() && !appDataPath.value().path.empty()) {
-      HLPath hmclJavaDir = appDataPath.value() / L".hmcl\\java";
+      HLPath xymlJavaDir = appDataPath.value() / L".xyml\\java";
       if (isARM64) {
-        hmclJavaDir /= L"windows-arm64";
+        xymlJavaDir /= L"windows-arm64";
       } else if (isX64) {
-        hmclJavaDir /= L"windows-x86_64";
+        xymlJavaDir /= L"windows-x86_64";
       } else {
-        hmclJavaDir /= L"windows-x86";
+        xymlJavaDir /= L"windows-x86";
       }
-      HLSearchJavaInDir(javaRuntimes, hmclJavaDir, javaExecutableName);
+      HLSearchJavaInDir(javaRuntimes, xymlJavaDir, javaExecutableName);
     }
   }
 
@@ -198,19 +207,19 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmd
     }
 
     for (const auto &item : javaRuntimes.runtimes | std::views::reverse) {
-      if (HLLaunchJVM(item.executablePath, options, item.version)) {
-        return EXIT_SUCCESS;
+      if (const auto exitCode = HLLaunchJVM(item.executablePath, options, item.version); exitCode.has_value()) {
+        return static_cast<int>(exitCode.value());
       }
     }
   }
 
   LPCWSTR downloadLink;
   if (isARM64) {
-    downloadLink = L"https://docs.hmcl.net/downloads/windows/arm64.html";
+    downloadLink = L"https://adoptium.net/temurin/releases/?version=17&os=windows&arch=aarch64";
   } else if (isX64) {
-    downloadLink = L"https://docs.hmcl.net/downloads/windows/x86_64.html";
+    downloadLink = L"https://adoptium.net/temurin/releases/?version=17&os=windows&arch=x64";
   } else {
-    downloadLink = L"https://docs.hmcl.net/downloads/windows/x86.html";
+    downloadLink = L"https://adoptium.net/temurin/releases/?version=17&os=windows&arch=x86";
   }
 
   if (MessageBoxW(nullptr, i18n.errorJavaNotFound, nullptr, MB_ICONWARNING | MB_OKCANCEL) == IDOK) {

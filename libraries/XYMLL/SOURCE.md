@@ -20,7 +20,20 @@ and Sonatype configuration are intentionally omitted. The XYML root Gradle build
 ## XYML modifications
 
 The import commit contains no product or source renaming. The integration commit renames the native product to
-XYMLLauncher, preserves the original author copyright display, adopts XYML-specific environment variables and Java
+XYMLL, preserves the original author copyright display, adopts XYML-specific environment variables and Java
 runtime paths, builds with CMake and Microsoft Visual C++ on Windows, packages the independently built executable in
 XYML, and adds source-fingerprint, checksum, resource-metadata, appended-JAR, environment, argument, working-directory,
 and exit-code verification.
+
+## Checked-in fallback
+
+`fallback/XYMLL.exe` is generated from this directory by `:XYMLL:updateXYMLLFallback` with CMake 4.4.2, the Visual
+Studio 2022 Build Tools generator, Microsoft Visual C++ 19.44, the Win32 architecture, and Windows SDK 10.0.26100.0.
+It is used only when the root build runs on a non-Windows host.
+
+- Binary SHA-256: `c256e0afecc96e1a6babe375b56f486efd28121e8db519e47a40ce9b6c09ab33`
+- Normalized source SHA-256: `d0293b82d4117ec76f462358d17567127ce9764a022abfe567e7074e634600d0`
+
+The verification task recalculates both values. The normalized source fingerprint covers `CMakeLists.txt`,
+`XYMLL.ico`, and all C++ headers, sources, and templates under `XYMLL/`; text line endings are normalized to LF before
+hashing so Windows and non-Windows checkouts produce the same value.

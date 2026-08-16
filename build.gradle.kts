@@ -47,8 +47,18 @@ extra["xymlBranchName"] = xymlBranchName.orEmpty()
 
 subprojects {
     apply {
-        plugin("java")
         plugin("idea")
+    }
+
+    if (path == ":XYMLL") {
+        apply {
+            plugin("base")
+        }
+        return@subprojects
+    }
+
+    apply {
+        plugin("java")
         plugin("maven-publish")
         plugin("checkstyle")
     }

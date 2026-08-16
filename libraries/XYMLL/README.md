@@ -1,16 +1,21 @@
-# HMCLauncher for Windows
+# XYMLL for Windows
 
-HMCL Launcher for Windows.
+XYML's native Windows launcher, based on HMCLauncher 3.7.0.1. The fork is renamed to satisfy the upstream license's
+modified-version condition and retains the original author's copyright in the executable metadata.
 
 ## Build
 
 ```powershell
-cmake -A Win32 -B build && cmake --build build --config Release
+.\gradlew.bat :XYMLL:build
 ```
+
+The root Gradle build invokes CMake with the Visual Studio 2022 generator, the Win32 architecture, and Microsoft
+Visual C++. Non-Windows hosts verify and use the checked-in fallback executable generated from this same source.
 
 ## License
 
-The project is distributed under [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html) license with the following additional terms:
+The project is distributed under [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html) license with the following
+additional terms inherited from HMCLauncher:
 
 ### Additional terms under GPLv3 Section 7
 

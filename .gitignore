@@ -61,6 +61,7 @@ language-subtag-registry
 .nb-gradle
 
 *.exe
+!libraries/XYMLL/fallback/XYMLL.exe
 
 # macos
 .DS_Store
