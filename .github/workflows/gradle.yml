@@ -22,6 +22,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
     - name: Set up JDK 17 and 25
       uses: actions/setup-java@v5
       with:
@@ -35,7 +37,9 @@ jobs:
       with:
         cache-cleanup: never
     - name: Build with Gradle
-      run: xvfb-run --auto-servernum ./gradlew build --no-daemon --parallel
+      run: >-
+        xvfb-run --auto-servernum
+        ./gradlew build -Pxyml.branchBuild.nested=true --no-daemon --parallel
       env:
         MICROSOFT_AUTH_ID: ${{ secrets.MICROSOFT_AUTH_ID }}
         CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
