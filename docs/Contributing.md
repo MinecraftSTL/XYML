@@ -79,6 +79,35 @@ To build XYML, switch to the root directory of the XYML project and run the foll
 
 The built XYML program files are located in the `XYML/build/libs` subdirectory under the project root.
 
+### IDEA Gradle Workflows
+
+After importing the repository as a Gradle project, open the Gradle tool window and expand
+`XYML > Tasks > XYML workflows`. The group contains these entry points:
+
+| Task | Behavior |
+| --- | --- |
+| `buildMain` | Fetches and builds the latest `origin/main` commit. |
+| `buildBeta` | Fetches and builds the latest `origin/beta` commit. |
+| `buildAlpha` | Fetches and builds the latest `origin/alpha` commit. |
+| `buildDev` | Fetches and builds the latest `origin/dev` commit. |
+| `build` | Routes a release checkout to the matching task above; builds a feature or detached checkout in place. |
+| `clean` | Cleans only the current checkout without inspecting or fetching any branch. |
+| `run` | Uses the same branch routing as `build`, then runs XYML instead of producing a distribution. |
+
+The four channel tasks refresh `main`, `beta`, `alpha`, and `dev` together, then build the selected commit in a
+temporary detached worktree without switching the current IDEA checkout. On Windows, the GitHub fetch uses the
+enabled Windows system proxy. Successful channel artifacts are copied to `build/channel-builds/<branch>` together
+with `build-info.properties`; feature artifacts remain in `XYML/build/libs`.
+
+To test cached remote-tracking refs without accessing GitHub, disable the refresh explicitly:
+
+```powershell
+.\gradlew.bat buildMain '-Pxyml.branchBuild.fetch=false'
+```
+
+An explicit proxy can be supplied with `-Pxyml.branchBuild.gitProxy=<proxy-url>` when the Windows system proxy is not
+available.
+
 ## Debug Options
 
 > [!WARNING]
