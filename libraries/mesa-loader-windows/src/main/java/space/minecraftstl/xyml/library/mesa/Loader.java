@@ -13,23 +13,36 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.glavo.mesa;
+// Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
+package space.minecraftstl.xyml.library.mesa;
 
-import java.io.*;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
 import java.nio.channels.FileLock;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
 
-/**
- * Mesa Loader
- *
- * @author Glavo
- */
+/// Extracts and activates one bundled Mesa driver for Windows.
+///
+/// @author Glavo
+@NotNullByDefault
 public final class Loader {
+    /// Prevents construction of the static javaagent entry-point class.
+    private Loader() {
+    }
 
-    public static void premain(String name) {
+    /// Selects, extracts, and activates the requested Mesa driver before application startup.
+    ///
+    /// @param requestedDriver optional driver name; defaults to `llvmpipe`
+    public static void premain(@Nullable String requestedDriver) {
         if (!System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win")) {
             System.err.println("[mesa-loader] unsupported operating system: " + System.getProperty("os.name"));
             return;
@@ -70,15 +83,12 @@ public final class Loader {
                 return;
         }
 
-        if (name == null || name.isEmpty()) {
-            name = "llvmpipe";
-        } else {
-            name = name.toLowerCase(Locale.ROOT);
-        }
+        String driverName = requestedDriver == null || requestedDriver.isEmpty()
+                ? "llvmpipe"
+                : requestedDriver.toLowerCase(Locale.ROOT);
 
-
-        String icdName;
-        switch (name) {
+        @Nullable String icdName;
+        switch (driverName) {
             case "lavapipe":
                 icdName = "lvp";
                 break;
@@ -91,12 +101,12 @@ public final class Loader {
                 icdName = null;
                 break;
             default:
-                System.err.println("[mesa-loader] Unsupported driver: " + name);
+                System.err.println("[mesa-loader] Unsupported driver: " + driverName);
                 return;
         }
 
         boolean vulkan = icdName != null;
-        String[] files;
+        String @Unmodifiable [] files;
         if (vulkan) {
             files = new String[]{
                     icdName + "_icd.json",
@@ -107,38 +117,54 @@ public final class Loader {
         }
 
         Properties properties = new Properties();
-        try (Reader reader = new InputStreamReader(Loader.class.getResourceAsStream("version.properties"), "UTF-8")) {
+        @Nullable InputStream versionInput = Loader.class.getResourceAsStream("version.properties");
+        if (versionInput == null) {
+            System.err.println("[mesa-loader] Missing version.properties");
+            return;
+        }
+        try (Reader reader = new InputStreamReader(versionInput, "UTF-8")) {
             properties.load(reader);
-        } catch (Throwable ignored) {
+        } catch (IOException e) {
+            System.err.println("[mesa-loader] Failed to read version.properties");
+            e.printStackTrace(System.err);
+            return;
         }
 
-        String loaderVersion = properties.getProperty("loader.version");
+        @Nullable String loaderVersion = properties.getProperty("loader.version");
         if (loaderVersion == null) {
             System.err.println("[mesa-loader] Missing loader version property in version.properties");
             return;
         }
+        @Nullable String mesaVersion = properties.getProperty("mesa.version");
+        if (mesaVersion == null) {
+            System.err.println("[mesa-loader] Missing Mesa version property in version.properties");
+            return;
+        }
 
-        String nativeDir = System.getProperty("org.glavo.mesa.loader.nativeDir");
+        @Nullable String nativeDir = System.getProperty("org.glavo.mesa.loader.nativeDir");
 
-        System.out.println("[mesa-loader] Mesa Driver: " + name);
-        System.out.println("[mesa-loader] Mesa Version: " + loaderVersion);
+        System.out.println("[mesa-loader] Mesa Driver: " + driverName);
+        System.out.println("[mesa-loader] Mesa Version: " + mesaVersion);
 
         File targetDir;
         if (nativeDir == null) {
             targetDir = new File(System.getProperty("java.io.tmpdir"),
-                    String.format("mesa-loader/%s/%s/%s", loaderVersion, arch, name)).getAbsoluteFile();
+                    String.format("mesa-loader/%s/%s/%s", loaderVersion, arch, driverName)).getAbsoluteFile();
         } else {
             targetDir = new File(nativeDir);
         }
 
         System.out.println("[mesa-loader] Native Directory: " + targetDir);
 
-        targetDir.mkdirs();
+        if (!targetDir.isDirectory() && !targetDir.mkdirs()) {
+            System.err.println("[mesa-loader] Failed to create native directory: " + targetDir);
+            return;
+        }
 
         File lockFile = new File(targetDir, "lock");
 
         try (FileOutputStream lockFileStream = new FileOutputStream(lockFile)) {
-            FileLock lock = lockFileStream.getChannel().tryLock();
+            @Nullable FileLock lock = lockFileStream.getChannel().tryLock();
 
             if (lock == null) {
                 for (int retry = 0; retry < 20 && lock == null; retry++) {
@@ -147,6 +173,7 @@ public final class Loader {
                     try {
                         Thread.sleep(3 * 1000);
                     } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
                         System.out.println("[mesa-loader] Interrupted while waiting for lock");
                         return;
                     }
@@ -162,7 +189,8 @@ public final class Loader {
 
             byte[] buffer = new byte[8192];
             for (String file : files) {
-                try (InputStream input = Loader.class.getResourceAsStream(arch + "/" + name + "/" + file)) {
+                try (@Nullable InputStream input = Loader.class.getResourceAsStream(
+                        arch + "/" + driverName + "/" + file)) {
                     if (input == null) {
                         System.err.println("[mesa-loader] " + file + " not exists");
                         return;

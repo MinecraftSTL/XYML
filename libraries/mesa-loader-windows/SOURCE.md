@@ -21,7 +21,16 @@ still present in the imported build script is removed when the project is integr
 
 ## XYML modifications
 
-This import commit contains no source or namespace changes. The integration commit records the package rename,
-shared publication version, Java compatibility, Gradle-managed Mesa archive acquisition and extraction, three
-architecture classifiers, archive-content verification, and the explicit decision that XYML continues consuming
-the upstream runtime coordinates from `natives.json` instead of embedding these large native artifacts.
+The import commit contains no source or namespace changes. The integration commit renames the package to
+`space.minecraftstl.xyml.library.mesa`, adopts the shared publication version while preserving Java 6 loader
+bytecode, builds three architecture classifiers, verifies their native contents, and enforces the explicit decision
+that XYML continues consuming the upstream runtime coordinates from `natives.json` instead of embedding these large
+native artifacts. Modified upstream Java retains its Apache-2.0 header and carries a MinecraftSTL modification
+notice.
+
+The locked `mmozeiko/build-mesa` 26.0.4 release archives use both the ARM64 branch filter and multi-stream BCJ2;
+Apache Commons Compress cannot decode the latter. To avoid a system 7-Zip or JNI build prerequisite, Gradle consumes
+the three upstream `org.glavo:mesa-loader-windows:26.0.4` classifier JARs as native payload inputs, verifies the
+existing `natives.json` SHA-1 and size metadata, and uses `zipTree` to rebuild the namespaced classifiers. The
+approximately 128.86 MiB inputs and outputs remain ignored build artifacts and are not checked into or embedded in
+XYML.

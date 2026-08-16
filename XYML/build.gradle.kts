@@ -22,11 +22,11 @@ plugins {
 }
 
 tasks.named("build") {
-    dependsOn(":hello-nbt:build", ":lwjgl-unsafe-agent:build")
+    dependsOn(":hello-nbt:build", ":lwjgl-unsafe-agent:build", ":mesa-loader-windows:build")
 }
 
 tasks.named("check") {
-    dependsOn(":hello-nbt:check", ":lwjgl-unsafe-agent:check")
+    dependsOn(":hello-nbt:check", ":lwjgl-unsafe-agent:check", ":mesa-loader-windows:check")
 }
 
 base {
@@ -421,6 +421,17 @@ val verifyOfflineUiArtifact = tasks.register("verifyOfflineUiArtifact") {
             val forbiddenEntries = findForbiddenRemovedUiEntries(jar)
             if (forbiddenEntries.isNotEmpty()) {
                 throw GradleException("Retained removed UI entries: ${forbiddenEntries.joinToString()}")
+            }
+
+            val bundledMesaEntries = jar.entries().asSequence()
+                .map { it.name }
+                .filter {
+                    it == "space/minecraftstl/xyml/library/mesa/Loader.class"
+                        || it.substringAfterLast('/').startsWith("mesa-loader-windows-")
+                }
+                .toList()
+            if (bundledMesaEntries.isNotEmpty()) {
+                throw GradleException("Locally built Mesa artifacts must not be embedded: ${bundledMesaEntries.joinToString()}")
             }
 
             val embeddedAgent = jar.getEntry(embeddedAgentEntry)

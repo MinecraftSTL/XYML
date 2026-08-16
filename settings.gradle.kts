@@ -4,11 +4,13 @@ include(
     "XYMLCore",
     "XYMLBoot",
     "hello-nbt",
-    "lwjgl-unsafe-agent"
+    "lwjgl-unsafe-agent",
+    "mesa-loader-windows"
 )
 
 project(":hello-nbt").projectDir = file("libraries/hello-nbt")
 project(":lwjgl-unsafe-agent").projectDir = file("libraries/lwjgl-unsafe-agent")
+project(":mesa-loader-windows").projectDir = file("libraries/mesa-loader-windows")
 
 val minecraftLibraries = listOf("XYMLTransformerDiscoveryService", "XYMLMultiMCBootstrap")
 include(minecraftLibraries)
