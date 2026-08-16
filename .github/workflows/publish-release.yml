@@ -23,6 +23,8 @@ jobs:
       RELEASE_VERSION: ${{ inputs.version }}
       BUILD_NUMBER: ${{ github.run_number }}
       GH_TOKEN: ${{ github.token }}
+      GRADLE_OPTS: >-
+        -Dorg.gradle.java.installations.fromEnv=JAVA_HOME,JAVA_HOME_17_X64,JAVA_HOME_17_ARM64
     steps:
       - name: Checkout main
         uses: actions/checkout@v6
@@ -35,11 +37,13 @@ jobs:
             exit 1
           fi
 
-      - name: Set up JDK 17
+      - name: Set up JDK 17 and 25
         uses: actions/setup-java@v5
         with:
           distribution: zulu
-          java-version: '17'
+          java-version: |
+            17
+            25
           java-package: jdk
 
       - name: Set up Gradle

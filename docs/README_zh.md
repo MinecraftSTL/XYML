@@ -45,6 +45,8 @@ XYML 源自 [HMCL（Hello Minecraft! Launcher）](https://github.com/HMCL-dev/HM
 
 XYML 是由 MinecraftSTL 独立维护的下游项目，并非 HMCL 的官方发行版。XYML 的版本号、发布渠道、构建产物和问题反馈均由本仓库独立管理；上游 HMCL 的发布状态与 XYML 不互相代表。仓库保留 `HMCL-dev/HMCL` 作为上游来源，以便追踪和评估适合 XYML 的上游变更。
 
+本仓库还在 [`libraries/`](../libraries/README.md) 中维护四个采用 XYML 品牌的源码分叉。它们会与 XYML 一起构建，同时继续以独立 Java 归档或原生可执行文件的形式使用。只有许可证声明、溯源记录和必须兼容的远程运行时坐标会保留上游项目名称。
+
 ## 下载与发布
 
 请从 [Github Release](https://github.com/MinecraftSTL/XYML/releases) 获取 XYML 稳定版；官网发布稳定版和公测版。XYML 采用稳定版、公测版、内测版和开发版四级发布渠道；各渠道的版本格式、测试范围、反馈方式和晋升顺序见[发布模型](ReleaseSchedule_zh.md)。
