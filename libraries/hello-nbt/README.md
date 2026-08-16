@@ -1,9 +1,5 @@
 # HelloNBT
 
-[![codecov](https://codecov.io/gh/HMCL-dev/HelloNBT/graph/badge.svg?token=M1XJHATTPN)](https://codecov.io/gh/HMCL-dev/HelloNBT)
-[![](https://img.shields.io/maven-central/v/org.glavo/HelloNBT?label=Maven%20Central)](https://search.maven.org/artifact/org.glavo/HelloNBT)
-[![javadoc](https://javadoc.io/badge2/org.glavo/HelloNBT/javadoc.svg)](https://javadoc.io/doc/org.glavo/HelloNBT)
-
 A powerful library for reading and writing Minecraft NBT data.
 
 It supports:
@@ -20,10 +16,9 @@ To get started, check out the following tutorials:
 - Quick Start ([中文](docs/QuickStart_zh.md))
 - Advanced Tutorial ([中文](docs/Tutorial_zh.md))
 
-We also provide detailed documentation for all APIs, which can be found here:
-[HelloNBT Javadoc](https://javadoc.io/doc/org.glavo/HelloNBT).
+The `javadoc` task builds API documentation for the namespaced XYML fork.
 
-This library is used for the [Hello! Minecraft Launcher](https://github.com/HMCL-Dev-HMCL).
+This fork is maintained and consumed by [XYML](https://github.com/MinecraftSTL/XYML).
 The API is currently unstable.
 
 ## Download

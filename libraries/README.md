@@ -1,6 +1,6 @@
-# Bundled HMCL-dev libraries
+# Bundled XYML libraries
 
-This directory contains source snapshots of HMCL-dev projects that XYML builds and maintains in the same Git
+This directory contains XYML-maintained source forks of selected HMCL-dev projects that are built in the same Git
 repository. Each library remains an independent build result and retains its upstream license and copyright notices.
 No directory under `libraries/` is a Git submodule or contains upstream Git history.
 
@@ -38,4 +38,4 @@ upstream license or additional terms require one.
 | `hello-nbt` | <https://github.com/HMCL-dev/HelloNBT> | `0.4.0` | `240743139834f8253d1b90b4cb75353285f9dfd5` | Apache-2.0 |
 | `lwjgl-unsafe-agent` | <https://github.com/HMCL-dev/lwjgl-unsafe-agent> | `2.0` | `6755ad42e444d472a5a849bbe85128e05b6442e5` | Apache-2.0 |
 | `mesa-loader-windows` | <https://github.com/HMCL-dev/mesa-loader-windows> | `26.0.4` | `fc8a412503ad47e989fd8dfc673b6d501ac8be9e` | Apache-2.0 |
-| `xyml-launcher` | <https://github.com/HMCL-dev/HMCLauncher> | `3.7.0.1` | `da0e0c3b4f01fa0edbaf575d9631f093daf70cd1` | GPL-3.0-or-later with upstream additional terms |
+| `XYMLL` | <https://github.com/HMCL-dev/HMCLauncher> | `3.7.0.1` | `da0e0c3b4f01fa0edbaf575d9631f093daf70cd1` | GPL-3.0-only with upstream additional terms |

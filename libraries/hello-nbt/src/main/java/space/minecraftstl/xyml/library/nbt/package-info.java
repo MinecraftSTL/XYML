@@ -15,7 +15,7 @@
  */
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 
-/// The base package for the [HelloNBT](https://github.com/HMCL-dev/HelloNBT).
+/// The base package for XYML's HelloNBT fork.
 ///
 /// There are the core packages for HelloNBT:
 ///
