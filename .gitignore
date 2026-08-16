@@ -34,6 +34,9 @@ language-subtag-registry
 /minecraft/libraries/XYMLTransformerDiscoveryService/build/
 /minecraft/libraries/XYMLMultiMCBootstrap/build/
 /buildSrc/build/
+/libraries/**/build/
+/libraries/**/.gradle/
+/libraries/**/out/
 
 # idea
 .idea

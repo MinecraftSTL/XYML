@@ -1,6 +1,4 @@
 import space.minecraftstl.xyml.gradle.TerracottaConfigUpgradeTask
-import space.minecraftstl.xyml.gradle.ci.GitHubActionUtils
-import space.minecraftstl.xyml.gradle.ci.JenkinsUtils
 import space.minecraftstl.xyml.gradle.l10n.CheckTranslations
 import space.minecraftstl.xyml.gradle.l10n.CreateLanguageList
 import space.minecraftstl.xyml.gradle.l10n.CreateLocaleNamesResourceBundle
@@ -8,8 +6,6 @@ import space.minecraftstl.xyml.gradle.l10n.UpsideDownTranslate
 import space.minecraftstl.xyml.gradle.mod.ParseModDataTask
 import space.minecraftstl.xyml.gradle.pack.CreateDeb
 import space.minecraftstl.xyml.gradle.pack.ReleaseType
-import space.minecraftstl.xyml.gradle.pack.ReleaseVersionResolver
-import space.minecraftstl.xyml.gradle.utils.PropertiesUtils
 import java.net.URI
 import java.nio.file.FileSystems
 import java.nio.file.Files
@@ -28,35 +24,10 @@ base {
     archivesName.set("XYML")
 }
 
-val projectConfig = PropertiesUtils.load(rootProject.file("config/project.properties").toPath())
+val currentReleaseType = ReleaseType.fromName(rootProject.extra["xymlReleaseChannel"] as String)
+val currentBranchName = (rootProject.extra["xymlBranchName"] as String).takeIf { it.isNotEmpty() }
 
-val isOfficial = JenkinsUtils.IS_ON_CI || GitHubActionUtils.IS_ON_OFFICIAL_REPO
-
-val releaseChannelName = System.getenv("RELEASE_CHANNEL")?.takeIf { it.isNotBlank() } ?: "dev"
-val currentReleaseType = ReleaseType.fromName(releaseChannelName)
-val stableVersion = System.getenv("STABLE_VERSION")?.takeIf { it.isNotBlank() }
-    ?: projectConfig.getProperty("stableVersion")
-    ?: "1.0.0"
-val explicitReleaseVersion = System.getenv("RELEASE_VERSION")?.takeIf { it.isNotBlank() }
-val buildNumber = System.getenv("BUILD_NUMBER")?.takeIf { it.isNotBlank() }
-val currentBranchName = sequenceOf("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "CHANGE_BRANCH", "BRANCH_NAME")
-    .mapNotNull { variable -> System.getenv(variable)?.takeIf { it.isNotBlank() } }
-    .firstOrNull()
-    ?: runCatching {
-        providers.exec {
-            commandLine("git", "branch", "--show-current")
-            isIgnoreExitValue = true
-        }.standardOutput.asText.get().trim().takeIf { it.isNotEmpty() }
-    }.getOrNull()
-
-version = ReleaseVersionResolver.resolve(
-    currentReleaseType,
-    stableVersion,
-    explicitReleaseVersion,
-    buildNumber,
-    isOfficial,
-    currentBranchName
-)
+version = rootProject.extra["xymlReleaseVersion"] as String
 
 val microsoftAuthId = System.getenv("MICROSOFT_AUTH_ID") ?: ""
 val curseForgeApiKey = System.getenv("CURSEFORGE_API_KEY") ?: ""
