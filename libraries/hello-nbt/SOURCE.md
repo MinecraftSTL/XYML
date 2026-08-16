@@ -5,7 +5,9 @@
 - Commit: `240743139834f8253d1b90b4cb75353285f9dfd5`
 - Acquired: 2026-08-16
 - Network path: GitHub was accessed through the configured Windows system proxy.
-- License: Apache License 2.0; the unmodified upstream text is preserved in `LICENSE`.
+- License: the repository-level license is Apache License 2.0 and its unmodified text is preserved in `LICENSE`.
+  Fourteen production files and two test files in this tag retain upstream GPL-3.0-or-later file headers; those
+  headers are preserved and the published POM records the file-level exception instead of silently relicensing them.
 
 ## Snapshot contents
 
@@ -19,5 +21,14 @@ root build.
 
 ## XYML modifications
 
-This import commit contains no source or namespace changes. The following integration commit records package/module
-renaming, build consolidation, publication coordinates, version metadata, and XYML consumer updates here.
+The integration commit performs the following changes:
+
+- renames module and packages from `org.glavo.nbt` to `space.minecraftstl.xyml.library.nbt` without a compatibility
+  facade;
+- adds a MinecraftSTL modification notice after every preserved upstream Java header;
+- replaces the standalone build, nested `buildSrc`, publication, and signing configuration with the XYML root Gradle
+  build and local Maven publication;
+- publishes `space.minecraftstl.xyml:hello-nbt` at the shared XYML release version while recording upstream `0.4.0`
+  in the JAR manifest;
+- switches XYMLCore and application consumers to the renamed public API and adds module, package, bytecode, artifact,
+  license, and serialization verification.

@@ -17,8 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
-import org.glavo.nbt.NBTElement;
-import org.glavo.nbt.tag.ValueTag;
+import space.minecraftstl.xyml.library.nbt.NBTElement;
+import space.minecraftstl.xyml.library.nbt.tag.ValueTag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 

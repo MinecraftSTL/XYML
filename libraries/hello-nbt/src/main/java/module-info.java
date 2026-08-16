@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+// Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 
 /// [HelloNBT](https://github.com/HMCL-dev/HelloNBT) is a modern Java library for reading and writing Minecraft NBT files.
 ///
@@ -20,18 +21,18 @@
 ///
 /// If you want to learn about the HelloNBT API by reading the Javadoc, check the documentation of the following core classes:
 ///
-/// - [org.glavo.nbt.tag.Tag]: Represents a tag in NBT format. Its documentation records the entire inheritance hierarchy of NBT tags.
-/// - [org.glavo.nbt.chunk.Chunk]: Represents a chunk of NBT data.
-/// - [org.glavo.nbt.chunk.ChunkRegion]: Represents a region of chunks.
-/// - [org.glavo.nbt.io.NBTCodec]: The core class for reading and writing NBT data.
-/// - [org.glavo.nbt.io.SNBTCodec]: The core class for reading and writing SNBT data.
-module org.glavo.nbt {
+/// - [space.minecraftstl.xyml.library.nbt.tag.Tag]: Represents a tag in NBT format. Its documentation records the entire inheritance hierarchy of NBT tags.
+/// - [space.minecraftstl.xyml.library.nbt.chunk.Chunk]: Represents a chunk of NBT data.
+/// - [space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion]: Represents a region of chunks.
+/// - [space.minecraftstl.xyml.library.nbt.io.NBTCodec]: The core class for reading and writing NBT data.
+/// - [space.minecraftstl.xyml.library.nbt.io.SNBTCodec]: The core class for reading and writing SNBT data.
+module space.minecraftstl.xyml.library.nbt {
     requires static org.jetbrains.annotations;
     requires static org.lz4.java;
 
-    exports org.glavo.nbt;
-    exports org.glavo.nbt.chunk;
-    exports org.glavo.nbt.tag;
-    exports org.glavo.nbt.io;
-    exports org.glavo.nbt.validation;
+    exports space.minecraftstl.xyml.library.nbt;
+    exports space.minecraftstl.xyml.library.nbt.chunk;
+    exports space.minecraftstl.xyml.library.nbt.tag;
+    exports space.minecraftstl.xyml.library.nbt.io;
+    exports space.minecraftstl.xyml.library.nbt.validation;
 }

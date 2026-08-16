@@ -17,11 +17,11 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
-import org.glavo.nbt.NBTElement;
-import org.glavo.nbt.chunk.Chunk;
-import org.glavo.nbt.chunk.ChunkRegion;
-import org.glavo.nbt.tag.CompoundTag;
-import org.glavo.nbt.tag.ParentTag;
+import space.minecraftstl.xyml.library.nbt.NBTElement;
+import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
+import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
+import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.tag.ParentTag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;

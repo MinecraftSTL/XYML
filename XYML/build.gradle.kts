@@ -20,6 +20,14 @@ plugins {
     alias(libs.plugins.shadow)
 }
 
+tasks.named("build") {
+    dependsOn(":hello-nbt:build")
+}
+
+tasks.named("check") {
+    dependsOn(":hello-nbt:check")
+}
+
 base {
     archivesName.set("XYML")
 }
@@ -219,10 +227,10 @@ val requiredOfflineLibraryEntries = listOf(
     "net/miginfocom/swing/MigLayout.class",
     "net/jpountz/lz4/LZ4BlockInputStream.class",
     "net/jpountz/lz4/LZ4Factory.class",
-    "org/glavo/nbt/NBTElement.class",
-    "org/glavo/nbt/chunk/ChunkRegion.class",
-    "org/glavo/nbt/io/NBTCodec.class",
-    "org/glavo/nbt/tag/CompoundTag.class",
+    "space/minecraftstl/xyml/library/nbt/NBTElement.class",
+    "space/minecraftstl/xyml/library/nbt/chunk/ChunkRegion.class",
+    "space/minecraftstl/xyml/library/nbt/io/NBTCodec.class",
+    "space/minecraftstl/xyml/library/nbt/tag/CompoundTag.class",
 )
 
 val requiredOfflineSwingIconEntries = listOf(
@@ -381,6 +389,7 @@ val forbiddenRemovedUiEntryPrefixes = listOf(
     "org/glavo/png/javafx/",
     "org/girod/javafx/svgimage/",
     "org/hildan/fxgson/",
+    "org/glavo/nbt/",
 )
 
 fun findForbiddenRemovedUiEntries(jar: ZipFile): List<String> = jar.entries().asSequence()

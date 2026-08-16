@@ -32,7 +32,7 @@ Gradle:
 
 ```kotlin
 dependencies {
-    implementation("org.glavo:HelloNBT:0.2.0")
+    implementation("space.minecraftstl.xyml:hello-nbt:<XYML version>")
 }
 ```
 
@@ -41,9 +41,9 @@ Maven:
 ```xml
 
 <dependency>
-    <groupId>org.glavo</groupId>
-    <artifactId>HelloNBT</artifactId>
-    <version>0.2.0</version>
+    <groupId>space.minecraftstl.xyml</groupId>
+    <artifactId>hello-nbt</artifactId>
+    <version>&lt;XYML version&gt;</version>
 </dependency>
 ```
 

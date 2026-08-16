@@ -2,8 +2,11 @@ rootProject.name = "XYML"
 include(
     "XYML",
     "XYMLCore",
-    "XYMLBoot"
+    "XYMLBoot",
+    "hello-nbt"
 )
+
+project(":hello-nbt").projectDir = file("libraries/hello-nbt")
 
 val minecraftLibraries = listOf("XYMLTransformerDiscoveryService", "XYMLMultiMCBootstrap")
 include(minecraftLibraries)

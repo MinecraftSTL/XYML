@@ -17,14 +17,14 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
-import org.glavo.nbt.NBTElement;
-import org.glavo.nbt.tag.ByteTag;
-import org.glavo.nbt.tag.DoubleTag;
-import org.glavo.nbt.tag.FloatTag;
-import org.glavo.nbt.tag.IntTag;
-import org.glavo.nbt.tag.LongTag;
-import org.glavo.nbt.tag.ShortTag;
-import org.glavo.nbt.tag.StringTag;
+import space.minecraftstl.xyml.library.nbt.NBTElement;
+import space.minecraftstl.xyml.library.nbt.tag.ByteTag;
+import space.minecraftstl.xyml.library.nbt.tag.DoubleTag;
+import space.minecraftstl.xyml.library.nbt.tag.FloatTag;
+import space.minecraftstl.xyml.library.nbt.tag.IntTag;
+import space.minecraftstl.xyml.library.nbt.tag.LongTag;
+import space.minecraftstl.xyml.library.nbt.tag.ShortTag;
+import space.minecraftstl.xyml.library.nbt.tag.StringTag;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
