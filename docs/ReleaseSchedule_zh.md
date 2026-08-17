@@ -94,7 +94,7 @@ Github Release 只发布稳定版，官网发布稳定版和公测版。内测�
 - `BUILD_NUMBER`：未指定 `RELEASE_VERSION` 时，普通 CI 构建使用的最后一段正十进制数字。
 - `STABLE_VERSION`：可选，用于覆盖 `config/project.properties` 中的 `stableVersion`。
 
-根 Gradle 构建中 `XYML workflows` 分类下的任务会根据 Git 拓扑推断版本号。渠道计数是从所选发布提交与相邻更稳定分支的合并基点开始，沿首父历史计算的提交数。`buildMain`、`buildBeta`、`buildAlpha` 和 `buildDev` 会把该推断版本注入隔离构建。
+根 Gradle 构建中 `stl` 分类下的任务会根据 Git 拓扑推断版本号。渠道计数是从所选发布提交与相邻更稳定分支的合并基点开始，沿首父历史计算的提交数。`buildMain`、`buildBeta`、`buildAlpha` 和 `buildDev` 会把该推断版本注入隔离构建。
 
 功能分支和游离提交保持六段开发版格式 `x.y.z.0.0.d`。其中 `d` 是与 `dev` 合并基点所继承的开发版计数，加上该分叉点之后的首父提交数；未提交改动不会增加版本段。其他正式构建调用仍会拒绝缺失或格式错误的发布输入。
 

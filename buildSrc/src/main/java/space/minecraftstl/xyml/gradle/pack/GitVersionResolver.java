@@ -71,6 +71,28 @@ public final class GitVersionResolver {
         return resolveFeatureVersion(repository, stableVersion, "HEAD", devRef, alphaRef);
     }
 
+    /// Resolves the checked-out release branch from its first-parent distance to the adjacent stable branch.
+    ///
+    /// @param repository Git repository root
+    /// @param releaseType release channel represented by the current branch
+    /// @param stableVersion stable version stored by the current checkout
+    /// @return inferred release version for `HEAD`
+    public static String resolveCurrentReleaseVersion(
+            Path repository,
+            ReleaseType releaseType,
+            String stableVersion) {
+        @Nullable String adjacentBranch = switch (releaseType) {
+            case STABLE -> null;
+            case BETA -> "main";
+            case ALPHA -> "beta";
+            case DEV -> "alpha";
+        };
+        @Nullable String adjacentRef = adjacentBranch == null
+                ? null
+                : preferredBranchRef(repository, adjacentBranch);
+        return resolveReleaseVersion(repository, releaseType, stableVersion, "HEAD", adjacentRef);
+    }
+
     /// Resolves a feature or detached commit relative to its Dev merge base.
     ///
     /// @param repository Git repository root

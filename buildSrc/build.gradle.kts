@@ -23,6 +23,7 @@ dependencies {
     implementation(libs.weburl)
     implementation(libs.xz)
 
+    testImplementation(gradleApi())
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

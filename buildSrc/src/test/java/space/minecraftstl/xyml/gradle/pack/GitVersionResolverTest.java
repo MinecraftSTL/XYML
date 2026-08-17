@@ -66,6 +66,26 @@ final class GitVersionResolverTest {
         assertEquals("1.2.3.0.0.5", GitVersionResolver.resolveCurrentFeatureVersion(repository, stableVersion));
     }
 
+    /// Resolves local release checkouts without requiring CI build-number environment variables.
+    @Test
+    void resolvesCurrentReleaseBranchVersions() throws IOException {
+        Path repository = createRepository();
+        String stableVersion = "1.2.3";
+
+        git(repository, "checkout", "main");
+        assertEquals("1.2.3", GitVersionResolver.resolveCurrentReleaseVersion(
+                repository, ReleaseType.STABLE, stableVersion));
+        git(repository, "checkout", "beta");
+        assertEquals("1.2.3.2", GitVersionResolver.resolveCurrentReleaseVersion(
+                repository, ReleaseType.BETA, stableVersion));
+        git(repository, "checkout", "alpha");
+        assertEquals("1.2.3.0.1", GitVersionResolver.resolveCurrentReleaseVersion(
+                repository, ReleaseType.ALPHA, stableVersion));
+        git(repository, "checkout", "dev");
+        assertEquals("1.2.3.0.0.2", GitVersionResolver.resolveCurrentReleaseVersion(
+                repository, ReleaseType.DEV, stableVersion));
+    }
+
     /// Classifies only the four exact release branch names as release builds.
     @Test
     void classifiesReleaseBranches() {

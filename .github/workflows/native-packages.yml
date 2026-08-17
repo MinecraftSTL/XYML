@@ -34,7 +34,7 @@ jobs:
     env:
       BUILD_NUMBER: ${{ github.run_number }}
       GRADLE_OPTS: >-
-        -Dorg.gradle.java.installations.fromEnv=JAVA_HOME,JAVA_HOME_17_X64,JAVA_HOME_17_ARM64
+        -Dorg.gradle.java.installations.fromEnv=XYML_AGENT_JAVA_HOME
       RELEASE_CHANNEL: >-
         ${{ github.event_name == 'push' && github.ref_name == 'main' && 'stable'
         || github.event_name == 'push' && github.ref_name == 'beta' && 'beta'
@@ -60,23 +60,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up JDK 17 and 25
+      - name: Set up agent JDK 25
         uses: actions/setup-java@v5
         with:
           distribution: zulu
-          java-version: |
-            17
-            25
+          java-version: '25'
           java-package: jdk
 
-      - name: Select JDK 17 for packaging
+      - name: Register agent JDK 25 toolchain
         shell: bash
-        run: |
-          if [[ "${RUNNER_ARCH}" == "ARM64" ]]; then
-            echo "XYML_PACKAGING_JAVA_HOME=${JAVA_HOME_17_ARM64}" >> "${GITHUB_ENV}"
-          else
-            echo "XYML_PACKAGING_JAVA_HOME=${JAVA_HOME_17_X64}" >> "${GITHUB_ENV}"
-          fi
+        run: echo "XYML_AGENT_JAVA_HOME=${JAVA_HOME}" >> "${GITHUB_ENV}"
+
+      - name: Set up primary JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: '17'
+          java-package: jdk
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
