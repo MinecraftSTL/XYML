@@ -36,6 +36,7 @@ import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
 import javax.swing.JButton;
 import javax.swing.JList;
+import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -60,6 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.ui.swing.SwingFileTransferTestSupport.fileTransfer;
 
 /// Verifies lazy installer-state activation, safe local actions, and exact remote-version task handoff.
 @NotNullByDefault
@@ -189,6 +191,33 @@ final class InstanceInstallerPanelTest {
             assertEquals(1, service.offlineCalls.get());
             assertEquals(chosenInstaller, service.offlineInstaller);
             panel.close();
+        });
+    }
+
+    /// A ready installer page accepts one dropped JAR or EXE and detaches its route on close.
+    @Test
+    void installsSupportedDroppedOfflineInstallerOnlyWhileReady() {
+        RecordingInstallerService service = new RecordingInstallerService();
+        InstanceInstallerPanel panel = createPanel(
+                service,
+                wizardWith(List.of()),
+                new RecordingInteractions());
+        activateWithSnapshot(panel, service, snapshot(List.of(), List.of()));
+
+        EdtDispatcher.executeAndWait(() -> {
+            TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+            Path installer = Path.of("C:/offline/NeoForge-INSTALLER.JAR");
+            TransferHandler.TransferSupport supported = fileTransfer(panel, List.of(installer));
+            TransferHandler.TransferSupport unsupported = fileTransfer(panel, List.of(Path.of("notes.txt")));
+
+            assertTrue(handler.canImport(supported));
+            assertFalse(handler.canImport(unsupported));
+            assertTrue(handler.importData(supported));
+            assertEquals(1, service.offlineCalls.get());
+            assertEquals(installer.toAbsolutePath().normalize(), service.offlineInstaller);
+
+            panel.close();
+            assertNull(panel.getTransferHandler());
         });
     }
 

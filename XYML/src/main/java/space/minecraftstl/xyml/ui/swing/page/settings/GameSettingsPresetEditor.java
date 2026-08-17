@@ -448,7 +448,7 @@ public record GameSettingsPresetEditor(
     /// @param backend selected graphics API
     /// @param openGlRenderer selected OpenGL renderer
     /// @param vulkanRenderer selected Vulkan renderer
-    /// @param highPerformance whether Windows should prefer a high-performance GPU
+    /// @param highPerformance whether the operating system should prefer a high-performance GPU
     @NotNullByDefault
     public record GraphicsSettings(
             GraphicsAPI backend,

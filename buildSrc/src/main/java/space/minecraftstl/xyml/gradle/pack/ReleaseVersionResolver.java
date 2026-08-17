@@ -28,7 +28,8 @@ import java.util.regex.Pattern;
 /// Stable, beta, alpha, and development releases contain exactly three, four, five, and six canonical decimal
 /// components respectively. An explicit release version is used for promotions whose parent counters are already
 /// known. A build number supplies the last component for ordinary channel builds, with zero placeholders for parent
-/// channels that have not yet produced a candidate.
+/// channels that have not yet produced a candidate. Git-derived feature versions are handled by
+/// [GitVersionResolver].
 @NotNullByDefault
 public final class ReleaseVersionResolver {
     /// Canonical non-negative decimal component without leading zeroes.
@@ -43,9 +44,9 @@ public final class ReleaseVersionResolver {
     /// @param channel target release channel
     /// @param stableVersion current three-component stable baseline
     /// @param explicitVersion complete release version, or `null` to derive it
-    /// @param buildNumber positive decimal CI build number, or `null` for a local feature build
+    /// @param buildNumber positive decimal CI build number, or `null` for a local build
     /// @param official whether missing CI version inputs must fail the build
-    /// @return validated release version or local feature-build version
+    /// @return validated release version
     /// @throws IllegalArgumentException when any supplied version value violates the release model
     public static String resolve(
             ReleaseType channel,
@@ -55,31 +56,29 @@ public final class ReleaseVersionResolver {
             boolean official) {
         validateVersion(ReleaseType.STABLE, stableVersion);
 
+        String resolvedVersion;
         if (explicitVersion != null) {
             validateVersion(channel, explicitVersion);
             if (!hasStablePrefix(explicitVersion, stableVersion)) {
                 throw new IllegalArgumentException(
                         "Release version " + explicitVersion + " does not use stable baseline " + stableVersion);
             }
-            return explicitVersion;
-        }
-
-        if (channel == ReleaseType.STABLE) {
-            return stableVersion;
-        }
-
-        if (buildNumber != null) {
+            resolvedVersion = explicitVersion;
+        } else if (channel == ReleaseType.STABLE) {
+            resolvedVersion = stableVersion;
+        } else if (buildNumber != null) {
             if (!DECIMAL_COMPONENT.matcher(buildNumber).matches() || "0".equals(buildNumber)) {
                 throw new IllegalArgumentException("BUILD_NUMBER must be a positive canonical decimal component");
             }
-            return derivedVersion(channel, stableVersion, buildNumber);
+            resolvedVersion = derivedVersion(channel, stableVersion, buildNumber);
+        } else {
+            if (official) {
+                throw new IllegalArgumentException(
+                        "Official " + channel.getName() + " builds require RELEASE_VERSION or BUILD_NUMBER");
+            }
+            resolvedVersion = derivedVersion(channel, stableVersion, "0");
         }
-
-        if (official) {
-            throw new IllegalArgumentException(
-                    "Official " + channel.getName() + " builds require RELEASE_VERSION or BUILD_NUMBER");
-        }
-        return derivedVersion(channel, stableVersion, "0") + ".";
+        return resolvedVersion;
     }
 
     /// Validates an exact channel version.

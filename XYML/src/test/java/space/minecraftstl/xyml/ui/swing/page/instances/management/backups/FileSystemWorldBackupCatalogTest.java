@@ -17,8 +17,8 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.backups;
 
-import org.glavo.nbt.io.NBTCodec;
-import org.glavo.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
+import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

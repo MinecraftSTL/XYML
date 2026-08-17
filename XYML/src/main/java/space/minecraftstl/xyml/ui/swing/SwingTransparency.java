@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.ui.swing;
 
 import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.ui.FlatScrollPaneBorder;
+import com.formdev.flatlaf.ui.FlatScrollPaneUI;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import javax.swing.JScrollPane;
@@ -60,6 +62,12 @@ public final class SwingTransparency {
     /// @param scrollPane layout-only scroll container to configure
     public static void revealBackgroundThroughScrollPane(JScrollPane scrollPane) {
         JScrollPane target = Objects.requireNonNull(scrollPane, "scrollPane");
+        if (target.getUI() instanceof FlatScrollPaneUI
+                && target.getBorder() instanceof FlatScrollPaneBorder) {
+            // FlatLaf paints the hosted view's background whenever ScrollPane.arc is positive, even if this
+            // container is non-opaque. A local zero arc is therefore part of the background-reveal contract.
+            target.putClientProperty(FlatClientProperties.STYLE, Map.of("arc", 0));
+        }
         target.setOpaque(false);
         target.getViewport().setOpaque(false);
     }

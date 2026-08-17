@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.ui.swing.shell;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JComponent;
@@ -26,26 +27,44 @@ import javax.swing.TransferHandler;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.Component;
+import java.awt.Container;
 import java.io.File;
 import java.io.IOException;
+import java.io.Reader;
+import java.net.URI;
+import java.net.URL;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
-/// Routes one supported local file dropped on the application shell to a caller-owned command.
+/// Composes local-file, filtered file-list, and text drop routes on one Swing component.
 ///
-/// This handler performs only in-memory transfer inspection on the Swing event-dispatch thread. It
-/// deliberately does not stat, open, or parse the path; the receiving workflow owns all filesystem
-/// validation and blocking work. Multiple files and non-file transfer flavors are rejected so a
-/// single user action cannot ambiguously launch several nested workflows.
+/// The handler normalizes local paths but does not open or parse them. Route predicates should remain
+/// cheap; receiving workflows own complete validation and blocking work. Single-file routes take
+/// precedence, then filtered file-list routes, then text routes.
 @NotNullByDefault
 public final class ShellFileDropHandler extends TransferHandler {
-    /// Ordered mutable route table confined to the Swing event-dispatch thread.
+    /// Maximum text payload inspected synchronously by one drop operation.
+    private static final int MAX_TRANSFER_TEXT_LENGTH = 64 * 1024;
+
+    /// Maximum distinct plain-text representations considered for one drop.
+    private static final int MAX_TRANSFER_TEXT_CANDIDATES = 16;
+
+    /// Ordered single-file routes confined to the Swing event-dispatch thread.
     private final List<Route> routes = new ArrayList<>();
+
+    /// Ordered multi-file routes confined to the Swing event-dispatch thread.
+    private final List<FileListRoute> fileListRoutes = new ArrayList<>();
+
+    /// Ordered text routes confined to the Swing event-dispatch thread.
+    private final List<TextRoute> textRoutes = new ArrayList<>();
 
     /// Creates an empty handler ready to receive independently removable routes.
     private ShellFileDropHandler() {
@@ -89,6 +108,112 @@ public final class ShellFileDropHandler extends TransferHandler {
         return Objects.requireNonNull(result.get(), "route registration was not created");
     }
 
+    /// Registers a route receiving every matching path from a local file-list transfer.
+    ///
+    /// Unsupported files in the same drag are ignored. The command receives an immutable list in
+    /// transfer order, matching HMCL's filtered multi-file drop behavior.
+    ///
+    /// @param target component receiving local-file drops
+    /// @param supportedPath pure predicate identifying paths handled by this workflow
+    /// @param openCommand command invoked with all matching paths
+    /// @return independently removable route registration
+    public static RouteRegistration registerFiles(
+            JComponent target,
+            Predicate<Path> supportedPath,
+            Consumer<@Unmodifiable List<Path>> openCommand) {
+        JComponent resolvedTarget = Objects.requireNonNull(target, "target");
+        Predicate<Path> resolvedPredicate = Objects.requireNonNull(supportedPath, "supportedPath");
+        Consumer<@Unmodifiable List<Path>> resolvedCommand = Objects.requireNonNull(openCommand, "openCommand");
+        AtomicReference<@Nullable RouteRegistration> result = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            ShellFileDropHandler handler = handlerFor(resolvedTarget);
+            FileListRoute route = new FileListRoute(resolvedPredicate, resolvedCommand);
+            handler.fileListRoutes.add(route);
+            result.set(new RegisteredRoute(
+                    resolvedTarget,
+                    handler,
+                    () -> handler.fileListRoutes.remove(route)));
+        });
+        return Objects.requireNonNull(result.get(), "file-list route registration was not created");
+    }
+
+    /// Registers a route receiving text from browser or desktop drag sources.
+    ///
+    /// @param target component receiving text drops
+    /// @param supportedText pure predicate identifying supported text
+    /// @param openCommand command invoked with accepted trimmed text
+    /// @return independently removable route registration
+    public static RouteRegistration registerText(
+            JComponent target,
+            Predicate<String> supportedText,
+            Consumer<String> openCommand) {
+        JComponent resolvedTarget = Objects.requireNonNull(target, "target");
+        Predicate<String> resolvedPredicate = Objects.requireNonNull(supportedText, "supportedText");
+        Consumer<String> resolvedCommand = Objects.requireNonNull(openCommand, "openCommand");
+        AtomicReference<@Nullable RouteRegistration> result = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            ShellFileDropHandler handler = handlerFor(resolvedTarget);
+            TextRoute route = new TextRoute(resolvedPredicate, resolvedCommand);
+            handler.textRoutes.add(route);
+            result.set(new RegisteredRoute(
+                    resolvedTarget,
+                    handler,
+                    () -> handler.textRoutes.remove(route)));
+        });
+        return Objects.requireNonNull(result.get(), "text route registration was not created");
+    }
+
+    /// Reports whether a custom child transfer handler can delegate text to a shell ancestor.
+    ///
+    /// Native drop-over inspection uses advertised flavors only, preserving deferred Windows OLE
+    /// payloads until the operation has been accepted. Programmatic transfers validate the actual
+    /// decoded candidates before reporting support.
+    ///
+    /// @param support proposed transfer targeting a custom child handler
+    /// @return whether an ancestor text route can inspect or accepts the payload
+    public static boolean canImportAncestorText(TransferSupport support) {
+        TransferSupport transferSupport = Objects.requireNonNull(support, "support");
+        Component transferTarget = transferSupport.getComponent();
+        @Nullable ShellFileDropHandler ancestorHandler = findAncestorHandler(transferTarget);
+        if (ancestorHandler == null || !ancestorHandler.hasReachableTextRoute(transferTarget)) {
+            return false;
+        }
+        if (transferSupport.isDrop()) {
+            return hasPotentialTextFlavor(transferSupport.getDataFlavors());
+        }
+        for (String text : extractTextCandidates(transferSupport.getTransferable())) {
+            if (ancestorHandler.findTextRoute(transferTarget, text) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Delivers decoded text from a custom child transfer handler to its first matching ancestor route.
+    ///
+    /// @param support accepted transfer targeting a custom child handler
+    /// @return whether an ancestor route command completed successfully
+    public static boolean importAncestorText(TransferSupport support) {
+        TransferSupport transferSupport = Objects.requireNonNull(support, "support");
+        Component transferTarget = transferSupport.getComponent();
+        @Nullable ShellFileDropHandler ancestorHandler = findAncestorHandler(transferTarget);
+        if (ancestorHandler == null) {
+            return false;
+        }
+        for (String text : extractTextCandidates(transferSupport.getTransferable())) {
+            @Nullable TextRoute textRoute = ancestorHandler.findTextRoute(transferTarget, text);
+            if (textRoute != null) {
+                try {
+                    textRoute.openCommand().accept(text);
+                    return true;
+                } catch (RuntimeException ignored) {
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+
     /// Adds one route to the target's shared handler on the Swing event-dispatch thread.
     ///
     /// @param target component receiving local-file drops
@@ -101,53 +226,186 @@ public final class ShellFileDropHandler extends TransferHandler {
             Consumer<Path> openCommand) {
         EdtDispatcher.requireEventDispatchThread();
         Route route = new Route(supportedPath, openCommand);
-        @Nullable TransferHandler current = target.getTransferHandler();
-        final ShellFileDropHandler handler;
-        if (current == null) {
-            handler = new ShellFileDropHandler();
-            target.setTransferHandler(handler);
-        } else if (current instanceof ShellFileDropHandler compatible) {
-            handler = compatible;
-        } else {
-            throw new IllegalStateException(
-                    "The target already has an incompatible transfer handler");
-        }
+        ShellFileDropHandler handler = handlerFor(target);
         handler.routes.add(route);
-        return new RegisteredRoute(target, handler, route);
+        return new RegisteredRoute(target, handler, () -> handler.routes.remove(route));
     }
 
-    /// Reports whether the payload contains exactly one supported local file path.
+    /// Returns or installs the one compatible composite handler on a target.
+    ///
+    /// @param target component receiving drops
+    /// @return existing or newly installed handler
+    private static ShellFileDropHandler handlerFor(JComponent target) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable TransferHandler current = target.getTransferHandler();
+        if (current == null) {
+            ShellFileDropHandler handler = new ShellFileDropHandler();
+            target.setTransferHandler(handler);
+            return handler;
+        }
+        if (current instanceof ShellFileDropHandler compatible) {
+            return compatible;
+        }
+        throw new IllegalStateException("The target already has an incompatible transfer handler");
+    }
+
+    /// Reports whether any registered route accepts the transfer payload.
     ///
     /// @param support proposed transfer
     /// @return whether `importData` can route the payload
     @Override
     public boolean canImport(TransferSupport support) {
         Objects.requireNonNull(support, "support");
-        @Nullable Path path = extractSinglePath(support.getTransferable());
-        return path != null && findRoute(path) != null;
+        if (support.isDrop()) {
+            // Windows OLE payloads are not guaranteed to be readable until Swing accepts the drop.
+            return canImportDropFlavors(support.getComponent(), support);
+        }
+        Transferable transferable = support.getTransferable();
+        @Unmodifiable List<Path> paths = extractPaths(transferable);
+        if (paths.size() == 1 && findRoute(paths.get(0)) != null) {
+            return true;
+        }
+        if (!paths.isEmpty() && findFileListRoute(paths) != null) {
+            return true;
+        }
+        for (String text : extractTextCandidates(transferable)) {
+            if (findTextRoute(support.getComponent(), text) != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    /// Delivers one supported local file path to the caller-owned command.
+    /// Delivers the payload to the first matching route by route-kind precedence.
     ///
     /// @param support accepted transfer
     /// @return whether the command was invoked successfully
     @Override
     public boolean importData(TransferSupport support) {
         Objects.requireNonNull(support, "support");
-        @Nullable Path path = extractSinglePath(support.getTransferable());
-        if (path == null) {
-            return false;
+        Transferable transferable = support.getTransferable();
+        @Unmodifiable List<Path> paths = extractPaths(transferable);
+        if (paths.size() == 1) {
+            Path path = paths.get(0);
+            @Nullable Route route = findRoute(path);
+            if (route != null) {
+                try {
+                    route.openCommand().accept(path);
+                    return true;
+                } catch (RuntimeException ignored) {
+                    return false;
+                }
+            }
         }
-        @Nullable Route route = findRoute(path);
-        if (route == null) {
-            return false;
+        if (!paths.isEmpty()) {
+            @Nullable FileListRoute fileListRoute = findFileListRoute(paths);
+            if (fileListRoute != null) {
+                @Unmodifiable List<Path> accepted = matchingPaths(fileListRoute, paths);
+                if (!accepted.isEmpty()) {
+                    try {
+                        fileListRoute.openCommand().accept(accepted);
+                        return true;
+                    } catch (RuntimeException ignored) {
+                        return false;
+                    }
+                }
+            }
         }
-        try {
-            route.openCommand().accept(path);
+        for (String text : extractTextCandidates(transferable)) {
+            @Nullable TextRoute textRoute = findTextRoute(support.getComponent(), text);
+            if (textRoute != null) {
+                try {
+                    textRoute.openCommand().accept(text);
+                    return true;
+                } catch (RuntimeException ignored) {
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+
+    /// Reports whether an unread native payload exposes a flavor owned by any reachable route.
+    ///
+    /// Native Windows drag sources can defer `getTransferData` until the target accepts the drop. This
+    /// method therefore inspects only advertised flavors and never requests their values.
+    ///
+    /// @param transferTarget component receiving the native drag
+    /// @param transferable deferred native payload
+    /// @return whether a file or reachable text route can inspect the payload after drop acceptance
+    boolean canImportDropFlavors(
+            Component transferTarget,
+            Transferable transferable) {
+        Objects.requireNonNull(transferTarget, "transferTarget");
+        Transferable payload = Objects.requireNonNull(transferable, "transferable");
+        return canImportDropFlavors(
+                transferTarget,
+                payload.getTransferDataFlavors());
+    }
+
+    /// Reports whether an unread native Swing support exposes a flavor owned by any reachable route.
+    ///
+    /// @param transferTarget component receiving the native drag
+    /// @param support native Swing transfer support
+    /// @return whether a file or reachable text route can inspect the payload after drop acceptance
+    private boolean canImportDropFlavors(
+            Component transferTarget,
+            TransferSupport support) {
+        Objects.requireNonNull(transferTarget, "transferTarget");
+        TransferSupport nativeSupport = Objects.requireNonNull(support, "support");
+        return canImportDropFlavors(transferTarget, nativeSupport.getDataFlavors());
+    }
+
+    /// Reports whether advertised flavors can be handled without reading transfer data.
+    ///
+    /// @param transferTarget component receiving the native drag
+    /// @param flavors advertised native flavors
+    /// @return whether a file or reachable text route can inspect the payload after drop acceptance
+    private boolean canImportDropFlavors(
+            Component transferTarget,
+            DataFlavor @Unmodifiable [] flavors) {
+        Objects.requireNonNull(transferTarget, "transferTarget");
+        DataFlavor[] advertised = Objects.requireNonNull(flavors, "flavors");
+        if ((!routes.isEmpty() || !fileListRoutes.isEmpty()) && hasPotentialFileFlavor(advertised)) {
             return true;
-        } catch (RuntimeException ignored) {
-            return false;
         }
+        return hasReachableTextRoute(transferTarget) && hasPotentialTextFlavor(advertised);
+    }
+
+    /// Returns whether this handler or a shell ancestor owns at least one text route.
+    ///
+    /// @param transferTarget component receiving the transfer
+    /// @return whether browser text can be routed without reading it during native drag-over
+    private boolean hasReachableTextRoute(Component transferTarget) {
+        if (!textRoutes.isEmpty()) {
+            return true;
+        }
+        @Nullable Container ancestor = Objects.requireNonNull(transferTarget, "transferTarget").getParent();
+        while (ancestor != null) {
+            if (ancestor instanceof JComponent component
+                    && component.getTransferHandler() instanceof ShellFileDropHandler handler
+                    && !handler.textRoutes.isEmpty()) {
+                return true;
+            }
+            ancestor = ancestor.getParent();
+        }
+        return false;
+    }
+
+    /// Returns the nearest ancestor component using the composable shell drop handler.
+    ///
+    /// @param transferTarget custom child transfer target
+    /// @return nearest compatible ancestor handler, or null when detached from the shell
+    private static @Nullable ShellFileDropHandler findAncestorHandler(Component transferTarget) {
+        @Nullable Container ancestor = Objects.requireNonNull(transferTarget, "transferTarget").getParent();
+        while (ancestor != null) {
+            if (ancestor instanceof JComponent component
+                    && component.getTransferHandler() instanceof ShellFileDropHandler handler) {
+                return handler;
+            }
+            ancestor = ancestor.getParent();
+        }
+        return null;
     }
 
     /// Returns the first matching route without allowing one malformed predicate to break Swing DnD.
@@ -167,24 +425,357 @@ public final class ShellFileDropHandler extends TransferHandler {
         return null;
     }
 
-    /// Extracts exactly one normalized path from the standard Java file-list flavor.
+    /// Returns the first multi-file route accepting at least one path.
+    private @Nullable FileListRoute findFileListRoute(@Unmodifiable List<Path> paths) {
+        for (FileListRoute route : List.copyOf(fileListRoutes)) {
+            if (!matchingPaths(route, paths).isEmpty()) {
+                return route;
+            }
+        }
+        return null;
+    }
+
+    /// Filters paths accepted by one multi-file route without exposing predicate failures.
+    private static @Unmodifiable List<Path> matchingPaths(
+            FileListRoute route,
+            @Unmodifiable List<Path> paths) {
+        List<Path> accepted = new ArrayList<>();
+        for (Path path : paths) {
+            try {
+                if (route.supportedPath().test(path)) {
+                    accepted.add(path);
+                }
+            } catch (RuntimeException ignored) {
+                // A malformed predicate must not escape the Swing transfer callback.
+            }
+        }
+        return List.copyOf(accepted);
+    }
+
+    /// Returns the first route accepting transferred text.
+    private @Nullable TextRoute findTextRoute(Component transferTarget, String text) {
+        @Nullable TextRoute localRoute = findLocalTextRoute(text);
+        if (localRoute != null) {
+            return localRoute;
+        }
+        @Nullable Container ancestor = Objects.requireNonNull(transferTarget, "transferTarget").getParent();
+        while (ancestor != null) {
+            if (ancestor instanceof JComponent component
+                    && component.getTransferHandler() instanceof ShellFileDropHandler handler) {
+                @Nullable TextRoute inheritedRoute = handler.findLocalTextRoute(text);
+                if (inheritedRoute != null) {
+                    return inheritedRoute;
+                }
+            }
+            ancestor = ancestor.getParent();
+        }
+        return null;
+    }
+
+    /// Returns the first local route accepting transferred text.
+    private @Nullable TextRoute findLocalTextRoute(String text) {
+        for (TextRoute route : List.copyOf(textRoutes)) {
+            try {
+                if (route.supportedText().test(text)) {
+                    return route;
+                }
+            } catch (RuntimeException ignored) {
+                // One malformed predicate must not hide compatible routes registered after it.
+            }
+        }
+        return null;
+    }
+
+    /// Extracts normalized paths from Java file lists or desktop file-URI transfers.
     ///
     /// @param transferable platform transfer payload
-    /// @return normalized path, or `null` for unsupported or malformed payloads
-    private static @Nullable Path extractSinglePath(Transferable transferable) {
-        Objects.requireNonNull(transferable, "transferable");
-        if (!transferable.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+    /// @return immutable normalized paths, or an empty list for unsupported or malformed payloads
+    private static @Unmodifiable List<Path> extractPaths(Transferable transferable) {
+        Transferable payload = Objects.requireNonNull(transferable, "transferable");
+        @Nullable DataFlavor fileListFlavor = findMatchingFlavor(payload, DataFlavor.javaFileListFlavor);
+        if (fileListFlavor != null) {
+            try {
+                Object transferred = payload.getTransferData(fileListFlavor);
+                if (transferred instanceof List<?> files) {
+                    List<Path> paths = new ArrayList<>(files.size());
+                    for (Object file : files) {
+                        if (!(file instanceof File source)) {
+                            paths.clear();
+                            break;
+                        }
+                        paths.add(source.toPath().toAbsolutePath().normalize());
+                    }
+                    if (!paths.isEmpty()) {
+                        return List.copyOf(paths);
+                    }
+                }
+            } catch (IOException | UnsupportedFlavorException | RuntimeException ignored) {
+                // File-URI flavors may still carry the same local paths below.
+            }
+        }
+        List<Path> uriPaths = fileUriPaths(readFirstTextFlavor(payload, "text/uri-list"));
+        if (!uriPaths.isEmpty()) {
+            return uriPaths;
+        }
+        @Nullable String javaUrl = readJavaUrlFlavor(payload);
+        @Nullable Path javaUrlPath = fileUriPath(javaUrl);
+        return javaUrlPath == null ? List.of() : List.of(javaUrlPath);
+    }
+
+    /// Extracts ordered standard String and plain-text representations without allowing one to hide another.
+    private static @Unmodifiable List<String> extractTextCandidates(Transferable transferable) {
+        Transferable payload = Objects.requireNonNull(transferable, "transferable");
+        Set<String> candidates = new LinkedHashSet<>();
+        @Nullable DataFlavor stringFlavor = findMatchingFlavor(payload, DataFlavor.stringFlavor);
+        if (stringFlavor != null) {
+            try {
+                Object transferred = payload.getTransferData(stringFlavor);
+                if (transferred instanceof String text) {
+                    addCandidate(candidates, text);
+                }
+            } catch (IOException | UnsupportedFlavorException | RuntimeException ignored) {
+                // A standard plain-text flavor may still provide the same payload below.
+            }
+        }
+        for (String plainText : readTextFlavors(payload, "text/plain")) {
+            addCandidate(candidates, plainText);
+        }
+        return List.copyOf(candidates);
+    }
+
+    /// Returns whether a deferred payload might contain local files.
+    ///
+    /// @param transferable deferred platform payload
+    /// @return whether the payload advertises a supported local-file representation
+    private static boolean hasPotentialFileFlavor(Transferable transferable) {
+        Transferable payload = Objects.requireNonNull(transferable, "transferable");
+        return hasPotentialFileFlavor(payload.getTransferDataFlavors());
+    }
+
+    /// Returns whether one advertised flavor might contain local files.
+    ///
+    /// @param flavors advertised platform flavors
+    /// @return whether the flavor list contains a supported local-file representation
+    private static boolean hasPotentialFileFlavor(DataFlavor @Unmodifiable [] flavors) {
+        DataFlavor[] advertised = Objects.requireNonNull(flavors, "flavors");
+        if (findMatchingFlavor(advertised, DataFlavor.javaFileListFlavor) != null) {
+            return true;
+        }
+        for (DataFlavor flavor : advertised) {
+            if (flavor.isMimeTypeEqual("text/uri-list")
+                    || flavor.isMimeTypeEqual("application/x-java-url")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Returns whether a deferred payload might contain standard protocol text.
+    ///
+    /// @param transferable deferred platform payload
+    /// @return whether the payload advertises a supported text representation
+    private static boolean hasPotentialTextFlavor(Transferable transferable) {
+        Transferable payload = Objects.requireNonNull(transferable, "transferable");
+        return hasPotentialTextFlavor(payload.getTransferDataFlavors());
+    }
+
+    /// Returns whether one advertised flavor might contain standard protocol text.
+    ///
+    /// @param flavors advertised platform flavors
+    /// @return whether the flavor list contains a supported text representation
+    private static boolean hasPotentialTextFlavor(DataFlavor @Unmodifiable [] flavors) {
+        DataFlavor[] advertised = Objects.requireNonNull(flavors, "flavors");
+        if (findMatchingFlavor(advertised, DataFlavor.stringFlavor) != null) {
+            return true;
+        }
+        for (DataFlavor flavor : advertised) {
+            if (flavor.isMimeTypeEqual("text/plain")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Finds the first platform flavor compatible with one standard Swing flavor.
+    ///
+    /// Windows and browser data providers sometimes add representation parameters while retaining
+    /// the same MIME contract. `DataFlavor.match` accepts those compatible variants without reading
+    /// deferred transfer data.
+    ///
+    /// @param transferable platform transfer payload
+    /// @param requested standard flavor contract
+    /// @return compatible advertised flavor, or null when absent
+    private static @Nullable DataFlavor findMatchingFlavor(
+            Transferable transferable,
+            DataFlavor requested) {
+        return findMatchingFlavor(
+                Objects.requireNonNull(transferable, "transferable").getTransferDataFlavors(),
+                requested);
+    }
+
+    /// Finds the first compatible flavor in an already advertised flavor array.
+    ///
+    /// @param flavors advertised platform flavors
+    /// @param requested standard flavor contract
+    /// @return compatible advertised flavor, or null when absent
+    private static @Nullable DataFlavor findMatchingFlavor(
+            DataFlavor @Unmodifiable [] flavors,
+            DataFlavor requested) {
+        DataFlavor expected = Objects.requireNonNull(requested, "requested");
+        for (DataFlavor flavor : Objects.requireNonNull(flavors, "flavors")) {
+            if (flavor.match(expected)) {
+                return flavor;
+            }
+        }
+        return null;
+    }
+
+    /// Reads the first decodable text flavor with one exact MIME type.
+    ///
+    /// @param transferable platform transfer payload
+    /// @param mimeType MIME type without parameters
+    /// @return decoded bounded text, or null when every matching flavor is unreadable
+    private static @Nullable String readFirstTextFlavor(
+            Transferable transferable,
+            String mimeType) {
+        @Unmodifiable List<String> representations = readTextFlavors(transferable, mimeType);
+        return representations.isEmpty() ? null : representations.get(0);
+    }
+
+    /// Reads every decodable text flavor with one exact MIME type in advertised order.
+    ///
+    /// @param transferable platform transfer payload
+    /// @param mimeType MIME type without parameters
+    /// @return immutable bounded decoded representations
+    private static @Unmodifiable List<String> readTextFlavors(
+            Transferable transferable,
+            String mimeType) {
+        List<String> representations = new ArrayList<>();
+        for (DataFlavor flavor : Objects.requireNonNull(
+                transferable,
+                "transferable").getTransferDataFlavors()) {
+            if (representations.size() >= MAX_TRANSFER_TEXT_CANDIDATES) {
+                break;
+            }
+            if (!flavor.isMimeTypeEqual(Objects.requireNonNull(mimeType, "mimeType"))) {
+                continue;
+            }
+            @Nullable String text = readTextFlavor(transferable, flavor);
+            if (text != null) {
+                representations.add(text);
+            }
+        }
+        return List.copyOf(representations);
+    }
+
+    /// Reads one text flavor through the platform's charset-aware reader with a bounded size.
+    ///
+    /// @param transferable platform transfer payload
+    /// @param flavor supported text flavor
+    /// @return decoded text, or null for malformed, unsupported, or oversized data
+    private static @Nullable String readTextFlavor(
+            Transferable transferable,
+            DataFlavor flavor) {
+        try (Reader reader = Objects.requireNonNull(flavor, "flavor")
+                .getReaderForText(Objects.requireNonNull(transferable, "transferable"))) {
+            StringBuilder text = new StringBuilder();
+            char[] buffer = new char[1024];
+            int count;
+            while ((count = reader.read(buffer)) >= 0) {
+                if (text.length() + count > MAX_TRANSFER_TEXT_LENGTH) {
+                    return null;
+                }
+                text.append(buffer, 0, count);
+            }
+            return text.toString();
+        } catch (IOException | UnsupportedFlavorException | RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    /// Reads a Java URL flavor exposed by Chromium-family desktop drag sources.
+    ///
+    /// @param transferable platform transfer payload
+    /// @return URL text, or null when absent or malformed
+    private static @Nullable String readJavaUrlFlavor(Transferable transferable) {
+        Transferable payload = Objects.requireNonNull(transferable, "transferable");
+        for (DataFlavor flavor : payload.getTransferDataFlavors()) {
+            if (!flavor.isMimeTypeEqual("application/x-java-url")) {
+                continue;
+            }
+            try {
+                Object transferred = payload.getTransferData(flavor);
+                if (transferred instanceof URL url) {
+                    String text = url.toExternalForm();
+                    return text.length() <= MAX_TRANSFER_TEXT_LENGTH ? text : null;
+                }
+                if (transferred instanceof URI uri) {
+                    String text = uri.toASCIIString();
+                    return text.length() <= MAX_TRANSFER_TEXT_LENGTH ? text : null;
+                }
+                if (transferred instanceof String text && text.length() <= MAX_TRANSFER_TEXT_LENGTH) {
+                    return text;
+                }
+            } catch (IOException | UnsupportedFlavorException | RuntimeException ignored) {
+                // Another representation of the same MIME type may still be readable.
+            }
+        }
+        return null;
+    }
+
+    /// Adds one trimmed bounded representation while preserving the first occurrence.
+    ///
+    /// @param candidates ordered bounded candidate collection
+    /// @param candidate text representation, or null
+    private static void addCandidate(Set<String> candidates, @Nullable String candidate) {
+        if (candidate == null || candidates.size() >= MAX_TRANSFER_TEXT_CANDIDATES) {
+            return;
+        }
+        String normalized = candidate.trim();
+        if (!normalized.isEmpty() && normalized.length() <= MAX_TRANSFER_TEXT_LENGTH) {
+            candidates.add(normalized);
+        }
+    }
+
+    /// Converts every file URI in one desktop URI-list transfer to a normalized local path.
+    ///
+    /// @param uriList decoded URI-list text, or null
+    /// @return immutable file paths in transfer order
+    private static @Unmodifiable List<Path> fileUriPaths(@Nullable String uriList) {
+        if (uriList == null) {
+            return List.of();
+        }
+        List<Path> paths = new ArrayList<>();
+        for (String line : uriList.lines().toList()) {
+            String candidate = line.trim();
+            if (candidate.isEmpty() || candidate.startsWith("#")) {
+                continue;
+            }
+            @Nullable Path path = fileUriPath(candidate);
+            if (path != null) {
+                paths.add(path);
+            }
+        }
+        return List.copyOf(paths);
+    }
+
+    /// Converts one absolute file URI to a normalized local path.
+    ///
+    /// @param candidate URI text, or null
+    /// @return normalized local path, or null for non-file and malformed URIs
+    private static @Nullable Path fileUriPath(@Nullable String candidate) {
+        if (candidate == null || candidate.isBlank()) {
             return null;
         }
         try {
-            Object transferred = transferable.getTransferData(DataFlavor.javaFileListFlavor);
-            if (!(transferred instanceof List<?> files)
-                    || files.size() != 1
-                    || !(files.get(0) instanceof File file)) {
+            URI uri = URI.create(candidate.trim());
+            if (!"file".equalsIgnoreCase(uri.getScheme())
+                    || uri.getQuery() != null
+                    || uri.getFragment() != null) {
                 return null;
             }
-            return file.toPath().toAbsolutePath().normalize();
-        } catch (IOException | UnsupportedFlavorException | RuntimeException ignored) {
+            return Path.of(uri).toAbsolutePath().normalize();
+        } catch (RuntimeException ignored) {
             return null;
         }
     }
@@ -198,6 +789,28 @@ public final class ShellFileDropHandler extends TransferHandler {
         /// Validates and creates an immutable route.
         private Route {
             Objects.requireNonNull(supportedPath, "supportedPath");
+            Objects.requireNonNull(openCommand, "openCommand");
+        }
+    }
+
+    /// Immutable filtered multi-file route.
+    @NotNullByDefault
+    private record FileListRoute(
+            Predicate<Path> supportedPath,
+            Consumer<@Unmodifiable List<Path>> openCommand) {
+        /// Validates one multi-file route.
+        private FileListRoute {
+            Objects.requireNonNull(supportedPath, "supportedPath");
+            Objects.requireNonNull(openCommand, "openCommand");
+        }
+    }
+
+    /// Immutable text route.
+    @NotNullByDefault
+    private record TextRoute(Predicate<String> supportedText, Consumer<String> openCommand) {
+        /// Validates one text route.
+        private TextRoute {
+            Objects.requireNonNull(supportedText, "supportedText");
             Objects.requireNonNull(openCommand, "openCommand");
         }
     }
@@ -220,8 +833,8 @@ public final class ShellFileDropHandler extends TransferHandler {
         /// Shared ordered transfer handler containing this registration.
         private final ShellFileDropHandler handler;
 
-        /// Exact route removed by this registration.
-        private final Route route;
+        /// Exact route-removal action owned by this registration.
+        private final Runnable removeRoute;
 
         /// Whether this registration has already been removed.
         private boolean closed;
@@ -230,14 +843,14 @@ public final class ShellFileDropHandler extends TransferHandler {
         ///
         /// @param target component hosting the shared handler
         /// @param handler shared ordered handler
-        /// @param route exact route owned by this registration
+        /// @param removeRoute exact route-removal action owned by this registration
         private RegisteredRoute(
                 JComponent target,
                 ShellFileDropHandler handler,
-                Route route) {
+                Runnable removeRoute) {
             this.target = Objects.requireNonNull(target, "target");
             this.handler = Objects.requireNonNull(handler, "handler");
-            this.route = Objects.requireNonNull(route, "route");
+            this.removeRoute = Objects.requireNonNull(removeRoute, "removeRoute");
         }
 
         /// Removes only this route and clears the handler when no route remains.
@@ -253,8 +866,11 @@ public final class ShellFileDropHandler extends TransferHandler {
                 return;
             }
             closed = true;
-            handler.routes.remove(route);
-            if (handler.routes.isEmpty() && target.getTransferHandler() == handler) {
+            removeRoute.run();
+            if (handler.routes.isEmpty()
+                    && handler.fileListRoutes.isEmpty()
+                    && handler.textRoutes.isEmpty()
+                    && target.getTransferHandler() == handler) {
                 target.setTransferHandler(null);
             }
         }

@@ -31,7 +31,7 @@ public final class ThemeColorTest {
     @Test
     public void testOf() {
         assertEquals(new ThemeColor("#AABBCC", "#AABBCC"), ThemeColor.of("#AABBCC"));
-        assertEquals(new ThemeColor("blue", "#5C6BC0"), ThemeColor.of("blue"));
+        assertEquals(new ThemeColor("blue", "#5555FF"), ThemeColor.of("blue"));
         assertEquals(new ThemeColor("darker_blue", "#283593"), ThemeColor.of("darker_blue"));
         assertEquals(new ThemeColor("green", "#43A047"), ThemeColor.of("green"));
         assertEquals(new ThemeColor("orange", "#E67E22"), ThemeColor.of("orange"));

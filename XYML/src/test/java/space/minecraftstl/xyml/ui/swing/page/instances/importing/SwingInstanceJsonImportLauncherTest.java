@@ -72,7 +72,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies JSON window reuse and coexistence with earlier shell drop routes.
+/// Verifies page-scoped JSON window reuse and coexistence with earlier shell drop routes.
 @NotNullByDefault
 final class SwingInstanceJsonImportLauncherTest {
     /// Routes JSON to the reusable import window while preserving and independently closing NBT.
@@ -101,25 +101,35 @@ final class SwingInstanceJsonImportLauncherTest {
             assertTrue(handler.importData(transfer(List.of(new File("first.JSON")))));
             assertTrue(handler.importData(transfer(List.of(new File("second.json")))));
             assertFalse(handler.canImport(transfer(List.of(new File("notes.txt")))));
+            shell.navigateTo(ShellPageId.DOWNLOADS);
+            assertFalse(handler.canImport(transfer(List.of(new File("downloads.json")))));
+            shell.navigateTo(ShellPageId.ACCOUNTS);
+            assertFalse(handler.canImport(transfer(List.of(new File("accounts.json")))));
+            shell.navigateTo(ShellPageId.SETTINGS);
+            assertFalse(handler.canImport(transfer(List.of(new File("settings.json")))));
+            shell.navigateTo(ShellPageId.INSTANCES);
+            assertTrue(handler.importData(transfer(List.of(new File("third.json")))));
         });
 
         assertEquals(List.of(Path.of("level.dat").toAbsolutePath().normalize()), nbtSources);
         assertEquals(1, windows.windows().size());
         assertEquals(List.of(
                 Path.of("first.JSON").toAbsolutePath().normalize(),
-                Path.of("second.json").toAbsolutePath().normalize()),
+                Path.of("second.json").toAbsolutePath().normalize(),
+                Path.of("third.json").toAbsolutePath().normalize()),
                 windows.windows().get(0).sources());
-        assertEquals(2, windows.windows().get(0).showCount());
+        assertEquals(3, windows.windows().get(0).showCount());
 
         Objects.requireNonNull(launcherReference.get()).close();
         EdtDispatcher.executeAndWait(() -> {
             TransferHandler remaining = Objects.requireNonNull(shell.getTransferHandler());
-            assertFalse(remaining.canImport(transfer(List.of(new File("third.json")))));
+            assertFalse(remaining.canImport(transfer(List.of(new File("fourth.json")))));
             assertTrue(remaining.canImport(transfer(List.of(new File("other.dat")))));
             Objects.requireNonNull(nbtRegistration.get()).close();
-            assertNull(shell.getTransferHandler());
+            assertFalse(remaining.canImport(transfer(List.of(new File("other.dat")))));
         });
         shell.close();
+        EdtDispatcher.executeAndWait(() -> assertNull(shell.getTransferHandler()));
     }
 
     /// Creates a complete headless shell on the EDT.

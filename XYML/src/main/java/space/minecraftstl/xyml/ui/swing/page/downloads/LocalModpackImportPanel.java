@@ -181,16 +181,36 @@ public final class LocalModpackImportPanel extends JPanel implements AutoCloseab
             return;
         }
 
-        Path archive = chooser.getSelectedFile().toPath().toAbsolutePath().normalize();
-        if (!Files.isRegularFile(archive) || !ModpackHelper.isFileModpackByExtension(archive)) {
+        acceptArchive(chooser.getSelectedFile().toPath());
+    }
+
+    /// Stores a supported archive received from a page-level file drop.
+    ///
+    /// @param archive dropped local archive
+    public void acceptDroppedArchive(Path archive) {
+        EdtDispatcher.requireEventDispatchThread();
+        acceptArchive(archive);
+    }
+
+    /// Validates and displays one archive selected by a chooser or file drop.
+    ///
+    /// @param archive candidate local archive
+    private void acceptArchive(Path archive) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(archive, "archive");
+        if (closed || activeExecutor != null) {
+            return;
+        }
+        Path normalized = archive.toAbsolutePath().normalize();
+        if (!Files.isRegularFile(normalized) || !ModpackHelper.isFileModpackByExtension(normalized)) {
             setStatus(i18n("modpack.unsupported"));
             return;
         }
 
-        selectedArchive = archive;
-        archiveField.setText(archive.toString());
+        selectedArchive = normalized;
+        archiveField.setText(normalized.toString());
         if (instanceNameField.getText().isBlank()) {
-            instanceNameField.setText(FileUtils.getNameWithoutExtension(archive));
+            instanceNameField.setText(FileUtils.getNameWithoutExtension(normalized));
         }
         setStatus("");
         updateImportButton();

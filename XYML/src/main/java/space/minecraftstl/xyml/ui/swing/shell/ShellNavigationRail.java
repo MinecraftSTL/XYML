@@ -17,12 +17,14 @@
  */
 package space.minecraftstl.xyml.ui.swing.shell;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.Metadata;
 
+import javax.swing.AbstractButton;
 import javax.swing.ButtonGroup;
 import javax.swing.Icon;
 import javax.swing.JButton;
@@ -38,6 +40,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -46,8 +49,12 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// Renders icon-only primary navigation with Settings, community, and help actions anchored at the bottom.
 @NotNullByDefault
 final class ShellNavigationRail extends JPanel {
-    /// Stable icon button width and height.
-    static final int BUTTON_SIZE = 42;
+    /// Stable width and height of every navigation-rail button and its rendered background.
+    static final int BUTTON_SIZE = 40;
+
+    /// Shared MigLayout constraint for every navigation-rail button.
+    private static final String BUTTON_CONSTRAINTS =
+            "w " + BUTTON_SIZE + "!, h " + BUTTON_SIZE + "!";
 
     /// Stable official-community destination resolved from launcher metadata.
     private static final URI OFFICIAL_GROUP_URI = URI.create(Metadata.GROUPS_URL);
@@ -114,9 +121,9 @@ final class ShellNavigationRail extends JPanel {
                 presentations.get(ShellPageId.SETTINGS),
                 toggle);
         officialGroupButton = createOfficialGroupButton(openExternalLink);
-        auxiliaryGroup.add(officialGroupButton, "w 42!, h 42!");
+        auxiliaryGroup.add(officialGroupButton, BUTTON_CONSTRAINTS);
         helpButton = createHelpButton(openExternalLink);
-        auxiliaryGroup.add(helpButton, "w 42!, h 42!");
+        auxiliaryGroup.add(helpButton, BUTTON_CONSTRAINTS);
         add(primaryGroup, BorderLayout.NORTH);
         add(auxiliaryGroup, BorderLayout.SOUTH);
     }
@@ -176,14 +183,11 @@ final class ShellNavigationRail extends JPanel {
         JButton button = new JButton(icon);
         button.setName(name);
         button.setText(fallbackText);
-        button.setHorizontalAlignment(SwingConstants.CENTER);
-        button.setMargin(new Insets(8, 8, 8, 8));
-        button.setPreferredSize(new Dimension(BUTTON_SIZE, BUTTON_SIZE));
+        configureRailButton(button);
         button.setToolTipText(label);
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         button.setFocusable(true);
         button.setFocusPainted(true);
-        button.putClientProperty("JButton.buttonType", "toolBarButton");
         button.getAccessibleContext().setAccessibleName(label);
         button.addActionListener(event -> openExternalLink.accept(target));
         return button;
@@ -219,7 +223,7 @@ final class ShellNavigationRail extends JPanel {
     private static JPanel createGroup(String layoutConstraints) {
         JPanel group = new JPanel(new MigLayout(
                 Objects.requireNonNull(layoutConstraints, "layoutConstraints") + ", flowy, gap 6",
-                "[42!]",
+                "[" + BUTTON_SIZE + "!]",
                 "[]"));
         group.setOpaque(false);
         return group;
@@ -238,14 +242,26 @@ final class ShellNavigationRail extends JPanel {
             Consumer<ShellPageId> toggle) {
         ShellNavigationButton button = new ShellNavigationButton(page, presentation);
         button.setText(null);
-        button.setHorizontalAlignment(SwingConstants.CENTER);
-        button.setMargin(new Insets(8, 8, 8, 8));
-        button.setPreferredSize(new Dimension(BUTTON_SIZE, BUTTON_SIZE));
+        configureRailButton(button);
         button.setToolTipText(presentation.label());
         button.addActionListener(event -> toggle.accept(page));
         buttonGroup.add(button);
         buttons.put(page, button);
-        group.add(button, "w 42!, h 42!");
+        group.add(button, BUTTON_CONSTRAINTS);
+    }
+
+    /// Configures one exact-size button without FlatLaf's asymmetric toolbar background insets.
+    ///
+    /// @param button navigation or independent action button
+    private static void configureRailButton(AbstractButton button) {
+        AbstractButton target = Objects.requireNonNull(button, "button");
+        target.setHorizontalAlignment(SwingConstants.CENTER);
+        target.setMargin(new Insets(8, 8, 8, 8));
+        target.setPreferredSize(new Dimension(BUTTON_SIZE, BUTTON_SIZE));
+        target.putClientProperty("JButton.buttonType", "toolBarButton");
+        target.putClientProperty(
+                FlatClientProperties.STYLE,
+                Map.of("toolbar.spacingInsets", new Insets(0, 0, 0, 0)));
     }
 
     /// Synchronizes visual selection with the active side page.

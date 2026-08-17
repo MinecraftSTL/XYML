@@ -491,12 +491,44 @@ public final class AccountsPanel extends JPanel implements AutoCloseable {
 
     /// Opens the owned persistent authlib-injector server workflow when this account source supports it.
     private void openAuthlibServerManagement() {
+        openAuthlibServerManagement(this, null);
+    }
+
+    /// Opens server registration for an endpoint dropped anywhere on the application shell.
+    ///
+    /// The dialog resolves metadata automatically but preserves its explicit Add confirmation.
+    ///
+    /// @param owner visible shell component owning the modal workflow
+    /// @param endpoint decoded authlib-injector server endpoint
+    public void openDroppedAuthlibServer(Component owner, String endpoint) {
+        EdtDispatcher.requireEventDispatchThread();
+        openAuthlibServerManagement(
+                Objects.requireNonNull(owner, "owner"),
+                Objects.requireNonNull(endpoint, "endpoint"));
+    }
+
+    /// Opens ordinary management or prefilled endpoint registration when supported by the model.
+    ///
+    /// @param owner component owning the modal workflow
+    /// @param initialEndpoint prefilled endpoint, or null for ordinary management
+    private void openAuthlibServerManagement(
+            Component owner,
+            @Nullable String initialEndpoint) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed || refreshInProgress) {
             return;
         }
-        model.authlibServerStore().ifPresent(
-                store -> new SwingAuthlibServerManagementDialog(this, store, Schedulers.io()).open());
+        model.authlibServerStore().ifPresent(store -> {
+            SwingAuthlibServerManagementDialog dialog = new SwingAuthlibServerManagementDialog(
+                    owner,
+                    store,
+                    Schedulers.io());
+            if (initialEndpoint == null) {
+                dialog.open();
+            } else {
+                dialog.openForEndpoint(initialEndpoint);
+            }
+        });
     }
 
     /// Opens local skin management only when the loaded selection remains an actual offline account.

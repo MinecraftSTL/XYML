@@ -96,7 +96,7 @@ public final class ThemeSelectionResolverTest {
                 () -> assertEquals(missing, selected.requestedReference()),
                 () -> assertEquals(ThemeSelectionResolver.DEFAULT_FALLBACK, selected.effectiveReference()),
                 () -> assertEquals(ThemeBrightness.DARK, selected.theme().brightness()),
-                () -> assertEquals(ThemeColor.of("#6B69D6"), selected.theme().primaryColorSeed()));
+                () -> assertEquals(ThemeColor.of("#5555FF"), selected.theme().primaryColorSeed()));
     }
 
     /// Loads the packaged offline inventory and creates one resolver.

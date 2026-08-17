@@ -17,16 +17,16 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
-import org.glavo.nbt.tag.ByteTag;
-import org.glavo.nbt.tag.CompoundTag;
-import org.glavo.nbt.tag.DoubleTag;
-import org.glavo.nbt.tag.FloatTag;
-import org.glavo.nbt.tag.IntArrayTag;
-import org.glavo.nbt.tag.IntTag;
-import org.glavo.nbt.tag.ListTag;
-import org.glavo.nbt.tag.LongTag;
-import org.glavo.nbt.tag.StringTag;
-import org.glavo.nbt.tag.Tag;
+import space.minecraftstl.xyml.library.nbt.tag.ByteTag;
+import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.tag.DoubleTag;
+import space.minecraftstl.xyml.library.nbt.tag.FloatTag;
+import space.minecraftstl.xyml.library.nbt.tag.IntArrayTag;
+import space.minecraftstl.xyml.library.nbt.tag.IntTag;
+import space.minecraftstl.xyml.library.nbt.tag.ListTag;
+import space.minecraftstl.xyml.library.nbt.tag.LongTag;
+import space.minecraftstl.xyml.library.nbt.tag.StringTag;
+import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.World;

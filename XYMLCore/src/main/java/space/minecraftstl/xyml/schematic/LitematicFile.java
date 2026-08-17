@@ -17,14 +17,14 @@
  */
 package space.minecraftstl.xyml.schematic;
 
-import org.glavo.nbt.io.NBTCodec;
-import org.glavo.nbt.tag.CompoundTag;
-import org.glavo.nbt.tag.IntArrayTag;
-import org.glavo.nbt.tag.IntTag;
-import org.glavo.nbt.tag.LongTag;
-import org.glavo.nbt.tag.StringTag;
-import org.glavo.nbt.tag.Tag;
-import org.glavo.nbt.tag.TagType;
+import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
+import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.tag.IntArrayTag;
+import space.minecraftstl.xyml.library.nbt.tag.IntTag;
+import space.minecraftstl.xyml.library.nbt.tag.LongTag;
+import space.minecraftstl.xyml.library.nbt.tag.StringTag;
+import space.minecraftstl.xyml.library.nbt.tag.Tag;
+import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;

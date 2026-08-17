@@ -202,7 +202,8 @@ public final class XYMLGameLauncher extends DefaultLauncher {
             throw new IOException("Missing xyml.lwjgl-unsafe-agent.version attribute");
         }
 
-        Library library = new Library(new Artifact("org.glavo", "lwjgl-unsafe-agent", agentVersion));
+        Library library = new Library(new Artifact(
+                "space.minecraftstl.xyml", "lwjgl-unsafe-agent", agentVersion));
         String fileName = library.artifact().getFileName();
 
         Path agentPath = repository.getLibraryFile(manifest, library).toAbsolutePath().normalize();

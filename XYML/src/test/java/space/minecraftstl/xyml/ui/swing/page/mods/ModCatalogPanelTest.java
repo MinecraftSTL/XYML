@@ -40,15 +40,23 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
+import javax.swing.TransferHandler;
+import javax.swing.event.ListDataEvent;
+import javax.swing.event.ListDataListener;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Rectangle;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
+import java.io.File;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -58,9 +66,11 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Headless tests for the independent Swing Mod page and production constructor boundary.
@@ -141,6 +151,7 @@ public final class ModCatalogPanelTest {
             assertEquals("mod-1:false", model.enabledCommands().get(0));
             findButton(panel, "modsImport").doClick();
             assertEquals(List.of(Path.of("incoming.jar")), model.imports().get(0));
+            assertEquals(Map.of(), model.importConflictActions().get(0));
             findButton(panel, "modsOpenDirectory").doClick();
             assertEquals(1, interactions.openCount());
             findButton(panel, "modsReveal").doClick();
@@ -160,6 +171,120 @@ public final class ModCatalogPanelTest {
 
         assertTrue(model.closed());
         assertNotNull(panelReference.get());
+    }
+
+    /// Same-key imports prompt for a decision and submit that exact decision with the source batch.
+    @Test
+    public void resolvesImportConflictsBeforeSubmittingMutation() throws Exception {
+        RecordingModel model = new RecordingModel(items(1));
+        RecordingInteractions interactions = new RecordingInteractions();
+        Path conflict = Path.of("incoming.jar").toAbsolutePath().normalize();
+        model.replaceImportConflicts(List.of(conflict));
+        interactions.replaceImportConflictAction(ModImportConflictAction.KEEP);
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            findButton(panel, "modsImport").doClick();
+
+            assertEquals(List.of(conflict), interactions.importConflictSources());
+            assertEquals(List.of(Path.of("incoming.jar")), model.imports().get(0));
+            assertEquals(
+                    Map.of(conflict, ModImportConflictAction.KEEP),
+                    model.importConflictActions().get(0));
+            panel.close();
+        });
+    }
+
+    /// A conflict discovered during background preflight returns to the same choice flow and retries.
+    @Test
+    public void resolvesLateImportConflictAndRetriesMutation() throws Exception {
+        RecordingModel model = new RecordingModel(items(1));
+        RecordingInteractions interactions = new RecordingInteractions();
+        Path conflict = Path.of("incoming.jar").toAbsolutePath().normalize();
+        model.replaceLateImportConflict(conflict);
+        interactions.replaceImportConflictAction(ModImportConflictAction.SKIP);
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            findButton(panel, "modsImport").doClick();
+
+            assertEquals(List.of(conflict), interactions.importConflictSources());
+            assertEquals(2, model.imports().size());
+            assertEquals(Map.of(), model.importConflictActions().get(0));
+            assertEquals(
+                    Map.of(conflict, ModImportConflictAction.SKIP),
+                    model.importConflictActions().get(1));
+            panel.close();
+        });
+    }
+
+    /// A page event queued before deletion cannot reselect a row that has left the current logical index.
+    @Test
+    public void ignoresLoadedRowsThatLeftCurrentLogicalIndex() throws Exception {
+        RecordingModel model = new RecordingModel(items(2));
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(
+                    model, STRINGS, ACTION_STRINGS, new RecordingInteractions());
+            panel.setSize(new Dimension(900, 620));
+            layoutRecursively(panel);
+            panel.choiceList().refreshLoadPlan();
+
+            JList<?> list = panel.choiceList().getList();
+            list.setSelectedIndex(1);
+            assertEquals(List.of("mod-1"), model.selectedKeys());
+
+            model.replaceFilteredLocalKeys(List.of("mod-0"));
+            ListDataEvent stalePageEvent = new ListDataEvent(
+                    panel.choiceList().getChoiceModel(),
+                    ListDataEvent.CONTENTS_CHANGED,
+                    1,
+                    1);
+            assertDoesNotThrow(() -> {
+                for (ListDataListener listener
+                        : panel.choiceList().getChoiceModel().getListDataListeners()) {
+                    listener.contentsChanged(stalePageEvent);
+                }
+            });
+
+            assertTrue(list.isSelectionEmpty());
+            assertEquals(List.of("mod-1"), model.selectedKeys());
+            panel.close();
+        });
+    }
+
+    /// A page-scoped drop defers supported Mods past the native callback and detaches on close.
+    @Test
+    public void importsSupportedDroppedModsOnlyWhileOpen() throws Exception {
+        RecordingModel model = new RecordingModel(items(4));
+        RecordingInteractions interactions = new RecordingInteractions();
+        AtomicReference<@Nullable ModCatalogPanel> panelReference = new AtomicReference<>();
+
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
+            panelReference.set(panel);
+            TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+            TransferHandler.TransferSupport transfer = fileTransfer(panel, List.of(
+                    new File("first.jar"),
+                    new File("notes.txt"),
+                    new File("second.litemod")));
+
+            assertTrue(handler.canImport(transfer));
+            assertTrue(handler.importData(transfer));
+            assertTrue(model.imports().isEmpty());
+        });
+        SwingUtilities.invokeAndWait(() -> { });
+        SwingUtilities.invokeAndWait(() -> {
+            assertEquals(
+                    List.of(
+                            Path.of("first.jar").toAbsolutePath().normalize(),
+                            Path.of("second.litemod").toAbsolutePath().normalize()),
+                    model.imports().get(0));
+
+            ModCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+            panel.close();
+            assertNull(panel.getTransferHandler());
+        });
     }
 
     /// Logical select-all and batch commands use stable keys without loading off-screen rows.
@@ -312,6 +437,52 @@ public final class ModCatalogPanelTest {
         return List.copyOf(items);
     }
 
+    /// Creates one local-file-list transfer wrapper for page drop tests.
+    ///
+    /// @param component transfer target
+    /// @param files local file payload
+    /// @return transfer support exposing the Java file-list flavor
+    private static TransferHandler.TransferSupport fileTransfer(
+            JPanel component,
+            @Unmodifiable List<File> files) {
+        return new TransferHandler.TransferSupport(component, new FileListTransferable(files));
+    }
+
+    /// Immutable file-list transferable for page drop tests.
+    @NotNullByDefault
+    private static final class FileListTransferable implements Transferable {
+        /// Immutable local files.
+        private final @Unmodifiable List<File> files;
+
+        /// Creates one file-list payload.
+        ///
+        /// @param files local files to expose
+        private FileListTransferable(@Unmodifiable List<File> files) {
+            this.files = List.copyOf(files);
+        }
+
+        /// Returns the supported Java file-list flavor.
+        @Override
+        public DataFlavor @Unmodifiable [] getTransferDataFlavors() {
+            return new DataFlavor[]{DataFlavor.javaFileListFlavor};
+        }
+
+        /// Reports whether the requested flavor is supported.
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor flavor) {
+            return DataFlavor.javaFileListFlavor.equals(flavor);
+        }
+
+        /// Returns the immutable local files.
+        @Override
+        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+            if (!isDataFlavorSupported(flavor)) {
+                throw new UnsupportedFlavorException(flavor);
+            }
+            return files;
+        }
+    }
+
     /// Creates a dynamic real repository boundary that exposes only the production constructor path.
     ///
     /// @param modsDirectory deterministic Mod directory
@@ -437,6 +608,9 @@ public final class ModCatalogPanelTest {
         /// Immutable public source rows.
         private final @Unmodifiable List<ModCatalogItem> items;
 
+        /// Current logical row identities, which may advance before the fake visual source.
+        private @Unmodifiable List<String> filteredLocalKeys;
+
         /// Snapshot transition support.
         private final ValueChangeSupport<ModCatalogSnapshot> changes = new ValueChangeSupport<>(this);
 
@@ -464,6 +638,16 @@ public final class ModCatalogPanelTest {
         /// Import commands.
         private final List<@Unmodifiable List<Path>> imports = new ArrayList<>();
 
+        /// Conflict decisions matching import commands.
+        private final List<@Unmodifiable Map<Path, ModImportConflictAction>>
+                importConflictActions = new ArrayList<>();
+
+        /// Import sources classified as conflicting before submission.
+        private @Unmodifiable List<Path> importConflicts = List.of();
+
+        /// Conflict surfaced only when an import without its decision reaches the fake backend.
+        private @Nullable Path lateImportConflict;
+
         /// Deleted stable keys.
         private final List<String> deletedKeys = new ArrayList<>();
 
@@ -481,6 +665,7 @@ public final class ModCatalogPanelTest {
         /// @param items immutable source rows
         private RecordingModel(@Unmodifiable List<ModCatalogItem> items) {
             this.items = List.copyOf(items);
+            filteredLocalKeys = items.stream().map(ModCatalogItem::localKey).toList();
             snapshot = new ModCatalogSnapshot(
                     OptionalInt.empty(),
                     OptionalInt.of(items.size()),
@@ -516,7 +701,7 @@ public final class ModCatalogPanelTest {
         /// Returns immutable stable keys matching the fake's logical list order.
         @Override
         public @Unmodifiable List<String> filteredLocalKeys() {
-            return items.stream().map(ModCatalogItem::localKey).toList();
+            return filteredLocalKeys;
         }
 
         /// Keeps the already-ready fake source unchanged.
@@ -544,6 +729,9 @@ public final class ModCatalogPanelTest {
         /// Records one stable selection.
         @Override
         public void selectMod(String localKey) {
+            if (!filteredLocalKeys.contains(localKey)) {
+                throw new IllegalArgumentException("Unknown filtered Mod: " + localKey);
+            }
             selectedKeys.add(localKey);
         }
 
@@ -562,6 +750,12 @@ public final class ModCatalogPanelTest {
                     snapshot.filter(),
                     snapshot.listEnabled(),
                     snapshot.refreshEnabled());
+        }
+
+        /// Returns configured normalized import conflicts.
+        @Override
+        public @Unmodifiable List<Path> findImportConflicts(@Unmodifiable List<Path> sources) {
+            return importConflicts;
         }
 
         /// Records one enabled-state command.
@@ -583,8 +777,15 @@ public final class ModCatalogPanelTest {
 
         /// Records one import command.
         @Override
-        public CompletionStage<ModCatalogSnapshot> importMods(@Unmodifiable List<Path> sources) {
+        public CompletionStage<ModCatalogSnapshot> importMods(
+                @Unmodifiable List<Path> sources,
+                @Unmodifiable Map<Path, ModImportConflictAction> conflictActions) {
             imports.add(List.copyOf(sources));
+            importConflictActions.add(Map.copyOf(conflictActions));
+            @Nullable Path conflict = lateImportConflict;
+            if (conflict != null && !conflictActions.containsKey(conflict)) {
+                return CompletableFuture.failedFuture(new ModImportConflictException(conflict));
+            }
             return CompletableFuture.completedFuture(snapshot);
         }
 
@@ -640,6 +841,13 @@ public final class ModCatalogPanelTest {
         /// @return rows
         private @Unmodifiable List<ModCatalogItem> items() {
             return items;
+        }
+
+        /// Advances logical row identities without replacing already loaded visual rows.
+        ///
+        /// @param localKeys replacement logical identities
+        private void replaceFilteredLocalKeys(@Unmodifiable List<String> localKeys) {
+            filteredLocalKeys = List.copyOf(localKeys);
         }
 
         /// Returns requested viewport ranges.
@@ -698,6 +906,28 @@ public final class ModCatalogPanelTest {
             return List.copyOf(imports);
         }
 
+        /// Returns conflict decisions matching recorded imports.
+        ///
+        /// @return immutable decision maps
+        private @Unmodifiable List<@Unmodifiable Map<Path, ModImportConflictAction>>
+                importConflictActions() {
+            return List.copyOf(importConflictActions);
+        }
+
+        /// Replaces the deterministic pre-import conflict classification.
+        ///
+        /// @param conflicts normalized conflicting sources
+        private void replaceImportConflicts(@Unmodifiable List<Path> conflicts) {
+            importConflicts = List.copyOf(conflicts);
+        }
+
+        /// Configures one conflict that appears only during asynchronous import preflight.
+        ///
+        /// @param conflict normalized conflicting source
+        private void replaceLateImportConflict(Path conflict) {
+            lateImportConflict = conflict.toAbsolutePath().normalize();
+        }
+
         /// Returns deleted keys.
         ///
         /// @return immutable keys
@@ -735,10 +965,23 @@ public final class ModCatalogPanelTest {
         /// Selected counts presented for batch deletion confirmation.
         private final List<Integer> batchDeleteCounts = new ArrayList<>();
 
+        /// Sources presented for import conflict resolution.
+        private final List<Path> importConflictSources = new ArrayList<>();
+
+        /// Deterministic import conflict response.
+        private ModImportConflictAction importConflictAction = ModImportConflictAction.REPLACE;
+
         /// Returns one deterministic import choice.
         @Override
         public @Unmodifiable List<Path> chooseImportFiles(Component owner, Path currentDirectory) {
             return List.of(Path.of("incoming.jar"));
+        }
+
+        /// Records and resolves one import conflict.
+        @Override
+        public @Nullable ModImportConflictAction resolveImportConflict(Component owner, Path source) {
+            importConflictSources.add(source);
+            return importConflictAction;
         }
 
         /// Confirms every deterministic deletion.
@@ -793,6 +1036,20 @@ public final class ModCatalogPanelTest {
         /// @return immutable confirmation counts
         private @Unmodifiable List<Integer> batchDeleteCounts() {
             return List.copyOf(batchDeleteCounts);
+        }
+
+        /// Returns immutable sources presented for import conflict resolution.
+        ///
+        /// @return immutable conflict sources
+        private @Unmodifiable List<Path> importConflictSources() {
+            return List.copyOf(importConflictSources);
+        }
+
+        /// Replaces the deterministic conflict response.
+        ///
+        /// @param action new response
+        private void replaceImportConflictAction(ModImportConflictAction action) {
+            importConflictAction = action;
         }
     }
 }

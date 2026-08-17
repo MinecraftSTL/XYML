@@ -85,6 +85,13 @@ public final class GraphicsCard {
         return driverVersion;
     }
 
+    /// Returns the detected integrated or discrete adapter type.
+    ///
+    /// @return adapter type, or `null` when the detector could not classify it
+    public @Nullable Type getType() {
+        return type;
+    }
+
     public List<Path> getVulkanDriverFiles() {
         return vulkanDriverFiles;
     }
