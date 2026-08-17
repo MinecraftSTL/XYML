@@ -92,10 +92,17 @@ After importing the repository as a Gradle project, open the Gradle tool window 
 | `buildDev` | Fetches and builds the latest `origin/dev` commit. |
 | `build` | Routes a release checkout to the matching task above; builds a feature or detached checkout in place. |
 | `clean` | Cleans only the current checkout without inspecting or fetching any branch. |
-| `run` | Runs the current IDEA checkout in place without fetching or creating a temporary worktree. |
+| `run` | Reuses the last root `:build` artifact when available; otherwise performs a non-cached temporary build of the current checkout. |
 
 The `run` task always uses the current repository root as XYML's working directory, including on `main`, `beta`,
 `alpha`, and `dev` checkouts.
+
+Only the root `:build` task records an artifact for reuse. A temporary build started by `run` never becomes the cached
+build result, and `clean` removes the reusable result marker. Artifact version differences do not prevent reuse; the
+version displayed by XYML is the version embedded in the selected JAR.
+
+The subproject-level task is named `:XYML:runCurrent`; it is intentionally not named `run`, so Gradle does not select
+a second launcher process together with the root workflow.
 
 The four channel tasks refresh `main`, `beta`, `alpha`, and `dev` together, then build the selected commit in a
 temporary detached worktree without switching the current IDEA checkout. On Windows, the GitHub fetch uses the
