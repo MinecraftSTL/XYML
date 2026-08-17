@@ -78,7 +78,7 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 
 ### IDEA Gradle 建置流程
 
-將倉庫作為 Gradle 專案匯入後，開啟 Gradle 工具視窗並展開 `XYML > Tasks > XYML workflows`。該分類包含以下入口：
+將倉庫作為 Gradle 專案匯入後，開啟 Gradle 工具視窗並展開 `XYML > Tasks > stl`。該分類包含以下入口：
 
 | 任務 | 行為 |
 | --- | --- |
@@ -88,7 +88,9 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 | `buildDev` | 擷取並建置最新的 `origin/dev` 提交。 |
 | `build` | 發佈分支呼叫上方對應任務；功能分支或游離提交直接建置目前工作樹。 |
 | `clean` | 只清理目前工作樹，不檢查或擷取任何分支。 |
-| `run` | 使用與 `build` 相同的分支路由，但改為執行 XYML。 |
+| `run` | 直接執行 IDEA 目前工作樹，不擷取分支，也不建立臨時 worktree。 |
+
+即使目前簽出的是 `main`、`beta`、`alpha` 或 `dev`，`run` 也始終將目前倉庫根目錄作為 XYML 的執行目錄。
 
 四個渠道任務會同時重新整理 `main`、`beta`、`alpha` 和 `dev`，再於臨時的游離 worktree 中建置所選提交，
 不會切換 IDEA 目前工作樹。在 Windows 上，GitHub 擷取會使用已啟用的 Windows 系統代理。成功的渠道建置產物會連同

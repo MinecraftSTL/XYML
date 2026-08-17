@@ -134,7 +134,7 @@ subprojects {
     }
 }
 
-val xymlWorkflowGroup = "XYML workflows"
+val xymlWorkflowGroup = "stl"
 val nestedBranchBuild = providers.gradleProperty("xyml.branchBuild.nested")
     .map { it.toBooleanStrict() }
     .orElse(false)
@@ -197,28 +197,10 @@ tasks.register("build") {
     }
 }
 
-if (nestedBranchBuild.get() || xymlBranchReleaseType == null) {
-    tasks.register("run") {
-        group = xymlWorkflowGroup
-        description = "Runs the current feature or detached checkout with its Git-derived version."
-        dependsOn(":XYML:run")
-    }
-} else {
-    tasks.register<GitBranchGradleTask>("run") {
-        group = xymlWorkflowGroup
-        description = "Runs the latest origin/${xymlBranchName} commit with its inferred release version."
-        branchName.set(xymlBranchName)
-        releaseType.set(xymlBranchReleaseType)
-        gradleArguments.set(listOf(
-            ":XYML:run",
-            "-Pxyml.branchBuild.nested=true",
-            "--no-daemon",
-            "--stacktrace"
-        ))
-        fetchRemote.set(fetchReleaseBranches)
-        gitProxy.set(configuredGitProxy)
-        repositoryDirectory.set(layout.projectDirectory)
-    }
+tasks.register("run") {
+    group = xymlWorkflowGroup
+    description = "Runs XYML from the current checkout with the repository root as its working directory."
+    dependsOn(":XYML:run")
 }
 
 defaultTasks("clean", "build")

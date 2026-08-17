@@ -98,7 +98,7 @@ The build accepts these release inputs:
 - `BUILD_NUMBER`: the final positive decimal component used for an ordinary CI build when `RELEASE_VERSION` is absent.
 - `STABLE_VERSION`: an optional override of `stableVersion` in `config/project.properties`.
 
-The root Gradle tasks in the `XYML workflows` group infer versions from Git topology. A channel counter is the number
+The root Gradle tasks in the `stl` group infer versions from Git topology. A channel counter is the number
 of first-parent commits from the merge base with its adjacent, more stable branch to the selected release commit.
 `buildMain`, `buildBeta`, `buildAlpha`, and `buildDev` inject that inferred version into their isolated builds.
 

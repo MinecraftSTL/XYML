@@ -82,7 +82,7 @@ The built XYML program files are located in the `XYML/build/libs` subdirectory u
 ### IDEA Gradle Workflows
 
 After importing the repository as a Gradle project, open the Gradle tool window and expand
-`XYML > Tasks > XYML workflows`. The group contains these entry points:
+`XYML > Tasks > stl`. The group contains these entry points:
 
 | Task | Behavior |
 | --- | --- |
@@ -92,7 +92,10 @@ After importing the repository as a Gradle project, open the Gradle tool window 
 | `buildDev` | Fetches and builds the latest `origin/dev` commit. |
 | `build` | Routes a release checkout to the matching task above; builds a feature or detached checkout in place. |
 | `clean` | Cleans only the current checkout without inspecting or fetching any branch. |
-| `run` | Uses the same branch routing as `build`, then runs XYML instead of producing a distribution. |
+| `run` | Runs the current IDEA checkout in place without fetching or creating a temporary worktree. |
+
+The `run` task always uses the current repository root as XYML's working directory, including on `main`, `beta`,
+`alpha`, and `dev` checkouts.
 
 The four channel tasks refresh `main`, `beta`, `alpha`, and `dev` together, then build the selected commit in a
 temporary detached worktree without switching the current IDEA checkout. On Windows, the GitHub fetch uses the

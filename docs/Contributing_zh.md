@@ -78,7 +78,7 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 
 ### IDEA Gradle 构建流程
 
-将仓库作为 Gradle 项目导入后，打开 Gradle 工具窗口并展开 `XYML > Tasks > XYML workflows`。该分类包含以下入口：
+将仓库作为 Gradle 项目导入后，打开 Gradle 工具窗口并展开 `XYML > Tasks > stl`。该分类包含以下入口：
 
 | 任务 | 行为 |
 | --- | --- |
@@ -88,7 +88,9 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 | `buildDev` | 拉取并构建最新的 `origin/dev` 提交。 |
 | `build` | 发布分支调用上方对应任务；功能分支或游离提交直接构建当前工作树。 |
 | `clean` | 只清理当前工作树，不检查或拉取任何分支。 |
-| `run` | 使用与 `build` 相同的分支路由，但改为运行 XYML。 |
+| `run` | 直接运行 IDEA 当前工作树，不拉取分支，也不创建临时 worktree。 |
+
+即使当前签出的是 `main`、`beta`、`alpha` 或 `dev`，`run` 也始终将当前仓库根目录作为 XYML 的运行目录。
 
 四个渠道任务会同时刷新 `main`、`beta`、`alpha` 和 `dev`，再于临时的游离 worktree 中构建所选提交，
 不会切换 IDEA 当前工作树。在 Windows 上，GitHub 拉取会使用已启用的 Windows 系统代理。成功的渠道构建产物会连同
