@@ -8,16 +8,16 @@
 
 ### 環境需求
 
-構建完整的 XYML 倉庫需要同時安裝 JDK 25 和 JDK 17。你可以從此處下載它們：[Download Liberica JDK](https://bell-sw.com/pages/downloads/#jdk-25-lts)。
-請將 `JAVA_HOME` 指向 JDK 25，並確保 [Gradle 工具鏈](https://docs.gradle.org/current/userguide/toolchains.html)能夠發現 JDK 17。
-只有 `lwjgl-unsafe-agent` 使用 Java 25 編譯。XYML、XYMLCore、buildSrc 和 HelloNBT 繼續相容 Java 17；
-啟動模組和 Minecraft 輔助模組繼續以 Java 8 為目標，Mesa 載入器也繼續保留更低的位元組碼目標。
+構建完整的 XYML 倉庫需要同時安裝 JDK 17 和 JDK 25。你可以從此處下載它們：[Download Liberica JDK](https://bell-sw.com/pages/downloads/#jdk-25-lts)。
+請將 `JAVA_HOME` 和 IntelliJ IDEA 的 Gradle JVM 指向 JDK 17，僅需確保 [Gradle 工具鏈](https://docs.gradle.org/current/userguide/toolchains.html)能夠發現 JDK 25。
+根構建預設讓所有 Java 專案繼承 Java 17，只有 `lwjgl-unsafe-agent` 單獨覆蓋為 Java 25 工具鏈；
+啓動模組和 Minecraft 輔助模組繼續以 Java 8 為目標，Mesa 載入器也繼續保留更低的位元組碼目標。
 
 在 Windows 上構建原生 `XYMLL` 啟動器還需要 CMake 3.16 或更高版本、帶 MSVC x86/x64 C++ 工具的
 Visual Studio 2022 Build Tools，以及 Windows SDK。不支援 MinGW 工具鏈。其他作業系統會驗證並使用倉庫中
 由同一份原始碼構建的可執行檔。
 
-安裝 JDK 後，請確保 `JAVA_HOME` 環境變數指向 JDK 25 目錄。
+安裝 JDK 後，請確保 `JAVA_HOME` 環境變數指向 JDK 17 目錄。
 你可以這樣查看 `JAVA_HOME` 指向的 JDK 版本:
 
 <details>
@@ -26,9 +26,9 @@ Visual Studio 2022 Build Tools，以及 Windows SDK。不支援 MinGW 工具鏈�
 PowerShell:
 ```
 PS > & "$env:JAVA_HOME/bin/java.exe" -version
-openjdk version "25" 2025-09-16 LTS
-OpenJDK Runtime Environment (build 25+37-LTS)
-OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
+openjdk version "17.0.8" 2023-07-18 LTS
+OpenJDK Runtime Environment (build 17.0.8+7-LTS)
+OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 ```
 
 </details>
@@ -38,9 +38,9 @@ OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
 
 ```
 > $JAVA_HOME/bin/java -version
-openjdk version "25" 2025-09-16 LTS
-OpenJDK Runtime Environment (build 25+37-LTS)
-OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
+openjdk version "17.0.8" 2023-07-18 LTS
+OpenJDK Runtime Environment (build 17.0.8+7-LTS)
+OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 ```
 
 </details>
@@ -49,10 +49,10 @@ OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
 <summary>macOS</summary>
 
 ```
-> /usr/libexec/java_home --exec java -version
-openjdk version "25" 2025-09-16 LTS
-OpenJDK Runtime Environment (build 25+37-LTS)
-OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
+> /usr/libexec/java_home -v 17 --exec java -version
+openjdk version "17.0.8" 2023-07-18 LTS
+OpenJDK Runtime Environment (build 17.0.8+7-LTS)
+OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 ```
 
 </details>
