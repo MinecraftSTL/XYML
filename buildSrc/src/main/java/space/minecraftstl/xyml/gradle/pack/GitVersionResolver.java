@@ -31,9 +31,8 @@ import java.util.Properties;
 /// Infers XYML release and feature versions from Git branch topology.
 ///
 /// A release-channel counter is the number of first-parent commits between the target commit and its merge base with
-/// the adjacent, more stable release branch. A feature version extends the Dev version at its `dev` merge base with
-/// the number of first-parent feature commits. Feature builds retain the six-component Dev version shape by adding
-/// that feature distance to the inherited Dev counter.
+/// the adjacent, more stable release branch. Dev release versions inherit the alpha counter from their alpha base.
+/// Feature versions retain the six-component `x.y.z.0.0.d` shape and append their feature distance to the Dev counter.
 @NotNullByDefault
 public final class GitVersionResolver {
     /// Prevents construction of this stateless resolver.
@@ -142,8 +141,12 @@ public final class GitVersionResolver {
         String base = mergeBase(repository, adjacentStableRef, targetRef);
         int distance = firstParentDistance(repository, base, targetRef);
         StringBuilder version = new StringBuilder(stableVersion);
-        for (int component = 4; component < releaseType.getVersionComponentCount(); component++) {
-            version.append(".0");
+        if (releaseType == ReleaseType.DEV) {
+            version.append(".0.").append(resolveAlphaCounter(repository, adjacentStableRef));
+        } else {
+            for (int component = 4; component < releaseType.getVersionComponentCount(); component++) {
+                version.append(".0");
+            }
         }
         version.append('.').append(distance);
         String result = version.toString();
@@ -221,6 +224,17 @@ public final class GitVersionResolver {
         } catch (NumberFormatException exception) {
             throw new IllegalStateException("Git returned an invalid first-parent distance: " + value, exception);
         }
+    }
+
+    /// Resolves the alpha counter inherited by a Dev or feature version.
+    ///
+    /// @param repository Git repository root
+    /// @param alphaRef alpha branch ref whose counter is inherited
+    /// @return first-parent alpha distance from the beta merge base
+    private static int resolveAlphaCounter(Path repository, String alphaRef) {
+        String betaRef = preferredBranchRef(repository, "beta");
+        String base = mergeBase(repository, betaRef, alphaRef);
+        return firstParentDistance(repository, base, alphaRef);
     }
 
     /// Executes Git and returns `null` instead of failing for a missing optional ref.
