@@ -92,14 +92,17 @@ After importing the repository as a Gradle project, open the Gradle tool window 
 | `buildDev` | Fetches and builds the latest `origin/dev` commit. |
 | `build` | Routes a release checkout to the matching task above; builds a feature or detached checkout in place. |
 | `clean` | Cleans only the current checkout without inspecting or fetching any branch. |
-| `run` | Reuses the last root `:build` artifact when available; otherwise performs a non-cached temporary build of the current checkout. |
+| `run` | Reuses the last root `:build` artifact when available; otherwise incrementally assembles a temporary artifact in the same Gradle invocation. |
 
 The `run` task always uses the current repository root as XYML's working directory, including on `main`, `beta`,
 `alpha`, and `dev` checkouts.
 
-Only the root `:build` task records an artifact for reuse. A temporary build started by `run` never becomes the cached
-build result, and `clean` removes the reusable result marker. Artifact version differences do not prevent reuse; the
-version displayed by XYML is the version embedded in the selected JAR.
+Only the root `:build` task records an artifact for reuse, including the JAR copied to `build/channel-builds/<branch>`
+by a release-branch build. A `run` fallback forces the final `shadowJar` to be recreated and may reuse up-to-date
+dependency outputs, but it never writes the root result marker or starts a second Wrapper process. `clean` removes the
+reusable result marker. Local release-branch builds without CI version inputs infer their version from Git topology.
+Artifact version differences do not prevent reuse; the version displayed by XYML is the version embedded in the
+selected JAR.
 
 The subproject-level task is named `:XYML:runCurrent`; it is intentionally not named `run`, so Gradle does not select
 a second launcher process together with the root workflow.
