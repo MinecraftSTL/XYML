@@ -1,0 +1,8 @@
+// HMCLauncher for Windows, Copyright (C) 2025 huangyuhui and contributors.
+// Modified by MinecraftSTL in 2026 for XYMLL. See ../README.md for the GPLv3 Section 7 additional terms.
+#pragma once
+
+#define XYMLL_VERSION L"@XYMLL_DISPLAY_VERSION@"
+#define XYMLL_UPSTREAM_VERSION L"@XYMLL_UPSTREAM_VERSION@"
+#define XYML_EXPECTED_JAVA_MAJOR_VERSION @XYML_EXPECTED_JAVA_MAJOR_VERSION@
+#define XYML_EXPECTED_JAVA_MAJOR_VERSION_STR "@XYML_EXPECTED_JAVA_MAJOR_VERSION@"

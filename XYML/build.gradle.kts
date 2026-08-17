@@ -1,6 +1,4 @@
 import space.minecraftstl.xyml.gradle.TerracottaConfigUpgradeTask
-import space.minecraftstl.xyml.gradle.ci.GitHubActionUtils
-import space.minecraftstl.xyml.gradle.ci.JenkinsUtils
 import space.minecraftstl.xyml.gradle.l10n.CheckTranslations
 import space.minecraftstl.xyml.gradle.l10n.CreateLanguageList
 import space.minecraftstl.xyml.gradle.l10n.CreateLocaleNamesResourceBundle
@@ -8,8 +6,6 @@ import space.minecraftstl.xyml.gradle.l10n.UpsideDownTranslate
 import space.minecraftstl.xyml.gradle.mod.ParseModDataTask
 import space.minecraftstl.xyml.gradle.pack.CreateDeb
 import space.minecraftstl.xyml.gradle.pack.ReleaseType
-import space.minecraftstl.xyml.gradle.pack.ReleaseVersionResolver
-import space.minecraftstl.xyml.gradle.utils.PropertiesUtils
 import java.net.URI
 import java.nio.file.FileSystems
 import java.nio.file.Files
@@ -17,6 +13,7 @@ import java.security.KeyFactory
 import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.PKCS8EncodedKeySpec
+import java.util.jar.JarInputStream
 import java.util.jar.Manifest
 import java.util.zip.ZipFile
 
@@ -24,51 +21,28 @@ plugins {
     alias(libs.plugins.shadow)
 }
 
+tasks.named("build") {
+    dependsOn(":hello-nbt:build", ":lwjgl-unsafe-agent:build", ":mesa-loader-windows:build", ":XYMLL:build")
+}
+
+tasks.named("check") {
+    dependsOn(":hello-nbt:check", ":lwjgl-unsafe-agent:check", ":mesa-loader-windows:check", ":XYMLL:check")
+}
+
 base {
     archivesName.set("XYML")
 }
 
-val projectConfig = PropertiesUtils.load(rootProject.file("config/project.properties").toPath())
+val currentReleaseType = ReleaseType.fromName(rootProject.extra["xymlReleaseChannel"] as String)
+val currentBranchName = (rootProject.extra["xymlBranchName"] as String).takeIf { it.isNotEmpty() }
 
-val isOfficial = JenkinsUtils.IS_ON_CI || GitHubActionUtils.IS_ON_OFFICIAL_REPO
-
-val releaseChannelName = System.getenv("RELEASE_CHANNEL")?.takeIf { it.isNotBlank() } ?: "dev"
-val currentReleaseType = ReleaseType.fromName(releaseChannelName)
-val stableVersion = System.getenv("STABLE_VERSION")?.takeIf { it.isNotBlank() }
-    ?: projectConfig.getProperty("stableVersion")
-    ?: "1.0.0"
-val explicitReleaseVersion = System.getenv("RELEASE_VERSION")?.takeIf { it.isNotBlank() }
-val buildNumber = System.getenv("BUILD_NUMBER")?.takeIf { it.isNotBlank() }
-val currentBranchName = sequenceOf("GITHUB_HEAD_REF", "GITHUB_REF_NAME", "CHANGE_BRANCH", "BRANCH_NAME")
-    .mapNotNull { variable -> System.getenv(variable)?.takeIf { it.isNotBlank() } }
-    .firstOrNull()
-    ?: runCatching {
-        providers.exec {
-            commandLine("git", "branch", "--show-current")
-            isIgnoreExitValue = true
-        }.standardOutput.asText.get().trim().takeIf { it.isNotEmpty() }
-    }.getOrNull()
-
-version = ReleaseVersionResolver.resolve(
-    currentReleaseType,
-    stableVersion,
-    explicitReleaseVersion,
-    buildNumber,
-    isOfficial,
-    currentBranchName
-)
+version = rootProject.extra["xymlReleaseVersion"] as String
 
 val microsoftAuthId = System.getenv("MICROSOFT_AUTH_ID") ?: ""
 val curseForgeApiKey = System.getenv("CURSEFORGE_API_KEY") ?: ""
 
-// The bundled stub preserves the upstream launcher code and copyright metadata;
-// only its Windows icon resources differ for this fork.
-val launcherExe = System.getenv("XYML_LAUNCHER_EXE")
-    ?.takeIf { it.isNotBlank() }
-    ?.let { file(it) }
-    ?: layout.projectDirectory.file("image/XYMLLauncher.windows.stub").asFile
-
 val embedResources = configurations.register("embedResources")
+val xymlLauncherExecutable = configurations.register("xymlLauncherExecutable")
 
 dependencies {
     implementation(project(":XYMLCore"))
@@ -84,7 +58,11 @@ dependencies {
     testImplementation(libs.jimfs)
 
     embedResources(libs.authlib.injector)
-    embedResources(libs.lwjgl.unsafe.agent)
+    embedResources(project(":lwjgl-unsafe-agent"))
+    xymlLauncherExecutable(project(mapOf(
+        "path" to ":XYMLL",
+        "configuration" to "xymlLauncherExecutable",
+    )))
 }
 
 fun digest(algorithm: String, bytes: ByteArray): ByteArray = MessageDigest.getInstance(algorithm).digest(bytes)
@@ -160,7 +138,7 @@ val xymlProperties = buildList {
     add("xyml.microsoft.auth.id" to microsoftAuthId)
     add("xyml.curseforge.apikey" to curseForgeApiKey)
     add("xyml.authlib-injector.version" to libs.authlib.injector.get().version!!)
-    add("xyml.lwjgl-unsafe-agent.version" to libs.lwjgl.unsafe.agent.get().version!!)
+    add("xyml.lwjgl-unsafe-agent.version" to rootProject.extra["xymlReleaseVersion"] as String)
 }
 
 val xymlPropertiesFile = layout.buildDirectory.file("xyml.properties")
@@ -188,6 +166,7 @@ val jarPath = tasks.jar.get().archiveFile.get().asFile
 
 tasks.shadowJar {
     dependsOn(createPropertiesFile)
+    dependsOn(xymlLauncherExecutable)
 
     archiveClassifier.set(null as String?)
 
@@ -221,8 +200,8 @@ tasks.shadowJar {
     )
 
     into("assets") {
-        from(launcherExe) {
-            rename { "XYMLLauncher.exe" }
+        from(xymlLauncherExecutable) {
+            rename { "XYMLL.exe" }
         }
     }
 
@@ -232,7 +211,11 @@ tasks.shadowJar {
     }
 }
 
+val embeddedAgentEntry = "assets/lwjgl-unsafe-agent-${project.version}.jar"
+
 val requiredOfflineLibraryEntries = listOf(
+    "assets/XYMLL.exe",
+    "assets/XYMLL.sh",
     "com/formdev/flatlaf/FlatLaf.class",
     "com/formdev/flatlaf/FlatLaf.properties",
     "com/formdev/flatlaf/FlatLightLaf.properties",
@@ -248,10 +231,11 @@ val requiredOfflineLibraryEntries = listOf(
     "net/miginfocom/swing/MigLayout.class",
     "net/jpountz/lz4/LZ4BlockInputStream.class",
     "net/jpountz/lz4/LZ4Factory.class",
-    "org/glavo/nbt/NBTElement.class",
-    "org/glavo/nbt/chunk/ChunkRegion.class",
-    "org/glavo/nbt/io/NBTCodec.class",
-    "org/glavo/nbt/tag/CompoundTag.class",
+    "space/minecraftstl/xyml/library/nbt/NBTElement.class",
+    "space/minecraftstl/xyml/library/nbt/chunk/ChunkRegion.class",
+    "space/minecraftstl/xyml/library/nbt/io/NBTCodec.class",
+    "space/minecraftstl/xyml/library/nbt/tag/CompoundTag.class",
+    embeddedAgentEntry,
 )
 
 val requiredOfflineSwingIconEntries = listOf(
@@ -410,6 +394,7 @@ val forbiddenRemovedUiEntryPrefixes = listOf(
     "org/glavo/png/javafx/",
     "org/girod/javafx/svgimage/",
     "org/hildan/fxgson/",
+    "org/glavo/nbt/",
 )
 
 fun findForbiddenRemovedUiEntries(jar: ZipFile): List<String> = jar.entries().asSequence()
@@ -438,6 +423,53 @@ val verifyOfflineUiArtifact = tasks.register("verifyOfflineUiArtifact") {
             if (forbiddenEntries.isNotEmpty()) {
                 throw GradleException("Retained removed UI entries: ${forbiddenEntries.joinToString()}")
             }
+
+            val bundledMesaEntries = jar.entries().asSequence()
+                .map { it.name }
+                .filter {
+                    it == "space/minecraftstl/xyml/library/mesa/Loader.class"
+                        || it.substringAfterLast('/').startsWith("mesa-loader-windows-")
+                }
+                .toList()
+            if (bundledMesaEntries.isNotEmpty()) {
+                throw GradleException("Locally built Mesa artifacts must not be embedded: ${bundledMesaEntries.joinToString()}")
+            }
+
+            val nativeLauncherEntry = jar.getEntry("assets/XYMLL.exe")
+                ?: throw GradleException("Missing locally built XYMLL executable")
+            val expectedNativeLauncher = xymlLauncherExecutable.get().singleFile
+            val embeddedNativeLauncherDigest = jar.getInputStream(nativeLauncherEntry).use { input ->
+                digest("SHA-256", input.readBytes())
+            }
+            if (!embeddedNativeLauncherDigest.contentEquals(digest("SHA-256", expectedNativeLauncher.readBytes()))) {
+                throw GradleException("Embedded XYMLL executable does not match the native project output")
+            }
+
+            val embeddedAgent = jar.getEntry(embeddedAgentEntry)
+                ?: throw GradleException("Missing locally built agent: $embeddedAgentEntry")
+            JarInputStream(jar.getInputStream(embeddedAgent)).use { agentJar ->
+                val attributes = agentJar.manifest?.mainAttributes
+                    ?: throw GradleException("Embedded agent has no manifest")
+                val agentClass = "space.minecraftstl.xyml.library.lwjgl.UnsafeAgent"
+                if (attributes.getValue("Premain-Class") != agentClass
+                    || attributes.getValue("Agent-Class") != agentClass
+                ) {
+                    throw GradleException("Embedded agent does not use the XYML namespace")
+                }
+                if (attributes.getValue("Lwjgl-Unsafe-Agent-Upstream-Version") != "2.0") {
+                    throw GradleException("Embedded agent does not record upstream version 2.0")
+                }
+                val agentEntries = generateSequence { agentJar.nextJarEntry }
+                    .map { it.name }
+                    .toSet()
+                if ("space/minecraftstl/xyml/library/lwjgl/UnsafeAgent.class" !in agentEntries) {
+                    throw GradleException("Embedded agent is missing the namespaced entry point")
+                }
+                if (agentEntries.any { it.startsWith("org/glavo/lwjgl/") }) {
+                    throw GradleException("Embedded agent retains the legacy org.glavo.lwjgl package")
+                }
+            }
+
             val manifestEntry = jar.getEntry("META-INF/MANIFEST.MF")
                 ?: throw GradleException("Launcher artifact has no manifest")
             val runtimeAddOpens = jar.getInputStream(manifestEntry).use { input ->
@@ -890,8 +922,8 @@ val makeExecutables = tasks.register("makeExecutables") {
         ZipFile(jarPath).use { zipFile ->
             for (extension in extensions) {
                 val output = artifactFile(extension)
-                val entry = zipFile.getEntry("assets/XYMLLauncher.$extension")
-                    ?: throw GradleException("XYMLLauncher.$extension not found")
+                val entry = zipFile.getEntry("assets/XYMLL.$extension")
+                    ?: throw GradleException("XYMLL.$extension not found")
 
                 output.outputStream().use { outputStream ->
                     zipFile.getInputStream(entry).use { it.copyTo(outputStream) }

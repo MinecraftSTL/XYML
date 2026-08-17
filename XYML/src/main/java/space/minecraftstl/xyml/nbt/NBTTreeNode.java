@@ -17,15 +17,15 @@
  */
 package space.minecraftstl.xyml.nbt;
 
-import org.glavo.nbt.NBTElement;
-import org.glavo.nbt.chunk.Chunk;
-import org.glavo.nbt.chunk.ChunkRegion;
-import org.glavo.nbt.tag.ArrayTag;
-import org.glavo.nbt.tag.CompoundTag;
-import org.glavo.nbt.tag.ListTag;
-import org.glavo.nbt.tag.ParentTag;
-import org.glavo.nbt.tag.Tag;
-import org.glavo.nbt.tag.ValueTag;
+import space.minecraftstl.xyml.library.nbt.NBTElement;
+import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
+import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
+import space.minecraftstl.xyml.library.nbt.tag.ArrayTag;
+import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.tag.ListTag;
+import space.minecraftstl.xyml.library.nbt.tag.ParentTag;
+import space.minecraftstl.xyml.library.nbt.tag.Tag;
+import space.minecraftstl.xyml.library.nbt.tag.ValueTag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -185,7 +185,7 @@ public final class NBTTreeNode {
             @Nullable CompoundTag rootTag = chunk.getRootTag();
             return rootTag == null ? 0 : rootTag.size();
         }
-        if (element instanceof org.glavo.nbt.NBTParent<?> parent) {
+        if (element instanceof space.minecraftstl.xyml.library.nbt.NBTParent<?> parent) {
             return parent.size();
         }
         return 0;

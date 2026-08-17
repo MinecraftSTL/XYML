@@ -156,13 +156,13 @@ fi
 
 case "$_XYML_OS-$_XYML_ARCH" in
   windows-x86|windows-x86_64|windows-arm64)
-    _XYML_JAVA_DOWNLOAD_PAGE="https://docs.hmcl.net/downloads/windows/$_XYML_ARCH.html"
+    _XYML_JAVA_DOWNLOAD_PAGE="https://adoptium.net/temurin/releases/?version=17"
     ;;
   linux-x86|linux-x86_64|linux-arm64|linux-arm32|linux-riscv64|linux-loongarch64)
-    _XYML_JAVA_DOWNLOAD_PAGE="https://docs.hmcl.net/downloads/linux/$_XYML_ARCH.html"
+    _XYML_JAVA_DOWNLOAD_PAGE="https://adoptium.net/temurin/releases/?version=17"
     ;;
   macos-x86_64|macos-arm64)
-    _XYML_JAVA_DOWNLOAD_PAGE="https://docs.hmcl.net/downloads/macos/$_XYML_ARCH.html"
+    _XYML_JAVA_DOWNLOAD_PAGE="https://adoptium.net/temurin/releases/?version=17"
     ;;
 esac
 

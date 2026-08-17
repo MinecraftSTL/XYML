@@ -8,9 +8,16 @@
 
 ### 環境需求
 
-構建 XYML 啟動器需要安裝 JDK 17 (或更高版本)。你可以從此處下載它: [Download Liberica JDK](https://bell-sw.com/pages/downloads/#jdk-25-lts)。
+構建完整的 XYML 倉庫需要同時安裝 JDK 25 和 JDK 17。你可以從此處下載它們：[Download Liberica JDK](https://bell-sw.com/pages/downloads/#jdk-25-lts)。
+請將 `JAVA_HOME` 指向 JDK 25，並確保 [Gradle 工具鏈](https://docs.gradle.org/current/userguide/toolchains.html)能夠發現 JDK 17。
+只有 `lwjgl-unsafe-agent` 使用 Java 25 編譯。XYML、XYMLCore、buildSrc 和 HelloNBT 繼續相容 Java 17；
+啟動模組和 Minecraft 輔助模組繼續以 Java 8 為目標，Mesa 載入器也繼續保留更低的位元組碼目標。
 
-在安裝 JDK 後，請確保 `JAVA_HOME` 環境變數指向符合需求的 JDK 目錄。
+在 Windows 上構建原生 `XYMLL` 啟動器還需要 CMake 3.16 或更高版本、帶 MSVC x86/x64 C++ 工具的
+Visual Studio 2022 Build Tools，以及 Windows SDK。不支援 MinGW 工具鏈。其他作業系統會驗證並使用倉庫中
+由同一份原始碼構建的可執行檔。
+
+安裝 JDK 後，請確保 `JAVA_HOME` 環境變數指向 JDK 25 目錄。
 你可以這樣查看 `JAVA_HOME` 指向的 JDK 版本:
 
 <details>
@@ -68,6 +75,32 @@ OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
 ```
 
 構建出的 XYML 程式檔位於根目錄下的 `XYML/build/libs` 子目錄中。
+
+### IDEA Gradle 建置流程
+
+將倉庫作為 Gradle 專案匯入後，開啟 Gradle 工具視窗並展開 `XYML > Tasks > XYML workflows`。該分類包含以下入口：
+
+| 任務 | 行為 |
+| --- | --- |
+| `buildMain` | 擷取並建置最新的 `origin/main` 提交。 |
+| `buildBeta` | 擷取並建置最新的 `origin/beta` 提交。 |
+| `buildAlpha` | 擷取並建置最新的 `origin/alpha` 提交。 |
+| `buildDev` | 擷取並建置最新的 `origin/dev` 提交。 |
+| `build` | 發佈分支呼叫上方對應任務；功能分支或游離提交直接建置目前工作樹。 |
+| `clean` | 只清理目前工作樹，不檢查或擷取任何分支。 |
+| `run` | 使用與 `build` 相同的分支路由，但改為執行 XYML。 |
+
+四個渠道任務會同時重新整理 `main`、`beta`、`alpha` 和 `dev`，再於臨時的游離 worktree 中建置所選提交，
+不會切換 IDEA 目前工作樹。在 Windows 上，GitHub 擷取會使用已啟用的 Windows 系統代理。成功的渠道建置產物會連同
+`build-info.properties` 複製到 `build/channel-builds/<branch>`；功能分支產物仍位於 `XYML/build/libs`。
+
+如需在不存取 GitHub 的情況下測試現有遠端追蹤引用，可明確關閉重新整理：
+
+```powershell
+.\gradlew.bat buildMain '-Pxyml.branchBuild.fetch=false'
+```
+
+Windows 系統代理無法使用時，也可以透過 `-Pxyml.branchBuild.gitProxy=<proxy-url>` 明確指定代理。
 
 ## 除錯選項
 

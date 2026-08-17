@@ -19,8 +19,8 @@ package space.minecraftstl.xyml.ui.swing.page.nbt;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLightLaf;
-import org.glavo.nbt.io.NBTCodec;
-import org.glavo.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
+import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;

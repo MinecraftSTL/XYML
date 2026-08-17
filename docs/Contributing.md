@@ -8,9 +8,18 @@
 
 ### Requirements
 
-To build the XYML launcher, you need to install JDK 17 (or higher). You can download it here: [Download Liberica JDK](https://bell-sw.com/pages/downloads/#jdk-25-lts).
+Building the complete XYML repository requires both JDK 25 and JDK 17. You can download them here:
+[Download Liberica JDK](https://bell-sw.com/pages/downloads/#jdk-25-lts). Set `JAVA_HOME` to JDK 25 and make the
+JDK 17 installation discoverable to [Gradle's toolchain support](https://docs.gradle.org/current/userguide/toolchains.html).
+Only `lwjgl-unsafe-agent` is compiled for Java 25. XYML, XYMLCore, buildSrc, and HelloNBT remain Java 17 compatible;
+the boot and Minecraft helper modules retain their Java 8 targets, and the Mesa loader retains its older bytecode
+target.
 
-After installing the JDK, make sure the `JAVA_HOME` environment variable points to the required JDK directory.
+On Windows, building the native `XYMLL` launcher also requires CMake 3.16 or newer, Visual Studio 2022 Build Tools
+with the MSVC x86/x64 C++ tools, and a Windows SDK. The MinGW toolchain is not supported. Builds on other operating
+systems verify and use the checked-in executable produced from the same source snapshot.
+
+After installing the JDKs, make sure the `JAVA_HOME` environment variable points to the JDK 25 directory.
 You can check the JDK version that `JAVA_HOME` points to like this:
 
 <details>
@@ -69,6 +78,35 @@ To build XYML, switch to the root directory of the XYML project and run the foll
 ```
 
 The built XYML program files are located in the `XYML/build/libs` subdirectory under the project root.
+
+### IDEA Gradle Workflows
+
+After importing the repository as a Gradle project, open the Gradle tool window and expand
+`XYML > Tasks > XYML workflows`. The group contains these entry points:
+
+| Task | Behavior |
+| --- | --- |
+| `buildMain` | Fetches and builds the latest `origin/main` commit. |
+| `buildBeta` | Fetches and builds the latest `origin/beta` commit. |
+| `buildAlpha` | Fetches and builds the latest `origin/alpha` commit. |
+| `buildDev` | Fetches and builds the latest `origin/dev` commit. |
+| `build` | Routes a release checkout to the matching task above; builds a feature or detached checkout in place. |
+| `clean` | Cleans only the current checkout without inspecting or fetching any branch. |
+| `run` | Uses the same branch routing as `build`, then runs XYML instead of producing a distribution. |
+
+The four channel tasks refresh `main`, `beta`, `alpha`, and `dev` together, then build the selected commit in a
+temporary detached worktree without switching the current IDEA checkout. On Windows, the GitHub fetch uses the
+enabled Windows system proxy. Successful channel artifacts are copied to `build/channel-builds/<branch>` together
+with `build-info.properties`; feature artifacts remain in `XYML/build/libs`.
+
+To test cached remote-tracking refs without accessing GitHub, disable the refresh explicitly:
+
+```powershell
+.\gradlew.bat buildMain '-Pxyml.branchBuild.fetch=false'
+```
+
+An explicit proxy can be supplied with `-Pxyml.branchBuild.gitProxy=<proxy-url>` when the Windows system proxy is not
+available.
 
 ## Debug Options
 
