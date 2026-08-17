@@ -100,9 +100,10 @@ The `run` task always uses the current repository root as XYML's working directo
 Only the root `:build` task records an artifact for reuse, including the JAR copied to `build/channel-builds/<branch>`
 by a release-branch build. A `run` fallback forces the final `shadowJar` to be recreated and may reuse up-to-date
 dependency outputs, but it never writes the root result marker or starts a second Wrapper process. `clean` removes the
-reusable result marker. Local release-branch builds without CI version inputs infer their version from Git topology.
-Artifact version differences do not prevent reuse; the version displayed by XYML is the version embedded in the
-selected JAR.
+reusable result marker. When the native source is unchanged, the fallback may also reuse the existing XYMLL executable
+as an intermediate input; this does not make the final artifact reusable. Local release-branch builds without CI
+version inputs infer their version from Git topology. Artifact version differences do not prevent reuse; the version
+displayed by XYML is the version embedded in the selected JAR.
 
 The subproject-level task is named `:XYML:runCurrent`; it is intentionally not named `run`, so Gradle does not select
 a second launcher process together with the root workflow.

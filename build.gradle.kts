@@ -159,6 +159,13 @@ val fetchReleaseBranches = providers.gradleProperty("xyml.branchBuild.fetch")
 val configuredGitProxy = providers.gradleProperty("xyml.branchBuild.gitProxy")
 
 val rootBuildResultFile = layout.buildDirectory.file("root-build-result.properties")
+val xymlNativeSourceFiles = files(
+    layout.projectDirectory.file("libraries/XYMLL/CMakeLists.txt"),
+    layout.projectDirectory.file("libraries/XYMLL/XYMLL.ico"),
+    fileTree("libraries/XYMLL/XYMLL") {
+        include("**/*.cpp", "**/*.h", "**/*.in")
+    },
+)
 
 fun findReusableRootBuildArtifact(): File? {
     val marker = rootBuildResultFile.get().asFile
@@ -222,6 +229,15 @@ fun releaseBranchArtifact(branchName: String): Pair<File, String> {
     val version = buildInfo.getProperty("version")?.takeIf { it.isNotBlank() }
         ?: error("Channel build metadata does not contain a version: $buildInfoFile")
     return artifactDirectory.resolve("XYML-$version.jar") to version
+}
+
+fun reusableXYMLLNativeOutput(): Boolean {
+    val executable = rootDir.resolve("libraries/XYMLL/build/cmake/Release/XYMLL.exe")
+    if (!executable.isFile) {
+        return false
+    }
+    val executableTimestamp = executable.lastModified()
+    return xymlNativeSourceFiles.files.all { it.lastModified() <= executableTimestamp }
 }
 
 fun registerReleaseBranchBuild(taskName: String, branchName: String, releaseType: ReleaseType) =
@@ -317,6 +333,17 @@ if (reusableRunArtifact == null) {
         if (name == "shadowJar") {
             outputs.upToDateWhen { false }
             outputs.doNotCacheIf("Temporary run artifacts are not reusable root build results") { true }
+        }
+    }
+    project(":XYMLL").tasks.configureEach {
+        if (name == "configureXYMLL" || name == "buildNativeXYMLL") {
+            onlyIf {
+                val reusable = reusableXYMLLNativeOutput()
+                if (reusable) {
+                    logger.lifecycle("XYML run: reusing the existing XYMLL native output")
+                }
+                !reusable
+            }
         }
     }
 }

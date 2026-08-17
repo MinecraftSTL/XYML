@@ -94,8 +94,8 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 
 只有根 `:build` 任务会记录可复用制品，包括发布分支构建复制到 `build/channel-builds/<branch>` 的 JAR。
 `run` 触发的回退只强制重新生成最终 `shadowJar`，可以复用依赖任务的最新输出，但不会写入根结果清单，也不会启动第二个 Wrapper。
-`clean` 会删除可复用结果清单。没有 CI 版本输入时，发布分支的本地构建版本按当前 Git 拓扑推断；构建制品的版本不同不会阻止复用，
-XYML 左上角显示的是所选 JAR 内嵌的版本。
+`clean` 会删除可复用结果清单。原生源码未变化时，回退还可以复用已有的 XYMLL 可执行文件作为中间输入，但不会因此让最终制品变为可复用结果。
+没有 CI 版本输入时，发布分支的本地构建版本按当前 Git 拓扑推断；构建制品的版本不同不会阻止复用，XYML 左上角显示的是所选 JAR 内嵌的版本。
 子项目任务改名为 `:XYML:runCurrent`，不再使用 `run`，以免 Gradle 执行根工作流时同时选中第二个启动器进程。
 
 四个渠道任务会同时刷新 `main`、`beta`、`alpha` 和 `dev`，再于临时的游离 worktree 中构建所选提交，
