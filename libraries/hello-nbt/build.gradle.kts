@@ -56,7 +56,8 @@ tasks.withType<Checkstyle> {
     exclude("module-info.java")
 }
 
-val run = tasks.register<JavaExec>("run") {
+val runNbtCli = tasks.register<JavaExec>("runNbtCli") {
+    description = "Runs the HelloNBT command-line reader without colliding with the root XYML run task."
     dependsOn(tasks.jar)
     mainModule = "space.minecraftstl.xyml.library.nbt"
     classpath(tasks.jar.map { it.archiveFile })
