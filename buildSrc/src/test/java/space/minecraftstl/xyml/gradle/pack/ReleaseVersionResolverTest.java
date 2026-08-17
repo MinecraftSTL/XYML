@@ -55,11 +55,20 @@ final class ReleaseVersionResolverTest {
                 ReleaseType.DEV, "1.0.1", "1.0.1.3.2.9", null, true));
     }
 
-    /// Appends an empty feature component after a complete local development version.
+    /// Keeps local zero-placeholder versions unmarked on all non-stable release branches.
     @Test
-    void derivesLocalFeatureBuildVersion() {
-        assertEquals("1.0.0.0.0.0.", ReleaseVersionResolver.resolve(
+    void keepsLocalReleaseBranchVersionsUnmarked() {
+        assertEquals("1.0.0.0", ReleaseVersionResolver.resolve(
+                ReleaseType.BETA, "1.0.0", null, null, false));
+        assertEquals("1.0.0.0.0", ReleaseVersionResolver.resolve(
+                ReleaseType.ALPHA, "1.0.0", null, null, false));
+        assertEquals("1.0.0.0.0.0", ReleaseVersionResolver.resolve(
                 ReleaseType.DEV, "1.0.0", null, null, false));
+    }
+
+    /// Requires an explicit version source for official non-stable builds.
+    @Test
+    void requiresOfficialVersionSource() {
         assertThrows(IllegalArgumentException.class, () -> ReleaseVersionResolver.resolve(
                 ReleaseType.DEV, "1.0.0", null, null, true));
     }

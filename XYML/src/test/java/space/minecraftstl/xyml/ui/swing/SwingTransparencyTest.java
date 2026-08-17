@@ -24,9 +24,11 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import javax.swing.JPanel;
+import javax.swing.JComponent;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
+import javax.swing.UIManager;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
@@ -81,6 +83,7 @@ public final class SwingTransparencyTest {
     @Test
     public void leavesScrollableViewOpacityUnderCallerControl() {
         EdtDispatcher.executeAndWait(() -> {
+            assertTrue(FlatLightLaf.setup());
             JTextArea editor = new JTextArea("editable content");
             JScrollPane scrollPane = new JScrollPane(editor);
 
@@ -89,17 +92,46 @@ public final class SwingTransparencyTest {
             assertAll(
                     () -> assertFalse(scrollPane.isOpaque()),
                     () -> assertFalse(scrollPane.getViewport().isOpaque()),
+                    () -> assertEquals(
+                            Map.of("arc", 0),
+                            scrollPane.getClientProperty(FlatClientProperties.STYLE)),
                     () -> assertTrue(editor.isOpaque()));
+        });
+    }
+
+    /// Transparent scroll panes suppress FlatLaf's rounded view-background fill under a nonzero global radius.
+    @Test
+    public void keepsLayoutScrollPaneTransparentAtPositiveGlobalRadius() {
+        EdtDispatcher.executeAndWait(() -> {
+            assertTrue(FlatLightLaf.setup());
+            try {
+                UIManager.put("ScrollPane.arc", 40);
+                JPanel content = new JPanel();
+                content.setOpaque(false);
+                JScrollPane scrollPane = new JScrollPane(content);
+                SwingTransparency.revealBackgroundThroughScrollPane(scrollPane);
+                scrollPane.setSize(360, 180);
+                scrollPane.doLayout();
+
+                BufferedImage rendered = renderOnBackdrop(scrollPane, 360, 180);
+                assertAll(
+                        () -> assertEquals(
+                                Map.of("arc", 0),
+                                scrollPane.getClientProperty(FlatClientProperties.STYLE)),
+                        () -> assertEquals(BACKDROP.getRGB(), rendered.getRGB(180, 90)));
+            } finally {
+                FlatLightLaf.setup();
+            }
         });
     }
 
     /// Paints one component over a recognizable color without involving a native window.
     ///
-    /// @param component configured tabbed pane
+    /// @param component configured Swing surface
     /// @param width render width
     /// @param height render height
     /// @return rendered pixels
-    private static BufferedImage renderOnBackdrop(JTabbedPane component, int width, int height) {
+    private static BufferedImage renderOnBackdrop(JComponent component, int width, int height) {
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = image.createGraphics();
         try {

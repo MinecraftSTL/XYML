@@ -36,11 +36,13 @@ public final class AuthlibInjectorUrlTest {
                         .orElseThrow());
     }
 
-    /// Rejects absent text and unsupported integration paths.
+    /// Rejects absent text, direct endpoints, and unsupported integration paths.
     @Test
     public void rejectsUnsupportedPayloads() {
         assertTrue(AuthlibInjectorUrl.parse(null).isEmpty());
         assertTrue(AuthlibInjectorUrl.parse("authlib-injector:unsupported:value").isEmpty());
-        assertTrue(AuthlibInjectorUrl.parse("https://example.com/api").isEmpty());
+        assertTrue(AuthlibInjectorUrl.parse(
+                "https://home.minecraftstl.space:8880/api/yggdrasil").isEmpty());
+        assertTrue(AuthlibInjectorUrl.parse("javascript:alert(1)").isEmpty());
     }
 }

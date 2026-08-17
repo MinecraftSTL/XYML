@@ -17,12 +17,12 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.instances.management.worlds;
 
-import org.glavo.nbt.io.NBTCodec;
-import org.glavo.nbt.tag.CompoundTag;
-import org.glavo.nbt.tag.DoubleTag;
-import org.glavo.nbt.tag.IntArrayTag;
-import org.glavo.nbt.tag.ListTag;
-import org.glavo.nbt.tag.TagType;
+import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
+import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.tag.DoubleTag;
+import space.minecraftstl.xyml.library.nbt.tag.IntArrayTag;
+import space.minecraftstl.xyml.library.nbt.tag.ListTag;
+import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

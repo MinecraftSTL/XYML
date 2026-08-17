@@ -100,7 +100,7 @@ final class RemoteAddonCatalogPanelTest {
                 assertFalse(panel.choiceList().getViewport().isOpaque());
                 assertFalse(list.isOpaque());
                 assertFalse(unselectedOpaque);
-                assertTrue(selectedOpaque);
+                assertFalse(selectedOpaque);
                 Insets listInsets = list.getBorder().getBorderInsets(list);
                 assertEquals(9, listInsets.bottom);
             });

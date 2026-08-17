@@ -24,10 +24,13 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
+import javax.swing.JPopupMenu;
 import java.awt.Color;
 import java.awt.Graphics2D;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -78,6 +81,82 @@ public final class ShellDropdownButtonTest {
         });
     }
 
+    /// A popup auto-hidden during an invoker click stays closed when the button action fires on release.
+    @Test
+    public void keepsAutomaticallyDismissedPopupClosed() {
+        EdtDispatcher.executeAndWait(() -> {
+            ShellDropdownButton button = new ShellDropdownButton();
+            TestPopupMenu popup = new TestPopupMenu();
+            AtomicInteger openCount = new AtomicInteger();
+            int initialUpdateCount = popup.updateCount();
+            button.setSize(220, 36);
+            button.bindPopup(popup, () -> {
+                openCount.incrementAndGet();
+                popup.setVisible(true);
+            });
+
+            button.doClick();
+            assertAll(
+                    () -> assertTrue(popup.isVisible()),
+                    () -> assertEquals(1, openCount.get()),
+                    () -> assertEquals(initialUpdateCount + 1, popup.updateCount()));
+
+            popup.setVisible(false);
+            button.processMouseEvent(mouseEvent(button, MouseEvent.MOUSE_PRESSED));
+            button.processMouseEvent(mouseEvent(button, MouseEvent.MOUSE_RELEASED));
+
+            assertAll(
+                    () -> assertFalse(popup.isVisible()),
+                    () -> assertEquals(1, openCount.get()));
+        });
+    }
+
+    /// The disclosure chevron points down while collapsed and up while the bound popup is visible.
+    @Test
+    public void pointsDisclosureChevronTowardPopupState() {
+        EdtDispatcher.executeAndWait(() -> {
+            assertTrue(FlatLightLaf.setup());
+            ShellDropdownButton button = new ShellDropdownButton();
+            TestPopupMenu popup = new TestPopupMenu();
+            button.setSize(220, 36);
+            button.bindPopup(popup, () -> popup.setVisible(true));
+
+            BufferedImage collapsed = render(button);
+            popup.setVisible(true);
+            BufferedImage expanded = render(button);
+            popup.setVisible(false);
+            BufferedImage collapsedAgain = render(button);
+            int centerX = button.getWidth() - 15;
+            int centerY = button.getHeight() / 2;
+            Color foreground = button.getForeground();
+
+            assertAll(
+                    () -> assertTrue(colorDistance(collapsed.getRGB(centerX, centerY + 2), foreground)
+                            < colorDistance(collapsed.getRGB(centerX, centerY - 2), foreground)),
+                    () -> assertTrue(colorDistance(expanded.getRGB(centerX, centerY - 2), foreground)
+                            < colorDistance(expanded.getRGB(centerX, centerY + 2), foreground)),
+                    () -> assertEquals(0, differingPixelCount(collapsed, collapsedAgain)));
+        });
+    }
+
+    /// Creates one primary-button event inside the dropdown bounds.
+    ///
+    /// @param button event target
+    /// @param eventId pressed or released event identifier
+    /// @return configured mouse event
+    private static MouseEvent mouseEvent(ShellDropdownButton button, int eventId) {
+        return new MouseEvent(
+                button,
+                eventId,
+                System.currentTimeMillis(),
+                0,
+                button.getWidth() / 2,
+                button.getHeight() / 2,
+                1,
+                false,
+                MouseEvent.BUTTON1);
+    }
+
     /// Paints one selector over a known opaque background.
     ///
     /// @param button configured selector button
@@ -104,6 +183,18 @@ public final class ShellDropdownButtonTest {
     /// @return center ARGB pixel
     private static int centerPixel(BufferedImage image) {
         return image.getRGB(image.getWidth() / 2, image.getHeight() / 2);
+    }
+
+    /// Measures RGB distance from one rendered pixel to a reference color.
+    ///
+    /// @param argb rendered pixel
+    /// @param reference comparison color
+    /// @return summed absolute RGB channel distance
+    private static int colorDistance(int argb, Color reference) {
+        Color pixel = new Color(argb, true);
+        return Math.abs(pixel.getRed() - reference.getRed())
+                + Math.abs(pixel.getGreen() - reference.getGreen())
+                + Math.abs(pixel.getBlue() - reference.getBlue());
     }
 
     /// Counts pixels changed by one interaction-state transition.
@@ -138,5 +229,53 @@ public final class ShellDropdownButtonTest {
             }
         }
         return false;
+    }
+
+    /// Headless popup fake that publishes the same visibility callbacks as `JPopupMenu`.
+    @NotNullByDefault
+    private static final class TestPopupMenu extends JPopupMenu {
+        /// Simulated popup visibility.
+        private boolean popupVisible;
+
+        /// Look-and-feel refreshes observed by this popup.
+        private int updates;
+
+        /// Records an explicit refresh after construction.
+        @Override
+        public void updateUI() {
+            super.updateUI();
+            updates++;
+        }
+
+        /// Returns simulated visibility without creating a native popup window.
+        ///
+        /// @return whether the fake popup is visible
+        @Override
+        public boolean isVisible() {
+            return popupVisible;
+        }
+
+        /// Publishes visibility callbacks without requiring a displayable invoker.
+        ///
+        /// @param visible requested popup visibility
+        @Override
+        public void setVisible(boolean visible) {
+            if (popupVisible == visible) {
+                return;
+            }
+            if (visible) {
+                firePopupMenuWillBecomeVisible();
+            } else {
+                firePopupMenuWillBecomeInvisible();
+            }
+            popupVisible = visible;
+        }
+
+        /// Returns all observed look-and-feel refreshes.
+        ///
+        /// @return update count
+        private int updateCount() {
+            return updates;
+        }
     }
 }

@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
 import space.minecraftstl.xyml.setting.AnimationSpeedSettings;
 import space.minecraftstl.xyml.setting.BackgroundType;
+import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.theme.BuiltinBackground;
 import space.minecraftstl.xyml.theme.NetworkBackgroundImageCachePolicy;
 import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
@@ -152,9 +153,12 @@ public final class PersistedAppearanceSettingsModelTest {
         FakeStore writableStore = new FakeStore(raw("light", 6, false, true));
         PersistedAppearanceSettingsModel writable =
                 new PersistedAppearanceSettingsModel(writableStore, ignored -> { });
-        assertThrows(IllegalArgumentException.class, () -> writable.setCornerRadius(21));
+        writable.setCornerRadius(LauncherSettings.MAXIMUM_CORNER_RADIUS);
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> writable.setCornerRadius(LauncherSettings.MAXIMUM_CORNER_RADIUS + 1));
         assertThrows(IllegalArgumentException.class, () -> writable.setAnimationSpeedPercentage(205));
-        assertEquals(6, writableStore.snapshot().cornerRadius());
+        assertEquals(LauncherSettings.MAXIMUM_CORNER_RADIUS, writableStore.snapshot().cornerRadius());
         assertEquals(100, writableStore.snapshot().animationSpeed().percentage());
         writable.close();
 
@@ -252,9 +256,9 @@ public final class PersistedAppearanceSettingsModelTest {
         return new StoredAppearanceSettings(
                 brightnessValue,
                 radius,
-                0,
-                20,
-                1,
+                LauncherSettings.MINIMUM_CORNER_RADIUS,
+                LauncherSettings.MAXIMUM_CORNER_RADIUS,
+                LauncherSettings.CORNER_RADIUS_STEP,
                 animationsDisabled,
                 background(),
                 writable,

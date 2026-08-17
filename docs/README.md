@@ -56,11 +56,15 @@ manages its own versions, release channels, artifacts, and issue tracking; the r
 represent the other project. This repository retains `HMCL-dev/HMCL` as its upstream source so that suitable upstream
 changes can be tracked and evaluated for XYML.
 
+The source tree also maintains four XYML-branded forks in [`libraries/`](../libraries/README.md). They are built with
+XYML while remaining independent Java archives or native executables. Upstream project names are retained only where
+license notices, provenance records, or compatible remote runtime coordinates require them.
+
 ## Downloads and Releases
 
-Download official XYML builds from [GitHub Releases](https://github.com/MinecraftSTL/XYML/releases). XYML uses four
-release channels: stable, beta, alpha, and dev. Their version formats, test audiences, feedback policies, and promotion
-order are documented in the [release model](ReleaseSchedule.md).
+Download XYML Stable builds from [Github Release](https://github.com/MinecraftSTL/XYML/releases). The official website
+publishes Stable and Beta builds. XYML uses four release channels: stable, beta, alpha, and dev. Their version formats,
+test audiences, feedback policies, and promotion order are documented in the [release model](ReleaseSchedule.md).
 
 ## Contributing
 

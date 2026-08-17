@@ -198,6 +198,9 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// Runtime snapshot subscription owned by this panel.
     private final Subscription runtimeSubscription;
 
+    /// Page-scoped router for Java homes, executables, and runtime archives.
+    private final JavaRuntimeDropController dropController;
+
     /// Snapshot currently rendered by both runtime lists, or null before initial application.
     private @Nullable JavaRuntimeManagementSnapshot displayedSnapshot;
 
@@ -297,6 +300,12 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         configureComponents();
         runtimeSubscription = service.subscribe(this::runtimeSnapshotChanged);
         applySnapshot(service.snapshot());
+        dropController = JavaRuntimeDropController.install(
+                this,
+                () -> !closed && activeExecutor == null && displayedSnapshot().writable(),
+                acquisitionService::supportsLocalArchive,
+                this::chooseLocalRuntime,
+                this::openAcquisitionView);
     }
 
     /// Returns the Java runtime snapshot currently represented by both cards.
@@ -504,9 +513,9 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
                 acquireButton,
                 "javaManagementAcquire",
                 "assets/swing/icons/nav-downloads.svg");
-        acquireButton.addActionListener(event -> openAcquisitionView());
+        acquireButton.addActionListener(event -> openAcquisitionView(null));
         configureIconButton(addButton, "javaManagementAdd", "assets/swing/icons/add.svg");
-        addButton.addActionListener(event -> chooseLocalRuntime());
+        addButton.addActionListener(event -> chooseLocalRuntime(null));
         configureIconButton(
                 manageDisabledButton,
                 "javaManagementDisabled",
@@ -696,14 +705,15 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         updateActionAvailability();
     }
 
-    /// Lazily loads local acquisition capabilities after the user explicitly opens the acquisition card.
-    private void openAcquisitionView() {
+    /// Lazily loads acquisition capabilities and optionally selects a dropped archive.
+    ///
+    /// @param droppedArchive dropped runtime archive, or null for the toolbar command
+    private void openAcquisitionView(@Nullable Path droppedArchive) {
         EdtDispatcher.requireEventDispatchThread();
         if (closed || activeExecutor != null) {
             return;
         }
         @Nullable JavaRuntimeAcquisitionPanel requestedPanel = acquisitionPanel;
-
         final Task<JavaRuntimeAcquisitionSnapshot> task;
         try {
             task = Objects.requireNonNull(
@@ -725,6 +735,10 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
                             requestedPanel.applySnapshot(result);
                         }
                         showAcquisitionView();
+                        if (droppedArchive != null
+                                && !Objects.requireNonNull(acquisitionPanel).selectArchive(droppedArchive)) {
+                            setStatus(i18n("java.install.failed.invalid"));
+                        }
                     }
                 });
     }
@@ -797,14 +811,16 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Opens the local runtime chooser and creates exactly one registration task for an accepted path.
-    private void chooseLocalRuntime() {
+    /// Opens the local runtime chooser or uses one dropped path, then creates one registration task.
+    ///
+    /// @param droppedPath dropped Java path, or null to open the chooser
+    private void chooseLocalRuntime(@Nullable Path droppedPath) {
         EdtDispatcher.requireEventDispatchThread();
         JavaRuntimeManagementSnapshot snapshot = displayedSnapshot();
         if (closed || activeExecutor != null || !snapshot.writable()) {
             return;
         }
-        @Nullable Path selectedPath = interactions.chooseLocalRuntime(this);
+        @Nullable Path selectedPath = droppedPath == null ? interactions.chooseLocalRuntime(this) : droppedPath;
         if (selectedPath == null) {
             return;
         }
@@ -1708,6 +1724,7 @@ public final class JavaManagementPanel extends JPanel implements AutoCloseable {
     /// Cancels a live executor and releases all task and runtime subscriptions on the EDT.
     private void closeOnEventDispatchThread() {
         EdtDispatcher.requireEventDispatchThread();
+        dropController.close();
         runtimeSubscription.unsubscribe();
         unsubscribe(activeCompletionSubscription);
         activeCompletionSubscription = null;

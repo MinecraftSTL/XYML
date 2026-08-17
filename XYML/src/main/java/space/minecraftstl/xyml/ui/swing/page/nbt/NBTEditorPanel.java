@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.nbt.NBTNodeType;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
@@ -372,7 +373,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         details.add(new JLabel(), "skip");
         applyButton.setName("nbtEditorApply");
         applyButton.setText(strings.applyText());
-        applyButton.putClientProperty("JButton.buttonType", "roundRect");
         applyButton.addActionListener(event -> applySelectedValue());
         applyButton.getAccessibleContext().setAccessibleName(strings.applyText());
         details.add(applyButton, "right, h 36!, wrap");
@@ -826,9 +826,10 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         @Override
         public boolean canImport(TransferSupport support) {
             TransferSupport transferSupport = Objects.requireNonNull(support, "support");
-            return !closed.get()
+            return ShellFileDropHandler.canImportAncestorText(transferSupport)
+                    || (!closed.get()
                     && !controller.snapshot().busy()
-                    && transferSupport.isDataFlavorSupported(DataFlavor.javaFileListFlavor);
+                    && transferSupport.isDataFlavorSupported(DataFlavor.javaFileListFlavor));
         }
 
         /// Decodes and forwards one file-list transfer.
@@ -838,6 +839,9 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         @Override
         public boolean importData(TransferSupport support) {
             TransferSupport transferSupport = Objects.requireNonNull(support, "support");
+            if (ShellFileDropHandler.importAncestorText(transferSupport)) {
+                return true;
+            }
             if (!canImport(transferSupport)) {
                 return false;
             }

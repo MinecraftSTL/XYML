@@ -645,7 +645,6 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         installActions.add(selectLoadersButton, "grow, h 40!");
         installButton.setName("gameVersionsInstall");
         installButton.setText(installStrings.installAction());
-        installButton.putClientProperty("JButton.buttonType", "roundRect");
         installButton.addActionListener(event -> startInstallation());
         installActions.add(installButton, "grow, h 40!");
         installConfigurationPanel.add(installActions, "span 2, growx");

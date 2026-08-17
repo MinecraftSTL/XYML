@@ -97,7 +97,7 @@ final class RemoteModpackCatalogPanelTest {
                 assertFalse(panel.choiceList().getViewport().isOpaque());
                 assertFalse(list.isOpaque());
                 assertFalse(unselectedOpaque);
-                assertTrue(selectedOpaque);
+                assertFalse(selectedOpaque);
             });
         } finally {
             @Nullable RemoteModpackCatalogPanel panel = panelReference.get();

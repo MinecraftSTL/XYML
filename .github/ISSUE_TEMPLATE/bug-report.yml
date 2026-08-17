@@ -10,14 +10,14 @@ body:
         提交前请确认：
 
         * 该问题确实是 **XYML 的错误**，而**不是 Minecraft 非正常退出**。如果你的 Minecraft 非正常退出，请前往 [QQ 群](https://github.com/MinecraftSTL/XYML/discussions)/[Discord 服务器](https://github.com/MinecraftSTL/XYML/discussions) 获取帮助。
-        * 你的启动器版本是 GitHub Releases 中最新的**稳定版或公测版**。内测版和开发版虽然可以公开下载，但反馈仅通过受限测试渠道收集，请不要在此表单提交。
+        * 你的启动器版本是 Github Release 中最新的**稳定版**，或官网提供的最新**稳定版或公测版**。内测版和开发版不公开分发，反馈仅通过受限测试渠道收集，请不要在此表单提交。
 
         如果你的问题并不属于上述两类，你可以选取另一种 Issue 类型，或者直接前往 [QQ 群](https://github.com/MinecraftSTL/XYML/discussions)/[Discord 服务器](https://github.com/MinecraftSTL/XYML/discussions) 获取帮助。
 
         Before submitting, please confirm:
 
         * The issue is indeed **a bug of XYML**, not **Minecraft abnormal exit**. If your Minecraft exits abnormally, please go to the [QQ group](https://github.com/MinecraftSTL/XYML/discussions) or [Discord server](https://github.com/MinecraftSTL/XYML/discussions) for help.
-        * Your launcher is the latest **Stable or Beta release** on GitHub Releases. Alpha and Dev builds remain publicly downloadable, but their feedback is accepted only through restricted testing channels; do not use this form for them.
+        * Your launcher is the latest **Stable release** on Github Release, or the latest **Stable or Beta release** from the official website. Alpha and Dev builds are not distributed publicly, and their feedback is accepted only through restricted testing channels; do not use this form for them.
 
         If your issue does not fall into the above two categories, you can choose another type of issue or directly go to the [QQ group](https://github.com/MinecraftSTL/XYML/discussions) or [Discord server](https://github.com/MinecraftSTL/XYML/discussions) for help.
   - type: textarea

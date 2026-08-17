@@ -83,7 +83,7 @@ final class LoaderSelectionWizardPanelTest {
                 assertFalse(panel.versionChoiceList().getViewport().isOpaque());
                 assertFalse(list.isOpaque());
                 assertFalse(unselectedOpaque);
-                assertTrue(selectedOpaque);
+                assertFalse(selectedOpaque);
             });
         } finally {
             closePanel(panelReference.get());
