@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.mcp;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Proxy;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -40,10 +41,11 @@ public final class XYMLMcpToolRegistryTest {
         List<XYMLMcpToolRegistry.ToolDefinition> definitions = registry.toolDefinitions();
         Set<String> names = definitions.stream().map(XYMLMcpToolRegistry.ToolDefinition::name)
                 .collect(Collectors.toSet());
-        assertEquals(17, definitions.size());
-        assertEquals(17, names.size());
+        assertEquals(16, definitions.size());
+        assertEquals(16, names.size());
         assertTrue(names.containsAll(Set.of("list_instances", "analyze_crash", "set_java_version",
                 "enable_mod", "remove_mods", "launch_game", "get_launch_status")));
+        assertFalse(names.contains("get_logs"));
         assertFalse(names.contains("search_addons"));
         assertFalse(names.contains("create_instance"));
     }
@@ -79,5 +81,26 @@ public final class XYMLMcpToolRegistryTest {
         assertTrue(result.error());
         assertEquals("launch_game", result.structuredContent().get("tool"));
         assertTrue(String.valueOf(result.structuredContent().get("error")).contains("confirmed=true"));
+    }
+
+    /// Ensures the resource and prompt registries expose protocol-neutral definitions without a repository.
+    @Test
+    public void registersResourceAndPromptInterfaces() throws Exception {
+        XYMLMcpOperations operations = (XYMLMcpOperations) Proxy.newProxyInstance(
+                XYMLMcpOperations.class.getClassLoader(), new Class<?>[]{XYMLMcpOperations.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "listInstances" -> List.of(Map.of("id", "demo"));
+                    case "readResource" -> Map.of("uri", "xyml://demo", "mime_type", "text/plain", "text", "ok");
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        XYMLMcpResourceRegistry resources = new XYMLMcpResourceRegistry(operations);
+        assertEquals(3, resources.resourceTemplateDefinitions().size());
+        assertEquals(2, resources.resourceDefinitions().size());
+        assertEquals("ok", resources.readResource("xyml://demo").text());
+
+        XYMLMcpPromptRegistry prompts = new XYMLMcpPromptRegistry();
+        assertEquals(1, prompts.promptDefinitions().size());
+        Map<String, Object> result = prompts.getPrompt("diagnose_crash", Map.of("instance_id", "demo"));
+        assertTrue(result.containsKey("messages"));
     }
 }

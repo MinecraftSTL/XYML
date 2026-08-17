@@ -29,16 +29,15 @@ import java.net.http.HttpResponse;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies the loopback HTTP/SSE JSON-RPC subset exposed by the MCP server.
 @NotNullByDefault
 public final class XYMLMcpServerHttpTest {
 
-    /// Performs initialize and tools/list through the only supported HTTP endpoint.
+    /// Performs capability discovery through the only supported HTTP endpoint.
     @Test
-    public void servesInitializeAndToolList() throws Exception {
+    public void servesDeclaredInterfaces() throws Exception {
         try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
             server.startListener();
             URI endpoint = URI.create("http://127.0.0.1:" + server.getListeningPort() + XYMLMcpServer.MCP_PATH);
@@ -49,14 +48,14 @@ public final class XYMLMcpServerHttpTest {
             assertEquals("2.0", initialize.get("jsonrpc").getAsString());
             assertEquals(1, initialize.get("id").getAsInt());
             JsonObject capabilities = initialize.getAsJsonObject("result").getAsJsonObject("capabilities");
-            assertEquals(1, capabilities.size());
+            assertEquals(3, capabilities.size());
             assertTrue(capabilities.has("tools"));
-            assertFalse(capabilities.has("resources"));
-            assertFalse(capabilities.has("prompts"));
+            assertTrue(capabilities.has("resources"));
+            assertTrue(capabilities.has("prompts"));
 
             JsonObject list = post(client, endpoint,
                     "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
-            assertEquals(17, list.getAsJsonObject("result").getAsJsonArray("tools").size());
+            assertEquals(16, list.getAsJsonObject("result").getAsJsonArray("tools").size());
 
             JsonObject call = post(client, endpoint,
                     "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\","
@@ -64,8 +63,35 @@ public final class XYMLMcpServerHttpTest {
             assertTrue(call.getAsJsonObject("result").get("isError").getAsBoolean());
             assertTrue(call.getAsJsonObject("result").has("structuredContent"));
 
-            JsonObject unsupported = post(client, endpoint,
+            JsonObject resources = post(client, endpoint,
                     "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"resources/list\"}");
+            assertEquals(0, resources.getAsJsonObject("result").getAsJsonArray("resources").size());
+
+            JsonObject templates = post(client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"resources/templates/list\"}");
+            assertEquals(3, templates.getAsJsonObject("result").getAsJsonArray("resourceTemplates").size());
+            assertTrue(templates.getAsJsonObject("result").getAsJsonArray("resourceTemplates")
+                    .get(0).getAsJsonObject().has("uriTemplate"));
+
+            JsonObject read = post(client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"resources/read\","
+                            + "\"params\":{\"uri\":\"xyml://instances/demo/logs/latest.log\"}}");
+            assertEquals(-32603, read.getAsJsonObject("error").get("code").getAsInt());
+
+            JsonObject prompts = post(client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"prompts/list\"}");
+            assertEquals(1, prompts.getAsJsonObject("result").getAsJsonArray("prompts").size());
+            assertTrue(prompts.getAsJsonObject("result").getAsJsonArray("prompts")
+                    .get(0).getAsJsonObject().has("arguments"));
+
+            JsonObject prompt = post(client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"prompts/get\","
+                            + "\"params\":{\"name\":\"diagnose_crash\","
+                            + "\"arguments\":{\"instance_id\":\"demo\"}}}");
+            assertEquals(1, prompt.getAsJsonObject("result").getAsJsonArray("messages").size());
+
+            JsonObject unsupported = post(client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"resources/subscribe\"}");
             assertEquals(-32601, unsupported.getAsJsonObject("error").get("code").getAsInt());
         }
     }

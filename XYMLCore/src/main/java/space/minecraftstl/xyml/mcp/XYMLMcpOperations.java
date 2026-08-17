@@ -49,13 +49,16 @@ public interface XYMLMcpOperations {
     /// @return absolute directory path
     String getModsDirectory(String instanceId);
 
-    /// Reads the latest game log tail.
+    /// Reads one launcher-owned text resource.
     ///
-    /// @param instanceId instance identifier
-    /// @param requestedLines maximum trailing lines to return
-    /// @return immutable log data
-    /// @throws IOException if the log cannot be read
-    @Unmodifiable Map<String, Object> getLogs(String instanceId, int requestedLines) throws IOException;
+    /// Supported URIs address the latest log, a crash-report directory listing, or one crash
+    /// report file. The application implementation is responsible for validating filesystem
+    /// ownership before returning text.
+    ///
+    /// @param uri resource URI
+    /// @return immutable resource URI, MIME type, and text
+    /// @throws IOException if the resource cannot be read
+    @Unmodifiable Map<String, String> readResource(String uri) throws IOException;
 
     /// Analyzes a game crash using XYML's crash analyzer.
     ///

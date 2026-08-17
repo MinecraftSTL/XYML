@@ -68,11 +68,6 @@ public final class XYMLMcpToolRegistry {
         register(definitions, handlers, "get_mods_directory", "[L1] Read-only absolute mods directory path.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
                 arguments -> Map.of("path", service().getModsDirectory(requiredString(arguments, "instance_id"))));
-        register(definitions, handlers, "get_logs", "[L1] Read-only tail of the latest game log.",
-                schema(Map.of("instance_id", stringSchema("Instance identifier"),
-                        "lines", integerSchema("Number of trailing lines", 1, 20_000)), List.of("instance_id")),
-                arguments -> service().getLogs(requiredString(arguments, "instance_id"),
-                        optionalInteger(arguments, "lines", 200)));
         register(definitions, handlers, "analyze_crash",
                 "[L1] Read-only CrashReportAnalyzer diagnosis using a log and optional instance crash report.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier"),

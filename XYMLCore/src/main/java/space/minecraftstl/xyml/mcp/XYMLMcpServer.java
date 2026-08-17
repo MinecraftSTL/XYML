@@ -37,10 +37,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 
-/// Serves XYML MCP tools through a loopback HTTP/SSE JSON-RPC endpoint.
+/// Serves the XYML MCP surface through a loopback HTTP/SSE JSON-RPC endpoint.
 ///
-/// The server exposes only `POST /mcp` and the `initialize`, `tools/list`, and `tools/call` methods.
-/// Its capability negotiation contains only the tools capability.
+/// The server exposes only `POST /mcp` and the launcher tools, resources, and prompts methods.
 @NotNullByDefault
 public final class XYMLMcpServer extends NanoHTTPD implements AutoCloseable {
 
@@ -60,6 +59,12 @@ public final class XYMLMcpServer extends NanoHTTPD implements AutoCloseable {
     /// Registry supplying XYML tool definitions and invocations.
     private final XYMLMcpToolRegistry registry;
 
+    /// Registry supplying launcher log and crash-report resources.
+    private final XYMLMcpResourceRegistry resourceRegistry;
+
+    /// Registry supplying launcher prompt templates.
+    private final XYMLMcpPromptRegistry promptRegistry;
+
     /// Creates a loopback MCP server without starting its listener.
     ///
     /// @param port loopback TCP port, or zero to select an available port
@@ -67,6 +72,8 @@ public final class XYMLMcpServer extends NanoHTTPD implements AutoCloseable {
     public XYMLMcpServer(int port, @Nullable XYMLMcpOperations service) {
         super("127.0.0.1", validatePort(port));
         registry = new XYMLMcpToolRegistry(service);
+        resourceRegistry = new XYMLMcpResourceRegistry(service);
+        promptRegistry = new XYMLMcpPromptRegistry();
     }
 
     /// Starts the loopback HTTP listener using NanoHTTPD's daemon mode.
@@ -182,11 +189,17 @@ public final class XYMLMcpServer extends NanoHTTPD implements AutoCloseable {
             case "initialize" -> initialize(params);
             case "tools/list" -> Map.of("tools", registry.toolDefinitions());
             case "tools/call" -> callTool(params);
+            case "resources/list" -> listResources();
+            case "resources/templates/list" -> Map.of(
+                    "resourceTemplates", resourceRegistry.resourceTemplateDefinitions());
+            case "resources/read" -> readResource(params);
+            case "prompts/list" -> Map.of("prompts", promptRegistry.promptDefinitions());
+            case "prompts/get" -> getPrompt(params);
             default -> throw new ProtocolException(-32601, "Unsupported method: " + method);
         };
     }
 
-    /// Negotiates the protocol version and advertises only tools.
+    /// Negotiates the protocol version and advertises the implemented MCP capabilities.
     ///
     /// @param params initialization parameters
     /// @return immutable initialization result
@@ -194,9 +207,59 @@ public final class XYMLMcpServer extends NanoHTTPD implements AutoCloseable {
         @Nullable String requestedVersion = stringMember(params, "protocolVersion");
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("protocolVersion", requestedVersion == null ? "2025-06-18" : requestedVersion);
-        result.put("capabilities", Map.of("tools", Map.of("listChanged", false)));
+        result.put("capabilities", Map.of(
+                "tools", Map.of("listChanged", false),
+                "resources", Map.of("subscribe", false, "listChanged", false),
+                "prompts", Map.of("listChanged", false)));
         result.put("serverInfo", SERVER_INFO);
         return Map.copyOf(result);
+    }
+
+    /// Lists concrete launcher resources.
+    ///
+    /// @return immutable resource list result
+    private @Unmodifiable Map<String, Object> listResources() {
+        try {
+            return Map.of("resources", resourceRegistry.resourceDefinitions());
+        } catch (Exception exception) {
+            throw new ProtocolException(-32603, exceptionMessage(exception, "Unable to list resources"));
+        }
+    }
+
+    /// Reads one launcher resource and formats the MCP contents envelope.
+    ///
+    /// @param params resource-read parameters
+    /// @return immutable resource contents result
+    private @Unmodifiable Map<String, Object> readResource(JsonObject params) {
+        @Nullable String uri = stringMember(params, "uri");
+        if (uri == null || uri.isBlank()) {
+            throw new ProtocolException(-32602, "Resource URI is missing");
+        }
+        try {
+            XYMLMcpResourceRegistry.ResourceReadResult result = resourceRegistry.readResource(uri);
+            return Map.of("contents", List.of(Map.of(
+                    "uri", result.uri(), "mimeType", result.mimeType(), "text", result.text())));
+        } catch (IllegalArgumentException exception) {
+            throw new ProtocolException(-32602, exceptionMessage(exception, "Invalid resource URI"));
+        } catch (Exception exception) {
+            throw new ProtocolException(-32603, exceptionMessage(exception, "Unable to read resource"));
+        }
+    }
+
+    /// Expands one launcher prompt template.
+    ///
+    /// @param params prompt-get parameters
+    /// @return immutable prompt result
+    private @Unmodifiable Map<String, Object> getPrompt(JsonObject params) {
+        @Nullable String name = stringMember(params, "name");
+        if (name == null || name.isBlank()) {
+            throw new ProtocolException(-32602, "Prompt name is missing");
+        }
+        try {
+            return promptRegistry.getPrompt(name, mapMember(params, "arguments"));
+        } catch (IllegalArgumentException exception) {
+            throw new ProtocolException(-32602, exceptionMessage(exception, "Invalid prompt arguments"));
+        }
     }
 
     /// Invokes one tool and formats its MCP content envelope.
@@ -246,6 +309,16 @@ public final class XYMLMcpServer extends NanoHTTPD implements AutoCloseable {
         response.add("id", id == null ? null : id.deepCopy());
         response.add("error", error);
         return response;
+    }
+
+    /// Returns an exception message suitable for a protocol response.
+    ///
+    /// @param exception operation exception
+    /// @param fallback message used when the exception has no message
+    /// @return stable response message
+    private static String exceptionMessage(Exception exception, String fallback) {
+        return exception.getMessage() == null || exception.getMessage().isBlank()
+                ? fallback : exception.getMessage();
     }
 
     /// Serializes a JSON-RPC response as one server-sent event.

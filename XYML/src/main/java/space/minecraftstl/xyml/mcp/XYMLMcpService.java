@@ -37,16 +37,22 @@ import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.property.InheritableProperty;
 
 import java.io.IOException;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /// Bridges the existing XYMLCore launcher services to MCP-safe structured operations.
 ///
@@ -55,8 +61,20 @@ import java.util.concurrent.ConcurrentHashMap;
 @NotNullByDefault
 public final class XYMLMcpService implements XYMLMcpOperations {
 
-    /// Maximum number of lines returned by one log request.
+    /// Maximum number of lines retained from one launch process.
     private static final int MAX_LOG_LINES = 20_000;
+
+    /// URI matcher for the latest instance log.
+    private static final Pattern LOG_RESOURCE = Pattern.compile(
+            "^xyml://instances/([^/]+)/logs/latest\\.log$");
+
+    /// URI matcher for an instance crash-report directory listing.
+    private static final Pattern CRASH_DIRECTORY_RESOURCE = Pattern.compile(
+            "^xyml://instances/([^/]+)/crash-reports/$");
+
+    /// URI matcher for one instance crash-report file.
+    private static final Pattern CRASH_REPORT_RESOURCE = Pattern.compile(
+            "^xyml://instances/([^/]+)/crash-reports/([^/]+)$");
 
     /// Repository exposed by this server process.
     private final XYMLGameRepository repository;
@@ -117,26 +135,6 @@ public final class XYMLMcpService implements XYMLMcpOperations {
         return repository.getModsDirectory(id(instanceId)).toAbsolutePath().normalize().toString();
     }
 
-    /// Reads the tail of the latest game log.
-    ///
-    /// @param instanceId instance identifier
-    /// @param requestedLines requested number of lines
-    /// @return log metadata and text
-    @Override
-    public @Unmodifiable Map<String, Object> getLogs(String instanceId, int requestedLines) throws IOException {
-        GameInstanceID id = id(instanceId);
-        Path file = latestLog(id);
-        int lines = Math.max(1, Math.min(MAX_LOG_LINES, requestedLines));
-        List<String> all = Files.exists(file) ? Files.readAllLines(file, StandardCharsets.UTF_8) : List.of();
-        int from = Math.max(0, all.size() - lines);
-        return Map.of(
-                "instance_id", id.id(),
-                "path", file.toAbsolutePath().normalize().toString(),
-                "exists", Files.isRegularFile(file),
-                "line_count", all.size() - from,
-                "text", String.join("\n", all.subList(from, all.size())));
-    }
-
     /// Analyzes a supplied log or the latest instance log with CrashReportAnalyzer.
     ///
     /// @param instanceId instance identifier
@@ -168,6 +166,36 @@ public final class XYMLMcpService implements XYMLMcpOperations {
     /// @return structured rule matches and extracted crash report
     public static @Unmodifiable Map<String, Object> analyzeCrashText(String logText) {
         return XYMLMcpCrashAnalyzer.analyze(logText, null);
+    }
+
+    /// Reads a supported `xyml://` resource URI.
+    ///
+    /// @param uri resource URI
+    /// @return immutable resource URI, MIME type, and text
+    /// @throws IOException if a resource file cannot be read
+    @Override
+    public @Unmodifiable Map<String, String> readResource(String uri) throws IOException {
+        Matcher logMatcher = LOG_RESOURCE.matcher(uri);
+        if (logMatcher.matches()) {
+            GameInstanceID id = instanceIdFromUri(logMatcher.group(1));
+            requireInstance(id);
+            return textResource(uri, readLog(id));
+        }
+
+        Matcher directoryMatcher = CRASH_DIRECTORY_RESOURCE.matcher(uri);
+        if (directoryMatcher.matches()) {
+            GameInstanceID id = instanceIdFromUri(directoryMatcher.group(1));
+            requireInstance(id);
+            return textResource(uri, listCrashReports(id));
+        }
+
+        Matcher reportMatcher = CRASH_REPORT_RESOURCE.matcher(uri);
+        if (reportMatcher.matches()) {
+            GameInstanceID id = instanceIdFromUri(reportMatcher.group(1));
+            requireInstance(id);
+            return textResource(uri, readCrashReport(id, decodePathSegment(reportMatcher.group(2))));
+        }
+        throw new IllegalArgumentException("Unsupported XYML resource URI: " + uri);
     }
 
     /// Lists Java runtimes already discovered by JavaManager.
@@ -471,6 +499,59 @@ public final class XYMLMcpService implements XYMLMcpOperations {
     /// @return normalized crash-report directory
     private Path crashReportRoot(GameInstanceID id) {
         return repository.getRunDirectory(id).resolve("crash-reports").toAbsolutePath().normalize();
+    }
+
+    /// Creates a text resource result.
+    ///
+    /// @param uri resource URI
+    /// @param text resource text
+    /// @return immutable resource map
+    private static @Unmodifiable Map<String, String> textResource(String uri, String text) {
+        return Map.of("uri", uri, "mime_type", "text/plain", "text", text);
+    }
+
+    /// Lists direct regular files in one instance's crash-report directory.
+    ///
+    /// @param id instance identifier
+    /// @return one file name per line, or an empty string when the directory is absent
+    /// @throws IOException if the directory cannot be listed
+    private String listCrashReports(GameInstanceID id) throws IOException {
+        Path root = crashReportRoot(id);
+        if (!Files.isDirectory(root)) {
+            return "";
+        }
+        try (Stream<Path> paths = Files.list(root)) {
+            return paths.filter(Files::isRegularFile)
+                    .map(path -> path.getFileName().toString())
+                    .sorted(Comparator.naturalOrder())
+                    .collect(Collectors.joining("\n"));
+        }
+    }
+
+    /// Decodes and validates one URI path segment.
+    ///
+    /// @param raw encoded path segment
+    /// @return decoded safe path segment
+    private static String decodePathSegment(String raw) {
+        final String decoded;
+        try {
+            decoded = URLDecoder.decode(raw.replace("+", "%2B"), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("Invalid XYML resource URI", exception);
+        }
+        if (decoded.isBlank() || decoded.contains("/") || decoded.contains("\\")
+                || ".".equals(decoded) || "..".equals(decoded)) {
+            throw new IllegalArgumentException("Invalid XYML resource path segment");
+        }
+        return decoded;
+    }
+
+    /// Decodes an instance identifier embedded in a resource URI.
+    ///
+    /// @param raw encoded instance identifier
+    /// @return validated instance identifier
+    private static GameInstanceID instanceIdFromUri(String raw) {
+        return new GameInstanceID(decodePathSegment(raw));
     }
 
     /// Reads one crash report after proving it belongs to the selected instance.
