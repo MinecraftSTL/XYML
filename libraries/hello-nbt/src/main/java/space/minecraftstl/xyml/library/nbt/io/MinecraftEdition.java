@@ -1,0 +1,41 @@
+/*
+ * Copyright 2026 Glavo
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+// Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
+package space.minecraftstl.xyml.library.nbt.io;
+
+import java.nio.ByteOrder;
+
+/// Represents the edition of Minecraft that the NBT data is used for.
+///
+/// @see NBTCodec
+public enum MinecraftEdition {
+    /// Stores the NBT data in big-endian byte order, and encodes strings in modified UTF-8.
+    JAVA_EDITION(ByteOrder.BIG_ENDIAN),
+
+    /// Stores the NBT data in little-endian byte order, and encodes strings in UTF-8.
+    BEDROCK_EDITION(ByteOrder.LITTLE_ENDIAN);
+
+    private final ByteOrder byteOrder;
+
+    MinecraftEdition(ByteOrder byteOrder) {
+        this.byteOrder = byteOrder;
+    }
+
+    /// Returns the byte order of the NBT data.
+    public ByteOrder byteOrder() {
+        return this.byteOrder;
+    }
+}

@@ -20,23 +20,17 @@ package space.minecraftstl.xyml.ui.swing.page.mods;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.addon.LocalAddonManager;
 import space.minecraftstl.xyml.addon.mod.LocalModFile;
 import space.minecraftstl.xyml.addon.mod.ModManager;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
-import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.CancellationException;
 
 /// Real blocking adapter around `GameRepository`, `ModManager`, and `LocalModFile`.
@@ -108,7 +102,7 @@ final class ModManagerCatalogAccess implements ModCatalogAccess {
             ModCatalogMutation mutation,
             LoadCancellation cancellation) throws IOException {
         if (mutation instanceof ModCatalogMutation.Import importMutation) {
-            importMods(importMutation.sources(), cancellation);
+            importMods(importMutation, cancellation);
         } else if (mutation instanceof ModCatalogMutation.Enabled enabledMutation) {
             setEnabled(enabledMutation.localKey(), enabledMutation.enabled());
         } else if (mutation instanceof ModCatalogMutation.EnabledBatch enabledBatch) {
@@ -122,42 +116,23 @@ final class ModManagerCatalogAccess implements ModCatalogAccess {
         }
     }
 
-    /// Validates every import source before copying the first file, then delegates to Core.
+    /// Preflights and applies one ordered import plan against the current Core index.
     ///
-    /// @param sources immutable normalized source paths
+    /// @param mutation immutable import sources and conflict decisions
     /// @param cancellation cooperative pre-commit cancellation
     /// @throws IOException when source inspection or copying fails
     private void importMods(
-            @Unmodifiable List<Path> sources,
+            ModCatalogMutation.Import mutation,
             LoadCancellation cancellation) throws IOException {
-        Set<String> existingKeys = new HashSet<>();
-        for (LocalModFile file : manager.getLocalFiles()) {
-            existingKeys.add(file.getFileName().toLowerCase(Locale.ROOT));
-        }
-
-        Set<String> importKeys = new HashSet<>();
-        for (Path source : sources) {
-            requireNotCancelled(cancellation);
-            if (!Files.isRegularFile(source)) {
-                throw new IOException("Mod source is not a regular file: " + source);
-            }
-            if (!ModManager.isFileNameMod(source)) {
-                throw new IllegalArgumentException("Unsupported Mod file: " + source);
-            }
-            String localKey = localKey(source).toLowerCase(Locale.ROOT);
-            if (!importKeys.add(localKey)) {
-                throw new IllegalArgumentException("Duplicate Mod import target: " + source.getFileName());
-            }
-            if (existingKeys.contains(localKey)
-                    || manager.hasSimpleMod(Objects.requireNonNull(source.getFileName()).toString())) {
-                throw new IOException("A Mod with the same local name already exists: " + source.getFileName());
-            }
-        }
-
-        // Crossing this loop starts irreversible copies; completion always performs a full refresh.
-        for (Path source : sources) {
-            manager.addMod(source);
-        }
+        @Unmodifiable List<Path> indexedPaths = manager.getLocalFiles().stream()
+                .map(LocalModFile::getFile)
+                .toList();
+        ModImportFileOperations.importMods(
+                manager.getDirectory(),
+                indexedPaths,
+                mutation.sources(),
+                mutation.conflictActions(),
+                cancellation);
     }
 
     /// Enables or disables the current Core object through exception-preserving manager methods.
@@ -256,15 +231,6 @@ final class ModManagerCatalogAccess implements ModCatalogAccess {
                 .map(file -> ModCatalogEntry.from(file, manager))
                 .toList();
         return new ModCatalogIndex(entries);
-    }
-
-    /// Derives the same rename-stable key used by `LocalModFile`.
-    ///
-    /// @param source candidate import source
-    /// @return stable local key
-    private static String localKey(Path source) {
-        String addOnName = LocalAddonManager.getLocalAddonName(source);
-        return FileUtils.getNameWithoutExtension(Path.of(addOnName));
     }
 
     /// Throws when cooperative cancellation was requested before irreversible work.

@@ -30,68 +30,62 @@ final class ReleaseVersionResolverTest {
     @Test
     void resolvesStableBaseline() {
         assertEquals("1.0.0", ReleaseVersionResolver.resolve(
-                ReleaseType.STABLE, "1.0.0", null, null, true, "main"));
+                ReleaseType.STABLE, "1.0.0", null, null, true));
     }
 
     /// Generates each testing channel at its required decimal depth.
     @Test
     void derivesChannelVersionsFromBuildNumber() {
         assertEquals("1.0.0.7", ReleaseVersionResolver.resolve(
-                ReleaseType.BETA, "1.0.0", null, "7", true, "beta"));
+                ReleaseType.BETA, "1.0.0", null, "7", true));
         assertEquals("1.0.0.0.7", ReleaseVersionResolver.resolve(
-                ReleaseType.ALPHA, "1.0.0", null, "7", true, "alpha"));
+                ReleaseType.ALPHA, "1.0.0", null, "7", true));
         assertEquals("1.0.0.0.0.7", ReleaseVersionResolver.resolve(
-                ReleaseType.DEV, "1.0.0", null, "7", true, "dev"));
+                ReleaseType.DEV, "1.0.0", null, "7", true));
     }
 
     /// Preserves explicit parent counters selected during promotion.
     @Test
     void acceptsExplicitHierarchicalVersions() {
         assertEquals("1.0.1.3", ReleaseVersionResolver.resolve(
-                ReleaseType.BETA, "1.0.1", "1.0.1.3", null, true, "beta"));
+                ReleaseType.BETA, "1.0.1", "1.0.1.3", null, true));
         assertEquals("1.0.1.3.2", ReleaseVersionResolver.resolve(
-                ReleaseType.ALPHA, "1.0.1", "1.0.1.3.2", null, true, "alpha"));
+                ReleaseType.ALPHA, "1.0.1", "1.0.1.3.2", null, true));
         assertEquals("1.0.1.3.2.9", ReleaseVersionResolver.resolve(
-                ReleaseType.DEV, "1.0.1", "1.0.1.3.2.9", null, true, "dev"));
+                ReleaseType.DEV, "1.0.1", "1.0.1.3.2.9", null, true));
     }
 
     /// Keeps local zero-placeholder versions unmarked on all non-stable release branches.
     @Test
     void keepsLocalReleaseBranchVersionsUnmarked() {
         assertEquals("1.0.0.0", ReleaseVersionResolver.resolve(
-                ReleaseType.BETA, "1.0.0", null, null, false, "beta"));
+                ReleaseType.BETA, "1.0.0", null, null, false));
         assertEquals("1.0.0.0.0", ReleaseVersionResolver.resolve(
-                ReleaseType.ALPHA, "1.0.0", null, null, false, "alpha"));
+                ReleaseType.ALPHA, "1.0.0", null, null, false));
         assertEquals("1.0.0.0.0.0", ReleaseVersionResolver.resolve(
-                ReleaseType.DEV, "1.0.0", null, null, false, "dev"));
+                ReleaseType.DEV, "1.0.0", null, null, false));
     }
 
-    /// Appends an empty component to local, CI, and explicit versions built outside release branches.
+    /// Requires an explicit version source for official non-stable builds.
     @Test
-    void marksFeatureBranchVersions() {
-        assertEquals("1.0.0.0.0.0.", ReleaseVersionResolver.resolve(
-                ReleaseType.DEV, "1.0.0", null, null, false, "feature/settings"));
-        assertEquals("1.0.0.0.0.7.", ReleaseVersionResolver.resolve(
-                ReleaseType.DEV, "1.0.0", null, "7", true, "feature/settings"));
-        assertEquals("1.0.0.0.0.8.", ReleaseVersionResolver.resolve(
-                ReleaseType.DEV, "1.0.0", "1.0.0.0.0.8", null, true, null));
+    void requiresOfficialVersionSource() {
         assertThrows(IllegalArgumentException.class, () -> ReleaseVersionResolver.resolve(
-                ReleaseType.DEV, "1.0.0", null, null, true, "dev"));
+                ReleaseType.DEV, "1.0.0", null, null, true));
     }
 
     /// Rejects malformed, cross-baseline, and incorrectly shaped versions.
     @Test
     void rejectsInvalidReleaseVersions() {
         assertThrows(IllegalArgumentException.class, () -> ReleaseVersionResolver.resolve(
-                ReleaseType.STABLE, "1.0", null, null, true, "main"));
+                ReleaseType.STABLE, "1.0", null, null, true));
         assertThrows(IllegalArgumentException.class, () -> ReleaseVersionResolver.resolve(
-                ReleaseType.BETA, "1.0.0", "1.0.0", null, true, "beta"));
+                ReleaseType.BETA, "1.0.0", "1.0.0", null, true));
         assertThrows(IllegalArgumentException.class, () -> ReleaseVersionResolver.resolve(
-                ReleaseType.BETA, "1.0.0", "1.0.1.1", null, true, "beta"));
+                ReleaseType.BETA, "1.0.0", "1.0.1.1", null, true));
         assertThrows(IllegalArgumentException.class, () -> ReleaseVersionResolver.resolve(
-                ReleaseType.ALPHA, "1.0.0", "1.0.0.alpha.1", null, true, "alpha"));
+                ReleaseType.ALPHA, "1.0.0", "1.0.0.alpha.1", null, true));
         assertThrows(IllegalArgumentException.class, () -> ReleaseVersionResolver.resolve(
-                ReleaseType.DEV, "1.0.0", null, "01", true, "dev"));
+                ReleaseType.DEV, "1.0.0", null, "01", true));
         assertThrows(IllegalArgumentException.class, () -> ReleaseType.fromName("STABLE"));
     }
 }

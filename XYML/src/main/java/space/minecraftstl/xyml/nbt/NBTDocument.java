@@ -17,7 +17,7 @@
  */
 package space.minecraftstl.xyml.nbt;
 
-import org.glavo.nbt.NBTElement;
+import space.minecraftstl.xyml.library.nbt.NBTElement;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 

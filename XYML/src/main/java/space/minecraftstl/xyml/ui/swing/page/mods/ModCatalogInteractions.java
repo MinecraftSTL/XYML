@@ -36,6 +36,13 @@ public interface ModCatalogInteractions {
     /// @return immutable selected paths, or empty after cancellation
     @Unmodifiable List<Path> chooseImportFiles(Component owner, Path currentDirectory);
 
+    /// Requests one explicit handling decision for a conflicting Mod source on the EDT.
+    ///
+    /// @param owner dialog owner
+    /// @param source normalized conflicting source
+    /// @return selected action, or `null` when the dialog was closed
+    @Nullable ModImportConflictAction resolveImportConflict(Component owner, Path source);
+
     /// Confirms permanent deletion on the EDT.
     ///
     /// @param owner dialog owner

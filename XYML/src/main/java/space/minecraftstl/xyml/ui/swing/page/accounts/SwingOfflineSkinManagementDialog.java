@@ -161,6 +161,9 @@ final class SwingOfflineSkinManagementDialog extends JDialog implements AutoClos
     /// Stable decoded-image preview surface.
     private final OfflineSkinPreviewPanel preview = new OfflineSkinPreviewPanel();
 
+    /// Page-scoped local-skin drop route attached to the preview surface.
+    private final OfflineSkinDropController dropController;
+
     /// Latest skin state rendered in the dialog, or null after the account disappears.
     private @Nullable OfflineSkinSnapshot snapshot;
 
@@ -218,6 +221,10 @@ final class SwingOfflineSkinManagementDialog extends JDialog implements AutoClos
         this.worker = Objects.requireNonNull(worker, "worker");
         configureComponents();
         refreshSnapshot();
+        dropController = OfflineSkinDropController.install(
+                preview,
+                this::canAcceptDroppedSkin,
+                this::stageDroppedSkin);
     }
 
     /// Opens this modal dialog with a stable working size and releases pending preview callbacks on closure.
@@ -239,6 +246,7 @@ final class SwingOfflineSkinManagementDialog extends JDialog implements AutoClos
             return;
         }
         closed = true;
+        dropController.close();
         ++previewRevision;
         @Nullable CompletableFuture<PreviewResult> operation = activePreview;
         activePreview = null;
@@ -278,6 +286,7 @@ final class SwingOfflineSkinManagementDialog extends JDialog implements AutoClos
         configureSettingsCards();
         editor.add(settingsCards, "span 2, grow, pushy");
 
+        preview.setName("offlineSkinPreview");
         preview.getAccessibleContext().setAccessibleName(i18n("account.skin.preview"));
         JPanel content = new JPanel(new MigLayout(
                 "insets 16, fill",
@@ -489,6 +498,34 @@ final class SwingOfflineSkinManagementDialog extends JDialog implements AutoClos
             stagedSkinFile = selected.toPath();
         }
         renderStagedPaths();
+        schedulePreview();
+    }
+
+    /// Returns whether the selected account currently accepts a dropped local skin.
+    ///
+    /// @return whether the dialog is open and the account is writable
+    private boolean canAcceptDroppedSkin() {
+        @Nullable OfflineSkinSnapshot current = snapshot;
+        return !closed && current != null && current.writable();
+    }
+
+    /// Stages one dropped PNG as the local skin and reuses the existing asynchronous validation flow.
+    ///
+    /// @param skinFile normalized dropped PNG path
+    private void stageDroppedSkin(Path skinFile) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!canAcceptDroppedSkin()) {
+            return;
+        }
+        applyingSnapshot = true;
+        try {
+            stagedSkinFile = Objects.requireNonNull(skinFile, "skinFile");
+            sourceType.setSelectedItem(Skin.Type.LOCAL_FILE);
+            showSettingsCard(Skin.Type.LOCAL_FILE);
+            renderStagedPaths();
+        } finally {
+            applyingSnapshot = false;
+        }
         schedulePreview();
     }
 

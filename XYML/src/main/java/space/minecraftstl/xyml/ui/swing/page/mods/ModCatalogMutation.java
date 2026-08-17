@@ -22,7 +22,9 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.nio.file.Path;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /// Internal serialized mutation understood by the real Mod access adapter.
@@ -31,16 +33,32 @@ sealed interface ModCatalogMutation {
     /// Imports one or more source archives.
     ///
     /// @param sources normalized source files
+    /// @param conflictActions explicit conflict decisions keyed by normalized source
     @NotNullByDefault
-    record Import(@Unmodifiable List<Path> sources) implements ModCatalogMutation {
-        /// Stores normalized immutable sources and rejects an empty import.
+    record Import(
+            @Unmodifiable List<Path> sources,
+            @Unmodifiable Map<Path, ModImportConflictAction> conflictActions)
+            implements ModCatalogMutation {
+        /// Stores normalized immutable sources and matching conflict decisions.
         public Import {
-            sources = sources.stream()
-                    .map(source -> Objects.requireNonNull(source, "source").toAbsolutePath().normalize())
-                    .toList();
-            if (sources.isEmpty()) {
-                throw new IllegalArgumentException("At least one Mod source is required");
+            sources = ModImportFileOperations.normalizeSources(sources);
+            Map<Path, ModImportConflictAction> normalizedActions = new LinkedHashMap<>();
+            Objects.requireNonNull(conflictActions, "conflictActions").forEach((source, action) -> {
+                Path normalizedSource = Objects.requireNonNull(source, "conflict source")
+                        .toAbsolutePath().normalize();
+                ModImportConflictAction previous = normalizedActions.put(
+                        normalizedSource,
+                        Objects.requireNonNull(action, "conflict action"));
+                if (previous != null && previous != action) {
+                    throw new IllegalArgumentException(
+                            "Conflicting decisions for Mod source " + normalizedSource);
+                }
+            });
+            if (!sources.containsAll(normalizedActions.keySet())) {
+                throw new IllegalArgumentException(
+                        "Conflict decisions must belong to the import sources");
             }
+            conflictActions = Map.copyOf(normalizedActions);
         }
     }
 

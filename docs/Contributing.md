@@ -8,9 +8,18 @@
 
 ### Requirements
 
-To build the XYML launcher, you need to install JDK 17 (or higher). You can download it here: [Download Liberica JDK](https://bell-sw.com/pages/downloads/#jdk-25-lts).
+Building the complete XYML repository requires both JDK 17 and JDK 25. You can download them here:
+[Download Liberica JDK](https://bell-sw.com/pages/downloads/#jdk-25-lts). Use JDK 17 as the Gradle runtime by pointing
+`JAVA_HOME` and IntelliJ IDEA's Gradle JVM to it. Make only JDK 25 discoverable to
+[Gradle's toolchain support](https://docs.gradle.org/current/userguide/toolchains.html). The root build defaults all
+Java projects to Java 17, and only `lwjgl-unsafe-agent` overrides that default with a Java 25 toolchain. The boot and
+Minecraft helper modules retain their Java 8 targets, and the Mesa loader retains its older bytecode target.
 
-After installing the JDK, make sure the `JAVA_HOME` environment variable points to the required JDK directory.
+On Windows, building the native `XYMLL` launcher also requires CMake 3.16 or newer, Visual Studio 2022 Build Tools
+with the MSVC x86/x64 C++ tools, and a Windows SDK. The MinGW toolchain is not supported. Builds on other operating
+systems verify and use the checked-in executable produced from the same source snapshot.
+
+After installing the JDKs, make sure the `JAVA_HOME` environment variable points to the JDK 17 directory.
 You can check the JDK version that `JAVA_HOME` points to like this:
 
 <details>
@@ -20,9 +29,9 @@ PowerShell:
 
 ```
 PS > & "$env:JAVA_HOME/bin/java.exe" -version
-openjdk version "25" 2025-09-16 LTS
-OpenJDK Runtime Environment (build 25+37-LTS)
-OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
+openjdk version "17.0.8" 2023-07-18 LTS
+OpenJDK Runtime Environment (build 17.0.8+7-LTS)
+OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 ```
 
 </details>
@@ -32,9 +41,9 @@ OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
 
 ```
 > $JAVA_HOME/bin/java -version
-openjdk version "25" 2025-09-16 LTS
-OpenJDK Runtime Environment (build 25+37-LTS)
-OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
+openjdk version "17.0.8" 2023-07-18 LTS
+OpenJDK Runtime Environment (build 17.0.8+7-LTS)
+OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 ```
 
 </details>
@@ -43,10 +52,10 @@ OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
 <summary>macOS</summary>
 
 ```
-> /usr/libexec/java_home --exec java -version
-openjdk version "25" 2025-09-16 LTS
-OpenJDK Runtime Environment (build 25+37-LTS)
-OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
+> /usr/libexec/java_home -v 17 --exec java -version
+openjdk version "17.0.8" 2023-07-18 LTS
+OpenJDK Runtime Environment (build 17.0.8+7-LTS)
+OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 ```
 
 </details>
@@ -69,6 +78,49 @@ To build XYML, switch to the root directory of the XYML project and run the foll
 ```
 
 The built XYML program files are located in the `XYML/build/libs` subdirectory under the project root.
+
+### IDEA Gradle Workflows
+
+After importing the repository as a Gradle project, open the Gradle tool window and expand
+`XYML > Tasks > stl`. The group contains these entry points:
+
+| Task | Behavior |
+| --- | --- |
+| `buildMain` | Fetches and builds the latest `origin/main` commit. |
+| `buildBeta` | Fetches and builds the latest `origin/beta` commit. |
+| `buildAlpha` | Fetches and builds the latest `origin/alpha` commit. |
+| `buildDev` | Fetches and builds the latest `origin/dev` commit. |
+| `build` | Routes a release checkout to the matching task above; builds a feature or detached checkout in place. |
+| `clean` | Cleans only the current checkout without inspecting or fetching any branch. |
+| `run` | Reuses the last root `:build` artifact when available; otherwise incrementally assembles a temporary artifact in the same Gradle invocation. |
+
+The `run` task always uses the current repository root as XYML's working directory, including on `main`, `beta`,
+`alpha`, and `dev` checkouts.
+
+Only the root `:build` task records an artifact for reuse, including the JAR copied to `build/channel-builds/<branch>`
+by a release-branch build. A `run` fallback forces the final `shadowJar` to be recreated and may reuse up-to-date
+dependency outputs, but it never writes the root result marker or starts a second Wrapper process. `clean` removes the
+reusable result marker. When the native source is unchanged, the fallback may also reuse the existing XYMLL executable
+as an intermediate input; this does not make the final artifact reusable. Local release-branch builds without CI
+version inputs infer their version from Git topology. Artifact version differences do not prevent reuse; the version
+displayed by XYML is the version embedded in the selected JAR.
+
+The subproject-level task is named `:XYML:runCurrent`; it is intentionally not named `run`, so Gradle does not select
+a second launcher process together with the root workflow.
+
+The four channel tasks refresh `main`, `beta`, `alpha`, and `dev` together, then build the selected commit in a
+temporary detached worktree without switching the current IDEA checkout. On Windows, the GitHub fetch uses the
+enabled Windows system proxy. Successful channel artifacts are copied to `build/channel-builds/<branch>` together
+with `build-info.properties`; feature artifacts remain in `XYML/build/libs`.
+
+To test cached remote-tracking refs without accessing GitHub, disable the refresh explicitly:
+
+```powershell
+.\gradlew.bat buildMain '-Pxyml.branchBuild.fetch=false'
+```
+
+An explicit proxy can be supplied with `-Pxyml.branchBuild.gitProxy=<proxy-url>` when the Windows system proxy is not
+available.
 
 ## Debug Options
 

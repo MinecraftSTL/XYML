@@ -1,0 +1,73 @@
+// Microsoft Visual C++ generated resource script.
+// HMCLauncher for Windows, Copyright (C) 2025 huangyuhui and contributors.
+// Modified by MinecraftSTL in 2026 for XYMLL. See ../README.md for the GPLv3 Section 7 additional terms.
+//
+#include <sdkddkver.h>
+#include "windows.h"
+
+#define IDC_MYICON                      2
+#define IDD_XYMLL_DIALOG                102
+#define IDS_APP_TITLE                   103
+#define IDM_ABOUT                       104
+#define IDI_XYMLL                       107
+#define IDC_XYMLL                       109
+#define IDR_MAINFRAME                   128
+#define ID_SCRIPT_DOWNLOAD_JAVA         160
+#define IDC_STATIC                      -1
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDI_XYMLL               ICON                    "XYMLL.ico"
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,@PROJECT_VERSION_TWEAK@
+ PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,@PROJECT_VERSION_TWEAK@
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "CompanyName", "MinecraftSTL"
+            VALUE "FileDescription", "XYML Launcher for Windows"
+            VALUE "FileVersion", "@XYMLL_DISPLAY_VERSION@"
+            VALUE "InternalName", "XYMLL.exe"
+            VALUE "LegalCopyright", "Copyright (C) 2025 huangyuhui; modifications Copyright (C) 2026 MinecraftSTL"
+            VALUE "OriginalFilename", "XYMLL.exe"
+            VALUE "ProductName", "XYMLL"
+            VALUE "ProductVersion", "@XYMLL_DISPLAY_VERSION@"
+            VALUE "UpstreamVersion", "HMCLauncher @XYMLL_UPSTREAM_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x804, 1200
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// String Table
+//
+
+STRINGTABLE
+BEGIN
+    IDS_APP_TITLE           "XYMLL"
+    IDC_XYMLL               "XYMLL"
+END

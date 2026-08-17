@@ -128,6 +128,12 @@
         <property name="files" value="^(?!.*[\\/]space[\\/]minecraftstl[\\/]xyml[\\/]).*$"/>
     </module>
 
+    <!-- Bundled upstream sources retain their original license headers and are checked by per-project tasks. -->
+    <module name="SuppressionSingleFilter">
+        <property name="checks" value="RegexpHeader"/>
+        <property name="files" value=".*[\\/]libraries[\\/].*"/>
+    </module>
+
     <module name="SuppressionSingleFilter">
         <property name="checks" value="RegexpHeader"/>
         <property name="files" value=".*[\\/]space[\\/]minecraftstl[\\/]xyml[\\/]ui[\\/]skin[\\/].*"/>

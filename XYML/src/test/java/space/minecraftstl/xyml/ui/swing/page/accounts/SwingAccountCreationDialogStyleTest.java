@@ -74,6 +74,24 @@ public final class SwingAccountCreationDialogStyleTest {
         });
     }
 
+    /// The shrinkable footer keeps both original commands inside a narrow dialog content width.
+    @Test
+    public void keepsLoginAndCancelInsideDialogFooter() {
+        EdtDispatcher.executeAndWait(() -> {
+            JButton login = new JButton("Log in");
+            JButton cancel = new JButton("Cancel");
+            JPanel actions = SwingAccountCreationDialog.createDialogActions(login, cancel);
+            actions.setSize(420, actions.getPreferredSize().height);
+            actions.doLayout();
+
+            assertAll(
+                    () -> assertTrue(login.getX() >= 0),
+                    () -> assertTrue(cancel.getX() >= 0),
+                    () -> assertTrue(login.getX() + login.getWidth() <= actions.getWidth()),
+                    () -> assertTrue(cancel.getX() + cancel.getWidth() <= actions.getWidth()));
+        });
+    }
+
     /// The empty UUID field presents and updates the same derived value used by the offline factory.
     @Test
     public void updatesDerivedOfflineUuidPlaceholderWithoutSettingAnOverride() {

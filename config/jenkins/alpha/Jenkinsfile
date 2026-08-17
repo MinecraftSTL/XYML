@@ -14,7 +14,7 @@ pipeline {
         stage('Build') {
             steps {
                 sh 'bash ./config/jenkins/config-jenkins.sh'
-                sh './gradlew clean build --stacktrace --no-daemon'
+                sh './gradlew clean build -Pxyml.branchBuild.nested=true --stacktrace --no-daemon'
             }
         }
     }

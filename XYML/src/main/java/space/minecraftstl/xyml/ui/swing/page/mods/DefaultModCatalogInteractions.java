@@ -89,6 +89,37 @@ public final class DefaultModCatalogInteractions implements ModCatalogInteractio
                 .toList();
     }
 
+    /// Shows Replace, Skip, and Keep choices for one same-local-name import.
+    @Override
+    public @Nullable ModImportConflictAction resolveImportConflict(
+            Component owner,
+            Path source) {
+        EdtDispatcher.requireEventDispatchThread();
+        String fileName = Objects.requireNonNull(
+                Objects.requireNonNull(source, "source").getFileName(),
+                "Mod source must have a file name").toString();
+        String[] options = {
+                i18n("swing.mods.import_conflict.replace"),
+                i18n("swing.mods.import_conflict.skip"),
+                i18n("swing.mods.import_conflict.keep")
+        };
+        int selection = JOptionPane.showOptionDialog(
+                Objects.requireNonNull(owner, "owner"),
+                i18n("swing.mods.import_conflict", fileName),
+                i18n("mods.add"),
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                options,
+                options[2]);
+        return switch (selection) {
+            case 0 -> ModImportConflictAction.REPLACE;
+            case 1 -> ModImportConflictAction.SKIP;
+            case 2 -> ModImportConflictAction.KEEP;
+            default -> null;
+        };
+    }
+
     /// Shows one permanent-delete confirmation on the EDT.
     @Override
     public boolean confirmDelete(Component owner, ModCatalogItem target) {

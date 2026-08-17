@@ -30,6 +30,7 @@ import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -111,6 +112,25 @@ public final class DefaultModCatalogModelTest {
         model.close();
     }
 
+    /// Installed keys and earlier same-key sources are both classified before import begins.
+    @Test
+    public void classifiesInstalledAndWithinBatchImportConflicts() {
+        ManualExecutor executor = new ManualExecutor();
+        FakeAccess access = new FakeAccess(List.of(
+                entry("alpha", "Alpha", true, ModLoaderType.FABRIC)));
+        DefaultModCatalogModel model = new DefaultModCatalogModel(access, executor, STATUS_STRINGS);
+        model.loadIfNeeded();
+        executor.runNext();
+
+        Path installedConflict = Path.of("incoming", "alpha.jar").toAbsolutePath().normalize();
+        Path firstBeta = Path.of("incoming", "beta.jar").toAbsolutePath().normalize();
+        Path batchConflict = Path.of("other", "BETA.litemod").toAbsolutePath().normalize();
+        assertEquals(
+                List.of(installedConflict, batchConflict),
+                model.findImportConflicts(List.of(installedConflict, firstBeta, batchConflict)));
+        model.close();
+    }
+
     /// Verifies that stable-key batches use one serialized mutation and one refreshed index each.
     @Test
     public void mutatesStableKeyBatchesWithSingleAccessRoundTrips() {
@@ -174,7 +194,9 @@ public final class DefaultModCatalogModelTest {
         assertFalse(beta.enabled());
         assertTrue(beta.fileName().endsWith(".disabled"));
 
-        CompletionStage<ModCatalogSnapshot> imported = model.importMods(List.of(Path.of("gamma.jar")));
+        CompletionStage<ModCatalogSnapshot> imported = model.importMods(
+                List.of(Path.of("gamma.jar")),
+                Map.of());
         executor.runNext();
         assertEquals(3, imported.toCompletableFuture().join().itemCount().orElseThrow());
 

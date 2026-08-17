@@ -17,6 +17,11 @@
  */
 package space.minecraftstl.xyml.upgrade;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
+
+import space.minecraftstl.xyml.util.io.IOUtils;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.Buffer;
@@ -29,24 +34,24 @@ import java.util.Optional;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
-import space.minecraftstl.xyml.util.io.IOUtils;
-
 import static java.nio.file.StandardOpenOption.*;
 import static space.minecraftstl.xyml.util.Lang.mapOf;
 import static space.minecraftstl.xyml.util.Pair.pair;
 
-/**
- * Helper class for adding/removing executable header from XYML file.
- *
- * @author yushijinhun
- */
+/// Adds and removes platform launcher headers from XYML artifacts.
+///
+/// @author yushijinhun
+@NotNullByDefault
 final class ExecutableHeaderHelper {
-    private ExecutableHeaderHelper() {}
+    /// Maps output suffixes to their independently built launcher resources.
+    private static final @Unmodifiable Map<String, String> SUFFIX_TO_HEADER = Map.copyOf(mapOf(
+            pair("exe", "assets/XYMLL.exe"),
+            pair("sh", "assets/XYMLL.sh")
+    ));
 
-    private static Map<String, String> suffix2header = mapOf(
-            pair("exe", "assets/XYMLLauncher.exe"),
-            pair("sh", "assets/XYMLLauncher.sh")
-    );
+    /// Prevents construction of this static helper.
+    private ExecutableHeaderHelper() {
+    }
 
     private static Optional<String> getSuffix(Path file) {
         String filename = file.getFileName().toString();
@@ -59,7 +64,7 @@ final class ExecutableHeaderHelper {
     }
 
     private static Optional<byte[]> readHeader(ZipFile zip, String suffix) throws IOException {
-        String location = suffix2header.get(suffix);
+        String location = SUFFIX_TO_HEADER.get(suffix);
         if (location != null) {
             ZipEntry entry = zip.getEntry(location);
             if (entry != null && !entry.isDirectory()) {
@@ -73,7 +78,7 @@ final class ExecutableHeaderHelper {
 
     private static int detectHeaderLength(ZipFile zip, FileChannel channel) throws IOException {
         ByteBuffer buf = channel.map(MapMode.READ_ONLY, 0, channel.size());
-        suffixLoop: for (String suffix : suffix2header.keySet()) {
+        suffixLoop: for (String suffix : SUFFIX_TO_HEADER.keySet()) {
             Optional<byte[]> header = readHeader(zip, suffix);
             if (header.isPresent()) {
                 ((Buffer) buf).rewind();

@@ -51,6 +51,7 @@ import javax.swing.JList;
 import javax.swing.JTextField;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
+import javax.swing.TransferHandler;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
@@ -75,7 +76,9 @@ import java.util.function.Supplier;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static space.minecraftstl.xyml.ui.swing.SwingFileTransferTestSupport.fileTransfer;
 
 /// Verifies viewport-sized loading, exact application, stable geometry, icon loading, and light/dark rendering.
 @NotNullByDefault
@@ -183,6 +186,35 @@ public final class ThemePackManagementPanelTest {
             assertNotNull(findNamed(panel, "themePacksRefresh", AbstractButton.class).getIcon());
             panel.close();
         });
+    }
+
+    /// A ready theme page imports one dropped XYML archive and detaches its route on close.
+    @Test
+    public void importsDroppedThemePackOnlyOnTheManagementPage() {
+        @Unmodifiable List<ThemePackItem> items = items(1);
+        ImmediateBackend backend = new ImmediateBackend(items);
+        ThemePackManagementModel model = new ThemePackManagementModel(
+                backend,
+                new RecordingApplication(),
+                Runnable::run,
+                items.get(0).reference());
+        ThemePackManagementPanel panel = onEdt(() -> new ThemePackManagementPanel(
+                model,
+                ThemePackManagementStrings.english(),
+                new RecordingInteractions(),
+                Runnable::run));
+        Path archive = temporaryDirectory.resolve("Dropped.XYML-THEME").toAbsolutePath().normalize();
+
+        onEdt(() -> {
+            TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+            assertTrue(handler.canImport(fileTransfer(panel, List.of(archive))));
+            assertFalse(handler.canImport(fileTransfer(panel, List.of(Path.of("theme.zip")))));
+            assertTrue(handler.importData(fileTransfer(panel, List.of(archive))));
+            assertEquals(archive, backend.importedArchive());
+            panel.close();
+        });
+        flushEdt();
+        onEdt(() -> assertNull(panel.getTransferHandler()));
     }
 
     /// Renders nonblank, non-overlapping desktop surfaces under both production FlatLaf modes.
@@ -552,6 +584,9 @@ public final class ThemePackManagementPanelTest {
         /// Immutable inventory returned by every refresh.
         private final @Unmodifiable List<ThemePackItem> items;
 
+        /// Most recently imported archive, or null before an import.
+        private @Nullable Path importedArchive;
+
         /// Creates an immediate backend.
         private ImmediateBackend(@Unmodifiable List<ThemePackItem> items) {
             this.items = List.copyOf(items);
@@ -563,10 +598,11 @@ public final class ThemePackManagementPanelTest {
             return CompletableFuture.completedFuture(items);
         }
 
-        /// Rejects unused imports in this panel-focused backend.
+        /// Records an import and returns the unchanged deterministic inventory.
         @Override
         public CompletionStage<@Unmodifiable List<ThemePackItem>> importArchive(Path archive, Executor executor) {
-            return CompletableFuture.failedFuture(new UnsupportedOperationException("Import is not configured"));
+            importedArchive = Objects.requireNonNull(archive, "archive");
+            return CompletableFuture.completedFuture(items);
         }
 
         /// Completes unused deletion immediately.
@@ -581,6 +617,13 @@ public final class ThemePackManagementPanelTest {
             return CompletableFuture.completedFuture(Objects.requireNonNull(
                     item.installedDirectory(),
                     "installedDirectory"));
+        }
+
+        /// Returns the most recently imported archive.
+        ///
+        /// @return imported archive, or null before import
+        private @Nullable Path importedArchive() {
+            return importedArchive;
         }
     }
 

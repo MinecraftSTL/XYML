@@ -17,10 +17,13 @@ dependencies {
 
     implementation(libs.gson)
     implementation(libs.jna)
+    implementation(libs.jna.platform)
     implementation(libs.kala.compress.tar)
     implementation(libs.kala.compress.ar)
     implementation(libs.weburl)
+    implementation(libs.xz)
 
+    testImplementation(gradleApi())
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

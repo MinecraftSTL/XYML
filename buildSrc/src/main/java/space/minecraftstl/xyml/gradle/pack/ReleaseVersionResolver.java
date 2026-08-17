@@ -23,13 +23,13 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Arrays;
 import java.util.regex.Pattern;
 
-/// Resolves and validates XYML versions for the four release channels and marks feature-branch builds.
+/// Resolves and validates XYML versions for the four release channels.
 ///
 /// Stable, beta, alpha, and development releases contain exactly three, four, five, and six canonical decimal
 /// components respectively. An explicit release version is used for promotions whose parent counters are already
 /// known. A build number supplies the last component for ordinary channel builds, with zero placeholders for parent
-/// channels that have not yet produced a candidate. Only `main`, `beta`, `alpha`, and `dev` are release branches;
-/// every other or unknown branch receives a trailing empty component.
+/// channels that have not yet produced a candidate. Git-derived feature versions are handled by
+/// [GitVersionResolver].
 @NotNullByDefault
 public final class ReleaseVersionResolver {
     /// Canonical non-negative decimal component without leading zeroes.
@@ -46,16 +46,14 @@ public final class ReleaseVersionResolver {
     /// @param explicitVersion complete release version, or `null` to derive it
     /// @param buildNumber positive decimal CI build number, or `null` for a local build
     /// @param official whether missing CI version inputs must fail the build
-    /// @param branchName current Git branch name, or `null` when it cannot be determined
-    /// @return validated release version, marked with a trailing empty component outside the four release branches
+    /// @return validated release version
     /// @throws IllegalArgumentException when any supplied version value violates the release model
     public static String resolve(
             ReleaseType channel,
             String stableVersion,
             @Nullable String explicitVersion,
             @Nullable String buildNumber,
-            boolean official,
-            @Nullable String branchName) {
+            boolean official) {
         validateVersion(ReleaseType.STABLE, stableVersion);
 
         String resolvedVersion;
@@ -80,7 +78,7 @@ public final class ReleaseVersionResolver {
             }
             resolvedVersion = derivedVersion(channel, stableVersion, "0");
         }
-        return isReleaseBranch(branchName) ? resolvedVersion : resolvedVersion + ".";
+        return resolvedVersion;
     }
 
     /// Validates an exact channel version.
@@ -119,19 +117,5 @@ public final class ReleaseVersionResolver {
     /// @return whether the first three components match exactly
     private static boolean hasStablePrefix(String releaseVersion, String stableVersion) {
         return releaseVersion.equals(stableVersion) || releaseVersion.startsWith(stableVersion + ".");
-    }
-
-    /// Returns whether a branch owns one of the four release channels.
-    ///
-    /// Branch names are exact and case-sensitive, matching Git branch semantics and the repository release model.
-    /// An unavailable branch is treated as a feature branch so it cannot be mistaken for a release artifact.
-    ///
-    /// @param branchName current Git branch name, or `null` when unavailable
-    /// @return whether the branch is `main`, `beta`, `alpha`, or `dev`
-    private static boolean isReleaseBranch(@Nullable String branchName) {
-        return branchName != null && switch (branchName) {
-            case "main", "beta", "alpha", "dev" -> true;
-            default -> false;
-        };
     }
 }
