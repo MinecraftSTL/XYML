@@ -10,9 +10,9 @@ The XYML application and the four bundled library projects use the shared `xymlR
 root Gradle build. Existing projects that do not opt into this convention, including `XYMLCore`, retain their current
 version semantics. Upstream tag versions are provenance metadata and do not replace the XYML publication version.
 
-Only `lwjgl-unsafe-agent` may target Java 25. XYML, XYMLCore, buildSrc, and HelloNBT remain Java 17 compatible;
-XYMLBoot, the Minecraft bootstrap libraries, and the Mesa loader retain their existing Java 8 or lower bytecode
-targets.
+The Gradle runtime and the default Java project toolchain use Java 17. Only `lwjgl-unsafe-agent` overrides that
+default with a Java 25 toolchain. XYMLBoot, the Minecraft bootstrap libraries, and the Mesa loader retain their
+existing Java 8 or lower bytecode targets.
 
 ## Snapshot provenance
 

@@ -8,18 +8,18 @@
 
 ### Requirements
 
-Building the complete XYML repository requires both JDK 25 and JDK 17. You can download them here:
-[Download Liberica JDK](https://bell-sw.com/pages/downloads/#jdk-25-lts). Set `JAVA_HOME` to JDK 25 and make the
-JDK 17 installation discoverable to [Gradle's toolchain support](https://docs.gradle.org/current/userguide/toolchains.html).
-Only `lwjgl-unsafe-agent` is compiled for Java 25. XYML, XYMLCore, buildSrc, and HelloNBT remain Java 17 compatible;
-the boot and Minecraft helper modules retain their Java 8 targets, and the Mesa loader retains its older bytecode
-target.
+Building the complete XYML repository requires both JDK 17 and JDK 25. You can download them here:
+[Download Liberica JDK](https://bell-sw.com/pages/downloads/#jdk-25-lts). Use JDK 17 as the Gradle runtime by pointing
+`JAVA_HOME` and IntelliJ IDEA's Gradle JVM to it. Make only JDK 25 discoverable to
+[Gradle's toolchain support](https://docs.gradle.org/current/userguide/toolchains.html). The root build defaults all
+Java projects to Java 17, and only `lwjgl-unsafe-agent` overrides that default with a Java 25 toolchain. The boot and
+Minecraft helper modules retain their Java 8 targets, and the Mesa loader retains its older bytecode target.
 
 On Windows, building the native `XYMLL` launcher also requires CMake 3.16 or newer, Visual Studio 2022 Build Tools
 with the MSVC x86/x64 C++ tools, and a Windows SDK. The MinGW toolchain is not supported. Builds on other operating
 systems verify and use the checked-in executable produced from the same source snapshot.
 
-After installing the JDKs, make sure the `JAVA_HOME` environment variable points to the JDK 25 directory.
+After installing the JDKs, make sure the `JAVA_HOME` environment variable points to the JDK 17 directory.
 You can check the JDK version that `JAVA_HOME` points to like this:
 
 <details>
@@ -29,9 +29,9 @@ PowerShell:
 
 ```
 PS > & "$env:JAVA_HOME/bin/java.exe" -version
-openjdk version "25" 2025-09-16 LTS
-OpenJDK Runtime Environment (build 25+37-LTS)
-OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
+openjdk version "17.0.8" 2023-07-18 LTS
+OpenJDK Runtime Environment (build 17.0.8+7-LTS)
+OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 ```
 
 </details>
@@ -41,9 +41,9 @@ OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
 
 ```
 > $JAVA_HOME/bin/java -version
-openjdk version "25" 2025-09-16 LTS
-OpenJDK Runtime Environment (build 25+37-LTS)
-OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
+openjdk version "17.0.8" 2023-07-18 LTS
+OpenJDK Runtime Environment (build 17.0.8+7-LTS)
+OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 ```
 
 </details>
@@ -52,10 +52,10 @@ OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
 <summary>macOS</summary>
 
 ```
-> /usr/libexec/java_home --exec java -version
-openjdk version "25" 2025-09-16 LTS
-OpenJDK Runtime Environment (build 25+37-LTS)
-OpenJDK 64-Bit Server VM (build 25+37-LTS, mixed mode, sharing)
+> /usr/libexec/java_home -v 17 --exec java -version
+openjdk version "17.0.8" 2023-07-18 LTS
+OpenJDK Runtime Environment (build 17.0.8+7-LTS)
+OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 ```
 
 </details>
