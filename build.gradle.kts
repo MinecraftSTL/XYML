@@ -7,6 +7,9 @@ import space.minecraftstl.xyml.gradle.pack.ReleaseVersionResolver
 import space.minecraftstl.xyml.gradle.pack.GitBranchGradleTask
 import space.minecraftstl.xyml.gradle.pack.GitVersionResolver
 import space.minecraftstl.xyml.gradle.utils.PropertiesUtils
+import java.nio.file.Files
+import java.util.Properties
+import org.gradle.jvm.tasks.Jar
 
 plugins {
     id("checkstyle")
@@ -142,6 +145,35 @@ val fetchReleaseBranches = providers.gradleProperty("xyml.branchBuild.fetch")
     .map { it.toBooleanStrict() }
     .orElse(true)
 val configuredGitProxy = providers.gradleProperty("xyml.branchBuild.gitProxy")
+val temporaryRunBuild = providers.gradleProperty("xyml.run.temporary")
+    .map { it.toBooleanStrict() }
+    .orElse(false)
+
+val rootBuildResultFile = layout.buildDirectory.file("root-build-result.properties")
+
+fun findReusableRootBuildArtifact(): File? {
+    val marker = rootBuildResultFile.get().asFile
+    if (!marker.isFile) {
+        return null
+    }
+
+    return runCatching {
+        val properties = PropertiesUtils.load(marker.toPath())
+        if (properties.getProperty("task") != ":build") {
+            return@runCatching null
+        }
+
+        val relativeArtifact = properties.getProperty("artifact")?.takeIf { it.isNotBlank() }
+            ?: return@runCatching null
+        val rootPath = rootDir.toPath().toAbsolutePath().normalize()
+        val artifactPath = rootPath.resolve(relativeArtifact).normalize()
+        if (!artifactPath.startsWith(rootPath) || !Files.isRegularFile(artifactPath)) {
+            null
+        } else {
+            artifactPath.toFile()
+        }
+    }.getOrNull()
+}
 
 fun registerReleaseBranchBuild(taskName: String, branchName: String, releaseType: ReleaseType) =
     tasks.register<GitBranchGradleTask>(taskName) {
@@ -183,24 +215,96 @@ tasks.register<Delete>("clean") {
     delete(layout.buildDirectory, layout.projectDirectory.dir("buildSrc/build"))
 }
 
-tasks.register("build") {
+val rootBuild = tasks.register("build") {
     group = xymlWorkflowGroup
     description = "Builds the latest matching release branch, or the current checkout as a Git-derived feature build."
-    if (nestedBranchBuild.get() || xymlBranchReleaseType == null) {
+}
+
+if (temporaryRunBuild.get() || nestedBranchBuild.get() || xymlBranchReleaseType == null) {
+    rootBuild.configure {
         dependsOn(localBuildTasks)
         doFirst {
-            logger.lifecycle("XYML feature checkout: ${xymlBranchName ?: "<detached>"}")
-            logger.lifecycle("XYML inferred feature version: $xymlReleaseVersion")
+            if (temporaryRunBuild.get()) {
+                logger.lifecycle("XYML run fallback: building the current checkout without recording a root :build result")
+            } else {
+                logger.lifecycle("XYML feature checkout: ${xymlBranchName ?: "<detached>"}")
+                logger.lifecycle("XYML inferred feature version: $xymlReleaseVersion")
+            }
         }
-    } else {
+
+        if (!temporaryRunBuild.get()) {
+            outputs.upToDateWhen { false }
+            outputs.file(rootBuildResultFile)
+            doLast {
+                val xymlArtifact = project(":XYML").tasks.named<Jar>("shadowJar").get().archiveFile.get().asFile
+                check(xymlArtifact.isFile) {
+                    "Root :build completed without producing the XYML launcher artifact: $xymlArtifact"
+                }
+
+                val rootPath = rootDir.toPath().toAbsolutePath().normalize()
+                val artifactPath = xymlArtifact.toPath().toAbsolutePath().normalize()
+                check(artifactPath.startsWith(rootPath)) {
+                    "XYML launcher artifact is outside the repository root: $xymlArtifact"
+                }
+
+                val properties = Properties()
+                properties.setProperty("task", ":build")
+                properties.setProperty("artifact", rootPath.relativize(artifactPath).toString().replace('\\', '/'))
+                properties.setProperty("version", project(":XYML").version.toString())
+                properties.setProperty("channel", xymlReleaseChannel)
+                properties.setProperty("branch", xymlBranchName ?: "<detached>")
+
+                val marker = rootBuildResultFile.get().asFile
+                marker.parentFile.mkdirs()
+                marker.outputStream().use { properties.store(it, "XYML root :build result") }
+                logger.lifecycle("XYML root :build result recorded: $artifactPath")
+            }
+        }
+    }
+} else {
+    rootBuild.configure {
         dependsOn(releaseBranchBuilds.getValue(xymlBranchReleaseType))
+    }
+}
+
+val prepareRunBuild = tasks.register<Exec>("prepareRunBuild") {
+    group = "internal"
+    description = "Temporarily builds the current checkout for run when no root :build result is available."
+    onlyIf {
+        val reusableArtifact = findReusableRootBuildArtifact()
+        if (reusableArtifact != null) {
+            logger.lifecycle("XYML run: reusing the last root :build result at $reusableArtifact")
+            false
+        } else {
+            logger.lifecycle("XYML run: no reusable root :build result; starting a non-cached temporary build")
+            true
+        }
+    }
+
+    workingDir(rootDir)
+    val nestedArguments = mutableListOf(
+        ":XYML:shadowJar",
+        "--rerun-tasks",
+        "--no-build-cache",
+        "--no-daemon",
+        "--parallel",
+        "--stacktrace"
+    )
+    if (gradle.startParameter.isOffline) {
+        nestedArguments += "--offline"
+    }
+
+    if (System.getProperty("os.name").lowercase().startsWith("windows")) {
+        commandLine(listOf("cmd", "/c", "gradlew.bat") + nestedArguments)
+    } else {
+        commandLine(listOf("./gradlew") + nestedArguments)
     }
 }
 
 tasks.register("run") {
     group = xymlWorkflowGroup
-    description = "Runs XYML from the current checkout with the repository root as its working directory."
-    dependsOn(":XYML:run")
+    description = "Runs XYML from the current checkout, reusing the last root :build result when available."
+    dependsOn(prepareRunBuild, ":XYML:runFromBuildResult")
 }
 
 defaultTasks("clean", "build")

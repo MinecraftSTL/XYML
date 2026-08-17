@@ -88,9 +88,13 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 | `buildDev` | 拉取并构建最新的 `origin/dev` 提交。 |
 | `build` | 发布分支调用上方对应任务；功能分支或游离提交直接构建当前工作树。 |
 | `clean` | 只清理当前工作树，不检查或拉取任何分支。 |
-| `run` | 直接运行 IDEA 当前工作树，不拉取分支，也不创建临时 worktree。 |
+| `run` | 有可用结果时复用最近一次根 `:build` 的制品；否则对当前工作树执行不写入缓存的临时构建。 |
 
 即使当前签出的是 `main`、`beta`、`alpha` 或 `dev`，`run` 也始终将当前仓库根目录作为 XYML 的运行目录。
+
+只有根 `:build` 任务会记录可复用制品。`run` 触发的临时构建不会成为缓存构建结果，`clean` 会删除可复用结果清单。
+构建制品的版本不同不会阻止复用；XYML 左上角显示的是所选 JAR 内嵌的版本。
+子项目任务改名为 `:XYML:runCurrent`，不再使用 `run`，以免 Gradle 执行根工作流时同时选中第二个启动器进程。
 
 四个渠道任务会同时刷新 `main`、`beta`、`alpha` 和 `dev`，再于临时的游离 worktree 中构建所选提交，
 不会切换 IDEA 当前工作树。在 Windows 上，GitHub 拉取会使用已启用的 Windows 系统代理。成功的渠道构建产物会连同
