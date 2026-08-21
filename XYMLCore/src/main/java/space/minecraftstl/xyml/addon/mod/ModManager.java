@@ -30,6 +30,8 @@ import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.tree.ZipFileTree;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
@@ -39,10 +41,15 @@ import java.util.*;
 import static space.minecraftstl.xyml.util.Pair.pair;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
+/// Manages supported local mod archives and their detected loader metadata.
+@NotNullByDefault
 public final class ModManager extends LocalAddonManager<LocalModFile> {
-    public static final List<String> MOD_EXTENSIONS = List.of("jar", "litemod");
+    /// Immutable supported mod archive extensions without leading dots.
+    public static final @Unmodifiable List<String> MOD_EXTENSIONS = List.of("jar", "zip", "litemod");
 
+    /// Reads one supported archive metadata format.
     @FunctionalInterface
+    @NotNullByDefault
     private interface ModMetadataReader {
         LocalModFile fromFile(ModManager modManager, Path modFile, ZipFileTree tree) throws IOException, JsonParseException;
     }
@@ -60,13 +67,14 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
         );
 
         map.put("jar", zipReaders);
+        map.put("zip", zipReaders);
         map.put("litemod", List.of(pair(LiteModMetadata::fromFile, ModLoaderType.LITE_LOADER)));
 
         READERS = map;
     }
 
     private final HashMap<Pair<String, ModLoaderType>, LocalMod> localMods = new HashMap<>();
-    private LibraryAnalyzer analyzer;
+    private @Nullable LibraryAnalyzer analyzer;
 
     private boolean loaded = false;
 
@@ -79,7 +87,7 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
         return repository.getModsDirectory(instanceId);
     }
 
-    public LibraryAnalyzer getLibraryAnalyzer() {
+    public @Nullable LibraryAnalyzer getLibraryAnalyzer() {
         return analyzer;
     }
 
@@ -106,13 +114,13 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
         String fileName = StringUtils.removeSuffix(FileUtils.getName(file), DISABLED_EXTENSION, OLD_EXTENSION);
         String extension = fileName.substring(fileName.lastIndexOf(".") + 1);
 
-        List<Pair<ModMetadataReader, ModLoaderType>> readersMap = READERS.get(extension);
+        @Nullable List<Pair<ModMetadataReader, ModLoaderType>> readersMap = READERS.get(extension);
         if (readersMap == null) {
             // Is not a mod file.
             return;
         }
 
-        Set<ModLoaderType> modLoaderTypes = analyzer.getModLoaders();
+        Set<ModLoaderType> modLoaderTypes = Objects.requireNonNull(analyzer, "analyzer").getModLoaders();
 
         var supportedReaders = new ArrayList<ModMetadataReader>();
         var unsupportedReaders = new ArrayList<ModMetadataReader>();
@@ -125,7 +133,7 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
             }
         }
 
-        LocalModFile modInfo = null;
+        @Nullable LocalModFile modInfo = null;
 
         List<Exception> exceptions = new ArrayList<>();
         try (ZipFileTree tree = CompressingUtils.openZipTree(file)) {
@@ -186,10 +194,11 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
                 throw new IOException(e);
             }
 
-            boolean supportSubfolders = analyzer.has(LibraryAnalyzer.LibraryType.FORGE)
-                    || analyzer.has(LibraryAnalyzer.LibraryType.QUILT)
-                    || analyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)
-                    || analyzer.has(LibraryAnalyzer.LibraryType.LITELOADER);
+            LibraryAnalyzer currentAnalyzer = Objects.requireNonNull(analyzer, "analyzer");
+            boolean supportSubfolders = currentAnalyzer.has(LibraryAnalyzer.LibraryType.FORGE)
+                    || currentAnalyzer.has(LibraryAnalyzer.LibraryType.QUILT)
+                    || currentAnalyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)
+                    || currentAnalyzer.has(LibraryAnalyzer.LibraryType.LITELOADER);
 
             if (Files.isDirectory(getDirectory())) {
                 try (DirectoryStream<Path> modsDirectoryStream = Files.newDirectoryStream(getDirectory())) {

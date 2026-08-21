@@ -66,7 +66,7 @@ public final class DefaultModCatalogInteractions implements ModCatalogInteractio
         this.executor = Objects.requireNonNull(executor, "executor");
     }
 
-    /// Opens a JAR/LITEMOD multi-selection chooser on the EDT.
+    /// Opens a JAR/ZIP/LITEMOD multi-selection chooser on the EDT.
     @Override
     public @Unmodifiable List<Path> chooseImportFiles(
             Component owner,
@@ -79,7 +79,7 @@ public final class DefaultModCatalogInteractions implements ModCatalogInteractio
         chooser.setMultiSelectionEnabled(true);
         chooser.setAcceptAllFileFilterUsed(false);
         chooser.setFileFilter(new FileNameExtensionFilter(
-                strings.modFileDescription(), "jar", "litemod"));
+                strings.modFileDescription(), "jar", "zip", "litemod"));
         if (chooser.showOpenDialog(Objects.requireNonNull(owner, "owner"))
                 != JFileChooser.APPROVE_OPTION) {
             return List.of();

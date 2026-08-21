@@ -18,16 +18,17 @@
 package space.minecraftstl.xyml.game;
 
 import space.minecraftstl.xyml.task.Task;
-import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.io.Unzipper;
+import org.jetbrains.annotations.NotNullByDefault;
 
 import java.nio.charset.Charset;
-import java.nio.file.FileSystem;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
+/// Extracts the detected game directory from a manually assembled modpack archive.
+@NotNullByDefault
 public class ManuallyCreatedModpackInstallTask extends Task<Path> {
 
     private final Path zipFile;
@@ -42,19 +43,19 @@ public class ManuallyCreatedModpackInstallTask extends Task<Path> {
         setName(i18n("modpack.installing"));
     }
 
+    /// {@inheritDoc}
     @Override
     public void execute() throws Exception {
-        Path subdirectory;
-        try (FileSystem fs = CompressingUtils.readonly(zipFile).setEncoding(charset).build()) {
-            subdirectory = ModpackHelper.findMinecraftDirectoryInManuallyCreatedModpack(zipFile.toString(), fs);
-        }
+        String subdirectory = ModpackHelper.findMinecraftDirectoryInManuallyCreatedModpack(
+                zipFile.toString(),
+                zipFile);
 
         Path dest = Paths.get("externalgames").resolve(name);
 
         setResult(dest);
 
         new Unzipper(zipFile, dest)
-                .setSubDirectory(subdirectory.toString())
+                .setSubDirectory(subdirectory)
                 .setTerminateIfSubDirectoryNotExists()
                 .setEncoding(charset)
                 .unzip();

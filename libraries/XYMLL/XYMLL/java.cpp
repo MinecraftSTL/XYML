@@ -79,7 +79,9 @@ std::optional<DWORD> HLLaunchJVM(const HLPath &javaExecutablePath, const HLJavaO
     command += L' ';
     command += options.jvmOptions.value();
   } else {
-    command += L" -Xmx1G -XX:MinHeapFreeRatio=5 -XX:MaxHeapFreeRatio=15";
+    command += L" -Xmx1G -XX:MinHeapFreeRatio=5 -XX:MaxHeapFreeRatio=15"
+               L" -XX:G1PeriodicGCInterval=900000 -XX:G1PeriodicGCSystemLoadThreshold=0.6"
+               L" -XX:+UseStringDeduplication";
   }
   command += L" -jar \"";
   command += options.jarPath;

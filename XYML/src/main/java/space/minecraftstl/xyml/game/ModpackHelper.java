@@ -46,13 +46,13 @@ import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.i18n.LocalizedText;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
+import space.minecraftstl.xyml.util.tree.ArchiveFileTree;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.charset.Charset;
-import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -60,10 +60,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.stream.Stream;
 
 import static space.minecraftstl.xyml.util.Lang.mapOf;
-import static space.minecraftstl.xyml.util.Lang.toIterable;
 import static space.minecraftstl.xyml.util.Pair.pair;
 
 /// Utilities for reading, installing, and applying modpack-specific game settings.
@@ -131,8 +129,8 @@ public final class ModpackHelper {
         } catch (IOException ignored) {
         }
 
-        try (FileSystem fs = CompressingUtils.createReadOnlyZipFileSystem(file, charset)) {
-            findMinecraftDirectoryInManuallyCreatedModpack(file.toString(), fs);
+        try {
+            findMinecraftDirectoryInManuallyCreatedModpack(file.toString(), file);
             throw new ManuallyCreatedModpackException(file);
         } catch (IOException e) {
             // ignore it
@@ -144,36 +142,40 @@ public final class ModpackHelper {
     /// Locates the Minecraft directory in a manually assembled modpack archive.
     ///
     /// @param modpackName name used when reporting an unsupported archive
-    /// @param fs read-only archive file system
-    /// @return the archive directory containing the `versions` directory
-    /// @throws IOException if an archive directory cannot be inspected
+    /// @param zipPath archive path to inspect
+    /// @return relative archive directory containing the `versions` directory, or an empty string for the root
+    /// @throws IOException if the archive cannot be inspected
     /// @throws UnsupportedModpackException if no Minecraft directory is found within two levels
-    public static Path findMinecraftDirectoryInManuallyCreatedModpack(String modpackName, FileSystem fs) throws IOException, UnsupportedModpackException {
-        Path root = fs.getPath("/");
-        if (isMinecraftDirectory(root)) return root;
-        try (Stream<Path> firstLayer = Files.list(root)) {
-            for (Path dir : toIterable(firstLayer)) {
-                if (isMinecraftDirectory(dir)) return dir;
+    public static String findMinecraftDirectoryInManuallyCreatedModpack(String modpackName, Path zipPath)
+            throws IOException, UnsupportedModpackException {
+        try (ArchiveFileTree<?, ?> tree = ArchiveFileTree.open(zipPath)) {
+            ArchiveFileTree.Dir<?> root = tree.getRoot();
+            if (isMinecraftDirectory(root)) {
+                return "";
+            }
 
-                try (Stream<Path> secondLayer = Files.list(dir)) {
-                    for (Path subdir : toIterable(secondLayer)) {
-                        if (isMinecraftDirectory(subdir)) return subdir;
+            for (ArchiveFileTree.Dir<?> firstLayer : root.getSubDirs().values()) {
+                if (isMinecraftDirectory(firstLayer)) {
+                    return firstLayer.getName();
+                }
+
+                for (ArchiveFileTree.Dir<?> secondLayer : firstLayer.getSubDirs().values()) {
+                    if (isMinecraftDirectory(secondLayer)) {
+                        return firstLayer.getName() + "/" + secondLayer.getName();
                     }
-                } catch (IOException ignored) {
                 }
             }
-        } catch (IOException ignored) {
         }
         throw new UnsupportedModpackException(modpackName);
     }
 
-    /// Returns whether a path has the directory structure of a Minecraft installation.
+    /// Returns whether an archive directory has the structure of a Minecraft installation.
     ///
-    /// @param path candidate directory
-    /// @return whether the path contains a `versions` directory and has an accepted root name
-    private static boolean isMinecraftDirectory(Path path) {
-        return Files.isDirectory(path.resolve("versions")) &&
-                (path.getFileName() == null || ".minecraft".equals(FileUtils.getName(path)));
+    /// @param directory candidate archive directory
+    /// @return whether it contains a `versions` directory and has an accepted root name
+    private static boolean isMinecraftDirectory(ArchiveFileTree.Dir<?> directory) {
+        return directory.getSubDirs().containsKey("versions")
+                && (directory.isRoot() || ".minecraft".equals(directory.getName()));
     }
 
     /// Reads persisted modpack configuration from JSON.

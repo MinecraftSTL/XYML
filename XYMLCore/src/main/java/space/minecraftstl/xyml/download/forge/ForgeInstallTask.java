@@ -25,6 +25,8 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.FileSystem;
@@ -39,18 +41,18 @@ import static space.minecraftstl.xyml.download.UnsupportedInstallationException.
 import static space.minecraftstl.xyml.util.StringUtils.removePrefix;
 import static space.minecraftstl.xyml.util.StringUtils.removeSuffix;
 
-/**
- *
- * @author huangyuhui
- */
+/// Installs a selected Forge loader patch into an existing game manifest.
+///
+/// @author huangyuhui
+@NotNullByDefault
 public final class ForgeInstallTask extends Task<GameInstancePatch> {
 
     private final DefaultDependencyManager dependencyManager;
     private final GameInstanceManifest manifest;
-    private Path installer;
+    private @Nullable Path installer;
     private final ForgeRemoteVersion remote;
-    private FileDownloadTask dependent;
-    private Task<GameInstancePatch> dependency;
+    private @Nullable FileDownloadTask dependent;
+    private @Nullable Task<GameInstancePatch> dependency;
 
     public ForgeInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, ForgeRemoteVersion remoteVersion) {
         this.dependencyManager = dependencyManager;
@@ -144,29 +146,36 @@ public final class ForgeInstallTask extends Task<GameInstancePatch> {
         }
     }
 
-    /**
-     * Install Forge library from existing local file.
-     * This method will try to identify this installer whether it is in old or new format.
-     *
-     * @param dependencyManager game repository
-     * @param manifest instance manifest
-     * @param installer the Forge installer, either the new or old one.
-     * @return the task to install library
-     * @throws IOException if unable to read compressed content of installer file, or installer file is corrupted, or the installer is not the one we want.
-     * @throws VersionMismatchException if required game version of installer does not match the actual one.
-     */
-    public static Task<GameInstancePatch> install(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, Path installer) throws IOException, VersionMismatchException {
+    /// Builds a local Forge installation task after validating the target instance.
+    ///
+    /// @param dependencyManager repository-scoped download services
+    /// @param manifest working instance manifest
+    /// @param installer local Forge installer in a supported format
+    /// @return task that produces the Forge patch
+    /// @throws IOException if the installer or target game version cannot be read
+    /// @throws VersionMismatchException if the installer targets another Minecraft version
+    /// @throws UnsupportedInstallationException if the target already contains Cleanroom
+    public static Task<GameInstancePatch> install(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            Path installer) throws IOException, VersionMismatchException, UnsupportedInstallationException {
         Optional<String> gameVersion = dependencyManager.getGameRepository().getGameVersion(manifest);
         if (!gameVersion.isPresent()) throw new IOException();
         try (FileSystem fs = CompressingUtils.createReadOnlyZipFileSystem(installer)) {
             String installProfileText = Files.readString(fs.getPath("install_profile.json"));
             Map<?, ?> installProfile = JsonUtils.fromNonNullJson(installProfileText, Map.class);
             if (installProfile.containsKey("spec")) {
+                checkCleanroomCompatibility(
+                        dependencyManager.getGameRepository().resolve(manifest),
+                        gameVersion.get());
                 ForgeNewInstallProfile profile = JsonUtils.fromNonNullJson(installProfileText, ForgeNewInstallProfile.class);
                 if (!gameVersion.get().equals(profile.getMinecraft()))
                     throw new VersionMismatchException(profile.getMinecraft(), gameVersion.get());
                 return new ForgeNewInstallTask(dependencyManager, manifest, modifyVersion(gameVersion.get(), profile.getVersion()), installer);
             } else if (installProfile.containsKey("install") && installProfile.containsKey("versionInfo")) {
+                checkCleanroomCompatibility(
+                        dependencyManager.getGameRepository().resolve(manifest),
+                        gameVersion.get());
                 ForgeInstallProfile profile = JsonUtils.fromNonNullJson(installProfileText, ForgeInstallProfile.class);
                 if (!gameVersion.get().equals(profile.getInstall().getMinecraft()))
                     throw new VersionMismatchException(profile.getInstall().getMinecraft(), gameVersion.get());
@@ -174,6 +183,21 @@ public final class ForgeInstallTask extends Task<GameInstancePatch> {
             } else {
                 throw new IOException();
             }
+        }
+    }
+
+    /// Rejects local Forge installation when the target already contains Cleanroom.
+    ///
+    /// @param resolved resolved target manifest
+    /// @param gameVersion resolved Minecraft version
+    /// @throws UnsupportedInstallationException if the target already contains Cleanroom
+    static void checkCleanroomCompatibility(
+            GameInstanceManifest.Resolved resolved,
+            String gameVersion) throws UnsupportedInstallationException {
+        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(resolved, gameVersion);
+        if (analyzer.has(LibraryAnalyzer.LibraryType.CLEANROOM)) {
+            throw new UnsupportedInstallationException(
+                    UnsupportedInstallationException.CLEANROOM_NOT_COMPATIBLE_WITH_FORGE);
         }
     }
 

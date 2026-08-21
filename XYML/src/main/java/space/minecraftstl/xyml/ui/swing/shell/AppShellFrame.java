@@ -57,6 +57,10 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 /// Hosts {@link AppShellPanel} in a resizable desktop window with platform-appropriate FlatLaf chrome.
 @NotNullByDefault
 public final class AppShellFrame extends JFrame {
+    /// Whether startup may request a background full collection after the main window becomes visible.
+    private static final boolean AUTO_TRIM_HEAP =
+            !"false".equalsIgnoreCase(System.getenv("XYML_AUTO_TRIM_HEAP"));
+
     /// Delay between foreground system-theme checks; native work runs only for system-dependent preferences.
     private static final int SYSTEM_THEME_REFRESH_DELAY_MILLIS = 5_000;
 
@@ -200,7 +204,15 @@ public final class AppShellFrame extends JFrame {
             WindowsNativeUtils.applyWindowCornerPreference(this, themeManager.designTokens().cornerRadius());
             WindowsNativeUtils.applyAppUserModelRelaunchProperties(this);
             requestSystemThemeRefresh();
+            requestHeapTrim();
         });
+    }
+
+    /// Requests startup heap trimming away from the event dispatch thread when it is enabled.
+    private static void requestHeapTrim() {
+        if (AUTO_TRIM_HEAP) {
+            Schedulers.io().execute(System::gc);
+        }
     }
 
     /// Hides the packed frame synchronously on the EDT without disposing its shell or cached pages.

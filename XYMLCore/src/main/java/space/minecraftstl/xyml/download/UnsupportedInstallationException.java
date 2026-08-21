@@ -17,6 +17,10 @@
  */
 package space.minecraftstl.xyml.download;
 
+import org.jetbrains.annotations.NotNullByDefault;
+
+/// Reports a known unsupported loader installation combination by stable reason code.
+@NotNullByDefault
 public class UnsupportedInstallationException extends Exception {
 
     private final int reason;
@@ -36,4 +40,7 @@ public class UnsupportedInstallationException extends Exception {
     public static final int FORGE_1_17_OPTIFINE_H1_PRE2 = 2;
 
     public static final int FABRIC_NOT_COMPATIBLE_WITH_FORGE = 3;
+
+    /// Cleanroom and Forge cannot be installed into the same instance.
+    public static final int CLEANROOM_NOT_COMPATIBLE_WITH_FORGE = 4;
 }
