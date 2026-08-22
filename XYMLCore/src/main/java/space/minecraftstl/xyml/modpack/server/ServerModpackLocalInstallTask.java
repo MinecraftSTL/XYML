@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.modpack.server;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
@@ -27,6 +29,7 @@ import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.modpack.ModpackInstallTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 
 import java.io.IOException;
@@ -36,6 +39,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+/// Installs a local server-format archive into one game repository.
+@NotNullByDefault
 public class ServerModpackLocalInstallTask extends Task<Void> {
 
     private final Path zipFile;
@@ -46,12 +51,25 @@ public class ServerModpackLocalInstallTask extends Task<Void> {
     private final List<Task<?>> dependencies = new ArrayList<>();
     private final List<Task<?>> dependents = new ArrayList<>(4);
 
-    public ServerModpackLocalInstallTask(DefaultDependencyManager dependencyManager, Path zipFile, Modpack modpack, ServerModpackManifest manifest, GameInstanceID instanceId) {
+    /// Creates a repository-scoped installation that also owns its input archive.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param zipFile input modpack archive
+    /// @param modpack parsed modpack metadata
+    /// @param manifest server-format manifest
+    /// @param instanceId destination instance
+    public ServerModpackLocalInstallTask(
+            DefaultDependencyManager dependencyManager,
+            Path zipFile,
+            Modpack modpack,
+            ServerModpackManifest manifest,
+            GameInstanceID instanceId) {
         this.zipFile = zipFile;
         this.modpack = modpack;
         this.manifest = manifest;
         this.instanceId = instanceId;
         this.repository = dependencyManager.getGameRepository();
+        setResources(TaskResource.gameDirectory(repository.getBaseDirectory()), TaskResource.archive(zipFile));
         Path run = repository.getRunDirectory(instanceId);
 
         Path json = repository.getModpackConfiguration(instanceId);
@@ -69,7 +87,7 @@ public class ServerModpackLocalInstallTask extends Task<Void> {
                 repository.removeInstanceFromDisk(instanceId);
         });
 
-        ModpackConfiguration<ServerModpackManifest> config = null;
+        @Nullable ModpackConfiguration<ServerModpackManifest> config = null;
         try {
             if (Files.exists(json)) {
                 config = JsonUtils.fromJsonFile(json, ModpackConfiguration.typeOf(ServerModpackManifest.class));

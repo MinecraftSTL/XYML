@@ -78,6 +78,15 @@ final class DiscoJavaRuntimeAcquisitionProcessBackend
         return archiveBackend.currentPlatform();
     }
 
+    /// Returns the exact managed Java platform root used by the publication backend.
+    ///
+    /// @param platform target platform
+    /// @return managed platform root
+    @Override
+    public Path managedPlatformRoot(Platform platform) {
+        return archiveBackend.managedPlatformRoot(platform);
+    }
+
     /// Creates the established Core Disco query for one explicit distribution and platform.
     ///
     /// @param distribution explicitly selected distribution

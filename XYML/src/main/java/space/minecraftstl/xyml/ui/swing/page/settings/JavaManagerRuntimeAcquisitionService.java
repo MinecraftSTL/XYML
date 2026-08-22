@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.java.JavaInfo;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.java.XYMLJavaRepository;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.platform.UnsupportedPlatformException;
 
@@ -275,6 +276,9 @@ public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAc
     @Override
     public Task<JavaRuntime> downloadMojangRuntime(GameJavaVersion version) {
         GameJavaVersion requestedVersion = Objects.requireNonNull(version, "version");
+        Path platformRoot = backend.managedPlatformRoot(Platform.SYSTEM_PLATFORM)
+                .toAbsolutePath()
+                .normalize();
         return Task.composeAsync("Download Mojang Java runtime", () -> {
             Platform platform = backend.currentPlatform();
             if (!Platform.SYSTEM_PLATFORM.equals(platform)) {
@@ -293,7 +297,7 @@ public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAc
                 throw new FileAlreadyExistsException(supportedVersion.component());
             }
             return backend.downloadMojangRuntime(platform, supportedVersion);
-        });
+        }).setResources(TaskResource.javaRuntime(platformRoot));
     }
 
     /// Creates a stopped task that validates the suffix before opening and inspecting the archive.
@@ -380,7 +384,10 @@ public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAc
             String name) {
         LocalJavaArchiveInspection originalInspection = Objects.requireNonNull(inspection, "inspection");
         String candidate = Objects.requireNonNull(name, "name");
-        return new CancellableComposedTask<>("Install local Java archive", cancellationCheck -> {
+        Path platformRoot = backend.managedPlatformRoot(originalInspection.javaInfo().getPlatform())
+                .toAbsolutePath()
+                .normalize();
+        Task<JavaRuntime> task = new CancellableComposedTask<>("Install local Java archive", cancellationCheck -> {
             requireValidInstallName(validateInstallName(originalInspection, candidate), candidate);
             if (!supportsLocalArchive(originalInspection.archiveFile())) {
                 throw new IllegalArgumentException(
@@ -420,6 +427,9 @@ public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAc
                 throw failure;
             }
         });
+        return task.setResources(
+                TaskResource.javaRuntime(platformRoot),
+                TaskResource.archive(originalInspection.archiveFile()));
     }
 
     /// Finds a supported Mojang component by both component identifier and major version.

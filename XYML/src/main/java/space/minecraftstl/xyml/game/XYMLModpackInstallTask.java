@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.modpack.ModpackInstallTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 
@@ -64,6 +65,7 @@ public final class XYMLModpackInstallTask extends Task<Void> {
         this.zipFile = zipFile;
         this.instanceId = instanceId;
         this.modpack = modpack;
+        setResources(TaskResource.gameDirectory(repository.getBaseDirectory()), TaskResource.archive(zipFile));
 
         Path run = repository.getRunDirectory(this.instanceId);
         Path json = repository.getModpackConfiguration(this.instanceId);

@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.java.JavaManifest;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.task.BoundedTextFetchTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
@@ -48,6 +49,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -250,6 +252,9 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
 
         assertAll(
                 () -> assertEquals(Task.TaskState.READY, task.getState()),
+                () -> assertEquals(
+                        Set.of(TaskResource.javaRuntime(backend.managedRoot)),
+                        task.getResources()),
                 () -> assertEquals(0, backend.fetchTextRequests.size()),
                 () -> assertEquals(0, backend.downloadRequests.get()));
         assertTrue(task.test(), () -> "Disco install failed: " + task.getException());
@@ -637,6 +642,9 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
         /// Fixed supported platform.
         private final Platform platform = Platform.WINDOWS_X86_64;
 
+        /// Fixed managed Java platform root.
+        private final Path managedRoot = Path.of("fake-managed").toAbsolutePath().normalize();
+
         /// Mutable per-package fake Core version maps.
         private final EnumMap<JavaPackageType, TreeMap<Integer, DiscoJavaRemoteVersion>> versions =
                 new EnumMap<>(JavaPackageType.class);
@@ -723,6 +731,15 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
         @Override
         public Platform currentPlatform() {
             return platform;
+        }
+
+        /// Returns the fixed managed Java platform root.
+        ///
+        /// @param ignoredPlatform ignored target platform
+        /// @return fixed managed root
+        @Override
+        public Path managedPlatformRoot(Platform ignoredPlatform) {
+            return managedRoot;
         }
 
         /// Records lazy version task construction and returns a defensive map copy.

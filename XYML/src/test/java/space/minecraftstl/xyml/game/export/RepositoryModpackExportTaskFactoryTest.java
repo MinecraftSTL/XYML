@@ -24,6 +24,7 @@ import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModpackExportInfo;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
@@ -31,6 +32,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -63,7 +65,13 @@ public final class RepositoryModpackExportTaskFactoryTest {
             Path output = root.resolve(format.name().toLowerCase(Locale.ROOT) + format.fileSuffix());
             ModpackExportRequest request = request(format, output);
 
-            Path result = factory.create(request).run();
+            Task<Path> exportTask = factory.create(request);
+            assertEquals(
+                    Set.of(
+                            TaskResource.gameInstance(runDirectory),
+                            TaskResource.exportTarget(output)),
+                    exportTask.getResources());
+            Path result = exportTask.run();
 
             assertEquals(output.toAbsolutePath().normalize(), result);
             assertEquals("archive-" + format, Files.readString(output));

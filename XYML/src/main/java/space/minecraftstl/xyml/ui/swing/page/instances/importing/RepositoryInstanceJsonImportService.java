@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 
 import java.io.IOException;
@@ -72,7 +73,10 @@ public final class RepositoryInstanceJsonImportService implements InstanceJsonIm
         return Task.<@Nullable Void>composeAsync(
                 ioExecutor,
                 () -> prepareImport(normalizedSource, targetId))
-                .setName("Import Minecraft instance JSON");
+                .setName("Import Minecraft instance JSON")
+                .setResources(
+                        TaskResource.gameDirectory(repository.getBaseDirectory()),
+                        TaskResource.configuration(normalizedSource));
     }
 
     /// Parses and validates one source, then creates the established download/save chain.

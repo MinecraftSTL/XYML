@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.modpack.curse.CurseManifest;
 import space.minecraftstl.xyml.modpack.curse.CurseManifestMinecraft;
 import space.minecraftstl.xyml.modpack.curse.CurseManifestModLoader;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
@@ -44,6 +45,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.*;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
@@ -53,17 +55,39 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 public class McbbsModpackExportTask extends Task<Void> {
     /// Repository containing the exported instance and its version manifests.
     private final DefaultGameRepository repository;
+
+    /// Stable exported instance identifier.
     private final GameInstanceID instanceId;
+
+    /// Validated export metadata.
     private final ModpackExportInfo info;
+
+    /// Effective instance run directory captured when the task is created.
+    private final Path runDirectory;
 
     /// Destination archive path.
     private final Path modpackFile;
 
-    public McbbsModpackExportTask(DefaultGameRepository repository, GameInstanceID instanceId, ModpackExportInfo info, Path modpackFile) {
-        this.repository = repository;
-        this.instanceId = instanceId;
-        this.info = info.validate();
-        this.modpackFile = modpackFile;
+    /// Creates a stopped MCBBS modpack export task with stable source and destination paths.
+    ///
+    /// @param repository repository containing the exported instance
+    /// @param instanceId exported instance identifier
+    /// @param info export metadata and file selection
+    /// @param modpackFile destination archive
+    public McbbsModpackExportTask(
+            DefaultGameRepository repository,
+            GameInstanceID instanceId,
+            ModpackExportInfo info,
+            Path modpackFile) {
+        this.repository = Objects.requireNonNull(repository, "repository");
+        this.instanceId = Objects.requireNonNull(instanceId, "instanceId");
+        this.info = Objects.requireNonNull(info, "info").validate();
+        this.runDirectory = repository.getRunDirectory(instanceId).toAbsolutePath().normalize();
+        this.modpackFile = modpackFile.toAbsolutePath().normalize();
+        setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameInstance(runDirectory),
+                TaskResource.exportTarget(this.modpackFile));
 
         onDone().register(event -> {
             if (event.isFailed()) {
@@ -89,7 +113,6 @@ public class McbbsModpackExportTask extends Task<Void> {
         blackList.add(instanceId + ".json");
         LOG.info("Compressing game files without some files in blacklist, including files or directories: usernamecache.json, asm, logs, backups, versions, assets, usercache.json, libraries, crash-reports, launcher_profiles.json, NVIDIA, TCNodeTracker");
         try (var zip = new Zipper(modpackFile)) {
-            Path runDirectory = repository.getRunDirectory(instanceId);
             List<McbbsModpackManifest.File> files = new ArrayList<>();
             zip.putDirectory(runDirectory, "overrides", path -> {
                 if (Modpack.acceptFile(path, blackList, info.getWhitelist())) {

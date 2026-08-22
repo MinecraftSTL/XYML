@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.modpack.multimc;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.MaintainTask;
@@ -31,6 +33,7 @@ import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.modpack.ModpackInstallTask;
 import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
@@ -51,26 +54,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/**
- * <p>A task transforming MultiMC Modpack Scheme to Official Launcher Scheme.
- * The transforming process contains 7 stage:
- * <ul>
- *     <li>General Setup: Compute checksum and copy 'overrides' files.</li>
- *     <li>Load Components: Parse all local Json-Patch and prepare to fetch others from Internet.</li>
- *     <li>Resolve Json-Patch: Fetch remote Json-Patch and their dependencies.</li>
- *     <li>Build Artifact: Transform Json-Patch to Official Scheme lossily, without original structure.</li>
- *     <li>Copy Embedded Files: Copy embedded libraries and icon.</li>
- *     <li>Assemble Game: Prepare to download main jar, libraries and assets.</li>
- *     <li>Download Game: Download files.</li>
- *     <li>Apply JAR mods: Apply JAR mods into main jar.</li>
- * </ul>
- * See codes below for detailed implementation.
- *
- * @implNote To guarantee all features of MultiMC Modpack Scheme is super hard.
- * As f*** MMC never provides a detailed API docs, most codes below is guessed from its source code.
- * <b>FUNCTIONS OF GAMES MIGHT NOT BE COMPLETELY THE SAME WITH MMC.</b>
- * </p>
- */
+/// Transforms and installs a MultiMC-format archive, including embedded libraries, assets, and JAR modifications.
+@NotNullByDefault
 public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.ResolvedInstance> {
 
     private final Path zipFile;
@@ -82,13 +67,26 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
     private final List<Task<?>> dependencies = new ArrayList<>();
     private final DefaultDependencyManager dependencyManager;
 
-    public MultiMCModpackInstallTask(DefaultDependencyManager dependencyManager, Path zipFile, Modpack modpack, MultiMCInstanceConfiguration manifest, GameInstanceID instanceId) {
+    /// Creates a repository-scoped installation that also owns its input archive.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param zipFile input modpack archive
+    /// @param modpack parsed modpack metadata
+    /// @param manifest MultiMC instance configuration
+    /// @param instanceId destination instance
+    public MultiMCModpackInstallTask(
+            DefaultDependencyManager dependencyManager,
+            Path zipFile,
+            Modpack modpack,
+            MultiMCInstanceConfiguration manifest,
+            GameInstanceID instanceId) {
         this.zipFile = zipFile;
         this.modpack = modpack;
         this.manifest = manifest;
         this.instanceId = instanceId;
         this.dependencyManager = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
+        setResources(TaskResource.gameDirectory(repository.getBaseDirectory()), TaskResource.archive(zipFile));
 
         Path json = repository.getModpackConfiguration(instanceId);
         if (repository.hasInstance(instanceId) && Files.notExists(json))
@@ -112,7 +110,7 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
             Path run = repository.getRunDirectory(instanceId);
             Path json = repository.getModpackConfiguration(instanceId);
 
-            ModpackConfiguration<MultiMCInstanceConfiguration> config = null;
+            @Nullable ModpackConfiguration<MultiMCInstanceConfiguration> config = null;
             try {
                 if (Files.exists(json)) {
                     config = JsonUtils.fromJsonFile(json, ModpackConfiguration.typeOf(MultiMCInstanceConfiguration.class));
@@ -143,7 +141,7 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
             );
             List<Task<MultiMCInstancePatch>> patches = new ArrayList<>();
 
-            String mcVersion = null;
+            @Nullable String mcVersion = null;
             for (MultiMCManifest.MultiMCManifestComponent component : components) {
                 if (MultiMCComponents.getComponent(component.getUid()) == LibraryAnalyzer.LibraryType.MINECRAFT) {
                     mcVersion = component.getVersion();
@@ -233,7 +231,7 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
     @Override
     public void execute() throws Exception {
         // Stage #3: Build Json-Patch artifact.
-        MultiMCInstancePatch.ResolvedInstance artifact = null;
+        @Nullable MultiMCInstancePatch.ResolvedInstance artifact = null;
         for (int i = dependents.size() - 1; i >= 0; i--) {
             Task<?> task = dependents.get(i);
             if (task instanceof MMCInstancePatchesAssembleTask) {
@@ -271,7 +269,7 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
                 Files.copy(Objects.requireNonNull(input, "Bundled XYMLMultiMCBootstrap is missing."), libraryPath, StandardCopyOption.REPLACE_EXISTING);
             }
 
-            String iconKey = this.manifest.getIconKey();
+            @Nullable String iconKey = this.manifest.getIconKey();
             if (iconKey != null) {
                 Path iconFile = root.resolve(iconKey + ".png");
                 if (Files.exists(iconFile)) {
@@ -294,7 +292,7 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
             ));
 
             Artifact mainJarArtifact = artifact.getMainJar().artifact();
-            String gameVersion = artifact.getGameVersion();
+            @Nullable String gameVersion = artifact.getGameVersion();
             if (gameVersion != null &&
                     "com.mojang".equals(mainJarArtifact.getGroup()) &&
                     "minecraft".equals(mainJarArtifact.getName()) &&

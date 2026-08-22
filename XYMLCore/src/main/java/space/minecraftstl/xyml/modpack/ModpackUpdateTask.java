@@ -17,16 +17,21 @@
  */
 package space.minecraftstl.xyml.modpack;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Set;
 
+/// Creates a repository backup, runs one modpack update, and restores the instance when that update fails.
+@NotNullByDefault
 public class ModpackUpdateTask extends Task<Void> {
 
     private final DefaultGameRepository repository;
@@ -34,6 +39,11 @@ public class ModpackUpdateTask extends Task<Void> {
     private final Task<?> updateTask;
     private final Path backupFolder;
 
+    /// Creates an update task covering the repository backup tree and every explicit child resource.
+    ///
+    /// @param repository repository containing the instance and backup directory
+    /// @param instanceId instance being updated
+    /// @param updateTask format-specific update task
     public ModpackUpdateTask(DefaultGameRepository repository, GameInstanceID instanceId, Task<?> updateTask) {
         this.repository = repository;
         this.id = instanceId;
@@ -46,6 +56,15 @@ public class ModpackUpdateTask extends Task<Void> {
                 backupFolder = backup.resolve(instanceId + "-" + num);
                 break;
             }
+        }
+
+        Set<TaskResource> updateResources = updateTask.getResources();
+        if (updateResources.equals(Set.of(TaskResource.conservative()))) {
+            setResources(TaskResource.gameDirectory(repository.getBaseDirectory()));
+        } else {
+            setResources(
+                    TaskResource.gameDirectory(repository.getBaseDirectory()),
+                    updateResources.toArray(TaskResource[]::new));
         }
     }
 

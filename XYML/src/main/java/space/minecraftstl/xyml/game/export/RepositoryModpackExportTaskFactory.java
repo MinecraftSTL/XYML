@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.modpack.server.ServerModpackExportTask;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.Lang;
 
 import java.io.IOException;
@@ -80,11 +81,17 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
     @Override
     public Task<Path> create(ModpackExportRequest request) {
         ModpackExportRequest requestSnapshot = Objects.requireNonNull(request, "request");
-        return new Task<>() {
+        Path outputSnapshot = requestSnapshot.outputFile();
+        Path runDirectorySnapshot = Objects.requireNonNull(
+                        runDirectoryResolver.resolve(requestSnapshot.instanceId()),
+                        "run directory")
+                .toAbsolutePath()
+                .normalize();
+        Task<Path> task = new Task<>() {
             /// Runs the format exporter against a sibling temporary file and publishes only a complete archive.
             @Override
             public void execute() throws Exception {
-                Path output = requestSnapshot.outputFile();
+                Path output = outputSnapshot;
                 Path parent = Objects.requireNonNull(output.getParent(), "output parent");
                 Files.createDirectories(parent);
                 if (Files.exists(output)) {
@@ -92,11 +99,8 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
                 }
 
                 GameInstanceID instanceId = requestSnapshot.instanceId();
-                Path runDirectory = Objects.requireNonNull(
-                        runDirectoryResolver.resolve(instanceId),
-                        "run directory");
                 @Unmodifiable List<String> whitelist =
-                        requestSnapshot.fileSelection().expand(runDirectory);
+                        requestSnapshot.fileSelection().expand(runDirectorySnapshot);
                 if (whitelist.isEmpty()) {
                     throw new IllegalArgumentException("At least one export file must be selected");
                 }
@@ -124,6 +128,9 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
                 }
             }
         };
+        return task.setResources(
+                TaskResource.gameInstance(runDirectorySnapshot),
+                TaskResource.exportTarget(outputSnapshot));
     }
 
     /// Copies immutable request metadata into the mutable core exporter DTO.

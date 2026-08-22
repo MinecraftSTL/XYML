@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.java.JavaManifest;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.platform.UnsupportedPlatformException;
@@ -154,6 +155,9 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
         assertAll(
                 () -> assertEquals(Task.TaskState.READY, validTask.getState()),
                 () -> assertEquals(Task.TaskState.READY, forgedTask.getState()),
+                () -> assertEquals(
+                        Set.of(TaskResource.javaRuntime(backend.managedRoot)),
+                        validTask.getResources()),
                 () -> assertEquals(0, backend.downloadTaskRequests.get()));
         assertTrue(validTask.test());
         assertFalse(forgedTask.test());
@@ -428,6 +432,9 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
                 targetDirectory,
                 manifestFile);
 
+        assertEquals(
+                Set.of(TaskResource.javaRuntime(platformRoot)),
+                task.getResources());
         assertTrue(task.test(), () -> "Publication failed: " + task.getException());
 
         JavaRuntime runtime = Objects.requireNonNull(task.getResult(), "published runtime");
@@ -779,6 +786,11 @@ final class JavaManagerRuntimeAcquisitionServiceTest {
 
         assertAll(
                 () -> assertEquals(Task.TaskState.READY, successTask.getState()),
+                () -> assertEquals(
+                        Set.of(
+                                TaskResource.javaRuntime(backend.managedRoot),
+                                TaskResource.archive(original.archiveFile())),
+                        successTask.getResources()),
                 () -> assertEquals(0, backend.copyRequests.get()),
                 () -> assertEquals(0, backend.prepareRequests.get()),
                 () -> assertEquals(0, backend.installTaskRequests.get()));

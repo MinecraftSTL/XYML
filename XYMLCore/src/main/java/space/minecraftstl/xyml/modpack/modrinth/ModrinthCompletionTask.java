@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.modpack.modrinth;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.addon.mod.ModManager;
@@ -24,6 +26,7 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModpackCompletionException;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
@@ -40,42 +43,44 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Completes missing files for an installed Modrinth modpack instance.
+@NotNullByDefault
 public class ModrinthCompletionTask extends Task<Void> {
 
     private final DefaultDependencyManager dependency;
     private final DefaultGameRepository repository;
     private final ModManager modManager;
     private final GameInstanceID instanceId;
-    private ModrinthManifest manifest;
+    /// Manifest supplied by the caller or loaded from the instance, if available.
+    private @Nullable ModrinthManifest manifest;
     private final List<Task<?>> dependencies = new ArrayList<>();
 
     private final AtomicBoolean allNameKnown = new AtomicBoolean(true);
     private final AtomicInteger finished = new AtomicInteger(0);
     private final AtomicBoolean notFound = new AtomicBoolean(false);
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager.
-     * @param instanceId           the existent and physical version.
-     */
+    /// Creates a completion task that loads its manifest from the destination instance.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
     public ModrinthCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
         this(dependencyManager, instanceId, null);
     }
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager.
-     * @param instanceId           the existent and physical version.
-     * @param manifest          the CurseForgeModpack manifest.
-     */
-    public ModrinthCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId, ModrinthManifest manifest) {
+    /// Creates a repository-scoped completion task with an optional in-memory manifest.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
+    /// @param manifest manifest, or null to load it from the instance
+    public ModrinthCompletionTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceID instanceId,
+            @Nullable ModrinthManifest manifest) {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
         this.modManager = repository.getModManager(instanceId);
         this.instanceId = instanceId;
         this.manifest = manifest;
+        setResources(TaskResource.gameDirectory(repository.getBaseDirectory()));
 
         if (manifest == null)
             try {
