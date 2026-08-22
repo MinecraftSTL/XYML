@@ -58,6 +58,24 @@ public final class TaskResourceLockManagerTest {
         assertEquals(Set.of(target), task.getResources());
     }
 
+    /// Verifies presentation-only wrappers retain precise resources while executable continuations stay conservative.
+    @Test
+    public void presentationWrappersRetainResourceSnapshot() {
+        TaskResource target = TaskResource.downloadTarget(temporaryDirectory.resolve("wrapped.jar"));
+        Task<Void> task = emptyTask().setResources(target);
+
+        List<Task<Void>> presentationWrappers = List.of(
+                task.withStage("download"),
+                task.withCounter("download"),
+                task.withStagesHints("download"),
+                task.withFakeProgress("download", () -> true, 1.0D));
+
+        presentationWrappers.forEach(wrapper -> assertEquals(Set.of(target), wrapper.getResources()));
+        assertEquals(
+                Set.of(TaskResource.conservative()),
+                task.thenRunAsync(() -> { }).getResources());
+    }
+
     /// Verifies every file download declares its normalized exact destination without starting network work.
     @Test
     public void fileDownloadDeclaresExactTargetResource() {

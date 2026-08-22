@@ -55,6 +55,14 @@ public abstract class Task<T> {
         return resources;
     }
 
+    /// Copies the immutable declaration of a task wrapped only for presentation behavior.
+    ///
+    /// @param wrapper presentation-only wrapper receiving the declaration
+    /// @param source wrapped task whose complete lifecycle remains the only resource owner
+    private static void inheritResources(Task<?> wrapper, Task<?> source) {
+        wrapper.resources = source.resources;
+    }
+
     /// Replaces this task's resource declaration with a defensive immutable snapshot.
     ///
     /// [TaskResource#conservative()] may only appear by itself. At least one resource is required so legacy tasks can
@@ -753,6 +761,7 @@ public abstract class Task<T> {
         /// Creates a wrapper and defensively copies its stage metadata.
         public StagesHintTask(List<StagesHint> hints) {
             this.hints = List.copyOf(hints);
+            inheritResources(this, Task.this);
         }
 
         /// Returns the outer task as this wrapper's sole prerequisite.
@@ -1096,6 +1105,7 @@ public abstract class Task<T> {
         /// Creates a stage wrapper with the supplied non-null stage.
         private StageTask(String stage) {
             this.setStage(stage);
+            inheritResources(this, Task.this);
         }
 
         /// Returns the outer task as this wrapper's sole prerequisite.
@@ -1127,6 +1137,7 @@ public abstract class Task<T> {
         private FakeProgressTask(BooleanSupplier done, double k) {
             this.done = done;
             this.k = k;
+            inheritResources(this, Task.this);
         }
 
         /// Returns the outer task as this wrapper's sole prerequisite.
@@ -1165,6 +1176,7 @@ public abstract class Task<T> {
         private CountTask(String countStage) {
             this.countStage = countStage;
             setSignificance(TaskSignificance.MINOR);
+            inheritResources(this, Task.this);
         }
 
         /// Returns the stage key used by count-aware presentation.
