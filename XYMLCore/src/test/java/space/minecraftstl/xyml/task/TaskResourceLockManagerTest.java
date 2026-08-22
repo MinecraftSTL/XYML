@@ -210,6 +210,30 @@ public final class TaskResourceLockManagerTest {
         assertEquals(0, manager.trackedResourceCount());
     }
 
+    /// Verifies an external waiter queued after a parent cannot prevent that parent's nested owner from completing.
+    @Test
+    public void nestedOwnerBypassesExternalWaiterBlockedByAncestor() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource instance = TaskResource.gameInstance(temporaryDirectory.resolve("instances/example"));
+        TaskResource childFile = TaskResource.downloadTarget(
+                temporaryDirectory.resolve("instances/example/example.jar"));
+        TaskResourceLockManager.Execution parentExecution = manager.createExecution();
+        TaskResourceLockManager.Owner parentOwner = manager.createOwner(parentExecution, null, Set.of(instance));
+        TaskResourceLockManager.Lease parentLease = manager.acquire(parentOwner).get(5, TimeUnit.SECONDS);
+        CompletableFuture<TaskResourceLockManager.Lease> externalFuture = manager.acquire(
+                rootOwner(manager, childFile));
+        TaskResourceLockManager.Owner childOwner = manager.createOwner(parentExecution, parentOwner, Set.of(childFile));
+
+        TaskResourceLockManager.Lease childLease = manager.acquire(childOwner).get(5, TimeUnit.SECONDS);
+
+        assertFalse(externalFuture.isDone());
+        childLease.close();
+        parentLease.close();
+        TaskResourceLockManager.Lease externalLease = externalFuture.get(5, TimeUnit.SECONDS);
+        externalLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Verifies a nested declaration cannot silently expand beyond ancestor coverage.
     @Test
     public void nestedResourceOutsideAncestorCoverageIsRejected() {

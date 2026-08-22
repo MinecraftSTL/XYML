@@ -76,7 +76,8 @@ final class TaskResourceLockManager {
 
         boolean conservative = declarations.stream().anyMatch(TaskResource::isConservative);
         if (conservative && (declarations.size() != 1 || !declarations.iterator().next().isConservative())) {
-            throw new IllegalArgumentException("The conservative task resource cannot be combined with explicit resources");
+            throw new IllegalArgumentException(
+                    "The conservative task resource cannot be combined with explicit resources");
         }
 
         @Unmodifiable List<TaskResource> requested;
@@ -204,7 +205,10 @@ final class TaskResourceLockManager {
                 continue;
             }
 
-            boolean overtakesConflict = earlierBlocked.stream().anyMatch(earlier -> requestsConflict(earlier, waiter));
+            // A nested owner must be able to finish beneath resources already held by its ancestor. Otherwise an
+            // unrelated waiter queued between the parent and child would create a parent-child self-deadlock.
+            boolean overtakesConflict = !waiter.owner.isNested()
+                    && earlierBlocked.stream().anyMatch(earlier -> requestsConflict(earlier, waiter));
             if (!overtakesConflict && canAcquire(waiter.owner)) {
                 iterator.remove();
                 removeWaiterReferences(waiter);
@@ -324,6 +328,11 @@ final class TaskResourceLockManager {
                 current = current.parent;
             }
             return false;
+        }
+
+        /// Returns whether this owner belongs to a task nested beneath another active owner.
+        private boolean isNested() {
+            return parent != null;
         }
     }
 
