@@ -42,6 +42,43 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 @NotNullByDefault
 public abstract class Task<T> {
 
+    /// Immutable semantic resources occupied by this task's complete executor-managed lifecycle.
+    private @Unmodifiable Set<TaskResource> resources = Set.of(TaskResource.conservative());
+
+    /// Returns this task's immutable non-empty resource declaration.
+    ///
+    /// The default singleton conservative declaration resolves globally for a root task and inherits ancestor coverage
+    /// for a nested task. Callers cannot use an empty collection to opt out of resource arbitration.
+    ///
+    /// @return immutable non-empty resource declaration
+    public final @Unmodifiable Set<TaskResource> getResources() {
+        return resources;
+    }
+
+    /// Replaces this task's resource declaration with a defensive immutable snapshot.
+    ///
+    /// [TaskResource#conservative()] may only appear by itself. At least one resource is required so legacy tasks can
+    /// never become accidentally lock-free.
+    ///
+    /// @param first first required resource
+    /// @param additional additional resources
+    /// @return this task
+    public final Task<T> setResources(TaskResource first, TaskResource... additional) {
+        Objects.requireNonNull(first, "first");
+        Objects.requireNonNull(additional, "additional");
+        LinkedHashSet<TaskResource> snapshot = new LinkedHashSet<>();
+        snapshot.add(first);
+        for (TaskResource resource : additional) {
+            snapshot.add(Objects.requireNonNull(resource, "additional resource"));
+        }
+        if (snapshot.stream().anyMatch(TaskResource::isConservative)
+                && (snapshot.size() != 1 || !snapshot.iterator().next().isConservative())) {
+            throw new IllegalArgumentException("The conservative task resource cannot be combined with explicit resources");
+        }
+        resources = Collections.unmodifiableSet(snapshot);
+        return this;
+    }
+
     /// The importance level that controls this task's logging and UI visibility.
     private TaskSignificance significance = TaskSignificance.MAJOR;
 
