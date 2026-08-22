@@ -21,7 +21,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.launch.ProcessListener;
+import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.platform.Bits;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
@@ -34,8 +36,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -53,6 +57,35 @@ class LogAnalyzerTest {
 
     /// Representative selected Java executable.
     private static final Path JAVA_PATH = Path.of("C:/Java/bin/javaw.exe");
+
+    /// Accepts the launcher's typed log model through the standalone convenience entry.
+    ///
+    /// @throws IOException when the real regression log cannot be read
+    @Test
+    void analyzesTypedLogSnapshotDirectly() throws IOException {
+        @Unmodifiable List<AnalyzeResult<LogAnalyzable>> results = LogAnalyzer.analyze(
+                loadLines("/logs/forgemod_resolution.txt").stream().map(Log::new).toList());
+
+        assertEquals(1, results.size());
+        assertEquals(ResultID.FORGE_MISSING_DEPENDENCY, results.get(0).resultId());
+        assertEquals(ForgeMissingDependencyAnalyzer.class, results.get(0).analyzer().getClass());
+    }
+
+    /// Continues the generic driver after one analyzer throws a checked exception.
+    @Test
+    void isolatesAnalyzerFailureAndContinues() {
+        AtomicBoolean followingAnalyzerInvoked = new AtomicBoolean();
+        Analyzer<String> failingAnalyzer = (input, results) -> {
+            throw new IOException("expected analyzer failure");
+        };
+        Analyzer<String> followingAnalyzer = (input, results) -> {
+            followingAnalyzerInvoked.set(true);
+            return Analyzer.ControlFlow.CONTINUE;
+        };
+
+        assertTrue(Analyzer.analyze(List.of(failingAnalyzer, followingAnalyzer), "input").isEmpty());
+        assertTrue(followingAnalyzerInvoked.get());
+    }
 
     /// Detects a Windows LWJGL native-loading failure only with a non-ASCII launch path and legacy code page.
     ///
@@ -470,6 +503,33 @@ class LogAnalyzerTest {
                 ResultID.JRE_VERSION,
                 JREVersionAnalyzer.class);
         assertEquals(List.of(16, 8), result.solver().messageArguments());
+    }
+
+    /// Binds the application replacement task while retaining the specific Java-version diagnosis.
+    ///
+    /// @throws IOException when the real regression log cannot be read
+    @Test
+    void jreVersionAnalyzerUsesApplicationRepairTask() throws IOException {
+        Task<?> replacementTask = Task.completed(null);
+        LogAnalyzable input = input(
+                loadLines("/logs/too_old_java.txt"),
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                16,
+                8,
+                ProcessListener.ExitType.APPLICATION_ERROR)
+                .withJavaRuntimeRepair(() -> replacementTask);
+
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.JRE_VERSION,
+                JREVersionAnalyzer.class);
+
+        assertEquals("game.crash.reason.log.jre_version", result.solver().messageKey());
+        assertEquals(List.of(16, 8), result.solver().messageArguments());
+        assertSame(replacementTask, result.solver().createTask());
     }
 
     /// Correlates a real legacy Forge failure with a selected Java runtime that is too new.

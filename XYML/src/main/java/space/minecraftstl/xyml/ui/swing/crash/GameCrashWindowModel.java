@@ -25,8 +25,10 @@ import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameJavaVersion;
+import space.minecraftstl.xyml.game.JavaRuntimeRepairTaskFactory;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.game.Log;
+import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.util.Lang;
@@ -142,6 +144,12 @@ final class GameCrashWindowModel {
                 launchOptions.getJava().getBits(),
                 launchOptions.getMaxMemory(),
                 capturedLogs.stream().map(Log::getLog).toList());
+        if (repository instanceof XYMLGameRepository xymlRepository) {
+            logAnalyzable = logAnalyzable.withJavaRuntimeRepair(() -> JavaRuntimeRepairTaskFactory.create(
+                    xymlRepository,
+                    manifest,
+                    launchOptions.getJava()));
+        }
         Path latestLog = repository.getRunDirectory(manifest.id()).resolve("logs/latest.log");
         return new GameCrashWindowModel(exitType, details, logAnalyzable, latestLog);
     }

@@ -137,7 +137,7 @@ public final class LauncherHelper {
         this.setting = repository.getEffectiveGameSettings(selectedInstanceId);
         this.launcherVisibility = setting.getInheritable(GameSettings::launcherVisibilityProperty);
         this.showLogs = setting.getInheritable(GameSettings::showLogsProperty);
-        this.logLineLimit = Log.getLogLines();
+        this.logLineLimit = GameLogSettings.getLogLines();
     }
 
     /// Returns the launcher visibility captured from the effective instance settings.

@@ -56,13 +56,20 @@ public final class JREVersionAnalyzer implements Analyzer<LogAnalyzable> {
             return ControlFlow.CONTINUE;
         }
 
+        Solver solver = input.javaRuntimeRepair() == null
+                ? new TextSolver(
+                        "game.crash.reason.log.jre_version",
+                        List.of(required, current),
+                        "Install or select Java " + required + " instead of Java " + current + ".")
+                : Solver.ofUninstallJRE(
+                        input,
+                        "game.crash.reason.log.jre_version",
+                        List.of(required, current),
+                        "Install or select Java " + required + " instead of Java " + current + ".");
         results.add(new AnalyzeResult<>(
                 this,
                 ResultID.JRE_VERSION,
-                new TextSolver(
-                        "game.crash.reason.log.jre_version",
-                        List.of(required, current),
-                        "Install or select Java " + required + " instead of Java " + current + ".")));
+                solver));
         return ControlFlow.BREAK_OTHER;
     }
 }

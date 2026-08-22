@@ -18,8 +18,13 @@
 package space.minecraftstl.xyml.game.analyzer;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Evaluates one immutable input and appends only high-confidence diagnoses.
 ///
@@ -32,7 +37,43 @@ public interface Analyzer<T> {
     /// @param input immutable analysis input
     /// @param results mutable result accumulator owned by the driver
     /// @return whether later analyzers should run
-    ControlFlow analyze(T input, List<AnalyzeResult<T>> results);
+    ControlFlow analyze(T input, List<AnalyzeResult<T>> results) throws Exception;
+
+    /// Runs an ordered analyzer snapshot while isolating failures from individual analyzers.
+    ///
+    /// One analyzer exception is logged and does not prevent later analyzers from running. An exclusive result still
+    /// stops the driver immediately, matching the HMAT control-flow contract.
+    ///
+    /// @param analyzers ordered analyzers to invoke
+    /// @param input immutable analysis input
+    /// @param <T> analyzable input type
+    /// @return immutable ordered results accumulated before normal completion or an exclusive stop
+    static <T> @Unmodifiable List<AnalyzeResult<T>> analyze(
+            List<? extends Analyzer<T>> analyzers,
+            T input) {
+        @Unmodifiable List<? extends Analyzer<T>> analyzerSnapshot =
+                List.copyOf(Objects.requireNonNull(analyzers, "analyzers"));
+        T checkedInput = Objects.requireNonNull(input, "input");
+        List<AnalyzeResult<T>> results = new ArrayList<>();
+        for (Analyzer<T> analyzer : analyzerSnapshot) {
+            ControlFlow controlFlow;
+            try {
+                controlFlow = Objects.requireNonNull(
+                        analyzer.analyze(checkedInput, results),
+                        "analyzer control flow");
+            } catch (Exception exception) {
+                LOG.warning(
+                        "Cannot invoke analyzer " + analyzer.getClass().getName()
+                                + " for input type " + checkedInput.getClass().getName() + ".",
+                        exception);
+                continue;
+            }
+            if (controlFlow == ControlFlow.BREAK_OTHER) {
+                break;
+            }
+        }
+        return List.copyOf(results);
+    }
 
     /// Controls whether the driver evaluates analyzers registered after the current analyzer.
     @NotNullByDefault

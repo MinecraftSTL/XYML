@@ -19,9 +19,11 @@ package space.minecraftstl.xyml.game.analyzer;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.launch.ProcessListener;
+import space.minecraftstl.xyml.util.platform.Bits;
+import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +34,31 @@ import java.util.Objects;
 public final class LogAnalyzer {
     /// Prevents construction of this static entry-point class.
     private LogAnalyzer() {
+    }
+
+    /// Analyzes a standalone immutable game-log snapshot without inventing unavailable launch context.
+    ///
+    /// Context-dependent analyzers such as code-page, Java-bitness, and Java-version checks remain conservative because
+    /// this convenience entry has no game path or selected-runtime metadata. Call [#analyze(LogAnalyzable)] when that
+    /// context is available.
+    ///
+    /// @param logs game-log entries in source order
+    /// @return immutable ordered diagnoses with at most one result per ID
+    public static @Unmodifiable List<AnalyzeResult<LogAnalyzable>> analyze(List<Log> logs) {
+        @Unmodifiable List<Log> logSnapshot = List.copyOf(Objects.requireNonNull(logs, "logs"));
+        return analyze(new LogAnalyzable(
+                null,
+                null,
+                ProcessListener.ExitType.APPLICATION_ERROR,
+                OperatingSystem.CURRENT_OS,
+                OperatingSystem.CODE_PAGE,
+                null,
+                null,
+                null,
+                null,
+                Bits.UNKNOWN,
+                null,
+                logSnapshot.stream().map(Log::getLog).toList()));
     }
 
     /// Runs every registered analyzer until one requests an exclusive stop, then deduplicates by result ID.
@@ -48,13 +75,8 @@ public final class LogAnalyzer {
             return List.of();
         }
 
-        List<AnalyzeResult<LogAnalyzable>> collected = new ArrayList<>();
-        for (Analyzer<LogAnalyzable> analyzer : AnalyzableType.LOG.logAnalyzers()) {
-            Analyzer.ControlFlow controlFlow = analyzer.analyze(input, collected);
-            if (controlFlow == Analyzer.ControlFlow.BREAK_OTHER) {
-                break;
-            }
-        }
+        @Unmodifiable List<AnalyzeResult<LogAnalyzable>> collected =
+                Analyzer.analyze(AnalyzableType.LOG.logAnalyzers(), input);
 
         Map<ResultID, AnalyzeResult<LogAnalyzable>> uniqueResults = new LinkedHashMap<>();
         for (AnalyzeResult<LogAnalyzable> result : collected) {
