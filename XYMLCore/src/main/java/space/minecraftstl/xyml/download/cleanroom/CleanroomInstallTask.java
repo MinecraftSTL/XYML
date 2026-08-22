@@ -29,6 +29,8 @@ import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.FileSystem;
@@ -39,15 +41,17 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
 
+/// Installs a selected Cleanroom loader patch into an existing game manifest.
+@NotNullByDefault
 public final class CleanroomInstallTask extends Task<GameInstancePatch> {
 
     private final DefaultDependencyManager dependencyManager;
     private final GameInstanceManifest manifest;
-    private final CleanroomRemoteVersion remote;
-    private Path installer;
-    private FileDownloadTask dependent;
-    private Task<GameInstancePatch> task;
-    private String selfVersion;
+    private final @Nullable CleanroomRemoteVersion remote;
+    private @Nullable Path installer;
+    private @Nullable FileDownloadTask dependent;
+    private @Nullable Task<GameInstancePatch> task;
+    private @Nullable String selfVersion;
 
     public CleanroomInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, CleanroomRemoteVersion remoteVersion) {
         this.dependencyManager = dependencyManager;
@@ -119,13 +123,29 @@ public final class CleanroomInstallTask extends Task<GameInstancePatch> {
         }
     }
 
-    public static Task<GameInstancePatch> install(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, Path installer) throws IOException, VersionMismatchException {
+    /// Builds a local Cleanroom installation task after validating the target instance.
+    ///
+    /// @param dependencyManager repository-scoped download services
+    /// @param manifest working instance manifest
+    /// @param installer local Cleanroom installer
+    /// @return task that produces the Cleanroom patch
+    /// @throws IOException if the installer or target game version cannot be read
+    /// @throws VersionMismatchException if the installer targets another Minecraft version
+    /// @throws UnsupportedInstallationException if the target already contains Forge
+    public static Task<GameInstancePatch> install(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            Path installer) throws IOException, VersionMismatchException, UnsupportedInstallationException {
         Optional<String> gameVersion = dependencyManager.getGameRepository().getGameVersion(manifest);
         if (gameVersion.isEmpty()) throw new IOException();
         try (FileSystem fs = CompressingUtils.createReadOnlyZipFileSystem(installer)) {
             String installProfileText = Files.readString(fs.getPath("install_profile.json"));
             Map<?, ?> installProfile = JsonUtils.fromNonNullJson(installProfileText, Map.class);
             if (LibraryAnalyzer.LibraryType.CLEANROOM.getPatchId().equals(installProfile.get("profile"))) {
+                checkForgeCompatibility(
+                        dependencyManager.getGameRepository().resolve(manifest),
+                        gameVersion.get());
+
                 ForgeNewInstallProfile profile = JsonUtils.fromNonNullJson(installProfileText, ForgeNewInstallProfile.class);
                 if (!gameVersion.get().equals(profile.getMinecraft()))
                     throw new VersionMismatchException(profile.getMinecraft(), gameVersion.get());
@@ -133,6 +153,21 @@ public final class CleanroomInstallTask extends Task<GameInstancePatch> {
             } else {
                 throw new IOException();
             }
+        }
+    }
+
+    /// Rejects local Cleanroom installation when the target already contains Forge.
+    ///
+    /// @param resolved resolved target manifest
+    /// @param gameVersion resolved Minecraft version
+    /// @throws UnsupportedInstallationException if the target already contains Forge
+    static void checkForgeCompatibility(
+            GameInstanceManifest.Resolved resolved,
+            String gameVersion) throws UnsupportedInstallationException {
+        LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(resolved, gameVersion);
+        if (analyzer.has(LibraryAnalyzer.LibraryType.FORGE)) {
+            throw new UnsupportedInstallationException(
+                    UnsupportedInstallationException.CLEANROOM_NOT_COMPATIBLE_WITH_FORGE);
         }
     }
 

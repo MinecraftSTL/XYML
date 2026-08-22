@@ -52,7 +52,7 @@ final class GitVersionResolverTest {
                 repository, ReleaseType.BETA, stableVersion, "refs/heads/beta", "refs/heads/main"));
         assertEquals("1.2.3.0.1", GitVersionResolver.resolveReleaseVersion(
                 repository, ReleaseType.ALPHA, stableVersion, "refs/heads/alpha", "refs/heads/beta"));
-        assertEquals("1.2.3.0.0.2", GitVersionResolver.resolveReleaseVersion(
+        assertEquals("1.2.3.0.1.2", GitVersionResolver.resolveReleaseVersion(
                 repository, ReleaseType.DEV, stableVersion, "refs/heads/dev", "refs/heads/alpha"));
         assertEquals("1.2.3.0.0.5", GitVersionResolver.resolveFeatureVersion(
                 repository,
@@ -82,7 +82,7 @@ final class GitVersionResolverTest {
         assertEquals("1.2.3.0.1", GitVersionResolver.resolveCurrentReleaseVersion(
                 repository, ReleaseType.ALPHA, stableVersion));
         git(repository, "checkout", "dev");
-        assertEquals("1.2.3.0.0.2", GitVersionResolver.resolveCurrentReleaseVersion(
+        assertEquals("1.2.3.0.1.2", GitVersionResolver.resolveCurrentReleaseVersion(
                 repository, ReleaseType.DEV, stableVersion));
     }
 
