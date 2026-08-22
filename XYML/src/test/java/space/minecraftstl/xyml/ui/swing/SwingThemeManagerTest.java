@@ -21,6 +21,7 @@ import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 import com.formdev.flatlaf.icons.FlatCheckBoxIcon;
+import com.formdev.flatlaf.util.SystemInfo;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -30,12 +31,20 @@ import space.minecraftstl.xyml.theme.ThemeBrightnessPreference;
 import space.minecraftstl.xyml.theme.ThemeColor;
 import space.minecraftstl.xyml.theme.ThemeColorStyle;
 import space.minecraftstl.xyml.theme.ThemeContrast;
+import space.minecraftstl.xyml.ui.swing.shell.RoundedComboBoxUI;
 
+import javax.swing.Icon;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.UIManager;
 import java.awt.Color;
+import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Graphics2D;
+import java.awt.Insets;
+import java.awt.image.BufferedImage;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -47,10 +56,45 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /// Tests FlatLaf initialization and hot updates without creating a displayable window.
 @NotNullByDefault
 public final class SwingThemeManagerTest {
+    /// Windows title-pane controls remain square and adopt live launcher-radius changes.
+    @Test
+    public void installsSquareWindowsTitlePaneButtons() {
+        assumeTrue(SystemInfo.isWindows);
+        @Nullable Map<String, String> previousExtraDefaults = FlatLaf.getGlobalExtraDefaults();
+        try {
+            SwingThemeManager manager = new SwingThemeManager(
+                    ThemeBrightnessPreference.LIGHT,
+                    new SwingDesignTokens(0),
+                    SystemThemeDetector.lightFallback());
+
+            manager.initialize();
+            assertWindowsTitlePaneButtonDefaults(0);
+            Icon squareCloseIcon = UIManager.getIcon("TitlePane.closeIcon");
+            BufferedImage squareCloseButton = paintHoveredTitlePaneButton(squareCloseIcon);
+            assertTrue((squareCloseButton.getRGB(0, 0) >>> 24) > 0);
+
+            manager.update(ThemeBrightnessPreference.LIGHT, new SwingDesignTokens(18));
+            assertWindowsTitlePaneButtonDefaults(36);
+            Icon roundedCloseIcon = UIManager.getIcon("TitlePane.closeIcon");
+            BufferedImage roundedCloseButton = paintHoveredTitlePaneButton(roundedCloseIcon);
+            assertAll(
+                    () -> assertNotSame(squareCloseIcon, roundedCloseIcon),
+                    () -> assertEquals(0, roundedCloseButton.getRGB(0, 0) >>> 24),
+                    () -> assertTrue((roundedCloseButton.getRGB(18, 18) >>> 24) > 0));
+
+            manager.update(ThemeBrightnessPreference.DARK, new SwingDesignTokens(18));
+            assertWindowsTitlePaneButtonDefaults(36);
+        } finally {
+            FlatLaf.setGlobalExtraDefaults(previousExtraDefaults != null ? previousExtraDefaults : Map.of());
+            FlatLaf.setup(new FlatLightLaf());
+        }
+    }
+
     /// The manager exposes a brightness-matched bundled XYML background before the first frame is created.
     @Test
     public void preparesBrightnessSpecificInitialWindowAppearance() {
@@ -92,9 +136,14 @@ public final class SwingThemeManagerTest {
                 () -> assertTrue(manager.isInitialized()),
                 () -> assertEquals(ThemeVariant.LIGHT, manager.effectiveVariant()),
                 () -> assertInstanceOf(FlatLightLaf.class, UIManager.getLookAndFeel()),
-                () -> assertEquals(4, UIManager.getInt("Component.arc")),
-                () -> assertEquals(4, UIManager.getInt("CheckBox.arc")),
-                () -> assertEquals(4, initialCheckBoxIcon.getStyleableValue("arc")));
+                () -> assertEquals(8, UIManager.getInt("Component.arc")),
+                () -> assertEquals(6, UIManager.getInt("CheckBox.arc")),
+                () -> assertEquals(4, UIManager.getInt("PopupMenu.borderCornerRadius")),
+                () -> assertEquals(8, UIManager.getInt("List.selectionArc")),
+                () -> assertEquals(RoundedComboBoxUI.class.getName(), UIManager.getString("ComboBoxUI")),
+                () -> assertEquals(6, initialCheckBoxIcon.getStyleableValue("arc")));
+
+        assertTrue(new JComboBox<>().getUI() instanceof RoundedComboBoxUI);
 
         manager.update(ThemeBrightnessPreference.LIGHT, new SwingDesignTokens(13));
         FlatCheckBoxIcon updatedCheckBoxIcon = assertInstanceOf(
@@ -104,8 +153,10 @@ public final class SwingThemeManagerTest {
         assertAll(
                 () -> assertEquals(ThemeVariant.LIGHT, manager.effectiveVariant()),
                 () -> assertInstanceOf(FlatLightLaf.class, UIManager.getLookAndFeel()),
-                () -> assertEquals(13, UIManager.getInt("Component.arc")),
+                () -> assertEquals(26, UIManager.getInt("Component.arc")),
                 () -> assertEquals(6, UIManager.getInt("CheckBox.arc")),
+                () -> assertEquals(13, UIManager.getInt("PopupMenu.borderCornerRadius")),
+                () -> assertEquals(26, UIManager.getInt("List.selectionArc")),
                 () -> assertNotSame(initialCheckBoxIcon, updatedCheckBoxIcon),
                 () -> assertEquals(6, updatedCheckBoxIcon.getStyleableValue("arc")));
 
@@ -114,7 +165,7 @@ public final class SwingThemeManagerTest {
         assertAll(
                 () -> assertEquals(ThemeVariant.DARK, manager.effectiveVariant()),
                 () -> assertInstanceOf(FlatDarkLaf.class, UIManager.getLookAndFeel()),
-                () -> assertEquals(13, UIManager.getInt("Component.arc")),
+                () -> assertEquals(26, UIManager.getInt("Component.arc")),
                 () -> assertEquals(6, UIManager.getInt("CheckBox.arc")));
     }
 
@@ -258,6 +309,46 @@ public final class SwingThemeManagerTest {
             FlatLaf.setGlobalExtraDefaults(previousExtraDefaults != null ? previousExtraDefaults : Map.of());
             FlatLaf.setup(new FlatLightLaf());
         }
+    }
+
+    /// Verifies the active logical Windows title-button dimensions, arc, and vertical sizing policy.
+    ///
+    /// @param expectedArcDiameter expected FlatLaf arc diameter
+    private static void assertWindowsTitlePaneButtonDefaults(int expectedArcDiameter) {
+        Dimension size = UIManager.getDimension("TitlePane.buttonSize");
+        Insets margins = UIManager.getInsets("TitlePane.buttonsMargins");
+        assertAll(
+                () -> assertEquals(SwingThemeManager.WINDOWS_TITLE_PANE_BUTTON_SIZE, size.width),
+                () -> assertEquals(SwingThemeManager.WINDOWS_TITLE_PANE_BUTTON_SIZE, size.height),
+                () -> assertEquals(0, margins.top),
+                () -> assertEquals(0, margins.left),
+                () -> assertEquals(0, margins.bottom),
+                () -> assertEquals(
+                        SwingThemeManager.WINDOWS_TITLE_PANE_BUTTON_TRAILING_MARGIN,
+                        margins.right),
+                () -> assertEquals(expectedArcDiameter, UIManager.getInt("TitlePane.buttonArc")),
+                () -> assertFalse(UIManager.getBoolean("TitlePane.buttonsFillVertically")));
+    }
+
+    /// Paints one hovered caption control onto a transparent image for corner-shape assertions.
+    ///
+    /// @param icon FlatLaf caption icon containing the state background painter
+    /// @return rendered logical button bounds
+    private static BufferedImage paintHoveredTitlePaneButton(Icon icon) {
+        JButton button = new JButton(icon);
+        button.setSize(icon.getIconWidth(), icon.getIconHeight());
+        button.getModel().setRollover(true);
+        BufferedImage image = new BufferedImage(
+                icon.getIconWidth(),
+                icon.getIconHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            icon.paintIcon(button, graphics, 0, 0);
+        } finally {
+            graphics.dispose();
+        }
+        return image;
     }
 
     /// Creates one concrete theme with stable non-color values.

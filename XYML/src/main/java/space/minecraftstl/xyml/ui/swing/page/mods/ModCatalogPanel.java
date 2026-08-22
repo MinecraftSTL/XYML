@@ -22,6 +22,7 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.addon.mod.ModManager;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -29,6 +30,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
@@ -45,6 +47,7 @@ import javax.swing.ScrollPaneConstants;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
+import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.event.ListDataEvent;
@@ -57,7 +60,9 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -168,6 +173,9 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// Owned model subscription.
     private final Subscription modelSubscription;
 
+    /// Page-scoped filtered Mod file-list route.
+    private final ShellFileDropHandler.RouteRegistration dropRegistration;
+
     /// Last snapshot rendered by this panel.
     private ModCatalogSnapshot displayedSnapshot;
 
@@ -252,6 +260,10 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             }
         });
         applySnapshot(displayedSnapshot);
+        dropRegistration = ShellFileDropHandler.registerFiles(
+                this,
+                this::supportsDroppedMod,
+                this::importDroppedMods);
         model.loadIfNeeded();
     }
 
@@ -596,7 +608,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             updateSelectionActions();
             return;
         }
-        @Nullable ModCatalogItem selected = singleSelectedItem();
+        @Nullable ModCatalogItem selected = currentSingleSelectedItem();
         if (selected != null) {
             model.selectMod(selected.localKey());
         }
@@ -609,12 +621,36 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         if (closed || synchronizing) {
             return;
         }
-        @Nullable ModCatalogItem selected = singleSelectedItem();
+        @Nullable ModCatalogItem selected = currentSingleSelectedItem();
         if (selected != null) {
             model.selectMod(selected.localKey());
         }
         showDetails(selected);
         updateSelectionActions();
+    }
+
+    /// Returns the loaded single selection only when it still matches the model's current row identity.
+    ///
+    /// A background mutation can commit a replacement index before the EDT applies its snapshot. Any
+    /// page completion already queued on the EDT still belongs to the old visual generation and must
+    /// not submit its stale key back to the strict model selection API.
+    ///
+    /// @return current loaded selection, or `null` after clearing a stale selection
+    private @Nullable ModCatalogItem currentSingleSelectedItem() {
+        JList<?> list = choiceList.getList();
+        int selectedIndex = list.getSelectedIndex();
+        @Nullable ModCatalogItem selected = singleSelectedItem();
+        if (selected == null) {
+            return null;
+        }
+        @Unmodifiable List<String> currentKeys = model.filteredLocalKeys();
+        if (selectedIndex < 0
+                || selectedIndex >= currentKeys.size()
+                || !currentKeys.get(selectedIndex).equals(selected.localKey())) {
+            list.clearSelection();
+            return null;
+        }
+        return selected;
     }
 
     /// Applies one immutable model snapshot to Swing state.
@@ -819,8 +855,102 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// Opens the chooser and submits selected archives as one serialized import.
     private void chooseAndImport() {
         List<Path> sources = interactions.chooseImportFiles(this, modsDirectory);
-        if (!sources.isEmpty()) {
-            observeFailure(model.importMods(sources));
+        resolveAndSubmitImport(sources);
+    }
+
+    /// Resolves known conflicts and submits one immutable source batch.
+    ///
+    /// @param sources selected or dropped Mod sources
+    private void resolveAndSubmitImport(@Unmodifiable List<Path> sources) {
+        if (sources.isEmpty()) {
+            return;
+        }
+        try {
+            @Unmodifiable List<Path> conflicts = model.findImportConflicts(sources);
+            Map<Path, ModImportConflictAction> conflictActions = new LinkedHashMap<>();
+            for (Path conflict : conflicts) {
+                if (conflictActions.containsKey(conflict)) {
+                    continue;
+                }
+                @Nullable ModImportConflictAction action = interactions.resolveImportConflict(
+                        this, conflict);
+                if (action == null) {
+                    return;
+                }
+                conflictActions.put(conflict, action);
+            }
+            submitImport(sources, conflictActions);
+        } catch (RuntimeException failure) {
+            interactions.showFailure(this, actionStrings.errorTitle(), failureDetail(failure));
+        }
+    }
+
+    /// Submits one resolved import and prompts again if disk state introduced a later conflict.
+    ///
+    /// @param sources original import sources
+    /// @param conflictActions conflict decisions collected so far
+    private void submitImport(
+            @Unmodifiable List<Path> sources,
+            @Unmodifiable Map<Path, ModImportConflictAction> conflictActions) {
+        @Unmodifiable List<Path> capturedSources = List.copyOf(sources);
+        @Unmodifiable Map<Path, ModImportConflictAction> capturedActions = Map.copyOf(conflictActions);
+        model.importMods(capturedSources, capturedActions).whenComplete(
+                (@Nullable ModCatalogSnapshot ignored, @Nullable Throwable failure) -> {
+                    if (failure == null) {
+                        return;
+                    }
+                    Throwable cause = unwrapFailure(failure);
+                    EdtDispatcher.execute(() -> handleImportFailure(
+                            capturedSources, capturedActions, cause));
+                });
+    }
+
+    /// Resolves a late disk conflict or presents an ordinary import failure.
+    ///
+    /// @param sources original import sources
+    /// @param conflictActions conflict decisions collected so far
+    /// @param failure unwrapped import failure
+    private void handleImportFailure(
+            @Unmodifiable List<Path> sources,
+            @Unmodifiable Map<Path, ModImportConflictAction> conflictActions,
+            Throwable failure) {
+        if (closed) {
+            return;
+        }
+        if (failure instanceof ModImportConflictException conflict
+                && !conflictActions.containsKey(conflict.source())) {
+            @Nullable ModImportConflictAction action = interactions.resolveImportConflict(
+                    this, conflict.source());
+            if (action != null) {
+                Map<Path, ModImportConflictAction> replacement = new LinkedHashMap<>(conflictActions);
+                replacement.put(conflict.source(), action);
+                submitImport(sources, replacement);
+            }
+            return;
+        }
+        interactions.showFailure(this, actionStrings.errorTitle(), failureDetail(failure));
+    }
+
+    /// Returns whether this writable page accepts one dropped Mod path.
+    ///
+    /// @param source normalized dropped path
+    /// @return whether the path has a supported Mod suffix and the catalog can write
+    private boolean supportsDroppedMod(Path source) {
+        return currentWritableSnapshot() != null && ModManager.isFileNameMod(source);
+    }
+
+    /// Imports all supported Mod paths delivered by the page-scoped drop route.
+    ///
+    /// @param sources immutable supported paths in transfer order
+    private void importDroppedMods(@Unmodifiable List<Path> sources) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (!sources.isEmpty() && currentWritableSnapshot() != null) {
+            @Unmodifiable List<Path> capturedSources = List.copyOf(sources);
+            SwingUtilities.invokeLater(() -> {
+                if (!closed && currentWritableSnapshot() != null) {
+                    resolveAndSubmitImport(capturedSources);
+                }
+            });
         }
     }
 
@@ -879,14 +1009,23 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// @param failure asynchronous failure
     /// @return original message or type name
     private static String failureDetail(Throwable failure) {
-        Throwable current = failure;
-        if (current instanceof CompletionException && current.getCause() != null) {
-            current = Objects.requireNonNull(current.getCause());
-        }
+        Throwable current = unwrapFailure(failure);
         @Nullable String message = current.getMessage();
         return message == null || message.isBlank()
                 ? current.getClass().getSimpleName()
                 : message;
+    }
+
+    /// Removes asynchronous completion wrappers while preserving the original failure object.
+    ///
+    /// @param failure asynchronous failure
+    /// @return first non-completion cause
+    private static Throwable unwrapFailure(Throwable failure) {
+        Throwable current = Objects.requireNonNull(failure, "failure");
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = Objects.requireNonNull(current.getCause());
+        }
+        return current;
     }
 
     /// Configures one fixed-size bundled SVG icon command.
@@ -940,6 +1079,7 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
             return;
         }
         closed = true;
+        dropRegistration.close();
         searchField.setEnabled(false);
         filterBox.setEnabled(false);
         refreshButton.setEnabled(false);

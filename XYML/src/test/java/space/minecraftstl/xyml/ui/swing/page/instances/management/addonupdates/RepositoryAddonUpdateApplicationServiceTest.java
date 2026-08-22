@@ -527,6 +527,8 @@ final class RepositoryAddonUpdateApplicationServiceTest {
             boolean useRemoteFileName) {
         RemoteAddon.IVersion source = () -> RemoteAddon.Source.MODRINTH;
         return new LocalAddonFile.AddonUpdate(
+                RemoteAddon.Source.MODRINTH,
+                RemoteAddon.Type.MOD,
                 local,
                 version(source, "current", currentVersion, "current.jar"),
                 version(source, "target", targetVersion, remoteFileName),
@@ -547,10 +549,10 @@ final class RepositoryAddonUpdateApplicationServiceTest {
             String fileName) {
         return new RemoteAddon.Version(
                 source,
+                version,
                 "project-id",
                 name,
                 version,
-                "",
                 Instant.EPOCH,
                 RemoteAddon.VersionType.Release,
                 new RemoteAddon.File(

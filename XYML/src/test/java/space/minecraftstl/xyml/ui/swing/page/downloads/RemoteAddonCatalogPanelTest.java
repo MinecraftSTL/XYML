@@ -100,7 +100,7 @@ final class RemoteAddonCatalogPanelTest {
                 assertFalse(panel.choiceList().getViewport().isOpaque());
                 assertFalse(list.isOpaque());
                 assertFalse(unselectedOpaque);
-                assertTrue(selectedOpaque);
+                assertFalse(selectedOpaque);
                 Insets listInsets = list.getBorder().getBorderInsets(list);
                 assertEquals(9, listInsets.bottom);
             });
@@ -620,10 +620,10 @@ final class RemoteAddonCatalogPanelTest {
     private static RemoteAddon.Version fixtureVersion() {
         return new RemoteAddon.Version(
                 () -> RemoteAddon.Source.MODRINTH,
+                "1.0.0",
                 "fixture-mod",
                 "Fixture Mod 1.0",
                 "1.0.0",
-                "",
                 Instant.EPOCH,
                 RemoteAddon.VersionType.Release,
                 new RemoteAddon.File(

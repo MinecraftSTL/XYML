@@ -22,8 +22,9 @@ import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.addon.RemoteAddon;
+import space.minecraftstl.xyml.addon.RemoteAddonRepository;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.setting.DownloadProviders;
@@ -34,6 +35,7 @@ import space.minecraftstl.xyml.task.presentation.TaskExecutorPresentationModel;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.downloads.RemoteAddonChangelogDialog;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 
@@ -112,6 +114,9 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
     /// Opens the selected row's exact remote project page when resolved.
     private final JButton openSourceButton = new JButton();
 
+    /// Loads and displays the selected row's exact remote version changelog.
+    private final JButton changelogButton = new JButton();
+
     /// Opens the selected row's containing local directory.
     private final JButton revealLocalButton = new JButton();
 
@@ -135,6 +140,9 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
 
     /// Guards one in-flight CSV write and prevents duplicate export commands.
     private final AtomicBoolean exporting = new AtomicBoolean();
+
+    /// Guards one in-flight changelog request and prevents duplicate dialog loads.
+    private final AtomicBoolean changelogLoading = new AtomicBoolean();
 
     /// Guards terminal component teardown and late background callbacks.
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -306,7 +314,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
     private JComponent createHeadingBand() {
         JPanel heading = new JPanel(new MigLayout(
                 "insets 12 16 8 16, fillx",
-                "[grow,fill][]8[]8[]8[]",
+                "[grow,fill][]8[]8[]8[]8[]",
                 "[40!]"));
         heading.setOpaque(false);
         JLabel title = new JLabel(strings.title());
@@ -336,6 +344,14 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
                 strings.sourceTooltip(),
                 this::openSelectedSourcePage);
         heading.add(openSourceButton, "w 40!, h 40!");
+
+        configureIconButton(
+                changelogButton,
+                "addonUpdatesChangelog",
+                "assets/swing/icons/script.svg",
+                i18n("update.changelog"),
+                this::showSelectedChangelog);
+        heading.add(changelogButton, "w 40!, h 40!");
 
         configureIconButton(
                 revealLocalButton,
@@ -551,6 +567,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         resultsTable.setEnabled(idle);
         revealLocalButton.setEnabled(idle && row != null);
         openSourceButton.setEnabled(idle && row != null && row.sourcePage() != null);
+        changelogButton.setEnabled(idle && row != null && row.update() != null);
         selectAllCheckBox.setEnabled(idle && tableModel.updateCount() > 0);
         selectAllCheckBox.setSelected(tableModel.areAllUpdatesSelected());
         updateButton.setEnabled(idle && !tableModel.selectedUpdates().isEmpty());
@@ -799,6 +816,87 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         handleDesktopCompletion(interactions.openSourcePage(sourcePage));
     }
 
+    /// Loads the selected target version's changelog off the EDT and opens the safe Swing viewer.
+    private void showSelectedChangelog() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get() || scanning.get() || exporting.get() || activeExecutor != null
+                || !changelogLoading.compareAndSet(false, true)) {
+            return;
+        }
+        @Nullable AddonUpdateTableRow row = selectedRow();
+        @Nullable AddonUpdateItem selected = row == null ? null : row.update();
+        if (selected == null) {
+            changelogLoading.set(false);
+            updateControls();
+            return;
+        }
+        statusLabel.setText(i18n("update.changelog"));
+        updateControls();
+        try {
+            executor.execute(() -> loadSelectedChangelog(selected));
+        } catch (RuntimeException failure) {
+            changelogLoaded(selected, null, null, failure);
+        }
+    }
+
+    /// Reads one exact provider changelog and version page on the caller-owned worker executor.
+    ///
+    /// @param selected immutable update item captured before the request starts
+    private void loadSelectedChangelog(AddonUpdateItem selected) {
+        try {
+            RemoteAddon.Type type = selected.update().repoType();
+            RemoteAddonRepository repository = selected.source().getRepoForType(type);
+            if (repository == null) {
+                throw new IOException("No remote repository for " + type);
+            }
+            RemoteAddon.Version version = selected.update().targetVersion();
+            @Nullable String markdown = repository.getAddonChangelog(
+                    DownloadProviders.getDownloadProvider(),
+                    version.projectId(),
+                    version.versionId());
+            URI page = URI.create(repository.getVersionPageUrl(version));
+            EdtDispatcher.execute(() -> changelogLoaded(selected, markdown, page, null));
+        } catch (IOException | RuntimeException failure) {
+            EdtDispatcher.execute(() -> changelogLoaded(selected, null, null, failure));
+        }
+    }
+
+    /// Applies one changelog result only while the panel remains open.
+    ///
+    /// @param selected update item captured for the request
+    /// @param markdown provider Markdown, or null when absent
+    /// @param page exact provider version page
+    /// @param failure request failure, or null on success
+    private void changelogLoaded(
+            AddonUpdateItem selected,
+            @Nullable String markdown,
+            @Nullable URI page,
+            @Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) {
+            return;
+        }
+        changelogLoading.set(false);
+        if (failure != null || page == null) {
+            String detail = i18n("addon.changelog.failed");
+            if (failure != null) {
+                detail += ": " + describeFailure(failure);
+            }
+            interactions.showFailure(
+                    this,
+                    strings.failureDialogTitle(),
+                    detail);
+        } else {
+            RemoteAddonChangelogDialog.show(
+                    this,
+                    i18n("addon.changelog") + " - " + selected.targetVersion(),
+                    markdown,
+                    page);
+        }
+        statusLabel.setText(displayedResult == null ? strings.emptyText() : statusFor(displayedResult));
+        updateControls();
+    }
+
     /// Opens the selected local add-on's containing directory.
     private void revealSelectedLocalFile() {
         EdtDispatcher.requireEventDispatchThread();
@@ -869,6 +967,7 @@ public final class AddonUpdatesPanel extends JPanel implements AutoCloseable {
         exportButton.setEnabled(false);
         openSourceButton.setEnabled(false);
         revealLocalButton.setEnabled(false);
+        changelogButton.setEnabled(false);
         selectAllCheckBox.setEnabled(false);
         updateButton.setEnabled(false);
         resultsTable.setEnabled(false);

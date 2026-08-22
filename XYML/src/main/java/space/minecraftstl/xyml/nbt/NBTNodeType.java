@@ -17,11 +17,11 @@
  */
 package space.minecraftstl.xyml.nbt;
 
-import org.glavo.nbt.NBTElement;
-import org.glavo.nbt.chunk.Chunk;
-import org.glavo.nbt.chunk.ChunkRegion;
-import org.glavo.nbt.tag.Tag;
-import org.glavo.nbt.tag.TagType;
+import space.minecraftstl.xyml.library.nbt.NBTElement;
+import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
+import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
+import space.minecraftstl.xyml.library.nbt.tag.Tag;
+import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import org.jetbrains.annotations.NotNullByDefault;
 
 /// Stable toolkit-neutral node categories suitable for choosing text or image presentation in a UI.

@@ -152,10 +152,10 @@ final class SwingRemoteWorldSaveTargetResolverTest {
     private static RemoteAddon.Version fixtureVersion(String fileName) {
         return new RemoteAddon.Version(
                 () -> RemoteAddon.Source.CURSEFORGE,
+                "1.0.0",
                 "fixture-world",
                 "Fixture World 1.0",
                 "1.0.0",
-                "",
                 Instant.EPOCH,
                 RemoteAddon.VersionType.Release,
                 new RemoteAddon.File(

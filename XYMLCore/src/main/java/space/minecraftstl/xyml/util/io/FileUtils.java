@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.util.io;
 
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import kala.encdet.EncodingDetector;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.function.ExceptionalConsumer;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
@@ -233,6 +234,26 @@ public final class FileUtils {
             LOG.warning("Failed to get file size of " + file, e);
             return 0L;
         }
+    }
+
+    /// Reads a text file as UTF-8 when it contains modern text, or as the configured native charset otherwise.
+    ///
+    /// @param file file to read
+    /// @return decoded file contents
+    /// @throws IOException when the file cannot be read
+    public static String readTextMaybeNativeEncoding(Path file) throws IOException {
+        byte[] bytes = Files.readAllBytes(file);
+        if (OperatingSystem.NATIVE_CHARSET == StandardCharsets.UTF_8) {
+            return new String(bytes, StandardCharsets.UTF_8);
+        }
+
+        EncodingDetector detector = EncodingDetector.MODERN_WEB;
+        @Nullable EncodingDetector.Encoding bestEncoding = detector.detect(bytes).bestEncoding();
+        @Nullable Charset detectedCharset = bestEncoding == null ? null : bestEncoding.approximateCharset();
+        if (detectedCharset == StandardCharsets.UTF_8 || detectedCharset == StandardCharsets.US_ASCII) {
+            return new String(bytes, StandardCharsets.UTF_8);
+        }
+        return new String(bytes, OperatingSystem.NATIVE_CHARSET);
     }
 
     public static void deleteDirectory(Path directory) throws IOException {

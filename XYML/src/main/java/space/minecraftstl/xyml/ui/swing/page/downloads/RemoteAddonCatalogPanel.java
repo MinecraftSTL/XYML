@@ -45,6 +45,7 @@ import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.JOptionPane;
 import javax.swing.JTextField;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -143,6 +144,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Selected-version acquisition command.
     private final JButton installButton = new JButton();
 
+    /// On-demand changelog and exact provider-page command.
+    private final JButton changelogButton = new JButton();
+
     /// Current catalog, version, selected-target, and task feedback.
     private final JLabel statusLabel = new JLabel();
 
@@ -187,6 +191,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
     /// Whether the selected project is waiting for background version resolution.
     private boolean versionLoading;
+
+    /// Whether a changelog request is currently outstanding.
+    private boolean changelogLoading;
 
     /// Whether the current provider category tree is loading in the background.
     private boolean categoryLoading;
@@ -499,7 +506,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
         JPanel installBand = new JPanel(new MigLayout(
                 "insets 0, fillx",
-                "[][grow,fill][220!]",
+                "[][grow,fill][140!][220!]",
                 "[40!]"));
         installBand.setOpaque(false);
         JLabel versionLabel = new JLabel(strings.versionLabel());
@@ -509,6 +516,10 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         versionBox.setRenderer(new RemoteAddonVersionRenderer());
         versionBox.addActionListener(event -> updateControls());
         installBand.add(versionBox, "growx, h 40!");
+        changelogButton.setName("remoteAddonChangelog");
+        changelogButton.setText(i18n("update.changelog"));
+        changelogButton.addActionListener(event -> showSelectedChangelog());
+        installBand.add(changelogButton, "grow, h 40!");
         installButton.setName("remoteAddonInstall");
         installButton.setText(strings.installAction());
         installButton.addActionListener(event -> beginInstall());
@@ -871,6 +882,59 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         updateControls();
     }
 
+    /// Loads the selected version changelog away from the EDT and opens its Swing dialog.
+    private void showSelectedChangelog() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || changelogLoading) {
+            return;
+        }
+        @Nullable RemoteAddonCatalogItem item = selectedItem;
+        @Nullable RemoteAddon.Version version = (RemoteAddon.Version) versionBox.getSelectedItem();
+        if (item == null || version == null) {
+            return;
+        }
+        changelogLoading = true;
+        updateControls();
+        long requestRevision = selectionRequestRevision.get();
+        try {
+            workerExecutor.execute(() -> {
+                try {
+                    @Nullable String markdown = backend.loadChangelog(item, version);
+                    java.net.URI page = backend.versionPage(item, version);
+                    SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+                        if (closed || selectionRequestRevision.get() != requestRevision
+                                || selectedItem != item) {
+                            return;
+                        }
+                        changelogLoading = false;
+                        updateControls();
+                        RemoteAddonChangelogDialog.show(
+                                this,
+                                item.addon().title() + " " + version.version(),
+                                markdown,
+                                page);
+                    });
+                } catch (IOException | RuntimeException failure) {
+                    LOG.warning("Failed to load remote add-on changelog", failure);
+                    SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
+                        if (closed || selectionRequestRevision.get() != requestRevision
+                                || selectedItem != item) {
+                            return;
+                        }
+                        changelogLoading = false;
+                        updateControls();
+                        JOptionPane.showMessageDialog(this, i18n("addon.changelog.failed"),
+                                i18n("message.error"), JOptionPane.ERROR_MESSAGE);
+                    });
+                }
+            });
+        } catch (RuntimeException schedulingFailure) {
+            changelogLoading = false;
+            updateControls();
+            LOG.warning("Failed to schedule remote add-on changelog request", schedulingFailure);
+        }
+    }
+
     /// Publishes selected-project version failure only while that selection remains current.
     ///
     /// @param item selected project whose version lookup failed
@@ -1021,6 +1085,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         choiceList.getList().clearSelection();
         selectedItem = null;
         versionLoading = false;
+        changelogLoading = false;
         versionBox.removeAllItems();
     }
 
@@ -1097,6 +1162,11 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         lastPageButton.setEnabled(pageButtonsEnabled && page.pageOffset() + 1 < page.totalPages());
 
         versionBox.setEnabled(inputsEnabled && selectedItem != null && !versionLoading && versionBox.getItemCount() > 0);
+        changelogButton.setEnabled(inputsEnabled
+                && selectedItem != null
+                && !versionLoading
+                && !changelogLoading
+                && versionBox.getSelectedItem() != null);
         installButton.setEnabled(inputsEnabled
                 && !catalogLoading
                 && !versionLoading
@@ -1158,6 +1228,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         categoryBox.setEnabled(false);
         sortBox.setEnabled(false);
         versionBox.setEnabled(false);
+        changelogButton.setEnabled(false);
         searchButton.setEnabled(false);
         firstPageButton.setEnabled(false);
         previousPageButton.setEnabled(false);

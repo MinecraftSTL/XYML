@@ -13,6 +13,9 @@
 
 [![GitHub](https://img.shields.io/badge/GitHub-repo-blue?style=flat-square&logo=github)](https://github.com/MinecraftSTL/XYML)
 
+[![QQ Group](https://img.shields.io/badge/QQ-gray?style=flat-square&logo=qq&logoColor=ffffff)](https://qm.qq.com/cgi-bin/qm/qr?k=wz9sCQuIj4TiQBHUpeuBGM-pZ83f5ini&jump_from=webapi&authKey=VKucBpojFUOiDWF7OCbmvDI6Vfkjr+S1m4e7+unOBAuEfW/j1yXYTnf50c+z/NWs)
+[![Bilibili](https://img.shields.io/badge/Bilibili-gray?style=flat-square&logo=bilibili)](https://space.bilibili.com/2059457567)
+
 
 </div>
 <!-- #END BLOCK -->
@@ -52,6 +55,10 @@ XYML is a downstream project independently maintained by MinecraftSTL and is not
 manages its own versions, release channels, artifacts, and issue tracking; the release status of HMCL and XYML does not
 represent the other project. This repository retains `HMCL-dev/HMCL` as its upstream source so that suitable upstream
 changes can be tracked and evaluated for XYML.
+
+The source tree also maintains four XYML-branded forks in [`libraries/`](../libraries/README.md). They are built with
+XYML while remaining independent Java archives or native executables. Upstream project names are retained only where
+license notices, provenance records, or compatible remote runtime coordinates require them.
 
 ## Downloads and Releases
 

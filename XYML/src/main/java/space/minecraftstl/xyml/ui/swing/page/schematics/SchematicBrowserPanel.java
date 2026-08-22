@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
+import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.util.i18n.I18n;
 
 import javax.swing.BorderFactory;
@@ -51,6 +52,7 @@ import java.awt.GridLayout;
 import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -152,6 +154,9 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
     /// Owned model listener registration.
     private final Subscription modelSubscription;
 
+    /// Page-scoped filtered route for local Litematica files.
+    private final ShellFileDropHandler.RouteRegistration dropRegistration;
+
     /// Listener that updates details after a selected placeholder row finishes loading.
     private final ListDataListener listDataListener = new ListDataListener() {
         /// Reconciles a newly loaded selected row.
@@ -233,6 +238,10 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         configureComponents();
         modelSubscription = model.subscribe(this::modelChanged);
         applySnapshot(model.snapshot());
+        dropRegistration = ShellFileDropHandler.registerFiles(
+                this,
+                this::supportsDroppedSchematic,
+                this::importDroppedFiles);
     }
 
     /// Returns the immutable snapshot currently represented by the panel.
@@ -570,6 +579,29 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
             return;
         }
         startWrite(() -> model.importFiles(selectedFiles));
+    }
+
+    /// Returns whether the current writable directory accepts one dropped Litematica file.
+    ///
+    /// @param source normalized dropped path
+    /// @return whether the source is a regular `.litematic` file and the directory is writable
+    private boolean supportsDroppedSchematic(Path source) {
+        @Nullable Path fileName = Objects.requireNonNull(source, "source").getFileName();
+        return currentActionSnapshot() != null
+                && Files.isRegularFile(source)
+                && fileName != null
+                && fileName.toString().toLowerCase(Locale.ROOT).endsWith(".litematic");
+    }
+
+    /// Imports accepted dropped files when the captured directory remains current.
+    ///
+    /// @param sources immutable accepted files in transfer order
+    private void importDroppedFiles(@Unmodifiable List<Path> sources) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable SchematicBrowserSnapshot snapshot = currentActionSnapshot();
+        if (snapshot != null && !sources.isEmpty() && isActionDirectoryCurrent(snapshot.currentDirectory())) {
+            startWrite(() -> model.importFiles(sources));
+        }
     }
 
     /// Prompts for a child name and starts creation only if the modal result remains current.
@@ -994,6 +1026,7 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
             }
             resourcesClosed = true;
             @Nullable Throwable failure = null;
+            failure = attemptCleanup(failure, dropRegistration::close);
             failure = attemptCleanup(failure, modelSubscription::unsubscribe);
             failure = attemptCleanup(
                     failure,

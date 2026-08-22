@@ -152,6 +152,11 @@ public final class SwingAccountCreationDialog extends JDialog
             SwingLogFontPreferences.currentOrDefault(),
             SwingAccountCreationDialog::copyToClipboard);
 
+    /// Repeatable browser and clipboard commands for the current Microsoft authorization URL.
+    private final MicrosoftAuthorizationActions microsoftAuthorizationActions = new MicrosoftAuthorizationActions(
+            SwingAccountCreationDialog::openExternalLocation,
+            SwingAccountCreationDialog::copyToClipboard);
+
     /// Starts authentication for the current form.
     private final JButton login = new JButton(i18n("account.login"));
 
@@ -296,29 +301,38 @@ public final class SwingAccountCreationDialog extends JDialog
     public void onProgress(AccountCreationNotice notice) {
         EdtDispatcher.requireEventDispatchThread();
         Objects.requireNonNull(notice, "notice");
-        microsoftDeviceCode.clearCode();
         switch (notice.kind()) {
-            case AUTHENTICATING -> status.setText(nonBlankOr(
-                    notice.detail(),
-                    i18n("account.methods.microsoft.logging_in")));
+            case AUTHENTICATING -> {
+                // Factory stage callbacks can follow the OAuth URL, so keep its recovery commands available.
+                status.setText(nonBlankOr(
+                        notice.detail(),
+                        i18n("account.methods.microsoft.logging_in")));
+            }
             case BROWSER_AUTHORIZATION -> {
                 String location = Objects.requireNonNull(notice.location(), "authorization location");
-                status.setText("<html>" + i18n("account.methods.microsoft.methods.browser")
-                        + "<br>" + location + "</html>");
+                microsoftDeviceCode.clearCode();
+                status.setText("<html>" + i18n("account.methods.microsoft.authorization.hint") + "</html>");
+                microsoftAuthorizationActions.showLocation(location);
                 openExternalLocation(location);
             }
             case DEVICE_AUTHORIZATION -> {
                 String location = Objects.requireNonNull(notice.location(), "verification location");
                 String code = Objects.requireNonNull(notice.code(), "device code");
-                status.setText("<html>" + i18n("account.methods.microsoft.methods.device")
-                        + "<br>" + location + "</html>");
+                status.setText("<html>" + i18n("account.methods.microsoft.authorization.hint") + "</html>");
                 microsoftDeviceCode.showCode(code);
+                microsoftAuthorizationActions.showLocation(location);
                 copyToClipboard(code);
                 openExternalLocation(location);
             }
-            case AUTHORIZATION_COMPLETED -> status.setText(
-                    "<html>" + i18n("account.methods.microsoft.methods.device.hint.completed") + "</html>");
-            case WRITING_STORAGE -> status.setText(i18n("settings.file.force_write"));
+            case AUTHORIZATION_COMPLETED -> {
+                status.setText(
+                        "<html>" + i18n("account.methods.microsoft.methods.device.hint.completed") + "</html>");
+                clearMicrosoftAuthorization();
+            }
+            case WRITING_STORAGE -> {
+                status.setText(i18n("settings.file.force_write"));
+                clearMicrosoftAuthorization();
+            }
         }
     }
 
@@ -338,7 +352,7 @@ public final class SwingAccountCreationDialog extends JDialog
         operation.set(null);
         if (!closed.get()) {
             status.setText(" ");
-            microsoftDeviceCode.clearCode();
+            clearMicrosoftAuthorization();
             setBusy(false);
         }
     }
@@ -353,7 +367,7 @@ public final class SwingAccountCreationDialog extends JDialog
         LOG.warning("Native Swing account creation failed", failure);
         if (!closed.get()) {
             status.setText("<html>" + localizedMessage.replace("\n", "<br>") + "</html>");
-            microsoftDeviceCode.clearCode();
+            clearMicrosoftAuthorization();
             setBusy(false);
         }
     }
@@ -403,7 +417,7 @@ public final class SwingAccountCreationDialog extends JDialog
         JPanel root = new JPanel(new MigLayout(
                 "insets 20, fill",
                 "[grow,fill]",
-                "[][grow,fill][][][pref!]"));
+                "[grow,fill][][][][][pref!]"));
         SwingTransparency.revealBackgroundThroughTabs(methodTabs);
         for (AccountCreationMethod method : displayedMethods) {
             methodTabs.addTab(methodTitle(method), switch (method) {
@@ -425,19 +439,34 @@ public final class SwingAccountCreationDialog extends JDialog
 
         status.setVerticalAlignment(SwingConstants.TOP);
         status.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
-        root.add(status, "growx, wrap");
-        root.add(microsoftDeviceCode, "alignx center, wrap");
+        root.add(status, "growx, wmin 0, wrap");
+        root.add(microsoftDeviceCode, "alignx center, wmin 0, wrap");
+        root.add(microsoftAuthorizationActions, "growx, wmin 0, wrap");
 
-        JPanel actions = new JPanel(new MigLayout("insets 0", "[grow][]8[]", "[]"));
-        actions.add(new JLabel(), "growx");
         login.addActionListener(event -> startFromForm());
         cancel.addActionListener(event -> cancelOrClose());
-        actions.add(login);
-        actions.add(cancel);
-        root.add(actions, "growx");
+        root.add(createDialogActions(login, cancel), "growx, wmin 0");
         setContentPane(root);
         pack();
         setLocationRelativeTo(getOwner());
+    }
+
+    /// Creates the fixed footer that keeps primary actions at the bottom-right edge.
+    ///
+    /// This package-visible helper keeps the non-window layout testable in headless builds.
+    ///
+    /// @param login login command
+    /// @param cancel cancellation command
+    /// @return transparent footer with a shrinkable leading spacer
+    static JPanel createDialogActions(JButton login, JButton cancel) {
+        JButton validatedLogin = Objects.requireNonNull(login, "login");
+        JButton validatedCancel = Objects.requireNonNull(cancel, "cancel");
+        JPanel actions = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill][]8[]", "[]"));
+        actions.setOpaque(false);
+        actions.add(new JLabel(), "growx, wmin 0");
+        actions.add(validatedLogin);
+        actions.add(validatedCancel);
+        return actions;
     }
 
     /// Creates offline username and optional UUID fields.
@@ -580,6 +609,7 @@ public final class SwingAccountCreationDialog extends JDialog
         try {
             AccountCreationRequest request = requestFromForm();
             status.setText(" ");
+            clearMicrosoftAuthorization();
             setBusy(true);
             AccountCreationOperation started = coordinator.start(request, this);
             if (!operation.compareAndSet(null, started)) {
@@ -911,15 +941,21 @@ public final class SwingAccountCreationDialog extends JDialog
         }
     }
 
-    /// Copies a Microsoft device code to the platform clipboard when available.
+    /// Copies Microsoft authorization text to the platform clipboard when available.
     ///
-    /// @param text device code
+    /// @param text device code or authorization URL
     private static void copyToClipboard(String text) {
         try {
             Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null);
         } catch (IllegalStateException | java.awt.HeadlessException | SecurityException failure) {
-            LOG.warning("Failed to copy Microsoft device code", failure);
+            LOG.warning("Failed to copy Microsoft authorization text", failure);
         }
+    }
+
+    /// Clears temporary Microsoft authorization data after the flow reaches a terminal or reset state.
+    private void clearMicrosoftAuthorization() {
+        microsoftDeviceCode.clearCode();
+        microsoftAuthorizationActions.clearLocation();
     }
 
     /// Returns non-blank detail text or a localized fallback.

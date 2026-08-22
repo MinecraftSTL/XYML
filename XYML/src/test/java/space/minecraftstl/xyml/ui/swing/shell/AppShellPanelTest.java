@@ -19,11 +19,13 @@ package space.minecraftstl.xyml.ui.swing.shell;
 
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.extras.FlatSVGIcon;
+import com.formdev.flatlaf.util.UIScale;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -50,6 +52,7 @@ import space.minecraftstl.xyml.ui.swing.page.home.HomeModel;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeSnapshot;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstanceListItem;
+import space.minecraftstl.xyml.ui.swing.page.instances.InstanceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstanceSearchEntry;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesModel;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesSnapshot;
@@ -64,15 +67,22 @@ import javax.imageio.ImageIO;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextField;
+import javax.swing.TransferHandler;
+import javax.swing.UIManager;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -111,6 +121,10 @@ public final class AppShellPanelTest {
 
     /// Fixed screenshot height matching the shell's preferred height.
     private static final int RENDER_HEIGHT = AppShellPanel.PREFERRED_HEIGHT;
+
+    /// Temporary local files used by native drop-routing tests.
+    @TempDir
+    private Path temporaryDirectory;
 
     /// Sidebar preloading starts only after the main page is ready and follows physical navigation order.
     ///
@@ -359,6 +373,20 @@ public final class AppShellPanelTest {
                         () -> assertEquals(
                                 toolbar.launchButton().getPreferredSize().width,
                                 toolbar.launchButton().getWidth()),
+                        () -> assertEquals(
+                                UIScale.scale(ShellToolbarPanel.LAUNCH_WINDOW_CONTROLS_GAP),
+                                toolbar.winWindowButtonsPlaceholder().getX()
+                                        - rightEdge(toolbar.launchButton())),
+                        () -> assertEquals(36, toolbar.launchButton().getHeight()),
+                        () -> assertEquals(
+                                toolbar.gameDirectorySelector().getHeight(),
+                                toolbar.launchButton().getHeight()),
+                        () -> assertEquals(
+                                toolbar.accountSelector().getHeight(),
+                                toolbar.launchButton().getHeight()),
+                        () -> assertEquals(
+                                toolbar.instanceSelector().getHeight(),
+                                toolbar.launchButton().getHeight()),
                         () -> assertTrue(toolbar.instanceSelector().getX() > toolbar.getWidth() / 2),
                         () -> assertTrue(toolbar.brandLabel().getX() >= 12),
                         () -> assertEquals(Boolean.TRUE, toolbar.getClientProperty(
@@ -373,8 +401,19 @@ public final class AppShellPanelTest {
                         () -> assertEquals(
                                 AccountListCellRenderer.ROW_HEIGHT
                                         + LazyAccountSelector.ADD_HEADER_HEIGHT
-                                        + LazyAccountSelector.MANAGEMENT_FOOTER_HEIGHT,
+                                        + LazyAccountSelector.MANAGEMENT_FOOTER_HEIGHT
+                                        + 2,
                                 toolbar.accountSelector().preparePopupSize().height),
+                        () -> assertEquals(
+                                LazyGameDirectorySelector.ROW_HEIGHT
+                                        + LazyGameDirectorySelector.COMMAND_HEIGHT
+                                        + 2,
+                                toolbar.gameDirectorySelector().preparePopupSize().height),
+                        () -> assertEquals(
+                                LazyInstanceSelector.COMMAND_HEIGHT * 2
+                                        + InstanceListCellRenderer.ROW_HEIGHT
+                                        + 2,
+                                toolbar.instanceSelector().preparePopupSize().height),
                         () -> assertEquals("XYML", toolbar.brandLabel().getText()),
                         () -> assertNotNull(toolbar.brandLabel().getIcon()),
                         () -> assertEquals(testHomeStrings().launchAction(),
@@ -406,11 +445,35 @@ public final class AppShellPanelTest {
                         () -> assertEquals(testHomeStrings().addInstanceAction(),
                                 toolbar.instanceSelector().addButton().getText()),
                         () -> assertEquals(
+                                space.minecraftstl.xyml.util.i18n.I18n.i18n(
+                                        "swing.shell.instance_add_detail"),
+                                toolbar.instanceSelector().addButton().detailText()),
+                        () -> assertEquals(
                                 space.minecraftstl.xyml.util.i18n.I18n.i18n("account.create"),
                                 toolbar.accountSelector().addButton().getText()),
                         () -> assertEquals(
                                 space.minecraftstl.xyml.util.i18n.I18n.i18n("game_directory.manage"),
                                 toolbar.gameDirectorySelector().manageButton().getText()),
+                        () -> assertEquals(
+                                space.minecraftstl.xyml.util.i18n.I18n.i18n(
+                                        "swing.shell.directory_manage_detail"),
+                                toolbar.gameDirectorySelector().manageButton().detailText()),
+                        () -> assertEquals(
+                                toolbar.accountSelector().addButton().getPreferredSize().height,
+                                toolbar.gameDirectorySelector().manageButton().getPreferredSize().height),
+                        () -> assertEquals(
+                                toolbar.accountSelector().addButton().getPreferredSize().height,
+                                toolbar.instanceSelector().addButton().getPreferredSize().height),
+                        () -> assertEquals(
+                                AccountListCellRenderer.ROW_HEIGHT,
+                                toolbar.gameDirectorySelector().directoryList().getFixedCellHeight()),
+                        () -> assertEquals(
+                                AccountListCellRenderer.ROW_HEIGHT,
+                                InstanceListCellRenderer.ROW_HEIGHT),
+                        () -> assertEquals(
+                                AccountListCellRenderer.ROW_HEIGHT,
+                                PopupCommandButton.HEIGHT),
+                        () -> assertDirectoryRendererShowsPath(toolbar.gameDirectorySelector()),
                         () -> assertEquals(
                                 2,
                                 toolbar.gameDirectorySelector().manageButton().getParent().getComponentCount()),
@@ -503,11 +566,116 @@ public final class AppShellPanelTest {
                         () -> assertEquals(
                                 AccountListCellRenderer.ROW_HEIGHT
                                         + LazyAccountSelector.ADD_HEADER_HEIGHT
-                                        + LazyAccountSelector.MANAGEMENT_FOOTER_HEIGHT,
+                                        + LazyAccountSelector.MANAGEMENT_FOOTER_HEIGHT
+                                        + 2,
                                 popupSize.height));
                 selector.manageButton().doClick();
                 assertEquals(ShellPageId.ACCOUNTS, panel.selectedPage());
             });
+        } finally {
+            panel.close();
+        }
+    }
+
+    /// Modpack drops are accepted only on the default instance-management workspace or downloads.
+    @Test
+    public void limitsModpackDropsToDefaultWorkspaceAndDownloads() {
+        AppShellPanel panel = createPanel(creationCounts());
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+                assertTrue(handler.canImport(fileTransfer(panel, new File("example.mrpack"))));
+
+                panel.navigateTo(ShellPageId.INSTANCES);
+                assertFalse(handler.canImport(fileTransfer(panel, new File("example.zip"))));
+
+                panel.navigateTo(ShellPageId.ACCOUNTS);
+                assertFalse(handler.canImport(fileTransfer(panel, new File("example.zip"))));
+
+                panel.navigateTo(ShellPageId.DOWNLOADS);
+                assertTrue(handler.canImport(fileTransfer(panel, new File("example.zip"))));
+
+                panel.navigateTo(ShellPageId.SETTINGS);
+                assertFalse(handler.canImport(fileTransfer(panel, new File("example.mrpack"))));
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
+    /// A dropped modpack closes every side page before opening its installer after the native drop callback.
+    ///
+    /// @throws IOException when the temporary archive fixture cannot be created
+    @Test
+    public void droppedModpackReturnsToDefaultWorkspaceAndDefersInstallerWindow() throws IOException {
+        Path archive = Files.createFile(temporaryDirectory.resolve("example.mrpack"));
+        AtomicReference<@Nullable Component> installerOwner = new AtomicReference<>();
+        AtomicReference<@Nullable Path> installerArchive = new AtomicReference<>();
+        AppShellPanel panel = createPanelWithModpackLauncher(
+                pageFactories(creationCounts()),
+                (owner, droppedArchive) -> {
+                    installerOwner.set(owner);
+                    installerArchive.set(droppedArchive);
+                });
+
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                panel.navigateTo(ShellPageId.DOWNLOADS);
+                TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+
+                assertTrue(handler.importData(fileTransfer(panel, archive.toFile())));
+                assertNull(panel.selectedPage());
+                assertNull(installerArchive.get());
+            });
+            EdtDispatcher.executeAndWait(() -> { });
+
+            assertAll(
+                    () -> assertSame(panel, installerOwner.get()),
+                    () -> assertEquals(archive.toAbsolutePath().normalize(), installerArchive.get()),
+                    () -> assertNull(panel.selectedPage()));
+        } finally {
+            panel.close();
+        }
+    }
+
+    /// Authlib-injector server text is accepted on every top-level shell page.
+    @Test
+    public void acceptsAuthlibServerDropOnEveryPage() {
+        String payload = "authlib-injector:yggdrasil-server:https%3A%2F%2Fexample.com%2Fapi";
+        AppShellPanel panel = createPanel(creationCounts());
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+                for (ShellPageId page : ShellPageId.values()) {
+                    panel.navigateTo(page);
+                    assertTrue(
+                            handler.canImport(textTransfer(panel, payload)),
+                            page.toString());
+                }
+                assertFalse(handler.canImport(textTransfer(panel, "https://example.com/ordinary-page")));
+            });
+        } finally {
+            panel.close();
+        }
+    }
+
+    /// Authlib server dialogs are not entered until the native drop callback has returned to Windows.
+    @Test
+    public void defersAuthlibWorkflowUntilAfterNativeDropCallback() {
+        String payload = "authlib-injector:yggdrasil-server:https%3A%2F%2Fexample.com%2Fapi";
+        EnumMap<ShellPageId, AtomicInteger> creationCounts = creationCounts();
+        AppShellPanel panel = createPanel(creationCounts);
+        try {
+            EdtDispatcher.executeAndWait(() -> {
+                TransferHandler handler = Objects.requireNonNull(panel.getTransferHandler());
+                assertTrue(handler.importData(textTransfer(panel, payload)));
+                assertFalse(panel.isPageCached(ShellPageId.ACCOUNTS));
+            });
+            EdtDispatcher.executeAndWait(() -> { });
+
+            assertAll(
+                    () -> assertTrue(panel.isPageCached(ShellPageId.ACCOUNTS)),
+                    () -> assertEquals(1, creationCounts.get(ShellPageId.ACCOUNTS).get()));
         } finally {
             panel.close();
         }
@@ -725,6 +893,43 @@ public final class AppShellPanelTest {
         return Objects.requireNonNull(result.get());
     }
 
+    /// Creates a shell with an injected dropped-modpack window boundary.
+    ///
+    /// @param factories complete page factories
+    /// @param droppedModpackInstallLauncher injected installer-window recorder
+    /// @return initialized shell panel
+    private static AppShellPanel createPanelWithModpackLauncher(
+            Map<ShellPageId, ? extends ShellPageFactory<? extends JComponent>> factories,
+            AppShellPanel.DroppedModpackInstallLauncher droppedModpackInstallLauncher) {
+        AtomicReference<@Nullable AppShellPanel> result = new AtomicReference<>();
+        EdtDispatcher.executeAndWait(() -> {
+            SwingThemeManager themeManager = new SwingThemeManager(
+                    ThemeBrightnessPreference.LIGHT,
+                    new SwingDesignTokens(8),
+                    SystemThemeDetector.lightFallback());
+            themeManager.initialize();
+            result.set(new AppShellPanel(
+                    "XYML",
+                    factories,
+                    ShellPagePresentations.englishFallback(),
+                    new ShellToolbarModels(
+                            new TestHomeModel(),
+                            testInstancesModel(),
+                            testAccountsModel(),
+                            testGameDirectories(),
+                            ShellRecentSelections.transientSelections()),
+                    testHomeStrings(),
+                    TaskProgressStrings.english(),
+                    new SwingAnimator(MotionPolicy.OFF, 16),
+                    Duration.ZERO,
+                    Duration.ZERO,
+                    Objects.requireNonNull(
+                            droppedModpackInstallLauncher,
+                            "droppedModpackInstallLauncher")));
+        });
+        return Objects.requireNonNull(result.get());
+    }
+
     /// Creates one factory counter for every destination.
     ///
     /// @return complete zero-valued counters
@@ -734,6 +939,94 @@ public final class AppShellPanelTest {
             counts.put(page, new AtomicInteger());
         }
         return counts;
+    }
+
+    /// Creates one local-file transfer wrapper for shell route assertions.
+    ///
+    /// @param component transfer target
+    /// @param file local file payload
+    /// @return transfer support exposing the Java file-list flavor
+    private static TransferHandler.TransferSupport fileTransfer(JComponent component, File file) {
+        return new TransferHandler.TransferSupport(component, new FileTransferable(file));
+    }
+
+    /// Creates one text transfer wrapper for global shell route assertions.
+    ///
+    /// @param component transfer target
+    /// @param text transferred text
+    /// @return transfer support exposing the string flavor
+    private static TransferHandler.TransferSupport textTransfer(JComponent component, String text) {
+        return new TransferHandler.TransferSupport(component, new StringTransferable(text));
+    }
+
+    /// Immutable one-file transferable used by shell routing tests.
+    @NotNullByDefault
+    private static final class FileTransferable implements Transferable {
+        /// Local file payload.
+        private final File file;
+
+        /// Creates one local-file payload.
+        ///
+        /// @param file local file
+        private FileTransferable(File file) {
+            this.file = Objects.requireNonNull(file, "file");
+        }
+
+        /// Returns the single supported transfer flavor.
+        @Override
+        public DataFlavor @Unmodifiable [] getTransferDataFlavors() {
+            return new DataFlavor[]{DataFlavor.javaFileListFlavor};
+        }
+
+        /// Reports whether the requested flavor is the Java file-list flavor.
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor flavor) {
+            return DataFlavor.javaFileListFlavor.equals(flavor);
+        }
+
+        /// Returns an immutable one-file list.
+        @Override
+        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+            if (!isDataFlavorSupported(flavor)) {
+                throw new UnsupportedFlavorException(flavor);
+            }
+            return List.of(file);
+        }
+    }
+
+    /// Immutable string transferable used by global shell route tests.
+    @NotNullByDefault
+    private static final class StringTransferable implements Transferable {
+        /// Transferred string.
+        private final String text;
+
+        /// Creates one string payload.
+        ///
+        /// @param text transferred string
+        private StringTransferable(String text) {
+            this.text = Objects.requireNonNull(text, "text");
+        }
+
+        /// Returns the supported string flavor.
+        @Override
+        public DataFlavor @Unmodifiable [] getTransferDataFlavors() {
+            return new DataFlavor[]{DataFlavor.stringFlavor};
+        }
+
+        /// Reports whether the requested flavor is supported.
+        @Override
+        public boolean isDataFlavorSupported(DataFlavor flavor) {
+            return DataFlavor.stringFlavor.equals(flavor);
+        }
+
+        /// Returns the transferred text.
+        @Override
+        public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+            if (!isDataFlavorSupported(flavor)) {
+                throw new UnsupportedFlavorException(flavor);
+            }
+            return text;
+        }
     }
 
     /// Creates complete lazy sample-page factories for shell and frame tests.
@@ -861,6 +1154,105 @@ public final class AppShellPanelTest {
     /// @return platform placeholder policy string
     private static Object placeholderPolicy(JComponent placeholder) {
         return placeholder.getClientProperty(FlatClientProperties.FULL_WINDOW_CONTENT_BUTTONS_PLACEHOLDER);
+    }
+
+    /// Verifies the directory selector renderer exposes a large icon and path detail in stable row geometry.
+    ///
+    /// @param selector configured one-entry directory selector
+    private static void assertDirectoryRendererShowsPath(LazyGameDirectorySelector selector) {
+        JList<GameDirectoryManagementEntry> list = selector.directoryList();
+        GameDirectoryManagementEntry entry = Objects.requireNonNull(list.getModel().getElementAt(0));
+        Component rendererComponent = list.getCellRenderer().getListCellRendererComponent(
+                list,
+                entry,
+                0,
+                false,
+                false);
+        assertInstanceOf(Container.class, rendererComponent);
+        JLabel icon = findNamedLabel((Container) rendererComponent, "gameDirectoryListIcon");
+        JLabel path = findNamedLabel((Container) rendererComponent, "gameDirectoryListPath");
+        assertAll(
+                () -> assertEquals(LazyGameDirectorySelector.ROW_HEIGHT,
+                        rendererComponent.getPreferredSize().height),
+                () -> assertNotNull(icon.getIcon()),
+                () -> assertEquals(40, Objects.requireNonNull(icon.getIcon()).getIconWidth()),
+                () -> assertEquals(40, Objects.requireNonNull(icon.getIcon()).getIconHeight()),
+                () -> assertEquals(entry.path().getPath(), path.getText()),
+                () -> assertEquals(UIManager.getColor("Label.disabledForeground"), path.getForeground()));
+
+        JComponent focusedComponent = (JComponent) list.getCellRenderer().getListCellRendererComponent(
+                list,
+                entry,
+                0,
+                true,
+                true);
+        focusedComponent.setSize(320, LazyGameDirectorySelector.ROW_HEIGHT);
+        layoutTree(focusedComponent);
+        BufferedImage focusedImage = renderComponent(focusedComponent);
+        assertAll(
+                () -> assertEquals(0, focusedImage.getRGB(0, 0) >>> 24),
+                () -> assertEquals(0, focusedImage.getRGB(focusedImage.getWidth() - 1, 0) >>> 24),
+                () -> assertEquals(
+                        Objects.requireNonNull(UIManager.getColor("List.cellFocusColor")).getRGB(),
+                        focusedImage.getRGB(0, focusedImage.getHeight() / 2)));
+    }
+
+    /// Paints one fixed-size component into a transparent image.
+    ///
+    /// @param component configured component
+    /// @return rendered pixels
+    private static BufferedImage renderComponent(JComponent component) {
+        BufferedImage image = new BufferedImage(
+                component.getWidth(),
+                component.getHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            component.paint(graphics);
+        } finally {
+            graphics.dispose();
+        }
+        return image;
+    }
+
+    /// Returns one deterministically named label from a renderer hierarchy.
+    ///
+    /// @param root renderer root
+    /// @param name stable component name
+    /// @return matching label
+    private static JLabel findNamedLabel(Container root, String name) {
+        for (Component child : root.getComponents()) {
+            if (child instanceof JLabel label && name.equals(label.getName())) {
+                return label;
+            }
+            if (child instanceof Container nested) {
+                @Nullable JLabel match = findNamedLabelOrNull(nested, name);
+                if (match != null) {
+                    return match;
+                }
+            }
+        }
+        throw new AssertionError("Missing label: " + name);
+    }
+
+    /// Returns one nested named label, or `null` when this subtree does not contain it.
+    ///
+    /// @param root subtree root
+    /// @param name stable component name
+    /// @return matching label or `null`
+    private static @Nullable JLabel findNamedLabelOrNull(Container root, String name) {
+        for (Component child : root.getComponents()) {
+            if (child instanceof JLabel label && name.equals(label.getName())) {
+                return label;
+            }
+            if (child instanceof Container nested) {
+                @Nullable JLabel match = findNamedLabelOrNull(nested, name);
+                if (match != null) {
+                    return match;
+                }
+            }
+        }
+        return null;
     }
 
     /// Recursively lays out a non-displayable Swing tree after assigning its fixed test size.

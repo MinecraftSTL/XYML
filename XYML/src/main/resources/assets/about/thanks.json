@@ -42,27 +42,10 @@
     "externalLink" : "https://github.com/ShulkerSakura"
   },
   {
-    "image" : "/assets/img/gamerteam.png",
-    "title" : "gamerteam",
-    "subtitleLocalized" : "about.thanks_to.gamerteam.statement",
-    "externalLink" : "https://github.com/ZhaiSoul"
-  },
-  {
-    "image" : "/assets/img/red_lnn.png",
-    "title" : "Red_lnn",
-    "subtitleLocalized" : "about.thanks_to.red_lnn.statement",
-    "externalLink" : "https://redlnn.top"
-  },
-  {
     "image" : "/assets/img/mcmod.png",
     "titleLocalized" : "about.thanks_to.mcmod",
     "subtitleLocalized" : "about.thanks_to.mcmod.statement",
     "externalLink" : "https://www.mcmod.cn"
-  },
-  {
-    "image" : "/assets/img/chest.png",
-    "titleLocalized" : "about.thanks_to.mcbbs",
-    "subtitleLocalized" : "about.thanks_to.mcbbs.statement"
   },
   {
     "image" : "/assets/img/mcim.png",
@@ -83,6 +66,15 @@
     },
     "titleLocalized" : "about.thanks_to.contributors",
     "subtitleLocalized" : "about.thanks_to.contributors.statement",
+    "externalLink" : "https://github.com/MinecraftSTL/XYML/graphs/contributors"
+  },
+  {
+    "image" : {
+      "light" : "/assets/img/github.png",
+      "dark" : "/assets/img/github-white.png"
+    },
+    "titleLocalized" : "about.thanks_to.upstream_contributors",
+    "subtitleLocalized" : "about.thanks_to.upstream_contributors.statement",
     "externalLink" : "https://github.com/HMCL-dev/HMCL/graphs/contributors"
   },
   {
