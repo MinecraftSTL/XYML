@@ -45,7 +45,7 @@ import java.util.zip.GZIPOutputStream;
 /// Loads and saves NBT documents exclusively on a caller-owned background executor.
 ///
 /// Save writes a same-directory temporary file, closes and forces it, parses it back, compares the
-/// semantic HelloNBT tree, rechecks the original fingerprint, and finally requires an atomic
+/// semantic XoyzNBT tree, rechecks the original fingerprint, and finally requires an atomic
 /// replacement. There is deliberately no non-atomic fallback. Region files that require external
 /// `.mcc` chunks fail while staging because multiple files cannot be published as one portable
 /// atomic transaction; the original region remains untouched.
@@ -58,7 +58,7 @@ public final class NBTDocumentService {
     /// Executor that owns all blocking NBT and filesystem operations.
     private final Executor ioExecutor;
 
-    /// Immutable thread-safe HelloNBT codec.
+    /// Immutable thread-safe XoyzNBT codec.
     private final NBTCodec codec;
 
     /// Creates a service whose operations are dispatched to the supplied executor.
@@ -89,7 +89,7 @@ public final class NBTDocumentService {
         }, ioExecutor);
     }
 
-    /// Safely persists the current HelloNBT root on the background executor.
+    /// Safely persists the current XoyzNBT root on the background executor.
     ///
     /// The operation preserves RAW, GZIP, or LZ4 envelopes for standalone tags. It rejects a stale
     /// source and never falls back when the filesystem cannot atomically replace the target.
@@ -167,7 +167,7 @@ public final class NBTDocumentService {
         }
     }
 
-    /// Parses one source using the HelloNBT operation proven for its file family.
+    /// Parses one source using the XoyzNBT operation proven for its file family.
     ///
     /// @param file source path
     /// @param fileType expected family
@@ -242,7 +242,7 @@ public final class NBTDocumentService {
     /// @param fileType destination family
     /// @param encoding preserved storage envelope
     /// @param element detached root snapshot
-    /// @throws IOException when the root type is incompatible or HelloNBT serialization fails
+    /// @throws IOException when the root type is incompatible or XoyzNBT serialization fails
     private void writeElement(
             Path target,
             NBTFileType fileType,
@@ -276,7 +276,7 @@ public final class NBTDocumentService {
     /// @param target temporary target path
     /// @param encoding RAW, GZIP, or LZ4 envelope
     /// @param tag detached tag root
-    /// @throws IOException when compression or HelloNBT serialization fails
+    /// @throws IOException when compression or XoyzNBT serialization fails
     private void writeTag(Path target, NBTStorageEncoding encoding, Tag tag) throws IOException {
         try (OutputStream rawOutput = new BufferedOutputStream(Files.newOutputStream(
                 target,

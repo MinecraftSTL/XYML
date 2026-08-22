@@ -37,11 +37,11 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
 /// Constructing a node reads only stable presentation metadata and the direct child count. In
 /// particular, a region root does not call `ChunkRegion.stream`, so asking for its size does not
 /// allocate all 1024 chunk objects. `childAt` creates and caches only the requested child node.
-/// The node is a structural view of the HelloNBT state at construction time; callers should obtain
+/// The node is a structural view of the XoyzNBT state at construction time; callers should obtain
 /// a fresh root node from `NBTDocument` after changing the underlying document.
 @NotNullByDefault
 public final class NBTTreeNode {
-    /// HelloNBT element retained solely to resolve requested direct children.
+    /// XoyzNBT element retained solely to resolve requested direct children.
     private final NBTElement element;
 
     /// Stable display name captured when this node was constructed.
@@ -61,7 +61,7 @@ public final class NBTTreeNode {
 
     /// Creates a root node with a caller-supplied filename or contextual name.
     ///
-    /// @param element root HelloNBT element
+    /// @param element root XoyzNBT element
     /// @param displayName non-null root display name
     NBTTreeNode(NBTElement element, String displayName) {
         this(element, Objects.requireNonNull(displayName, "displayName"), true);
@@ -98,7 +98,7 @@ public final class NBTTreeNode {
         return type;
     }
 
-    /// Returns the scalar value text reported by HelloNBT.
+    /// Returns the scalar value text reported by XoyzNBT.
     ///
     /// @return scalar text, or `null` for parent and container nodes
     public @Nullable String scalarValue() {
@@ -160,7 +160,7 @@ public final class NBTTreeNode {
         return count;
     }
 
-    /// Computes a regular child name from HelloNBT parent and coordinate metadata.
+    /// Computes a regular child name from XoyzNBT parent and coordinate metadata.
     ///
     /// @param element child source element
     /// @return non-null display name
@@ -191,7 +191,7 @@ public final class NBTTreeNode {
         return 0;
     }
 
-    /// Resolves one direct HelloNBT child without enumerating its siblings.
+    /// Resolves one direct XoyzNBT child without enumerating its siblings.
     ///
     /// @param index validated direct-child index
     /// @return requested child element

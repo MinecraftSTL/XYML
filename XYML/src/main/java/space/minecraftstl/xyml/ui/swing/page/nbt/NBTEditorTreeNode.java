@@ -33,7 +33,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
-/// Swing tree node that pairs lazy presentation metadata with the exact mutable HelloNBT element.
+/// Swing tree node that pairs lazy presentation metadata with the exact mutable XoyzNBT element.
 @NotNullByDefault
 public final class NBTEditorTreeNode {
     /// Document whose mutable root owns this element.
@@ -42,7 +42,7 @@ public final class NBTEditorTreeNode {
     /// Toolkit-neutral presentation node supplied by the NBT backend.
     private final NBTTreeNode presentation;
 
-    /// Exact HelloNBT element edited when this row is selected.
+    /// Exact XoyzNBT element edited when this row is selected.
     private final NBTElement element;
 
     /// Immutable child-index address from the document root.
@@ -163,7 +163,7 @@ public final class NBTEditorTreeNode {
 
     /// Returns the exact mutable element for controller-owned edits.
     ///
-    /// @return mutable HelloNBT element
+    /// @return mutable XoyzNBT element
     NBTElement element() {
         return element;
     }

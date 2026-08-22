@@ -28,7 +28,7 @@ public enum NBTStorageEncoding {
     /// A standalone NBT tag wrapped in a GZIP stream.
     GZIP,
 
-    /// A standalone NBT tag wrapped in the LZ4 block-stream format used by HelloNBT.
+    /// A standalone NBT tag wrapped in the LZ4 block-stream format used by XoyzNBT.
     LZ4,
 
     /// A Minecraft chunk-region container with per-chunk compression.

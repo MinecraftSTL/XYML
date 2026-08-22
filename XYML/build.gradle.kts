@@ -23,11 +23,11 @@ plugins {
 }
 
 tasks.named("build") {
-    dependsOn(":hello-nbt:build", ":lwjgl-unsafe-agent:build", ":mesa-loader-windows:build", ":XYMLL:build")
+    dependsOn(":xoyz-nbt:build", ":lwjgl-unsafe-agent:build", ":mesa-loader-windows:build", ":XYMLL:build")
 }
 
 tasks.named("check") {
-    dependsOn(":hello-nbt:check", ":lwjgl-unsafe-agent:check", ":mesa-loader-windows:check", ":XYMLL:check")
+    dependsOn(":xoyz-nbt:check", ":lwjgl-unsafe-agent:check", ":mesa-loader-windows:check", ":XYMLL:check")
 }
 
 base {

@@ -69,10 +69,10 @@ public enum NBTNodeType {
     /// A 32 by 32 chunk region.
     CHUNK_REGION,
 
-    /// A future HelloNBT element type unknown to this launcher version.
+    /// A future XoyzNBT element type unknown to this launcher version.
     UNKNOWN;
 
-    /// Maps a concrete HelloNBT element to its stable presentation category.
+    /// Maps a concrete XoyzNBT element to its stable presentation category.
     ///
     /// @param element source element
     /// @return corresponding node category
