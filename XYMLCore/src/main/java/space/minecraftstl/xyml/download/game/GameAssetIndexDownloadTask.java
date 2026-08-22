@@ -18,13 +18,14 @@
 package space.minecraftstl.xyml.download.game;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.AbstractDependencyManager;
 import space.minecraftstl.xyml.game.AssetIndex;
 import space.minecraftstl.xyml.game.AssetIndexInfo;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
-import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
@@ -37,11 +38,8 @@ import java.util.List;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * This task is to download asset index file provided in minecraft.json.
- *
- * @author huangyuhui
- */
+/// Downloads and validates the asset index referenced by one game manifest.
+@NotNullByDefault
 public final class GameAssetIndexDownloadTask extends Task<Void> {
 
     private final AbstractDependencyManager dependencyManager;
@@ -49,17 +47,23 @@ public final class GameAssetIndexDownloadTask extends Task<Void> {
     private final boolean forceDownloading;
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager that can provides {@link GameRepository}
-     * @param manifest the <b>resolved</b> version
-     */
-    public GameAssetIndexDownloadTask(AbstractDependencyManager dependencyManager, GameInstanceManifest manifest, boolean forceDownloading) {
+    /// Creates a game-directory-scoped asset-index download task.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param manifest resolved game manifest
+    /// @param forceDownloading whether an existing valid index should still be replaced
+    public GameAssetIndexDownloadTask(
+            AbstractDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            boolean forceDownloading) {
         this.dependencyManager = dependencyManager;
         this.manifest = manifest;
         this.forceDownloading = forceDownloading;
         setSignificance(TaskSignificance.MODERATE);
+        AssetIndexInfo assetIndexInfo = manifest.getAssetIndex();
+        setResources(TaskResource.gameDirectory(dependencyManager.getGameRepository().getAssetDirectory(
+                manifest.id(),
+                assetIndexInfo.getId())));
     }
 
     @Override

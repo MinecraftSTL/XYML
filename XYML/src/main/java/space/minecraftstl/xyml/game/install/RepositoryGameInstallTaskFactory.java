@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -83,7 +84,8 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         Objects.requireNonNull(request, "request");
         return Task.composeAsync(() -> createDeferredInstallTask(
                 request,
-                unwrapProvider(downloadProvider)));
+                unwrapProvider(downloadProvider)))
+                .setResources(TaskResource.gameDirectory(repository.getBaseDirectory()));
     }
 
     /// Performs destination validation and side-effectful task construction only after execution starts.

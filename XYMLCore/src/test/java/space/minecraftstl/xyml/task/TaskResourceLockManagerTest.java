@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.net.URI;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
@@ -55,6 +56,16 @@ public final class TaskResourceLockManagerTest {
         TaskResource target = TaskResource.downloadTarget(temporaryDirectory.resolve("downloads/../game.jar"));
         assertSame(task, task.setResources(target));
         assertEquals(Set.of(target), task.getResources());
+    }
+
+    /// Verifies every file download declares its normalized exact destination without starting network work.
+    @Test
+    public void fileDownloadDeclaresExactTargetResource() {
+        Path targetPath = temporaryDirectory.resolve("downloads/../game.jar");
+        FileDownloadTask task = new FileDownloadTask(URI.create("https://example.invalid/game.jar"), targetPath);
+
+        assertEquals(Set.of(TaskResource.downloadTarget(targetPath)), task.getResources());
+        assertEquals(targetPath, task.getPath());
     }
 
     /// Verifies normalized directory coverage removes redundant child resources and yields a stable order.

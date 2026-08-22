@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.io.FileUtils;
 
 import java.io.IOException;
@@ -77,6 +78,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
         return new DefaultGameBuilder(this);
     }
 
+    /// {@inheritDoc}
     @Override
     public Task<?> checkGameCompletionAsync(GameInstanceManifest manifest, boolean integrityCheck) {
         return Task.allOf(
@@ -90,7 +92,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                 new GameAssetDownloadTask(this, manifest, GameAssetDownloadTask.DOWNLOAD_INDEX_IF_NECESSARY, integrityCheck)
                         .setSignificance(Task.TaskSignificance.MODERATE),
                 new GameLibrariesTask(this, manifest, integrityCheck)
-        );
+        ).setResources(TaskResource.gameDirectory(repository.getBaseDirectory()));
     }
 
     @Override
@@ -98,6 +100,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
         return new GameLibrariesTask(this, manifest, integrityCheck, manifest.getLibraries());
     }
 
+    /// {@inheritDoc}
     @Override
     public Task<?> checkPatchCompletionAsync(GameInstanceManifest manifest, boolean integrityCheck) {
         return Task.composeAsync(() -> {
@@ -143,7 +146,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
             }
 
             return Task.allOf(tasks);
-        });
+        }).setResources(TaskResource.gameDirectory(repository.getBaseDirectory()));
     }
 
     @Override

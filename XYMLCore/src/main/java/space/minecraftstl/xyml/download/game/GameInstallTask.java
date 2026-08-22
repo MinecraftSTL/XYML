@@ -17,11 +17,13 @@
  */
 package space.minecraftstl.xyml.download.game;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 
 import java.util.ArrayList;
@@ -31,6 +33,8 @@ import java.util.List;
 
 import static space.minecraftstl.xyml.download.LibraryAnalyzer.LibraryType.MINECRAFT;
 
+/// Installs a base game and its shared assets and libraries into one game repository.
+@NotNullByDefault
 public class GameInstallTask extends Task<GameInstancePatch> {
 
     private final DefaultGameRepository gameRepository;
@@ -40,12 +44,21 @@ public class GameInstallTask extends Task<GameInstancePatch> {
     private final GameInstanceJsonDownloadTask downloadTask;
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    public GameInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, GameRemoteVersion remoteVersion) {
+    /// Creates a repository-scoped base-game installation task.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param manifest destination instance manifest
+    /// @param remoteVersion selected remote base-game version
+    public GameInstallTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            GameRemoteVersion remoteVersion) {
         this.dependencyManager = dependencyManager;
         this.gameRepository = dependencyManager.getGameRepository();
         this.manifest = manifest;
         this.remote = remoteVersion;
         this.downloadTask = new GameInstanceJsonDownloadTask(remoteVersion.getGameVersion(), dependencyManager);
+        setResources(TaskResource.gameDirectory(gameRepository.getBaseDirectory()));
     }
 
     @Override
