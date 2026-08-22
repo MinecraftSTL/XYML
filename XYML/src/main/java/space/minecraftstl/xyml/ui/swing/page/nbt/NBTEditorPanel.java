@@ -125,7 +125,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Displays the selected node's direct child count.
     private final JTextField childrenField = readOnlyField("nbtEditorNodeChildren");
 
-    /// Edits only scalar types with concrete HelloNBT setters.
+    /// Edits only scalar types with concrete XoyzNBT setters.
     private final JTextArea valueArea = new JTextArea(6, 24);
 
     /// Applies one validated type-preserving scalar mutation.
