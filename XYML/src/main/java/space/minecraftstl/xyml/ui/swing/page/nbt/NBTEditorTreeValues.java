@@ -24,14 +24,14 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
-/// Extracts live scalar text from exact HelloNBT value elements.
+/// Extracts live scalar text from exact XoyzNBT value elements.
 @NotNullByDefault
 final class NBTEditorTreeValues {
     /// Prevents construction of this stateless utility.
     private NBTEditorTreeValues() {
     }
 
-    /// Returns the current HelloNBT scalar text.
+    /// Returns the current XoyzNBT scalar text.
     ///
     /// @param element concrete element
     /// @return scalar text, or `null` for non-value elements

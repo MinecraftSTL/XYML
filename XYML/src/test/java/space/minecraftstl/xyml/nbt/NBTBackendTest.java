@@ -128,7 +128,7 @@ final class NBTBackendTest {
         assertEquals(1, regionNode.materializedChildCount());
     }
 
-    /// Preserves RAW, GZIP, and LZ4 envelopes while persisting supported HelloNBT mutations.
+    /// Preserves RAW, GZIP, and LZ4 envelopes while persisting supported XoyzNBT mutations.
     @Test
     void atomicallySavesStandaloneTagsWithTheirOriginalEncoding() throws Exception {
         assertTagEncodingRoundTrip(temporaryDirectory.resolve("raw.dat"), NBTStorageEncoding.RAW);
@@ -136,7 +136,7 @@ final class NBTBackendTest {
         assertTagEncodingRoundTrip(temporaryDirectory.resolve("lz4.dat"), NBTStorageEncoding.LZ4);
     }
 
-    /// Uses HelloNBT's proven Region writer and atomically publishes a single-file region update.
+    /// Uses XoyzNBT's proven Region writer and atomically publishes a single-file region update.
     @Test
     void atomicallySavesARegionThatNeedsNoExternalChunks() throws Exception {
         Path source = temporaryDirectory.resolve("r.0.0.mca");
@@ -177,7 +177,7 @@ final class NBTBackendTest {
         assertEquals(99, retainedRoot.getInt("value"));
     }
 
-    /// Exercises one standalone encoding through open, HelloNBT mutation, atomic save, and reopen.
+    /// Exercises one standalone encoding through open, XoyzNBT mutation, atomic save, and reopen.
     ///
     /// @param source unique test source
     /// @param encoding source envelope to preserve
