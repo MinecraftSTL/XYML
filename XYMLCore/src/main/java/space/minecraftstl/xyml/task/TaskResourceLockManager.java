@@ -82,7 +82,7 @@ final class TaskResourceLockManager {
 
         @Unmodifiable List<TaskResource> requested;
         if (conservative) {
-            requested = parent == null ? List.of(TaskResource.global()) : parent.coverageResources;
+            requested = parent == null ? List.of(TaskResource.global()) : parent.requestedResources;
         } else {
             requested = TaskResource.normalize(declarations);
             if (parent != null) {

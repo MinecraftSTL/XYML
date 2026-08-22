@@ -86,6 +86,19 @@ public final class TaskResourceLockManagerTest {
         assertEquals(targetPath, task.getPath());
     }
 
+    /// Verifies semantic exact-file categories still conflict when they represent the same normalized path.
+    @Test
+    public void addonFileConflictsWithDownloadTargetAtSamePath() {
+        Path path = temporaryDirectory.resolve("mods/../mods/example.jar");
+        TaskResource addonFile = TaskResource.addonFile(path);
+        TaskResource downloadTarget = TaskResource.downloadTarget(path);
+
+        assertEquals(TaskResource.Kind.ADDON_FILE, addonFile.getKind());
+        assertEquals(path.toAbsolutePath().normalize(), addonFile.getPath());
+        assertTrue(addonFile.conflictsWith(downloadTarget));
+        assertTrue(downloadTarget.conflictsWith(addonFile));
+    }
+
     /// Verifies normalized directory coverage removes redundant child resources and yields a stable order.
     @Test
     public void normalizationMinimizesAndSortsResources() {
@@ -212,6 +225,41 @@ public final class TaskResourceLockManagerTest {
 
         childLease.close();
         parentLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies conservative descendants inherit their direct precise branch instead of the root resource union.
+    @Test
+    public void conservativeGrandchildrenRetainDisjointSiblingBranches() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource first = TaskResource.addonFile(temporaryDirectory.resolve("mods/first.jar"));
+        TaskResource second = TaskResource.addonFile(temporaryDirectory.resolve("mods/second.jar"));
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner root = manager.createOwner(execution, null, Set.of(first, second));
+        TaskResourceLockManager.Lease rootLease = manager.acquire(root).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Owner firstChild = manager.createOwner(execution, root, Set.of(first));
+        TaskResourceLockManager.Owner secondChild = manager.createOwner(execution, root, Set.of(second));
+        TaskResourceLockManager.Lease firstChildLease = manager.acquire(firstChild).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Lease secondChildLease = manager.acquire(secondChild).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Owner firstGrandchild = manager.createOwner(
+                execution,
+                firstChild,
+                Set.of(TaskResource.conservative()));
+        TaskResourceLockManager.Owner secondGrandchild = manager.createOwner(
+                execution,
+                secondChild,
+                Set.of(TaskResource.conservative()));
+
+        TaskResourceLockManager.Lease firstGrandchildLease = manager.acquire(firstGrandchild)
+                .get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Lease secondGrandchildLease = manager.acquire(secondGrandchild)
+                .get(5, TimeUnit.SECONDS);
+
+        secondGrandchildLease.close();
+        firstGrandchildLease.close();
+        secondChildLease.close();
+        firstChildLease.close();
+        rootLease.close();
         assertEquals(0, manager.trackedResourceCount());
     }
 

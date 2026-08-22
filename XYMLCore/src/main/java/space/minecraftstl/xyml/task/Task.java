@@ -47,8 +47,9 @@ public abstract class Task<T> {
 
     /// Returns this task's immutable non-empty resource declaration.
     ///
-    /// The default singleton conservative declaration resolves globally for a root task and inherits ancestor coverage
-    /// for a nested task. Callers cannot use an empty collection to opt out of resource arbitration.
+    /// The default singleton conservative declaration resolves globally for a root task and inherits the direct parent
+    /// owner's effective request for a nested task. Callers cannot use an empty collection to opt out of resource
+    /// arbitration.
     ///
     /// @return immutable non-empty resource declaration
     public final @Unmodifiable Set<TaskResource> getResources() {

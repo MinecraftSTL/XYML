@@ -78,8 +78,8 @@ public final class TaskResource {
 
     /// Returns the default declaration used until a task is explicitly audited.
     ///
-    /// A root task resolves this declaration to [#global()]. A nested task resolves it to the effective resource
-    /// coverage already retained by its ancestor chain.
+    /// A root task resolves this declaration to [#global()]. A nested task resolves it to its direct parent owner's
+    /// effective request; an explicitly narrowed parent therefore defines the conservative boundary for its subtree.
     ///
     /// @return shared conservative declaration
     public static TaskResource conservative() {
@@ -115,6 +115,14 @@ public final class TaskResource {
     /// @return normalized exact-file resource
     public static TaskResource downloadTarget(Path target) {
         return file(Kind.DOWNLOAD_TARGET, target);
+    }
+
+    /// Creates a resource covering one exact managed add-on file.
+    ///
+    /// @param file managed add-on source, archive, or destination
+    /// @return normalized exact-file resource
+    public static TaskResource addonFile(Path file) {
+        return file(Kind.ADDON_FILE, file);
     }
 
     /// Creates a resource covering one managed Java runtime tree.
@@ -319,6 +327,8 @@ public final class TaskResource {
         GAME_INSTANCE,
         /// Exact download destination.
         DOWNLOAD_TARGET,
+        /// Exact managed add-on source, archive, or destination.
+        ADDON_FILE,
         /// Complete managed Java runtime tree.
         JAVA_RUNTIME,
         /// Complete launcher-upgrade tree.

@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.download.DownloadProvider;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.StringUtils;
 
 import java.io.IOException;
@@ -137,7 +138,10 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
             operations.add(createOperation(state));
         }
 
-        ApplicationTask task = new ApplicationTask(batchPlan.selectedItems(), operations);
+        ApplicationTask task = new ApplicationTask(
+                batchPlan.selectedItems(),
+                operations,
+                batchPlan.protectedPaths());
         task.onDone().register(event -> {
             if (event.isFailed()) {
                 recoverCancelledOperations(states);
@@ -165,7 +169,8 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
                             exactPreparation.stagingPath(),
                             exactPreparation.plan().destinationOrThrow(),
                             exactPreparation.integrityCheck(),
-                            exactPreparation.downloadName());
+                            exactPreparation.downloadName())
+                            .setResources(TaskResource.addonFile(exactPreparation.plan().sourcePath()));
                 });
         Task<@Nullable Void> completedDownload = download.thenRunAsync(
                 ioExecutor,
@@ -817,6 +822,24 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
         return Files.exists(path, LinkOption.NOFOLLOW_LINKS);
     }
 
+    /// Declares exact managed add-on files for one aggregate or per-item task.
+    ///
+    /// An empty read-only batch retains the conservative default. Non-empty declarations are normalized and
+    /// deduplicated by [Task#setResources(TaskResource, TaskResource...)].
+    ///
+    /// @param task task owning the declared file lifecycle
+    /// @param paths exact source, archive, and destination paths
+    private static void setAddonFileResources(Task<?> task, Collection<Path> paths) {
+        @Unmodifiable List<TaskResource> resources = Objects.requireNonNull(paths, "paths").stream()
+                .map(TaskResource::addonFile)
+                .toList();
+        if (!resources.isEmpty()) {
+            task.setResources(
+                    resources.get(0),
+                    resources.subList(1, resources.size()).toArray(TaskResource[]::new));
+        }
+    }
+
     /// Converts one task failure to concise non-blank UI text.
     ///
     /// @param failure task failure
@@ -1166,9 +1189,11 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
         ///
         /// @param selectedUpdates exact caller selection
         /// @param operations ordered per-item operation tasks
+        /// @param protectedPaths every source, archive, and valid destination path in the batch
         private ApplicationTask(
                 @Unmodifiable List<AddonUpdateItem> selectedUpdates,
-                List<Task<UpdateOutcome>> operations) {
+                List<Task<UpdateOutcome>> operations,
+                @Unmodifiable Set<Path> protectedPaths) {
             this.selectedUpdates = List.copyOf(Objects.requireNonNull(
                     selectedUpdates,
                     "selectedUpdates"));
@@ -1179,6 +1204,7 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
             setStage(UPDATE_STAGE);
             setName(UPDATE_STAGE);
             getProperties().put("total", this.selectedUpdates.size());
+            setAddonFileResources(this, protectedPaths);
         }
 
         /// Returns all per-item operations as aggregate prerequisites.
@@ -1238,6 +1264,14 @@ public final class RepositoryAddonUpdateApplicationService implements AddonUpdat
             this.download = Objects.requireNonNull(download, "download");
             setExecutor(Objects.requireNonNull(ioExecutor, "ioExecutor"));
             setName(state.plan().updateItem().fileName());
+            List<Path> operationPaths = new ArrayList<>(3);
+            operationPaths.add(state.plan().sourcePath());
+            operationPaths.add(state.plan().archivePath());
+            @Nullable Path destination = state.plan().destinationOrNull();
+            if (destination != null) {
+                operationPaths.add(destination);
+            }
+            setAddonFileResources(this, operationPaths);
         }
 
         /// Returns the preparation and staged-download chain as this operation's sole prerequisite.
