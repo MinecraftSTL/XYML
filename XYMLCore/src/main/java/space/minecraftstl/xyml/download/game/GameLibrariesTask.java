@@ -90,10 +90,7 @@ public final class GameLibrariesTask extends Task<Void> {
         setStage("xyml.install.libraries");
         setSignificance(TaskSignificance.MODERATE);
         GameRepository gameRepository = dependencyManager.getGameRepository();
-        Path resourceRoot = gameRepository instanceof DefaultGameRepository defaultGameRepository
-                ? defaultGameRepository.getBaseDirectory()
-                : gameRepository.getLibrariesDirectory(manifest);
-        setResources(TaskResource.gameDirectory(resourceRoot));
+        setResources(TaskResource.gameDirectory(gameRepository.getLibrariesDirectory(manifest)));
     }
 
     @Override

@@ -65,6 +65,7 @@ public abstract class Task<T> {
     /// @param source wrapped task whose complete lifecycle remains the only resource owner
     private static void inheritResources(Task<?> wrapper, Task<?> source) {
         wrapper.resources = source.resources;
+        wrapper.releaseResourcesBeforeDependencies = source.releaseResourcesBeforeDependencies;
     }
 
     /// Replaces this task's resource declaration with a defensive immutable snapshot.

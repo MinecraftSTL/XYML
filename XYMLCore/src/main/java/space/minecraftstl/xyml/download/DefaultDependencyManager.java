@@ -108,7 +108,8 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
             public List<Task<?>> getDependencies() {
                 return dependencies;
             }
-        }.setResources(TaskResource.gameDirectory(repository.getBaseDirectory()))
+        }.setResources(
+                TaskResource.gameDirectory(repository.getBaseDirectory()))
                 .releaseResourcesBeforeDependencies();
     }
 
@@ -168,9 +169,12 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                                 tasks.add(installLibraryAsync(gameVersion, original, "optifine", optifinePatchVersion));
                             } else {
                                 tasks.add(OptiFineInstallTask.install(
-                                        DefaultDependencyManager.this,
-                                        original,
-                                        repository.getLibraryFile(manifest, installer)));
+                                                DefaultDependencyManager.this,
+                                                original,
+                                                repository.getLibraryFile(manifest, installer))
+                                        .setResources(
+                                                TaskResource.gameInstance(repository.getInstanceRoot(original.id())),
+                                                TaskResource.gameDirectory(repository.getLibrariesDirectory(original))));
                             }
                         }
                     }
@@ -192,7 +196,11 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
         return versionList.loadAsync(gameVersion)
                 .thenComposeAsync(() -> installLibraryAsync(baseVersion, versionList.getVersion(gameVersion, libraryVersion)
                         .orElseThrow(() -> new IOException("Remote library " + libraryId + " has no version " + libraryVersion))))
-                .withStage(String.format("xyml.install.%s:%s", libraryId, libraryVersion));
+                .releaseResourcesBeforeDependencies()
+                .withStage(String.format("xyml.install.%s:%s", libraryId, libraryVersion))
+                .setResources(
+                        TaskResource.gameInstance(repository.getInstanceRoot(baseVersion.id())),
+                        TaskResource.gameDirectory(repository.getLibrariesDirectory(baseVersion)));
     }
 
     @Override
@@ -211,7 +219,10 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                         return removedLibraryVersion.get().addPatch(patch);
                     }
                 })
-                .withStage(String.format("xyml.install.%s:%s", libraryVersion.getLibraryId(), libraryVersion.getSelfVersion()));
+                .withStage(String.format("xyml.install.%s:%s", libraryVersion.getLibraryId(), libraryVersion.getSelfVersion()))
+                .setResources(
+                        TaskResource.gameInstance(repository.getInstanceRoot(baseVersion.id())),
+                        TaskResource.gameDirectory(repository.getLibrariesDirectory(baseVersion)));
     }
 
     public Task<GameInstanceManifest> installLibraryAsync(GameInstanceManifest oldVersion, Path installer) {
@@ -239,7 +250,10 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
 
                     throw new UnsupportedLibraryInstallerException();
                 })
-                .thenApplyAsync(patch -> patch == null ? oldVersion : oldVersion.addPatch(patch));
+                .thenApplyAsync(patch -> patch == null ? oldVersion : oldVersion.addPatch(patch))
+                .setResources(
+                        TaskResource.gameInstance(repository.getInstanceRoot(oldVersion.id())),
+                        TaskResource.gameDirectory(repository.getLibrariesDirectory(oldVersion)));
     }
 
     public static class UnsupportedLibraryInstallerException extends Exception {
@@ -261,7 +275,9 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
             GameInstanceManifest independentVersion = repository.resolve(manifest).standaloneManifest();
             String gameVersion = repository.getGameVersion(independentVersion).orElse(null);
             return LibraryAnalyzer.analyze(independentVersion, gameVersion).removeLibrary(libraryId).build();
-        });
+        }).setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(manifest.id())),
+                TaskResource.gameDirectory(repository.getLibrariesDirectory(manifest)));
     }
 
 }

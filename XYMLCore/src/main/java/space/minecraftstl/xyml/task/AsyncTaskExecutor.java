@@ -214,7 +214,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             TaskResourceLockManager.Owner owner = resourceLockManager.createOwner(
                     resourceExecution,
                     parentOwner,
-                    task.getResources());
+                    task.getResources(),
+                    false);
             execution = resourceLockManager.acquire(owner).thenCompose(lease -> {
                 leaseReference.set(lease);
                 return executeCompletableFutureTaskLifecycle(parentTask, owner, resourceExecution, task);
@@ -324,7 +325,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             TaskResourceLockManager.Owner owner = resourceLockManager.createOwner(
                     resourceExecution,
                     parentOwner,
-                    task.getResources());
+                    task.getResources(),
+                    task.releasesResourcesBeforeDependencies());
             execution = resourceLockManager.acquire(owner).thenCompose(lease -> {
                 leaseReference.set(lease);
                 return executeNormalTaskLifecycle(parentTask, owner, resourceExecution, task, leaseReference);
@@ -344,9 +346,9 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             TaskResourceLockManager.Execution resourceExecution,
             Task<T> task,
             AtomicReference<TaskResourceLockManager.@Nullable Lease> leaseReference) {
-        TaskResourceLockManager.@Nullable Owner dependencyOwner = task.releasesResourcesBeforeDependencies()
-                ? null
-                : owner;
+        // A handed-off owner remains as an inheritance context after its lease is released. This keeps conservative
+        // descendants scoped to the audited branch while allowing precise children to acquire independent paths.
+        TaskResourceLockManager.Owner dependencyOwner = owner;
         return CompletableFuture.<@Nullable Void>completedFuture(null)
                 .thenComposeAsync((@Nullable Void unused) -> {
                     checkCancellation();

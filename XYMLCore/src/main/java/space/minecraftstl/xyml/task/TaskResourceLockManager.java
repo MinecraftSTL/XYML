@@ -68,6 +68,21 @@ final class TaskResourceLockManager {
             Execution execution,
             @Nullable Owner parent,
             @Unmodifiable Collection<TaskResource> declarations) {
+        return createOwner(execution, parent, declarations, false);
+    }
+
+    /// Resolves declarations and creates an owner that may detach before its dependencies run.
+    ///
+    /// @param execution cancellation domain shared by the complete root chain
+    /// @param parent parent owner, or null for the root task
+    /// @param declarations immutable task declarations
+    /// @param allowsDetachedChildren whether this owner may release before child acquisition
+    /// @return owner carrying requested and ancestor coverage resources
+    Owner createOwner(
+            Execution execution,
+            @Nullable Owner parent,
+            @Unmodifiable Collection<TaskResource> declarations,
+            boolean allowsDetachedChildren) {
         Objects.requireNonNull(execution, "execution");
         Objects.requireNonNull(declarations, "declarations");
         if (declarations.isEmpty()) {
@@ -86,8 +101,13 @@ final class TaskResourceLockManager {
         } else {
             requested = TaskResource.normalize(declarations);
             if (parent != null) {
+                @Nullable Owner activeAncestor = parent;
+                while (activeAncestor != null && activeAncestor.detached) {
+                    activeAncestor = activeAncestor.parent;
+                }
                 for (TaskResource resource : requested) {
-                    boolean covered = parent.coverageResources.stream().anyMatch(ancestor -> ancestor.covers(resource));
+                    boolean covered = activeAncestor == null
+                            || activeAncestor.coverageResources.stream().anyMatch(ancestor -> ancestor.covers(resource));
                     if (!covered) {
                         throw new IllegalStateException(
                                 "Nested task resource is outside its ancestor coverage: " + resource);
@@ -101,7 +121,7 @@ final class TaskResourceLockManager {
             coverage.addAll(parent.coverageResources);
         }
         coverage.addAll(requested);
-        return new Owner(execution, parent, requested, TaskResource.normalize(coverage));
+        return new Owner(execution, parent, requested, TaskResource.normalize(coverage), allowsDetachedChildren);
     }
 
     /// Requests all resources for one owner without blocking the caller.
@@ -183,6 +203,9 @@ final class TaskResourceLockManager {
                 } else {
                     state.holders.put(lease.owner, count - 1);
                 }
+            }
+            if (lease.owner.allowsDetachedChildren) {
+                lease.owner.detached = true;
             }
             removeUnusedStates();
             completions = new ArrayList<>(processWaiters());
@@ -306,16 +329,24 @@ final class TaskResourceLockManager {
         /// Complete normalized resource coverage retained by this invocation and its ancestors.
         private final @Unmodifiable List<TaskResource> coverageResources;
 
+        /// Whether this owner has released its lease but remains as a resource-inheritance context for descendants.
+        private volatile boolean detached;
+
+        /// Whether this owner is allowed to release before its dependencies acquire resources.
+        private final boolean allowsDetachedChildren;
+
         /// Creates one immutable owner node.
         private Owner(
                 Execution execution,
                 @Nullable Owner parent,
                 @Unmodifiable List<TaskResource> requestedResources,
-                @Unmodifiable List<TaskResource> coverageResources) {
+                @Unmodifiable List<TaskResource> coverageResources,
+                boolean allowsDetachedChildren) {
             this.execution = execution;
             this.parent = parent;
             this.requestedResources = List.copyOf(requestedResources);
             this.coverageResources = List.copyOf(coverageResources);
+            this.allowsDetachedChildren = allowsDetachedChildren;
         }
 
         /// Returns whether this owner is the same as, or an ancestor of, another owner.

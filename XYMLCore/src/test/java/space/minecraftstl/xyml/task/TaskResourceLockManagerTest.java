@@ -327,6 +327,28 @@ public final class TaskResourceLockManagerTest {
                 Set.of(TaskResource.downloadTarget(temporaryDirectory.resolve("shared/library.jar")))));
     }
 
+    /// Verifies an explicitly detached parent can hand an outside resource range to its child after release.
+    @Test
+    public void detachedOwnerCanHandOffToOutsideResource() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource parentResource = TaskResource.gameDirectory(temporaryDirectory.resolve("repository"));
+        TaskResource childResource = TaskResource.gameInstance(temporaryDirectory.resolve("repository/versions/example"));
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner parentOwner = manager.createOwner(
+                execution,
+                null,
+                Set.of(parentResource),
+                true);
+        TaskResourceLockManager.Lease parentLease = manager.acquire(parentOwner).get(5, TimeUnit.SECONDS);
+
+        parentLease.close();
+        TaskResourceLockManager.Owner childOwner = manager.createOwner(execution, parentOwner, Set.of(childResource));
+        TaskResourceLockManager.Lease childLease = manager.acquire(childOwner).get(5, TimeUnit.SECONDS);
+
+        childLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Verifies cancelling an execution removes its waiter without later granting the resource.
     @Test
     public void waitingCancellationRemovesPendingNode() throws Exception {
