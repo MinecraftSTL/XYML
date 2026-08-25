@@ -85,7 +85,8 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         return Task.composeAsync(() -> createDeferredInstallTask(
                 request,
                 unwrapProvider(downloadProvider)))
-                .setResources(TaskResource.gameDirectory(repository.getBaseDirectory()));
+                .setResources(TaskResource.gameDirectory(repository.getBaseDirectory()))
+                .releaseResourcesBeforeDependencies();
     }
 
     /// Performs destination validation and side-effectful task construction only after execution starts.
@@ -118,7 +119,8 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
                 })
                 .thenRunAsync(
                         instanceSelectionExecutor,
-                        () -> repository.setSelectedInstance(instanceId));
+                        () -> repository.setSelectedInstance(instanceId))
+                .setResources(TaskResource.gameInstance(repository.getInstanceRoot(instanceId)));
     }
 
     /// Applies the request's base game and remote installers to a newly created game builder.

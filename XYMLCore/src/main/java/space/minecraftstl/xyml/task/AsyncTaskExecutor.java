@@ -311,7 +311,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                 });
     }
 
-    /// Executes a regular task while holding its semantic resources through terminal listener notification.
+    /// Executes a regular task while holding its semantic resources through terminal listener notification unless it
+    /// explicitly hands the lease to its dependencies.
     private <T> CompletableFuture<@Nullable T> executeNormalTask(
             @Nullable Task<?> parentTask,
             @Nullable TaskResourceLockManager.Owner parentOwner,
@@ -326,7 +327,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     task.getResources());
             execution = resourceLockManager.acquire(owner).thenCompose(lease -> {
                 leaseReference.set(lease);
-                return executeNormalTaskLifecycle(parentTask, owner, resourceExecution, task);
+                return executeNormalTaskLifecycle(parentTask, owner, resourceExecution, task, leaseReference);
             });
         } catch (Throwable failure) {
             execution = CompletableFuture.failedFuture(failure);
@@ -341,7 +342,11 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             @Nullable Task<?> parentTask,
             TaskResourceLockManager.Owner owner,
             TaskResourceLockManager.Execution resourceExecution,
-            Task<T> task) {
+            Task<T> task,
+            AtomicReference<TaskResourceLockManager.@Nullable Lease> leaseReference) {
+        TaskResourceLockManager.@Nullable Owner dependencyOwner = task.releasesResourcesBeforeDependencies()
+                ? null
+                : owner;
         return CompletableFuture.<@Nullable Void>completedFuture(null)
                 .thenComposeAsync((@Nullable Void unused) -> {
                     checkCancellation();
@@ -392,12 +397,15 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     }), task.getExecutor()).whenComplete(
                             (@Nullable Void unused, @Nullable Throwable throwable) -> {
                         task.setState(Task.TaskState.EXECUTED);
+                        if (throwable == null && task.releasesResourcesBeforeDependencies()) {
+                            release(leaseReference);
+                        }
                         rethrow(throwable);
                     });
                 })
                 .thenComposeAsync((@Nullable Void unused) -> executeTasks(
                         task,
-                        owner,
+                        dependencyOwner,
                         resourceExecution,
                         task.getDependencies()))
                 .thenComposeAsync((@Nullable Exception dependenciesException) -> {

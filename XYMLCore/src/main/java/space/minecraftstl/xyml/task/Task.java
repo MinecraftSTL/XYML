@@ -45,6 +45,9 @@ public abstract class Task<T> {
     /// Immutable semantic resources occupied by this task's complete executor-managed lifecycle.
     private @Unmodifiable Set<TaskResource> resources = Set.of(TaskResource.conservative());
 
+    /// Whether the acquired declaration may be handed off before this task's dependencies run.
+    private boolean releaseResourcesBeforeDependencies;
+
     /// Returns this task's immutable non-empty resource declaration.
     ///
     /// The default singleton conservative declaration resolves globally for a root task and inherits the direct parent
@@ -86,6 +89,27 @@ public abstract class Task<T> {
         }
         resources = Collections.unmodifiableSet(snapshot);
         return this;
+    }
+
+    /// Releases this task's resources after its primary execution and before its dependencies start.
+    ///
+    /// This is intended for deferred orchestration tasks that serialize a short resolution phase and then hand the
+    /// fully constructed operation to independent child owners. The task's pre-execution, dependents, and primary
+    /// execution remain protected; terminal listeners and post-execution work run after the handoff without the
+    /// released lease. Dependencies intentionally begin as a new resource branch and do not inherit this task's owner;
+    /// tasks that need their resource through post-execution or ancestor coverage must keep the default lifecycle.
+    ///
+    /// @return this task
+    public final Task<T> releaseResourcesBeforeDependencies() {
+        releaseResourcesBeforeDependencies = true;
+        return this;
+    }
+
+    /// Returns whether this task transfers its lease before dependency execution.
+    ///
+    /// @return whether the resource handoff is enabled
+    final boolean releasesResourcesBeforeDependencies() {
+        return releaseResourcesBeforeDependencies;
     }
 
     /// The importance level that controls this task's logging and UI visibility.
