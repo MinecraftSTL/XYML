@@ -102,12 +102,13 @@ public final class AsyncTaskExecutorResourceTest {
     @Test
     public void resourceHandoffSerializesResolutionAndParallelizesInstances() throws Exception {
         TaskResourceLockManager manager = new TaskResourceLockManager();
-        TaskResource repositoryResource = TaskResource.gameDirectory(temporaryDirectory.resolve("repository"));
+        TaskResource repositoryResource = TaskResource.repositoryMetadata(temporaryDirectory.resolve("repository"));
         TaskResource firstInstance = TaskResource.gameInstance(temporaryDirectory.resolve("repository/versions/first"));
         TaskResource secondInstance = TaskResource.gameInstance(temporaryDirectory.resolve("repository/versions/second"));
         CountDownLatch firstResolutionStarted = new CountDownLatch(1);
         CountDownLatch releaseFirstResolution = new CountDownLatch(1);
         CountDownLatch secondResolutionStarted = new CountDownLatch(1);
+        CountDownLatch releaseSecondResolution = new CountDownLatch(1);
         CountDownLatch firstOperationStarted = new CountDownLatch(1);
         CountDownLatch secondOperationStarted = new CountDownLatch(1);
         CountDownLatch releaseOperations = new CountDownLatch(1);
@@ -123,7 +124,7 @@ public final class AsyncTaskExecutorResourceTest {
                 repositoryResource,
                 secondInstance,
                 secondResolutionStarted,
-                new CountDownLatch(0),
+                releaseSecondResolution,
                 secondOperationStarted,
                 releaseOperations);
 
@@ -136,6 +137,9 @@ public final class AsyncTaskExecutorResourceTest {
         releaseFirstResolution.countDown();
         assertTrue(firstOperationStarted.await(5, TimeUnit.SECONDS));
         assertTrue(secondResolutionStarted.await(5, TimeUnit.SECONDS));
+        assertFalse(secondOperationStarted.await(200, TimeUnit.MILLISECONDS));
+
+        releaseSecondResolution.countDown();
         assertTrue(secondOperationStarted.await(5, TimeUnit.SECONDS));
 
         releaseOperations.countDown();

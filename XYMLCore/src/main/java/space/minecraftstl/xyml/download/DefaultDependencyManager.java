@@ -92,7 +92,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                             ? new GameDownloadTask(DefaultDependencyManager.this, null, manifest)
                             : null;
                 }).thenComposeAsync(checkPatchCompletionAsync(manifest, integrityCheck))
-                        .setResources(TaskResource.gameDirectory(repository.getBaseDirectory()))
+                        .setResources(TaskResource.repositoryMetadata(repository.getBaseDirectory()))
                         .releaseResourcesBeforeDependencies();
                 dependencies = List.of(
                         versionAndPatch,
@@ -109,7 +109,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                 return dependencies;
             }
         }.setResources(
-                TaskResource.gameDirectory(repository.getBaseDirectory()))
+                TaskResource.repositoryMetadata(repository.getBaseDirectory()))
                 .releaseResourcesBeforeDependencies();
     }
 
@@ -186,7 +186,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
             public List<Task<?>> getDependencies() {
                 return dependencies;
             }
-        }.setResources(TaskResource.gameDirectory(repository.getBaseDirectory()))
+        }.setResources(TaskResource.repositoryMetadata(repository.getBaseDirectory()))
                 .releaseResourcesBeforeDependencies();
     }
 

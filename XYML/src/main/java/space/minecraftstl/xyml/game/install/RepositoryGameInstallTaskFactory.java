@@ -85,7 +85,7 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         return Task.composeAsync(() -> createDeferredInstallTask(
                 request,
                 unwrapProvider(downloadProvider)))
-                .setResources(TaskResource.gameDirectory(repository.getBaseDirectory()))
+                .setResources(TaskResource.repositoryMetadata(repository.getBaseDirectory()))
                 .releaseResourcesBeforeDependencies();
     }
 

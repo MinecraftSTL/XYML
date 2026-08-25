@@ -101,6 +101,18 @@ public final class TaskResource {
         return directory(Kind.GAME_DIRECTORY, directory);
     }
 
+    /// Creates a resource serializing instance-name and repository-catalog resolution for one repository.
+    ///
+    /// This key deliberately does not cover instance directories. A task may hold it while resolving a destination
+    /// instance and then hand it off to a precise instance resource, allowing the subsequent instance operation to
+    /// overlap resolution in another instance while shared game-directory writes remain protected separately.
+    ///
+    /// @param directory repository base directory
+    /// @return normalized repository-metadata resource
+    public static TaskResource repositoryMetadata(Path directory) {
+        return new TaskResource(Kind.REPOSITORY_METADATA, Scope.REPOSITORY_METADATA, normalizePath(directory));
+    }
+
     /// Creates a resource covering one complete game-instance tree.
     ///
     /// @param directory game instance directory
@@ -201,6 +213,10 @@ public final class TaskResource {
             return true;
         }
 
+        if (scope == Scope.REPOSITORY_METADATA || other.scope == Scope.REPOSITORY_METADATA) {
+            return repositoryMetadataConflicts(other);
+        }
+
         Path thisPath = Objects.requireNonNull(comparisonPath, "comparisonPath");
         Path otherPath = Objects.requireNonNull(other.comparisonPath, "other comparisonPath");
         if (scope == Scope.DIRECTORY) {
@@ -222,6 +238,13 @@ public final class TaskResource {
         }
         if (other.scope == Scope.GLOBAL) {
             return false;
+        }
+
+        if (scope == Scope.REPOSITORY_METADATA || other.scope == Scope.REPOSITORY_METADATA) {
+            return scope == Scope.REPOSITORY_METADATA
+                    && other.scope == Scope.REPOSITORY_METADATA
+                    && Objects.requireNonNull(comparisonPath, "comparisonPath")
+                    .equals(other.comparisonPath);
         }
 
         Path thisPath = Objects.requireNonNull(comparisonPath, "comparisonPath");
@@ -276,6 +299,24 @@ public final class TaskResource {
         return Path.of(path.toString().toLowerCase(Locale.ROOT));
     }
 
+    /// Returns whether a repository-catalog request conflicts with another semantic resource.
+    private boolean repositoryMetadataConflicts(TaskResource other) {
+        if (scope == Scope.REPOSITORY_METADATA && other.scope == Scope.REPOSITORY_METADATA) {
+            return Objects.requireNonNull(comparisonPath, "comparisonPath")
+                    .equals(other.comparisonPath);
+        }
+
+        TaskResource metadata = scope == Scope.REPOSITORY_METADATA ? this : other;
+        TaskResource candidate = scope == Scope.REPOSITORY_METADATA ? other : this;
+        if (candidate.kind != Kind.GAME_DIRECTORY) {
+            return false;
+        }
+
+        Path metadataPath = Objects.requireNonNull(metadata.comparisonPath, "metadata comparisonPath");
+        Path candidatePath = Objects.requireNonNull(candidate.comparisonPath, "candidate comparisonPath");
+        return candidatePath.startsWith(metadataPath) || metadataPath.startsWith(candidatePath);
+    }
+
     /// Returns stable text for resource ordering.
     private String comparisonText() {
         return comparisonPath == null ? "" : comparisonPath.toString();
@@ -323,6 +364,8 @@ public final class TaskResource {
         GLOBAL,
         /// Complete game-directory tree.
         GAME_DIRECTORY,
+        /// Repository instance-catalog and destination-name resolution scope.
+        REPOSITORY_METADATA,
         /// Complete game-instance tree.
         GAME_INSTANCE,
         /// Exact download destination.
@@ -351,6 +394,8 @@ public final class TaskResource {
         GLOBAL(1),
         /// Complete directory tree.
         DIRECTORY(2),
+        /// Repository metadata scope keyed by one normalized repository path.
+        REPOSITORY_METADATA(2),
         /// Exact filesystem path.
         FILE(3);
 

@@ -115,6 +115,21 @@ public final class TaskResourceLockManagerTest {
         assertFalse(instance.conflictsWith(otherFile));
     }
 
+    /// Verifies repository-catalog serialization does not reintroduce a base-directory lock for instance work.
+    @Test
+    public void repositoryMetadataDoesNotConflictWithInstanceResource() {
+        Path repository = temporaryDirectory.resolve("repository");
+        TaskResource metadata = TaskResource.repositoryMetadata(repository);
+        TaskResource instance = TaskResource.gameInstance(repository.resolve("versions/example"));
+        TaskResource sharedDirectory = TaskResource.gameDirectory(repository);
+        TaskResource otherMetadata = TaskResource.repositoryMetadata(temporaryDirectory.resolve("other"));
+
+        assertFalse(metadata.conflictsWith(instance));
+        assertFalse(instance.conflictsWith(metadata));
+        assertTrue(metadata.conflictsWith(sharedDirectory));
+        assertFalse(metadata.conflictsWith(otherMetadata));
+    }
+
     /// Verifies two unrelated roots requesting the same exact path cannot hold it concurrently.
     @Test
     public void sameResourceIsMutuallyExclusive() throws Exception {
