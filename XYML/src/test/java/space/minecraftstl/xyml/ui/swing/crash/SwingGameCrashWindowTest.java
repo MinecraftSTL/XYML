@@ -47,7 +47,10 @@ class SwingGameCrashWindowTest {
         SwingGameCrashWindow window = window(service, worker);
 
         window.show();
-        EdtDispatcher.executeAndWait(() -> assertTrue(window.hasContentOnEdt()));
+        EdtDispatcher.executeAndWait(() -> {
+            assertTrue(window.hasContentOnEdt());
+            assertTrue(window.hasReportQrCodeOnEdt());
+        });
         service.result.complete(new GameCrashAnalysis(List.of(), Set.of()));
         EdtDispatcher.executeAndWait(() -> assertEquals(
                 i18n("game.crash.reason.unknown"),
