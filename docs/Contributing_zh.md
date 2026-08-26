@@ -88,14 +88,14 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 | `buildDev` | 拉取并构建最新的 `origin/dev` 提交。 |
 | `build` | 发布分支调用上方对应任务；功能分支或游离提交直接构建当前工作树。 |
 | `clean` | 只清理当前工作树，不检查或拉取任何分支。 |
-| `run` | 有可用结果时复用最近一次根 `:build` 的制品；否则在同一次 Gradle 调用中对当前工作树增量构建临时制品。 |
+| `run` | 始终重新构建 `XYML`、`XYMLCore` 和 `XYMLBoot`，然后运行当前工作树制品。 |
 
 即使当前签出的是 `main`、`beta`、`alpha` 或 `dev`，`run` 也始终将当前仓库根目录作为 XYML 的运行目录。
 
-只有根 `:build` 任务会记录可复用制品，包括发布分支构建复制到 `build/channel-builds/<branch>` 的 JAR。
-`run` 触发的回退只强制重新生成最终 `shadowJar`，可以复用依赖任务的最新输出，但不会写入根结果清单，也不会启动第二个 Wrapper。
-`clean` 会删除可复用结果清单。原生源码未变化时，回退还可以复用已有的 XYMLL 可执行文件作为中间输入，但不会因此让最终制品变为可复用结果。
-没有 CI 版本输入时，发布分支的本地构建版本按当前 Git 拓扑推断；构建制品的版本不同不会阻止复用，XYML 左上角显示的是所选 JAR 内嵌的版本。
+每次调用 `run` 都会禁止 `XYML`、`XYMLCore` 和 `XYMLBoot` 中的任务复用最新输出或构建缓存，包括 Java 编译、语言数据生成、
+资源处理和最终 `shadowJar`。其他项目依赖仍使用 Gradle 的常规复用机制，因此原生源码未变化时可以复用已有的 XYMLL 可执行文件。
+`run` 始终选择当前 `XYML/build/libs` 制品，不会选择之前根 `:build` 记录的 JAR，也不会写入根结果清单或启动第二个 Wrapper。
+没有 CI 版本输入时，发布分支的本地构建版本按当前 Git 拓扑推断。
 子项目任务改名为 `:XYML:runCurrent`，不再使用 `run`，以免 Gradle 执行根工作流时同时选中第二个启动器进程。
 
 四个渠道任务会同时刷新 `main`、`beta`、`alpha` 和 `dev`，再于临时的游离 worktree 中构建所选提交，

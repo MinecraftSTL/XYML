@@ -88,14 +88,14 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 | `buildDev` | 擷取並建置最新的 `origin/dev` 提交。 |
 | `build` | 發佈分支呼叫上方對應任務；功能分支或游離提交直接建置目前工作樹。 |
 | `clean` | 只清理目前工作樹，不檢查或擷取任何分支。 |
-| `run` | 有可用結果時複用最近一次根 `:build` 的製品；否則在同一次 Gradle 呼叫中對目前工作樹增量建置臨時製品。 |
+| `run` | 始終重新建置 `XYML`、`XYMLCore` 和 `XYMLBoot`，然後執行目前工作樹製品。 |
 
 即使目前簽出的是 `main`、`beta`、`alpha` 或 `dev`，`run` 也始終將目前倉庫根目錄作為 XYML 的執行目錄。
 
-只有根 `:build` 任務會記錄可複用製品，包括發佈分支建置複製到 `build/channel-builds/<branch>` 的 JAR。
-`run` 觸發的回退只強制重新產生最終 `shadowJar`，可以複用相依任務的最新輸出，但不會寫入根結果清單，也不會啓動第二個 Wrapper。
-`clean` 會刪除可複用結果清單。原生源碼未變更時，回退還可以複用現有的 XYMLL 可執行檔作為中間輸入，但不會因此讓最終製品變為可複用結果。
-沒有 CI 版本輸入時，發佈分支的本機建置版本按目前 Git 拓撲推斷；建置製品的版本不同不會阻止複用，XYML 左上角顯示的是所選 JAR 內嵌的版本。
+每次呼叫 `run` 都會禁止 `XYML`、`XYMLCore` 和 `XYMLBoot` 中的任務複用最新輸出或建置快取，包括 Java 編譯、語言資料產生、
+資源處理和最終 `shadowJar`。其他專案相依仍使用 Gradle 的常規複用機制，因此原生源碼未變更時可以複用現有的 XYMLL 可執行檔。
+`run` 始終選擇目前 `XYML/build/libs` 製品，不會選擇之前根 `:build` 記錄的 JAR，也不會寫入根結果清單或啓動第二個 Wrapper。
+沒有 CI 版本輸入時，發佈分支的本機建置版本按目前 Git 拓撲推斷。
 子專案任務改名為 `:XYML:runCurrent`，不再使用 `run`，以免 Gradle 執行根工作流程時同時選中第二個啓動器程序。
 
 四個渠道任務會同時重新整理 `main`、`beta`、`alpha` 和 `dev`，再於臨時的游離 worktree 中建置所選提交，
