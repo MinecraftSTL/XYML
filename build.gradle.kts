@@ -7,7 +7,6 @@ import space.minecraftstl.xyml.gradle.pack.ReleaseVersionResolver
 import space.minecraftstl.xyml.gradle.pack.GitBranchGradleTask
 import space.minecraftstl.xyml.gradle.pack.GitVersionResolver
 import space.minecraftstl.xyml.gradle.utils.PropertiesUtils
-import java.nio.file.Files
 import java.util.Properties
 import org.gradle.jvm.tasks.Jar
 
@@ -167,30 +166,6 @@ val xymlNativeSourceFiles = files(
     },
 )
 
-fun findReusableRootBuildArtifact(): File? {
-    val marker = rootBuildResultFile.get().asFile
-    if (!marker.isFile) {
-        return null
-    }
-
-    return runCatching {
-        val properties = PropertiesUtils.load(marker.toPath())
-        if (properties.getProperty("task") != ":build") {
-            return@runCatching null
-        }
-
-        val relativeArtifact = properties.getProperty("artifact")?.takeIf { it.isNotBlank() }
-            ?: return@runCatching null
-        val rootPath = rootDir.toPath().toAbsolutePath().normalize()
-        val artifactPath = rootPath.resolve(relativeArtifact).normalize()
-        if (!artifactPath.startsWith(rootPath) || !Files.isRegularFile(artifactPath)) {
-            null
-        } else {
-            artifactPath.toFile()
-        }
-    }.getOrNull()
-}
-
 fun recordRootBuildResult(artifact: File, version: String, channel: String, branch: String) {
     check(artifact.isFile) {
         "Root :build completed without producing the XYML launcher artifact: $artifact"
@@ -323,18 +298,25 @@ if (nestedBranchBuild.get() || xymlBranchReleaseType == null) {
     }
 }
 
-val cleanRequested = gradle.startParameter.taskNames.any { taskName ->
-    taskName.substringAfterLast(':') == "clean"
+val runBuildRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName in setOf(
+        "run",
+        ":run",
+        "prepareRunBuild",
+        ":prepareRunBuild",
+        "runCurrent",
+        ":XYML:runCurrent"
+    )
 }
-val reusableRunArtifact = if (cleanRequested) null else findReusableRootBuildArtifact()
 
-if (reusableRunArtifact == null) {
-    project(":XYML").tasks.configureEach {
-        if (name == "shadowJar") {
+if (runBuildRequested) {
+    setOf(":XYML", ":XYMLCore", ":XYMLBoot").forEach { projectPath ->
+        project(projectPath).tasks.configureEach {
             outputs.upToDateWhen { false }
-            outputs.doNotCacheIf("Temporary run artifacts are not reusable root build results") { true }
+            outputs.doNotCacheIf("XYML run always rebuilds $projectPath") { true }
         }
     }
+
     project(":XYMLL").tasks.configureEach {
         if (name == "configureXYMLL" || name == "buildNativeXYMLL") {
             onlyIf {
@@ -350,24 +332,19 @@ if (reusableRunArtifact == null) {
 
 val prepareRunBuild = tasks.register("prepareRunBuild") {
     group = "internal"
-    description = "Temporarily builds the current checkout for run when no root :build result is available."
-    if (reusableRunArtifact == null) {
-        dependsOn(":XYML:shadowJar")
-    }
+    description = "Rebuilds the current XYML, XYMLCore, and XYMLBoot outputs required by run."
+    dependsOn(":XYML:shadowJar")
 
     doLast {
-        if (reusableRunArtifact == null) {
-            logger.lifecycle("XYML run: prepared an unrecorded temporary artifact from incremental project outputs")
-        } else {
-            logger.lifecycle("XYML run: reusing the last root :build result at $reusableRunArtifact")
-        }
+        val runArtifact = project(":XYML").tasks.named<Jar>("shadowJar").get().archiveFile.get().asFile
+        logger.lifecycle("XYML run: rebuilt the current checkout artifact at $runArtifact")
     }
 }
 
 tasks.register("run") {
     group = xymlWorkflowGroup
-    description = "Runs XYML from the current checkout, reusing the last root :build result when available."
-    dependsOn(prepareRunBuild, ":XYML:runFromBuildResult")
+    description = "Rebuilds XYML, XYMLCore, and XYMLBoot, then runs the current checkout artifact."
+    dependsOn(prepareRunBuild, ":XYML:runCurrent")
 }
 
 defaultTasks("clean", "build")
