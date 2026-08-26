@@ -124,6 +124,9 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// Analysis progress indicator, accessed only on the EDT.
     private @Nullable JProgressBar analysisProgress;
 
+    /// Trailing crash-report QR marker, accessed only on the EDT.
+    private @Nullable CrashReportQrCodeMarker reportQrCodeMarker;
+
     /// Short operation status displayed beside the action buttons, accessed only on the EDT.
     private @Nullable JLabel operationStatus;
 
@@ -257,6 +260,14 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         return content != null;
     }
 
+    /// Reports whether the crash-report QR marker was composed in the page header.
+    ///
+    /// @return true after the page header has been created
+    boolean hasReportQrCodeOnEdt() {
+        EdtDispatcher.requireEventDispatchThread();
+        return reportQrCodeMarker != null;
+    }
+
     /// Creates or raises the native frame and starts diagnosis once.
     private void showOnEdt() {
         EdtDispatcher.requireEventDispatchThread();
@@ -314,7 +325,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         return root;
     }
 
-    /// Creates the exit-type-specific headline.
+    /// Creates the exit-type-specific headline with the crash-report QR marker at the trailing edge.
     ///
     /// @return header component
     private Component createHeaderOnEdt() {
@@ -322,7 +333,14 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         JLabel headline = new JLabel(titleFor(model.exitType()));
         headline.setFont(headline.getFont().deriveFont(Font.BOLD, headline.getFont().getSize2D() + 2.0F));
         headline.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
-        return headline;
+
+        CrashReportQrCodeMarker qrCodeMarker = new CrashReportQrCodeMarker();
+        reportQrCodeMarker = qrCodeMarker;
+
+        JPanel header = new JPanel(new BorderLayout(12, 0));
+        header.add(headline, BorderLayout.CENTER);
+        header.add(qrCodeMarker, BorderLayout.EAST);
+        return header;
     }
 
     /// Creates a selectable, wrapped environment-information viewport.
@@ -364,7 +382,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
                 }
             }
         });
-        reason.setText(htmlDocument(i18n("game.crash.feedback"), displayedReason));
+        reason.setText(htmlDocument(displayedReason));
         reason.setCaretPosition(0);
         reasonPane = reason;
 
@@ -463,7 +481,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         }
         @Nullable JEditorPane reason = reasonPane;
         if (reason != null) {
-            reason.setText(htmlDocument(i18n("game.crash.feedback"), displayedReason));
+            reason.setText(htmlDocument(displayedReason));
             reason.setCaretPosition(0);
         }
     }
@@ -613,6 +631,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         content = null;
         reasonPane = null;
         analysisProgress = null;
+        reportQrCodeMarker = null;
         operationStatus = null;
         exportButton = null;
     }
@@ -644,15 +663,12 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         };
     }
 
-    /// Wraps trusted localized markup in a display-properties-aware HTML document.
+    /// Wraps a trusted localized reason in a display-properties-aware HTML document.
     ///
-    /// @param feedback localized safety guidance that may contain HTML emphasis
     /// @param reason localized reason that may contain HTML links
     /// @return complete HTML document
-    private static String htmlDocument(String feedback, String reason) {
+    private static String htmlDocument(String reason) {
         return "<html><body>"
-                + newlinesToBreaks(feedback)
-                + "<br><br>"
                 + newlinesToBreaks(reason)
                 + "</body></html>";
     }

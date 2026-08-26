@@ -6,7 +6,6 @@ import space.minecraftstl.xyml.gradle.l10n.UpsideDownTranslate
 import space.minecraftstl.xyml.gradle.mod.ParseModDataTask
 import space.minecraftstl.xyml.gradle.pack.CreateDeb
 import space.minecraftstl.xyml.gradle.pack.ReleaseType
-import space.minecraftstl.xyml.gradle.utils.PropertiesUtils
 import java.net.URI
 import java.nio.file.FileSystems
 import java.nio.file.Files
@@ -1011,38 +1010,12 @@ fun parseToolOptions(options: String?): MutableList<String> {
 
 // For IntelliJ IDEA
 tasks.withType<JavaExec> {
-    if (name !in setOf("runCurrent", "runFromBuildResult")) {
+    if (name != "runCurrent") {
         jvmArgs(runtimeOpens.map { "--add-opens=$it=ALL-UNNAMED" })
 //        if (javaVersion >= JavaVersion.VERSION_24) {
 //            jvmArgs("--enable-native-access=ALL-UNNAMED")
 //        }
     }
-}
-
-val rootBuildResultFile = rootProject.layout.buildDirectory.file("root-build-result.properties")
-
-fun findReusableRootBuildArtifact(): File? {
-    val marker = rootBuildResultFile.get().asFile
-    if (!marker.isFile) {
-        return null
-    }
-
-    return runCatching {
-        val properties = PropertiesUtils.load(marker.toPath())
-        if (properties.getProperty("task") != ":build") {
-            return@runCatching null
-        }
-
-        val relativeArtifact = properties.getProperty("artifact")?.takeIf { it.isNotBlank() }
-            ?: return@runCatching null
-        val rootPath = rootProject.rootDir.toPath().toAbsolutePath().normalize()
-        val artifactPath = rootPath.resolve(relativeArtifact).normalize()
-        if (!artifactPath.startsWith(rootPath) || !Files.isRegularFile(artifactPath)) {
-            null
-        } else {
-            artifactPath.toFile()
-        }
-    }.getOrNull()
 }
 
 fun configureXYMLRun(task: JavaExec) {
@@ -1071,30 +1044,11 @@ fun configureXYMLRun(task: JavaExec) {
 
 tasks.register<JavaExec>("runCurrent") {
     dependsOn(tasks.jar)
+    mustRunAfter(rootProject.tasks.named("prepareRunBuild"))
     group = "application"
     description = "Builds and runs the current XYML project artifact."
     classpath = files(jarPath)
     configureXYMLRun(this)
-}
-
-tasks.register<JavaExec>("runFromBuildResult") {
-    group = "application"
-    description = "Runs the last root :build artifact, or the temporary artifact prepared by the root run task."
-    classpath = files(jarPath)
-    configureXYMLRun(this)
-    mustRunAfter(rootProject.tasks.named("prepareRunBuild"))
-
-    doFirst {
-        val reusableArtifact = findReusableRootBuildArtifact()
-        val selectedArtifact = reusableArtifact ?: jarPath.takeIf { it.isFile }
-            ?: throw GradleException(
-                "XYML run could not find a root :build artifact or a temporary build artifact. "
-                    + "Run the root :build task or retry the run task."
-            )
-        classpath = files(selectedArtifact)
-        val source = if (reusableArtifact != null) "root :build" else "temporary run build"
-        logger.lifecycle("XYML run artifact ($source): $selectedArtifact")
-    }
 }
 
 // terracotta
