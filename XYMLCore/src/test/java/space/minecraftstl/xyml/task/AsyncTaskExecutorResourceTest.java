@@ -82,6 +82,56 @@ public final class AsyncTaskExecutorResourceTest {
         assertEquals(0, manager.trackedResourceCount());
     }
 
+    /// Verifies one instance owner remains held while its metadata phase hands off to the operation phase.
+    @Test
+    public void resourceHandoffRetainsSameInstanceUntilOperationCompletes() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource repositoryResource = TaskResource.repositoryMetadata(temporaryDirectory.resolve("repository"));
+        TaskResource operationResource = TaskResource.repositoryOperation(temporaryDirectory.resolve("repository"));
+        TaskResource instanceResource = TaskResource.gameInstance(
+                temporaryDirectory.resolve("repository/versions/example"));
+        CountDownLatch firstResolutionStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstResolution = new CountDownLatch(1);
+        CountDownLatch secondResolutionStarted = new CountDownLatch(1);
+        CountDownLatch firstOperationStarted = new CountDownLatch(1);
+        CountDownLatch secondOperationStarted = new CountDownLatch(1);
+        CountDownLatch releaseOperations = new CountDownLatch(1);
+
+        Task<?> first = handoffTask(
+                repositoryResource,
+                operationResource,
+                instanceResource,
+                firstResolutionStarted,
+                releaseFirstResolution,
+                firstOperationStarted,
+                releaseOperations);
+        Task<?> second = handoffTask(
+                repositoryResource,
+                operationResource,
+                instanceResource,
+                secondResolutionStarted,
+                new CountDownLatch(0),
+                secondOperationStarted,
+                releaseOperations);
+
+        CompletableFuture<Boolean> firstResult = execute(first, manager);
+        assertTrue(firstResolutionStarted.await(5, TimeUnit.SECONDS));
+        CompletableFuture<Boolean> secondResult = execute(second, manager);
+        awaitCondition(() -> manager.pendingWaiterCount() == 1);
+        assertFalse(secondResolutionStarted.await(200, TimeUnit.MILLISECONDS));
+
+        releaseFirstResolution.countDown();
+        assertTrue(firstOperationStarted.await(5, TimeUnit.SECONDS));
+        assertFalse(secondResolutionStarted.await(200, TimeUnit.MILLISECONDS));
+
+        releaseOperations.countDown();
+        assertTrue(secondResolutionStarted.await(5, TimeUnit.SECONDS));
+        assertTrue(secondOperationStarted.await(5, TimeUnit.SECONDS));
+        assertTrue(get(firstResult));
+        assertTrue(get(secondResult));
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Verifies independent exact resources reach a barrier concurrently rather than being globally serialized.
     @Test
     public void differentResourcesExecuteInParallel() throws Exception {
@@ -375,7 +425,7 @@ public final class AsyncTaskExecutorResourceTest {
         return Task.runAsync(action).setResources(resource);
     }
 
-    /// Creates a two-phase task whose repository resolution is handed off before its instance operation.
+    /// Creates a two-phase task retaining its instance while handing off the short repository resolution resource.
     private static Task<@Nullable Void> handoffTask(
             TaskResource repositoryResource,
             TaskResource operationResource,
@@ -384,7 +434,7 @@ public final class AsyncTaskExecutorResourceTest {
             CountDownLatch resolutionRelease,
             CountDownLatch operationStarted,
             CountDownLatch operationRelease) {
-        return new Task<@Nullable Void>() {
+        Task<@Nullable Void> resolution = new Task<@Nullable Void>() {
             private List<Task<?>> dependencies = List.of();
 
             @Override
@@ -401,7 +451,9 @@ public final class AsyncTaskExecutorResourceTest {
             public List<Task<?>> getDependencies() {
                 return dependencies;
             }
-        }.setResources(repositoryResource).releaseResourcesBeforeDependencies();
+        }.setResources(repositoryResource, instanceResource).releaseResourcesBeforeDependencies();
+        Task<@Nullable Void> operation = resolution.thenApplyAsync(ignored -> null);
+        return operation.setResources(operationResource, instanceResource);
     }
 
     /// Creates a lifecycle task whose phases and nested tasks all reuse one resource owner chain.

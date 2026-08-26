@@ -60,14 +60,14 @@ public final class DefaultGameBuilderResourceTest {
         assertTrue(executor.test(), () -> String.valueOf(executor.getFailure()));
     }
 
-    /// Verifies completion checks retain repository serialization only for their short manifest-resolution phase.
+    /// Verifies completion checks expose a shared repository domain and retain a precise instance resource.
     @Test
     public void completionChecksDeclareMetadataAndPreciseInstanceResources() {
         DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory);
         ResourceDependencyManager dependencyManager = new ResourceDependencyManager(repository);
         GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("example"));
         @Unmodifiable Set<TaskResource> expectedResources = Set.of(
-                TaskResource.repositoryMetadata(repository.getBaseDirectory()),
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
                 TaskResource.gameInstance(repository.getInstanceRoot(manifest.id())));
 
         assertEquals(expectedResources, dependencyManager.checkGameCompletionAsync(manifest, true).getResources());

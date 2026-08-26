@@ -85,7 +85,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
         TaskResource metadataResource = TaskResource.repositoryMetadata(repository.getBaseDirectory());
         TaskResource operationResource = TaskResource.repositoryOperation(repository.getBaseDirectory());
         TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(manifest.id()));
-        return new Task<>() {
+        Task<?> resolution = new Task<>() {
             private List<Task<?>> dependencies = List.of();
 
             @Override
@@ -114,6 +114,8 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
             }
         }.setResources(metadataResource, instanceResource)
                 .releaseResourcesBeforeDependencies();
+        return resolution.thenApplyAsync(ignored -> null)
+                .setResources(operationResource, instanceResource);
     }
 
     @Override
@@ -125,8 +127,9 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
     @Override
     public Task<?> checkPatchCompletionAsync(GameInstanceManifest manifest, boolean integrityCheck) {
         TaskResource metadataResource = TaskResource.repositoryMetadata(repository.getBaseDirectory());
+        TaskResource operationResource = TaskResource.repositoryOperation(repository.getBaseDirectory());
         TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(manifest.id()));
-        return new Task<>() {
+        Task<?> resolution = new Task<>() {
             private List<Task<?>> dependencies = List.of();
 
             @Override
@@ -193,6 +196,8 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
             }
         }.setResources(metadataResource, instanceResource)
                 .releaseResourcesBeforeDependencies();
+        return resolution.thenApplyAsync(ignored -> null)
+                .setResources(operationResource, instanceResource);
     }
 
     @Override
