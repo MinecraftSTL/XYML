@@ -107,7 +107,8 @@ final class TaskResourceLockManager {
                 }
                 for (TaskResource resource : requested) {
                     boolean covered = activeAncestor == null
-                            || activeAncestor.coverageResources.stream().anyMatch(ancestor -> ancestor.covers(resource));
+                            || activeAncestor.coverageResources.stream().anyMatch(ancestor ->
+                            ancestor.permitsNested(resource));
                     if (!covered) {
                         throw new IllegalStateException(
                                 "Nested task resource is outside its ancestor coverage: " + resource);

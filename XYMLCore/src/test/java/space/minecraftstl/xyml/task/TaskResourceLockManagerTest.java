@@ -115,19 +115,29 @@ public final class TaskResourceLockManagerTest {
         assertFalse(instance.conflictsWith(otherFile));
     }
 
-    /// Verifies repository-catalog serialization does not reintroduce a base-directory lock for instance work.
+    /// Verifies repository coordination scopes preserve only the intended short and repository-wide conflicts.
     @Test
-    public void repositoryMetadataDoesNotConflictWithInstanceResource() {
+    public void repositoryScopesPreservePreciseInstanceConcurrency() {
         Path repository = temporaryDirectory.resolve("repository");
         TaskResource metadata = TaskResource.repositoryMetadata(repository);
+        TaskResource operation = TaskResource.repositoryOperation(repository);
+        TaskResource otherOperation = TaskResource.repositoryOperation(repository);
         TaskResource instance = TaskResource.gameInstance(repository.resolve("versions/example"));
         TaskResource sharedDirectory = TaskResource.gameDirectory(repository);
+        TaskResource libraries = TaskResource.gameDirectory(repository.resolve("libraries"));
         TaskResource otherMetadata = TaskResource.repositoryMetadata(temporaryDirectory.resolve("other"));
 
         assertFalse(metadata.conflictsWith(instance));
         assertFalse(instance.conflictsWith(metadata));
         assertTrue(metadata.conflictsWith(sharedDirectory));
+        assertFalse(metadata.conflictsWith(operation));
         assertFalse(metadata.conflictsWith(otherMetadata));
+        assertFalse(operation.conflictsWith(otherOperation));
+        assertTrue(operation.conflictsWith(sharedDirectory));
+        assertFalse(operation.conflictsWith(libraries));
+        assertTrue(operation.permitsNested(libraries));
+        assertTrue(sharedDirectory.permitsNested(operation));
+        assertEquals(Set.of(operation, instance), Set.copyOf(TaskResource.normalize(List.of(operation, instance))));
     }
 
     /// Verifies two unrelated roots requesting the same exact path cannot hold it concurrently.

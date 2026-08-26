@@ -103,6 +103,7 @@ public final class AsyncTaskExecutorResourceTest {
     public void resourceHandoffSerializesResolutionAndParallelizesInstances() throws Exception {
         TaskResourceLockManager manager = new TaskResourceLockManager();
         TaskResource repositoryResource = TaskResource.repositoryMetadata(temporaryDirectory.resolve("repository"));
+        TaskResource operationResource = TaskResource.repositoryOperation(temporaryDirectory.resolve("repository"));
         TaskResource firstInstance = TaskResource.gameInstance(temporaryDirectory.resolve("repository/versions/first"));
         TaskResource secondInstance = TaskResource.gameInstance(temporaryDirectory.resolve("repository/versions/second"));
         CountDownLatch firstResolutionStarted = new CountDownLatch(1);
@@ -115,6 +116,7 @@ public final class AsyncTaskExecutorResourceTest {
 
         Task<?> first = handoffTask(
                 repositoryResource,
+                operationResource,
                 firstInstance,
                 firstResolutionStarted,
                 releaseFirstResolution,
@@ -122,6 +124,7 @@ public final class AsyncTaskExecutorResourceTest {
                 releaseOperations);
         Task<?> second = handoffTask(
                 repositoryResource,
+                operationResource,
                 secondInstance,
                 secondResolutionStarted,
                 releaseSecondResolution,
@@ -135,8 +138,8 @@ public final class AsyncTaskExecutorResourceTest {
         assertFalse(secondResolutionStarted.await(200, TimeUnit.MILLISECONDS));
 
         releaseFirstResolution.countDown();
-        assertTrue(firstOperationStarted.await(5, TimeUnit.SECONDS));
         assertTrue(secondResolutionStarted.await(5, TimeUnit.SECONDS));
+        assertTrue(firstOperationStarted.await(5, TimeUnit.SECONDS));
         assertFalse(secondOperationStarted.await(200, TimeUnit.MILLISECONDS));
 
         releaseSecondResolution.countDown();
@@ -375,6 +378,7 @@ public final class AsyncTaskExecutorResourceTest {
     /// Creates a two-phase task whose repository resolution is handed off before its instance operation.
     private static Task<@Nullable Void> handoffTask(
             TaskResource repositoryResource,
+            TaskResource operationResource,
             TaskResource instanceResource,
             CountDownLatch resolutionStarted,
             CountDownLatch resolutionRelease,
@@ -387,10 +391,10 @@ public final class AsyncTaskExecutorResourceTest {
             public void execute() throws InterruptedException {
                 resolutionStarted.countDown();
                 resolutionRelease.await(5, TimeUnit.SECONDS);
-                dependencies = List.of(task(instanceResource, () -> {
+                dependencies = List.of(Task.runAsync(() -> {
                     operationStarted.countDown();
                     await(operationRelease);
-                }));
+                }).setResources(operationResource, instanceResource));
             }
 
             @Override

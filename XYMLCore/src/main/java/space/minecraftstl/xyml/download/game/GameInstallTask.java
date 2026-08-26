@@ -58,8 +58,9 @@ public class GameInstallTask extends Task<GameInstancePatch> {
         this.manifest = manifest;
         this.remote = remoteVersion;
         this.downloadTask = new GameInstanceJsonDownloadTask(remoteVersion.getGameVersion(), dependencyManager);
-        setResources(TaskResource.gameInstance(gameRepository.getInstanceRoot(manifest.id())));
-        releaseResourcesBeforeDependencies();
+        setResources(
+                TaskResource.repositoryOperation(gameRepository.getBaseDirectory()),
+                TaskResource.gameInstance(gameRepository.getInstanceRoot(manifest.id())));
     }
 
     @Override

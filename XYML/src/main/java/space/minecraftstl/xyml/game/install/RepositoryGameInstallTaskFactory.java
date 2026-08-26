@@ -111,8 +111,20 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
 
         GameBuilder builder = repository.getDependency(requestProvider).newGameBuilder();
         configureBuilder(builder, instanceId, request);
-        repository.applyDefaultIsolationSettingForNewInstance(instanceId, isModded(request));
-        return builder.buildAsync()
+        TaskResource metadataResource = TaskResource.repositoryMetadata(repository.getBaseDirectory());
+        TaskResource operationResource = TaskResource.repositoryOperation(repository.getBaseDirectory());
+        TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(instanceId));
+        Task<?> installation = Task.runAsync(() -> {
+            if (repository.instanceIdConflicts(instanceId)) {
+                throw new GameInstallRequestRejectedException(
+                        request,
+                        GameInstallRequestRejectedException.Reason.INSTANCE_ALREADY_EXISTS);
+            }
+            repository.applyDefaultIsolationSettingForNewInstance(instanceId, isModded(request));
+        }).setResources(metadataResource, instanceResource)
+                .thenComposeAsync(builder.buildAsync())
+                .setResources(operationResource, instanceResource);
+        return installation
                 .whenComplete(repositoryRefreshExecutor, ignoredFailure -> {
                     repository.refresh();
                     repository.applyDefaultIsolationSetting(instanceId);
@@ -120,7 +132,9 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
                 .thenRunAsync(
                         instanceSelectionExecutor,
                         () -> repository.setSelectedInstance(instanceId))
-                .setResources(TaskResource.gameInstance(repository.getInstanceRoot(instanceId)));
+                .setResources(
+                        operationResource,
+                        instanceResource);
     }
 
     /// Applies the request's base game and remote installers to a newly created game builder.

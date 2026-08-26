@@ -113,6 +113,19 @@ public final class TaskResource {
         return new TaskResource(Kind.REPOSITORY_METADATA, Scope.REPOSITORY_METADATA, normalizePath(directory));
     }
 
+    /// Creates a shared operation domain for one game repository.
+    ///
+    /// Unrelated owners may hold this resource concurrently, including while another task briefly resolves repository
+    /// metadata. It conflicts only with a repository-wide game-directory operation and permits nested tasks to declare
+    /// precise resources inside the repository. Instance, asset, library, and target-file resources therefore decide
+    /// conflicts between the actual filesystem stages.
+    ///
+    /// @param directory repository base directory
+    /// @return normalized shared repository-operation resource
+    public static TaskResource repositoryOperation(Path directory) {
+        return new TaskResource(Kind.REPOSITORY_OPERATION, Scope.REPOSITORY_OPERATION, normalizePath(directory));
+    }
+
     /// Creates a resource covering one complete game-instance tree.
     ///
     /// @param directory game instance directory
@@ -213,8 +226,8 @@ public final class TaskResource {
             return true;
         }
 
-        if (scope == Scope.REPOSITORY_METADATA || other.scope == Scope.REPOSITORY_METADATA) {
-            return repositoryMetadataConflicts(other);
+        if (isRepositoryScope() || other.isRepositoryScope()) {
+            return repositoryScopeConflicts(other);
         }
 
         Path thisPath = Objects.requireNonNull(comparisonPath, "comparisonPath");
@@ -240,9 +253,8 @@ public final class TaskResource {
             return false;
         }
 
-        if (scope == Scope.REPOSITORY_METADATA || other.scope == Scope.REPOSITORY_METADATA) {
-            return scope == Scope.REPOSITORY_METADATA
-                    && other.scope == Scope.REPOSITORY_METADATA
+        if (isRepositoryScope() || other.isRepositoryScope()) {
+            return scope == other.scope
                     && Objects.requireNonNull(comparisonPath, "comparisonPath")
                     .equals(other.comparisonPath);
         }
@@ -253,6 +265,35 @@ public final class TaskResource {
             return otherPath.startsWith(thisPath);
         }
         return other.scope == Scope.FILE && thisPath.equals(otherPath);
+    }
+
+    /// Returns whether this declaration permits a nested task to acquire the supplied resource.
+    ///
+    /// Shared repository-operation owners permit precise descendants inside their repository without claiming those
+    /// descendants themselves. This keeps exact child resources in normalized requests while preventing arbitrary
+    /// lock expansion outside the audited repository boundary.
+    boolean permitsNested(TaskResource other) {
+        Objects.requireNonNull(other, "other");
+        if (covers(other)) {
+            return true;
+        }
+        if (scope == Scope.DIRECTORY && kind == Kind.GAME_DIRECTORY && other.isRepositoryScope()) {
+            Path directoryPath = Objects.requireNonNull(comparisonPath, "directory comparisonPath");
+            Path repositoryPath = Objects.requireNonNull(other.comparisonPath, "repository comparisonPath");
+            return repositoryPath.startsWith(directoryPath);
+        }
+        if (scope != Scope.REPOSITORY_OPERATION || other.path == null) {
+            return false;
+        }
+        Path repositoryPath = Objects.requireNonNull(comparisonPath, "repository comparisonPath");
+        Path nestedPath = Objects.requireNonNull(other.comparisonPath, "nested comparisonPath");
+        if (other.scope == Scope.REPOSITORY_METADATA) {
+            return repositoryPath.equals(nestedPath);
+        }
+        if (other.isRepositoryScope()) {
+            return false;
+        }
+        return nestedPath.startsWith(repositoryPath);
     }
 
     /// Normalizes, deduplicates, minimizes, and sorts one resolved resource collection.
@@ -299,22 +340,36 @@ public final class TaskResource {
         return Path.of(path.toString().toLowerCase(Locale.ROOT));
     }
 
-    /// Returns whether a repository-catalog request conflicts with another semantic resource.
-    private boolean repositoryMetadataConflicts(TaskResource other) {
-        if (scope == Scope.REPOSITORY_METADATA && other.scope == Scope.REPOSITORY_METADATA) {
-            return Objects.requireNonNull(comparisonPath, "comparisonPath")
-                    .equals(other.comparisonPath);
+    /// Returns whether this resource is one of the logical repository coordination scopes.
+    private boolean isRepositoryScope() {
+        return scope == Scope.REPOSITORY_METADATA || scope == Scope.REPOSITORY_OPERATION;
+    }
+
+    /// Returns whether a logical repository request conflicts with another semantic resource.
+    private boolean repositoryScopeConflicts(TaskResource other) {
+        if (isRepositoryScope() && other.isRepositoryScope()) {
+            if (scope == Scope.REPOSITORY_OPERATION && other.scope == Scope.REPOSITORY_OPERATION) {
+                return false;
+            }
+            if (scope != other.scope) {
+                return false;
+            }
+            Path thisPath = Objects.requireNonNull(comparisonPath, "comparisonPath");
+            Path otherPath = Objects.requireNonNull(other.comparisonPath, "other comparisonPath");
+            return thisPath.startsWith(otherPath) || otherPath.startsWith(thisPath);
         }
 
-        TaskResource metadata = scope == Scope.REPOSITORY_METADATA ? this : other;
-        TaskResource candidate = scope == Scope.REPOSITORY_METADATA ? other : this;
+        TaskResource repositoryResource = isRepositoryScope() ? this : other;
+        TaskResource candidate = isRepositoryScope() ? other : this;
         if (candidate.kind != Kind.GAME_DIRECTORY) {
             return false;
         }
 
-        Path metadataPath = Objects.requireNonNull(metadata.comparisonPath, "metadata comparisonPath");
+        Path repositoryPath = Objects.requireNonNull(
+                repositoryResource.comparisonPath,
+                "repository comparisonPath");
         Path candidatePath = Objects.requireNonNull(candidate.comparisonPath, "candidate comparisonPath");
-        return candidatePath.startsWith(metadataPath) || metadataPath.startsWith(candidatePath);
+        return repositoryPath.startsWith(candidatePath);
     }
 
     /// Returns stable text for resource ordering.
@@ -366,6 +421,8 @@ public final class TaskResource {
         GAME_DIRECTORY,
         /// Repository instance-catalog and destination-name resolution scope.
         REPOSITORY_METADATA,
+        /// Shared execution domain for independent operations in one repository.
+        REPOSITORY_OPERATION,
         /// Complete game-instance tree.
         GAME_INSTANCE,
         /// Exact download destination.
@@ -396,6 +453,8 @@ public final class TaskResource {
         DIRECTORY(2),
         /// Repository metadata scope keyed by one normalized repository path.
         REPOSITORY_METADATA(2),
+        /// Shared repository operation scope keyed by one normalized repository path.
+        REPOSITORY_OPERATION(2),
         /// Exact filesystem path.
         FILE(3);
 

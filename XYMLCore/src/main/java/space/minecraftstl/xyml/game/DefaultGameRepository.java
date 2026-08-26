@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.download.MaintainTask;
 import space.minecraftstl.xyml.event.*;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
@@ -577,11 +578,19 @@ public class DefaultGameRepository implements GameRepository {
         return assetsDir;
     }
 
+    /// Creates a stopped task that normalizes, persists, and publishes one instance manifest.
+    ///
+    /// Repository metadata protects the mutable in-memory instance catalog, while the precise instance and library
+    /// resources cover the manifest file and compatibility libraries written during maintenance.
+    ///
+    /// @param instanceManifest manifest to persist
+    /// @return stopped task yielding the persisted manifest
     public Task<GameInstanceManifest> saveAsync(GameInstanceManifest instanceManifest) {
+        GameInstanceManifest capturedManifest = Objects.requireNonNull(instanceManifest, "instanceManifest");
         return Task.supplyAsync(() -> {
-            GameInstanceManifest savedManifest = instanceManifest.isResolvedPreservingPatches()
-                    ? MaintainTask.maintainPreservingPatches(this, instanceManifest)
-                    : instanceManifest;
+            GameInstanceManifest savedManifest = capturedManifest.isResolvedPreservingPatches()
+                    ? MaintainTask.maintainPreservingPatches(this, capturedManifest)
+                    : capturedManifest;
 
             Path json = getInstanceJson(savedManifest.id()).toAbsolutePath();
             Files.createDirectories(json.getParent());
@@ -591,7 +600,10 @@ public class DefaultGameRepository implements GameRepository {
             currentStatus.instances.put(savedManifest.id(), new InstanceHolder(currentStatus, savedManifest.id(), savedManifest));
             gameVersions.clear();
             return savedManifest;
-        });
+        }).setResources(
+                TaskResource.repositoryMetadata(getBaseDirectory()),
+                TaskResource.gameInstance(getInstanceRoot(capturedManifest.id())),
+                TaskResource.gameDirectory(getLibrariesDirectory(capturedManifest)));
     }
 
     public Path getModpackConfiguration(GameInstanceID instanceId) {

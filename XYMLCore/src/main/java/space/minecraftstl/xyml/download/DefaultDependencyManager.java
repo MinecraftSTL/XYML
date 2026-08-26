@@ -17,6 +17,8 @@
  */
 package space.minecraftstl.xyml.download;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.cleanroom.CleanroomInstallTask;
 import space.minecraftstl.xyml.download.forge.ForgeInstallTask;
 import space.minecraftstl.xyml.download.game.GameAssetDownloadTask;
@@ -41,11 +43,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Note: This class has no state.
- *
- * @author huangyuhui
- */
+/// Creates repository-aware installation and repair task graphs.
+///
+/// @author huangyuhui
+@NotNullByDefault
 public class DefaultDependencyManager extends AbstractDependencyManager {
 
     private final DefaultGameRepository repository;
@@ -81,6 +82,9 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
     /// {@inheritDoc}
     @Override
     public Task<?> checkGameCompletionAsync(GameInstanceManifest manifest, boolean integrityCheck) {
+        TaskResource metadataResource = TaskResource.repositoryMetadata(repository.getBaseDirectory());
+        TaskResource operationResource = TaskResource.repositoryOperation(repository.getBaseDirectory());
+        TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(manifest.id()));
         return new Task<>() {
             private List<Task<?>> dependencies = List.of();
 
@@ -92,7 +96,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                             ? new GameDownloadTask(DefaultDependencyManager.this, null, manifest)
                             : null;
                 }).thenComposeAsync(checkPatchCompletionAsync(manifest, integrityCheck))
-                        .setResources(TaskResource.repositoryMetadata(repository.getBaseDirectory()))
+                        .setResources(operationResource, instanceResource)
                         .releaseResourcesBeforeDependencies();
                 dependencies = List.of(
                         versionAndPatch,
@@ -108,8 +112,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
             public List<Task<?>> getDependencies() {
                 return dependencies;
             }
-        }.setResources(
-                TaskResource.repositoryMetadata(repository.getBaseDirectory()))
+        }.setResources(metadataResource, instanceResource)
                 .releaseResourcesBeforeDependencies();
     }
 
@@ -121,6 +124,8 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
     /// {@inheritDoc}
     @Override
     public Task<?> checkPatchCompletionAsync(GameInstanceManifest manifest, boolean integrityCheck) {
+        TaskResource metadataResource = TaskResource.repositoryMetadata(repository.getBaseDirectory());
+        TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(manifest.id()));
         return new Task<>() {
             private List<Task<?>> dependencies = List.of();
 
@@ -128,7 +133,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
             public void execute() throws Exception {
                 List<Task<?>> tasks = new ArrayList<>(0);
 
-                String gameVersion = repository.getGameVersion(manifest).orElse(null);
+                @Nullable String gameVersion = repository.getGameVersion(manifest).orElse(null);
                 if (gameVersion == null) {
                     dependencies = List.of();
                     return;
@@ -143,7 +148,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                         continue;
 
                     if (type == LibraryAnalyzer.LibraryType.OPTIFINE) {
-                        String optifinePatchVersion = analyzer.getVersion(type)
+                        @Nullable String optifinePatchVersion = analyzer.getVersion(type)
                                 .map(optifineVersion -> {
                                     Matcher matcher = Pattern.compile("^([0-9.]+)_(?<optifine>HD_.+)$").matcher(optifineVersion);
                                     return matcher.find() ? matcher.group("optifine") : optifineVersion;
@@ -186,7 +191,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
             public List<Task<?>> getDependencies() {
                 return dependencies;
             }
-        }.setResources(TaskResource.repositoryMetadata(repository.getBaseDirectory()))
+        }.setResources(metadataResource, instanceResource)
                 .releaseResourcesBeforeDependencies();
     }
 
@@ -273,7 +278,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
         // So resolving this game version to preserve all information in this version.json is necessary.
         return Task.supplyAsync(() -> {
             GameInstanceManifest independentVersion = repository.resolve(manifest).standaloneManifest();
-            String gameVersion = repository.getGameVersion(independentVersion).orElse(null);
+            @Nullable String gameVersion = repository.getGameVersion(independentVersion).orElse(null);
             return LibraryAnalyzer.analyze(independentVersion, gameVersion).removeLibrary(libraryId).build();
         }).setResources(
                 TaskResource.gameInstance(repository.getInstanceRoot(manifest.id())),
