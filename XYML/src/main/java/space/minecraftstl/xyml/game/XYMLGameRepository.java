@@ -239,14 +239,14 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         return Objects.requireNonNullElse(parent.runningDirectoryProperty().getValue(), "");
     }
 
-    /// Streams visible installed instances in release-time and version-number order.
+    /// Streams visible installed instances in version-number and release-time order.
     ///
     /// @return lazily filtered and sorted visible instance manifests
     public Stream<GameInstanceManifest> getDisplayInstanceManifests() {
         return getInstanceManifests().stream()
                 .filter(v -> !v.isHidden())
-                .sorted(Comparator.comparing((GameInstanceManifest v) -> Lang.requireNonNullElse(v.releaseTime(), Instant.EPOCH))
-                        .thenComparing(v -> VersionNumber.asVersion(v.id().id())));
+                .sorted(Comparator.comparing((GameInstanceManifest v) -> VersionNumber.asVersion(v.id().id()))
+                        .thenComparing(v -> Lang.requireNonNullElse(v.releaseTime(), Instant.EPOCH)));
     }
 
     /// Detects the Minecraft version from one already captured primary JAR path.
@@ -295,13 +295,16 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         refreshAsync().start();
     }
 
-    /// Removes crash reports and logs from one game directory.
+    /// Removes crash reports, log directories, and root-level log files from one game directory.
     ///
     /// @param directory directory to clean
-    /// @throws IOException if either generated directory cannot be removed
+    /// @throws IOException if generated content cannot be removed
     private void clean(Path directory) throws IOException {
         FileUtils.deleteDirectory(directory.resolve("crash-reports"));
         FileUtils.deleteDirectory(directory.resolve("logs"));
+        for (Path logFile : FileUtils.listFilesByExtension(directory, "log")) {
+            Files.deleteIfExists(logFile);
+        }
     }
 
     /// Removes generated crash reports and logs from shared and instance running directories.
