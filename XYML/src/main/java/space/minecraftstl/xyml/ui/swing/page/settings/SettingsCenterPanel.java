@@ -208,6 +208,12 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Local MCP HTTP listener port input.
     private final JTextField mcpPortField = new JTextField();
 
+    /// Shows validation and persistence feedback for MCP settings.
+    private final JLabel mcpValidationLabel = new JLabel();
+
+    /// Shows restart state and provides the immediate restart action for MCP settings.
+    private final SettingsRestartPanel mcpRestartPanel;
+
     /// Store subscription released when this panel is discarded.
     private final Subscription storeSubscription;
 
@@ -318,6 +324,10 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 localizedRestartStrings(),
                 restartCommand,
                 this::restartActivityChanged);
+        mcpRestartPanel = new SettingsRestartPanel(
+                localizedDelayedEffectRestartStrings(),
+                restartCommand,
+                this::restartActivityChanged);
         appearancePanel.attachCornerRadiusRestartPanel(
                 localizedDelayedEffectRestartStrings(),
                 restartCommand,
@@ -396,6 +406,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 nbtSettingsPanel.close();
                 maintenanceActions.close();
                 restartPanel.close();
+                mcpRestartPanel.close();
                 setInteractiveControlsEnabled(false);
             }
         });
@@ -536,11 +547,13 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
 
     /// Configures MCP enablement persistence.
     private void configureMcpControls() {
+        mcpEnabledBox.setName("settingsMcpEnabled");
         mcpEnabledBox.addActionListener(event -> {
             if (!applyingSnapshot) {
                 store.setMcpEnabled(mcpEnabledBox.isSelected());
             }
         });
+        mcpPortField.setName("settingsMcpPort");
         mcpPortField.addActionListener(event -> persistMcpPort());
         mcpPortField.addFocusListener(new FocusAdapter() {
             @Override
@@ -548,6 +561,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 persistMcpPort();
             }
         });
+        mcpValidationLabel.setName("settingsMcpValidation");
     }
 
     /// Creates the general preferences page.
@@ -607,6 +621,8 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         page.add(createHeading(i18n("settings.mcp.title")), "growx");
         page.add(mcpEnabledBox, "growx");
         page.add(createFieldRow(i18n("settings.mcp.port"), mcpPortField), "growx");
+        page.add(mcpRestartPanel, "growx");
+        page.add(mcpValidationLabel, "growx");
         return page;
     }
 
@@ -1072,13 +1088,17 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
 
     /// Validates and persists the local MCP listener port.
     private void persistMcpPort() {
+        EdtDispatcher.requireEventDispatchThread();
         if (closed || applyingSnapshot) {
             return;
         }
         @Nullable Integer port = parseMcpPort(mcpPortField.getText());
-        if (port != null) {
-            store.setMcpPort(port);
+        if (port == null) {
+            mcpValidationLabel.setText(i18n("input.number"));
+            return;
         }
+        mcpValidationLabel.setText("");
+        store.setMcpPort(port);
     }
 
     /// Parses a legal local MCP listener port.
@@ -1167,6 +1187,8 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             networkValidationLabel.setText("");
             mcpEnabledBox.setSelected(snapshot.mcpEnabled());
             mcpPortField.setText(Integer.toString(snapshot.mcpPort()));
+            mcpValidationLabel.setText("");
+            mcpRestartPanel.updateMcpSettings(snapshot.mcpEnabled(), snapshot.mcpPort());
 
             setInteractiveControlsEnabled(snapshot.writable());
             updateDownloadControlAvailability();
@@ -1187,6 +1209,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         disableUpdatePromptBox.setEnabled(interactive);
         disableAprilFoolsBox.setEnabled(interactive);
         restartPanel.setAvailable(interactive);
+        mcpRestartPanel.setAvailable(interactive);
         appearancePanel.setRestartInProgress(restartInProgress);
         if (fontSettingsPanel != null) {
             fontSettingsPanel.setRestartInProgress(restartInProgress);
@@ -1203,6 +1226,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         networkValidationLabel.setEnabled(interactive);
         mcpEnabledBox.setEnabled(interactive);
         mcpPortField.setEnabled(interactive);
+        mcpValidationLabel.setEnabled(interactive);
         updateStatusLabel.setEnabled(!closed);
         cacheStatusLabel.setEnabled(!closed);
         updateMaintenanceControlAvailability();
