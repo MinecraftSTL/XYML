@@ -32,9 +32,10 @@ import java.util.Objects;
 
 /// Immutable semantic key describing filesystem state occupied by a [Task].
 ///
-/// Path-backed resources use normalized absolute paths without resolving symbolic links. Directory resources cover
-/// their complete descendant tree, while file resources cover one exact path. Resource kinds remain visible in
-/// diagnostics even though conflict detection is based on the represented filesystem range.
+/// Path-backed declarations use normalized absolute paths at construction time; the lock manager additionally resolves
+/// existing symbolic-link and junction components before arbitration. Directory resources cover their complete
+/// descendant tree, while file resources cover one exact path. Resource kinds remain visible in diagnostics even though
+/// conflict detection is based on the represented filesystem range.
 @NotNullByDefault
 public final class TaskResource {
     /// Stable ordering used for atomic multi-resource acquisition.
@@ -51,6 +52,10 @@ public final class TaskResource {
 
     /// Shared explicit process-wide resource.
     private static final TaskResource GLOBAL = new TaskResource(Kind.GLOBAL, Scope.GLOBAL, null);
+
+    /// Shared marker for a pure graph-orchestration phase.
+    private static final TaskResource ORCHESTRATION =
+            new TaskResource(Kind.ORCHESTRATION, Scope.ORCHESTRATION, null);
 
     /// Semantic category retained for diagnostics and stable ordering.
     private final Kind kind;
@@ -78,8 +83,12 @@ public final class TaskResource {
 
     /// Returns the default declaration used until a task is explicitly audited.
     ///
-    /// A root task resolves this declaration to [#global()]. A nested task resolves it to its direct parent owner's
-    /// effective request; an explicitly narrowed parent therefore defines the conservative boundary for its subtree.
+    /// A root task resolves this declaration to [#global()]. A nested task inherits the nearest complete filesystem
+    /// boundary. A repository metadata/operation declaration is eligible only when a game-directory declaration covers
+    /// that repository; mixed coordination and narrow resources otherwise fall back to [#global()]. If no complete
+    /// boundary exists, the nested task also resolves globally so an unknown write never becomes lock-free. The lock
+    /// manager rejects that global expansion while a narrower ancestor remains active; an audited parent must retain a
+    /// complete boundary or hand off before the child starts.
     ///
     /// @return shared conservative declaration
     public static TaskResource conservative() {
@@ -91,6 +100,17 @@ public final class TaskResource {
     /// @return shared global resource
     public static TaskResource global() {
         return GLOBAL;
+    }
+
+    /// Returns a non-filesystem marker for a pure task-graph orchestration phase.
+    ///
+    /// This marker does not conflict with precise filesystem resources and must only be used by framework tasks whose
+    /// work is limited to coordinating already declared child tasks. It still conflicts with [#global()] through the
+    /// process-wide exclusion rule.
+    ///
+    /// @return shared orchestration marker
+    static TaskResource orchestration() {
+        return ORCHESTRATION;
     }
 
     /// Creates a resource covering one complete game-directory tree.
@@ -212,9 +232,30 @@ public final class TaskResource {
         return path;
     }
 
+    /// Creates an equivalent resource with a canonical filesystem path for lock-manager use.
+    ///
+    /// The logical kind and coverage shape are preserved; callers should keep the original resource for diagnostics.
+    ///
+    /// @param canonicalPath canonical or fail-closed normalized path
+    /// @return resource with the supplied path
+    TaskResource withPath(Path canonicalPath) {
+        if (path == null) {
+            throw new IllegalStateException("Non-path task resources cannot be assigned a path");
+        }
+        return new TaskResource(kind, scope, normalizePath(canonicalPath));
+    }
+
     /// Returns whether this declaration is the conservative unresolved default.
     boolean isConservative() {
         return scope == Scope.CONSERVATIVE;
+    }
+
+    /// Returns whether this resource is an exclusive filesystem boundary suitable for unknown nested writes.
+    ///
+    /// Logical repository coordination scopes deliberately return false: they coordinate a known metadata or
+    /// operation phase, but do not promise to protect arbitrary filesystem writes made by a conservative child.
+    boolean isExclusiveCoverage() {
+        return scope == Scope.GLOBAL || scope == Scope.DIRECTORY || scope == Scope.FILE;
     }
 
     /// Returns whether this resource conflicts with another normalized resource.
@@ -224,6 +265,10 @@ public final class TaskResource {
         other.requireResolved();
         if (scope == Scope.GLOBAL || other.scope == Scope.GLOBAL) {
             return true;
+        }
+
+        if (scope == Scope.ORCHESTRATION || other.scope == Scope.ORCHESTRATION) {
+            return false;
         }
 
         if (isRepositoryScope() || other.isRepositoryScope()) {
@@ -253,6 +298,10 @@ public final class TaskResource {
             return false;
         }
 
+        if (scope == Scope.ORCHESTRATION || other.scope == Scope.ORCHESTRATION) {
+            return scope == Scope.ORCHESTRATION && other.scope == Scope.ORCHESTRATION;
+        }
+
         if (isRepositoryScope() || other.isRepositoryScope()) {
             return scope == other.scope
                     && Objects.requireNonNull(comparisonPath, "comparisonPath")
@@ -274,7 +323,16 @@ public final class TaskResource {
     /// lock expansion outside the audited repository boundary.
     boolean permitsNested(TaskResource other) {
         Objects.requireNonNull(other, "other");
+        // An orchestration node has no filesystem coverage and can therefore be nested beneath any owner without
+        // expanding the ancestor's protected range. Its own children still need an explicit handoff before acquiring
+        // resources outside an ancestor's coverage.
+        if (other.scope == Scope.ORCHESTRATION) {
+            return true;
+        }
         if (covers(other)) {
+            return true;
+        }
+        if (scope == Scope.ORCHESTRATION && other.scope == Scope.ORCHESTRATION) {
             return true;
         }
         if (scope == Scope.DIRECTORY && kind == Kind.GAME_DIRECTORY && other.isRepositoryScope()) {
@@ -283,6 +341,9 @@ public final class TaskResource {
             return repositoryPath.startsWith(directoryPath);
         }
         if (scope != Scope.REPOSITORY_OPERATION || other.path == null) {
+            return false;
+        }
+        if (conflictsWith(other)) {
             return false;
         }
         Path repositoryPath = Objects.requireNonNull(comparisonPath, "repository comparisonPath");
@@ -303,10 +364,16 @@ public final class TaskResource {
             throw new IllegalArgumentException("Task resource declarations cannot be empty");
         }
 
-        ArrayList<TaskResource> normalized = new ArrayList<>(resources.size());
+        ArrayList<TaskResource> candidates = new ArrayList<>(resources.size());
         for (TaskResource resource : resources) {
             TaskResource checkedResource = Objects.requireNonNull(resource, "resource");
             checkedResource.requireResolved();
+            candidates.add(checkedResource);
+        }
+        candidates.sort(ORDER);
+
+        ArrayList<TaskResource> normalized = new ArrayList<>(candidates.size());
+        for (TaskResource checkedResource : candidates) {
             if (normalized.stream().anyMatch(existing -> existing.covers(checkedResource))) {
                 continue;
             }
@@ -417,6 +484,8 @@ public final class TaskResource {
         CONSERVATIVE,
         /// Explicit process-wide exclusion.
         GLOBAL,
+        /// Pure task-graph orchestration marker with no filesystem coverage.
+        ORCHESTRATION,
         /// Complete game-directory tree.
         GAME_DIRECTORY,
         /// Repository instance-catalog and destination-name resolution scope.
@@ -449,6 +518,8 @@ public final class TaskResource {
         CONSERVATIVE(0),
         /// Process-wide wildcard.
         GLOBAL(1),
+        /// Pure graph-orchestration marker with no filesystem path.
+        ORCHESTRATION(2),
         /// Complete directory tree.
         DIRECTORY(2),
         /// Repository metadata scope keyed by one normalized repository path.

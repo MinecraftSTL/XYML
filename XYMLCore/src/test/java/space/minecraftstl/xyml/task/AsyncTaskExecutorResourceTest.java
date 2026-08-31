@@ -148,6 +148,34 @@ public final class AsyncTaskExecutorResourceTest {
         assertEquals(0, manager.trackedResourceCount());
     }
 
+    /// Verifies a pure all-of root hands off before its prerequisite and does not hold a global lease over the wait.
+    @Test
+    public void allOfRootHandsOffBeforePrerequisites() throws Exception {
+        TaskResource firstResource = target("aggregate-first.jar");
+        TaskResource unrelatedResource = target("aggregate-unrelated.jar");
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch unrelatedStarted = new CountDownLatch(1);
+
+        Task<?> first = task(firstResource, () -> {
+            firstStarted.countDown();
+            await(releaseFirst);
+        });
+        Task<?> aggregate = Task.allOf(List.of(first));
+        Task<?> unrelated = task(unrelatedResource, unrelatedStarted::countDown);
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+
+        CompletableFuture<Boolean> aggregateResult = execute(aggregate, manager);
+        assertTrue(firstStarted.await(5, TimeUnit.SECONDS));
+        CompletableFuture<Boolean> unrelatedResult = execute(unrelated, manager);
+
+        assertTrue(unrelatedStarted.await(5, TimeUnit.SECONDS));
+        releaseFirst.countDown();
+        assertTrue(get(aggregateResult));
+        assertTrue(get(unrelatedResult));
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Verifies that a repository-scoped resolution phase serializes while its detached instance operations overlap.
     @Test
     public void resourceHandoffSerializesResolutionAndParallelizesInstances() throws Exception {
@@ -196,6 +224,23 @@ public final class AsyncTaskExecutorResourceTest {
         assertTrue(secondOperationStarted.await(5, TimeUnit.SECONDS));
 
         releaseOperations.countDown();
+        assertTrue(get(firstResult));
+        assertTrue(get(secondResult));
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies audited dynamic composition callbacks do not globalize different instance branches.
+    @Test
+    public void auditedDynamicCompositionParallelizesDifferentInstances() {
+        Path repository = temporaryDirectory.resolve("dynamic-repository");
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        Task<?> first = dynamicCompositionParent(repository, "first", barrier);
+        Task<?> second = dynamicCompositionParent(repository, "second", barrier);
+
+        CompletableFuture<Boolean> firstResult = execute(first, manager);
+        CompletableFuture<Boolean> secondResult = execute(second, manager);
+
         assertTrue(get(firstResult));
         assertTrue(get(secondResult));
         assertEquals(0, manager.trackedResourceCount());
@@ -305,6 +350,81 @@ public final class AsyncTaskExecutorResourceTest {
         assertEquals(0, manager.trackedResourceCount());
     }
 
+    /// Verifies a future task can launch a child from another continuation thread under the same owner chain.
+    @Test
+    public void completableFutureChildReentersAcrossThreads() {
+        TaskResource instance = TaskResource.gameInstance(temporaryDirectory.resolve("instances/future-parent"));
+        AtomicBoolean childRan = new AtomicBoolean();
+        Task<@Nullable Void> child = task(
+                TaskResource.downloadTarget(temporaryDirectory.resolve("instances/future-parent/child.jar")),
+                () -> childRan.set(true));
+        CompletableFutureTask<@Nullable Void> parent = new CompletableFutureTask<>() {
+            /// Schedules the child through a separate completable-future continuation.
+            @Override
+            public CompletableFuture<@Nullable Void> getFuture(TaskCompletableFuture executor) {
+                return CompletableFuture.completedFuture(null)
+                        .thenComposeAsync(ignored -> executor.one(child));
+            }
+        };
+        parent.setResources(instance);
+        Task<?> parentTask = parent;
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+
+        assertTrue(assertTimeoutPreemptively(TIMEOUT, () -> new AsyncTaskExecutor(parentTask, manager).test()));
+        assertTrue(childRan.get());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies cancelling an exposed nested future cannot suppress cleanup when its lease is granted later.
+    @Test
+    public void cancelledNestedFutureCannotLeakLateLease() throws Exception {
+        TaskResource resource = target("late-cancel.jar");
+        TaskResource parentResource = TaskResource.repositoryOperation(temporaryDirectory);
+        CountDownLatch holderStarted = new CountDownLatch(1);
+        CountDownLatch releaseHolder = new CountDownLatch(1);
+        CountDownLatch childScheduled = new CountDownLatch(1);
+        CountDownLatch childRan = new CountDownLatch(1);
+        AtomicReference<CompletableFuture<@Nullable Void>> childFuture = new AtomicReference<>();
+        CompletableFuture<@Nullable Void> parentCompletion = new CompletableFuture<>();
+        Task<?> holder = task(resource, () -> {
+            holderStarted.countDown();
+            await(releaseHolder);
+        });
+        Task<@Nullable Void> child = task(resource, childRan::countDown);
+        CompletableFutureTask<@Nullable Void> parent = new CompletableFutureTask<>() {
+            /// Schedules one conflicting child and keeps the parent alive until the test releases it.
+            @Override
+            public CompletableFuture<@Nullable Void> getFuture(TaskCompletableFuture executor) {
+                childFuture.set(executor.one(child));
+                childScheduled.countDown();
+                return parentCompletion;
+            }
+        };
+        parent.setResources(parentResource);
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        CompletableFuture<Boolean> holderResult = execute(holder, manager);
+        assertTrue(holderStarted.await(5, TimeUnit.SECONDS));
+        AsyncTaskExecutor parentExecutor = new AsyncTaskExecutor(parent, manager);
+        CompletableFuture<Boolean> parentResult = CompletableFuture.supplyAsync(parentExecutor::test);
+        assertTrue(childScheduled.await(5, TimeUnit.SECONDS));
+        awaitCondition(() -> manager.pendingWaiterCount() == 1);
+
+        CompletableFuture<@Nullable Void> exposedChildFuture = Objects.requireNonNull(childFuture.get());
+        assertTrue(exposedChildFuture.cancel(false));
+        releaseHolder.countDown();
+        assertTrue(get(holderResult));
+        assertTrue(childRan.await(5, TimeUnit.SECONDS));
+
+        AtomicBoolean successorRan = new AtomicBoolean();
+        assertTrue(get(execute(task(resource, () -> successorRan.set(true)), manager)));
+        assertTrue(successorRan.get());
+        assertTrue(exposedChildFuture.isCancelled());
+        parentCompletion.complete(null);
+        assertTrue(get(parentResult));
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Verifies successful, exceptional, error, interrupted, and rejected regular tasks all release their resources.
     @Test
     public void regularTerminalPathsAlwaysReleaseResources() {
@@ -338,6 +458,41 @@ public final class AsyncTaskExecutorResourceTest {
                 "future-cancel.jar",
                 Task.fromCompletableFuture(cancelledFuture),
                 false);
+    }
+
+    /// Verifies a cancelled future reaches both legacy and independently resourced completion callbacks.
+    @Test
+    public void cancelledCompletableFutureReachesCompletionCallbacks() {
+        AtomicReference<@Nullable Exception> legacyFailure = new AtomicReference<>();
+        CompletableFuture<@Nullable Void> legacyFuture = new CompletableFuture<>();
+        legacyFuture.cancel(false);
+        Task<?> legacyCompletion = Task.fromCompletableFuture(legacyFuture)
+                .setResources(target("legacy-cancelled-future.jar"))
+                .whenComplete(Runnable::run, legacyFailure::set);
+        AsyncTaskExecutor legacyExecutor = new AsyncTaskExecutor(legacyCompletion, new TaskResourceLockManager());
+
+        assertFalse(assertTimeoutPreemptively(TIMEOUT, legacyExecutor::test));
+        assertTrue(legacyFailure.get() instanceof java.util.concurrent.CancellationException);
+
+        Path repository = temporaryDirectory.resolve("resourced-cancelled-future");
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        AtomicReference<@Nullable Exception> resourcedFailure = new AtomicReference<>();
+        CompletableFuture<@Nullable Void> resourcedFuture = new CompletableFuture<>();
+        resourcedFuture.cancel(false);
+        Task<?> resourcedCompletion = Task.fromCompletableFuture(resourcedFuture)
+                .setResources(
+                        TaskResource.repositoryOperation(repository),
+                        TaskResource.gameInstance(repository.resolve("versions/example")))
+                .whenCompleteWithResources(
+                        Runnable::run,
+                        resourcedFailure::set,
+                        TaskResource.repositoryMetadata(repository));
+        AsyncTaskExecutor resourcedExecutor = new AsyncTaskExecutor(resourcedCompletion, manager);
+
+        assertFalse(assertTimeoutPreemptively(TIMEOUT, resourcedExecutor::test));
+        assertTrue(resourcedFailure.get() instanceof java.util.concurrent.CancellationException);
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
     }
 
     /// Verifies an error raised by a terminal listener cannot leak the completed task's lease.
@@ -418,6 +573,214 @@ public final class AsyncTaskExecutorResourceTest {
         assertTrue(get(waiterResult));
         assertTrue(waiterRan.get());
         assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a terminal cleanup does not acquire its repository resource while the long prerequisite is running.
+    @Test
+    public void resourceAwareCompletionAcquiresCleanupResourceAfterPrerequisite() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource operationResource = TaskResource.repositoryOperation(
+                temporaryDirectory.resolve("cleanup-repository"));
+        TaskResource cleanupResource = TaskResource.repositoryMetadata(temporaryDirectory.resolve("cleanup-repository"));
+        TaskResource instanceResource = TaskResource.gameInstance(
+                temporaryDirectory.resolve("cleanup-repository/versions/example"));
+        CountDownLatch holderStarted = new CountDownLatch(1);
+        CountDownLatch releaseHolder = new CountDownLatch(1);
+        CountDownLatch prerequisiteStarted = new CountDownLatch(1);
+        CountDownLatch releasePrerequisite = new CountDownLatch(1);
+        AtomicBoolean cleanupRan = new AtomicBoolean();
+        Task<?> holder = task(cleanupResource, () -> {
+            holderStarted.countDown();
+            await(releaseHolder);
+        });
+        Task<?> prerequisite = Task.runAsync(() -> {
+            prerequisiteStarted.countDown();
+            await(releasePrerequisite);
+        }).setResources(operationResource, instanceResource);
+        Task<?> completion = prerequisite.whenCompleteWithResources(
+                Runnable::run,
+                ignoredFailure -> cleanupRan.set(true),
+                cleanupResource);
+
+        CompletableFuture<Boolean> holderResult = execute(holder, manager);
+        assertTrue(holderStarted.await(5, TimeUnit.SECONDS));
+        CompletableFuture<Boolean> completionResult = execute(completion, manager);
+        assertTrue(prerequisiteStarted.await(5, TimeUnit.SECONDS));
+        assertEquals(0, manager.pendingWaiterCount());
+
+        releasePrerequisite.countDown();
+        awaitCondition(() -> manager.pendingWaiterCount() == 1);
+        assertFalse(cleanupRan.get());
+        releaseHolder.countDown();
+
+        assertTrue(get(holderResult));
+        assertTrue(get(completionResult));
+        assertTrue(cleanupRan.get());
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a resource-aware completion never inherits either early-release policy from its prerequisite.
+    @Test
+    public void resourceAwareCompletionRetainsSourceResourceAcrossCleanup() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource resource = target("retained-cleanup.jar");
+        CountDownLatch prerequisiteStarted = new CountDownLatch(1);
+        CountDownLatch releasePrerequisite = new CountDownLatch(1);
+        CountDownLatch cleanupStarted = new CountDownLatch(1);
+        CountDownLatch releaseCleanup = new CountDownLatch(1);
+        AtomicBoolean competitorRan = new AtomicBoolean();
+        Task<?> prerequisite = Task.runAsync(() -> {
+            prerequisiteStarted.countDown();
+            await(releasePrerequisite);
+        }).setResources(resource)
+                .releaseResourcesBeforeDependents()
+                .releaseResourcesBeforeDependencies();
+        Task<?> completion = prerequisite.whenCompleteWithResources(
+                Runnable::run,
+                ignoredFailure -> {
+                    cleanupStarted.countDown();
+                    await(releaseCleanup);
+                },
+                resource);
+
+        assertFalse(completion.releasesResourcesBeforeDependents());
+        assertFalse(completion.releasesResourcesBeforeDependencies());
+        CompletableFuture<Boolean> completionResult = execute(completion, manager);
+        assertTrue(prerequisiteStarted.await(5, TimeUnit.SECONDS));
+        CompletableFuture<Boolean> competitorResult = execute(
+                task(resource, () -> competitorRan.set(true)),
+                manager);
+        awaitCondition(() -> manager.pendingWaiterCount() == 1);
+        assertFalse(competitorRan.get());
+
+        releasePrerequisite.countDown();
+        assertTrue(cleanupStarted.await(5, TimeUnit.SECONDS));
+        assertFalse(competitorRan.get());
+        releaseCleanup.countDown();
+
+        assertTrue(get(completionResult));
+        assertTrue(get(competitorResult));
+        assertTrue(competitorRan.get());
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies cancellation after finalizer startup still runs its independently resourced terminal cleanup.
+    @Test
+    public void resourceAwareCompletionRunsCleanupAfterCancellation() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource operationResource = TaskResource.repositoryOperation(temporaryDirectory.resolve("cancel-cleanup"));
+        TaskResource instanceResource = TaskResource.gameInstance(
+                temporaryDirectory.resolve("cancel-cleanup/versions/example"));
+        TaskResource cleanupResource = TaskResource.repositoryMetadata(temporaryDirectory.resolve("cancel-cleanup"));
+        CountDownLatch prerequisiteStarted = new CountDownLatch(1);
+        CountDownLatch releasePrerequisite = new CountDownLatch(1);
+        CountDownLatch cleanupRan = new CountDownLatch(1);
+        AtomicReference<@Nullable Exception> cleanupFailure = new AtomicReference<>();
+        Task<?> prerequisite = Task.runAsync(() -> {
+            prerequisiteStarted.countDown();
+            await(releasePrerequisite);
+        }).setResources(operationResource, instanceResource);
+        Task<?> completion = prerequisite.whenCompleteWithResources(
+                Runnable::run,
+                failure -> {
+                    cleanupFailure.set(failure);
+                    cleanupRan.countDown();
+                },
+                cleanupResource);
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(completion, manager);
+
+        CompletableFuture<Boolean> result = CompletableFuture.supplyAsync(executor::test);
+        assertTrue(prerequisiteStarted.await(5, TimeUnit.SECONDS));
+        executor.cancel();
+        releasePrerequisite.countDown();
+
+        assertTrue(cleanupRan.await(5, TimeUnit.SECONDS));
+        assertFalse(get(result));
+        assertTrue(cleanupFailure.get() instanceof java.util.concurrent.CancellationException);
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a terminal-cleanup exception still takes precedence over the prerequisite failure.
+    @Test
+    public void resourceAwareCompletionPreservesCallbackFailurePriority() {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        Task<?> prerequisite = Task.runAsync(() -> {
+            throw new IOException("prerequisite failure");
+        }).setResources(
+                TaskResource.repositoryOperation(temporaryDirectory),
+                target("cleanup-prerequisite.jar"));
+        Task<?> completion = prerequisite.whenCompleteWithResources(
+                Runnable::run,
+                ignoredFailure -> {
+                    throw new IllegalStateException("cleanup failure");
+                },
+                target("cleanup-callback.jar"));
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(completion, manager);
+
+        assertFalse(assertTimeoutPreemptively(TIMEOUT, executor::test));
+        assertTrue(executor.getException() instanceof IllegalStateException);
+        assertEquals("cleanup failure", Objects.requireNonNull(executor.getException()).getMessage());
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies the implementation-only cleanup child does not add externally visible lifecycle events.
+    @Test
+    public void resourceAwareCompletionPreservesVisibleListenerOrder() {
+        Path repository = temporaryDirectory.resolve("cleanup-listeners");
+        Task<?> prerequisite = Task.runAsync(() -> {
+        }).setResources(
+                TaskResource.repositoryOperation(repository),
+                TaskResource.gameInstance(repository.resolve("versions/example")));
+        Task<?> completion = prerequisite.whenCompleteWithResources(
+                Runnable::run,
+                ignoredFailure -> {
+                },
+                TaskResource.repositoryMetadata(repository));
+        List<String> events = new java.util.concurrent.CopyOnWriteArrayList<>();
+        AtomicBoolean unexpectedTask = new AtomicBoolean();
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(completion, new TaskResourceLockManager());
+        executor.subscribeTaskListener(new TaskListener() {
+            /// Records visible ready events and rejects an exposed cleanup child.
+            @Override
+            public void onReady(Task<?> task) {
+                unexpectedTask.compareAndSet(false, task != prerequisite && task != completion);
+                events.add(task == prerequisite ? "prerequisite-ready" : "completion-ready");
+            }
+
+            /// Records visible running events and rejects an exposed cleanup child.
+            @Override
+            public void onRunning(Task<?> task) {
+                unexpectedTask.compareAndSet(false, task != prerequisite && task != completion);
+                events.add(task == prerequisite ? "prerequisite-running" : "completion-running");
+            }
+
+            /// Records visible finished events and rejects an exposed cleanup child.
+            @Override
+            public void onFinished(Task<?> task) {
+                unexpectedTask.compareAndSet(false, task != prerequisite && task != completion);
+                events.add(task == prerequisite ? "prerequisite-finished" : "completion-finished");
+            }
+
+            /// Rejects any failed event because both visible tasks and the cleanup succeed.
+            @Override
+            public void onFailed(Task<?> task, Throwable throwable) {
+                unexpectedTask.set(true);
+            }
+        });
+
+        assertTrue(assertTimeoutPreemptively(TIMEOUT, executor::test));
+        assertFalse(unexpectedTask.get());
+        assertEquals(List.of(
+                "completion-ready",
+                "prerequisite-ready",
+                "prerequisite-running",
+                "prerequisite-finished",
+                "completion-running",
+                "completion-finished"), events);
     }
 
     /// Creates a regular task with one explicit resource declaration.
@@ -546,6 +909,26 @@ public final class AsyncTaskExecutorResourceTest {
                 return dependents;
             }
         }.setResources(resource);
+    }
+
+    /// Creates one precise repository parent whose audited callback constructs an instance-local child.
+    private static Task<Void> dynamicCompositionParent(Path repository, String instanceName, CyclicBarrier barrier) {
+        TaskResource operation = TaskResource.repositoryOperation(repository);
+        TaskResource instance = TaskResource.gameInstance(repository.resolve("versions").resolve(instanceName));
+        Task<?> composition = Task.composeAsync(() -> task(instance, () -> barrier.await(5, TimeUnit.SECONDS)))
+                .asOrchestration();
+        return new Task<Void>() {
+            /// Returns the audited dynamic composition as this parent's only prerequisite.
+            @Override
+            public @Unmodifiable List<Task<?>> getDependents() {
+                return List.of(composition);
+            }
+
+            /// Performs no work after the instance-local branch completes.
+            @Override
+            public void execute() {
+            }
+        }.setResources(operation, instance);
     }
 
     /// Executes one task asynchronously with an isolated manager.

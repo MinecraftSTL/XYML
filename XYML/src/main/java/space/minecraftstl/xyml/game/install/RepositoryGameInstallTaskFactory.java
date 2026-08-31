@@ -124,17 +124,15 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         }).setResources(metadataResource, instanceResource)
                 .thenComposeAsync(builder.buildAsync())
                 .setResources(operationResource, instanceResource);
-        return installation
-                .whenComplete(repositoryRefreshExecutor, ignoredFailure -> {
-                    repository.refresh();
-                    repository.applyDefaultIsolationSetting(instanceId);
-                })
-                .thenRunAsync(
+        Task<?> refreshed = installation.whenComplete(repositoryRefreshExecutor, ignoredFailure -> {
+            repository.refresh();
+            repository.applyDefaultIsolationSetting(instanceId);
+        })
+                .setResources(operationResource, instanceResource);
+        return refreshed.thenRunAsync(
                         instanceSelectionExecutor,
                         () -> repository.setSelectedInstance(instanceId))
-                .setResources(
-                        operationResource,
-                        instanceResource);
+                .setResources(operationResource, instanceResource);
     }
 
     /// Applies the request's base game and remote installers to a newly created game builder.

@@ -95,7 +95,7 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                     return Files.notExists(versionJar) || FileUtils.size(versionJar) == 0L
                             ? new GameDownloadTask(DefaultDependencyManager.this, null, manifest)
                             : null;
-                }).thenComposeAsync(checkPatchCompletionAsync(manifest, integrityCheck))
+                }).setResources(instanceResource).thenComposeAsync(checkPatchCompletionAsync(manifest, integrityCheck))
                         .setResources(operationResource, instanceResource)
                         .releaseResourcesBeforeDependencies();
                 dependencies = List.of(

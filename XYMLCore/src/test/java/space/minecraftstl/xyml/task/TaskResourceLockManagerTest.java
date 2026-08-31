@@ -18,15 +18,21 @@
 package space.minecraftstl.xyml.task;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
+import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -49,6 +55,9 @@ public final class TaskResourceLockManagerTest {
 
         assertEquals(Set.of(TaskResource.conservative()), task.getResources());
         assertThrows(UnsupportedOperationException.class, () -> task.getResources().clear());
+        assertEquals(
+                List.of(TaskResource.global()),
+                TaskResourcePathIdentity.resolve(List.of(TaskResource.conservative())));
         assertThrows(IllegalArgumentException.class, () -> task.setResources(
                 TaskResource.conservative(),
                 TaskResource.global()));
@@ -76,6 +85,29 @@ public final class TaskResourceLockManagerTest {
                 task.thenRunAsync(() -> { }).getResources());
     }
 
+    /// Verifies direct task composition uses a non-owning orchestration node while arbitrary callbacks remain
+    /// conservative.
+    @Test
+    public void directTaskCompositionUsesOrchestrationResource() {
+        TaskResource firstResource = TaskResource.downloadTarget(temporaryDirectory.resolve("compose-first.jar"));
+        TaskResource secondResource = TaskResource.downloadTarget(temporaryDirectory.resolve("compose-second.jar"));
+        Task<?> first = emptyTask().setResources(firstResource);
+        Task<?> second = emptyTask().setResources(secondResource);
+
+        Task<?> composed = first.thenComposeAsync(second);
+        Task<?> failureTolerant = first.withComposeAsync(second);
+
+        assertEquals(Set.of(TaskResource.orchestration()), composed.getResources());
+        assertEquals(Set.of(TaskResource.orchestration()), failureTolerant.getResources());
+        assertEquals(Set.of(TaskResource.conservative()), first.thenComposeAsync(() -> second).getResources());
+        assertEquals(
+                Set.of(TaskResource.orchestration()),
+                first.thenComposeAsync(() -> second).asOrchestration().getResources());
+        assertEquals(Set.of(TaskResource.orchestration()), first.wrapResult().getResources());
+        assertEquals(Set.of(TaskResource.orchestration()), Task.completed(null).getResources());
+        assertEquals(Set.of(TaskResource.orchestration()), Task.runSequentially().getResources());
+    }
+
     /// Verifies every file download declares its normalized exact destination without starting network work.
     @Test
     public void fileDownloadDeclaresExactTargetResource() {
@@ -84,6 +116,93 @@ public final class TaskResourceLockManagerTest {
 
         assertEquals(Set.of(TaskResource.downloadTarget(targetPath)), task.getResources());
         assertEquals(targetPath, task.getPath());
+    }
+
+    /// Verifies a symbolic-link directory and its real directory serialize the same missing target path.
+    @Test
+    public void symbolicLinkDirectorySharesIdentityForMissingLeaf() throws Exception {
+        Path realDirectory = Files.createDirectories(temporaryDirectory.resolve("real-directory"));
+        Path aliasDirectory = temporaryDirectory.resolve("alias-directory");
+        try {
+            Files.createSymbolicLink(aliasDirectory, realDirectory);
+        } catch (IOException | UnsupportedOperationException | SecurityException unavailable) {
+            Assumptions.assumeTrue(false, "Symbolic links are unavailable: " + unavailable.getMessage());
+            return;
+        }
+
+        Path realTarget = realDirectory.resolve("nested/missing.jar");
+        Path aliasTarget = aliasDirectory.resolve("nested/missing.jar");
+        assertAliasSharesIdentity(realTarget, aliasTarget);
+    }
+
+    /// Verifies a Windows junction and its target serialize the same missing descendant.
+    @Test
+    public void windowsJunctionDirectorySharesIdentityForMissingLeaf() throws Exception {
+        Assumptions.assumeTrue(File.separatorChar == '\\', "Windows junction test");
+        Path realDirectory = Files.createDirectories(temporaryDirectory.resolve("junction-real-directory"));
+        Path aliasDirectory = temporaryDirectory.resolve("junction-alias-directory");
+        Process junctionCreation = new ProcessBuilder(
+                "cmd.exe",
+                "/d",
+                "/c",
+                "mklink",
+                "/J",
+                aliasDirectory.toString(),
+                realDirectory.toString())
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .start();
+        boolean junctionCreated = junctionCreation.waitFor(5, TimeUnit.SECONDS);
+        if (!junctionCreated) {
+            junctionCreation.destroyForcibly();
+        }
+        Assumptions.assumeTrue(junctionCreated && junctionCreation.exitValue() == 0,
+                "Junction creation is unavailable");
+
+        try {
+            assertAliasSharesIdentity(
+                    realDirectory.resolve("nested/missing.jar"),
+                    aliasDirectory.resolve("nested/missing.jar"));
+        } finally {
+            Files.deleteIfExists(aliasDirectory);
+        }
+    }
+
+    /// Asserts that two lexical aliases resolve to one identity and remain mutually exclusive.
+    private static void assertAliasSharesIdentity(Path realTarget, Path aliasTarget) throws Exception {
+        assertFalse(Files.exists(realTarget, LinkOption.NOFOLLOW_LINKS));
+        assertFalse(Files.exists(aliasTarget, LinkOption.NOFOLLOW_LINKS));
+
+        List<TaskResource> realIdentity = TaskResourcePathIdentity.resolve(
+                List.of(TaskResource.downloadTarget(realTarget)));
+        List<TaskResource> aliasIdentity = TaskResourcePathIdentity.resolve(
+                List.of(TaskResource.downloadTarget(aliasTarget)));
+        assertEquals(realIdentity, aliasIdentity);
+        assertTrue(realIdentity.get(0).conflictsWith(aliasIdentity.get(0)));
+
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResourceLockManager.Lease firstLease = manager.acquire(
+                rootOwner(manager, TaskResource.downloadTarget(realTarget))).get(5, TimeUnit.SECONDS);
+        CompletableFuture<TaskResourceLockManager.Lease> aliasFuture = manager.acquire(
+                rootOwner(manager, TaskResource.downloadTarget(aliasTarget)));
+
+        assertFalse(aliasFuture.isDone());
+        firstLease.close();
+        TaskResourceLockManager.Lease aliasLease = aliasFuture.get(5, TimeUnit.SECONDS);
+        aliasLease.close();
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a missing descendant below an existing regular file fails closed to the global resource.
+    @Test
+    public void missingDescendantBelowRegularFileFallsBackToGlobal() throws Exception {
+        Path existingFile = Files.createFile(temporaryDirectory.resolve("existing-file.jar"));
+        Path impossibleDescendant = existingFile.resolve("child.jar");
+
+        assertEquals(
+                List.of(TaskResource.global()),
+                TaskResourcePathIdentity.resolve(List.of(TaskResource.downloadTarget(impossibleDescendant))));
     }
 
     /// Verifies semantic exact-file categories still conflict when they represent the same normalized path.
@@ -136,8 +255,40 @@ public final class TaskResourceLockManagerTest {
         assertTrue(operation.conflictsWith(sharedDirectory));
         assertFalse(operation.conflictsWith(libraries));
         assertTrue(operation.permitsNested(libraries));
+        assertFalse(operation.permitsNested(sharedDirectory));
         assertTrue(sharedDirectory.permitsNested(operation));
         assertEquals(Set.of(operation, instance), Set.copyOf(TaskResource.normalize(List.of(operation, instance))));
+    }
+
+    /// Verifies concurrent shared repository owners cannot upgrade to the conflicting repository directory.
+    @Test
+    public void sharedRepositoryOwnersRejectDirectoryLockUpgrade() throws Exception {
+        Path repository = temporaryDirectory.resolve("repository-upgrade");
+        TaskResource operation = TaskResource.repositoryOperation(repository);
+        TaskResource directory = TaskResource.gameDirectory(repository);
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResourceLockManager.Execution firstExecution = manager.createExecution();
+        TaskResourceLockManager.Execution secondExecution = manager.createExecution();
+        TaskResourceLockManager.Owner first = manager.createOwner(
+                firstExecution,
+                null,
+                Set.of(operation, TaskResource.gameInstance(repository.resolve("versions/first"))));
+        TaskResourceLockManager.Owner second = manager.createOwner(
+                secondExecution,
+                null,
+                Set.of(operation, TaskResource.gameInstance(repository.resolve("versions/second"))));
+        TaskResourceLockManager.Lease firstLease = manager.acquire(first).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Lease secondLease = manager.acquire(second).get(5, TimeUnit.SECONDS);
+
+        TaskResourceLockManager.Owner firstUpgrade = manager.createOwner(firstExecution, first, Set.of(directory));
+        TaskResourceLockManager.Owner secondUpgrade = manager.createOwner(secondExecution, second, Set.of(directory));
+
+        assertThrows(CompletionException.class, () -> manager.acquire(firstUpgrade).join());
+        assertThrows(CompletionException.class, () -> manager.acquire(secondUpgrade).join());
+        secondLease.close();
+        firstLease.close();
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
     }
 
     /// Verifies two unrelated roots requesting the same exact path cannot hold it concurrently.
@@ -288,6 +439,198 @@ public final class TaskResourceLockManagerTest {
         assertEquals(0, manager.trackedResourceCount());
     }
 
+    /// Verifies a conservative child cannot expand an active repository-only owner to the global resource.
+    @Test
+    public void conservativeChildUnderOperationScopeFailsFast() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource operation = TaskResource.repositoryOperation(temporaryDirectory.resolve("repository"));
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner parent = manager.createOwner(execution, null, Set.of(operation));
+        TaskResourceLockManager.Lease parentLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+
+        TaskResourceLockManager.Owner conservativeChild = manager.createOwner(
+                execution,
+                parent,
+                Set.of(TaskResource.conservative()));
+
+        assertThrows(CompletionException.class, () -> manager.acquire(conservativeChild).join());
+        parentLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies an unknown child cannot expand an active mixed repository-operation owner globally.
+    @Test
+    public void conservativeChildUnderMixedOperationAndInstanceFailsFast() throws Exception {
+        assertConservativeChildFailsOutsideCompleteBoundary(
+                TaskResource.repositoryOperation(temporaryDirectory.resolve("mixed-operation-instance")),
+                TaskResource.gameInstance(temporaryDirectory.resolve("mixed-operation-instance/versions/example")));
+    }
+
+    /// Verifies an unknown child cannot expand an active mixed repository-metadata owner globally.
+    @Test
+    public void conservativeChildUnderMixedMetadataAndInstanceFailsFast() throws Exception {
+        assertConservativeChildFailsOutsideCompleteBoundary(
+                TaskResource.repositoryMetadata(temporaryDirectory.resolve("mixed-metadata-instance")),
+                TaskResource.gameInstance(temporaryDirectory.resolve("mixed-metadata-instance/versions/example")));
+    }
+
+    /// Verifies a repository-wide game-directory boundary may safely retain a repository-operation marker.
+    @Test
+    public void conservativeChildRetainsRepositoryWideGameDirectoryBoundary() throws Exception {
+        Path repository = temporaryDirectory.resolve("repository-wide");
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner parent = manager.createOwner(
+                execution,
+                null,
+                Set.of(TaskResource.gameDirectory(repository), TaskResource.repositoryOperation(repository)),
+                true);
+        TaskResourceLockManager.Lease parentLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Owner child = manager.createOwner(
+                execution,
+                parent,
+                Set.of(TaskResource.conservative()));
+        TaskResourceLockManager.Lease childLease = manager.acquire(child).get(5, TimeUnit.SECONDS);
+
+        parentLease.close();
+        TaskResourceLockManager.Lease outsideLease = manager.acquire(
+                rootOwner(manager, TaskResource.downloadTarget(temporaryDirectory.resolve("outside-wide.jar"))))
+                .get(5, TimeUnit.SECONDS);
+        outsideLease.close();
+        childLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a narrow game-directory that does not cover the repository root fails before global expansion.
+    @Test
+    public void conservativeChildUnderNarrowRepositoryDirectoryFailsFast() throws Exception {
+        Path repository = temporaryDirectory.resolve("narrow-repository");
+        assertConservativeChildFailsOutsideCompleteBoundary(
+                TaskResource.repositoryOperation(repository),
+                TaskResource.gameDirectory(repository.resolve("libraries")));
+    }
+
+    /// Verifies detaching a mixed repository owner does not turn its unknown child into an instance-only lock.
+    @Test
+    public void detachedMixedRepositoryOwnerStillFallsBackToGlobal() throws Exception {
+        Path repository = temporaryDirectory.resolve("detached-mixed-repository");
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner parent = manager.createOwner(
+                execution,
+                null,
+                Set.of(
+                        TaskResource.repositoryOperation(repository),
+                        TaskResource.gameInstance(repository.resolve("versions/example"))),
+                true);
+        TaskResourceLockManager.Lease parentLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+        parentLease.close();
+
+        TaskResourceLockManager.Owner child = manager.createOwner(
+                execution,
+                parent,
+                Set.of(TaskResource.conservative()));
+        TaskResourceLockManager.Lease childLease = manager.acquire(child).get(5, TimeUnit.SECONDS);
+        CompletableFuture<TaskResourceLockManager.Lease> outside = manager.acquire(
+                rootOwner(manager, TaskResource.downloadTarget(repository.resolve("outside.jar"))));
+
+        assertFalse(outside.isDone());
+        childLease.close();
+        outside.get(5, TimeUnit.SECONDS).close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a repository-only child cannot cross a detached narrow ancestor before resolving its own child.
+    @Test
+    public void conservativeGrandchildDoesNotCrossDetachedNarrowAncestor() throws Exception {
+        Path repository = temporaryDirectory.resolve("detached-narrow-repository");
+        TaskResource instance = TaskResource.gameInstance(repository.resolve("versions/example"));
+        TaskResource operation = TaskResource.repositoryOperation(repository);
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner narrowParent = manager.createOwner(execution, null, Set.of(instance), true);
+        TaskResourceLockManager.Lease parentLease = manager.acquire(narrowParent).get(5, TimeUnit.SECONDS);
+        parentLease.close();
+
+        TaskResourceLockManager.Owner operationChild = manager.createOwner(
+                execution,
+                narrowParent,
+                Set.of(operation));
+        TaskResourceLockManager.Lease operationLease = manager.acquire(operationChild).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Owner conservativeGrandchild = manager.createOwner(
+                execution,
+                operationChild,
+                Set.of(TaskResource.conservative()));
+
+        assertThrows(CompletionException.class, () -> manager.acquire(conservativeGrandchild).join());
+        operationLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies an active narrow owner rejects explicit global expansion instead of waiting in a parent-child cycle.
+    @Test
+    public void nestedGlobalExpansionIsRejected() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource instance = TaskResource.gameInstance(temporaryDirectory.resolve("instances/fallback"));
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner parent = manager.createOwner(execution, null, Set.of(instance));
+        TaskResourceLockManager.Lease parentLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Owner child = manager.createOwner(
+                execution,
+                parent,
+                Set.of(TaskResource.global()));
+
+        assertThrows(CompletionException.class, () -> manager.acquire(child).join());
+        parentLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies an uncertain nested path fails rather than escalating beneath an active narrow directory owner.
+    @Test
+    public void uncertainNestedPathFailsBeforeGlobalWait() throws Exception {
+        Path instance = Files.createDirectories(temporaryDirectory.resolve("instances/uncertain"));
+        Path existingFile = Files.createFile(instance.resolve("existing.jar"));
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner parent = manager.createOwner(
+                execution,
+                null,
+                Set.of(TaskResource.gameInstance(instance)));
+        TaskResourceLockManager.Lease parentLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Owner child = manager.createOwner(
+                execution,
+                parent,
+                Set.of(TaskResource.downloadTarget(existingFile.resolve("missing.jar"))));
+
+        assertThrows(CompletionException.class, () -> manager.acquire(child).join());
+        parentLease.close();
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a reentrant owner is detached only after its final lease is released.
+    @Test
+    public void reentrantOwnerDetachesAfterFinalLease() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource instance = TaskResource.gameInstance(temporaryDirectory.resolve("instances/reentrant"));
+        TaskResource outside = TaskResource.downloadTarget(temporaryDirectory.resolve("outside/reentrant.jar"));
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner parent = manager.createOwner(execution, null, Set.of(instance), true);
+        TaskResourceLockManager.Lease firstLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Lease secondLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+
+        firstLease.close();
+        TaskResourceLockManager.Owner child = manager.createOwner(execution, parent, Set.of(outside));
+        assertThrows(CompletionException.class, () -> manager.acquire(child).join());
+
+        secondLease.close();
+        TaskResourceLockManager.Lease reactivatedLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Owner reactivatedChild = manager.createOwner(execution, parent, Set.of(outside));
+        assertThrows(CompletionException.class, () -> manager.acquire(reactivatedChild).join());
+        reactivatedLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Verifies sibling owners remain mutually exclusive even while their common parent is reentrant.
     @Test
     public void siblingOwnersConflictIndependently() throws Exception {
@@ -309,6 +652,60 @@ public final class TaskResourceLockManagerTest {
         TaskResourceLockManager.Lease secondLease = secondFuture.get(5, TimeUnit.SECONDS);
         secondLease.close();
         parentLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a running sibling's descendant can reenter its owner without being deadlocked by another sibling.
+    @Test
+    public void descendantBypassesSiblingBlockedByActiveBranch() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource instance = TaskResource.gameInstance(temporaryDirectory.resolve("instances/descendant"));
+        TaskResource childResource = TaskResource.downloadTarget(
+                temporaryDirectory.resolve("instances/descendant/shared.jar"));
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner parent = manager.createOwner(execution, null, Set.of(instance));
+        TaskResourceLockManager.Lease parentLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Owner firstChild = manager.createOwner(execution, parent, Set.of(childResource));
+        TaskResourceLockManager.Owner secondChild = manager.createOwner(execution, parent, Set.of(childResource));
+        TaskResourceLockManager.Lease firstLease = manager.acquire(firstChild).get(5, TimeUnit.SECONDS);
+        CompletableFuture<TaskResourceLockManager.Lease> secondFuture = manager.acquire(secondChild);
+
+        TaskResourceLockManager.Owner grandchild = manager.createOwner(execution, firstChild, Set.of(childResource));
+        TaskResourceLockManager.Lease grandchildLease = manager.acquire(grandchild).get(5, TimeUnit.SECONDS);
+
+        grandchildLease.close();
+        firstLease.close();
+        secondFuture.get(5, TimeUnit.SECONDS).close();
+        parentLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies sibling waiters retain queue order while an external root remains blocked by their common parent.
+    @Test
+    public void siblingWaitersRetainFifoOrder() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource instance = TaskResource.gameInstance(temporaryDirectory.resolve("instances/fifo"));
+        TaskResource childResource = TaskResource.downloadTarget(
+                temporaryDirectory.resolve("instances/fifo/shared.jar"));
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner parent = manager.createOwner(execution, null, Set.of(instance));
+        TaskResourceLockManager.Lease parentLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+        CompletableFuture<TaskResourceLockManager.Lease> external = manager.acquire(
+                rootOwner(manager, childResource));
+        TaskResourceLockManager.Owner first = manager.createOwner(execution, parent, Set.of(childResource));
+        TaskResourceLockManager.Owner second = manager.createOwner(execution, parent, Set.of(childResource));
+
+        CompletableFuture<TaskResourceLockManager.Lease> firstFuture = manager.acquire(first);
+        CompletableFuture<TaskResourceLockManager.Lease> secondFuture = manager.acquire(second);
+        TaskResourceLockManager.Lease firstLease = firstFuture.get(5, TimeUnit.SECONDS);
+        assertFalse(secondFuture.isDone());
+
+        firstLease.close();
+        TaskResourceLockManager.Lease secondLease = secondFuture.get(5, TimeUnit.SECONDS);
+        secondLease.close();
+        assertFalse(external.isDone());
+        parentLease.close();
+        external.get(5, TimeUnit.SECONDS).close();
         assertEquals(0, manager.trackedResourceCount());
     }
 
@@ -346,10 +743,11 @@ public final class TaskResourceLockManagerTest {
                 null,
                 Set.of(TaskResource.gameInstance(temporaryDirectory.resolve("instances/example"))));
 
-        assertThrows(IllegalStateException.class, () -> manager.createOwner(
+        TaskResourceLockManager.Owner childOwner = manager.createOwner(
                 execution,
                 parentOwner,
-                Set.of(TaskResource.downloadTarget(temporaryDirectory.resolve("shared/library.jar")))));
+                Set.of(TaskResource.downloadTarget(temporaryDirectory.resolve("shared/library.jar"))));
+        assertThrows(CompletionException.class, () -> manager.acquire(childOwner).join());
     }
 
     /// Verifies an explicitly detached parent can hand an outside resource range to its child after release.
@@ -357,7 +755,8 @@ public final class TaskResourceLockManagerTest {
     public void detachedOwnerCanHandOffToOutsideResource() throws Exception {
         TaskResourceLockManager manager = new TaskResourceLockManager();
         TaskResource parentResource = TaskResource.gameDirectory(temporaryDirectory.resolve("repository"));
-        TaskResource childResource = TaskResource.gameInstance(temporaryDirectory.resolve("repository/versions/example"));
+        TaskResource childResource = TaskResource.gameInstance(
+                temporaryDirectory.resolve("repository/versions/example"));
         TaskResourceLockManager.Execution execution = manager.createExecution();
         TaskResourceLockManager.Owner parentOwner = manager.createOwner(
                 execution,
@@ -371,6 +770,56 @@ public final class TaskResourceLockManagerTest {
         TaskResourceLockManager.Lease childLease = manager.acquire(childOwner).get(5, TimeUnit.SECONDS);
 
         childLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies opposite handoff branches cannot revive detached ancestor coverage and deadlock each other.
+    @Test
+    public void detachedAncestorCoverageCannotBeRevivedByGrandchild() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource firstResource = TaskResource.downloadTarget(temporaryDirectory.resolve("handoff-first.jar"));
+        TaskResource secondResource = TaskResource.downloadTarget(temporaryDirectory.resolve("handoff-second.jar"));
+        TaskResourceLockManager.Execution firstExecution = manager.createExecution();
+        TaskResourceLockManager.Execution secondExecution = manager.createExecution();
+        TaskResourceLockManager.Owner firstParent = manager.createOwner(
+                firstExecution,
+                null,
+                Set.of(firstResource),
+                true);
+        TaskResourceLockManager.Owner secondParent = manager.createOwner(
+                secondExecution,
+                null,
+                Set.of(secondResource),
+                true);
+        TaskResourceLockManager.Lease firstParentLease = manager.acquire(firstParent).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Lease secondParentLease = manager.acquire(secondParent).get(5, TimeUnit.SECONDS);
+        firstParentLease.close();
+        secondParentLease.close();
+
+        TaskResourceLockManager.Owner firstChild = manager.createOwner(
+                firstExecution,
+                firstParent,
+                Set.of(secondResource));
+        TaskResourceLockManager.Owner secondChild = manager.createOwner(
+                secondExecution,
+                secondParent,
+                Set.of(firstResource));
+        TaskResourceLockManager.Lease firstChildLease = manager.acquire(firstChild).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Lease secondChildLease = manager.acquire(secondChild).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Owner firstGrandchild = manager.createOwner(
+                firstExecution,
+                firstChild,
+                Set.of(firstResource));
+        TaskResourceLockManager.Owner secondGrandchild = manager.createOwner(
+                secondExecution,
+                secondChild,
+                Set.of(secondResource));
+
+        assertThrows(CompletionException.class, () -> manager.acquire(firstGrandchild).join());
+        assertThrows(CompletionException.class, () -> manager.acquire(secondGrandchild).join());
+        secondChildLease.close();
+        firstChildLease.close();
+        assertEquals(0, manager.pendingWaiterCount());
         assertEquals(0, manager.trackedResourceCount());
     }
 
@@ -393,6 +842,22 @@ public final class TaskResourceLockManagerTest {
         assertEquals(0, manager.trackedResourceCount());
     }
 
+    /// Verifies cancelling the acquisition future itself removes an unresolved waiter before the holder releases.
+    @Test
+    public void directAcquisitionCancellationRemovesPendingNode() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource resource = TaskResource.downloadTarget(temporaryDirectory.resolve("direct-cancel.jar"));
+        TaskResourceLockManager.Lease holderLease = manager.acquire(rootOwner(manager, resource))
+                .get(5, TimeUnit.SECONDS);
+        CompletableFuture<TaskResourceLockManager.Lease> waitingFuture = manager.acquire(rootOwner(manager, resource));
+
+        assertTrue(waitingFuture.cancel(false));
+        assertThrows(CancellationException.class, () -> waitingFuture.get(5, TimeUnit.SECONDS));
+        assertEquals(0, manager.pendingWaiterCount());
+        holderLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Creates one root owner in a fresh execution domain.
     private static TaskResourceLockManager.Owner rootOwner(
             TaskResourceLockManager manager,
@@ -409,5 +874,30 @@ public final class TaskResourceLockManagerTest {
             public void execute() {
             }
         };
+    }
+
+    /// Asserts that a conservative child fails beneath an active owner without one complete inherited boundary.
+    ///
+    /// @param firstResource first parent declaration
+    /// @param secondResource second parent declaration
+    private void assertConservativeChildFailsOutsideCompleteBoundary(
+            TaskResource firstResource,
+            TaskResource secondResource) throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner parent = manager.createOwner(
+                execution,
+                null,
+                Set.of(firstResource, secondResource),
+                true);
+        TaskResourceLockManager.Lease parentLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Owner child = manager.createOwner(
+                execution,
+                parent,
+                Set.of(TaskResource.conservative()));
+
+        assertThrows(CompletionException.class, () -> manager.acquire(child).join());
+        parentLease.close();
+        assertEquals(0, manager.trackedResourceCount());
     }
 }

@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.download;
 import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.function.ExceptionalFunction;
@@ -59,36 +60,41 @@ public class DefaultGameBuilder extends GameBuilder {
         var hints = new ArrayList<Task.StagesHint>();
         var repository = dependencyManager.getGameRepository();
         GameInstanceID instanceId = Objects.requireNonNull(name, "name");
+        TaskResource metadataResource = TaskResource.repositoryMetadata(repository.getBaseDirectory());
         TaskResource operationResource = TaskResource.repositoryOperation(repository.getBaseDirectory());
         TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(instanceId));
 
-        Task<GameInstanceManifest> libraryTask = Task.supplyAsync(() -> new GameInstanceManifest(instanceId));
+        Task<GameInstanceManifest> libraryTask = Task
+                .supplyAsync(() -> new GameInstanceManifest(instanceId))
+                .asOrchestration();
         libraryTask = libraryTask.thenComposeAsync(libraryTaskHelper(gameVersion, "game", gameVersion))
-                .releaseResourcesBeforeDependencies();
+                .asOrchestration();
         hints.add(new Task.StagesHint("xyml.install.game:" + gameVersion));
         hints.add(new Task.StagesHint("xyml.install.libraries"));
         hints.add(new Task.StagesHint("xyml.install.assets"));
 
         for (Map.Entry<String, String> entry : toolVersions.entrySet()) {
             libraryTask = libraryTask.thenComposeAsync(libraryTaskHelper(gameVersion, entry.getKey(), entry.getValue()))
-                    .releaseResourcesBeforeDependencies();
+                    .asOrchestration();
             hints.add(new Task.StagesHint(String.format("xyml.install.%s:%s", entry.getKey(), entry.getValue())));
         }
 
         for (RemoteVersion remoteVersion : remoteVersions) {
             libraryTask = libraryTask.thenComposeAsync(version -> dependencyManager.installLibraryAsync(version, remoteVersion))
-                    .releaseResourcesBeforeDependencies();
+                    .asOrchestration();
             hints.add(new Task.StagesHint(String.format("xyml.install.%s:%s", remoteVersion.getLibraryId(), remoteVersion.getSelfVersion())));
         }
 
         boolean isUpdate = repository.hasInstance(instanceId);
 
-        return libraryTask.thenComposeAsync(repository::saveAsync).releaseResourcesBeforeDependencies().whenComplete(exception -> {
-            if (exception != null && !isUpdate) {
-                repository.removeInstanceFromDisk(instanceId);
-            }
-        }).releaseResourcesBeforeDependencies().withStagesHints(hints)
-                .setResources(operationResource, instanceResource);
+        return libraryTask.thenComposeAsync(repository::saveAsync)
+                .setResources(operationResource, instanceResource)
+                .whenCompleteWithResources(Schedulers.defaultScheduler(), exception -> {
+                    if (exception != null && !isUpdate) {
+                        repository.removeInstanceFromDisk(instanceId);
+                    }
+                }, metadataResource, instanceResource)
+                .withStagesHints(hints);
     }
 
     /// Creates one deferred legacy-library installation function.

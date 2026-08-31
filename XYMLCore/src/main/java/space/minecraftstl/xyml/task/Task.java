@@ -43,16 +43,27 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 public abstract class Task<T> {
 
     /// Immutable semantic resources occupied by this task's complete executor-managed lifecycle.
+    ///
+    /// Parent ownership is intentionally not stored on the task object: one task definition may be wrapped or started
+    /// by multiple invocations. [AsyncTaskExecutor] carries the invocation-local owner chain instead.
     private @Unmodifiable Set<TaskResource> resources = Set.of(TaskResource.conservative());
 
     /// Whether the acquired declaration may be handed off before this task's dependencies run.
     private boolean releaseResourcesBeforeDependencies;
 
+    /// Whether the acquired declaration may be handed off before this task's prerequisite tasks run.
+    private boolean releaseResourcesBeforeDependents;
+
+    /// Whether this hidden terminal-cleanup task continues after its owning executor is cancelled.
+    private boolean terminalCleanup;
+
     /// Returns this task's immutable non-empty resource declaration.
     ///
-    /// The default singleton conservative declaration resolves globally for a root task and inherits the direct parent
-    /// owner's effective request for a nested task. Callers cannot use an empty collection to opt out of resource
-    /// arbitration.
+    /// The default singleton conservative declaration resolves globally for a root task and inherits the nearest
+    /// complete filesystem boundary for a nested task. Mixed repository-coordination and narrow declarations fall back
+    /// globally unless a game-directory declaration covers the repository. A global fallback beneath an active narrow
+    /// ancestor fails before waiting; the parent must declare a complete boundary or explicitly hand off first. Callers
+    /// cannot use an empty collection to opt out of resource arbitration.
     ///
     /// @return immutable non-empty resource declaration
     public final @Unmodifiable Set<TaskResource> getResources() {
@@ -64,8 +75,17 @@ public abstract class Task<T> {
     /// @param wrapper presentation-only wrapper receiving the declaration
     /// @param source wrapped task whose complete lifecycle remains the only resource owner
     private static void inheritResources(Task<?> wrapper, Task<?> source) {
-        wrapper.resources = source.resources;
+        inheritResourceDeclaration(wrapper, source);
         wrapper.releaseResourcesBeforeDependencies = source.releaseResourcesBeforeDependencies;
+        wrapper.releaseResourcesBeforeDependents = source.releaseResourcesBeforeDependents;
+    }
+
+    /// Copies only the immutable resource declaration without inheriting either early-release policy.
+    ///
+    /// @param target task receiving the declaration
+    /// @param source task providing the immutable declaration
+    private static void inheritResourceDeclaration(Task<?> target, Task<?> source) {
+        target.resources = source.resources;
     }
 
     /// Replaces this task's resource declaration with a defensive immutable snapshot.
@@ -92,6 +112,19 @@ public abstract class Task<T> {
         return this;
     }
 
+    /// Marks this task as an audited graph-orchestration node with no filesystem write of its own.
+    ///
+    /// The task releases its non-conflicting orchestration marker before prerequisites run. Its execution callback may
+    /// inspect completed prerequisite results and select or construct follow-up tasks, but it must not perform a
+    /// filesystem write or start untracked asynchronous work. Every returned follow-up must declare the resources it
+    /// occupies. Arbitrary composition callbacks remain conservative unless callers opt in through this method.
+    ///
+    /// @return this task
+    public final Task<T> asOrchestration() {
+        setResources(TaskResource.orchestration());
+        return releaseResourcesBeforeDependents();
+    }
+
     /// Releases this task's resources after its primary execution and before its dependencies start.
     ///
     /// This is intended for deferred orchestration tasks that serialize a short resolution phase and then hand the
@@ -111,6 +144,32 @@ public abstract class Task<T> {
     /// @return whether the resource handoff is enabled
     final boolean releasesResourcesBeforeDependencies() {
         return releaseResourcesBeforeDependencies;
+    }
+
+    /// Releases this task's resources after pre-execution and before its prerequisite tasks start.
+    ///
+    /// This is reserved for pure orchestration tasks whose own body and terminal callbacks do not perform writes.
+    /// Prerequisite tasks become independent owner branches after the handoff, so each branch must declare every
+    /// resource it writes. The default is disabled and preserves the historical complete-lifecycle lease.
+    ///
+    /// @return this task
+    public final Task<T> releaseResourcesBeforeDependents() {
+        releaseResourcesBeforeDependents = true;
+        return this;
+    }
+
+    /// Returns whether this task transfers its lease before prerequisite execution.
+    ///
+    /// @return whether the prerequisite handoff is enabled
+    final boolean releasesResourcesBeforeDependents() {
+        return releaseResourcesBeforeDependents;
+    }
+
+    /// Returns whether this task is a hidden, already-committed cleanup that must survive executor cancellation.
+    ///
+    /// @return whether terminal cleanup execution is required
+    final boolean isTerminalCleanup() {
+        return terminalCleanup;
     }
 
     /// The importance level that controls this task's logging and UI visibility.
@@ -443,6 +502,10 @@ public abstract class Task<T> {
     }
 
     /// Runs dependents, this task body, and dependencies synchronously, then returns the possibly absent result.
+    ///
+    /// This compatibility path does not create an [AsyncTaskExecutor] owner or wait on the resource manager. Callers
+    /// that need arbitration must invoke [#executor()] or [#executor(boolean)] instead; synchronous subtasks called by
+    /// an executor-managed task are covered by that outer owner in the audited call graph.
     public final @Nullable T run() throws Exception {
         if (getSignificance().shouldLog())
             LOG.trace("Executing task: " + getName());
@@ -575,7 +638,10 @@ public abstract class Task<T> {
 
     /// Chains the supplied task after this task and stops the chain when this task fails.
     public final <U> Task<U> thenComposeAsync(Task<U> other) {
-        return thenComposeAsync(() -> other);
+        return new UniCompose<>(() -> other, true)
+                .setExecutor(Schedulers.defaultScheduler())
+                .setResources(TaskResource.orchestration())
+                .releaseResourcesBeforeDependents();
     }
 
     /// Supplies an optional successor after this task on the default scheduler.
@@ -603,7 +669,10 @@ public abstract class Task<T> {
 
     /// Chains the supplied task after this task while allowing the chain to continue after predecessor failure.
     public final <U> Task<U> withComposeAsync(Task<U> other) {
-        return withComposeAsync(() -> other);
+        return new UniCompose<>(() -> other, false)
+                .setExecutor(Schedulers.defaultScheduler())
+                .setResources(TaskResource.orchestration())
+                .releaseResourcesBeforeDependents();
     }
 
     /// Supplies an optional successor while allowing the chain to continue after predecessor failure.
@@ -643,17 +712,21 @@ public abstract class Task<T> {
             /// Invokes the completion callback and rethrows the predecessor failure after callback delivery.
             @Override
             public void execute() throws Exception {
-                if (isDependentsSucceeded() != (Task.this.getException() == null))
-                    throw new AssertionError("When whenComplete succeeded, Task.exception must be null.", Task.this.getException());
+                @Nullable Exception prerequisiteFailure = Task.this.getException();
+                if (!isDependentsSucceeded() && prerequisiteFailure == null) {
+                    prerequisiteFailure = getException();
+                }
+                if (isDependentsSucceeded() != (prerequisiteFailure == null))
+                    throw new AssertionError("When whenComplete succeeded, Task.exception must be null.", prerequisiteFailure);
 
-                action.execute(Task.this.getException());
+                action.execute(prerequisiteFailure);
 
                 if (!isDependentsSucceeded()) {
                     setSignificance(TaskSignificance.MINOR);
-                    if (Task.this.getException() == null)
+                    if (prerequisiteFailure == null)
                         throw new AssertionError("When failed, exception cannot be null");
                     else
-                        throw Task.this.getException();
+                        throw prerequisiteFailure;
                 }
             }
 
@@ -671,16 +744,110 @@ public abstract class Task<T> {
         }.setExecutor(executor).setName(getCaller()).setSignificance(TaskSignificance.MODERATE);
     }
 
+    /// Creates a completion continuation whose callback acquires additional resources after the prerequisite ends.
+    ///
+    /// The returned coordinator inherits and retains this task's resource declaration while one explicit cleanup child
+    /// acquires the supplied resources. The retained owner prevents another operation on the same narrow resource from
+    /// entering between a failed prerequisite and its rollback. Every cleanup resource must therefore fit within the
+    /// inherited owner coverage; callers must not use this method to upgrade multiple shared repository operations to a
+    /// conflicting directory-wide resource. Once the coordinator has started, its cleanup still runs after executor
+    /// cancellation, matching [#whenComplete(Executor, FinalizedCallback)]; cancellation before the coordinator acquires
+    /// its initial lease still prevents the callback. The callback exception takes precedence over a prerequisite
+    /// exception, while a successful callback rethrows the original prerequisite exception.
+    ///
+    /// @param executor executor used for the coordinator and cleanup callback
+    /// @param action completion callback receiving the prerequisite failure, or null after success
+    /// @param first first resource occupied only by the cleanup callback
+    /// @param additional additional resources occupied only by the cleanup callback
+    /// @return completion coordinator with an explicitly resourced cleanup child
+    public final Task<@Nullable Void> whenCompleteWithResources(
+            Executor executor,
+            FinalizedCallback action,
+            TaskResource first,
+            TaskResource... additional) {
+        Objects.requireNonNull(executor, "executor");
+        Objects.requireNonNull(action, "action");
+        Objects.requireNonNull(first, "first");
+        Objects.requireNonNull(additional, "additional");
+        @Unmodifiable List<TaskResource> cleanupResources = Stream.concat(
+                Stream.of(first),
+                Arrays.stream(additional).map(resource -> Objects.requireNonNull(resource, "additional resource")))
+                .toList();
+        if (cleanupResources.stream().anyMatch(TaskResource::isConservative)
+                && (cleanupResources.size() != 1 || !cleanupResources.get(0).isConservative())) {
+            throw new IllegalArgumentException("The conservative task resource cannot be combined with explicit resources");
+        }
+        String taskName = getCaller();
+
+        return new Task<@Nullable Void>() {
+            /// Cleanup child created only after the prerequisite reaches an Exception-based terminal state.
+            private @Nullable Task<@Nullable Void> cleanup;
+
+            {
+                inheritResourceDeclaration(this, Task.this);
+            }
+
+            /// Validates the prerequisite outcome and creates the independently resourced cleanup child.
+            @Override
+            public void execute() {
+                @Nullable Exception prerequisiteFailure = Task.this.getException();
+                if (!isDependentsSucceeded() && prerequisiteFailure == null) {
+                    prerequisiteFailure = getException();
+                }
+                if (isDependentsSucceeded() != (prerequisiteFailure == null)) {
+                    throw new AssertionError(
+                            "When whenComplete succeeded, Task.exception must be null.",
+                            prerequisiteFailure);
+                }
+                @Nullable Exception capturedFailure = prerequisiteFailure;
+
+                TaskResource @Unmodifiable [] remainingResources = cleanupResources.subList(1, cleanupResources.size())
+                        .toArray(TaskResource[]::new);
+                cleanup = Task.runAsync(taskName, executor, () -> {
+                    action.execute(capturedFailure);
+                    if (capturedFailure != null) {
+                        throw capturedFailure;
+                    }
+                }).setResources(cleanupResources.get(0), remainingResources)
+                        .setSignificance(TaskSignificance.MINOR);
+                cleanup.terminalCleanup = true;
+            }
+
+            /// Returns the outer task as this coordinator's prerequisite.
+            @Override
+            public @Unmodifiable Collection<Task<?>> getDependents() {
+                return Collections.singleton(Task.this);
+            }
+
+            /// Returns the cleanup child after construction, or an empty immutable collection beforehand.
+            @Override
+            public @Unmodifiable Collection<Task<?>> getDependencies() {
+                return cleanup == null ? Collections.emptySet() : Collections.singleton(cleanup);
+            }
+
+            /// Allows cleanup construction after an Exception-based prerequisite failure.
+            @Override
+            public boolean isRelyingOnDependents() {
+                return false;
+            }
+        }.setExecutor(executor).setName(taskName).setSignificance(TaskSignificance.MODERATE);
+    }
+
     /// Creates a completion continuation that receives this task's possibly absent result and failure.
     public Task<@Nullable Void> whenComplete(Executor executor, FinalizedCallbackWithResult<T> action) {
         return whenComplete(executor, (exception -> action.execute(getResult(), exception)));
     }
 
     /// Wraps successful results and failures in a [Result] while preventing prerequisite failure from stopping it.
+    ///
+    /// The wrapper only reads the completed predecessor and is therefore an orchestration node; the predecessor keeps
+    /// ownership of its own declared resources.
     public Task<Result<@Nullable T>> wrapResult() {
         return new Task<Result<@Nullable T>>() {
             {
                 setSignificance(TaskSignificance.MODERATE);
+                setResources(TaskResource.orchestration());
+                releaseResourcesBeforeDependents();
             }
 
             /// Converts the outer task's terminal state to a success or failure [Result].
@@ -887,8 +1054,12 @@ public abstract class Task<T> {
     }
 
     /// Creates a task backed by an already completed future containing the supplied possibly absent value.
+    ///
+    /// Because the future is already terminal and this factory performs no external work, the returned task uses the
+    /// non-filesystem orchestration resource.
     public static <V> Task<V> completed(@Nullable V value) {
-        return fromCompletableFuture(CompletableFuture.completedFuture(value));
+        return fromCompletableFuture(CompletableFuture.completedFuture(value))
+                .setResources(TaskResource.orchestration());
     }
 
     /// Creates a minor task that waits for every supplied prerequisite and returns their results in immutable order.
@@ -904,6 +1075,8 @@ public abstract class Task<T> {
         return new Task<@Unmodifiable List<@Nullable T>>() {
             {
                 setSignificance(TaskSignificance.MINOR);
+                setResources(TaskResource.orchestration());
+                releaseResourcesBeforeDependents();
             }
 
             /// Collects prerequisite results into an unmodifiable list after every prerequisite succeeds.
@@ -920,10 +1093,10 @@ public abstract class Task<T> {
         };
     }
 
-    /// Chains the supplied tasks in order and returns the final task, or a result-less task for an empty input.
+    /// Chains the supplied tasks in order and returns the final task, or an orchestration task for an empty input.
     public static Task<?> runSequentially(Task<?>... tasks) {
         if (tasks.length == 0) {
-            return new SimpleTask<>(() -> null);
+            return new SimpleTask<>(() -> null).setResources(TaskResource.orchestration());
         }
 
         Task<?> task = tasks[0];
