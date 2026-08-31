@@ -31,8 +31,8 @@ public final class XYMLMcpPromptRegistry {
 
     /// Prompt definitions in stable declaration order.
     private static final @Unmodifiable List<PromptDefinition> PROMPTS = List.of(
-            new PromptDefinition("diagnose_crash", "Inspect an instance crash and its reports.",
-                    List.of(new PromptArgument("instance_id", "Instance identifier", true))));
+            new PromptDefinition("diagnose_crash", "检查实例崩溃及其报告。",
+                    List.of(new PromptArgument("instance_id", "实例标识符", true))));
 
     /// Returns every prompt definition exposed by XYML.
     ///
@@ -54,10 +54,9 @@ public final class XYMLMcpPromptRegistry {
         if (!(rawInstanceId instanceof String instanceId) || instanceId.isBlank()) {
             throw new IllegalArgumentException("instance_id must be a non-blank string");
         }
-        String text = "Inspect the latest log and crash reports for instance '" + instanceId
-                + "', then summarize the cause and applicable launcher changes.";
+        String text = "请检查实例“" + instanceId + "”的最新日志和崩溃报告，然后总结崩溃原因及适用的启动器设置调整。";
         return Map.of(
-                "description", "Instance crash diagnosis",
+                "description", "实例崩溃诊断",
                 "messages", List.of(Map.of(
                         "role", "user",
                         "content", Map.of("type", "text", "text", text))));

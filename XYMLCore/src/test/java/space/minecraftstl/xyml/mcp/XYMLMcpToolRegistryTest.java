@@ -100,7 +100,14 @@ public final class XYMLMcpToolRegistryTest {
 
         XYMLMcpPromptRegistry prompts = new XYMLMcpPromptRegistry();
         assertEquals(1, prompts.promptDefinitions().size());
+        XYMLMcpPromptRegistry.PromptDefinition definition = prompts.promptDefinitions().get(0);
+        assertEquals("diagnose_crash", definition.name());
+        assertEquals("检查实例崩溃及其报告。", definition.description());
+        assertEquals("instance_id", definition.arguments().get(0).name());
+        assertEquals("实例标识符", definition.arguments().get(0).description());
         Map<String, Object> result = prompts.getPrompt("diagnose_crash", Map.of("instance_id", "demo"));
         assertTrue(result.containsKey("messages"));
+        assertEquals("实例崩溃诊断", result.get("description"));
+        assertTrue(String.valueOf(result.get("messages")).contains("请检查实例“demo”"));
     }
 }

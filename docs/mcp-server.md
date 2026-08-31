@@ -1,14 +1,17 @@
 # XYML MCP Server
 
-MCP 服务器默认关闭。启用后，XYML 在启动时绑定本机回环地址 `127.0.0.1`，默认端口为 `23968`，唯一端点为 `POST /mcp`。开关和监听端口位于启动器设置中的“MCP 服务器”页，修改会立即保存，监听器将在重启后读取新配置；页面会提供“立即重启”按钮。
+MCP 服务器默认关闭。启用后，XYML 在启动时绑定本机回环地址 `127.0.0.1`，默认端口为 `23968`，唯一端点为 `/mcp`，客户端消息使用 POST。开关和监听端口位于启动器设置中的“MCP 服务器”页，修改会立即保存，监听器将在重启后读取新配置；页面会提供“立即重启”按钮。
 
 协议传输、工具注册、崩溃分析适配和操作契约位于现有 `XYMLCore` 模块；依赖应用配置与已初始化游戏仓库的实现位于现有 `XYML` 模块。实现只复用已有的实例、设置、模组和启动服务，不提供通用文件操作接口。
 
 ## 协议范围
 
-服务只实现以下 JSON-RPC 2.0 子集：
+服务通过单一 `/mcp` 端点实现 Streamable HTTP，客户端消息使用 POST，并实现以下 JSON-RPC 2.0 子集：
 
-- `initialize`：完成握手，声明 `tools`、`resources` 和 `prompts` 能力。
+初始化版本协商支持 `2025-11-25`、`2025-06-18` 和 `2025-03-26`；未支持的客户端版本会回退到当前版本
+`2025-11-25`，后续请求以响应中的版本头为准。
+
+- `initialize`：完成握手，协商协议版本并签发 `Mcp-Session-Id`，声明 `tools`、`resources` 和 `prompts` 能力。
 - `tools/list`：列出 XYML 工具。
 - `tools/call`：调用一个 XYML 工具。
 - `resources/list`：列出当前实例的日志和崩溃报告目录资源。
@@ -17,11 +20,20 @@ MCP 服务器默认关闭。启用后，XYML 在启动时绑定本机回环地�
 - `prompts/list`：列出提示模板。
 - `prompts/get`：展开提示模板。
 
-请求使用 JSON，响应使用 `text/event-stream`，每次响应包含一个 `data:` 事件。带 `id` 的请求返回 `result` 或 `error`；不带 `id` 的 notification 不返回 JSON-RPC 消息。服务不实现其他 MCP 方法，也不监听除 `POST /mcp` 之外的端点。
+POST 请求必须使用 `Content-Type: application/json`，`Accept` 必须同时声明 `application/json` 和
+`text/event-stream`，服务端再协商响应格式。单条 JSON-RPC 响应默认返回 `application/json`；只有
+客户端明确拒绝 JSON，或将来一次响应包含多条消息时，才返回包含 `event: message` 和 `data:` 的 SSE
+事件。SSE 在这里仅作为 Streamable HTTP 的流式响应格式，不提供传统的 `/sse` 端点。
+
+初始化响应会返回 `Mcp-Session-Id` 和 `MCP-Protocol-Version`，后续请求必须携带这两个请求头。带 `id`
+的请求返回 `result` 或 `error`；不带 `id` 的 notification 返回 HTTP 202。服务端没有主动推送消息，
+因此携带有效会话的 `GET /mcp` 返回 HTTP 405，并通过 `Allow: POST` 表明当前只支持 POST 消息交换。
+客户端可以携带会话和协议版本请求 `DELETE /mcp` 终止会话；成功时返回 HTTP 200，之后该会话标识不再有效。
+传输层错误始终返回 JSON。
 
 ## 连接
 
-先在启动器设置中启用 MCP 服务器并重启 XYML。MCP 客户端使用 HTTP/SSE 地址连接：
+先在启动器设置中启用 MCP 服务器并重启 XYML。MCP 客户端选择 Streamable HTTP，并使用以下地址连接：
 
 ```json
 {
@@ -35,12 +47,18 @@ MCP 服务器默认关闭。启用后，XYML 在启动时绑定本机回环地�
 
 不同客户端的 URL 字段名称可能不同，应以目标客户端的 MCP 配置格式为准。端口若在 XYML 设置中修改，配置 URL 也必须同步修改。
 
-可使用以下请求检查握手：
+可使用以下请求检查握手并保存会话头：
 
 ```powershell
+$headers = @{
+    "Accept" = "application/json, text/event-stream"
+    "Content-Type" = "application/json"
+}
 $body = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
-Invoke-WebRequest -Method Post -Uri http://127.0.0.1:23968/mcp `
-    -ContentType application/json -Body $body
+$initialize = Invoke-WebRequest -Method Post -Uri http://127.0.0.1:23968/mcp `
+    -Headers $headers -Body $body
+$headers["Mcp-Session-Id"] = $initialize.Headers["Mcp-Session-Id"]
+$headers["MCP-Protocol-Version"] = $initialize.Headers["MCP-Protocol-Version"]
 ```
 
 ## 工具
@@ -69,6 +87,8 @@ Invoke-WebRequest -Method Post -Uri http://127.0.0.1:23968/mcp `
 
 ## 验证
 
-`XYMLCore` 中的 JUnit Jupiter 测试覆盖 16 个工具注册、确认门禁、CrashReportAnalyzer 结构化输出，以及 HTTP/SSE `initialize`、工具、资源、提示和 notification 行为。构建时使用仓库 Gradle Wrapper；Windows 若用户级 Gradle 锁不可写，可将 `GRADLE_USER_HOME` 指向仓库内缓存目录。
+`XYMLCore` 中的 JUnit Jupiter 测试覆盖 16 个工具注册、确认门禁、CrashReportAnalyzer 结构化输出，以及
+Streamable HTTP 的初始化协商、会话校验、JSON/SSE 响应选择、工具、资源、提示和 notification 行为。
+构建时使用仓库 Gradle Wrapper；Windows 若用户级 Gradle 锁不可写，可将 `GRADLE_USER_HOME` 指向仓库内缓存目录。
 
 真实环境仍需项目负责人验证：使用目标 MCP 客户端完成 `initialize`、`tools/list` 握手，并在隔离实例中确认设置写入、模组启停/删除以及游戏启动和停止行为。
