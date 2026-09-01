@@ -50,11 +50,16 @@ public final class RepositoryModpackExportTaskFactoryTest {
     /// Every supported format reaches the core adapter with the effective run-directory whitelist.
     @Test
     public void adaptsEveryFormatAndPublishesCompleteArchive() throws Exception {
+        Path instanceRoot = Files.createDirectories(root.resolve("instance"));
         Path runDirectory = Files.createDirectories(root.resolve("effective-run"));
         Files.createDirectories(runDirectory.resolve("config"));
         Files.writeString(runDirectory.resolve("config/options.txt"), "options");
         RecordingCoreTaskCreator creator = new RecordingCoreTaskCreator(false);
         RepositoryModpackExportTaskFactory factory = new RepositoryModpackExportTaskFactory(
+                instanceId -> {
+                    assertEquals(new GameInstanceID("instance"), instanceId);
+                    return instanceRoot;
+                },
                 instanceId -> {
                     assertEquals(new GameInstanceID("instance"), instanceId);
                     return runDirectory;
@@ -68,6 +73,7 @@ public final class RepositoryModpackExportTaskFactoryTest {
             Task<Path> exportTask = factory.create(request);
             assertEquals(
                     Set.of(
+                            TaskResource.gameInstance(instanceRoot),
                             TaskResource.gameInstance(runDirectory),
                             TaskResource.exportTarget(output)),
                     exportTask.getResources());

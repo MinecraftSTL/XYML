@@ -48,6 +48,9 @@ import java.util.Objects;
 /// no-replace hard link when supported, with a same-directory no-replace move as the compatibility path.
 @NotNullByDefault
 public final class RepositoryModpackExportTaskFactory implements ModpackExportTaskFactory {
+    /// Resolves the repository-owned instance root captured by the production repository.
+    private final RunDirectoryResolver instanceRootResolver;
+
     /// Resolves the effective run directory captured by the production repository.
     private final RunDirectoryResolver runDirectoryResolver;
 
@@ -59,6 +62,7 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
     /// @param repository repository containing the exported instance
     public RepositoryModpackExportTaskFactory(XYMLGameRepository repository) {
         Objects.requireNonNull(repository, "repository");
+        this.instanceRootResolver = repository::getInstanceRoot;
         this.runDirectoryResolver = repository::getRunDirectory;
         this.coreTaskCreator = new RepositoryCoreExportTaskCreator(repository);
     }
@@ -70,6 +74,19 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
     RepositoryModpackExportTaskFactory(
             RunDirectoryResolver runDirectoryResolver,
             CoreExportTaskCreator coreTaskCreator) {
+        this(runDirectoryResolver, runDirectoryResolver, coreTaskCreator);
+    }
+
+    /// Creates a factory with independently controlled instance and run-directory paths.
+    ///
+    /// @param instanceRootResolver resolver for the complete repository-owned instance tree
+    /// @param runDirectoryResolver resolver for the exact effective instance run directory
+    /// @param coreTaskCreator creator for one format-specific stopped core task
+    RepositoryModpackExportTaskFactory(
+            RunDirectoryResolver instanceRootResolver,
+            RunDirectoryResolver runDirectoryResolver,
+            CoreExportTaskCreator coreTaskCreator) {
+        this.instanceRootResolver = Objects.requireNonNull(instanceRootResolver, "instanceRootResolver");
         this.runDirectoryResolver = Objects.requireNonNull(runDirectoryResolver, "runDirectoryResolver");
         this.coreTaskCreator = Objects.requireNonNull(coreTaskCreator, "coreTaskCreator");
     }
@@ -82,6 +99,11 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
     public Task<Path> create(ModpackExportRequest request) {
         ModpackExportRequest requestSnapshot = Objects.requireNonNull(request, "request");
         Path outputSnapshot = requestSnapshot.outputFile();
+        Path instanceRootSnapshot = Objects.requireNonNull(
+                        instanceRootResolver.resolve(requestSnapshot.instanceId()),
+                        "instance root")
+                .toAbsolutePath()
+                .normalize();
         Path runDirectorySnapshot = Objects.requireNonNull(
                         runDirectoryResolver.resolve(requestSnapshot.instanceId()),
                         "run directory")
@@ -114,6 +136,8 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
                             requestSnapshot.metadata(),
                             whitelist,
                             requestSnapshot.format());
+                    // The outer lease covers both instance trees and the shared final target. The core exporter writes
+                    // only this invocation's random sibling temporary file before the outer task publishes it.
                     coreTaskCreator.create(
                                     requestSnapshot.format(),
                                     instanceId,
@@ -129,6 +153,7 @@ public final class RepositoryModpackExportTaskFactory implements ModpackExportTa
             }
         };
         return task.setResources(
+                TaskResource.gameInstance(instanceRootSnapshot),
                 TaskResource.gameInstance(runDirectorySnapshot),
                 TaskResource.exportTarget(outputSnapshot));
     }
