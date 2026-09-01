@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.RemoteVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 
@@ -124,15 +125,20 @@ public final class RepositoryGameInstallTaskFactory implements GameInstallTaskFa
         }).setResources(metadataResource, instanceResource)
                 .thenComposeAsync(builder.buildAsync())
                 .setResources(operationResource, instanceResource);
-        Task<?> refreshed = installation.whenComplete(repositoryRefreshExecutor, ignoredFailure -> {
-            repository.refresh();
-            repository.applyDefaultIsolationSetting(instanceId);
-        })
-                .setResources(operationResource, instanceResource);
-        return refreshed.thenRunAsync(
+        Task<@Nullable Void> refreshed = installation.whenCompleteWithResources(
+                repositoryRefreshExecutor,
+                ignoredFailure -> {
+                    repository.refresh();
+                    repository.applyDefaultIsolationSetting(instanceId);
+                },
+                TaskResource.gameDirectory(repository.getBaseDirectory()))
+                .asOrchestration();
+        return refreshed.thenComposeAsync(instanceSelectionExecutor, () -> Task.runAsync(
+                        "Select installed instance",
                         instanceSelectionExecutor,
                         () -> repository.setSelectedInstance(instanceId))
-                .setResources(operationResource, instanceResource);
+                .setResources(TaskResource.configuration(SettingsManager.settingsLocation())))
+                .asOrchestration();
     }
 
     /// Applies the request's base game and remote installers to a newly created game builder.

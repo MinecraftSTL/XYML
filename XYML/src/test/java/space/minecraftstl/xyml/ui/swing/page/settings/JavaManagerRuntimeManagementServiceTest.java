@@ -33,7 +33,9 @@ import space.minecraftstl.xyml.observable.collection.ObservableCollections;
 import space.minecraftstl.xyml.observable.collection.ObservableSet;
 import space.minecraftstl.xyml.observable.collection.SetChange;
 import space.minecraftstl.xyml.observable.property.ObservableValue;
+import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.platform.Platform;
 
 import java.io.IOException;
@@ -66,6 +68,48 @@ final class JavaManagerRuntimeManagementServiceTest {
     /// Per-test filesystem root used to distinguish valid and invalid disabled paths.
     @TempDir
     private @Nullable Path temporaryDirectory;
+
+    /// Declares narrow input, settings, runtime, and manifest resources for the audited lifecycle operations.
+    @Test
+    void declaresAuditedLifecycleResources() throws IOException {
+        Path localHome = Files.createDirectories(temporaryDirectory().resolve("local-java"));
+        Path localBinary = Files.createDirectories(localHome.resolve("bin")).resolve("java.exe");
+        Files.createFile(localBinary);
+        Path platformRoot = Files.createDirectories(temporaryDirectory().resolve("managed-platform"));
+        Path managedHome = Files.createDirectories(platformRoot.resolve("managed-java"));
+        Path managedBinary = Files.createDirectories(managedHome.resolve("bin")).resolve("java.exe");
+        Files.createFile(managedBinary);
+        FakeBackend backend = new FakeBackend(true);
+        JavaManagerRuntimeManagementService service = new JavaManagerRuntimeManagementService(backend);
+        JavaRuntime unmanaged = runtime(localBinary, false);
+        JavaRuntime managed = runtime(managedBinary, true);
+        DisabledJavaRuntimeEntry available = DisabledJavaRuntimeEntry.available(
+                localBinary.toString(),
+                localBinary.toRealPath());
+        DisabledJavaRuntimeEntry unchecked = DisabledJavaRuntimeEntry.unchecked(localBinary.toString());
+
+        Task<JavaRuntime> addTask = service.addLocalRuntime(localHome);
+        Task<@Nullable Void> disableTask = service.disableLocalRuntime(unmanaged);
+        Task<@Nullable Void> uninstallTask = service.uninstallManagedRuntime(managed);
+        Task<JavaRuntime> restoreTask = service.restoreDisabledRuntime(available);
+        Task<@Nullable Void> removeTask = service.removeDisabledRuntime(unchecked);
+        Task<DisabledJavaRuntimeEntry> inspectTask = service.inspectDisabledRuntime(unchecked);
+
+        TaskResource userSettings = TaskResource.configuration(SettingsManager.USER_SETTINGS_LOCATION);
+        assertAll(
+                () -> assertEquals(Set.of(TaskResource.javaRuntime(localHome)), addTask.getResources()),
+                () -> assertEquals(Set.of(userSettings), disableTask.getResources()),
+                () -> assertEquals(
+                        Set.of(
+                                TaskResource.javaRuntime(managedHome),
+                                TaskResource.configuration(platformRoot.resolve("managed-java.json"))),
+                        uninstallTask.getResources()),
+                () -> assertEquals(
+                        Set.of(TaskResource.javaRuntime(localHome), userSettings),
+                        restoreTask.getResources()),
+                () -> assertEquals(Set.of(userSettings), removeTask.getResources()),
+                () -> assertEquals(Set.of(userSettings), inspectTask.getResources()));
+    }
 
     /// Leaves initial disabled entries unchecked and performs no filesystem or Java inspection while taking a snapshot.
     @Test

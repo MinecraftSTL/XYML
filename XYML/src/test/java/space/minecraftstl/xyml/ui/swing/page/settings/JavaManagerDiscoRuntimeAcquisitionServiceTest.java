@@ -117,6 +117,9 @@ final class JavaManagerDiscoRuntimeAcquisitionServiceTest {
 
         assertAll(
                 () -> assertEquals(Task.TaskState.READY, task.getState()),
+                () -> assertEquals(
+                        List.of(TaskResource.Kind.ORCHESTRATION),
+                        task.getResources().stream().map(TaskResource::getKind).toList()),
                 () -> assertEquals(0, backend.fetchVersionRequests.get()));
         assertTrue(task.test(), () -> "Version fetch failed: " + task.getException());
         @Unmodifiable List<DiscoJavaRemoteVersion> result = Objects.requireNonNull(task.getResult());
