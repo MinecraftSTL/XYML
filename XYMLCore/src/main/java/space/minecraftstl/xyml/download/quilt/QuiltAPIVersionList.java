@@ -22,32 +22,50 @@ import space.minecraftstl.xyml.download.VersionList;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.repository.ModrinthRemoteAddonRepository;
 import space.minecraftstl.xyml.task.Task;
-import space.minecraftstl.xyml.util.Lang;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Collections;
+import java.util.List;
 
+/// Loads Quilt Standard Libraries versions from Modrinth.
+@NotNullByDefault
 public class QuiltAPIVersionList extends VersionList<QuiltAPIRemoteVersion> {
-
+    /// Download provider used to rewrite Modrinth endpoints.
     private final DownloadProvider downloadProvider;
 
+    /// Creates a Quilt API version list using the given download provider.
+    ///
+    /// @param downloadProvider provider used to resolve Modrinth endpoints
     public QuiltAPIVersionList(DownloadProvider downloadProvider) {
         this.downloadProvider = downloadProvider;
     }
 
+    /// {@inheritDoc}
     @Override
     public boolean hasType() {
         return false;
     }
 
+    /// {@inheritDoc}
     @Override
     public Task<?> refreshAsync() {
         return Task.runAsync(() -> {
-            for (RemoteAddon.Version modVersion : Lang.toIterable(ModrinthRemoteAddonRepository.MODS.getRemoteVersionsById(downloadProvider, "qsl"))) {
-                for (String gameVersion : modVersion.gameVersions()) {
-                    versions.put(gameVersion, new QuiltAPIRemoteVersion(gameVersion, modVersion.version(), modVersion.name(), modVersion.datePublished(), modVersion,
-                            Collections.singletonList(modVersion.file().url())));
+            @Unmodifiable List<RemoteAddon.Version> remoteVersions =
+                    ModrinthRemoteAddonRepository.MODS.getRemoteVersionsById(downloadProvider, "qsl").toList();
+
+            lock.writeLock().lock();
+            try {
+                for (RemoteAddon.Version modVersion : remoteVersions) {
+                    for (String gameVersion : modVersion.gameVersions()) {
+                        versions.put(gameVersion, new QuiltAPIRemoteVersion(gameVersion, modVersion.version(),
+                                modVersion.name(), modVersion.datePublished(), modVersion,
+                                Collections.singletonList(modVersion.file().url())));
+                    }
                 }
+            } finally {
+                lock.writeLock().unlock();
             }
-        });
+        }).asOrchestration();
     }
 }

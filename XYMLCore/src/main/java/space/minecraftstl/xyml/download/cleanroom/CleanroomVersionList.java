@@ -59,7 +59,7 @@ public final class CleanroomVersionList extends VersionList<CleanroomRemoteVersi
             } finally {
                 lock.writeLock().unlock();
             }
-        });
+        }).asOrchestration();
     }
 
     private final static class ReleaseResult {

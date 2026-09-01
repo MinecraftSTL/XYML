@@ -126,7 +126,7 @@ public final class ForgeBMCLVersionList extends VersionList<ForgeRemoteVersion> 
                     } finally {
                         lock.writeLock().unlock();
                     }
-                });
+                }).asOrchestration();
     }
 
     @Override

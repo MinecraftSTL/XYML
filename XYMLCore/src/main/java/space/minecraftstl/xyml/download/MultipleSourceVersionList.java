@@ -59,6 +59,7 @@ public class MultipleSourceVersionList extends VersionList<RemoteVersion> {
                 setName("MultipleSourceVersionList.refreshAsync(task=%s, index=%d, all=%d)".formatted(
                         refreshTask.getName(), sourceIndex, backends.length)
                 );
+                asOrchestration();
             }
 
             @Override

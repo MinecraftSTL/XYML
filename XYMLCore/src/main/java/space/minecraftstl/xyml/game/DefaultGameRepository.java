@@ -102,7 +102,10 @@ public class DefaultGameRepository implements GameRepository {
         return status.baseDirectory;
     }
 
-    public void setBaseDirectory(Path baseDirectory) {
+    /// Replaces the repository root while excluding an asynchronous refresh that captured the previous root.
+    ///
+    /// @param baseDirectory replacement repository root
+    public synchronized void setBaseDirectory(Path baseDirectory) {
         this.status = new Status(baseDirectory);
         this.loaded = false;
         this.gameVersions.clear();
@@ -121,6 +124,26 @@ public class DefaultGameRepository implements GameRepository {
         refreshImpl();
         loaded = true;
         EventBus.EVENT_BUS.fireEvent(new RefreshedGameInstancesEvent(this));
+    }
+
+    /// Creates a refresh task scoped to the repository root captured at task construction.
+    ///
+    /// The repository monitor prevents [#setBaseDirectory(Path)] from replacing that root during the refresh. A task
+    /// that has already become stale fails before touching the replacement repository instead of using a mismatched
+    /// resource declaration.
+    ///
+    /// @return stopped refresh task occupying the complete captured game directory
+    @Override
+    public Task<Void> refreshAsync() {
+        Status expectedStatus = status;
+        return Task.runAsync(() -> {
+            synchronized (this) {
+                if (status != expectedStatus) {
+                    throw new IllegalStateException("Game repository root changed before refresh execution");
+                }
+                refresh();
+            }
+        }).setResources(TaskResource.gameDirectory(expectedStatus.baseDirectory));
     }
 
     protected void refreshImpl() {

@@ -66,6 +66,7 @@ public final class LiteLoaderBMCLVersionList extends VersionList<LiteLoaderRemot
                         "mcversion", gameVersion
                 )))
                 .thenApplyAsync(json -> JsonUtils.fromMaybeMalformedJson(json, LiteLoaderBMCLVersion.class))
+                .asOrchestration()
                 .thenAcceptAsync(v -> {
                     lock.writeLock().lock();
                     try {
@@ -83,6 +84,6 @@ public final class LiteLoaderBMCLVersionList extends VersionList<LiteLoaderRemot
                     } finally {
                         lock.writeLock().unlock();
                     }
-                });
+                }).asOrchestration();
     }
 }

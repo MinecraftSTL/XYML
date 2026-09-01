@@ -36,17 +36,23 @@ import static space.minecraftstl.xyml.util.gson.JsonUtils.listTypeOf;
 /// Loads Fabric game and loader versions from the Fabric metadata service.
 @NotNullByDefault
 public final class FabricVersionList extends VersionList<FabricRemoteVersion> {
+    /// Download provider used to rewrite metadata endpoints.
     private final DownloadProvider downloadProvider;
 
+    /// Creates a Fabric version list using the given download provider.
+    ///
+    /// @param downloadProvider provider used to resolve metadata endpoints
     public FabricVersionList(DownloadProvider downloadProvider) {
         this.downloadProvider = downloadProvider;
     }
 
+    /// {@inheritDoc}
     @Override
     public boolean hasType() {
         return false;
     }
 
+    /// {@inheritDoc}
     @Override
     public Task<?> refreshAsync() {
         return Task.runAsync(() -> {
@@ -63,7 +69,7 @@ public final class FabricVersionList extends VersionList<FabricRemoteVersion> {
             } finally {
                 lock.writeLock().unlock();
             }
-        });
+        }).asOrchestration();
     }
 
     private static final String LOADER_META_URL = "https://meta.fabricmc.net/v2/versions/loader";

@@ -71,6 +71,10 @@ public abstract class VersionList<T extends RemoteVersion> {
         return refreshAsync();
     }
 
+    /// Creates a pure composition that skips an already loaded catalog or runs its conservative refresh task.
+    ///
+    /// @param gameVersion game version whose catalog subset is required
+    /// @return non-owning composition task
     public Task<?> loadAsync(String gameVersion) {
         return Task.composeAsync(() -> {
             lock.readLock().lock();
@@ -79,7 +83,7 @@ public abstract class VersionList<T extends RemoteVersion> {
             } finally {
                 lock.readLock().unlock();
             }
-        });
+        }).asOrchestration();
     }
 
     protected Collection<T> getVersionsImpl(String gameVersion) {
