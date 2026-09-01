@@ -86,11 +86,13 @@ public class McbbsModpackCompletionTask extends CompletableFutureTask<Void> {
             @Nullable ModpackConfiguration<McbbsModpackManifest> configuration) {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
+        setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(repository.getRunDirectory(instanceId)));
         this.modManager = repository.getModManager(instanceId);
         this.instanceId = instanceId;
         this.configurationFile = repository.getModpackConfiguration(instanceId);
         this.configuration = configuration;
-        setResources(TaskResource.gameDirectory(repository.getBaseDirectory()));
 
         setStage("xyml.modpack.download");
     }
@@ -116,7 +118,9 @@ public class McbbsModpackCompletionTask extends CompletableFutureTask<Void> {
                     throw new CustomException();
                 }
             })).thenComposeAsync(wrap(unused1 -> {
-                return executor.one(new GetTask(manifest.getFileApi() + "/manifest.json"));
+                GetTask task = new GetTask(manifest.getFileApi() + "/manifest.json");
+                task.setCacheRepository(dependency.getCacheRepository());
+                return executor.one(task);
             })).thenComposeAsync(wrap(remoteManifestJson -> {
                 McbbsModpackManifest remoteManifest;
                 // We needs to update modpack from online server.

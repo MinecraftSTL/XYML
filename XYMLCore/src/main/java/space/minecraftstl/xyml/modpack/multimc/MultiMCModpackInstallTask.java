@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.modpack.multimc;
 import com.google.gson.JsonParseException;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.MaintainTask;
@@ -31,8 +32,10 @@ import space.minecraftstl.xyml.modpack.MinecraftInstanceTask;
 import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.modpack.ModpackInstallTask;
+import space.minecraftstl.xyml.task.CompletableFutureTask;
 import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskCompletableFuture;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
@@ -47,18 +50,22 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 
 /// Transforms and installs a MultiMC-format archive, including embedded libraries, assets, and JAR modifications.
 @NotNullByDefault
 public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.ResolvedInstance> {
 
+    /// Normalized input archive snapshot used by execution and resource arbitration.
     private final Path zipFile;
+
+    /// Normalized effective run-directory snapshot used by execution and resource arbitration.
+    private final Path run;
     private final Modpack modpack;
     private final MultiMCInstanceConfiguration manifest;
     private final GameInstanceID instanceId;
@@ -80,13 +87,18 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
             Modpack modpack,
             MultiMCInstanceConfiguration manifest,
             GameInstanceID instanceId) {
-        this.zipFile = zipFile;
+        this.zipFile = zipFile.toAbsolutePath().normalize();
         this.modpack = modpack;
         this.manifest = manifest;
         this.instanceId = instanceId;
         this.dependencyManager = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
-        setResources(TaskResource.gameDirectory(repository.getBaseDirectory()), TaskResource.archive(zipFile));
+        this.run = repository.getRunDirectory(instanceId).toAbsolutePath().normalize();
+        setResources(
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(this.run),
+                TaskResource.archive(this.zipFile));
 
         Path json = repository.getModpackConfiguration(instanceId);
         if (repository.hasInstance(instanceId) && Files.notExists(json))
@@ -107,7 +119,6 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
     public void preExecute() throws Exception {
         // Stage #0: General Setup
         {
-            Path run = repository.getRunDirectory(instanceId);
             Path json = repository.getModpackConfiguration(instanceId);
 
             @Nullable ModpackConfiguration<MultiMCInstanceConfiguration> config = null;
@@ -162,64 +173,135 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
                     }
 
                     MultiMCInstancePatch patch = MultiMCInstancePatch.read(componentID, Files.readString(patchPath));
-                    patches.add(Task.supplyAsync(() -> patch)); // TODO: Task.completed has unclear compatibility issue.
+                    // TODO: Task.completed has unclear compatibility issue.
+                    patches.add(Task.supplyAsync(() -> patch).asOrchestration());
                 } else {
-                    patches.add(
-                            new GetTask(MultiMCComponents.getMetaURL(componentID, component.getVersion(), mcVersion))
-                                    .thenApplyAsync(s -> MultiMCInstancePatch.read(componentID, s))
-                    );
+                    patches.add(createPatchTask(componentID, component.getVersion(), mcVersion));
                 }
             }
             dependents.add(new MMCInstancePatchesAssembleTask(patches, mcVersion));
         }
     }
 
-    private static final class MMCInstancePatchesAssembleTask extends Task<List<MultiMCInstancePatch>> {
-        private final List<Task<MultiMCInstancePatch>> patches;
+    /// Creates a managed metadata fetch followed by an in-memory patch decode.
+    ///
+    /// @param componentID MultiMC component identifier
+    /// @param version requested component version, or null for the component-specific default
+    /// @param mcVersion Minecraft version used by component-specific default resolution
+    /// @return orchestration continuation whose fetch prerequisite retains the cache resource
+    private static Task<MultiMCInstancePatch> createPatchTask(
+            String componentID,
+            @Nullable String version,
+            String mcVersion) {
+        return new GetTask(MultiMCComponents.getMetaURL(componentID, version, mcVersion))
+                .thenApplyAsync(contents -> MultiMCInstancePatch.read(componentID, contents))
+                .asOrchestration();
+    }
+
+    /// Builds the transitive MultiMC patch set while scheduling every dynamically discovered fetch through the owner
+    /// chain supplied by [TaskCompletableFuture].
+    @NotNullByDefault
+    static final class MMCInstancePatchesAssembleTask extends CompletableFutureTask<List<MultiMCInstancePatch>> {
+        /// Immutable initial patch-task snapshot.
+        private final @Unmodifiable List<Task<MultiMCInstancePatch>> patches;
+
+        /// Minecraft version used to resolve components with an implicit version.
         private final String mcVersion;
 
-        public MMCInstancePatchesAssembleTask(List<Task<MultiMCInstancePatch>> patches, String mcVersion) {
-            this.patches = patches;
+        /// Factory for dynamically discovered component-patch tasks.
+        private final PatchTaskFactory patchTaskFactory;
+
+        /// Creates a patch assembler backed by the production MultiMC metadata endpoint.
+        ///
+        /// @param patches initial local or remote patch tasks
+        /// @param mcVersion Minecraft version used by component-specific default resolution
+        MMCInstancePatchesAssembleTask(List<Task<MultiMCInstancePatch>> patches, String mcVersion) {
+            this(patches, mcVersion, MultiMCModpackInstallTask::createPatchTask);
+        }
+
+        /// Creates a patch assembler with an explicit factory for dynamically discovered patches.
+        ///
+        /// @param patches initial local or remote patch tasks
+        /// @param mcVersion Minecraft version used by component-specific default resolution
+        /// @param patchTaskFactory factory for missing required component patches
+        MMCInstancePatchesAssembleTask(
+                List<Task<MultiMCInstancePatch>> patches,
+                String mcVersion,
+                PatchTaskFactory patchTaskFactory) {
+            this.patches = List.copyOf(patches);
             this.mcVersion = mcVersion;
+            this.patchTaskFactory = Objects.requireNonNull(patchTaskFactory, "patchTaskFactory");
+            asOrchestration();
         }
 
+        /// Executes initial patch tasks as owned children, then recursively schedules every missing requirement.
+        ///
+        /// @param executor current invocation's owner-aware nested-task executor
+        /// @return future containing the immutable transitive patch list
         @Override
-        public Collection<? extends Task<?>> getDependents() {
-            return patches;
+        public CompletableFuture<@Unmodifiable List<MultiMCInstancePatch>> getFuture(
+                TaskCompletableFuture executor) {
+            CompletableFuture<?>[] initialPatches = patches.stream()
+                    .map(executor::one)
+                    .toArray(CompletableFuture<?>[]::new);
+            return CompletableFuture.allOf(initialPatches).thenCompose(ignored -> {
+                Map<String, MultiMCInstancePatch> existing = new LinkedHashMap<>();
+                for (Task<MultiMCInstancePatch> patch : patches) {
+                    MultiMCInstancePatch result = Objects.requireNonNull(
+                            patch.getResult(),
+                            "Initial MultiMC component patch result");
+                    existing.put(result.getID(), result);
+                }
+                return fetchMissingPatches(executor, existing);
+            });
         }
 
-        @Override
-        public void execute() throws Exception {
-            Map<String, MultiMCInstancePatch> existed = new LinkedHashMap<>();
-            for (Task<MultiMCInstancePatch> patch : patches) {
-                MultiMCInstancePatch result = patch.getResult();
-
-                existed.put(result.getID(), result);
-            }
-
-            checking:
-            while (true) {
-                for (MultiMCInstancePatch patch : existed.values()) {
-                    for (MultiMCManifest.MultiMCManifestCachedRequires require : patch.getRequires()) {
-                        String componentID = require.getID();
-                        if (!existed.containsKey(componentID)) {
-                            Task<MultiMCInstancePatch> task = new GetTask(MultiMCComponents.getMetaURL(
-                                    componentID, Lang.requireNonNullElse(require.getEqualsVersion(), require.getSuggests()), mcVersion
-                            )).thenApplyAsync(s -> MultiMCInstancePatch.read(componentID, s));
-                            task.run();
-
-                            MultiMCInstancePatch result = Objects.requireNonNull(task.getResult());
-                            existed.put(result.getID(), result);
-                            continue checking;
-                        }
+        /// Finds one missing requirement and continues after its owner-managed task completes.
+        ///
+        /// @param executor current invocation's nested-task executor
+        /// @param existing insertion-ordered patches collected so far
+        /// @return future containing the immutable completed patch list
+        private CompletableFuture<@Unmodifiable List<MultiMCInstancePatch>> fetchMissingPatches(
+                TaskCompletableFuture executor,
+                Map<String, MultiMCInstancePatch> existing) {
+            for (MultiMCInstancePatch patch : existing.values()) {
+                for (MultiMCManifest.MultiMCManifestCachedRequires requirement : patch.getRequires()) {
+                    String componentID = requirement.getID();
+                    if (!existing.containsKey(componentID)) {
+                        @Nullable String version = Lang.requireNonNullElse(
+                                requirement.getEqualsVersion(),
+                                requirement.getSuggests());
+                        Task<MultiMCInstancePatch> task = Objects.requireNonNull(
+                                patchTaskFactory.create(componentID, version, mcVersion),
+                                "required MultiMC component patch task");
+                        return executor.one(task).thenCompose(result -> {
+                            MultiMCInstancePatch requiredPatch = Objects.requireNonNull(
+                                    result,
+                                    "Required MultiMC component patch result");
+                            existing.put(requiredPatch.getID(), requiredPatch);
+                            return fetchMissingPatches(executor, existing);
+                        });
                     }
                 }
-
-                break;
             }
-
-            setResult(new ArrayList<>(existed.values()));
+            return CompletableFuture.completedFuture(List.copyOf(existing.values()));
         }
+    }
+
+    /// Creates one task for a dynamically discovered MultiMC component patch.
+    @FunctionalInterface
+    @NotNullByDefault
+    interface PatchTaskFactory {
+        /// Creates the task that supplies one required component patch.
+        ///
+        /// @param componentID required component identifier
+        /// @param version required component version, or null for the component-specific default
+        /// @param mcVersion Minecraft version used by component-specific default resolution
+        /// @return explicitly resourced patch task
+        Task<MultiMCInstancePatch> create(
+                String componentID,
+                @Nullable String version,
+                String mcVersion);
     }
 
     @Override

@@ -123,21 +123,29 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// Instance IDs whose newer settings schema must be preserved without writing.
     private final Set<GameInstanceID> readOnlyInstanceGameSettings = new HashSet<>();
 
-    /// Instance IDs provisionally treated as modpacks while installation is in progress.
-    private final Set<GameInstanceID> beingModpackInstances = new HashSet<>();
+    /// Thread-safe instance IDs provisionally treated as modpacks while concurrent installations are in progress.
+    private final Set<GameInstanceID> beingModpackInstances = Collections.synchronizedSet(new HashSet<>());
 
     /// Publishes changes to per-instance icon files.
     public final EventManager<Event> onInstanceIconChanged = new EventManager<>();
 
     /// Creates a repository backed by the given game directory.
     public XYMLGameRepository(GameDirectory gameDirectory) {
+        this(gameDirectory, settings());
+    }
+
+    /// Creates a repository with an explicitly supplied settings owner for isolated package tests.
+    ///
+    /// @param gameDirectory persistent game directory
+    /// @param launcherSettings settings object owning selected-instance state
+    XYMLGameRepository(GameDirectory gameDirectory, LauncherSettings launcherSettings) {
         super(gameDirectory.getPath().toPath());
         this.gameDirectory = gameDirectory;
         this.selectedInstance = new SimpleObjectProperty<>(
-                settings().getSelectedInstance(gameDirectory.getId()));
-        this.selectedInstanceSubscription = settings().getSelectedInstance().subscribe(change -> {
+                launcherSettings.getSelectedInstance(gameDirectory.getId()));
+        this.selectedInstanceSubscription = launcherSettings.getSelectedInstance().subscribe(change -> {
             if (change.affectedKeys().contains(gameDirectory.getId())) {
-                selectedInstance.set(settings().getSelectedInstance(gameDirectory.getId()));
+                selectedInstance.set(launcherSettings.getSelectedInstance(gameDirectory.getId()));
             }
         });
         gameDirectory.pathProperty().subscribe(change -> changeDirectory(gameDirectory.getPath().toPath()));

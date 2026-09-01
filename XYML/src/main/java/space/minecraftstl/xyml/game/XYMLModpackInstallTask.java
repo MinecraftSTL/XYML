@@ -62,13 +62,17 @@ public final class XYMLModpackInstallTask extends Task<Void> {
             XYMLGameRepository repository, Path zipFile, Modpack modpack, GameInstanceID instanceId) {
         this.repository = repository;
         this.dependency = repository.getDependency();
-        this.zipFile = zipFile;
+        this.zipFile = zipFile.toAbsolutePath().normalize();
         this.instanceId = instanceId;
         this.modpack = modpack;
-        setResources(TaskResource.gameDirectory(repository.getBaseDirectory()), TaskResource.archive(zipFile));
 
-        Path run = repository.getRunDirectory(this.instanceId);
+        Path run = repository.getRunDirectory(this.instanceId).toAbsolutePath().normalize();
         Path json = repository.getModpackConfiguration(this.instanceId);
+        setResources(
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(this.instanceId)),
+                TaskResource.gameDirectory(run),
+                TaskResource.archive(this.zipFile));
         if (repository.hasInstance(this.instanceId) && Files.notExists(json))
             throw new IllegalArgumentException("Instance " + instanceId + " already exists");
 

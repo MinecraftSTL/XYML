@@ -88,9 +88,12 @@ public final class CurseInstallTask extends Task<Void> {
         this.instanceId = instanceId;
         this.iconUrl = iconUrl;
         this.repository = dependencyManager.getGameRepository();
-        setResources(TaskResource.gameDirectory(repository.getBaseDirectory()), TaskResource.archive(zipFile));
-
-        this.run = repository.getRunDirectory(instanceId);
+        this.run = repository.getRunDirectory(instanceId).toAbsolutePath().normalize();
+        setResources(
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(this.run),
+                TaskResource.archive(zipFile));
 
         Path json = repository.getModpackConfiguration(instanceId);
         if (repository.hasInstance(instanceId) && Files.notExists(json))

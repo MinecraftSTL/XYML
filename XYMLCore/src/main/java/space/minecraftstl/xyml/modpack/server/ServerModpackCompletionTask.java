@@ -80,7 +80,9 @@ public class ServerModpackCompletionTask extends Task<Void> {
         this.dependencyManager = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
         this.instanceId = instanceId;
-        setResources(TaskResource.gameDirectory(repository.getBaseDirectory()));
+        setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(repository.getRunDirectory(instanceId)));
 
         if (manifest == null) {
             try {
@@ -106,7 +108,9 @@ public class ServerModpackCompletionTask extends Task<Void> {
     @Override
     public void preExecute() throws Exception {
         if (manifest == null || StringUtils.isBlank(manifest.getManifest().getFileApi())) return;
-        dependent = new GetTask(manifest.getManifest().getFileApi() + "/server-manifest.json");
+        GetTask manifestTask = new GetTask(manifest.getManifest().getFileApi() + "/server-manifest.json");
+        manifestTask.setCacheRepository(dependencyManager.getCacheRepository());
+        dependent = manifestTask;
     }
 
     @Override

@@ -59,7 +59,10 @@ public class McbbsModpackRemoteInstallTask extends Task<Void> {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
         this.manifest = manifest;
-        setResources(TaskResource.gameDirectory(repository.getBaseDirectory()));
+        setResources(
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(repository.getRunDirectory(instanceId)));
 
         Path json = repository.getModpackConfiguration(instanceId);
         if (repository.hasInstance(instanceId) && Files.notExists(json))

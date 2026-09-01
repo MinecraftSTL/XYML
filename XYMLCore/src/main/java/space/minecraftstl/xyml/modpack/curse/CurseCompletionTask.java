@@ -84,10 +84,12 @@ public final class CurseCompletionTask extends Task<Void> {
             @Nullable CurseManifest manifest) {
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
+        setResources(
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(repository.getRunDirectory(instanceId)));
         this.modManager = repository.getModManager(instanceId);
         this.instanceId = instanceId;
         this.manifest = manifest;
-        setResources(TaskResource.gameDirectory(repository.getBaseDirectory()));
 
         if (manifest == null)
             try {
