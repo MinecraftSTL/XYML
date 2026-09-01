@@ -429,8 +429,8 @@ public final class JavaManagerDiscoRuntimeAcquisitionService
                                 currentPlatform,
                                 selectedDistribution,
                                 selectedPackageType);
-                    });
-        });
+                    }).asOrchestration();
+        }).asOrchestration();
     }
 
     /// Derives the prior launcher's stable distribution-version-package naming convention without selecting it.

@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.download.game.GameLibrariesTask;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
@@ -75,8 +76,9 @@ public final class RepositoryInstanceJsonImportService implements InstanceJsonIm
                 () -> prepareImport(normalizedSource, targetId))
                 .setName("Import Minecraft instance JSON")
                 .setResources(
-                        TaskResource.gameDirectory(repository.getBaseDirectory()),
-                        TaskResource.configuration(normalizedSource));
+                        TaskResource.repositoryMetadata(repository.getBaseDirectory()),
+                        TaskResource.configuration(normalizedSource))
+                .releaseResourcesBeforeDependencies();
     }
 
     /// Parses and validates one source, then creates the established download/save chain.
@@ -102,6 +104,17 @@ public final class RepositoryInstanceJsonImportService implements InstanceJsonIm
 
         GameInstanceManifest importedManifest = parsedManifest.withId(instanceId).withJar(instanceId);
         DefaultDependencyManager dependencyManager = repository.getDependency();
+        TaskResource metadataResource = TaskResource.repositoryMetadata(repository.getBaseDirectory());
+        TaskResource operationResource = TaskResource.repositoryOperation(repository.getBaseDirectory());
+        TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(instanceId));
+        Task<@Nullable Void> availabilityCheck = Task.runAsync(
+                "Recheck imported instance name",
+                ioExecutor,
+                () -> {
+                    if (repository.instanceIdConflicts(instanceId)) {
+                        throw InstanceJsonImportException.instanceAlreadyExists(instanceId);
+                    }
+                }).setResources(metadataResource, instanceResource);
         Task<?> optionalAssetsAndLibraries = Task.allOf(
                 new GameAssetDownloadTask(
                         dependencyManager,
@@ -114,11 +127,25 @@ public final class RepositoryInstanceJsonImportService implements InstanceJsonIm
                     // while optional asset/library repair can be retried from instance maintenance.
                 });
 
-        return Task.allOf(
-                        new GameDownloadTask(dependencyManager, null, importedManifest),
-                        optionalAssetsAndLibraries)
+        Task<?> downloads = Task.allOf(
+                new GameDownloadTask(dependencyManager, null, importedManifest),
+                optionalAssetsAndLibraries);
+        Task<?> operation = availabilityCheck
+                .thenComposeAsync(ioExecutor, ignored -> downloads)
+                .setResources(operationResource, instanceResource)
                 .thenComposeAsync(ioExecutor, ignored -> repository.saveAsync(importedManifest))
-                .thenRunAsync(ioExecutor, repository::refresh)
-                .thenRunAsync(ioExecutor, () -> repository.setSelectedInstance(instanceId));
+                .setResources(operationResource, instanceResource);
+        Task<@Nullable Void> refreshed = operation.thenComposeAsync(ioExecutor, ignored -> Task.runAsync(
+                        "Publish imported instance",
+                        ioExecutor,
+                        repository::refresh)
+                .setResources(TaskResource.gameDirectory(repository.getBaseDirectory())))
+                .asOrchestration();
+        return refreshed.thenComposeAsync(ioExecutor, ignored -> Task.runAsync(
+                        "Select imported instance",
+                        ioExecutor,
+                        () -> repository.setSelectedInstance(instanceId))
+                .setResources(TaskResource.configuration(SettingsManager.settingsLocation())))
+                .asOrchestration();
     }
 }

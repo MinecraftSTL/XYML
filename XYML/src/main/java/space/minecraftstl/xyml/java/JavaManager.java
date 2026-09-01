@@ -35,6 +35,7 @@ import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.observable.property.ObservableValue;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.CacheRepository;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.Lang;
@@ -225,7 +226,12 @@ public final class JavaManager {
             } finally {
                 JAVA_RUNTIMES.cancelRefresh(ticket);
             }
-        }).start();
+        }).setResources(
+                TaskResource.configuration(Metadata.XYML_USER_HOME.resolve("javaCache.json")),
+                TaskResource.javaRuntime(Metadata.XYML_USER_HOME.resolve("java")),
+                TaskResource.javaRuntime(Metadata.XYML_LOCAL_HOME.resolve("java")),
+                TaskResource.javaRuntime(CacheRepository.getInstance().getCacheDirectory().resolve("java")))
+                .start();
     }
 
     /// Creates a task that validates and registers a user-selected Java executable.
@@ -245,7 +251,9 @@ public final class JavaManager {
                         addJava(javaRuntime);
                     }
                     return javaRuntime;
-                });
+                }).setResources(
+                        runtimeProbeResource(binary),
+                        TaskResource.configuration(SettingsManager.USER_SETTINGS_LOCATION));
     }
 
     /// Creates a task that downloads and registers a managed Java runtime.
@@ -255,11 +263,11 @@ public final class JavaManager {
     /// @param gameJavaVersion requested game Java component
     /// @return download and registration task
     public static Task<JavaRuntime> getDownloadJavaTask(DownloadProvider downloadProvider, Platform platform, GameJavaVersion gameJavaVersion) {
-        return REPOSITORY.getDownloadJavaTask(downloadProvider, platform, gameJavaVersion)
-                .thenApplyAsync(Schedulers.ui(), java -> {
+        Task<JavaRuntime> installation = REPOSITORY.getDownloadJavaTask(downloadProvider, platform, gameJavaVersion);
+        return copyResourceDeclaration(installation.thenApplyAsync(Schedulers.ui(), java -> {
                     addJava(java);
                     return java;
-                });
+                }), installation);
     }
 
     /// Creates a task that installs and registers Java from an existing archive.
@@ -270,11 +278,11 @@ public final class JavaManager {
     /// @param archiveFile downloaded runtime archive
     /// @return installation and registration task
     public static Task<JavaRuntime> getInstallJavaTask(Platform platform, String name, Map<String, Object> update, Path archiveFile) {
-        return REPOSITORY.getInstallJavaTask(platform, name, update, archiveFile)
-                .thenApplyAsync(Schedulers.ui(), java -> {
+        Task<JavaRuntime> installation = REPOSITORY.getInstallJavaTask(platform, name, update, archiveFile);
+        return copyResourceDeclaration(installation.thenApplyAsync(Schedulers.ui(), java -> {
                     addJava(java);
                     return java;
-                });
+                }), installation);
     }
 
     /// Creates a task that unregisters and deletes a launcher-managed Java runtime.
@@ -297,13 +305,47 @@ public final class JavaManager {
         Path relativized = platformRoot.relativize(java.getBinary());
         if (relativized.getNameCount() > 1) {
             String name = relativized.getName(0).toString();
-            return Task.composeAsync(() -> {
+            Task<Void> deletion = REPOSITORY.getUninstallJavaTask(java.getPlatform(), name);
+            return copyResourceDeclaration(Task.composeAsync(() -> {
                 removeJava(java);
-                return REPOSITORY.getUninstallJavaTask(java.getPlatform(), name);
-            });
+                return deletion;
+            }), deletion);
         } else {
             return Task.completed(null);
         }
+    }
+
+    /// Resolves a conservative runtime directory boundary for probing one executable.
+    ///
+    /// Standard `bin/java` layouts use their Java home. Non-standard executable locations use the containing directory,
+    /// which remains a complete boundary for every file path directly inferred by the probe.
+    ///
+    /// @param binary executable path supplied by the user
+    /// @return runtime resource covering the executable's probe boundary
+    private static TaskResource runtimeProbeResource(Path binary) {
+        Path absoluteBinary = Objects.requireNonNull(binary, "binary").toAbsolutePath().normalize();
+        @Nullable Path parent = absoluteBinary.getParent();
+        if (parent == null) {
+            return TaskResource.global();
+        }
+        @Nullable Path parentName = parent.getFileName();
+        @Nullable Path javaHome = parentName != null && "bin".equalsIgnoreCase(parentName.toString())
+                ? parent.getParent()
+                : parent;
+        return javaHome == null ? TaskResource.global() : TaskResource.javaRuntime(javaHome);
+    }
+
+    /// Copies one audited immutable resource declaration to its presentation or registry continuation.
+    ///
+    /// @param target continuation covering the same external operation
+    /// @param source task whose resources already describe that operation
+    /// @param <T> task result type
+    /// @return target with the source declaration copied defensively
+    private static <T> Task<T> copyResourceDeclaration(Task<T> target, Task<?> source) {
+        @Unmodifiable List<TaskResource> resources = List.copyOf(source.getResources());
+        TaskResource @Unmodifiable [] additional = resources.subList(1, resources.size())
+                .toArray(TaskResource[]::new);
+        return target.setResources(resources.get(0), additional);
     }
 
     /// Adds a runtime to the observable registry.

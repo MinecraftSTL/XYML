@@ -245,19 +245,25 @@ public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAc
     /// @return stopped immutable snapshot task
     @Override
     public Task<JavaRuntimeAcquisitionSnapshot> loadSnapshot() {
-        return Task.supplyAsync("Load Java acquisition options", () -> {
+        return Task.composeAsync("Load Java acquisition options", () -> {
             Platform platform = backend.currentPlatform();
             if (!Platform.SYSTEM_PLATFORM.equals(platform)) {
-                return new JavaRuntimeAcquisitionSnapshot(platform, List.of());
+                return Task.supplyAsync(
+                        "Load unsupported-platform Java acquisition options",
+                        () -> new JavaRuntimeAcquisitionSnapshot(platform, List.of()))
+                        .asOrchestration();
             }
 
-            @Unmodifiable List<MojangJavaRuntimeOption> options = backend.supportedMojangVersions(platform).stream()
-                    .map(version -> new MojangJavaRuntimeOption(
-                            version,
-                            backend.isMojangRuntimeInstalled(platform, version)))
-                    .toList();
-            return new JavaRuntimeAcquisitionSnapshot(platform, options);
-        });
+            Path platformRoot = backend.managedPlatformRoot(platform).toAbsolutePath().normalize();
+            return Task.supplyAsync("Read Java acquisition options", () -> {
+                @Unmodifiable List<MojangJavaRuntimeOption> options = backend.supportedMojangVersions(platform).stream()
+                        .map(version -> new MojangJavaRuntimeOption(
+                                version,
+                                backend.isMojangRuntimeInstalled(platform, version)))
+                        .toList();
+                return new JavaRuntimeAcquisitionSnapshot(platform, options);
+            }).setResources(TaskResource.javaRuntime(platformRoot));
+        }).asOrchestration();
     }
 
     /// Checks the exact supported archive suffixes without accessing the filesystem.
@@ -276,9 +282,6 @@ public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAc
     @Override
     public Task<JavaRuntime> downloadMojangRuntime(GameJavaVersion version) {
         GameJavaVersion requestedVersion = Objects.requireNonNull(version, "version");
-        Path platformRoot = backend.managedPlatformRoot(Platform.SYSTEM_PLATFORM)
-                .toAbsolutePath()
-                .normalize();
         return Task.composeAsync("Download Mojang Java runtime", () -> {
             Platform platform = backend.currentPlatform();
             if (!Platform.SYSTEM_PLATFORM.equals(platform)) {
@@ -296,8 +299,13 @@ public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAc
             if (backend.isMojangRuntimeInstalled(platform, supportedVersion)) {
                 throw new FileAlreadyExistsException(supportedVersion.component());
             }
-            return backend.downloadMojangRuntime(platform, supportedVersion);
-        }).setResources(TaskResource.javaRuntime(platformRoot));
+            Path platformRoot = backend.managedPlatformRoot(platform).toAbsolutePath().normalize();
+            Task<JavaRuntime> downloadTask = backend.downloadMojangRuntime(platform, supportedVersion);
+            if (downloadTask.getResources().contains(TaskResource.conservative())) {
+                downloadTask.setResources(TaskResource.javaRuntime(platformRoot));
+            }
+            return downloadTask;
+        }).asOrchestration();
     }
 
     /// Creates a stopped task that validates the suffix before opening and inspecting the archive.
@@ -306,13 +314,15 @@ public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAc
     /// @return stopped archive inspection task
     @Override
     public Task<LocalJavaArchiveInspection> inspectLocalArchive(Path archiveFile) {
-        Path selectedArchive = Objects.requireNonNull(archiveFile, "archiveFile");
+        Path selectedArchive = Objects.requireNonNull(archiveFile, "archiveFile")
+                .toAbsolutePath()
+                .normalize();
         return new CancellableValueTask<>("Inspect local Java archive", cancellationCheck -> {
             if (!supportsLocalArchive(selectedArchive)) {
                 throw new IllegalArgumentException("Unsupported Java archive: " + selectedArchive);
             }
             return backend.inspectLocalArchive(selectedArchive, cancellationCheck);
-        });
+        }).setResources(TaskResource.archive(selectedArchive));
     }
 
     /// Classifies syntax, reserved names, direct-child containment, and current local repository state.
