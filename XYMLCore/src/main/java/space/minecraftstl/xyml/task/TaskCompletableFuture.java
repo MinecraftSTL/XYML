@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.task;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
@@ -31,7 +32,7 @@ import java.util.concurrent.CompletableFuture;
 /// outcome only when that returned view is composed into the parent future, preserving the established propagation
 /// contract while preventing early resource release.
 @NotNullByDefault
-public interface TaskCompletableFuture {
+public interface TaskCompletableFuture extends TaskExecutionContext {
 
     /// Starts one child task and returns an independently cancellable view of its result.
     ///
@@ -39,6 +40,7 @@ public interface TaskCompletableFuture {
     /// @param <T> possibly nullable child result type
     /// @return future view whose cancellation does not cancel internal resource cleanup
     /// @throws IllegalStateException if the parent scope has already closed
+    @Override
     <T> CompletableFuture<@Nullable T> one(Task<T> task);
 
     /// Starts an immutable snapshot of child tasks and returns an independently cancellable aggregate view.
@@ -46,5 +48,6 @@ public interface TaskCompletableFuture {
     /// @param tasks child tasks to execute as independent siblings under the current invocation owner
     /// @return future view completed after every child reaches a terminal state
     /// @throws IllegalStateException if the parent scope has already closed
-    CompletableFuture<@Nullable Void> all(Collection<Task<?>> tasks);
+    @Override
+    CompletableFuture<@Nullable Void> all(@Unmodifiable Collection<? extends Task<?>> tasks);
 }

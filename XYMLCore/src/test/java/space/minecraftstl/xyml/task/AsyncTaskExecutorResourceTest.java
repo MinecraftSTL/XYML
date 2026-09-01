@@ -432,6 +432,54 @@ public final class AsyncTaskExecutorResourceTest {
         assertEquals(0, manager.trackedResourceCount());
     }
 
+    /// Verifies an ordinary task can register a dynamic child from another worker without losing parent ownership.
+    @Test
+    public void regularTaskContextReentersAcrossThreadsAndDelaysCompletion() throws Exception {
+        Path instanceDirectory = temporaryDirectory.resolve("instances/regular-parent");
+        TaskResource instance = TaskResource.gameInstance(instanceDirectory);
+        TaskResource childResource = TaskResource.downloadTarget(instanceDirectory.resolve("child.jar"));
+        CountDownLatch childRegistered = new CountDownLatch(1);
+        CountDownLatch childStarted = new CountDownLatch(1);
+        CountDownLatch releaseChild = new CountDownLatch(1);
+        AtomicBoolean competitorRan = new AtomicBoolean();
+        Task<?> child = task(childResource, () -> {
+            childStarted.countDown();
+            await(releaseChild);
+        });
+        Task<Void> parent = new Task<Void>() {
+            /// Retains synchronous [Task#run()] compatibility without creating dynamic children.
+            @Override
+            public void execute() {
+            }
+
+            /// Registers the child from a different continuation worker before this primary operation returns.
+            @Override
+            public void execute(TaskExecutionContext context) throws Exception {
+                CompletableFuture.runAsync(() -> {
+                    context.one(child);
+                    childRegistered.countDown();
+                }).get(5, TimeUnit.SECONDS);
+            }
+        }.setResources(instance);
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+
+        CompletableFuture<Boolean> parentResult = execute(parent, manager);
+        assertTrue(childRegistered.await(5, TimeUnit.SECONDS));
+        assertTrue(childStarted.await(5, TimeUnit.SECONDS));
+        CompletableFuture<Boolean> competitorResult = execute(task(childResource, () -> competitorRan.set(true)), manager);
+        awaitCondition(() -> manager.pendingWaiterCount() == 1);
+
+        assertFalse(parentResult.isDone());
+        assertFalse(competitorRan.get());
+        releaseChild.countDown();
+
+        assertTrue(get(parentResult));
+        assertTrue(get(competitorResult));
+        assertTrue(competitorRan.get());
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Verifies cancelling an exposed nested future cannot suppress cleanup when its lease is granted later.
     @Test
     public void cancelledNestedFutureCannotLeakLateLease() throws Exception {

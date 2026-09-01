@@ -405,6 +405,20 @@ public abstract class Task<T> {
     /// Performs this task's primary operation and may store its result.
     public abstract void execute() throws Exception;
 
+    /// Performs this task's primary operation with an executor-owned dynamic-child context.
+    ///
+    /// The default implementation retains the historical [#execute()] contract. Override this overload only when a
+    /// regular task must start dynamic children during its primary operation; the context keeps them in the current
+    /// invocation's resource lifetime without storing an owner on this reusable task object or relying on thread
+    /// identity. Direct [#run()] calls deliberately invoke only [#execute()] and therefore do not create a context.
+    ///
+    /// @param context active executor-owned child context
+    /// @throws Exception if the primary operation cannot complete
+    public void execute(TaskExecutionContext context) throws Exception {
+        Objects.requireNonNull(context, "context");
+        execute();
+    }
+
     /// Returns whether the executor should invoke [#postExecute()] after follow-up tasks terminate.
     public boolean doPostExecute() {
         return false;

@@ -402,11 +402,13 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                         }
                     }
 
-                    return CompletableFuture.runAsync(wrap(() -> {
+                    NestedTaskScope scope = new NestedTaskScope(task, owner, resourceExecution);
+                    CompletableFuture<@Nullable Void> mainExecution = CompletableFuture.runAsync(wrap(() -> {
                         task.setState(Task.TaskState.RUNNING);
                         notifyTaskListeners(task, it -> it.onRunning(task));
-                        task.execute();
-                    }), task.getExecutor()).whenComplete(
+                        task.execute(scope);
+                    }), task.getExecutor()).thenApply((@Nullable Void unused) -> (Void) null);
+                    return scope.closeAfter(mainExecution).whenComplete(
                             (@Nullable Void unused, @Nullable Throwable throwable) -> {
                         task.setState(Task.TaskState.EXECUTED);
                         if (throwable == null && task.releasesResourcesBeforeDependencies()) {
@@ -538,7 +540,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         return releaseStage.copy();
     }
 
-    /// Tracks every child source started by one completable-future task invocation.
+    /// Tracks every child source started by one executor-managed task invocation.
     ///
     /// The scope is kept outside [Task] so reused task objects cannot share owner state. Returned child futures are
     /// copies; cancellation or manual completion by business code therefore cannot suppress the internal source used
@@ -596,7 +598,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         /// @param tasks child tasks
         /// @return independently cancellable aggregate future view
         @Override
-        public synchronized CompletableFuture<@Nullable Void> all(Collection<Task<?>> tasks) {
+        public synchronized CompletableFuture<@Nullable Void> all(@Unmodifiable Collection<? extends Task<?>> tasks) {
             ensureOpen();
             @Unmodifiable List<Task<?>> taskSnapshot = List.copyOf(Objects.requireNonNull(tasks, "tasks"));
             CompletableFuture<@Nullable Void> source = executeTasksExceptionally(
@@ -608,7 +610,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             return source.copy();
         }
 
-        /// Closes registration after the main future and then waits for every registered internal source.
+        /// Closes registration after the main task body or future and then waits for every registered internal source.
         ///
         /// The main future remains the sole source of the parent's result and failure. A child future already reports
         /// its own failure through its task lifecycle and the view returned by [#one(Task)] or [#all(Collection)]; a
