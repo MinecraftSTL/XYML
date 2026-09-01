@@ -748,14 +748,16 @@ public abstract class Task<T> {
 
     /// Creates a completion continuation whose callback acquires additional resources after the prerequisite ends.
     ///
-    /// The returned coordinator inherits and retains this task's resource declaration while one explicit cleanup child
-    /// acquires the supplied resources. The retained owner prevents another operation on the same narrow resource from
-    /// entering between a failed prerequisite and its rollback. Every cleanup resource must therefore fit within the
-    /// inherited owner coverage; callers must not use this method to upgrade multiple shared repository operations to a
-    /// conflicting directory-wide resource. Once the coordinator has started, its cleanup still runs after executor
-    /// cancellation, matching [#whenComplete(Executor, FinalizedCallback)]; cancellation before the coordinator acquires
-    /// its initial lease still prevents the callback. The callback exception takes precedence over a prerequisite
-    /// exception, while a successful callback rethrows the original prerequisite exception.
+    /// The returned coordinator inherits this task's resource declaration while one explicit cleanup child acquires the
+    /// supplied resources. When every cleanup resource fits within the inherited coverage, the owner is retained so no
+    /// conflicting operation can enter between a failed prerequisite and its rollback. If a cleanup resource is wider
+    /// than that coverage, the coordinator automatically hands off its lease before starting the cleanup child; the
+    /// child then acquires its own independent boundary. This permits a repository-wide refresh after an instance-local
+    /// operation without serializing the operation itself. Callers must still declare every resource touched by the
+    /// callback. Once the coordinator has started, its cleanup still runs after executor cancellation, matching
+    /// [#whenComplete(Executor, FinalizedCallback)]; cancellation before the coordinator acquires its initial lease still
+    /// prevents the callback. The callback exception takes precedence over a prerequisite exception, while a successful
+    /// callback rethrows the original prerequisite exception.
     ///
     /// @param executor executor used for the coordinator and cleanup callback
     /// @param action completion callback receiving the prerequisite failure, or null after success
@@ -779,9 +781,12 @@ public abstract class Task<T> {
                 && (cleanupResources.size() != 1 || !cleanupResources.get(0).isConservative())) {
             throw new IllegalArgumentException("The conservative task resource cannot be combined with explicit resources");
         }
+        boolean handoffBeforeCleanup = cleanupResources.stream().anyMatch(cleanupResource ->
+                resources.stream().noneMatch(parentResource ->
+                        !parentResource.isConservative() && parentResource.permitsNested(cleanupResource)));
         String taskName = getCaller();
 
-        return new Task<@Nullable Void>() {
+        Task<@Nullable Void> coordinator = new Task<@Nullable Void>() {
             /// Cleanup child created only after the prerequisite reaches an Exception-based terminal state.
             private @Nullable Task<@Nullable Void> cleanup;
 
@@ -832,7 +837,11 @@ public abstract class Task<T> {
             public boolean isRelyingOnDependents() {
                 return false;
             }
-        }.setExecutor(executor).setName(taskName).setSignificance(TaskSignificance.MODERATE);
+        };
+        if (handoffBeforeCleanup) {
+            coordinator.releaseResourcesBeforeDependencies();
+        }
+        return coordinator.setExecutor(executor).setName(taskName).setSignificance(TaskSignificance.MODERATE);
     }
 
     /// Creates a completion continuation that receives this task's possibly absent result and failure.

@@ -824,6 +824,35 @@ public final class AsyncTaskExecutorResourceTest {
         assertEquals(0, manager.trackedResourceCount());
     }
 
+    /// Verifies a cleanup resource wider than its prerequisite is acquired after an automatic owner handoff.
+    @Test
+    public void resourceAwareCompletionHandsOffForWiderCleanupResource() throws Exception {
+        TaskResource instanceResource = TaskResource.gameInstance(
+                temporaryDirectory.resolve("handoff-cleanup/versions/example"));
+        TaskResource repositoryResource = TaskResource.gameDirectory(
+                temporaryDirectory.resolve("handoff-cleanup"));
+        CountDownLatch prerequisiteStarted = new CountDownLatch(1);
+        CountDownLatch releasePrerequisite = new CountDownLatch(1);
+        CountDownLatch cleanupRan = new CountDownLatch(1);
+        Task<?> prerequisite = Task.runAsync(() -> {
+            prerequisiteStarted.countDown();
+            await(releasePrerequisite);
+        }).setResources(instanceResource);
+        Task<?> completion = prerequisite.whenCompleteWithResources(
+                Runnable::run,
+                ignoredFailure -> cleanupRan.countDown(),
+                repositoryResource);
+
+        assertTrue(completion.releasesResourcesBeforeDependencies());
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(completion, new TaskResourceLockManager());
+        CompletableFuture<Boolean> result = CompletableFuture.supplyAsync(executor::test);
+        assertTrue(prerequisiteStarted.await(5, TimeUnit.SECONDS));
+        releasePrerequisite.countDown();
+
+        assertTrue(cleanupRan.await(5, TimeUnit.SECONDS));
+        assertTrue(result.get(5, TimeUnit.SECONDS));
+    }
+
     /// Verifies cancellation after finalizer startup still runs its independently resourced terminal cleanup.
     @Test
     public void resourceAwareCompletionRunsCleanupAfterCancellation() throws Exception {
