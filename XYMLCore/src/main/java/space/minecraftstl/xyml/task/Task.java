@@ -112,12 +112,13 @@ public abstract class Task<T> {
         return this;
     }
 
-    /// Marks this task as an audited graph-orchestration node with no filesystem write of its own.
+    /// Marks this task as an audited non-filesystem phase with no filesystem write of its own.
     ///
     /// The task releases its non-conflicting orchestration marker before prerequisites run. Its execution callback may
-    /// inspect completed prerequisite results and select or construct follow-up tasks, but it must not perform a
-    /// filesystem write or start untracked asynchronous work. Every returned follow-up must declare the resources it
-    /// occupies. Arbitrary composition callbacks remain conservative unless callers opt in through this method.
+    /// inspect completed prerequisite results, parse immutable data, perform read-only computation, update memory under
+    /// its own synchronization, and select or construct follow-up tasks. It must not perform a filesystem write or
+    /// start untracked asynchronous work. Every returned follow-up must declare the resources it occupies. Arbitrary
+    /// composition callbacks remain conservative unless callers opt in through this method.
     ///
     /// @return this task
     public final Task<T> asOrchestration() {
@@ -503,9 +504,10 @@ public abstract class Task<T> {
 
     /// Runs dependents, this task body, and dependencies synchronously, then returns the possibly absent result.
     ///
-    /// This compatibility path does not create an [AsyncTaskExecutor] owner or wait on the resource manager. Callers
-    /// that need arbitration must invoke [#executor()] or [#executor(boolean)] instead; synchronous subtasks called by
-    /// an executor-managed task are covered by that outer owner in the audited call graph.
+    /// This compatibility path does not create an [AsyncTaskExecutor] owner, inspect this task's resource declaration,
+    /// or wait on the resource manager. Callers that need arbitration must invoke [#executor()] or
+    /// [#executor(boolean)] instead. A synchronous subtask inside an executor-managed task is protected only when the
+    /// active outer declaration already covers every side effect of that subtask; no parent relationship is inferred.
     public final @Nullable T run() throws Exception {
         if (getSignificance().shouldLog())
             LOG.trace("Executing task: " + getName());

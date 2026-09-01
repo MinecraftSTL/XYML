@@ -143,6 +143,12 @@ public class FileDownloadTask extends FetchTask<Void> {
         return file;
     }
 
+    /// Enables or disables content-addressed cache writes for this destination download.
+    ///
+    /// CacheRepository serializes its own shared cache transaction; this task therefore keeps only the exact target
+    /// resource so downloads to different targets can proceed concurrently.
+    ///
+    /// @param caching whether successful downloads should be written to the content-addressed cache
     public void setCaching(boolean caching) {
         this.caching = caching;
     }

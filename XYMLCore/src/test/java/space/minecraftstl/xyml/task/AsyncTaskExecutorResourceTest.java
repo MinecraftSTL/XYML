@@ -42,6 +42,7 @@ import java.util.function.BooleanSupplier;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -226,6 +227,62 @@ public final class AsyncTaskExecutorResourceTest {
         releaseOperations.countDown();
         assertTrue(get(firstResult));
         assertTrue(get(secondResult));
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies parallel instance operations can release their shared scope before serialized repository finalizers.
+    @Test
+    public void resourceAwareFinalizersCanUpgradeOnlyAfterOperationHandoff() throws Exception {
+        Path repository = temporaryDirectory.resolve("finalizer-handoff-repository");
+        TaskResource operationResource = TaskResource.repositoryOperation(repository);
+        TaskResource repositoryResource = TaskResource.gameDirectory(repository);
+        CountDownLatch operationsOverlapped = new CountDownLatch(1);
+        CyclicBarrier operationBarrier = new CyclicBarrier(2, operationsOverlapped::countDown);
+        CountDownLatch releaseOperations = new CountDownLatch(1);
+        CountDownLatch firstFinalizerStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstFinalizer = new CountDownLatch(1);
+        AtomicInteger activeFinalizers = new AtomicInteger();
+        AtomicInteger maximumActiveFinalizers = new AtomicInteger();
+        AtomicInteger completedFinalizers = new AtomicInteger();
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+
+        Task<?> first = finalizingHandoffTask(
+                operationResource,
+                TaskResource.gameInstance(repository.resolve("versions/first")),
+                repositoryResource,
+                operationBarrier,
+                releaseOperations,
+                firstFinalizerStarted,
+                releaseFirstFinalizer,
+                activeFinalizers,
+                maximumActiveFinalizers,
+                completedFinalizers);
+        Task<?> second = finalizingHandoffTask(
+                operationResource,
+                TaskResource.gameInstance(repository.resolve("versions/second")),
+                repositoryResource,
+                operationBarrier,
+                releaseOperations,
+                firstFinalizerStarted,
+                releaseFirstFinalizer,
+                activeFinalizers,
+                maximumActiveFinalizers,
+                completedFinalizers);
+
+        CompletableFuture<Boolean> firstResult = execute(first, manager);
+        CompletableFuture<Boolean> secondResult = execute(second, manager);
+        assertTrue(operationsOverlapped.await(5, TimeUnit.SECONDS));
+        releaseOperations.countDown();
+        assertTrue(firstFinalizerStarted.await(5, TimeUnit.SECONDS));
+        awaitCondition(() -> manager.pendingWaiterCount() == 1);
+        assertEquals(1, activeFinalizers.get());
+
+        releaseFirstFinalizer.countDown();
+        assertTrue(get(firstResult));
+        assertTrue(get(secondResult));
+        assertEquals(2, completedFinalizers.get());
+        assertEquals(1, maximumActiveFinalizers.get());
+        assertEquals(0, manager.pendingWaiterCount());
         assertEquals(0, manager.trackedResourceCount());
     }
 
@@ -423,6 +480,107 @@ public final class AsyncTaskExecutorResourceTest {
         assertTrue(get(parentResult));
         assertEquals(0, manager.pendingWaiterCount());
         assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a discarded sibling-group view remains in the parent lifetime until every internal source terminates.
+    @Test
+    public void discardedCompletableFutureChildrenDelayParentCompletion() throws Exception {
+        Path instanceDirectory = temporaryDirectory.resolve("instances/discarded-children");
+        TaskResource instance = TaskResource.gameInstance(instanceDirectory);
+        CountDownLatch blockingChildStarted = new CountDownLatch(1);
+        CountDownLatch releaseBlockingChild = new CountDownLatch(1);
+        CountDownLatch siblingFinished = new CountDownLatch(1);
+        AtomicBoolean competitorRan = new AtomicBoolean();
+        Task<?> blockingChild = task(
+                TaskResource.downloadTarget(instanceDirectory.resolve("blocking.jar")),
+                () -> {
+                    blockingChildStarted.countDown();
+                    await(releaseBlockingChild);
+                });
+        Task<?> sibling = task(
+                TaskResource.downloadTarget(instanceDirectory.resolve("sibling.jar")),
+                siblingFinished::countDown);
+        CompletableFutureTask<@Nullable Void> parent = new CompletableFutureTask<>() {
+            /// Starts both children but deliberately discards the returned aggregate view.
+            @Override
+            public CompletableFuture<@Nullable Void> getFuture(TaskCompletableFuture executor) {
+                executor.all(List.of(blockingChild, sibling));
+                return CompletableFuture.completedFuture(null);
+            }
+        };
+        parent.setResources(instance);
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+
+        CompletableFuture<Boolean> parentResult = execute(parent, manager);
+        assertTrue(blockingChildStarted.await(5, TimeUnit.SECONDS));
+        assertTrue(siblingFinished.await(5, TimeUnit.SECONDS));
+        CompletableFuture<Boolean> competitorResult = execute(task(
+                TaskResource.downloadTarget(instanceDirectory.resolve("competitor.jar")),
+                () -> competitorRan.set(true)), manager);
+        awaitCondition(() -> manager.pendingWaiterCount() == 1);
+
+        assertFalse(parentResult.isDone());
+        assertFalse(competitorRan.get());
+        releaseBlockingChild.countDown();
+
+        assertTrue(get(parentResult));
+        assertTrue(get(competitorResult));
+        assertTrue(competitorRan.get());
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies discarded-child terminal failures retain historical propagation while delaying resource release.
+    @Test
+    public void discardedCompletableFutureChildFailuresDoNotReplaceMainOutcome() {
+        assertDiscardedChildFailureDoesNotReplaceMainOutcome(
+                "discarded-exception.jar",
+                Task.runAsync(() -> {
+                    throw new IOException("discarded child exception");
+                }));
+        assertDiscardedChildFailureDoesNotReplaceMainOutcome(
+                "discarded-error.jar",
+                Task.runAsync(() -> {
+                    throw new AssertionError("discarded child error");
+                }));
+        assertDiscardedChildFailureDoesNotReplaceMainOutcome(
+                "discarded-rejected.jar",
+                Task.runAsync(command -> {
+                    throw new RejectedExecutionException("discarded child rejection");
+                }, () -> {
+                }));
+        CompletableFuture<@Nullable Void> cancelledFuture = new CompletableFuture<>();
+        assertTrue(cancelledFuture.cancel(false));
+        assertDiscardedChildFailureDoesNotReplaceMainOutcome(
+                "discarded-cancelled.jar",
+                Task.fromCompletableFuture(cancelledFuture));
+    }
+
+    /// Verifies a discarded child cannot modify the main future's original failure object.
+    @Test
+    public void mainCompletableFutureFailureRemainsPrimary() {
+        TaskResource resource = target("structured-main-failure.jar");
+        IOException mainFailure = new IOException("main future failure");
+        AssertionError childFailure = new AssertionError("discarded child failure");
+        Task<?> child = task(resource, () -> {
+            throw childFailure;
+        });
+        CompletableFutureTask<@Nullable Void> parent = new CompletableFutureTask<>() {
+            /// Starts one discarded failing child before returning an independently failed main future.
+            @Override
+            public CompletableFuture<@Nullable Void> getFuture(TaskCompletableFuture executor) {
+                executor.one(child);
+                return CompletableFuture.failedFuture(mainFailure);
+            }
+        };
+        parent.setResources(resource);
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(parent, manager);
+
+        assertFalse(assertTimeoutPreemptively(TIMEOUT, executor::test));
+        assertSame(mainFailure, executor.getFailure());
+        assertEquals(0, mainFailure.getSuppressed().length);
+        assertSuccessorRuns(manager, resource);
     }
 
     /// Verifies successful, exceptional, error, interrupted, and rejected regular tasks all release their resources.
@@ -819,6 +977,50 @@ public final class AsyncTaskExecutorResourceTest {
         return operation.setResources(operationResource, instanceResource);
     }
 
+    /// Creates an instance operation that hands off before one repository-wide terminal callback.
+    ///
+    /// @param operationResource shared repository-operation domain
+    /// @param instanceResource exact instance boundary
+    /// @param repositoryResource repository-wide finalizer boundary
+    /// @param operationBarrier barrier proving both instance operations overlap
+    /// @param releaseOperations latch releasing both operations
+    /// @param firstFinalizerStarted latch signaled by the first finalizer
+    /// @param releaseFirstFinalizer latch releasing serialized finalizers
+    /// @param activeFinalizers current finalizer count
+    /// @param maximumActiveFinalizers observed maximum finalizer count
+    /// @param completedFinalizers completed finalizer count
+    /// @return stopped resource-aware finalization chain
+    private static Task<@Nullable Void> finalizingHandoffTask(
+            TaskResource operationResource,
+            TaskResource instanceResource,
+            TaskResource repositoryResource,
+            CyclicBarrier operationBarrier,
+            CountDownLatch releaseOperations,
+            CountDownLatch firstFinalizerStarted,
+            CountDownLatch releaseFirstFinalizer,
+            AtomicInteger activeFinalizers,
+            AtomicInteger maximumActiveFinalizers,
+            AtomicInteger completedFinalizers) {
+        Task<@Nullable Void> operation = Task.runAsync(() -> {
+            operationBarrier.await(5, TimeUnit.SECONDS);
+            await(releaseOperations);
+        }).setResources(operationResource, instanceResource);
+        return operation.whenCompleteWithResources(Runnable::run, failure -> {
+            if (failure != null) {
+                throw failure;
+            }
+            int active = activeFinalizers.incrementAndGet();
+            maximumActiveFinalizers.accumulateAndGet(active, Math::max);
+            firstFinalizerStarted.countDown();
+            try {
+                await(releaseFirstFinalizer);
+            } finally {
+                activeFinalizers.decrementAndGet();
+                completedFinalizers.incrementAndGet();
+            }
+        }, repositoryResource).asOrchestration();
+    }
+
     /// Creates a lifecycle task whose phases and nested tasks all reuse one resource owner chain.
     private static Task<Void> lifecycleTask(
             TaskResourceLockManager manager,
@@ -945,6 +1147,32 @@ public final class AsyncTaskExecutorResourceTest {
         AsyncTaskExecutor executor = new AsyncTaskExecutor(terminalTask, manager);
 
         assertEquals(expectedSuccess, assertTimeoutPreemptively(TIMEOUT, executor::test));
+        assertSuccessorRuns(manager, resource);
+    }
+
+    /// Verifies one discarded child failure leaves a successful main future unchanged and releases its lease.
+    ///
+    /// @param fileName unique resource name
+    /// @param child discarded child task
+    private void assertDiscardedChildFailureDoesNotReplaceMainOutcome(
+            String fileName,
+            Task<?> child) {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource resource = target(fileName);
+        child.setResources(resource);
+        CompletableFutureTask<@Nullable Void> parent = new CompletableFutureTask<>() {
+            /// Starts one child while returning an independently successful main future.
+            @Override
+            public CompletableFuture<@Nullable Void> getFuture(TaskCompletableFuture executor) {
+                executor.one(child);
+                return CompletableFuture.completedFuture(null);
+            }
+        };
+        parent.setResources(resource);
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(parent, manager);
+
+        assertTrue(assertTimeoutPreemptively(TIMEOUT, executor::test));
+        assertEquals(Task.TaskState.SUCCEEDED, parent.getState());
         assertSuccessorRuns(manager, resource);
     }
 

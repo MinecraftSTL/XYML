@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.util.CacheRepository;
 
 import java.io.File;
 import java.io.IOException;
@@ -116,6 +117,51 @@ public final class TaskResourceLockManagerTest {
 
         assertEquals(Set.of(TaskResource.downloadTarget(targetPath)), task.getResources());
         assertEquals(targetPath, task.getPath());
+    }
+
+    /// Verifies cache-only fetchers follow their configured cache transaction while target downloads remain exact.
+    @Test
+    public void cacheOnlyFetchersDeclareExclusiveCacheOperation() {
+        Path commonDirectory = temporaryDirectory.resolve("fetch-cache");
+        CacheRepository cacheRepository = new CacheRepository();
+        cacheRepository.changeDirectory(commonDirectory);
+        URI source = URI.create("https://example.invalid/metadata.json");
+        GetTask text = new GetTask(source);
+        BoundedTextFetchTask bounded = new BoundedTextFetchTask(List.of(source), 1_024L);
+        CacheFileTask cachedFile = new CacheFileTask(source);
+        Path targetPath = temporaryDirectory.resolve("target.json");
+        FileDownloadTask targetDownload = new FileDownloadTask(source, targetPath);
+
+        text.setCacheRepository(cacheRepository);
+        bounded.setCacheRepository(cacheRepository);
+        cachedFile.setCacheRepository(cacheRepository);
+        targetDownload.setCacheRepository(cacheRepository);
+
+        Set<TaskResource> cacheResources = Set.of(TaskResource.cacheOperation(commonDirectory.resolve("cache")));
+        assertEquals(cacheResources, text.getResources());
+        assertEquals(cacheResources, bounded.getResources());
+        assertEquals(cacheResources, cachedFile.getResources());
+        targetDownload.setCaching(true);
+        assertEquals(Set.of(TaskResource.downloadTarget(targetPath)), targetDownload.getResources());
+        targetDownload.setCaching(false);
+        assertEquals(Set.of(TaskResource.downloadTarget(targetPath)), targetDownload.getResources());
+        assertEquals(
+                Set.of(TaskResource.orchestration()),
+                text.thenGetJsonAsync(Object.class).getResources());
+    }
+
+    /// Verifies mutable cache reconfiguration cannot redirect a queued cache task outside its declared resource.
+    @Test
+    public void cacheOnlyFetcherRejectsChangedCacheDirectory() {
+        CacheRepository cacheRepository = new CacheRepository();
+        cacheRepository.changeDirectory(temporaryDirectory.resolve("first-cache-root"));
+        GetTask task = new GetTask(URI.create("https://example.invalid/metadata.json"));
+        task.setCacheRepository(cacheRepository);
+
+        cacheRepository.changeDirectory(temporaryDirectory.resolve("second-cache-root"));
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class, task::execute);
+        assertTrue(failure.getMessage().contains("Cache directory changed"));
     }
 
     /// Verifies a symbolic-link directory and its real directory serialize the same missing target path.
@@ -260,6 +306,91 @@ public final class TaskResourceLockManagerTest {
         assertEquals(Set.of(operation, instance), Set.copyOf(TaskResource.normalize(List.of(operation, instance))));
     }
 
+    /// Verifies cache operations serialize within one tree while different trees remain independent.
+    @Test
+    public void cacheOperationsSerializeWithinExclusiveCacheBoundary() throws Exception {
+        Path cacheDirectory = temporaryDirectory.resolve("cache-operation");
+        TaskResource firstOperation = TaskResource.cacheOperation(cacheDirectory);
+        TaskResource secondOperation = TaskResource.cacheOperation(cacheDirectory);
+        TaskResource independentOperation = TaskResource.cacheOperation(temporaryDirectory.resolve("other-cache"));
+        TaskResource maintenance = TaskResource.cache(cacheDirectory);
+        TaskResource exactEntry = TaskResource.downloadTarget(cacheDirectory.resolve("entry.bin"));
+        TaskResource outside = TaskResource.downloadTarget(temporaryDirectory.resolve("outside-cache.bin"));
+
+        assertTrue(firstOperation.conflictsWith(secondOperation));
+        assertFalse(firstOperation.conflictsWith(independentOperation));
+        assertTrue(firstOperation.conflictsWith(maintenance));
+        assertTrue(maintenance.conflictsWith(firstOperation));
+        assertTrue(firstOperation.conflictsWith(exactEntry));
+        assertFalse(firstOperation.conflictsWith(outside));
+        assertTrue(maintenance.covers(firstOperation));
+
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResourceLockManager.Lease firstLease = manager.acquire(rootOwner(manager, firstOperation))
+                .get(5, TimeUnit.SECONDS);
+        CompletableFuture<TaskResourceLockManager.Lease> secondFuture = manager.acquire(
+                rootOwner(manager, secondOperation));
+        TaskResourceLockManager.Lease independentLease = manager.acquire(rootOwner(manager, independentOperation))
+                .get(5, TimeUnit.SECONDS);
+        CompletableFuture<TaskResourceLockManager.Lease> maintenanceFuture = manager.acquire(
+                rootOwner(manager, maintenance));
+
+        assertFalse(secondFuture.isDone());
+        assertFalse(maintenanceFuture.isDone());
+        independentLease.close();
+        firstLease.close();
+        TaskResourceLockManager.Lease secondLease = secondFuture.get(5, TimeUnit.SECONDS);
+        secondLease.close();
+        maintenanceFuture.get(5, TimeUnit.SECONDS).close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies an explicitly audited cache transaction may branch from a precise parent without widening it.
+    @Test
+    public void disjointCacheOperationMayBranchFromPreciseParent() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource instance = TaskResource.gameInstance(temporaryDirectory.resolve("instances/cache-parent"));
+        TaskResource cacheOperation = TaskResource.cacheOperation(temporaryDirectory.resolve("cache-branch"));
+        TaskResource outsideFile = TaskResource.downloadTarget(temporaryDirectory.resolve("outside-branch.jar"));
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner parent = manager.createOwner(execution, null, Set.of(instance));
+        TaskResourceLockManager.Lease parentLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+
+        TaskResourceLockManager.Owner cacheChild = manager.createOwner(execution, parent, Set.of(cacheOperation));
+        TaskResourceLockManager.Lease cacheLease = manager.acquire(cacheChild).get(5, TimeUnit.SECONDS);
+        cacheLease.close();
+
+        TaskResourceLockManager.Owner unsafeChild = manager.createOwner(execution, parent, Set.of(outsideFile));
+        assertThrows(CompletionException.class, () -> manager.acquire(unsafeChild).join());
+
+        parentLease.close();
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies an unrelated parent key cannot hide a partially overlapping cache expansion.
+    @Test
+    public void cacheOperationCannotExpandAcrossPartiallyOverlappingAncestor() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        Path cacheDirectory = temporaryDirectory.resolve("overlapping-cache");
+        TaskResource nestedDirectory = TaskResource.gameInstance(cacheDirectory.resolve("entries"));
+        TaskResource unrelatedArchive = TaskResource.archive(temporaryDirectory.resolve("input.zip"));
+        TaskResource cacheOperation = TaskResource.cacheOperation(cacheDirectory);
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner parent = manager.createOwner(
+                execution,
+                null,
+                Set.of(nestedDirectory, unrelatedArchive));
+        TaskResourceLockManager.Lease parentLease = manager.acquire(parent).get(5, TimeUnit.SECONDS);
+
+        TaskResourceLockManager.Owner child = manager.createOwner(execution, parent, Set.of(cacheOperation));
+        assertThrows(CompletionException.class, () -> manager.acquire(child).join());
+
+        parentLease.close();
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Verifies concurrent shared repository owners cannot upgrade to the conflicting repository directory.
     @Test
     public void sharedRepositoryOwnersRejectDirectoryLockUpgrade() throws Exception {
@@ -287,6 +418,59 @@ public final class TaskResourceLockManagerTest {
         assertThrows(CompletionException.class, () -> manager.acquire(secondUpgrade).join());
         secondLease.close();
         firstLease.close();
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies cross-instance descendants cannot deadlock two shared repository-operation roots.
+    @Test
+    public void crossInstanceWaitCycleFailsOneBranchAndUnblocksTheOther() throws Exception {
+        Path repository = temporaryDirectory.resolve("repository-cycle");
+        TaskResource operation = TaskResource.repositoryOperation(repository);
+        TaskResource firstInstance = TaskResource.gameInstance(repository.resolve("versions/first"));
+        TaskResource secondInstance = TaskResource.gameInstance(repository.resolve("versions/second"));
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResourceLockManager.Execution firstExecution = manager.createExecution();
+        TaskResourceLockManager.Execution secondExecution = manager.createExecution();
+        TaskResourceLockManager.Owner firstRoot = manager.createOwner(
+                firstExecution, null, Set.of(operation, firstInstance));
+        TaskResourceLockManager.Owner secondRoot = manager.createOwner(
+                secondExecution, null, Set.of(operation, secondInstance));
+        TaskResourceLockManager.Lease firstRootLease = manager.acquire(firstRoot).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Lease secondRootLease = manager.acquire(secondRoot).get(5, TimeUnit.SECONDS);
+
+        TaskResourceLockManager.Owner firstChild = manager.createOwner(
+                firstExecution, firstRoot, Set.of(secondInstance));
+        CompletableFuture<TaskResourceLockManager.Lease> firstChildFuture = manager.acquire(firstChild);
+        assertFalse(firstChildFuture.isDone());
+        TaskResourceLockManager.Owner secondChild = manager.createOwner(
+                secondExecution, secondRoot, Set.of(firstInstance));
+        CompletableFuture<TaskResourceLockManager.Lease> secondChildFuture = manager.acquire(secondChild);
+
+        Throwable cycleFailure = (Throwable) CompletableFuture.anyOf(
+                firstChildFuture.handle((lease, failure) -> failure == null
+                        ? new AssertionError("First cyclic child unexpectedly acquired its resource")
+                        : failure),
+                secondChildFuture.handle((lease, failure) -> failure == null
+                        ? new AssertionError("Second cyclic child unexpectedly acquired its resource")
+                        : failure))
+                .get(5, TimeUnit.SECONDS);
+        Throwable resolvedFailure = cycleFailure instanceof CompletionException && cycleFailure.getCause() != null
+                ? cycleFailure.getCause()
+                : cycleFailure;
+        assertTrue(resolvedFailure instanceof IllegalStateException);
+        assertTrue(resolvedFailure.getMessage().contains("wait cycle"));
+        assertTrue(firstChildFuture.isCompletedExceptionally() ^ secondChildFuture.isCompletedExceptionally());
+
+        if (firstChildFuture.isCompletedExceptionally()) {
+            firstRootLease.close();
+            secondChildFuture.get(5, TimeUnit.SECONDS).close();
+            secondRootLease.close();
+        } else {
+            secondRootLease.close();
+            firstChildFuture.get(5, TimeUnit.SECONDS).close();
+            firstRootLease.close();
+        }
         assertEquals(0, manager.pendingWaiterCount());
         assertEquals(0, manager.trackedResourceCount());
     }

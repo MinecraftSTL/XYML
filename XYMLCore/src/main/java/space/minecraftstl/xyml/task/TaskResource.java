@@ -102,11 +102,12 @@ public final class TaskResource {
         return GLOBAL;
     }
 
-    /// Returns a non-filesystem marker for a pure task-graph orchestration phase.
+    /// Returns a non-filesystem marker for an audited phase with no filesystem side effects.
     ///
-    /// This marker does not conflict with precise filesystem resources and must only be used by framework tasks whose
-    /// work is limited to coordinating already declared child tasks. It still conflicts with [#global()] through the
-    /// process-wide exclusion rule.
+    /// This marker does not conflict with precise filesystem resources. It may be used for graph coordination,
+    /// immutable parsing, read-only computation, or internally synchronized memory updates, but never for filesystem
+    /// writes or untracked asynchronous work. It still conflicts with [#global()] through the process-wide exclusion
+    /// rule.
     ///
     /// @return shared orchestration marker
     static TaskResource orchestration() {
@@ -194,6 +195,19 @@ public final class TaskResource {
         return directory(Kind.CACHE, directory);
     }
 
+    /// Creates an exclusive operation domain for one cache tree.
+    ///
+    /// Operations in the same or overlapping cache tree serialize because legacy cache file and index updates are not
+    /// one atomic transaction. Different cache trees remain independent. Unlike [#cache(Path)], this scope is not a
+    /// complete filesystem boundary and therefore cannot make an unknown conservative child safe; arbitrary cache
+    /// maintenance must keep using [#cache(Path)].
+    ///
+    /// @param directory cache directory used throughout task execution
+    /// @return normalized exclusive cache-operation resource
+    public static TaskResource cacheOperation(Path directory) {
+        return new TaskResource(Kind.CACHE_OPERATION, Scope.CACHE_OPERATION, normalizePath(directory));
+    }
+
     /// Creates a resource covering one exact configuration file.
     ///
     /// @param file configuration file
@@ -274,6 +288,9 @@ public final class TaskResource {
         if (isRepositoryScope() || other.isRepositoryScope()) {
             return repositoryScopeConflicts(other);
         }
+        if (isCacheOperationScope() || other.isCacheOperationScope()) {
+            return cacheOperationConflicts(other);
+        }
 
         Path thisPath = Objects.requireNonNull(comparisonPath, "comparisonPath");
         Path otherPath = Objects.requireNonNull(other.comparisonPath, "other comparisonPath");
@@ -307,6 +324,18 @@ public final class TaskResource {
                     && Objects.requireNonNull(comparisonPath, "comparisonPath")
                     .equals(other.comparisonPath);
         }
+        if (isCacheOperationScope() || other.isCacheOperationScope()) {
+            if (scope == Scope.CACHE_OPERATION && other.scope == Scope.CACHE_OPERATION) {
+                return Objects.requireNonNull(comparisonPath, "comparisonPath")
+                        .equals(other.comparisonPath);
+            }
+            if (scope != Scope.DIRECTORY) {
+                return false;
+            }
+            Path thisPath = Objects.requireNonNull(comparisonPath, "comparisonPath");
+            Path otherPath = Objects.requireNonNull(other.comparisonPath, "other comparisonPath");
+            return otherPath.startsWith(thisPath);
+        }
 
         Path thisPath = Objects.requireNonNull(comparisonPath, "comparisonPath");
         Path otherPath = Objects.requireNonNull(other.comparisonPath, "other comparisonPath");
@@ -320,7 +349,8 @@ public final class TaskResource {
     ///
     /// Shared repository-operation owners permit precise descendants inside their repository without claiming those
     /// descendants themselves. This keeps exact child resources in normalized requests while preventing arbitrary
-    /// lock expansion outside the audited repository boundary.
+    /// lock expansion outside the audited repository boundary. Disjoint cache-operation branching is validated
+    /// against the ancestor's complete resource set by the lock manager, rather than by one key in isolation.
     boolean permitsNested(TaskResource other) {
         Objects.requireNonNull(other, "other");
         // An orchestration node has no filesystem coverage and can therefore be nested beneath any owner without
@@ -412,6 +442,11 @@ public final class TaskResource {
         return scope == Scope.REPOSITORY_METADATA || scope == Scope.REPOSITORY_OPERATION;
     }
 
+    /// Returns whether this resource is an exclusive cache transaction.
+    private boolean isCacheOperationScope() {
+        return scope == Scope.CACHE_OPERATION;
+    }
+
     /// Returns whether a logical repository request conflicts with another semantic resource.
     private boolean repositoryScopeConflicts(TaskResource other) {
         if (isRepositoryScope() && other.isRepositoryScope()) {
@@ -437,6 +472,24 @@ public final class TaskResource {
                 "repository comparisonPath");
         Path candidatePath = Objects.requireNonNull(candidate.comparisonPath, "candidate comparisonPath");
         return repositoryPath.startsWith(candidatePath);
+    }
+
+    /// Returns whether a cache operation conflicts with an overlapping cache or filesystem resource.
+    private boolean cacheOperationConflicts(TaskResource other) {
+        if (isCacheOperationScope() && other.isCacheOperationScope()) {
+            Path thisPath = Objects.requireNonNull(comparisonPath, "cache comparisonPath");
+            Path otherPath = Objects.requireNonNull(other.comparisonPath, "other cache comparisonPath");
+            return thisPath.startsWith(otherPath) || otherPath.startsWith(thisPath);
+        }
+
+        TaskResource cacheResource = isCacheOperationScope() ? this : other;
+        TaskResource candidate = isCacheOperationScope() ? other : this;
+        Path cachePath = Objects.requireNonNull(cacheResource.comparisonPath, "cache comparisonPath");
+        Path candidatePath = Objects.requireNonNull(candidate.comparisonPath, "candidate comparisonPath");
+        if (candidate.scope == Scope.DIRECTORY) {
+            return cachePath.startsWith(candidatePath) || candidatePath.startsWith(cachePath);
+        }
+        return candidate.scope == Scope.FILE && candidatePath.startsWith(cachePath);
     }
 
     /// Returns stable text for resource ordering.
@@ -504,6 +557,8 @@ public final class TaskResource {
         LAUNCHER_UPGRADE,
         /// Complete shared-cache tree.
         CACHE,
+        /// Exclusive transaction in one cache tree.
+        CACHE_OPERATION,
         /// Exact configuration file.
         CONFIGURATION,
         /// Exact input archive.
@@ -526,6 +581,8 @@ public final class TaskResource {
         REPOSITORY_METADATA(2),
         /// Shared repository operation scope keyed by one normalized repository path.
         REPOSITORY_OPERATION(2),
+        /// Exclusive cache transaction keyed by one normalized cache path.
+        CACHE_OPERATION(2),
         /// Exact filesystem path.
         FILE(3);
 

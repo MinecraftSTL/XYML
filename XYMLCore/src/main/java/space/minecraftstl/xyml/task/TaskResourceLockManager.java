@@ -23,12 +23,14 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -285,6 +287,12 @@ final class TaskResourceLockManager {
                 if (terminalFailure == null) {
                     waiter.prepared = true;
                     addWaiterReferences(waiter);
+                    if (hasWaitCycle(waiter.owner)) {
+                        waiters.remove(waiter);
+                        removeWaiterReferences(waiter);
+                        terminalFailure = new IllegalStateException(
+                                "Task resource wait cycle detected across execution-owner chains");
+                    }
                 }
             }
 
@@ -494,6 +502,111 @@ final class TaskResourceLockManager {
         return true;
     }
 
+    /// Returns whether a newly prepared owner closes a resource-wait cycle.
+    ///
+    /// An active parent lifecycle waits for every descendant invocation it starts. A prepared waiter in turn waits for
+    /// every conflicting holder outside its ancestry. Walking both edge kinds detects cross-branch ABBA patterns even
+    /// when the branches run on different threads or executors.
+    ///
+    /// @param owner newly prepared waiting owner
+    /// @return whether the owner participates in a wait cycle
+    private boolean hasWaitCycle(Owner owner) {
+        Set<Owner> visited = newIdentityOwnerSet();
+        Set<Owner> visiting = newIdentityOwnerSet();
+        return hasWaitCycle(owner, visited, visiting);
+    }
+
+    /// Performs one depth-first traversal of the current owner wait graph.
+    ///
+    /// @param owner owner currently being visited
+    /// @param visited owners already traversed
+    /// @param visiting owners on the active recursion path
+    /// @return whether the traversal encounters an active owner twice
+    private boolean hasWaitCycle(Owner owner, Set<Owner> visited, Set<Owner> visiting) {
+        if (!visiting.add(owner)) {
+            return true;
+        }
+        if (!visited.add(owner)) {
+            visiting.remove(owner);
+            return false;
+        }
+
+        for (Owner dependency : waitDependencies(owner)) {
+            if (hasWaitCycle(dependency, visited, visiting)) {
+                return true;
+            }
+        }
+        visiting.remove(owner);
+        return false;
+    }
+
+    /// Returns the current owners whose completion is required before this owner can finish.
+    ///
+    /// @param owner owner whose outgoing wait edges are requested
+    /// @return immutable identity set of owners that must finish first
+    private @Unmodifiable Set<Owner> waitDependencies(Owner owner) {
+        Set<Owner> dependencies = newIdentityOwnerSet();
+        if (hasActiveHolder(owner)) {
+            for (Owner candidate : activeOwners()) {
+                if (candidate != owner && owner.isAncestorOf(candidate)) {
+                    dependencies.add(candidate);
+                }
+            }
+        }
+
+        @Nullable Waiter waiter = waiterFor(owner);
+        if (waiter != null && waiter.prepared) {
+            for (TaskResource requested : owner.requestedResources) {
+                for (Map.Entry<TaskResource, ResourceState> entry : resourceStates.entrySet()) {
+                    if (!entry.getValue().holders.isEmpty() && requested.conflictsWith(entry.getKey())) {
+                        for (Owner holder : entry.getValue().holders.keySet()) {
+                            if (!holder.isAncestorOf(owner)) {
+                                dependencies.add(holder);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return Collections.unmodifiableSet(dependencies);
+    }
+
+    /// Returns every holder and prepared waiter represented in the current graph.
+    ///
+    /// @return immutable identity set of active graph nodes
+    private @Unmodifiable Set<Owner> activeOwners() {
+        Set<Owner> owners = newIdentityOwnerSet();
+        for (ResourceState state : resourceStates.values()) {
+            owners.addAll(state.holders.keySet());
+        }
+        for (Waiter waiter : waiters) {
+            if (waiter.prepared) {
+                owners.add(waiter.owner);
+            }
+        }
+        return Collections.unmodifiableSet(owners);
+    }
+
+    /// Finds the prepared waiter for one owner identity, if the owner is still pending.
+    ///
+    /// @param owner owner identity to find
+    /// @return matching waiter, or null when the owner is not pending
+    private @Nullable Waiter waiterFor(Owner owner) {
+        for (Waiter waiter : waiters) {
+            if (waiter.owner == owner) {
+                return waiter;
+            }
+        }
+        return null;
+    }
+
+    /// Creates a mutable identity-based owner set.
+    ///
+    /// @return empty mutable identity set
+    private static Set<Owner> newIdentityOwnerSet() {
+        return Collections.newSetFromMap(new IdentityHashMap<>());
+    }
+
     /// Returns whether two pending requests contain at least one conflicting resource pair.
     private static boolean requestsConflict(Waiter first, Waiter second) {
         for (TaskResource firstResource : first.owner.requestedResources) {
@@ -627,9 +740,7 @@ final class TaskResourceLockManager {
             @Nullable Owner activeAncestor = nearestActiveAncestor(parent);
             if (activeAncestor != null) {
                 for (TaskResource resource : normalizedRequested) {
-                    boolean covered = activeAncestor.coverageResources.stream().anyMatch(ancestor ->
-                            ancestor.permitsNested(resource));
-                    if (!covered) {
+                    if (!activeAncestor.permitsNested(resource)) {
                         throw new IllegalStateException(
                                 "Nested task resource is outside its ancestor coverage: " + resource);
                     }
@@ -644,6 +755,22 @@ final class TaskResourceLockManager {
             requestedResources = normalizedRequested;
             coverageResources = TaskResource.normalize(coverage);
             prepared = true;
+        }
+
+        /// Returns whether the complete active coverage permits one nested resource request.
+        ///
+        /// A cache transaction may branch outside the parent filesystem boundary only when it is disjoint from every
+        /// retained ancestor resource. Checking the complete set prevents an unrelated parent key from hiding a
+        /// partially overlapping cache expansion.
+        ///
+        /// @param resource normalized nested resource
+        /// @return whether the nested request stays covered or is an audited disjoint cache branch
+        private boolean permitsNested(TaskResource resource) {
+            if (coverageResources.stream().anyMatch(ancestor -> ancestor.permitsNested(resource))) {
+                return true;
+            }
+            return resource.getKind() == TaskResource.Kind.CACHE_OPERATION
+                    && coverageResources.stream().noneMatch(ancestor -> ancestor.conflictsWith(resource));
         }
 
         /// Returns whether this owner is the same as, or an ancestor of, another owner.

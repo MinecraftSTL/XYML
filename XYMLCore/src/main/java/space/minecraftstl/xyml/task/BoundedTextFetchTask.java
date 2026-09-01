@@ -59,6 +59,7 @@ public final class BoundedTextFetchTask extends FetchTask<String> {
         }
         this.maximumBytes = maximumBytes;
         setName(this.uris.get(0).toString());
+        useCacheOperationResource();
     }
 
     /// Enables existing HTTP validator caching while keeping cache reads bounded.

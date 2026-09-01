@@ -20,10 +20,13 @@ package space.minecraftstl.xyml.task;
 import com.google.gson.JsonParseException;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.util.Lang;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.*;
@@ -253,19 +256,16 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
                     notifyTaskListeners(it -> it.onReady(task));
 
-                    return task.getFuture(new TaskCompletableFuture() {
-                        /// Executes one nested task with the current task as its parent.
-                        @Override
-                        public <T2> CompletableFuture<@Nullable T2> one(Task<T2> subtask) {
-                            return executeTask(task, owner, resourceExecution, subtask);
-                        }
-
-                        /// Executes all supplied nested tasks with the current task as their parent.
-                        @Override
-                        public CompletableFuture<@Nullable Void> all(Collection<Task<?>> tasks) {
-                            return executeTasksExceptionally(task, owner, resourceExecution, tasks);
-                        }
-                    });
+                    NestedTaskScope scope = new NestedTaskScope(task, owner, resourceExecution);
+                    CompletableFuture<@Nullable T> mainFuture;
+                    try {
+                        mainFuture = Objects.requireNonNull(
+                                task.getFuture(scope),
+                                "CompletableFutureTask.getFuture() returned null");
+                    } catch (Throwable failure) {
+                        mainFuture = CompletableFuture.failedFuture(failure);
+                    }
+                    return scope.closeAfter(mainFuture);
                 })
                 .thenApplyAsync((@Nullable T result) -> {
                     checkCancellation(task);
@@ -536,6 +536,126 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         CompletableFuture<@Nullable T> releaseStage = terminal.whenComplete(
                 (@Nullable T result, @Nullable Throwable throwable) -> leaseReference.release());
         return releaseStage.copy();
+    }
+
+    /// Tracks every child source started by one completable-future task invocation.
+    ///
+    /// The scope is kept outside [Task] so reused task objects cannot share owner state. Returned child futures are
+    /// copies; cancellation or manual completion by business code therefore cannot suppress the internal source used
+    /// for parent completion and lease release.
+    @NotNullByDefault
+    private final class NestedTaskScope implements TaskCompletableFuture {
+        /// Parent task whose structured lifetime includes every registered child source.
+        private final Task<?> parentTask;
+
+        /// Invocation-local owner inherited by registered child tasks.
+        private final TaskResourceLockManager.Owner parentOwner;
+
+        /// Cancellation domain shared with registered child tasks.
+        private final TaskResourceLockManager.Execution resourceExecution;
+
+        /// Internal child sources retained until the parent main future closes this scope.
+        private final List<CompletableFuture<?>> childSources = new ArrayList<>();
+
+        /// Whether the main future reached its terminal state and registration is therefore closed.
+        private boolean closed;
+
+        /// Creates one open structured child scope.
+        ///
+        /// @param parentTask parent completable-future task
+        /// @param parentOwner invocation-local parent owner
+        /// @param resourceExecution shared cancellation domain
+        private NestedTaskScope(
+                Task<?> parentTask,
+                TaskResourceLockManager.Owner parentOwner,
+                TaskResourceLockManager.Execution resourceExecution) {
+            this.parentTask = parentTask;
+            this.parentOwner = parentOwner;
+            this.resourceExecution = resourceExecution;
+        }
+
+        /// Starts one registered child and returns an isolated future view.
+        ///
+        /// @param subtask child task
+        /// @param <T> possibly nullable child result type
+        /// @return independently cancellable child future view
+        @Override
+        public synchronized <T> CompletableFuture<@Nullable T> one(Task<T> subtask) {
+            ensureOpen();
+            CompletableFuture<@Nullable T> source = executeTask(
+                    parentTask,
+                    parentOwner,
+                    resourceExecution,
+                    Objects.requireNonNull(subtask, "subtask"));
+            childSources.add(source);
+            return source.copy();
+        }
+
+        /// Starts one registered sibling group from an immutable collection snapshot.
+        ///
+        /// @param tasks child tasks
+        /// @return independently cancellable aggregate future view
+        @Override
+        public synchronized CompletableFuture<@Nullable Void> all(Collection<Task<?>> tasks) {
+            ensureOpen();
+            @Unmodifiable List<Task<?>> taskSnapshot = List.copyOf(Objects.requireNonNull(tasks, "tasks"));
+            CompletableFuture<@Nullable Void> source = executeTasksExceptionally(
+                    parentTask,
+                    parentOwner,
+                    resourceExecution,
+                    taskSnapshot);
+            childSources.add(source);
+            return source.copy();
+        }
+
+        /// Closes registration after the main future and then waits for every registered internal source.
+        ///
+        /// The main future remains the sole source of the parent's result and failure. A child future already reports
+        /// its own failure through its task lifecycle and the view returned by [#one(Task)] or [#all(Collection)]; a
+        /// caller that deliberately discards that view retains the historical exception-propagation behavior. The
+        /// scope changes only the parent's resource lifetime.
+        ///
+        /// @param mainFuture future returned by the completable-future task
+        /// @param <T> possibly nullable parent result type
+        /// @return future preserving the parent result after every child source terminates
+        private <T> CompletableFuture<@Nullable T> closeAfter(CompletableFuture<@Nullable T> mainFuture) {
+            return mainFuture.handle((@Nullable T result, @Nullable Throwable mainFailure) ->
+                    closeAndAwaitChildren().thenApply((@Nullable Void unused) -> {
+                        if (mainFailure instanceof CompletionException completionFailure) {
+                            throw completionFailure;
+                        }
+                        if (mainFailure != null) {
+                            throw new CompletionException(mainFailure);
+                        }
+                        return result;
+                    }))
+                    .thenCompose(nested -> nested);
+        }
+
+        /// Atomically closes registration and returns a future completed after every child source terminates.
+        ///
+        /// @return future completed normally after all children, regardless of their individual outcomes
+        private CompletableFuture<@Nullable Void> closeAndAwaitChildren() {
+            @Unmodifiable List<CompletableFuture<?>> sourceSnapshot;
+            synchronized (this) {
+                closed = true;
+                sourceSnapshot = List.copyOf(childSources);
+            }
+            CompletableFuture<?>[] terminalSources = sourceSnapshot.stream()
+                    .map(source -> source.handle((@Nullable Object result, @Nullable Throwable failure) -> null))
+                    .toArray(CompletableFuture<?>[]::new);
+            return CompletableFuture.allOf(terminalSources);
+        }
+
+        /// Rejects child registration after the structured parent scope has closed.
+        ///
+        /// @throws IllegalStateException when registration is closed
+        private void ensureOpen() {
+            if (closed) {
+                throw new IllegalStateException("Completable-future task child scope is already closed");
+            }
+        }
+
     }
 
     /// Owns one task lease with a terminal sentinel so a release racing with acquisition cannot leak a late grant.
