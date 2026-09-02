@@ -28,14 +28,14 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/// Verifies that launcher upgrades retain both file-level and upgrade-directory resource declarations.
+/// Verifies the normalized public resource view of launcher-upgrade downloads.
 @NotNullByDefault
 final class XYMLDownloadTaskTest {
     /// Per-test upgrade destination root.
     @TempDir
     private Path temporaryDirectory;
 
-    /// One upgrade download owns its exact target and the surrounding publication directory.
+    /// One upgrade download exposes the surrounding directory that subsumes its exact target.
     @Test
     void declaresUpgradeDestinationResources() {
         Path upgradeDirectory = temporaryDirectory.resolve("upgrade");
@@ -53,7 +53,6 @@ final class XYMLDownloadTaskTest {
 
         assertEquals(
                 Set.of(
-                        TaskResource.downloadTarget(target),
                         TaskResource.launcherUpgrade(upgradeDirectory)),
                 task.getResources());
     }

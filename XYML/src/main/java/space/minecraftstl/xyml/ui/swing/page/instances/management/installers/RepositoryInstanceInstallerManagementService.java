@@ -168,7 +168,10 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
                                     "Installer path is not a regular file: " + installerPath);
                         }
                         return repository.getResolvedInstanceManifest(id).standaloneManifest();
-                    }).setResources(metadataResource(), instanceResource(id))
+                    }).setResources(
+                            metadataResource(),
+                            instanceResource(id),
+                            TaskResource.archive(installerPath))
                     .thenComposeAsync(
                     ioExecutor,
                     manifest -> dependencyManager.installLibraryAsync(manifest, installerPath))

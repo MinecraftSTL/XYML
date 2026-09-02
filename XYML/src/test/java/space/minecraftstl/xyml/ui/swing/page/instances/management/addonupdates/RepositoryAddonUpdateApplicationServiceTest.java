@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskExecutor;
 import space.minecraftstl.xyml.task.TaskListener;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.StringUtils;
 
 import java.io.IOException;
@@ -107,6 +108,18 @@ final class RepositoryAddonUpdateApplicationServiceTest {
                 () -> assertTrue(downloads.requests().isEmpty()),
                 () -> assertTrue(stagingFiles(local.getFile().getParent()).isEmpty()),
                 () -> assertTrue(Files.exists(local.getFile())));
+    }
+
+    /// An empty update selection has no staged files and therefore does not reserve the conservative global lease.
+    @Test
+    void emptySelectionUsesOrchestrationResource() {
+        RepositoryAddonUpdateApplicationService service = service(new RecordingDownloadTaskFactory(null));
+
+        Task<AddonUpdateApplicationResult> task = service.applyUpdates(List.of());
+
+        assertEquals(
+                List.of(TaskResource.Kind.ORCHESTRATION),
+                task.getResources().stream().map(TaskResource::getKind).toList());
     }
 
     /// Applies active and disabled selections through `.part` staging and configured old-file retention rules.

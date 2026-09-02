@@ -125,15 +125,20 @@ public final class XYMLModpackInstallTask extends Task<Void> {
                 JsonUtils.GSON.fromJson(json, GameInstanceManifest.class), "Missing minecraft/pack.json manifest");
         GameInstanceManifest originalManifest = parsedManifest.withId(instanceId).withJar(null);
         LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(originalManifest, null);
-        Task<GameInstanceManifest> libraryTask = Task.supplyAsync(() -> originalManifest);
+        // The seed and each continuation only assemble immutable manifest data.  Keep these graph nodes out of the
+        // conservative fallback so the explicitly declared installer children can retain the instance boundary.
+        Task<GameInstanceManifest> libraryTask = Task.supplyAsync(() -> originalManifest).asOrchestration();
         // reinstall libraries
         // libraries of Forge and OptiFine should be obtained by installation.
         for (LibraryAnalyzer.LibraryMark mark : analyzer) {
             if (LibraryAnalyzer.LibraryType.MINECRAFT.getPatchId().equals(mark.getLibraryId()))
                 continue;
-            libraryTask = libraryTask.thenComposeAsync(version -> dependency.installLibraryAsync(modpack.getGameVersion(), version, mark.getLibraryId(), mark.getLibraryVersion()));
+            libraryTask = libraryTask.thenComposeAsync(
+                    version -> dependency.installLibraryAsync(
+                            modpack.getGameVersion(), version, mark.getLibraryId(), mark.getLibraryVersion()))
+                    .asOrchestration();
         }
 
-        dependencies.add(libraryTask.thenComposeAsync(repository::saveAsync));
+        dependencies.add(libraryTask.thenComposeAsync(repository::saveAsync).asOrchestration());
     }
 }

@@ -89,8 +89,12 @@ public final class DefaultRemoteAddonInstallLauncher implements RemoteAddonInsta
                 ? request.version().file().filename()
                 : request.version().name());
         download.addIntegrityCheckHandler(FileDownloadTask.ZIP_INTEGRITY_CHECK_HANDLER);
-        return download
+        Task<?> publication = download
                 .thenRunAsync(Schedulers.io(), () -> Files.move(temporary, destination))
+                .setResources(
+                        TaskResource.downloadTarget(temporary),
+                        TaskResource.addonFile(destination));
+        return publication
                 .whenComplete(Schedulers.io(), failure -> Files.deleteIfExists(temporary))
                 .setResources(
                         TaskResource.downloadTarget(temporary),

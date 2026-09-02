@@ -425,6 +425,9 @@ public final class JavaManagerRuntimeAcquisitionService implements JavaRuntimeAc
                     cancellationCheck.checkCancelled();
 
                     Task<JavaRuntime> installTask = backend.installLocalArchive(preparedInspection, candidate);
+                    if (installTask.getResources().contains(TaskResource.conservative())) {
+                        installTask.setResources(TaskResource.javaRuntime(platformRoot));
+                    }
                     return new StagedTask<>(
                             installTask,
                             () -> cleanupTemporaryArchives(controlledCopy, preparedArchive));

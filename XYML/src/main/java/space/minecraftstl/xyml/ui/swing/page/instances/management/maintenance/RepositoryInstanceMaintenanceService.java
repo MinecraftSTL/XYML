@@ -340,7 +340,10 @@ public final class RepositoryInstanceMaintenanceService implements InstanceMaint
     ///
     /// @return stopped snapshot task
     private Task<InstanceMaintenanceSnapshot> snapshotTask() {
-        return Task.supplyAsync(ioExecutor, this::readSnapshot);
+        // Snapshot reads consult both the repository catalog and the fixed instance.  Declaring them here keeps
+        // callers that construct this helper dynamically from falling back to the process-wide conservative lock.
+        return Task.supplyAsync(ioExecutor, this::readSnapshot)
+                .setResources(metadataResource(), instanceResource());
     }
 
     /// Reads one immutable snapshot after checking that the fixed instance still exists.

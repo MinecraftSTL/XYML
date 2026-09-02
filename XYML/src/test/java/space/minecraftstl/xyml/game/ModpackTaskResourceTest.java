@@ -109,7 +109,7 @@ public final class ModpackTaskResourceTest {
         assertTrue(overlapped, "Different instance installation bodies did not overlap");
     }
 
-    /// MCBBS post-install settings mutation declares the instance tree and exact auto-saved settings file.
+    /// MCBBS post-install settings mutation exposes the instance tree that subsumes its settings file.
     ///
     /// @param temporaryDirectory isolated repository root
     /// @throws ReflectiveOperationException if the private task factory cannot be inspected
@@ -128,9 +128,7 @@ public final class ModpackTaskResourceTest {
         Task<?> postInstall = (Task<?>) factory.invoke(null, repository, new McbbsModpackManifest(), instanceId);
 
         assertEquals(Set.of(
-                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
-                TaskResource.configuration(repository.getInstanceConfigDirectory(instanceId)
-                        .resolve("instance-game-settings.json"))), postInstall.getResources());
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId))), postInstall.getResources());
     }
 
     /// Manual archive extraction hands off to a short settings task instead of retaining shared configuration locks.

@@ -479,12 +479,14 @@ public final class LauncherHelper {
     ///
     /// @param task complete authentication and recovery task
     /// @param <T> authentication result type
-    /// @return task protected by account storage and dependency-cache resources
+    /// @return task protected by account storage and dependency-cache resources, handing off before an
+    ///         unclassified recovery child starts
     private static <T> Task<T> configureAuthenticationResources(Task<T> task) {
         return Objects.requireNonNull(task, "task").setResources(
                 TaskResource.configuration(SettingsManager.gameAccountsLocation()),
                 TaskResource.configuration(SettingsManager.userGameAccountsLocation()),
-                TaskResource.cache(Metadata.DEPENDENCIES_DIRECTORY));
+                TaskResource.cache(Metadata.DEPENDENCIES_DIRECTORY))
+                .releaseResourcesBeforeDependencies();
     }
 
     /// Configures the resource boundary for the short launcher-object construction callback.
@@ -1160,7 +1162,7 @@ public final class LauncherHelper {
         } catch (RuntimeException | Error failure) {
             completion.completeExceptionally(failure);
         }
-        return Task.fromCompletableFuture(completion);
+        return configureAuthenticationRecoveryResources(Task.fromCompletableFuture(completion));
     }
 
     /// Maps one production authentication-recovery selection without exposing Swing to account operations.
@@ -1177,7 +1179,7 @@ public final class LauncherHelper {
         Objects.requireNonNull(selected, "selected");
         Objects.requireNonNull(retryTaskSupplier, "retryTaskSupplier");
         return switch (selected) {
-            case PLAY_OFFLINE -> Task.supplyAsync(account::playOffline);
+            case PLAY_OFFLINE -> configureAuthenticationRecoveryResources(Task.supplyAsync(account::playOffline));
             case RETRY_AUTHENTICATION -> Objects.requireNonNull(
                     retryTaskSupplier.get(),
                     "retryTaskSupplier returned null");
@@ -1185,6 +1187,22 @@ public final class LauncherHelper {
             default -> throw new IllegalArgumentException(
                     "Unexpected authentication recovery action: " + selected);
         };
+    }
+
+    /// Applies the bounded account-storage resources used by authentication recovery callbacks.
+    ///
+    /// Recovery is often created after the enclosing authentication task hands off its lease. Declaring the two
+    /// possible account stores and the shared dependency cache here prevents that child from falling back to the
+    /// process-wide conservative lock while still protecting account persistence and bundled authentication data.
+    ///
+    /// @param task recovery task to classify
+    /// @param <T> task result type
+    /// @return task with the bounded authentication resource declaration
+    private static <T> Task<T> configureAuthenticationRecoveryResources(Task<T> task) {
+        return Objects.requireNonNull(task, "task").setResources(
+                TaskResource.configuration(SettingsManager.gameAccountsLocation()),
+                TaskResource.configuration(SettingsManager.userGameAccountsLocation()),
+                TaskResource.cache(Metadata.DEPENDENCIES_DIRECTORY));
     }
 
     /// Persists automatic agent enablement at the effective setting's active override level.

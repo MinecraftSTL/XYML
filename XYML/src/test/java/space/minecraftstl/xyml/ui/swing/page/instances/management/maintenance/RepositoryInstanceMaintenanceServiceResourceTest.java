@@ -107,8 +107,7 @@ final class RepositoryInstanceMaintenanceServiceResourceTest {
         Path archive = repository.getBaseDirectory().resolve("update.zip");
 
         assertEquals(Set.of(
-                        TaskResource.gameDirectory(repository.getBaseDirectory()),
-                        TaskResource.archive(archive)),
+                        TaskResource.gameDirectory(repository.getBaseDirectory())),
                 service.updateModpack(archive, StandardCharsets.UTF_8).getResources());
         assertExplicit(service.redownloadAssets());
         assertExplicit(service.removeAssets());
