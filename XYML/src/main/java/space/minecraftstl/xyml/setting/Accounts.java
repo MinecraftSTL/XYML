@@ -48,12 +48,11 @@ import java.nio.file.Paths;
 import java.util.*;
 
 import static java.util.stream.Collectors.toList;
-import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 import static space.minecraftstl.xyml.setting.SettingsManager.getAccountMetadataRecords;
 import static space.minecraftstl.xyml.setting.SettingsManager.getAuthlibInjectorServers;
 import static space.minecraftstl.xyml.setting.SettingsManager.getUserAccountMetadataRecords;
+import static space.minecraftstl.xyml.setting.SettingsManager.settings;
 import static space.minecraftstl.xyml.setting.SettingsManager.userSettings;
-import static space.minecraftstl.xyml.util.Lang.immutableListOf;
 import static space.minecraftstl.xyml.util.Lang.mapOf;
 import static space.minecraftstl.xyml.util.Pair.pair;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -76,7 +75,6 @@ public final class Accounts {
 
     /// Creates offline accounts.
     public static final OfflineAccountFactory FACTORY_OFFLINE = new OfflineAccountFactory(AUTHLIB_INJECTOR_DOWNLOADER);
-
     /// Creates authlib-injector accounts against configured authentication servers.
     public static final AuthlibInjectorAccountFactory FACTORY_AUTHLIB_INJECTOR = new AuthlibInjectorAccountFactory(AUTHLIB_INJECTOR_DOWNLOADER, Accounts::getOrCreateAuthlibInjectorServer);
 
@@ -85,7 +83,7 @@ public final class Accounts {
 
     /// Immutable account factories in launcher display order.
     public static final @Unmodifiable List<AccountFactory<?>> FACTORIES =
-            immutableListOf(FACTORY_OFFLINE, FACTORY_MICROSOFT, FACTORY_AUTHLIB_INJECTOR);
+            List.of(FACTORY_OFFLINE, FACTORY_MICROSOFT, FACTORY_AUTHLIB_INJECTOR);
 
     /// Login-type identifiers indexed to their storage factories.
     private static final Map<String, AccountFactory<?>> type2factory = new HashMap<>();

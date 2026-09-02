@@ -154,8 +154,8 @@ final class InstanceGameSettingsMapper {
                         effective.getInheritable(GameSettings::nativesDirectoryProperty),
                         isOverridden(instance, GameSettings::notPatchNativesProperty),
                         effective.getInheritable(GameSettings::notPatchNativesProperty),
-                        isOverridden(instance, GameSettings::useNativeGLFWProperty),
-                        effective.getInheritable(GameSettings::useNativeGLFWProperty),
+                        isOverridden(instance, GameSettings::useNativeGLFWorSDLProperty),
+                        effective.getInheritable(GameSettings::useNativeGLFWorSDLProperty),
                         isOverridden(instance, GameSettings::useNativeOpenALProperty),
                         effective.getInheritable(GameSettings::useNativeOpenALProperty)));
     }
@@ -350,7 +350,7 @@ final class InstanceGameSettingsMapper {
                 settings,
                 values.nativeGlfwOverridden(),
                 values.nativeGlfw(),
-                GameSettings::useNativeGLFWProperty);
+                GameSettings::useNativeGLFWorSDLProperty);
         apply(
                 settings,
                 values.nativeOpenAlOverridden(),

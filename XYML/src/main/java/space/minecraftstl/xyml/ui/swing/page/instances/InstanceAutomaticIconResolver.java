@@ -88,7 +88,9 @@ public final class InstanceAutomaticIconResolver {
         if (versionNumber.isAprilFools()) {
             return GameInstanceIconType.APRIL_FOOLS;
         }
-        if (versionNumber instanceof GameVersionNumber.LegacySnapshot) {
+        if (versionNumber instanceof GameVersionNumber.LegacySnapshot
+                || versionNumber instanceof GameVersionNumber.Release release
+                && release.getEaType() != GameVersionNumber.Release.ReleaseType.GA) {
             return GameInstanceIconType.COMMAND;
         }
         if (versionNumber instanceof GameVersionNumber.Old) {

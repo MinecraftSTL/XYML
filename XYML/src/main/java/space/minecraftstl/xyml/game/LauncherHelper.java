@@ -691,7 +691,7 @@ public final class LauncherHelper {
         JavaVersionType javaVersionType = setting.getInheritable(GameSettings::javaTypeProperty);
         if (setting.getInheritable(GameSettings::notCheckJVMProperty)) {
             task = getJavaTask.thenApplyAsync((@Nullable JavaRuntime java) ->
-                    Lang.requireNonNullElse(java, JavaRuntime.getDefault()));
+                    Objects.requireNonNullElse(java, JavaRuntime.getDefault()));
         } else if (javaVersionType == JavaVersionType.AUTO || javaVersionType == JavaVersionType.VERSION) {
             task = getJavaTask.thenComposeAsync(Schedulers.ui(), (@Nullable JavaRuntime java) -> {
                 if (java != null) {
@@ -1192,7 +1192,7 @@ public final class LauncherHelper {
                     : null;
             if (showLogs) {
                 if (level == null)
-                    level = Lang.requireNonNullElse(Log4jLevel.guessLevel(log), Log4jLevel.INFO);
+                    level = Objects.requireNonNullElse(Log4jLevel.guessLevel(log), Log4jLevel.INFO);
                 Objects.requireNonNull(logBuffer, "log buffer").add(new Log(log, level));
             } else {
                 lock.lock();

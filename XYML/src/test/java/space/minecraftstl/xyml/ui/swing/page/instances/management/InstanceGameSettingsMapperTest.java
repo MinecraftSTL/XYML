@@ -318,7 +318,7 @@ final class InstanceGameSettingsMapperTest {
                 GameSettings.PROPERTY_NOT_PATCH_NATIVES,
                 GameSettings.PROPERTY_USE_CUSTOM_NATIVES,
                 GameSettings.PROPERTY_NATIVES_DIRECTORY,
-                GameSettings.PROPERTY_USE_NATIVE_GLFW,
+                GameSettings.PROPERTY_USE_NATIVE_GLFW_OR_SDL,
                 GameSettings.PROPERTY_USE_NATIVE_OPENAL);
     }
 }

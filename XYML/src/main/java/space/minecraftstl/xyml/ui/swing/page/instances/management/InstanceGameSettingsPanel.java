@@ -744,7 +744,7 @@ public final class InstanceGameSettingsPanel extends JPanel implements AutoClose
                 useCustomNativesControl);
         addControlRow(section, i18n("settings.advanced.natives_directory"), nativesDirectoryControl);
         addBooleanControlRow(section, i18n("settings.advanced.dont_patch_natives"), notPatchNativesControl);
-        addBooleanControlRow(section, i18n("settings.advanced.use_native_glfw"), nativeGlfwControl);
+        addBooleanControlRow(section, i18n("settings.advanced.use_native_glfw_or_sdl"), nativeGlfwControl);
         addBooleanControlRow(section, i18n("settings.advanced.use_native_openal"), nativeOpenAlControl);
         content.add(section, "growx");
         return content;

@@ -223,7 +223,9 @@ final class SwingAuthlibServerManagementDialog extends JDialog implements AutoCl
         serverList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         serverList.setVisibleRowCount(8);
         serverList.setCellRenderer((list, value, index, selected, focused) -> {
-            JLabel label = new JLabel(value == null ? "" : value.displayName() + " - " + value.url());
+            JLabel label = new JLabel(value == null
+                    ? ""
+                    : value.displayName() + " - " + value.displayAddress());
             label.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
             label.setOpaque(true);
             label.setBackground(selected ? list.getSelectionBackground() : list.getBackground());

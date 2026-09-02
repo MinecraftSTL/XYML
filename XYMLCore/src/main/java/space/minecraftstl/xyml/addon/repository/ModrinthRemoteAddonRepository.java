@@ -19,19 +19,22 @@ package space.minecraftstl.xyml.addon.repository;
 
 import com.google.gson.annotations.SerializedName;
 import com.google.gson.reflect.TypeToken;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.download.DownloadProvider;
-import space.minecraftstl.xyml.util.*;
+import space.minecraftstl.xyml.util.DigestUtils;
+import space.minecraftstl.xyml.util.Immutable;
+import space.minecraftstl.xyml.util.PriorityComparator;
+import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.HttpRequest;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.io.ResponseCodeException;
-import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -297,7 +300,7 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
                 try {
                     List<ProjectVersion> versions = HttpRequest.GET(candidate.toString())
                             .getJson(listTypeOf(ProjectVersion.class));
-                    return versions.stream().map(ProjectVersion::toVersion).flatMap(Lang::toStream);
+                    return versions.stream().map(ProjectVersion::toVersion).flatMap(Optional::stream);
                 } catch (IOException e) {
                     IOException wrapper = new IOException("Failed to get remote versions: " + candidate, e);
                     if (candidates.size() == 1) {
