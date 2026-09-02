@@ -34,6 +34,7 @@ import org.gradle.process.ExecSpec;
 import org.gradle.work.DisableCachingByDefault;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.gradle.cache.RunLibraryCache;
 
 import javax.inject.Inject;
 import java.io.IOException;
@@ -52,11 +53,15 @@ import java.util.stream.Stream;
 /// Runs Gradle against the latest commit of one release branch in an isolated temporary Git worktree.
 ///
 /// The task refreshes all four `origin` release refs together, infers a version from their topology, and passes that
-/// exact version to the nested build. Build artifacts are copied back into the configured output directory. Run tasks
-/// omit an output directory and keep the temporary worktree alive until the launched application exits.
+/// exact version to the nested build. Application artifacts and any supported run-library snapshot are copied back
+/// into the controlling checkout. Run tasks omit an output directory and keep the temporary worktree alive until the
+/// launched application exits.
 @NotNullByDefault
 @DisableCachingByDefault(because = "The task fetches remote Git refs and always evaluates their latest commits")
 public abstract class GitBranchGradleTask extends DefaultTask {
+    /// Libraries whose successful branch-build artifacts can be reused by `run`.
+    private static final List<String> RUN_LIBRARY_NAMES = List.of("xoyz-nbt", "xoyz-mcp");
+
     /// Windows Internet Settings registry key containing the user's system proxy.
     private static final String INTERNET_SETTINGS_KEY =
             "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
@@ -210,7 +215,7 @@ public abstract class GitBranchGradleTask extends DefaultTask {
         execute(checkout, command, false, environment);
     }
 
-    /// Copies application artifacts and writes immutable build metadata.
+    /// Copies application artifacts, writes immutable build metadata, and installs any library snapshot.
     ///
     /// @param repository controlling Git repository root
     /// @param checkout temporary detached worktree
@@ -249,6 +254,14 @@ public abstract class GitBranchGradleTask extends DefaultTask {
                 target.resolve("build-info.properties"),
                 "branch=" + branchName + "\ncommit=" + commit + "\nversion=" + version + "\n",
                 StandardCharsets.UTF_8);
+        Path sourceLibraryCache = checkout.resolve("build/run-library-cache");
+        Path localLibraryCache = repository.resolve("build/run-library-cache");
+        if (Files.isDirectory(sourceLibraryCache)) {
+            RunLibraryCache.install(sourceLibraryCache, localLibraryCache, RUN_LIBRARY_NAMES);
+        } else {
+            deleteTree(localLibraryCache);
+            getLogger().lifecycle("XYML {} branch does not provide a reusable run-library snapshot", branchName);
+        }
         getLogger().lifecycle("XYML {} artifacts: {}", branchName, target);
     }
 

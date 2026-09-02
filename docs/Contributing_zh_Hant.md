@@ -93,9 +93,13 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 即使目前簽出的是 `main`、`beta`、`alpha` 或 `dev`，`run` 也始終將目前倉庫根目錄作為 XYML 的執行目錄。
 
 每次呼叫 `run` 都會禁止 `XYML`、`XYMLCore` 和 `XYMLBoot` 中的任務複用最新輸出或建置快取，包括 Java 編譯、語言資料產生、
-資源處理和最終 `shadowJar`。其他專案相依仍使用 Gradle 的常規複用機制，因此原生源碼未變更時可以複用現有的 XYMLL 可執行檔。
-`run` 始終選擇目前 `XYML/build/libs` 製品，不會選擇之前根 `:build` 記錄的 JAR，也不會寫入根結果清單或啓動第二個 Wrapper。
-沒有 CI 版本輸入時，發佈分支的本機建置版本按目前 Git 拓撲推斷。
+資源處理和最終 `shadowJar`。XoyzNBT 和 XoyzMCP 使用單獨的規則：成功的根 `build` 會登記一份經過完整性校驗的庫快照，
+`run` 會優先使用該快照，直到下一次根 `build` 成功。若不存在完整快照，或執行 `clean run`，兩個庫會在停用 Gradle 複用的
+臨時目錄中建置，並在啓動器 JAR 組裝完成後刪除；這種臨時回退不會更新快照。同一次呼叫中包含 `build run` 或 `check run`
+時則使用目前專案輸出。其他專案相依保留原有複用規則，因此原生源碼未變更時仍可複用現有的 XYMLL 可執行檔。
+
+`run` 始終重新建置並選擇目前 `XYML/build/libs` 中的應用製品，不會複用之前根 `:build` 記錄的應用 JAR、寫入根結果清單或
+啓動第二個 Wrapper。沒有 CI 版本輸入時，發佈分支的本機建置版本按目前 Git 拓撲推斷。
 子專案任務改名為 `:XYML:runCurrent`，不再使用 `run`，以免 Gradle 執行根工作流程時同時選中第二個啓動器程序。
 
 四個渠道任務會同時重新整理 `main`、`beta`、`alpha` 和 `dev`，再於臨時的游離 worktree 中建置所選提交，

@@ -45,6 +45,9 @@ import java.util.Objects;
 /// @param proxyAuthenticationEnabled whether proxy credentials are enabled
 /// @param proxyUsername proxy authentication username, or an empty string when unused
 /// @param proxyPassword proxy authentication password, or an empty string when unused
+/// @param mcpEnabled whether the local MCP server is enabled
+/// @param mcpPort loopback port used by the local MCP server
+/// @param mcpConfirmDeletion whether MCP deletion operations require interactive confirmation
 /// @param writable whether changes can be persisted to launcher settings
 @NotNullByDefault
 public record SettingsCenterSnapshot(
@@ -66,8 +69,11 @@ public record SettingsCenterSnapshot(
         boolean proxyAuthenticationEnabled,
         String proxyUsername,
         String proxyPassword,
+        boolean mcpEnabled,
+        int mcpPort,
+        boolean mcpConfirmDeletion,
         boolean writable) {
-    /// Validates non-null values and the download-concurrency invariant.
+    /// Validates non-null values and the numeric setting invariants.
     public SettingsCenterSnapshot {
         Objects.requireNonNull(language, "language");
         Objects.requireNonNull(commonDirectoryType, "commonDirectoryType");
@@ -82,6 +88,9 @@ public record SettingsCenterSnapshot(
         Objects.requireNonNull(proxyPassword, "proxyPassword");
         if (downloadThreads <= 0) {
             throw new IllegalArgumentException("downloadThreads must be positive");
+        }
+        if (mcpPort < 1 || mcpPort > 0xFFFF) {
+            throw new IllegalArgumentException("mcpPort must be in range 1..65535");
         }
     }
 }

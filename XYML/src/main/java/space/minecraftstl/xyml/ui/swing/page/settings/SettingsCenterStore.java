@@ -127,6 +127,21 @@ public interface SettingsCenterStore extends AutoCloseable {
     /// @param password configured password, which may be empty
     void setProxyPassword(String password);
 
+    /// Persists whether the local MCP server is enabled.
+    ///
+    /// @param enabled whether the MCP entry point may serve requests
+    void setMcpEnabled(boolean enabled);
+
+    /// Persists the local MCP server loopback port.
+    ///
+    /// @param port loopback TCP port in the range 1..65535
+    void setMcpPort(int port);
+
+    /// Persists whether MCP deletion operations require interactive confirmation.
+    ///
+    /// @param required whether deletion confirmation is required
+    void setMcpConfirmDeletion(boolean required);
+
     /// Releases every store-owned listener.
     @Override
     void close();

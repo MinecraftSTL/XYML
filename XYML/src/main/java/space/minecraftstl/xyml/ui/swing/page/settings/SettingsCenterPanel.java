@@ -62,6 +62,8 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Desktop;
 import java.awt.Font;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
@@ -200,6 +202,21 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Commits validated free-form download and proxy values.
     private final JButton confirmNetworkButton = new JButton(i18n("button.ok"));
 
+    /// Enables or disables the local MCP HTTP server.
+    private final JCheckBox mcpEnabledBox = new JCheckBox(i18n("settings.mcp.enabled"));
+
+    /// Local MCP HTTP listener port input.
+    private final JTextField mcpPortField = new JTextField();
+
+    /// Requires interactive confirmation before MCP deletion operations.
+    private final JCheckBox mcpConfirmDeletionBox = new JCheckBox(i18n("settings.mcp.confirm_deletion"));
+
+    /// Shows validation and persistence feedback for MCP settings.
+    private final JLabel mcpValidationLabel = new JLabel();
+
+    /// Shows restart state and provides the immediate restart action for MCP settings.
+    private final SettingsRestartPanel mcpRestartPanel;
+
     /// Store subscription released when this panel is discarded.
     private final Subscription storeSubscription;
 
@@ -310,6 +327,10 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 localizedRestartStrings(),
                 restartCommand,
                 this::restartActivityChanged);
+        mcpRestartPanel = new SettingsRestartPanel(
+                localizedDelayedEffectRestartStrings(),
+                restartCommand,
+                this::restartActivityChanged);
         appearancePanel.attachCornerRadiusRestartPanel(
                 localizedDelayedEffectRestartStrings(),
                 restartCommand,
@@ -388,6 +409,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 nbtSettingsPanel.close();
                 maintenanceActions.close();
                 restartPanel.close();
+                mcpRestartPanel.close();
                 setInteractiveControlsEnabled(false);
             }
         });
@@ -398,11 +420,13 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         setOpaque(false);
         configureGeneralControls();
         configureDownloadAndProxyControls();
+        configureMcpControls();
         SwingTransparency.revealBackgroundThroughTabs(tabs);
         tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
 
         tabs.addTab(i18n("settings.launcher.general"), createScrollPane(createGeneralPage()));
         tabs.addTab(i18n("settings.launcher.download"), createScrollPane(createDownloadAndProxyPage()));
+        tabs.addTab(i18n("settings.mcp.title"), createScrollPane(createMcpPage()));
         tabs.addTab(i18n("settings.launcher.appearance"), createScrollPane(createAppearancePage()));
         tabs.addTab(i18n("settings.type.global.preset.manage_all"), gameSettingsPresetsPanel);
         tabs.addTab(i18n("game_directory.title"), gameDirectoryManagementPanel);
@@ -524,6 +548,31 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         });
     }
 
+    /// Configures MCP enablement persistence.
+    private void configureMcpControls() {
+        mcpEnabledBox.setName("settingsMcpEnabled");
+        mcpEnabledBox.addActionListener(event -> {
+            if (!applyingSnapshot) {
+                store.setMcpEnabled(mcpEnabledBox.isSelected());
+            }
+        });
+        mcpConfirmDeletionBox.setName("settingsMcpConfirmDeletion");
+        mcpConfirmDeletionBox.addActionListener(event -> {
+            if (!applyingSnapshot) {
+                store.setMcpConfirmDeletion(mcpConfirmDeletionBox.isSelected());
+            }
+        });
+        mcpPortField.setName("settingsMcpPort");
+        mcpPortField.addActionListener(event -> persistMcpPort());
+        mcpPortField.addFocusListener(new FocusAdapter() {
+            @Override
+            public void focusLost(FocusEvent event) {
+                persistMcpPort();
+            }
+        });
+        mcpValidationLabel.setName("settingsMcpValidation");
+    }
+
     /// Creates the general preferences page.
     ///
     /// @return fully configured general-preferences content
@@ -570,6 +619,20 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         page.add(createFieldRow(i18n("settings.launcher.proxy.password"), proxyPasswordField), "growx");
         page.add(createNetworkActionsRow(), "growx");
         page.add(networkValidationLabel, "growx");
+        return page;
+    }
+
+    /// Creates the local MCP server settings page.
+    ///
+    /// @return MCP settings content
+    private JPanel createMcpPage() {
+        JPanel page = createPage();
+        page.add(createHeading(i18n("settings.mcp.title")), "growx");
+        page.add(mcpEnabledBox, "growx");
+        page.add(createFieldRow(i18n("settings.mcp.port"), mcpPortField), "growx");
+        page.add(mcpConfirmDeletionBox, "growx");
+        page.add(mcpRestartPanel, "growx");
+        page.add(mcpValidationLabel, "growx");
         return page;
     }
 
@@ -1033,6 +1096,34 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         }
     }
 
+    /// Validates and persists the local MCP listener port.
+    private void persistMcpPort() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || applyingSnapshot) {
+            return;
+        }
+        @Nullable Integer port = parseMcpPort(mcpPortField.getText());
+        if (port == null) {
+            mcpValidationLabel.setText(i18n("input.number"));
+            return;
+        }
+        mcpValidationLabel.setText("");
+        store.setMcpPort(port);
+    }
+
+    /// Parses a legal local MCP listener port.
+    ///
+    /// @param raw text-field value
+    /// @return port from 1 through 65535, or null when invalid
+    private static @Nullable Integer parseMcpPort(String raw) {
+        try {
+            int parsed = Integer.parseInt(Objects.requireNonNull(raw, "raw").trim());
+            return parsed >= 1 && parsed <= 0xFFFF ? parsed : null;
+        } catch (NumberFormatException exception) {
+            return null;
+        }
+    }
+
     /// Opens a trusted launcher metadata URL in the desktop browser.
     ///
     /// @param destination destination URI
@@ -1104,6 +1195,11 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             proxyUsernameField.setText(snapshot.proxyUsername());
             proxyPasswordField.setText(snapshot.proxyPassword());
             networkValidationLabel.setText("");
+            mcpEnabledBox.setSelected(snapshot.mcpEnabled());
+            mcpPortField.setText(Integer.toString(snapshot.mcpPort()));
+            mcpConfirmDeletionBox.setSelected(snapshot.mcpConfirmDeletion());
+            mcpValidationLabel.setText("");
+            mcpRestartPanel.updateMcpSettings(snapshot.mcpEnabled(), snapshot.mcpPort());
 
             setInteractiveControlsEnabled(snapshot.writable());
             updateDownloadControlAvailability();
@@ -1124,6 +1220,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         disableUpdatePromptBox.setEnabled(interactive);
         disableAprilFoolsBox.setEnabled(interactive);
         restartPanel.setAvailable(interactive);
+        mcpRestartPanel.setAvailable(interactive);
         appearancePanel.setRestartInProgress(restartInProgress);
         if (fontSettingsPanel != null) {
             fontSettingsPanel.setRestartInProgress(restartInProgress);
@@ -1138,6 +1235,10 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         proxyAuthenticationBox.setEnabled(interactive);
         confirmNetworkButton.setEnabled(interactive);
         networkValidationLabel.setEnabled(interactive);
+        mcpEnabledBox.setEnabled(interactive);
+        mcpPortField.setEnabled(interactive);
+        mcpConfirmDeletionBox.setEnabled(interactive);
+        mcpValidationLabel.setEnabled(interactive);
         updateStatusLabel.setEnabled(!closed);
         cacheStatusLabel.setEnabled(!closed);
         updateMaintenanceControlAvailability();

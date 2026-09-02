@@ -11,6 +11,13 @@ tasks.compileJava {
     options.compilerArgs.add("--add-exports=jdk.attach/sun.tools.attach=ALL-UNNAMED")
 }
 
+val runLibraryArtifacts = rootProject.extra["xymlRunLibraryArtifacts"] as Map<*, *>
+
+fun runLibraryDependency(name: String): Any {
+    val cachedArtifact = runLibraryArtifacts[name]
+    return if (cachedArtifact is File) files(cachedArtifact) else project(":$name")
+}
+
 dependencies {
     api(libs.kala.compress.zip)
     api(libs.kala.compress.tar)
@@ -24,7 +31,8 @@ dependencies {
     api(libs.jsoup)
     api(libs.jna)
     api(libs.pci.ids)
-    api(project(":xoyz-nbt"))
+    api(runLibraryDependency("xoyz-nbt"))
+    api(runLibraryDependency("xoyz-mcp"))
     api(libs.weburl)
     api(libs.uuid.tools)
     compileOnlyApi(libs.jetbrains.annotations)

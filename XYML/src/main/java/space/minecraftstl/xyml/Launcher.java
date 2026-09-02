@@ -22,6 +22,9 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.XYMLCacheRepository;
 import space.minecraftstl.xyml.java.JavaManager;
+import space.minecraftstl.xyml.mcp.SwingMcpDeletionConfirmation;
+import space.minecraftstl.xyml.mcp.XYMLMcpServer;
+import space.minecraftstl.xyml.mcp.XYMLMcpService;
 import space.minecraftstl.xyml.setting.*;
 import space.minecraftstl.xyml.task.AsyncTaskExecutor;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -58,6 +61,7 @@ import space.minecraftstl.xyml.util.platform.*;
 
 import java.awt.Component;
 import java.io.File;
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryPoolMXBean;
 import java.net.CookieHandler;
@@ -126,6 +130,9 @@ public final class Launcher {
     /// Automatic native update notification subscription, or null when disabled or not yet initialized.
     private @Nullable SwingUpdateNotificationController swingUpdateNotifications;
 
+    /// Local MCP HTTP listener, or null when disabled or not yet initialized.
+    private @Nullable XYMLMcpServer mcpServer;
+
     /// Initializes launcher services, displays startup warnings, and opens the native Swing window.
     public void start() {
         Thread.currentThread().setUncaughtExceptionHandler(CRASH_REPORTER);
@@ -138,6 +145,7 @@ public final class Launcher {
 
         try {
             initializeSettingsRuntime();
+            startMcpServer();
 
             if (Metadata.SKIP_OFFLINE_USERNAME_CHECK) {
                 LOG.warning(Metadata.SKIP_OFFLINE_USERNAME_CHECK_ENVIRONMENT_VARIABLE
@@ -406,6 +414,30 @@ public final class Launcher {
         settings().commonDirectoryTypeProperty().subscribe(change -> refreshCacheDirectory.run());
     }
 
+    /// Starts the opt-in local MCP HTTP listener after the repository has been initialized.
+    private void startMcpServer() {
+        if (!settings().mcpEnabledProperty().get()) {
+            return;
+        }
+        @Nullable XYMLMcpServer server = null;
+        try {
+            server = new XYMLMcpServer(
+                    settings().mcpPortProperty().get(),
+                    new XYMLMcpService(
+                            GameDirectoryManager.getSelectedRepository(),
+                            new SwingMcpDeletionConfirmation(
+                                    () -> settings().mcpConfirmDeletionProperty().get())));
+            server.startListener();
+            mcpServer = server;
+            LOG.info("MCP server listening on http://127.0.0.1:" + server.getListeningPort() + "/mcp");
+        } catch (IOException | IllegalArgumentException exception) {
+            if (server != null) {
+                server.close();
+            }
+            LOG.warning("Unable to start MCP server", exception);
+        }
+    }
+
     /// Returns whether the active config directory appears to be temporary or disposable.
     ///
     /// @return true when the config path matches a platform temporary location
@@ -465,6 +497,11 @@ public final class Launcher {
         ACTIVE_LAUNCHER.compareAndSet(this, null);
 
         @Nullable Throwable failure = null;
+        @Nullable XYMLMcpServer server = mcpServer;
+        mcpServer = null;
+        if (server != null) {
+            failure = closeCollecting(server, failure);
+        }
         @Nullable AccountCreationWorkflowHandle accountWorkflow;
         synchronized (accountCreationLifecycleLock) {
             accountWorkflow = accountCreationWorkflow.getAndSet(null);

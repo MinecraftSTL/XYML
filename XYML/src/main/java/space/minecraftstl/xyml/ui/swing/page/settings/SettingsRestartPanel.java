@@ -62,6 +62,12 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
     /// Font antialiasing mode active when this settings surface first observed process state.
     private @Nullable FontAntialiasingMode baselineFontAntialiasingMode;
 
+    /// MCP enablement active when this settings surface first observed process state.
+    private @Nullable Boolean baselineMcpEnabled;
+
+    /// MCP listener port active when this settings surface first observed process state.
+    private @Nullable Integer baselineMcpPort;
+
     /// Latest launcher language supplied to the general restart tracker.
     private @Nullable SupportedLocale currentLanguage;
 
@@ -73,6 +79,12 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
 
     /// Latest mode supplied to the font antialiasing restart tracker.
     private @Nullable FontAntialiasingMode currentFontAntialiasingMode;
+
+    /// Latest MCP enablement supplied to the restart tracker.
+    private @Nullable Boolean currentMcpEnabled;
+
+    /// Latest MCP listener port supplied to the restart tracker.
+    private @Nullable Integer currentMcpPort;
 
     /// Whether settings persistence currently permits restart-sensitive edits.
     private boolean available = true;
@@ -150,6 +162,24 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
             baselineFontAntialiasingMode = validatedMode;
         }
         currentFontAntialiasingMode = validatedMode;
+        updateRestartRequired();
+    }
+
+    /// Tracks MCP enablement and listener port against the active process baseline.
+    ///
+    /// @param enabled whether the local MCP server is enabled
+    /// @param port local MCP listener port
+    void updateMcpSettings(boolean enabled, int port) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (port < 1 || port > 0xFFFF) {
+            throw new IllegalArgumentException("MCP port must be in range 1..65535");
+        }
+        if (baselineMcpEnabled == null || baselineMcpPort == null) {
+            baselineMcpEnabled = enabled;
+            baselineMcpPort = port;
+        }
+        currentMcpEnabled = enabled;
+        currentMcpPort = port;
         updateRestartRequired();
     }
 
@@ -232,8 +262,8 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
 
     /// Recomputes whether any baseline value tracked by this row requires a restart.
     ///
-    /// A row normally tracks either the general language pair, appearance radius, or font antialiasing mode. Keeping
-    /// the checks in one place lets all rows share identical behavior without resetting another row's baseline.
+    /// A row normally tracks the general language pair, appearance radius, font antialiasing mode, or MCP settings.
+    /// Keeping the checks in one place lets all rows share identical behavior without resetting another row's baseline.
     private void updateRestartRequired() {
         boolean generalChanged = currentLanguage != null
                 && baselineLanguage != null
@@ -247,7 +277,13 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
         boolean fontAntialiasingChanged = currentFontAntialiasingMode != null
                 && baselineFontAntialiasingMode != null
                 && currentFontAntialiasingMode != baselineFontAntialiasingMode;
-        restartRequired = generalChanged || radiusChanged || fontAntialiasingChanged;
+        boolean mcpChanged = currentMcpEnabled != null
+                && baselineMcpEnabled != null
+                && currentMcpPort != null
+                && baselineMcpPort != null
+                && (!Objects.equals(currentMcpEnabled, baselineMcpEnabled)
+                || !Objects.equals(currentMcpPort, baselineMcpPort));
+        restartRequired = generalChanged || radiusChanged || fontAntialiasingChanged || mcpChanged;
         updatePresentation();
     }
 }

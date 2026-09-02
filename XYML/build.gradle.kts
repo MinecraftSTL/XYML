@@ -22,11 +22,23 @@ plugins {
 }
 
 tasks.named("build") {
-    dependsOn(":xoyz-nbt:build", ":lwjgl-unsafe-agent:build", ":mesa-loader-windows:build", ":XYMLL:build")
+    dependsOn(
+        ":xoyz-nbt:build",
+        ":xoyz-mcp:build",
+        ":lwjgl-unsafe-agent:build",
+        ":mesa-loader-windows:build",
+        ":XYMLL:build"
+    )
 }
 
 tasks.named("check") {
-    dependsOn(":xoyz-nbt:check", ":lwjgl-unsafe-agent:check", ":mesa-loader-windows:check", ":XYMLL:check")
+    dependsOn(
+        ":xoyz-nbt:check",
+        ":xoyz-mcp:check",
+        ":lwjgl-unsafe-agent:check",
+        ":mesa-loader-windows:check",
+        ":XYMLL:check"
+    )
 }
 
 base {
@@ -235,6 +247,8 @@ val requiredOfflineLibraryEntries = listOf(
     "space/minecraftstl/xyml/library/nbt/chunk/ChunkRegion.class",
     "space/minecraftstl/xyml/library/nbt/io/NBTCodec.class",
     "space/minecraftstl/xyml/library/nbt/tag/CompoundTag.class",
+    "space/minecraftstl/xyml/library/mcp/McpServer.class",
+    "fi/iki/elonen/NanoHTTPD.class",
     embeddedAgentEntry,
 )
 
