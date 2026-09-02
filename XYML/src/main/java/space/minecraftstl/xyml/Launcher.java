@@ -429,6 +429,13 @@ public final class Launcher {
                                     kind -> switch (kind) {
                                         case INSTANCE -> settings().mcpConfirmInstanceDeletionProperty().get();
                                         case MODS -> settings().mcpConfirmModDeletionProperty().get();
+                                    },
+                                    () -> !SettingsManager.hasReadOnlyCoreSettings(),
+                                    kind -> {
+                                        switch (kind) {
+                                            case INSTANCE -> settings().mcpConfirmInstanceDeletionProperty().set(false);
+                                            case MODS -> settings().mcpConfirmModDeletionProperty().set(false);
+                                        }
                                     })));
             server.startListener();
             mcpServer = server;
