@@ -621,6 +621,15 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         return mcpPort;
     }
 
+    /// Whether MCP deletion operations require interactive user confirmation.
+    @SerializedName("mcpConfirmDeletion")
+    private final BooleanProperty mcpConfirmDeletion = new SimpleBooleanProperty(true);
+
+    /// Returns the MCP deletion-confirmation preference.
+    public BooleanProperty mcpConfirmDeletionProperty() {
+        return mcpConfirmDeletion;
+    }
+
     /// The selected game directory ID.
     ///
     /// This field is owned by [GameDirectoryManager]. Code outside [GameDirectoryManager] should not modify it directly.

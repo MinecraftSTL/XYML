@@ -277,6 +277,14 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         write(() -> settings.mcpPortProperty().set(port));
     }
 
+    /// Queues the MCP deletion-confirmation preference write.
+    ///
+    /// @param required whether deletion confirmation is required
+    @Override
+    public void setMcpConfirmDeletion(boolean required) {
+        write(() -> settings.mcpConfirmDeletionProperty().set(required));
+    }
+
     /// Releases subscriptions and blocks later writes.
     @Override
     public void close() {
@@ -310,6 +318,7 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         propertySubscriptions.add(settings.proxyPasswordProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.mcpEnabledProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.mcpPortProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.mcpConfirmDeletionProperty().subscribe(change -> scheduleRefreshSnapshot()));
     }
 
     /// Queues a launcher-state snapshot refresh after one property change.
@@ -366,6 +375,7 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
                 Objects.requireNonNullElse(configuredProxyPassword, ""),
                 settings.mcpEnabledProperty().get(),
                 settings.mcpPortProperty().get(),
+                settings.mcpConfirmDeletionProperty().get(),
                 writableSupplier.getAsBoolean());
     }
 

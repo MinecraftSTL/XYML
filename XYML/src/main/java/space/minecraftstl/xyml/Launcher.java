@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.XYMLCacheRepository;
 import space.minecraftstl.xyml.java.JavaManager;
+import space.minecraftstl.xyml.mcp.SwingMcpDeletionConfirmation;
 import space.minecraftstl.xyml.mcp.XYMLMcpServer;
 import space.minecraftstl.xyml.mcp.XYMLMcpService;
 import space.minecraftstl.xyml.setting.*;
@@ -422,7 +423,10 @@ public final class Launcher {
         try {
             server = new XYMLMcpServer(
                     settings().mcpPortProperty().get(),
-                    new XYMLMcpService(GameDirectoryManager.getSelectedRepository()));
+                    new XYMLMcpService(
+                            GameDirectoryManager.getSelectedRepository(),
+                            new SwingMcpDeletionConfirmation(
+                                    () -> settings().mcpConfirmDeletionProperty().get())));
             server.startListener();
             mcpServer = server;
             LOG.info("MCP server listening on http://127.0.0.1:" + server.getListeningPort() + "/mcp");

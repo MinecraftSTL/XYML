@@ -237,6 +237,21 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
         }
     }
 
+    /// Invalidates loaded mod metadata after an external filesystem mutation.
+    ///
+    /// The next call to [getLocalFiles] performs an authoritative rescan.
+    public void invalidateCache() {
+        lock.lock();
+        try {
+            loaded = false;
+            localFiles.clear();
+            localMods.clear();
+            analyzer = null;
+        } finally {
+            lock.unlock();
+        }
+    }
+
     public void addMod(Path file) throws IOException {
         if (!isFileNameMod(file))
             throw new IllegalArgumentException("File " + file + " is not a valid mod file.");

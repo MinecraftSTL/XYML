@@ -15,19 +15,25 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-package space.minecraftstl.xyml.mcp;
+package space.minecraftstl.xyml.library.mcp;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -35,7 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies the Streamable HTTP JSON-RPC transport exposed by the MCP server.
 @NotNullByDefault
-public final class XYMLMcpServerHttpTest {
+public final class McpServerHttpTest {
 
     /// Protocol version used by the server's current message surface.
     private static final String PROTOCOL_VERSION = "2025-11-25";
@@ -52,10 +58,17 @@ public final class XYMLMcpServerHttpTest {
     /// Accept value that prefers SSE but still permits a single JSON response.
     private static final String ACCEPT_SSE_PREFERRED = "application/json;q=0.1, text/event-stream;q=1";
 
+    /// Server identity used by protocol tests.
+    private static final McpServerInfo SERVER_INFO = new McpServerInfo("xoyz-mcp-test", "1.0");
+
+    /// Complete feature set used by protocol tests.
+    private static final McpFeatureSet FEATURES = new McpFeatureSet(
+            new TestToolProvider(), new TestResourceProvider(), new TestPromptProvider());
+
     /// Performs the Streamable HTTP handshake and then uses the issued session for JSON requests.
     @Test
     public void negotiatesSessionAndJsonResponses() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        try (McpServer server = createServer()) {
             server.startListener();
             URI endpoint = endpoint(server);
             HttpClient client = HttpClient.newHttpClient();
@@ -63,7 +76,7 @@ public final class XYMLMcpServerHttpTest {
             HttpResponse<String> initializeResponse = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}",
+                    initializeBody(1),
                     ACCEPT_BOTH,
                     null,
                     null);
@@ -102,24 +115,146 @@ public final class XYMLMcpServerHttpTest {
                     PROTOCOL_VERSION);
             assertEquals(200, listResponse.statusCode());
             assertContentType(listResponse, "application/json");
-            assertEquals(16, jsonBody(listResponse)
+            assertEquals(1, jsonBody(listResponse)
                     .getAsJsonObject("result")
                     .getAsJsonArray("tools")
                     .size());
         }
     }
 
-    /// Keeps the complete launcher-specific tools, resources, prompts, and call response surface covered.
+    /// Advertises only configured capability families and rejects omitted methods.
+    @Test
+    public void advertisesOnlyConfiguredCapabilities() throws Exception {
+        McpFeatureSet toolsOnly = new McpFeatureSet(new TestToolProvider(), null, null);
+        try (McpServer server = new McpServer(0, SERVER_INFO, toolsOnly)) {
+            server.startListener();
+            URI endpoint = endpoint(server);
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> initializeResponse = post(
+                    client, endpoint, initializeBody(35), ACCEPT_BOTH, null, null);
+            String sessionId = requireHeader(initializeResponse, "Mcp-Session-Id");
+
+            JsonObject capabilities = jsonBody(initializeResponse)
+                    .getAsJsonObject("result")
+                    .getAsJsonObject("capabilities");
+            assertEquals(1, capabilities.size());
+            assertTrue(capabilities.has("tools"));
+
+            HttpResponse<String> unavailable = post(
+                    client,
+                    endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":36,\"method\":\"resources/list\"}",
+                    ACCEPT_BOTH,
+                    sessionId,
+                    PROTOCOL_VERSION);
+            assertEquals(-32601, jsonBody(unavailable).getAsJsonObject("error").get("code").getAsInt());
+        }
+    }
+
+    /// Rejects initialize requests that do not contain the required handshake fields.
+    @Test
+    public void validatesInitializeParameters() throws Exception {
+        try (McpServer server = createServer()) {
+            server.startListener();
+            URI endpoint = endpoint(server);
+            HttpClient client = HttpClient.newHttpClient();
+
+            assertInitializeRejected(client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":40,\"method\":\"initialize\"}");
+            assertInitializeRejected(client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"initialize\","
+                            + "\"params\":{\"protocolVersion\":\"\",\"capabilities\":{},"
+                            + "\"clientInfo\":{\"name\":\"test\",\"version\":\"1\"}}}");
+            assertInitializeRejected(client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"initialize\","
+                            + "\"params\":{\"protocolVersion\":\"" + PROTOCOL_VERSION + "\","
+                            + "\"capabilities\":[],\"clientInfo\":{\"name\":\"test\",\"version\":\"1\"}}}");
+            assertInitializeRejected(client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":43,\"method\":\"initialize\","
+                            + "\"params\":{\"protocolVersion\":\"" + PROTOCOL_VERSION + "\","
+                            + "\"capabilities\":{},\"clientInfo\":{\"name\":\"test\"}}}");
+        }
+    }
+
+    /// Renews active sessions and expires them after the configured inactivity period.
+    @Test
+    public void renewsAndExpiresSessions() throws Exception {
+        AtomicLong now = new AtomicLong(1_000L);
+        try (McpServer server = new McpServer(
+                0, SERVER_INFO, FEATURES, Duration.ofMillis(100), 4, now::get)) {
+            server.startListener();
+            URI endpoint = endpoint(server);
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> initializeResponse = post(
+                    client, endpoint, initializeBody(50), ACCEPT_BOTH, null, null);
+            String sessionId = requireHeader(initializeResponse, "Mcp-Session-Id");
+
+            now.set(1_090L);
+            HttpResponse<String> renewed = post(
+                    client, endpoint, "{\"jsonrpc\":\"2.0\",\"id\":51,\"method\":\"tools/list\"}",
+                    ACCEPT_BOTH, sessionId, PROTOCOL_VERSION);
+            assertEquals(200, renewed.statusCode());
+
+            now.set(1_150L);
+            HttpResponse<String> stillActive = post(
+                    client, endpoint, "{\"jsonrpc\":\"2.0\",\"id\":52,\"method\":\"tools/list\"}",
+                    ACCEPT_BOTH, sessionId, PROTOCOL_VERSION);
+            assertEquals(200, stillActive.statusCode());
+
+            now.set(1_251L);
+            HttpResponse<String> expired = post(
+                    client, endpoint, "{\"jsonrpc\":\"2.0\",\"id\":53,\"method\":\"tools/list\"}",
+                    ACCEPT_BOTH, sessionId, PROTOCOL_VERSION);
+            assertEquals(404, expired.statusCode());
+            assertEquals(-32001, jsonBody(expired).getAsJsonObject("error").get("code").getAsInt());
+        }
+    }
+
+    /// Keeps the session map within its capacity by evicting the least recently active session.
+    @Test
+    public void evictsOldestSessionAtCapacity() throws Exception {
+        AtomicLong now = new AtomicLong(2_000L);
+        try (McpServer server = new McpServer(
+                0, SERVER_INFO, FEATURES, Duration.ofHours(1), 2, now::get)) {
+            server.startListener();
+            URI endpoint = endpoint(server);
+            HttpClient client = HttpClient.newHttpClient();
+            String firstSession = requireHeader(post(
+                    client, endpoint, initializeBody(60), ACCEPT_BOTH, null, null), "Mcp-Session-Id");
+            now.set(2_010L);
+            String secondSession = requireHeader(post(
+                    client, endpoint, initializeBody(61), ACCEPT_BOTH, null, null), "Mcp-Session-Id");
+            now.set(2_020L);
+            assertEquals(200, post(
+                    client, endpoint, "{\"jsonrpc\":\"2.0\",\"id\":62,\"method\":\"tools/list\"}",
+                    ACCEPT_BOTH, firstSession, PROTOCOL_VERSION).statusCode());
+            now.set(2_030L);
+            String newestSession = requireHeader(post(
+                    client, endpoint, initializeBody(63), ACCEPT_BOTH, null, null), "Mcp-Session-Id");
+
+            assertEquals(404, post(
+                    client, endpoint, "{\"jsonrpc\":\"2.0\",\"id\":64,\"method\":\"tools/list\"}",
+                    ACCEPT_BOTH, secondSession, PROTOCOL_VERSION).statusCode());
+            assertEquals(200, post(
+                    client, endpoint, "{\"jsonrpc\":\"2.0\",\"id\":65,\"method\":\"tools/list\"}",
+                    ACCEPT_BOTH, firstSession, PROTOCOL_VERSION).statusCode());
+            assertEquals(200, post(
+                    client, endpoint, "{\"jsonrpc\":\"2.0\",\"id\":66,\"method\":\"tools/list\"}",
+                    ACCEPT_BOTH, newestSession, PROTOCOL_VERSION).statusCode());
+        }
+    }
+
+    /// Keeps the complete tools, resources, prompts, and call response surface covered.
     @Test
     public void servesToolsResourcesPromptsAndCalls() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        try (McpServer server = createServer()) {
             server.startListener();
             URI endpoint = endpoint(server);
             HttpClient client = HttpClient.newHttpClient();
             HttpResponse<String> initializeResponse = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}",
+                    initializeBody(1),
                     ACCEPT_BOTH,
                     null,
                     null);
@@ -132,7 +267,7 @@ public final class XYMLMcpServerHttpTest {
                     ACCEPT_BOTH,
                     sessionId,
                     PROTOCOL_VERSION);
-            assertEquals(16, jsonBody(listResponse)
+            assertEquals(1, jsonBody(listResponse)
                     .getAsJsonObject("result")
                     .getAsJsonArray("tools")
                     .size());
@@ -141,13 +276,28 @@ public final class XYMLMcpServerHttpTest {
                     client,
                     endpoint,
                     "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\","
-                            + "\"params\":{\"name\":\"list_instances\",\"arguments\":{}}}",
+                            + "\"params\":{\"name\":\"echo\",\"arguments\":{}}}",
                     ACCEPT_BOTH,
                     sessionId,
                     PROTOCOL_VERSION);
             JsonObject callResult = jsonBody(callResponse).getAsJsonObject("result");
-            assertTrue(callResult.get("isError").getAsBoolean());
+            assertFalse(callResult.get("isError").getAsBoolean());
             assertTrue(callResult.has("structuredContent"));
+
+            HttpResponse<String> nullArgumentResponse = post(
+                    client,
+                    endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"tools/call\","
+                            + "\"params\":{\"name\":\"echo\",\"arguments\":{\"value\":null}}}",
+                    ACCEPT_BOTH,
+                    sessionId,
+                    PROTOCOL_VERSION);
+            assertTrue(jsonBody(nullArgumentResponse)
+                    .getAsJsonObject("result")
+                    .getAsJsonObject("structuredContent")
+                    .getAsJsonObject("arguments")
+                    .get("value")
+                    .isJsonNull());
 
             HttpResponse<String> resourcesResponse = post(
                     client,
@@ -156,10 +306,10 @@ public final class XYMLMcpServerHttpTest {
                     ACCEPT_BOTH,
                     sessionId,
                     PROTOCOL_VERSION);
-            assertTrue(jsonBody(resourcesResponse)
+            assertEquals(1, jsonBody(resourcesResponse)
                     .getAsJsonObject("result")
                     .getAsJsonArray("resources")
-                    .isEmpty());
+                    .size());
 
             HttpResponse<String> templatesResponse = post(
                     client,
@@ -168,7 +318,7 @@ public final class XYMLMcpServerHttpTest {
                     ACCEPT_BOTH,
                     sessionId,
                     PROTOCOL_VERSION);
-            assertEquals(3, jsonBody(templatesResponse)
+            assertEquals(1, jsonBody(templatesResponse)
                     .getAsJsonObject("result")
                     .getAsJsonArray("resourceTemplates")
                     .size());
@@ -183,11 +333,29 @@ public final class XYMLMcpServerHttpTest {
                     client,
                     endpoint,
                     "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"resources/read\","
-                            + "\"params\":{\"uri\":\"xyml://instances/demo/logs/latest.log\"}}",
+                            + "\"params\":{\"uri\":\"mcp-test://status\"}}",
                     ACCEPT_BOTH,
                     sessionId,
                     PROTOCOL_VERSION);
-            assertEquals(-32603, jsonBody(readResponse).getAsJsonObject("error").get("code").getAsInt());
+            JsonObject resourceContent = jsonBody(readResponse)
+                    .getAsJsonObject("result")
+                    .getAsJsonArray("contents")
+                    .get(0)
+                    .getAsJsonObject();
+            assertEquals("mcp-test://status", resourceContent.get("uri").getAsString());
+            assertEquals("text/plain", resourceContent.get("mimeType").getAsString());
+            assertEquals("ready", resourceContent.get("text").getAsString());
+
+            HttpResponse<String> missingReadResponse = post(
+                    client,
+                    endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":61,\"method\":\"resources/read\","
+                            + "\"params\":{\"uri\":\"mcp-test://missing\"}}",
+                    ACCEPT_BOTH,
+                    sessionId,
+                    PROTOCOL_VERSION);
+            assertEquals(-32603,
+                    jsonBody(missingReadResponse).getAsJsonObject("error").get("code").getAsInt());
 
             HttpResponse<String> promptsResponse = post(
                     client,
@@ -204,8 +372,8 @@ public final class XYMLMcpServerHttpTest {
                     client,
                     endpoint,
                     "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"prompts/get\","
-                            + "\"params\":{\"name\":\"diagnose_crash\","
-                            + "\"arguments\":{\"instance_id\":\"demo\"}}}",
+                            + "\"params\":{\"name\":\"inspect\","
+                            + "\"arguments\":{\"subject\":\"demo\"}}}",
                     ACCEPT_BOTH,
                     sessionId,
                     PROTOCOL_VERSION);
@@ -227,7 +395,7 @@ public final class XYMLMcpServerHttpTest {
     /// Negotiates a supported legacy protocol and falls back to the current version for unknown requests.
     @Test
     public void negotiatesLegacyAndFallsBackForUnknownVersion() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        try (McpServer server = createServer()) {
             server.startListener();
             URI endpoint = endpoint(server);
             HttpClient client = HttpClient.newHttpClient();
@@ -235,8 +403,7 @@ public final class XYMLMcpServerHttpTest {
             HttpResponse<String> legacyResponse = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"initialize\","
-                            + "\"params\":{\"protocolVersion\":\"" + LEGACY_PROTOCOL_VERSION + "\"}}",
+                    initializeBody(10, LEGACY_PROTOCOL_VERSION),
                     ACCEPT_BOTH,
                     null,
                     null);
@@ -259,11 +426,21 @@ public final class XYMLMcpServerHttpTest {
             assertEquals(200, legacyRequest.statusCode());
             assertEquals(LEGACY_PROTOCOL_VERSION, requireHeader(legacyRequest, "MCP-Protocol-Version"));
 
+            HttpResponse<String> missingLegacyVersionRequest = post(
+                    client,
+                    endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":111,\"method\":\"tools/list\"}",
+                    ACCEPT_BOTH,
+                    legacySessionId,
+                    null);
+            assertEquals(200, missingLegacyVersionRequest.statusCode());
+            assertEquals(LEGACY_PROTOCOL_VERSION,
+                    requireHeader(missingLegacyVersionRequest, "MCP-Protocol-Version"));
+
             HttpResponse<String> fallbackResponse = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"initialize\","
-                            + "\"params\":{\"protocolVersion\":\"2024-11-05\"}}",
+                    initializeBody(12, "2024-11-05"),
                     ACCEPT_BOTH,
                     null,
                     null);
@@ -280,16 +457,14 @@ public final class XYMLMcpServerHttpTest {
     /// Accepts the latest protocol header that modern Streamable HTTP clients send during initialization.
     @Test
     public void acceptsLatestProtocolHeaderDuringInitialization() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        try (McpServer server = createServer()) {
             server.startListener();
             URI endpoint = endpoint(server);
             HttpClient client = HttpClient.newHttpClient();
             HttpResponse<String> response = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"initialize\","
-                            + "\"params\":{\"protocolVersion\":\"" + PROTOCOL_VERSION + "\","
-                            + "\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1\"}}}",
+                    initializeBody(13),
                     ACCEPT_BOTH,
                     null,
                     PROTOCOL_VERSION);
@@ -305,15 +480,14 @@ public final class XYMLMcpServerHttpTest {
     /// Ignores an unknown protocol header during initialization and negotiates from the request body.
     @Test
     public void ignoresUnknownProtocolHeaderDuringInitialization() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        try (McpServer server = createServer()) {
             server.startListener();
             URI endpoint = endpoint(server);
             HttpClient client = HttpClient.newHttpClient();
             HttpResponse<String> response = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"initialize\","
-                            + "\"params\":{\"protocolVersion\":\"" + PROTOCOL_VERSION + "\"}}",
+                    initializeBody(14),
                     ACCEPT_BOTH,
                     null,
                     "2099-01-01");
@@ -329,14 +503,14 @@ public final class XYMLMcpServerHttpTest {
     /// Uses the Streamable HTTP SSE representation only when JSON is not acceptable.
     @Test
     public void selectsSseOnlyWhenNegotiated() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        try (McpServer server = createServer()) {
             server.startListener();
             URI endpoint = endpoint(server);
             HttpClient client = HttpClient.newHttpClient();
             HttpResponse<String> initializeResponse = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}",
+                    initializeBody(1),
                     ACCEPT_BOTH,
                     null,
                     null);
@@ -376,7 +550,7 @@ public final class XYMLMcpServerHttpTest {
     /// Rejects malformed JSON-RPC bodies and accepts session headers regardless of casing or order.
     @Test
     public void rejectsMalformedBodiesAndHandlesHeaderOrder() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        try (McpServer server = createServer()) {
             server.startListener();
             URI endpoint = endpoint(server);
             HttpClient client = HttpClient.newHttpClient();
@@ -396,7 +570,7 @@ public final class XYMLMcpServerHttpTest {
             HttpResponse<String> initializeResponse = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"initialize\",\"params\":{}}",
+                    initializeBody(20),
                     ACCEPT_BOTH,
                     null,
                     null);
@@ -447,7 +621,7 @@ public final class XYMLMcpServerHttpTest {
     /// Rejects requests that do not carry the issued session and negotiated protocol version.
     @Test
     public void enforcesSessionAndProtocolHeaders() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        try (McpServer server = createServer()) {
             server.startListener();
             URI endpoint = endpoint(server);
             HttpClient client = HttpClient.newHttpClient();
@@ -473,7 +647,7 @@ public final class XYMLMcpServerHttpTest {
             HttpResponse<String> initializeResponse = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"initialize\",\"params\":{}}",
+                    initializeBody(3),
                     ACCEPT_BOTH,
                     null,
                     null);
@@ -500,7 +674,7 @@ public final class XYMLMcpServerHttpTest {
             HttpResponse<String> reinitialize = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"initialize\",\"params\":{}}",
+                    initializeBody(6),
                     ACCEPT_BOTH,
                     sessionId,
                     null);
@@ -511,7 +685,7 @@ public final class XYMLMcpServerHttpTest {
     /// Rejects unsupported media negotiation and body content types.
     @Test
     public void validatesHttpNegotiationHeaders() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        try (McpServer server = createServer()) {
             server.startListener();
             URI endpoint = endpoint(server);
             HttpClient client = HttpClient.newHttpClient();
@@ -519,7 +693,7 @@ public final class XYMLMcpServerHttpTest {
             HttpResponse<String> missingAccept = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}",
+                    initializeBody(1),
                     null,
                     null,
                     null);
@@ -530,7 +704,7 @@ public final class XYMLMcpServerHttpTest {
             HttpResponse<String> unsupportedAccept = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":{}}",
+                    initializeBody(2),
                     "text/plain",
                     null,
                     null);
@@ -539,7 +713,7 @@ public final class XYMLMcpServerHttpTest {
             HttpResponse<String> jsonOnlyAccept = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"initialize\",\"params\":{}}",
+                    initializeBody(3),
                     "application/json",
                     null,
                     null);
@@ -548,7 +722,7 @@ public final class XYMLMcpServerHttpTest {
             HttpResponse<String> wrongContentType = postWithContentType(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"initialize\",\"params\":{}}",
+                    initializeBody(4),
                     ACCEPT_BOTH,
                     "text/plain",
                     null,
@@ -558,10 +732,10 @@ public final class XYMLMcpServerHttpTest {
         }
     }
 
-    /// Rejects an optional GET stream because this launcher has no server-initiated messages.
+    /// Rejects an optional GET stream because this server has no server-initiated messages.
     @Test
     public void handlesGetAndUnsupportedMethods() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        try (McpServer server = createServer()) {
             server.startListener();
             URI endpoint = endpoint(server);
             HttpClient client = HttpClient.newHttpClient();
@@ -586,7 +760,7 @@ public final class XYMLMcpServerHttpTest {
             HttpResponse<String> initializeResponse = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}",
+                    initializeBody(1),
                     ACCEPT_BOTH,
                     null,
                     null);
@@ -600,14 +774,14 @@ public final class XYMLMcpServerHttpTest {
                     .build();
             HttpResponse<String> getResponse = client.send(getRequest, HttpResponse.BodyHandlers.ofString());
             assertEquals(405, getResponse.statusCode());
-            assertEquals("POST", requireHeader(getResponse, "Allow"));
+            assertEquals("POST, DELETE", requireHeader(getResponse, "Allow"));
 
             HttpRequest putRequest = HttpRequest.newBuilder(endpoint)
                     .PUT(HttpRequest.BodyPublishers.ofString("{}"))
                     .build();
             HttpResponse<String> putResponse = client.send(putRequest, HttpResponse.BodyHandlers.ofString());
             assertEquals(405, putResponse.statusCode());
-            assertEquals("GET, POST, DELETE", requireHeader(putResponse, "Allow"));
+            assertEquals("POST, DELETE", requireHeader(putResponse, "Allow"));
 
             HttpResponse<String> wrongPath = client.send(HttpRequest.newBuilder(
                             endpoint.resolve("/other"))
@@ -620,14 +794,14 @@ public final class XYMLMcpServerHttpTest {
     /// Terminates a session with DELETE and rejects subsequent requests using that session.
     @Test
     public void terminatesSessionWithDelete() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        try (McpServer server = createServer()) {
             server.startListener();
             URI endpoint = endpoint(server);
             HttpClient client = HttpClient.newHttpClient();
             HttpResponse<String> initializeResponse = post(
                     client,
                     endpoint,
-                    "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"initialize\",\"params\":{}}",
+                    initializeBody(30),
                     ACCEPT_BOTH,
                     null,
                     null);
@@ -658,7 +832,7 @@ public final class XYMLMcpServerHttpTest {
     /// Rejects non-loopback origins before a request reaches the protocol dispatcher.
     @Test
     public void validatesOriginHeader() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        try (McpServer server = createServer()) {
             server.startListener();
             URI endpoint = endpoint(server);
             HttpClient client = HttpClient.newHttpClient();
@@ -667,19 +841,58 @@ public final class XYMLMcpServerHttpTest {
                     .header("Content-Type", "application/json")
                     .header("Origin", "https://example.com")
                     .POST(HttpRequest.BodyPublishers.ofString(
-                            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"))
+                            initializeBody(1)))
                     .build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             assertEquals(403, response.statusCode());
         }
     }
 
+    /// Creates a server exposing deterministic test providers.
+    ///
+    /// @return unstarted test server
+    private static McpServer createServer() {
+        return new McpServer(0, SERVER_INFO, FEATURES);
+    }
+
     /// Returns the loopback endpoint for a running test server.
     ///
     /// @param server running server
     /// @return endpoint URI
-    private static URI endpoint(XYMLMcpServer server) {
-        return URI.create("http://127.0.0.1:" + server.getListeningPort() + XYMLMcpServer.MCP_PATH);
+    private static URI endpoint(McpServer server) {
+        return URI.create("http://127.0.0.1:" + server.getListeningPort() + McpServer.MCP_PATH);
+    }
+
+    /// Creates a valid initialize request using the current protocol version.
+    ///
+    /// @param id JSON-RPC request identifier
+    /// @return initialize request body
+    private static String initializeBody(int id) {
+        return initializeBody(id, PROTOCOL_VERSION);
+    }
+
+    /// Creates a valid initialize request for a selected protocol version.
+    ///
+    /// @param id JSON-RPC request identifier
+    /// @param protocolVersion requested protocol version
+    /// @return initialize request body
+    private static String initializeBody(int id, String protocolVersion) {
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + id
+                + ",\"method\":\"initialize\",\"params\":{\"protocolVersion\":\""
+                + protocolVersion + "\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test-client\","
+                + "\"version\":\"1.0\"}}}";
+    }
+
+    /// Asserts that an initialize request returns a parameter error without allocating a session.
+    ///
+    /// @param client HTTP client
+    /// @param endpoint MCP endpoint
+    /// @param body initialize request body
+    private static void assertInitializeRejected(HttpClient client, URI endpoint, String body) throws Exception {
+        HttpResponse<String> response = post(client, endpoint, body, ACCEPT_BOTH, null, null);
+        assertEquals(400, response.statusCode());
+        assertEquals(-32602, jsonBody(response).getAsJsonObject("error").get("code").getAsInt());
+        assertTrue(response.headers().firstValue("Mcp-Session-Id").isEmpty());
     }
 
     /// Sends one JSON POST with negotiated Streamable HTTP headers.
@@ -760,5 +973,83 @@ public final class XYMLMcpServerHttpTest {
     private static String requireHeader(HttpResponse<String> response, String name) {
         return Objects.requireNonNull(response.headers().firstValue(name).orElse(null),
                 "Missing response header: " + name);
+    }
+
+    /// Supplies one deterministic tool for transport tests.
+    @NotNullByDefault
+    private static final class TestToolProvider implements McpToolProvider {
+        /// {@inheritDoc}
+        @Override
+        public @Unmodifiable List<ToolDefinition> toolDefinitions() {
+            return List.of(new ToolDefinition(
+                    "echo",
+                    "Returns the supplied arguments.",
+                    Map.of("type", "object", "properties", Map.of())));
+        }
+
+        /// {@inheritDoc}
+        @Override
+        public ToolCallResult call(
+                String name,
+                @Unmodifiable Map<String, @Nullable Object> arguments) {
+            if (!"echo".equals(name)) {
+                return ToolCallResult.error(name, "Unknown tool: " + name);
+            }
+            return ToolCallResult.success(Map.of("arguments", arguments));
+        }
+    }
+
+    /// Supplies deterministic resource metadata, contents, and failures for transport tests.
+    @NotNullByDefault
+    private static final class TestResourceProvider implements McpResourceProvider {
+        /// {@inheritDoc}
+        @Override
+        public @Unmodifiable List<ResourceDefinition> resourceDefinitions() {
+            return List.of(new ResourceDefinition(
+                    "mcp-test://status", "test_status", "Test status", "text/plain"));
+        }
+
+        /// {@inheritDoc}
+        @Override
+        public @Unmodifiable List<ResourceTemplateDefinition> resourceTemplateDefinitions() {
+            return List.of(new ResourceTemplateDefinition(
+                    "mcp-test://items/{name}", "test_item", "Test item", "text/plain"));
+        }
+
+        /// {@inheritDoc}
+        @Override
+        public ResourceReadResult readResource(String uri) throws IOException {
+            if ("mcp-test://status".equals(uri)) {
+                return new ResourceReadResult(uri, "text/plain", "ready");
+            }
+            throw new IOException("Test resource is unavailable: " + uri);
+        }
+    }
+
+    /// Supplies one deterministic prompt for transport tests.
+    @NotNullByDefault
+    private static final class TestPromptProvider implements McpPromptProvider {
+        /// {@inheritDoc}
+        @Override
+        public @Unmodifiable List<PromptDefinition> promptDefinitions() {
+            return List.of(new PromptDefinition(
+                    "inspect",
+                    "Inspects one subject.",
+                    List.of(new PromptArgument("subject", "Subject to inspect", true))));
+        }
+
+        /// {@inheritDoc}
+        @Override
+        public @Unmodifiable Map<String, @Nullable Object> getPrompt(
+                String name,
+                @Unmodifiable Map<String, @Nullable Object> arguments) {
+            if (!"inspect".equals(name)) {
+                throw new IllegalArgumentException("Unknown prompt: " + name);
+            }
+            Object subject = arguments.get("subject");
+            return Map.of("messages", List.of(Map.of(
+                    "role", "user",
+                    "content", Map.of("type", "text", "text", "Inspect " + subject))));
+        }
     }
 }

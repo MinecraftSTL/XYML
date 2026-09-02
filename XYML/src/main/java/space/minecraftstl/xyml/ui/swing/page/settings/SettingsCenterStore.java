@@ -137,6 +137,11 @@ public interface SettingsCenterStore extends AutoCloseable {
     /// @param port loopback TCP port in the range 1..65535
     void setMcpPort(int port);
 
+    /// Persists whether MCP deletion operations require interactive confirmation.
+    ///
+    /// @param required whether deletion confirmation is required
+    void setMcpConfirmDeletion(boolean required);
+
     /// Releases every store-owned listener.
     @Override
     void close();

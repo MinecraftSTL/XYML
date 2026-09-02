@@ -20,6 +20,10 @@ package space.minecraftstl.xyml.mcp;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.library.mcp.McpResourceProvider;
+import space.minecraftstl.xyml.library.mcp.McpResourceProvider.ResourceDefinition;
+import space.minecraftstl.xyml.library.mcp.McpResourceProvider.ResourceReadResult;
+import space.minecraftstl.xyml.library.mcp.McpResourceProvider.ResourceTemplateDefinition;
 import space.minecraftstl.xyml.task.Schedulers;
 
 import java.util.ArrayList;
@@ -34,7 +38,7 @@ import java.util.concurrent.ExecutionException;
 /// Logs and crash reports are addressed by stable `xyml://` URIs.  Files are read by the
 /// application-side operation implementation, which keeps filesystem ownership outside Core.
 @NotNullByDefault
-public final class XYMLMcpResourceRegistry {
+public final class XYMLMcpResourceRegistry implements McpResourceProvider {
 
     /// URI template for the latest log of an instance.
     private static final String LOG_URI_TEMPLATE = "xyml://instances/{instance_id}/logs/latest.log";
@@ -63,6 +67,7 @@ public final class XYMLMcpResourceRegistry {
     ///
     /// @return immutable resource definitions
     /// @throws Exception when the launcher cannot enumerate instances
+    @Override
     public @Unmodifiable List<ResourceDefinition> resourceDefinitions() throws Exception {
         @Nullable XYMLMcpOperations configuredService = service;
         if (configuredService == null) {
@@ -93,6 +98,7 @@ public final class XYMLMcpResourceRegistry {
     /// Lists templates for parameterized log and crash-report resources.
     ///
     /// @return immutable resource template definitions
+    @Override
     public @Unmodifiable List<ResourceTemplateDefinition> resourceTemplateDefinitions() {
         return List.of(
                 new ResourceTemplateDefinition(LOG_URI_TEMPLATE, "latest_log",
@@ -108,6 +114,7 @@ public final class XYMLMcpResourceRegistry {
     /// @param uri resource URI
     /// @return immutable resource contents
     /// @throws Exception when the URI is unsupported or its contents cannot be read
+    @Override
     public ResourceReadResult readResource(String uri) throws Exception {
         XYMLMcpOperations configuredService = Objects.requireNonNull(service,
                 "This registry has no launcher service");
@@ -151,53 +158,4 @@ public final class XYMLMcpResourceRegistry {
         }
     }
 
-    /// Describes one concrete resource URI.
-    ///
-    /// @param uri concrete resource URI
-    /// @param name stable resource name
-    /// @param description human-readable description
-    /// @param mimeType resource MIME type
-    @NotNullByDefault
-    public record ResourceDefinition(String uri, String name, String description, String mimeType) {
-        /// Validates one resource definition.
-        public ResourceDefinition {
-            Objects.requireNonNull(uri, "uri");
-            Objects.requireNonNull(name, "name");
-            Objects.requireNonNull(description, "description");
-            Objects.requireNonNull(mimeType, "mimeType");
-        }
-    }
-
-    /// Describes a parameterized resource URI.
-    ///
-    /// @param uriTemplate URI containing `{instance_id}` or `{report_name}` placeholders
-    /// @param name stable template name
-    /// @param description human-readable description
-    /// @param mimeType resource MIME type
-    @NotNullByDefault
-    public record ResourceTemplateDefinition(
-            String uriTemplate, String name, String description, String mimeType) {
-        /// Validates one resource template definition.
-        public ResourceTemplateDefinition {
-            Objects.requireNonNull(uriTemplate, "uriTemplate");
-            Objects.requireNonNull(name, "name");
-            Objects.requireNonNull(description, "description");
-            Objects.requireNonNull(mimeType, "mimeType");
-        }
-    }
-
-    /// Contains the text returned by `resources/read`.
-    ///
-    /// @param uri resolved resource URI
-    /// @param mimeType resource MIME type
-    /// @param text UTF-8 text contents
-    @NotNullByDefault
-    public record ResourceReadResult(String uri, String mimeType, String text) {
-        /// Validates one resource result.
-        public ResourceReadResult {
-            Objects.requireNonNull(uri, "uri");
-            Objects.requireNonNull(mimeType, "mimeType");
-            Objects.requireNonNull(text, "text");
-        }
-    }
 }

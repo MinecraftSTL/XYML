@@ -20,14 +20,16 @@ package space.minecraftstl.xyml.mcp;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.library.mcp.McpPromptProvider;
+import space.minecraftstl.xyml.library.mcp.McpPromptProvider.PromptArgument;
+import space.minecraftstl.xyml.library.mcp.McpPromptProvider.PromptDefinition;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /// Registers the small set of launcher prompt templates exposed by the MCP endpoint.
 @NotNullByDefault
-public final class XYMLMcpPromptRegistry {
+public final class XYMLMcpPromptRegistry implements McpPromptProvider {
 
     /// Prompt definitions in stable declaration order.
     private static final @Unmodifiable List<PromptDefinition> PROMPTS = List.of(
@@ -37,6 +39,7 @@ public final class XYMLMcpPromptRegistry {
     /// Returns every prompt definition exposed by XYML.
     ///
     /// @return immutable prompt definitions
+    @Override
     public @Unmodifiable List<PromptDefinition> promptDefinitions() {
         return PROMPTS;
     }
@@ -46,7 +49,10 @@ public final class XYMLMcpPromptRegistry {
     /// @param name prompt name
     /// @param arguments prompt arguments
     /// @return immutable MCP prompt result
-    public @Unmodifiable Map<String, Object> getPrompt(String name, Map<String, Object> arguments) {
+    @Override
+    public @Unmodifiable Map<String, Object> getPrompt(
+            String name,
+            @Unmodifiable Map<String, @Nullable Object> arguments) {
         if (!"diagnose_crash".equals(name)) {
             throw new IllegalArgumentException("Unknown prompt: " + name);
         }
@@ -54,7 +60,9 @@ public final class XYMLMcpPromptRegistry {
         if (!(rawInstanceId instanceof String instanceId) || instanceId.isBlank()) {
             throw new IllegalArgumentException("instance_id must be a non-blank string");
         }
-        String text = "请检查实例“" + instanceId + "”的最新日志和崩溃报告，然后总结崩溃原因及适用的启动器设置调整。";
+        String text = "请先读取实例“" + instanceId + "”的最新日志资源和崩溃报告目录资源。"
+                + "如目录中存在报告，请将直接文件名作为 crash_report_path 调用 analyze_crash；"
+                + "然后根据合并后的规则、关键词和警告总结崩溃原因及适用的启动器设置调整。";
         return Map.of(
                 "description", "实例崩溃诊断",
                 "messages", List.of(Map.of(
@@ -62,33 +70,4 @@ public final class XYMLMcpPromptRegistry {
                         "content", Map.of("type", "text", "text", text))));
     }
 
-    /// Describes a prompt exposed through `prompts/list`.
-    ///
-    /// @param name prompt name
-    /// @param description human-readable description
-    /// @param arguments immutable prompt arguments
-    @NotNullByDefault
-    public record PromptDefinition(
-            String name, String description, @Unmodifiable List<PromptArgument> arguments) {
-        /// Validates and snapshots one prompt definition.
-        public PromptDefinition {
-            Objects.requireNonNull(name, "name");
-            Objects.requireNonNull(description, "description");
-            arguments = List.copyOf(arguments);
-        }
-    }
-
-    /// Describes one prompt argument.
-    ///
-    /// @param name argument name
-    /// @param description human-readable argument description
-    /// @param required whether the argument is required
-    @NotNullByDefault
-    public record PromptArgument(String name, String description, boolean required) {
-        /// Validates one prompt argument.
-        public PromptArgument {
-            Objects.requireNonNull(name, "name");
-            Objects.requireNonNull(description, "description");
-        }
-    }
 }

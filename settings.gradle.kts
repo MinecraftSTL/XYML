@@ -4,12 +4,14 @@ include(
     "XYMLCore",
     "XYMLBoot",
     "xoyz-nbt",
+    "xoyz-mcp",
     "lwjgl-unsafe-agent",
     "mesa-loader-windows",
     "XYMLL"
 )
 
 project(":xoyz-nbt").projectDir = file("libraries/xoyz-nbt")
+project(":xoyz-mcp").projectDir = file("libraries/xoyz-mcp")
 project(":lwjgl-unsafe-agent").projectDir = file("libraries/lwjgl-unsafe-agent")
 project(":mesa-loader-windows").projectDir = file("libraries/mesa-loader-windows")
 project(":XYMLL").projectDir = file("libraries/XYMLL")

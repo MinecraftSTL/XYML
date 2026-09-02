@@ -29,6 +29,26 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class CrashReportAnalyzerTest {
+    /// Uses the latest report marker and excludes a Windows line terminator from its path.
+    @Test
+    public void findCrashReportUsesLatestLocation() throws IOException {
+        String log = "#@!@# Game crashed! Crash report saved to: #@!@# stale.txt\r\n"
+                + "#@!@# Game crashed! Crash report saved to: #@!@# latest.txt\r\n";
+
+        assertEquals("latest.txt", CrashReportAnalyzer.findCrashReport(log, Object::toString));
+    }
+
+    /// Keeps the latest complete embedded report when a later report header has not completed yet.
+    @Test
+    public void extractCrashReportIgnoresTrailingIncompleteHeader() {
+        String completeReport = "---- Minecraft Crash Report ----\ncomplete report\n";
+        String rawLog = completeReport
+                + "#@!@# Game crashed! Crash report saved to: #@!@# crash.txt\n"
+                + "---- Minecraft Crash Report ----\nincomplete report\n";
+
+        assertEquals(completeReport, CrashReportAnalyzer.extractCrashReport(rawLog));
+    }
+
     private String loadLog(String path) throws IOException {
         List<Pair<String, Log4jLevel>> logs = new ArrayList<>();
         InputStream is = CrashReportAnalyzerTest.class.getResourceAsStream(path);
