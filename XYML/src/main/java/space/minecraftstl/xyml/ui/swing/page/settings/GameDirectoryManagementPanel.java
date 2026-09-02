@@ -461,6 +461,24 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         }
     }
 
+    /// Returns whether a path resolves syntactically to its filesystem root.
+    ///
+    /// @param text raw path text
+    /// @return whether the normalized absolute path equals its root
+    private static boolean isFileSystemRoot(String text) {
+        String candidate = Objects.requireNonNull(text, "text").trim();
+        if (candidate.isBlank()) {
+            return false;
+        }
+        try {
+            Path normalized = Path.of(candidate).toAbsolutePath().normalize();
+            @Nullable Path root = normalized.getRoot();
+            return root != null && normalized.equals(root);
+        } catch (InvalidPathException failure) {
+            return false;
+        }
+    }
+
     /// Begins background portable-path preparation before a state mutation.
     private void saveEditor() {
         EdtDispatcher.requireEventDispatchThread();
@@ -469,6 +487,9 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         }
         String requestedName = nameField.getText();
         String requestedPath = pathField.getText();
+        if (isFileSystemRoot(requestedPath) && !interaction.confirmRootDirectory(this)) {
+            return;
+        }
         boolean relative = relativePathBox.isSelected();
         EditorMode requestedMode = editorMode;
         @Nullable GameDirectoryManagementEntry requestedEntry = editedEntry;

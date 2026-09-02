@@ -116,6 +116,44 @@ public final class GameDirectoryManagementPanelTest {
         });
     }
 
+    /// Requires explicit confirmation before saving a filesystem root as a game directory.
+    @Test
+    public void confirmsFileSystemRootBeforeSaving() throws InterruptedException {
+        GameDirectoryManagementEntry current = entry("Current", ".minecraft", true);
+        FakeGameDirectoryManagementService service = new FakeGameDirectoryManagementService(current);
+        WorkerExecutor executor = new WorkerExecutor();
+        FakeInteraction interaction = new FakeInteraction();
+        interaction.rootDirectoryConfirmationAccepted = false;
+        GameDirectoryManagementPanel panel = onEventDispatchThread(() -> new GameDirectoryManagementPanel(
+                service,
+                interaction,
+                executor));
+        Path root = Objects.requireNonNull(Path.of(".").toAbsolutePath().getRoot(), "filesystem root");
+
+        onEventDispatchThread(() -> {
+            findComponent(panel, "gameDirectoryManagementAdd", AbstractButton.class).doClick();
+            findComponent(panel, "gameDirectoryManagementPath", JTextField.class).setText(root.toString());
+            findComponent(panel, "gameDirectoryManagementRelativePath", JCheckBox.class).setSelected(false);
+            findComponent(panel, "gameDirectoryManagementSave", AbstractButton.class).doClick();
+            assertAll(
+                    () -> assertEquals(1, interaction.rootDirectoryConfirmations.get()),
+                    () -> assertEquals(0, service.addCalls.get()));
+
+            interaction.rootDirectoryConfirmationAccepted = true;
+            findComponent(panel, "gameDirectoryManagementSave", AbstractButton.class).doClick();
+        });
+        executor.awaitLatest();
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertEquals(2, interaction.rootDirectoryConfirmations.get()),
+                    () -> assertEquals(1, service.addCalls.get()),
+                    () -> assertEquals(root.toString(), service.lastEdit.path().getPath()));
+            panel.close();
+        });
+    }
+
     /// Updates an existing entry and retries removal only after explicit read-only overwrite consent.
     @Test
     public void editsAndRemovesWithReadOnlyRecovery() throws InterruptedException {
@@ -461,6 +499,12 @@ public final class GameDirectoryManagementPanelTest {
         /// Number of accepted read-only recovery confirmations.
         private final AtomicInteger overwriteConfirmations = new AtomicInteger();
 
+        /// Number of filesystem-root confirmations requested by the panel.
+        private final AtomicInteger rootDirectoryConfirmations = new AtomicInteger();
+
+        /// Whether the fake accepts use of a filesystem root.
+        private boolean rootDirectoryConfirmationAccepted = true;
+
         /// Cancels native chooser requests in this focused presentation test.
         ///
         /// @param owner chooser parent
@@ -469,6 +513,16 @@ public final class GameDirectoryManagementPanelTest {
         @Override
         public @Nullable Path chooseDirectory(Component owner, @Nullable Path initialDirectory) {
             return null;
+        }
+
+        /// Returns the configured filesystem-root confirmation response.
+        ///
+        /// @param owner confirmation parent
+        /// @return configured response
+        @Override
+        public boolean confirmRootDirectory(Component owner) {
+            rootDirectoryConfirmations.incrementAndGet();
+            return rootDirectoryConfirmationAccepted;
         }
 
         /// Accepts read-only recovery and records the confirmation.

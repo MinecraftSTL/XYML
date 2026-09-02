@@ -59,6 +59,21 @@ final class SwingGameDirectoryManagementInteraction implements GameDirectoryMana
         return selected == null ? null : selected.toPath();
     }
 
+    /// Confirms use of a filesystem root as the game directory.
+    ///
+    /// @param owner confirmation parent component
+    /// @return whether saving the root directory may continue
+    @Override
+    public boolean confirmRootDirectory(Component owner) {
+        EdtDispatcher.requireEventDispatchThread();
+        return JOptionPane.showConfirmDialog(
+                Objects.requireNonNull(owner, "owner"),
+                i18n("game_directory.root"),
+                i18n("message.warning"),
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
     /// Confirms recovery of a newer read-only directory configuration file.
     ///
     /// @param owner confirmation parent component
