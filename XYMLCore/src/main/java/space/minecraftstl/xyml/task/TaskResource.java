@@ -269,7 +269,20 @@ public final class TaskResource {
     /// Logical repository coordination scopes deliberately return false: they coordinate a known metadata or
     /// operation phase, but do not promise to protect arbitrary filesystem writes made by a conservative child.
     boolean isExclusiveCoverage() {
-        return scope == Scope.GLOBAL || scope == Scope.DIRECTORY || scope == Scope.FILE;
+        return scope == Scope.GLOBAL || scope == Scope.DIRECTORY;
+    }
+
+    /// Returns whether this declaration is a complete boundary for an unknown nested write.
+    ///
+    /// The nearest explicit directory boundary wins. An exact file is never sufficient: an unknown descendant may
+    /// write a sibling or a sidecar next to that file, which the exact-file key would not protect. A parent that
+    /// declares several unrelated files or directories still falls back globally. Cache-operation and
+    /// repository-coordination scopes are excluded because they describe a particular transaction or coordination
+    /// phase rather than a complete branch boundary.
+    ///
+    /// @return whether this resource can safely bound an unknown descendant
+    boolean isCompleteBoundary() {
+        return scope == Scope.GLOBAL || scope == Scope.DIRECTORY;
     }
 
     /// Returns whether this resource conflicts with another normalized resource.
@@ -294,11 +307,10 @@ public final class TaskResource {
 
         Path thisPath = Objects.requireNonNull(comparisonPath, "comparisonPath");
         Path otherPath = Objects.requireNonNull(other.comparisonPath, "other comparisonPath");
-        if (scope == Scope.DIRECTORY) {
-            return otherPath.startsWith(thisPath);
-        }
-        if (other.scope == Scope.DIRECTORY) {
-            return thisPath.startsWith(otherPath);
+        if (scope == Scope.DIRECTORY || other.scope == Scope.DIRECTORY) {
+            // Both operands may be complete directory trees.  Check both containment directions so conflict
+            // detection remains symmetric regardless of declaration order.
+            return thisPath.startsWith(otherPath) || otherPath.startsWith(thisPath);
         }
         return thisPath.equals(otherPath);
     }
@@ -353,9 +365,9 @@ public final class TaskResource {
     /// against the ancestor's complete resource set by the lock manager, rather than by one key in isolation.
     boolean permitsNested(TaskResource other) {
         Objects.requireNonNull(other, "other");
-        // An orchestration node has no filesystem coverage and can therefore be nested beneath any owner without
-        // expanding the ancestor's protected range. Its own children still need an explicit handoff before acquiring
-        // resources outside an ancestor's coverage.
+        // An orchestration node has no filesystem coverage. It can be nested beneath any owner as a marker, but it
+        // cannot by itself authorize an arbitrary filesystem child; the owner-level check handles a pure orchestration
+        // parent separately so a marker cannot mask a narrower directory held by an older ancestor.
         if (other.scope == Scope.ORCHESTRATION) {
             return true;
         }
@@ -404,14 +416,62 @@ public final class TaskResource {
 
         ArrayList<TaskResource> normalized = new ArrayList<>(candidates.size());
         for (TaskResource checkedResource : candidates) {
-            if (normalized.stream().anyMatch(existing -> existing.covers(checkedResource))) {
+            if (normalized.stream().anyMatch(existing -> coversForNormalization(existing, checkedResource))) {
                 continue;
             }
-            normalized.removeIf(checkedResource::covers);
+            normalized.removeIf(existing -> coversForNormalization(checkedResource, existing));
             normalized.add(checkedResource);
         }
         normalized.sort(ORDER);
         return List.copyOf(normalized);
+    }
+
+    /// Creates a defensive, stable-order declaration snapshot without eliminating lexical descendants.
+    ///
+    /// Coverage minimization is intentionally deferred until [TaskResourcePathIdentity] has resolved symbolic links
+    /// and junctions. Removing a lexical child here could discard a path whose real target lies outside its apparent
+    /// parent directory. The lock manager uses this snapshot as its input and performs the final minimization only on
+    /// canonical identities.
+    ///
+    /// @param resources logical declarations
+    /// @return immutable, deduplicated declarations in stable order
+    static @Unmodifiable List<TaskResource> snapshotDeclarations(Collection<TaskResource> resources) {
+        Objects.requireNonNull(resources, "resources");
+        if (resources.isEmpty()) {
+            throw new IllegalArgumentException("Task resource declarations cannot be empty");
+        }
+
+        ArrayList<TaskResource> snapshot = new ArrayList<>(resources.size());
+        for (TaskResource resource : resources) {
+            snapshot.add(Objects.requireNonNull(resource, "resource"));
+        }
+        snapshot.sort(ORDER);
+        return List.copyOf(new java.util.LinkedHashSet<>(snapshot));
+    }
+
+    /// Returns whether one resource may replace another during normalization without losing kind-sensitive semantics.
+    ///
+    /// A game-directory declaration is also the permission boundary for repository coordination children. A broader
+    /// directory with another semantic kind may cover the same path range, but replacing the game-directory marker
+    /// would make that nested permission unavailable. Global coverage remains a true replacement for every resource.
+    private static boolean coversForNormalization(TaskResource covering, TaskResource covered) {
+        if (covering.scope == Scope.GLOBAL) {
+            return true;
+        }
+        if (!covering.covers(covered)) {
+            return false;
+        }
+        if (covered.kind == Kind.GAME_DIRECTORY) {
+            // GAME_DIRECTORY is also the permission boundary for repository coordination descendants. Keep it even
+            // when another directory kind covers the same range so normalization cannot erase that capability.
+            return covering.kind == Kind.GAME_DIRECTORY;
+        }
+        if (covering.kind != covered.kind && covering.covers(covered) && covered.covers(covering)) {
+            // Equal filesystem ranges can still carry different coordination or diagnostic semantics (for example,
+            // DOWNLOAD_TARGET versus ADDON_FILE). Preserve both declarations instead of treating kind as cosmetic.
+            return false;
+        }
+        return true;
     }
 
     /// Creates a directory resource after normalizing its path.

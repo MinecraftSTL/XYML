@@ -102,7 +102,9 @@ final class TaskResourceLockManager {
         if (conservative) {
             requested = conservativeResourcesFor(parent);
         } else {
-            requested = TaskResource.normalize(declarationSnapshot);
+            // Keep lexical descendants until the asynchronous identity resolver has followed symlinks and junctions.
+            // A lexical directory can appear to cover a child whose real target lies outside that directory.
+            requested = TaskResource.snapshotDeclarations(declarationSnapshot);
         }
 
         ArrayList<TaskResource> coverage = new ArrayList<>();
@@ -111,7 +113,9 @@ final class TaskResourceLockManager {
             coverage.addAll(activeAncestor.coverageResources);
         }
         coverage.addAll(requested);
-        @Unmodifiable List<TaskResource> normalizedCoverage = TaskResource.normalize(coverage);
+        // Coverage is minimized after canonical identity resolution in Owner.prepare.  Retaining the lexical snapshot
+        // here prevents a symlink or junction child from disappearing before the resolver can inspect it.
+        @Unmodifiable List<TaskResource> normalizedCoverage = TaskResource.snapshotDeclarations(coverage);
         return new Owner(
                 execution,
                 parent,
@@ -123,57 +127,39 @@ final class TaskResourceLockManager {
 
     /// Finds the nearest complete ancestor boundary that can safely bound an unknown nested write.
     ///
-    /// A repository metadata or operation scope is only a coordination contract. When it is mixed with a narrow
-    /// resource, an unknown child cannot prove that it will stay inside that narrow path, so the child falls back to
-    /// the global resource. A repository scope may be inherited only when a game-directory declaration covers the
-    /// repository root itself. Pure orchestration nodes are skipped while walking toward an older complete boundary.
-    /// [Owner#prepare(List)] rejects a global fallback until any narrower active ancestor has handed off its lease.
+    /// A single nearest branch boundary must cover every active declaration between the child and that boundary. A union
+    /// of disjoint files or directories is not sufficient because an unknown child can write outside every member of
+    /// the union. Repository metadata and operation scopes are coordination contracts; they become safely inheritable
+    /// only when an active complete directory boundary covers them. Pure orchestration nodes do not contribute
+    /// coverage. [Owner#prepare(List)] rejects a global fallback until any narrower active ancestor has handed off its
+    /// lease.
     private static @Unmodifiable List<TaskResource> conservativeResourcesFor(@Nullable Owner parent) {
         @Nullable Owner current = nearestActiveAncestor(parent);
+        ArrayList<TaskResource> required = new ArrayList<>();
         while (current != null) {
             @Unmodifiable List<TaskResource> declarations = current.requestedResources;
-            if (declarations.stream().anyMatch(resource -> resource.getKind() == TaskResource.Kind.GLOBAL)) {
+            ArrayList<TaskResource> boundaries = new ArrayList<>();
+            for (TaskResource declaration : declarations) {
+                if (declaration.getKind() == TaskResource.Kind.GLOBAL) {
+                    return List.of(TaskResource.global());
+                }
+                if (declaration.getKind() != TaskResource.Kind.ORCHESTRATION) {
+                    required.add(declaration);
+                }
+                if (declaration.isCompleteBoundary()) {
+                    boundaries.add(declaration);
+                }
+            }
+
+            if (!boundaries.isEmpty()) {
+                for (TaskResource candidate : boundaries) {
+                    if (required.stream().allMatch(candidate::permitsNested)) {
+                        return List.of(candidate);
+                    }
+                }
+                // This owner explicitly selected a branch, but no single branch covers its complete declaration.
+                // Walking past it would turn a multi-resource operation into an incorrectly narrowed unknown write.
                 return List.of(TaskResource.global());
-            }
-
-            boolean hasRepositoryScope = declarations.stream().anyMatch(resource ->
-                    resource.getKind() == TaskResource.Kind.REPOSITORY_METADATA
-                            || resource.getKind() == TaskResource.Kind.REPOSITORY_OPERATION);
-            ArrayList<TaskResource> directoryBoundaries = declarations.stream()
-                    .filter(resource -> resource.getKind() == TaskResource.Kind.GAME_DIRECTORY)
-                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
-            if (hasRepositoryScope) {
-                if (directoryBoundaries.isEmpty()) {
-                    // A coordination-only node cannot prove that an unknown descendant stays inside an older
-                    // detached or narrow boundary. Crossing it would silently turn a repository-wide write into an
-                    // instance-only lock, so fail closed instead of walking past the node.
-                    return List.of(TaskResource.global());
-                }
-
-                boolean repositoryCovered = declarations.stream()
-                        .filter(resource -> resource.getKind() == TaskResource.Kind.REPOSITORY_METADATA
-                                || resource.getKind() == TaskResource.Kind.REPOSITORY_OPERATION)
-                        .allMatch(repository -> directoryBoundaries.stream()
-                                .anyMatch(directory -> directory.permitsNested(repository)));
-                boolean otherResourcesCovered = declarations.stream()
-                        .filter(resource -> resource.getKind() != TaskResource.Kind.REPOSITORY_METADATA
-                                && resource.getKind() != TaskResource.Kind.REPOSITORY_OPERATION
-                                && resource.getKind() != TaskResource.Kind.ORCHESTRATION)
-                        .allMatch(resource -> directoryBoundaries.stream()
-                                .anyMatch(directory -> directory.covers(resource)));
-                if (!repositoryCovered || !otherResourcesCovered) {
-                    return List.of(TaskResource.global());
-                }
-                return TaskResource.normalize(declarations.stream()
-                        .filter(resource -> resource.getKind() != TaskResource.Kind.ORCHESTRATION)
-                        .toList());
-            }
-
-            ArrayList<TaskResource> exclusive = declarations.stream()
-                    .filter(TaskResource::isExclusiveCoverage)
-                    .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
-            if (!exclusive.isEmpty()) {
-                return TaskResource.normalize(exclusive);
             }
             current = nearestActiveAncestor(current.parent);
         }
@@ -200,11 +186,71 @@ final class TaskResourceLockManager {
     /// @param owner execution owner containing a normalized resource request
     /// @return future completed with an internal lease after asynchronous identity resolution and atomic acquisition
     CompletableFuture<Lease> acquire(Owner owner) {
+        return acquire(owner, false);
+    }
+
+    /// Acquires one owner lease for terminal callbacks even after cooperative cancellation was requested.
+    ///
+    /// A task that already released its handoff lease still has to protect post-execution and terminal callbacks. Those
+    /// callbacks are part of the committed lifecycle, so their waiter remains eligible after cancellation; cancelling
+    /// the returned future still removes it normally when the executor's terminal sentinel closes the lease. The canonical
+    /// snapshot captured by the initial acquisition is reused without resolving paths a second time.
+    ///
+    /// @param owner owner whose prepared resources are reacquired
+    /// @return future completed with the terminal lease
+    CompletableFuture<Lease> acquireForTerminal(Owner owner) {
         Objects.requireNonNull(owner, "owner");
-        Waiter waiter = new Waiter(owner);
+        Waiter waiter = new Waiter(owner, true);
+        waiter.future.whenComplete((@Nullable Lease ignoredLease, @Nullable Throwable ignoredFailure) -> {
+            if (waiter.future.isCancelled()) {
+                cancelWaiter(waiter);
+            }
+        });
+
+        ArrayList<Completion> completions = new ArrayList<>();
+        @Nullable Throwable terminalFailure = null;
+        synchronized (this) {
+            if (!owner.prepared) {
+                terminalFailure = new IllegalStateException(
+                        "Terminal task resource reacquisition requires a prepared owner");
+            } else {
+                waiters.add(waiter);
+                waiter.prepared = true;
+                try {
+                    addWaiterReferences(waiter);
+                    if (hasWaitCycle(owner)) {
+                        waiters.remove(waiter);
+                        removeWaiterReferences(waiter);
+                        terminalFailure = new IllegalStateException(
+                                "Task resource wait cycle detected across execution-owner chains");
+                    }
+                } catch (Throwable failure) {
+                    waiters.remove(waiter);
+                    removeWaiterReferences(waiter);
+                    terminalFailure = failure;
+                }
+                completions.addAll(processWaiters());
+                removeUnusedStates();
+            }
+        }
+        complete(completions);
+        if (terminalFailure != null) {
+            completeFailure(waiter.future, terminalFailure);
+        }
+        return waiter.future;
+    }
+
+    /// Enqueues one owner lease request with an optional terminal-callback cancellation exemption.
+    ///
+    /// @param owner logical owner requesting resources
+    /// @param survivesCancellation whether this committed terminal request survives its execution cancellation flag
+    /// @return future completed with an internal lease
+    private CompletableFuture<Lease> acquire(Owner owner, boolean survivesCancellation) {
+        Objects.requireNonNull(owner, "owner");
+        Waiter waiter = new Waiter(owner, survivesCancellation);
         boolean cancelled;
         synchronized (this) {
-            cancelled = owner.execution.isCancelled();
+            cancelled = owner.execution.isCancelled() && !survivesCancellation;
             if (cancelled) {
                 // Complete after leaving the monitor so cancellation callbacks cannot re-enter manager state.
             } else {
@@ -268,7 +314,7 @@ final class TaskResourceLockManager {
                 return;
             }
 
-            if (waiter.owner.execution.cancelled || waiter.future.isCancelled()) {
+            if ((waiter.owner.execution.cancelled && !waiter.survivesCancellation) || waiter.future.isCancelled()) {
                 waiters.remove(waiter);
                 removeWaiterReferences(waiter);
                 completions.add(Completion.cancelled(waiter));
@@ -278,21 +324,25 @@ final class TaskResourceLockManager {
                 terminalFailure = resolutionFailure;
             } else {
                 try {
+                    @Nullable Owner activeAncestor = nearestActiveAncestor(waiter.owner.parent);
+                    if (activeAncestor != null && !hasActiveHolder(activeAncestor)) {
+                        throw new IllegalStateException(
+                                "Nested task resource acquisition requires an active ancestor lease");
+                    }
                     waiter.owner.prepare(Objects.requireNonNull(resolvedResources, "resolved resources"));
-                } catch (Throwable failure) {
-                    waiters.remove(waiter);
-                    removeWaiterReferences(waiter);
-                    terminalFailure = failure;
-                }
-                if (terminalFailure == null) {
                     waiter.prepared = true;
                     addWaiterReferences(waiter);
                     if (hasWaitCycle(waiter.owner)) {
-                        waiters.remove(waiter);
-                        removeWaiterReferences(waiter);
                         terminalFailure = new IllegalStateException(
                                 "Task resource wait cycle detected across execution-owner chains");
                     }
+                } catch (Throwable failure) {
+                    terminalFailure = failure;
+                }
+                if (terminalFailure != null) {
+                    waiters.remove(waiter);
+                    removeWaiterReferences(waiter);
+                    waiter.prepared = false;
                 }
             }
 
@@ -310,10 +360,23 @@ final class TaskResourceLockManager {
         if (waiter.counted) {
             throw new IllegalStateException("Task resource waiter was counted twice");
         }
-        for (TaskResource resource : waiter.owner.requestedResources) {
-            resourceStates.computeIfAbsent(resource, ignored -> new ResourceState()).waiterCount++;
+        int addedCount = 0;
+        try {
+            for (TaskResource resource : waiter.owner.requestedResources) {
+                resourceStates.computeIfAbsent(resource, ignored -> new ResourceState()).waiterCount++;
+                addedCount++;
+            }
+            waiter.counted = true;
+        } catch (Throwable failure) {
+            // A runtime failure or Error during state creation must not leave a partially counted waiter behind.
+            for (int index = addedCount - 1; index >= 0; index--) {
+                TaskResource resource = waiter.owner.requestedResources.get(index);
+                ResourceState state = Objects.requireNonNull(resourceStates.get(resource), "resource state");
+                state.waiterCount--;
+            }
+            removeUnusedStates();
+            throw failure;
         }
-        waiter.counted = true;
     }
 
     /// Cancels every pending request in one execution domain.
@@ -329,7 +392,7 @@ final class TaskResourceLockManager {
             Iterator<Waiter> iterator = waiters.iterator();
             while (iterator.hasNext()) {
                 Waiter waiter = iterator.next();
-                if (waiter.owner.execution == execution) {
+                if (waiter.owner.execution == execution && !waiter.survivesCancellation) {
                     iterator.remove();
                     removeWaiterReferences(waiter);
                     completions.add(Completion.cancelled(waiter));
@@ -390,7 +453,7 @@ final class TaskResourceLockManager {
         Iterator<Waiter> iterator = waiters.iterator();
         while (iterator.hasNext()) {
             Waiter waiter = iterator.next();
-            if (waiter.owner.execution.cancelled) {
+            if (waiter.owner.execution.cancelled && !waiter.survivesCancellation) {
                 iterator.remove();
                 removeWaiterReferences(waiter);
                 completions.add(Completion.cancelled(waiter));
@@ -440,7 +503,10 @@ final class TaskResourceLockManager {
             return false;
         }
         if (earlier.owner.execution != current.owner.execution) {
-            return true;
+            // An external request has no ancestry relationship with the current branch. It may be bypassed only
+            // after identity resolution proves that it is blocked by a resource held by this branch; otherwise an
+            // unresolved or independently blocked waiter would be overtaken and FIFO would be violated.
+            return earlier.prepared && isBlockedByCurrentAncestor(earlier, current.owner);
         }
         // Owners in the same execution domain that are neither ancestors nor descendants are siblings. Preserve their
         // declaration order even when both can reenter a resource held by their common parent, unless the earlier
@@ -694,7 +760,7 @@ final class TaskResourceLockManager {
         /// Parent owner, or null for a root invocation.
         private final @Nullable Owner parent;
 
-        /// Canonical exact resources acquired by this invocation after preparation.
+        /// Lexical resource snapshot before preparation, replaced with canonical exact resources after preparation.
         private volatile @Unmodifiable List<TaskResource> requestedResources;
 
         /// Complete normalized coverage retained by this invocation and its ancestors.
@@ -766,11 +832,25 @@ final class TaskResourceLockManager {
         /// @param resource normalized nested resource
         /// @return whether the nested request stays covered or is an audited disjoint cache branch
         private boolean permitsNested(TaskResource resource) {
-            if (coverageResources.stream().anyMatch(ancestor -> ancestor.permitsNested(resource))) {
+            if (resource.getKind() == TaskResource.Kind.ORCHESTRATION) {
+                return true;
+            }
+            boolean hasFilesystemCoverage = coverageResources.stream()
+                    .anyMatch(ancestor -> ancestor.getKind() != TaskResource.Kind.ORCHESTRATION);
+            if (!hasFilesystemCoverage) {
+                // A genuinely pure orchestration owner contributes no filesystem range. Its explicitly declared child
+                // starts a new range; conservative children still resolve to the global fallback at the root.
+                return true;
+            }
+            if (coverageResources.stream()
+                    .filter(ancestor -> ancestor.getKind() != TaskResource.Kind.ORCHESTRATION)
+                    .anyMatch(ancestor -> ancestor.permitsNested(resource))) {
                 return true;
             }
             return resource.getKind() == TaskResource.Kind.CACHE_OPERATION
-                    && coverageResources.stream().noneMatch(ancestor -> ancestor.conflictsWith(resource));
+                    && coverageResources.stream()
+                    .filter(ancestor -> ancestor.getKind() != TaskResource.Kind.ORCHESTRATION)
+                    .noneMatch(ancestor -> ancestor.conflictsWith(resource));
         }
 
         /// Returns whether this owner is the same as, or an ancestor of, another owner.
@@ -846,9 +926,13 @@ final class TaskResourceLockManager {
         /// Whether this waiter contributes counts to resource states.
         private boolean counted;
 
+        /// Whether this request protects committed terminal callbacks after execution cancellation.
+        private final boolean survivesCancellation;
+
         /// Creates one pending request.
-        private Waiter(Owner owner) {
+        private Waiter(Owner owner, boolean survivesCancellation) {
             this.owner = owner;
+            this.survivesCancellation = survivesCancellation;
         }
     }
 

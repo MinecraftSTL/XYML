@@ -223,9 +223,11 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             TaskResourceLockManager.Owner owner = resourceLockManager.createOwner(
                     resourceExecution,
                     parentOwner,
-                    task.getResources(),
+                    task.getDeclaredResources(),
                     false);
-            execution = resourceLockManager.acquire(owner).thenCompose(lease -> {
+            CompletableFuture<TaskResourceLockManager.Lease> acquisition = resourceLockManager.acquire(owner);
+            leaseReference.trackPending(acquisition);
+            execution = acquisition.thenCompose(lease -> {
                 leaseReference.set(lease);
                 return executeCompletableFutureTaskLifecycle(parentTask, owner, resourceExecution, task);
             });
@@ -325,14 +327,18 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             TaskResourceLockManager.Execution resourceExecution,
             Task<T> task) {
         LeaseReference leaseReference = new LeaseReference();
+        @Nullable TaskResourceLockManager.Owner ownerForCompletion = null;
         CompletableFuture<@Nullable T> execution;
         try {
             TaskResourceLockManager.Owner owner = resourceLockManager.createOwner(
                     resourceExecution,
                     parentOwner,
-                    task.getResources(),
+                    task.getDeclaredResources(),
                     task.releasesResourcesBeforeDependencies() || task.releasesResourcesBeforeDependents());
-            execution = resourceLockManager.acquire(owner).thenCompose(lease -> {
+            ownerForCompletion = owner;
+            CompletableFuture<TaskResourceLockManager.Lease> acquisition = resourceLockManager.acquire(owner);
+            leaseReference.trackPending(acquisition);
+            execution = acquisition.thenCompose(lease -> {
                 leaseReference.set(lease);
                 return executeNormalTaskLifecycle(parentTask, owner, resourceExecution, task, leaseReference);
             });
@@ -340,7 +346,8 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             execution = CompletableFuture.failedFuture(failure);
         }
 
-        return withLeaseRelease(handleNormalTaskCompletion(task, execution), leaseReference);
+        return withLeaseRelease(handleNormalTaskCompletion(task, ownerForCompletion, execution, leaseReference),
+                leaseReference);
     }
 
     /// Runs the established regular-task lifecycle after its semantic resources have been acquired.
@@ -380,7 +387,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                 })
                 .thenApplyAsync((@Nullable Void unused) -> {
                     if (task.releasesResourcesBeforeDependents()) {
-                        leaseReference.release();
+                        leaseReference.releaseForHandoff();
                     }
                     return unused;
                 })
@@ -412,7 +419,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                             (@Nullable Void unused, @Nullable Throwable throwable) -> {
                         task.setState(Task.TaskState.EXECUTED);
                         if (throwable == null && task.releasesResourcesBeforeDependencies()) {
-                            leaseReference.release();
+                            leaseReference.releaseForHandoff();
                         }
                         rethrow(throwable);
                     });
@@ -428,12 +435,15 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     if (isDependenciesSucceeded)
                         task.setDependenciesSucceeded();
 
-                    if (task.doPostExecute()) {
-                        return CompletableFuture.runAsync(wrap(task::postExecute), task.getExecutor())
-                                .thenApply((@Nullable Void unused) -> dependenciesException);
-                    } else {
-                        return CompletableFuture.completedFuture(dependenciesException);
-                    }
+                    return reacquireTerminalLease(owner, leaseReference)
+                            .thenComposeAsync((@Nullable Void unused) -> {
+                                if (task.doPostExecute()) {
+                                    return CompletableFuture.runAsync(wrap(task::postExecute), task.getExecutor())
+                                            .thenApply((@Nullable Void ignored) -> dependenciesException);
+                                } else {
+                                    return CompletableFuture.completedFuture(dependenciesException);
+                                }
+                            });
                 })
                 .thenApplyAsync((@Nullable Exception dependenciesException) -> {
                     boolean isDependenciesSucceeded = dependenciesException == null;
@@ -463,32 +473,74 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     /// Applies the established regular-task failure classification before the resource lease is released.
     private <T> CompletableFuture<@Nullable T> handleNormalTaskCompletion(
             Task<T> task,
-            CompletableFuture<@Nullable T> execution) {
-        return execution.exceptionally(throwable -> {
-            Throwable resolved = resolveException(throwable);
-            if (resolved instanceof Exception) {
-                Exception e = convertInterruptedException((Exception) resolved);
-                task.setException(e);
-                exception = e;
-                if (e instanceof CancellationException) {
-                    if (task.getSignificance().shouldLog()) {
-                        LOG.trace("Task aborted: " + task.getName());
-                    }
-                } else {
-                    if (task.getSignificance().shouldLog()) {
-                        LOG.trace("Task failed: " + task.getName(), e);
-                    }
-                }
-                task.fireDoneEvent(this, true);
-                notifyTaskListeners(task, it -> it.onFailed(task, e));
-
-                task.setState(Task.TaskState.FAILED);
-            } else if (resolved instanceof OutOfMemoryError e) {
-                handleOutOfMemoryError(task, e);
+            @Nullable TaskResourceLockManager.Owner owner,
+            CompletableFuture<@Nullable T> execution,
+            LeaseReference leaseReference) {
+        return execution.handle((@Nullable T result, @Nullable Throwable throwable) -> {
+            if (throwable == null) {
+                return CompletableFuture.completedFuture(result);
             }
+            return reacquireTerminalLease(owner, leaseReference)
+                    .handle((@Nullable Void ignored, @Nullable Throwable reacquisitionFailure) -> {
+                        if (reacquisitionFailure != null) {
+                            attachReacquisitionFailure(throwable, reacquisitionFailure);
+                        }
+                        return classifyNormalTaskFailure(task, throwable);
+                    })
+                    .thenCompose(stage -> stage);
+        }).thenCompose(stage -> stage);
+    }
 
-            throw new CompletionException(resolved); // rethrow error
-        });
+    /// Classifies one established regular-task failure and republishes its historical terminal callbacks.
+    private <T> CompletableFuture<@Nullable T> classifyNormalTaskFailure(Task<T> task, Throwable throwable) {
+        Throwable resolved = resolveException(throwable);
+        if (resolved instanceof Exception) {
+            Exception e = convertInterruptedException((Exception) resolved);
+            task.setException(e);
+            exception = e;
+            if (e instanceof CancellationException) {
+                if (task.getSignificance().shouldLog()) {
+                    LOG.trace("Task aborted: " + task.getName());
+                }
+            } else {
+                if (task.getSignificance().shouldLog()) {
+                    LOG.trace("Task failed: " + task.getName(), e);
+                }
+            }
+            task.fireDoneEvent(this, true);
+            notifyTaskListeners(task, it -> it.onFailed(task, e));
+
+            task.setState(Task.TaskState.FAILED);
+        } else if (resolved instanceof OutOfMemoryError e) {
+            handleOutOfMemoryError(task, e);
+        }
+
+        return CompletableFuture.failedFuture(new CompletionException(resolved));
+    }
+
+    /// Retains a terminal reacquisition failure without replacing the original task failure.
+    private static void attachReacquisitionFailure(Throwable original, Throwable reacquisitionFailure) {
+        Throwable resolved = resolveException(reacquisitionFailure);
+        if (resolved != original) {
+            original.addSuppressed(resolved);
+        }
+    }
+
+    /// Reacquires a handed-off owner's resources before post-execution and terminal listener delivery.
+    ///
+    /// The manager request is asynchronous and uses the same logical owner token, so a continuation may cross threads
+    /// without losing reentrancy. An owner that never received its initial lease has no committed lifecycle to protect.
+    ///
+    /// @param owner owner whose resources were handed off, or null when owner creation failed
+    /// @param leaseReference lease state for this task invocation
+    /// @return future completed after the terminal lease is held
+    private CompletableFuture<@Nullable Void> reacquireTerminalLease(
+            @Nullable TaskResourceLockManager.Owner owner,
+            LeaseReference leaseReference) {
+        if (owner == null || !leaseReference.needsTerminalReacquisition()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return leaseReference.reacquire(resourceLockManager, owner);
     }
 
     /// Completes the failed task lifecycle while preserving the original error for the global handler.
@@ -564,7 +616,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
         /// Creates one open structured child scope.
         ///
-        /// @param parentTask parent completable-future task
+        /// @param parentTask parent task
         /// @param parentOwner invocation-local parent owner
         /// @param resourceExecution shared cancellation domain
         private NestedTaskScope(
@@ -654,52 +706,174 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         /// @throws IllegalStateException when registration is closed
         private void ensureOpen() {
             if (closed) {
-                throw new IllegalStateException("Completable-future task child scope is already closed");
+                throw new IllegalStateException("Task child scope is already closed");
             }
         }
 
     }
 
-    /// Owns one task lease with a terminal sentinel so a release racing with acquisition cannot leak a late grant.
+    /// Owns one task lease lifecycle, including an optional handoff and terminal reacquisition.
     @NotNullByDefault
     private static final class LeaseReference {
-        /// Lease installed after the manager grants resources, or null before that point.
-        private @Nullable TaskResourceLockManager.Lease lease;
+        /// Leases currently held by this task invocation.
+        private final List<TaskResourceLockManager.Lease> leases = new ArrayList<>();
 
-        /// Whether the task's lease lifecycle has reached its terminal release point.
+        /// Acquisition currently being resolved, or null after it reaches a terminal state.
+        private @Nullable CompletableFuture<TaskResourceLockManager.Lease> pendingAcquisition;
+
+        /// Shared terminal reacquisition future, created at most once after a handoff.
+        private @Nullable CompletableFuture<@Nullable Void> terminalAcquisition;
+
+        /// Whether an early handoff has released a previously granted lease.
+        private boolean handedOff;
+
+        /// Whether the task's complete lease lifecycle has reached its terminal release point.
         private boolean released;
 
-        /// Installs a newly granted lease or closes it immediately when release already won the race.
-        private void set(TaskResourceLockManager.Lease newLease) {
+        /// Installs a newly granted lease or closes it immediately when terminal release already won the race.
+        ///
+        /// @param newLease newly granted lease
+        /// @return whether the lease was retained by this reference
+        private boolean set(TaskResourceLockManager.Lease newLease) {
             Objects.requireNonNull(newLease, "newLease");
             boolean closeImmediately;
             synchronized (this) {
                 closeImmediately = released;
                 if (!closeImmediately) {
-                    if (lease != null) {
-                        throw new IllegalStateException("Task lease was installed more than once");
-                    }
-                    lease = newLease;
+                    leases.add(newLease);
                 }
             }
             if (closeImmediately) {
                 newLease.close();
             }
+            return !closeImmediately;
         }
 
-        /// Marks this reference released and closes its installed lease outside the reference monitor.
+        /// Tracks an asynchronous acquisition so terminal release can cancel a still-pending waiter.
+        ///
+        /// @param acquisition acquisition future to track
+        private void trackPending(CompletableFuture<TaskResourceLockManager.Lease> acquisition) {
+            Objects.requireNonNull(acquisition, "acquisition");
+            boolean cancelImmediately;
+            synchronized (this) {
+                cancelImmediately = released;
+                if (!cancelImmediately) {
+                    if (pendingAcquisition != null && !pendingAcquisition.isDone()) {
+                        throw new IllegalStateException("Task lease acquisition was already pending");
+                    }
+                    pendingAcquisition = acquisition;
+                }
+            }
+            acquisition.whenComplete((@Nullable TaskResourceLockManager.Lease ignoredLease,
+                    @Nullable Throwable ignoredFailure) -> {
+                synchronized (this) {
+                    if (pendingAcquisition == acquisition) {
+                        pendingAcquisition = null;
+                    }
+                }
+            });
+            if (cancelImmediately) {
+                acquisition.cancel(false);
+            }
+        }
+
+        /// Releases the currently held lease during an explicit dependency or dependent handoff.
+        private void releaseForHandoff() {
+            @Unmodifiable List<TaskResourceLockManager.Lease> leasesToClose;
+            synchronized (this) {
+                if (released) {
+                    return;
+                }
+                handedOff = true;
+                leasesToClose = List.copyOf(leases);
+                leases.clear();
+            }
+            for (TaskResourceLockManager.Lease lease : leasesToClose) {
+                lease.close();
+            }
+        }
+
+        /// Returns whether this invocation released a lease that must be reacquired for terminal callbacks.
+        private synchronized boolean needsTerminalReacquisition() {
+            return handedOff && !released;
+        }
+
+        /// Asynchronously reacquires the same owner resources once after an early handoff.
+        ///
+        /// @param manager resource manager coordinating the request
+        /// @param owner logical owner whose canonical request is reused
+        /// @return future completed after the terminal lease is held
+        private CompletableFuture<@Nullable Void> reacquire(
+                TaskResourceLockManager manager,
+                TaskResourceLockManager.Owner owner) {
+            CompletableFuture<@Nullable Void> result;
+            synchronized (this) {
+                if (!handedOff || released) {
+                    return CompletableFuture.completedFuture(null);
+                }
+                if (terminalAcquisition != null) {
+                    return terminalAcquisition;
+                }
+                result = new CompletableFuture<>();
+                terminalAcquisition = result;
+            }
+
+            CompletableFuture<TaskResourceLockManager.Lease> acquisition;
+            try {
+                acquisition = manager.acquireForTerminal(owner);
+                try {
+                    trackPending(acquisition);
+                } catch (Throwable trackingFailure) {
+                    acquisition.cancel(false);
+                    throw trackingFailure;
+                }
+            } catch (Throwable failure) {
+                result.completeExceptionally(failure);
+                return result;
+            }
+            acquisition.whenComplete((@Nullable TaskResourceLockManager.Lease lease,
+                    @Nullable Throwable failure) -> {
+                if (failure != null) {
+                    result.completeExceptionally(failure);
+                    return;
+                }
+                try {
+                    if (set(Objects.requireNonNull(lease, "terminal lease"))) {
+                        result.complete(null);
+                    } else {
+                        result.cancel(false);
+                    }
+                } catch (Throwable installationFailure) {
+                    result.completeExceptionally(installationFailure);
+                }
+            });
+            return result;
+        }
+
+        /// Marks this reference terminally released and closes every installed lease outside the reference monitor.
         private void release() {
-            @Nullable TaskResourceLockManager.Lease leaseToClose;
+            @Unmodifiable List<TaskResourceLockManager.Lease> leasesToClose;
+            @Nullable CompletableFuture<TaskResourceLockManager.Lease> acquisitionToCancel;
+            @Nullable CompletableFuture<@Nullable Void> terminalToCancel;
             synchronized (this) {
                 if (released) {
                     return;
                 }
                 released = true;
-                leaseToClose = lease;
-                lease = null;
+                leasesToClose = List.copyOf(leases);
+                leases.clear();
+                acquisitionToCancel = pendingAcquisition;
+                pendingAcquisition = null;
+                terminalToCancel = terminalAcquisition;
             }
-            if (leaseToClose != null) {
-                leaseToClose.close();
+            if (acquisitionToCancel != null) {
+                acquisitionToCancel.cancel(false);
+            }
+            if (terminalToCancel != null && !terminalToCancel.isDone()) {
+                terminalToCancel.cancel(false);
+            }
+            for (TaskResourceLockManager.Lease lease : leasesToClose) {
+                lease.close();
             }
         }
     }

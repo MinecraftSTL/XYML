@@ -48,6 +48,13 @@ public abstract class Task<T> {
     /// by multiple invocations. [AsyncTaskExecutor] carries the invocation-local owner chain instead.
     private @Unmodifiable Set<TaskResource> resources = Set.of(TaskResource.conservative());
 
+    /// Full declaration snapshot retained until asynchronous filesystem identity resolution.
+    ///
+    /// Unlike [#resources], this snapshot keeps lexical descendants that may resolve through a symbolic link or
+    /// junction to a path outside an apparent parent directory. It is package-private through [#getDeclaredResources]
+    /// so only the executor can pass the complete declaration set to the lock manager.
+    private @Unmodifiable Set<TaskResource> declaredResources = resources;
+
     /// Whether the acquired declaration may be handed off before this task's dependencies run.
     private boolean releaseResourcesBeforeDependencies;
 
@@ -70,6 +77,17 @@ public abstract class Task<T> {
         return resources;
     }
 
+    /// Returns the complete immutable declaration snapshot used by the asynchronous resource arbiter.
+    ///
+    /// The snapshot may contain lexical descendants that [#getResources()] removes as apparent redundancies. Callers
+    /// outside the task subsystem should use [#getResources()] for the public minimized declaration; this method is
+    /// package-private so path identity resolution can preserve aliases until it has inspected the filesystem.
+    ///
+    /// @return immutable declarations before coverage minimization
+    final @Unmodifiable Set<TaskResource> getDeclaredResources() {
+        return declaredResources;
+    }
+
     /// Copies the immutable declaration of a task wrapped only for presentation behavior.
     ///
     /// @param wrapper presentation-only wrapper receiving the declaration
@@ -86,6 +104,7 @@ public abstract class Task<T> {
     /// @param source task providing the immutable declaration
     private static void inheritResourceDeclaration(Task<?> target, Task<?> source) {
         target.resources = source.resources;
+        target.declaredResources = source.declaredResources;
     }
 
     /// Replaces this task's resource declaration with a defensive immutable snapshot.
@@ -108,7 +127,13 @@ public abstract class Task<T> {
                 && (snapshot.size() != 1 || !snapshot.iterator().next().isConservative())) {
             throw new IllegalArgumentException("The conservative task resource cannot be combined with explicit resources");
         }
-        resources = Collections.unmodifiableSet(snapshot);
+        @Unmodifiable List<TaskResource> declarationSnapshot = TaskResource.snapshotDeclarations(snapshot);
+        declaredResources = Collections.unmodifiableSet(new LinkedHashSet<>(declarationSnapshot));
+        if (snapshot.iterator().next().isConservative()) {
+            resources = Set.of(TaskResource.conservative());
+        } else {
+            resources = Collections.unmodifiableSet(new LinkedHashSet<>(TaskResource.normalize(declarationSnapshot)));
+        }
         return this;
     }
 
@@ -130,9 +155,10 @@ public abstract class Task<T> {
     ///
     /// This is intended for deferred orchestration tasks that serialize a short resolution phase and then hand the
     /// fully constructed operation to independent child owners. The task's pre-execution, dependents, and primary
-    /// execution remain protected; terminal listeners and post-execution work run after the handoff without the
-    /// released lease. Dependencies intentionally begin as a new resource branch and do not inherit this task's owner;
-    /// tasks that need their resource through post-execution or ancestor coverage must keep the default lifecycle.
+    /// execution remain protected; dependencies intentionally begin as a new resource branch and do not inherit this
+    /// task's owner. Before post-execution and terminal listener delivery the executor reacquires the same owner lease,
+    /// so the complete lifecycle remains protected even when a handoff is used. A task that cannot tolerate this
+    /// terminal reacquisition should keep the default lifecycle instead of using this method.
     ///
     /// @return this task
     public final Task<T> releaseResourcesBeforeDependencies() {
@@ -763,12 +789,13 @@ public abstract class Task<T> {
     /// Creates a completion continuation whose callback acquires additional resources after the prerequisite ends.
     ///
     /// The returned coordinator inherits this task's resource declaration while one explicit cleanup child acquires the
-    /// supplied resources. When every cleanup resource fits within the inherited coverage, the owner is retained so no
-    /// conflicting operation can enter between a failed prerequisite and its rollback. If a cleanup resource is wider
-    /// than that coverage, the coordinator automatically hands off its lease before starting the cleanup child; the
-    /// child then acquires its own independent boundary. This permits a repository-wide refresh after an instance-local
-    /// operation without serializing the operation itself. Callers must still declare every resource touched by the
-    /// callback. Once the coordinator has started, its cleanup still runs after executor cancellation, matching
+    /// supplied resources. The owner is retained only when every cleanup key represents the exact same filesystem
+    /// range as an inherited key, or the inherited key is global. Lexical directory containment is not enough because
+    /// an unresolved symbolic-link or junction component can redirect the cleanup outside that directory; those cases
+    /// automatically hand off before the cleanup child acquires its canonical resource independently. This also permits
+    /// a repository-wide refresh after an instance-local operation without serializing the operation itself. Callers
+    /// must still declare every resource touched by the callback. Once the coordinator has started, its cleanup still
+    /// runs after executor cancellation, matching
     /// [#whenComplete(Executor, FinalizedCallback)]; cancellation before the coordinator acquires its initial lease still
     /// prevents the callback. The callback exception takes precedence over a prerequisite exception, while a successful
     /// callback rethrows the original prerequisite exception.
@@ -796,8 +823,10 @@ public abstract class Task<T> {
             throw new IllegalArgumentException("The conservative task resource cannot be combined with explicit resources");
         }
         boolean handoffBeforeCleanup = cleanupResources.stream().anyMatch(cleanupResource ->
-                resources.stream().noneMatch(parentResource ->
-                        !parentResource.isConservative() && parentResource.permitsNested(cleanupResource)));
+                declaredResources.stream().noneMatch(parentResource ->
+                        !parentResource.isConservative()
+                                && (parentResource.getKind() == TaskResource.Kind.GLOBAL
+                                || parentResource.covers(cleanupResource) && cleanupResource.covers(parentResource))));
         String taskName = getCaller();
 
         Task<@Nullable Void> coordinator = new Task<@Nullable Void>() {

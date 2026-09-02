@@ -39,10 +39,11 @@ import java.util.concurrent.Executor;
 /// Resolves filesystem aliases for task resources without performing I/O on task construction or UI threads.
 ///
 /// Existing path components are resolved through [Path#toRealPath(java.nio.file.LinkOption...)], which follows both
-/// symbolic links and Windows junctions. Missing leaves are reconstructed from the nearest existing ancestor. Each
-/// snapshot is checked again after canonicalization, including the first missing component, and a changing snapshot is
-/// retried a bounded number of times. Any remaining uncertainty is represented by a global resource so an alias is
-/// never incorrectly treated as disjoint.
+/// symbolic links and Windows junctions. Each declaration retains its real target identity and the canonical directory
+/// entry of every alias component. The latter prevents a target write or replacement from running concurrently with an
+/// operation on the directory that contains the alias. Missing leaves are reconstructed from the nearest existing
+/// ancestor. Each snapshot is checked again after canonicalization, and a changing snapshot is retried a bounded number
+/// of times. Any remaining uncertainty is represented by a global resource so an alias is never treated as disjoint.
 ///
 /// Java 17 does not expose a portable stable filesystem handle or file identifier through [Path]. Consequently, a
 /// path can still be replaced after the final check, and distinct hard-link names cannot be merged across independent
@@ -95,10 +96,14 @@ final class TaskResourcePathIdentity {
                 continue;
             }
 
-            @Nullable Path canonicalPath = resolvePath(path);
-            resolved.add(canonicalPath == null
-                    ? TaskResource.global()
-                    : checkedResource.withPath(canonicalPath));
+            @Nullable List<Path> canonicalPaths = resolvePaths(path);
+            if (canonicalPaths == null) {
+                resolved.add(TaskResource.global());
+            } else {
+                for (Path canonicalPath : canonicalPaths) {
+                    resolved.add(checkedResource.withPath(canonicalPath));
+                }
+            }
         }
 
         return TaskResource.normalize(resolved);
@@ -107,12 +112,12 @@ final class TaskResourcePathIdentity {
     /// Resolves a path through its nearest existing ancestor, or returns null when identity remains uncertain.
     ///
     /// @param path normalized logical resource path
-    /// @return stable canonical snapshot, or null when no stable snapshot can be established
-    private static @Nullable Path resolvePath(Path path) {
+    /// @return stable canonical target and alias-entry snapshots, or null when none can be established
+    private static @Nullable @Unmodifiable List<Path> resolvePaths(Path path) {
         try {
             Path normalizedPath = Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
             for (int attempt = 0; attempt < MAX_RESOLUTION_ATTEMPTS; attempt++) {
-                @Nullable Path resolved = resolvePathSnapshot(normalizedPath);
+                @Nullable List<Path> resolved = resolvePathSnapshot(normalizedPath);
                 if (resolved != null) {
                     return resolved;
                 }
@@ -126,9 +131,13 @@ final class TaskResourcePathIdentity {
     /// Attempts one self-consistent canonical snapshot of a normalized path.
     ///
     /// @param normalizedPath normalized absolute path
-    /// @return canonical path, or null when the snapshot changed or could not be confirmed
-    private static @Nullable Path resolvePathSnapshot(Path normalizedPath) {
+    /// @return canonical target and alias entries, or null when the snapshot changed or could not be confirmed
+    private static @Nullable @Unmodifiable List<Path> resolvePathSnapshot(Path normalizedPath) {
         try {
+            @Nullable List<Path> aliasesBefore = resolveAliasEntries(normalizedPath);
+            if (aliasesBefore == null) {
+                return null;
+            }
             Path candidate = normalizedPath;
             Deque<Path> missingSuffix = new ArrayDeque<>();
             while (!Files.exists(candidate, LinkOption.NOFOLLOW_LINKS)) {
@@ -157,11 +166,8 @@ final class TaskResourcePathIdentity {
                 // instead of manufacturing a lexical key that could be mistaken for an independent resource.
                 return null;
             }
-            if (!missingSuffix.isEmpty()) {
-                Path firstMissingComponent = candidate.resolve(missingSuffix.peek());
-                if (!Files.notExists(firstMissingComponent, LinkOption.NOFOLLOW_LINKS)) {
-                    return null;
-                }
+            if (!missingSuffix.isEmpty() && !missingSuffixRemainsAbsent(candidate, missingSuffix)) {
+                return null;
             }
 
             Path confirmed = candidate.toRealPath();
@@ -171,17 +177,79 @@ final class TaskResourcePathIdentity {
                     || !Files.isSameFile(candidate, resolved)) {
                 return null;
             }
-            if (!missingSuffix.isEmpty()
-                    && !Files.notExists(candidate.resolve(missingSuffix.peek()), LinkOption.NOFOLLOW_LINKS)) {
+            if (!missingSuffix.isEmpty() && !missingSuffixRemainsAbsent(candidate, missingSuffix)) {
+                return null;
+            }
+            @Nullable List<Path> aliasesAfter = resolveAliasEntries(normalizedPath);
+            if (aliasesAfter == null || !aliasesBefore.equals(aliasesAfter)) {
                 return null;
             }
             while (!missingSuffix.isEmpty()) {
                 resolved = resolved.resolve(missingSuffix.pop());
             }
-            return resolved.toAbsolutePath().normalize();
+            ArrayList<Path> identities = new ArrayList<>(aliasesBefore);
+            identities.add(resolved.toAbsolutePath().normalize());
+            return List.copyOf(identities);
         } catch (IOException | SecurityException | UnsupportedOperationException ignored) {
             return null;
         }
+    }
+
+    /// Resolves the canonical directory entry of every symbolic-link or junction component in one lexical path.
+    ///
+    /// The component's parent is resolved separately from the component itself. A different result means the component
+    /// redirects traversal, so both its directory entry and the final real target must participate in arbitration.
+    /// Scanning stops at the first missing component because the remaining suffix cannot yet contain an alias.
+    ///
+    /// @param normalizedPath normalized absolute declaration path
+    /// @return immutable alias-entry identities, or null when component existence is uncertain
+    private static @Nullable @Unmodifiable List<Path> resolveAliasEntries(Path normalizedPath) throws IOException {
+        @Nullable Path root = normalizedPath.getRoot();
+        if (root == null) {
+            return null;
+        }
+        Path current = root;
+        ArrayList<Path> aliases = new ArrayList<>();
+        for (Path component : normalizedPath) {
+            current = current.resolve(component);
+            if (!Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
+                return Files.notExists(current, LinkOption.NOFOLLOW_LINKS) ? List.copyOf(aliases) : null;
+            }
+
+            @Nullable Path parent = current.getParent();
+            if (parent == null) {
+                continue;
+            }
+            Path directoryEntry = parent.toRealPath()
+                    .resolve(component)
+                    .toAbsolutePath()
+                    .normalize();
+            Path realComponent = current.toRealPath().toAbsolutePath().normalize();
+            if (!directoryEntry.equals(realComponent)) {
+                aliases.add(directoryEntry);
+            }
+        }
+        return List.copyOf(aliases);
+    }
+
+    /// Confirms that every component below the canonical existing ancestor is still absent.
+    ///
+    /// Checking only the nearest missing component is insufficient: a concurrently created directory can make a
+    /// deeper component visible as a symbolic link or junction after the first check. Iterating the complete suffix
+    /// fails closed for that case and lets the bounded outer retry establish a fresh snapshot.
+    ///
+    /// @param candidate nearest existing lexical ancestor
+    /// @param missingSuffix missing components in ancestor-to-leaf order
+    /// @return whether no missing component has appeared
+    private static boolean missingSuffixRemainsAbsent(Path candidate, Deque<Path> missingSuffix) {
+        Path next = candidate;
+        for (Path component : missingSuffix) {
+            next = next.resolve(component);
+            if (!Files.notExists(next, LinkOption.NOFOLLOW_LINKS)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// Compares two followed attribute reads from one canonicalization attempt.

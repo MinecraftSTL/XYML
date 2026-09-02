@@ -30,17 +30,22 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies alias canonicalization, asynchronous inspection, and the documented filesystem-identity boundary.
@@ -107,34 +112,199 @@ public final class TaskResourcePathIdentityTest {
                 aliasDirectory.resolve("missing/target.jar"));
     }
 
+    /// Verifies a final symbolic link conflicts with both its real target and its containing lexical directory.
+    @Test
+    public void finalSymbolicLinkRetainsTargetAndDirectoryEntryIdentities() throws Exception {
+        Path repository = Files.createDirectories(temporaryDirectory.resolve("entry-repository"));
+        Path realTarget = Files.writeString(temporaryDirectory.resolve("entry-target.jar"), "target");
+        Path aliasTarget = repository.resolve("entry-alias.jar");
+        try {
+            Files.createSymbolicLink(aliasTarget, realTarget);
+        } catch (IOException | UnsupportedOperationException | SecurityException unavailable) {
+            Assumptions.assumeTrue(false, "Symbolic links are unavailable: " + unavailable.getMessage());
+            return;
+        }
+
+        List<TaskResource> identities = TaskResourcePathIdentity.resolve(
+                List.of(TaskResource.downloadTarget(aliasTarget)));
+
+        assertEquals(2, identities.size());
+        assertTrue(identities.contains(TaskResource.downloadTarget(realTarget.toRealPath())));
+        assertTrue(identities.contains(TaskResource.downloadTarget(
+                repository.toRealPath().resolve(aliasTarget.getFileName()))));
+
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner directoryOwner = manager.createOwner(
+                execution,
+                null,
+                Set.of(TaskResource.gameDirectory(repository)));
+        TaskResourceLockManager.Lease directoryLease = manager.acquire(directoryOwner).get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Owner aliasOwner = manager.createOwner(
+                manager.createExecution(),
+                null,
+                Set.of(TaskResource.downloadTarget(aliasTarget)));
+        CompletableFuture<TaskResourceLockManager.Lease> aliasLease = manager.acquire(aliasOwner);
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            while (manager.trackedResourceCount() < 3) {
+                Thread.yield();
+            }
+        });
+        assertFalse(aliasLease.isDone());
+
+        directoryLease.close();
+        aliasLease.get(5, TimeUnit.SECONDS).close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies executor arbitration serializes equivalent symbolic-link target paths after asynchronous resolution.
+    @Test
+    public void executorSerializesSymbolicLinkAliases() throws Exception {
+        Path realDirectory = Files.createDirectories(temporaryDirectory.resolve("executor-symbolic-real"));
+        Path aliasDirectory = temporaryDirectory.resolve("executor-symbolic-alias");
+        try {
+            Files.createSymbolicLink(aliasDirectory, realDirectory);
+        } catch (IOException | UnsupportedOperationException | SecurityException unavailable) {
+            Assumptions.assumeTrue(false, "Symbolic links are unavailable: " + unavailable.getMessage());
+            return;
+        }
+
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicBoolean secondRan = new AtomicBoolean();
+        Task<?> first = Task.runAsync(() -> {
+            firstStarted.countDown();
+            assertTrue(releaseFirst.await(5, TimeUnit.SECONDS));
+        }).setResources(TaskResource.downloadTarget(realDirectory.resolve("missing/target.jar")));
+        Task<?> second = Task.runAsync(() -> secondRan.set(true))
+                .setResources(TaskResource.downloadTarget(aliasDirectory.resolve("missing/target.jar")));
+
+        CompletableFuture<Boolean> firstResult = CompletableFuture.supplyAsync(
+                () -> new AsyncTaskExecutor(first, manager).test());
+        assertTrue(firstStarted.await(5, TimeUnit.SECONDS));
+        CompletableFuture<Boolean> secondResult = CompletableFuture.supplyAsync(
+                () -> new AsyncTaskExecutor(second, manager).test());
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            while (manager.pendingWaiterCount() != 1) {
+                Thread.yield();
+            }
+        });
+
+        assertFalse(secondRan.get());
+        releaseFirst.countDown();
+
+        assertTrue(firstResult.get(5, TimeUnit.SECONDS));
+        assertTrue(secondResult.get(5, TimeUnit.SECONDS));
+        assertTrue(secondRan.get());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a lexical parent cannot hide a symbolic-link child whose real target is outside that parent.
+    @Test
+    public void preservesAliasedChildBeforeCoverageMinimization() throws Exception {
+        Path repository = Files.createDirectories(temporaryDirectory.resolve("lexical-repository"));
+        Path external = Files.createDirectories(temporaryDirectory.resolve("lexical-external"));
+        Path alias = repository.resolve("instances-alias");
+        try {
+            Files.createSymbolicLink(alias, external);
+        } catch (IOException | UnsupportedOperationException | SecurityException unavailable) {
+            Assumptions.assumeTrue(false, "Symbolic links are unavailable: " + unavailable.getMessage());
+            return;
+        }
+
+        Path externalInstance = external.resolve("instance");
+        TaskResource parentDirectory = TaskResource.gameDirectory(repository);
+        TaskResource aliasedInstance = TaskResource.gameInstance(alias.resolve("instance"));
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicBoolean secondRan = new AtomicBoolean();
+        Task<?> first = Task.runAsync(() -> {
+            firstStarted.countDown();
+            assertTrue(releaseFirst.await(5, TimeUnit.SECONDS));
+        }).setResources(parentDirectory, aliasedInstance);
+        assertEquals(Set.of(parentDirectory), first.getResources());
+
+        CompletableFuture<Boolean> firstResult = CompletableFuture.supplyAsync(
+                () -> new AsyncTaskExecutor(first, manager).test());
+        assertTrue(firstStarted.await(5, TimeUnit.SECONDS));
+
+        Task<?> second = Task.runAsync(() -> secondRan.set(true))
+                .setResources(TaskResource.gameInstance(externalInstance));
+        CompletableFuture<Boolean> secondResult = CompletableFuture.supplyAsync(
+                () -> new AsyncTaskExecutor(second, manager).test());
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            while (manager.pendingWaiterCount() != 1) {
+                Thread.yield();
+            }
+        });
+        assertFalse(secondRan.get());
+
+        releaseFirst.countDown();
+        assertTrue(firstResult.get(5, TimeUnit.SECONDS));
+        assertTrue(secondResult.get(5, TimeUnit.SECONDS));
+        assertTrue(secondRan.get());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Verifies a Windows junction and its target resolve one missing descendant to the same identity.
     @Test
     public void followsWindowsJunctionForMissingDescendant() throws Exception {
         Assumptions.assumeTrue(File.separatorChar == '\\', "Windows junction test");
         Path realDirectory = Files.createDirectories(temporaryDirectory.resolve("junction-real"));
         Path aliasDirectory = temporaryDirectory.resolve("junction-alias");
-        Process junctionCreation = new ProcessBuilder(
-                "cmd.exe",
-                "/d",
-                "/c",
-                "mklink",
-                "/J",
-                aliasDirectory.toString(),
-                realDirectory.toString())
-                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                .redirectError(ProcessBuilder.Redirect.DISCARD)
-                .start();
-        boolean junctionCreated = junctionCreation.waitFor(5, TimeUnit.SECONDS);
-        if (!junctionCreated) {
-            junctionCreation.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
-        }
-        Assumptions.assumeTrue(junctionCreated && junctionCreation.exitValue() == 0,
+        Assumptions.assumeTrue(createWindowsJunction(aliasDirectory, realDirectory),
                 "Junction creation is unavailable");
 
         try {
             assertSameIdentity(
                     realDirectory.resolve("missing/target.jar"),
                     aliasDirectory.resolve("missing/target.jar"));
+        } finally {
+            Files.deleteIfExists(aliasDirectory);
+        }
+    }
+
+    /// Verifies a Windows junction root conflicts with the lexical directory containing its reparse-point entry.
+    @Test
+    public void windowsJunctionRetainsDirectoryEntryIdentity() throws Exception {
+        Assumptions.assumeTrue(File.separatorChar == '\\', "Windows junction test");
+        Path repository = Files.createDirectories(temporaryDirectory.resolve("junction-entry-repository"));
+        Path realDirectory = Files.createDirectories(temporaryDirectory.resolve("junction-entry-real"));
+        Path aliasDirectory = repository.resolve("junction-entry-alias");
+        Assumptions.assumeTrue(createWindowsJunction(aliasDirectory, realDirectory),
+                "Junction creation is unavailable");
+
+        try {
+            List<TaskResource> identities = TaskResourcePathIdentity.resolve(
+                    List.of(TaskResource.gameInstance(aliasDirectory)));
+            assertEquals(2, identities.size());
+            assertTrue(identities.contains(TaskResource.gameInstance(realDirectory.toRealPath())));
+            assertTrue(identities.contains(TaskResource.gameInstance(
+                    repository.toRealPath().resolve(aliasDirectory.getFileName()))));
+
+            TaskResourceLockManager manager = new TaskResourceLockManager();
+            TaskResourceLockManager.Owner directoryOwner = manager.createOwner(
+                    manager.createExecution(),
+                    null,
+                    Set.of(TaskResource.gameDirectory(repository)));
+            TaskResourceLockManager.Lease directoryLease = manager.acquire(directoryOwner).get(5, TimeUnit.SECONDS);
+            TaskResourceLockManager.Owner aliasOwner = manager.createOwner(
+                    manager.createExecution(),
+                    null,
+                    Set.of(TaskResource.gameInstance(aliasDirectory)));
+            CompletableFuture<TaskResourceLockManager.Lease> aliasLease = manager.acquire(aliasOwner);
+            assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+                while (manager.trackedResourceCount() < 3) {
+                    Thread.yield();
+                }
+            });
+            assertFalse(aliasLease.isDone());
+
+            directoryLease.close();
+            aliasLease.get(5, TimeUnit.SECONDS).close();
+            assertEquals(0, manager.trackedResourceCount());
         } finally {
             Files.deleteIfExists(aliasDirectory);
         }
@@ -188,7 +358,7 @@ public final class TaskResourcePathIdentityTest {
                         List.of(TaskResource.downloadTarget(file.resolve("impossible-child.bin")))));
     }
 
-    /// Asserts that a lexical alias and its real path resolve to one canonical declaration.
+    /// Asserts that a lexical alias retains the declaration of its real target alongside any alias entry.
     ///
     /// @param realTarget target below a real directory
     /// @param aliasTarget equivalent target below an alias directory
@@ -201,7 +371,32 @@ public final class TaskResourcePathIdentityTest {
         List<TaskResource> aliasIdentity = TaskResourcePathIdentity.resolve(
                 List.of(TaskResource.downloadTarget(aliasTarget)));
 
-        assertEquals(realIdentity, aliasIdentity);
-        assertTrue(realIdentity.get(0).conflictsWith(aliasIdentity.get(0)));
+        assertTrue(aliasIdentity.containsAll(realIdentity));
+        assertTrue(realIdentity.stream().anyMatch(realResource ->
+                aliasIdentity.stream().anyMatch(realResource::conflictsWith)));
+    }
+
+    /// Creates one Windows junction without exposing a console window.
+    ///
+    /// @param alias junction path to create
+    /// @param target existing junction target
+    /// @return whether the command completed successfully within the timeout
+    private static boolean createWindowsJunction(Path alias, Path target) throws Exception {
+        Process junctionCreation = new ProcessBuilder(
+                "cmd.exe",
+                "/d",
+                "/c",
+                "mklink",
+                "/J",
+                alias.toString(),
+                target.toString())
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .start();
+        boolean completed = junctionCreation.waitFor(5, TimeUnit.SECONDS);
+        if (!completed) {
+            junctionCreation.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
+        }
+        return completed && junctionCreation.exitValue() == 0;
     }
 }

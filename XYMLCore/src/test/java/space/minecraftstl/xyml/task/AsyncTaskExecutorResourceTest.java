@@ -43,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -347,6 +348,69 @@ public final class AsyncTaskExecutorResourceTest {
         assertEquals(0, manager.trackedResourceCount());
     }
 
+    /// Verifies a handed-off task reacquires its resource before post-execution work can run.
+    @Test
+    public void handedOffTaskReacquiresResourceBeforePostExecute() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource resource = target("handoff-post.jar");
+        TaskResource dependencyResource = target("handoff-post-dependency.jar");
+        CountDownLatch dependencyStarted = new CountDownLatch(1);
+        CountDownLatch releaseDependency = new CountDownLatch(1);
+        CountDownLatch competitorStarted = new CountDownLatch(1);
+        CountDownLatch releaseCompetitor = new CountDownLatch(1);
+        AtomicBoolean postStarted = new AtomicBoolean();
+
+        Task<?> dependency = task(dependencyResource, () -> {
+            dependencyStarted.countDown();
+            await(releaseDependency);
+        });
+        Task<Void> handedOff = new Task<Void>() {
+            /// Returns the independent dependency that runs after this task hands off its resource.
+            @Override
+            public @Unmodifiable List<Task<?>> getDependencies() {
+                return List.of(dependency);
+            }
+
+            /// Performs no primary operation before the dependency phase.
+            @Override
+            public void execute() {
+            }
+
+            /// Enables the post-execution callback whose resource ownership is being checked.
+            @Override
+            public boolean doPostExecute() {
+                return true;
+            }
+
+            /// Records that terminal work entered while the resource was held again.
+            @Override
+            public void postExecute() {
+                postStarted.set(true);
+            }
+        }.setResources(resource).releaseResourcesBeforeDependencies();
+
+        CompletableFuture<Boolean> handedOffResult = execute(handedOff, manager);
+        assertTrue(dependencyStarted.await(5, TimeUnit.SECONDS));
+
+        Task<?> competitor = task(resource, () -> {
+            competitorStarted.countDown();
+            await(releaseCompetitor);
+        });
+        CompletableFuture<Boolean> competitorResult = execute(competitor, manager);
+        assertTrue(competitorStarted.await(5, TimeUnit.SECONDS));
+
+        releaseDependency.countDown();
+        awaitCondition(() -> manager.pendingWaiterCount() >= 1);
+        assertFalse(postStarted.get());
+
+        releaseCompetitor.countDown();
+        assertTrue(get(handedOffResult));
+        assertTrue(get(competitorResult));
+        assertTrue(postStarted.get());
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Verifies same-resource siblings remain independent owners even though both reenter their parent coverage.
     @Test
     public void conflictingSiblingsSerializeWithinOneExecutionChain() throws Exception {
@@ -405,6 +469,44 @@ public final class AsyncTaskExecutorResourceTest {
         assertTrue(get(competitorResult));
         assertTrue(competitorRan.get());
         assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies cancelling a completable-future task while waiting removes its waiter without invoking its body.
+    @Test
+    public void cancellingWaitingCompletableFutureTaskSkipsFutureBody() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource resource = target("future-waiting-cancel.jar");
+        CountDownLatch holderStarted = new CountDownLatch(1);
+        CountDownLatch releaseHolder = new CountDownLatch(1);
+        AtomicBoolean futureBodyStarted = new AtomicBoolean();
+        Task<?> holder = task(resource, () -> {
+            holderStarted.countDown();
+            await(releaseHolder);
+        });
+        CompletableFutureTask<@Nullable Void> waitingTask = new CompletableFutureTask<>() {
+            /// Records unexpected future-body execution after the waiting task is cancelled.
+            @Override
+            public CompletableFuture<@Nullable Void> getFuture(TaskCompletableFuture executor) {
+                futureBodyStarted.set(true);
+                return CompletableFuture.completedFuture(null);
+            }
+        };
+        waitingTask.setResources(resource);
+
+        CompletableFuture<Boolean> holderResult = execute(holder, manager);
+        assertTrue(holderStarted.await(5, TimeUnit.SECONDS));
+        AsyncTaskExecutor waitingExecutor = new AsyncTaskExecutor(waitingTask, manager);
+        CompletableFuture<Boolean> waitingResult = CompletableFuture.supplyAsync(waitingExecutor::test);
+        awaitCondition(() -> manager.pendingWaiterCount() == 1);
+
+        waitingExecutor.cancel();
+        assertFalse(get(waitingResult));
+        assertFalse(futureBodyStarted.get());
+        assertEquals(0, manager.pendingWaiterCount());
+
+        releaseHolder.countDown();
+        assertTrue(get(holderResult));
+        assertSuccessorRuns(manager, resource);
     }
 
     /// Verifies a future task can launch a child from another continuation thread under the same owner chain.
@@ -478,6 +580,29 @@ public final class AsyncTaskExecutorResourceTest {
         assertTrue(competitorRan.get());
         assertEquals(0, manager.pendingWaiterCount());
         assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a normal task cannot retain its invocation-local child context after its primary body has returned.
+    @Test
+    public void regularTaskContextClosesAfterPrimaryExecution() {
+        AtomicReference<TaskExecutionContext> contextReference = new AtomicReference<>();
+        Task<Void> parent = new Task<Void>() {
+            /// Retains direct-run compatibility without a dynamic child context.
+            @Override
+            public void execute() {
+            }
+
+            /// Captures the executor-owned context only for this invocation.
+            @Override
+            public void execute(TaskExecutionContext context) {
+                contextReference.set(context);
+            }
+        }.setResources(target("closed-context.jar"));
+
+        assertTrue(new AsyncTaskExecutor(parent, new TaskResourceLockManager()).test());
+
+        TaskExecutionContext context = Objects.requireNonNull(contextReference.get(), "task execution context");
+        assertThrows(IllegalStateException.class, () -> context.one(Task.completed(null)));
     }
 
     /// Verifies cancelling an exposed nested future cannot suppress cleanup when its lease is granted later.
@@ -899,6 +1024,22 @@ public final class AsyncTaskExecutorResourceTest {
 
         assertTrue(cleanupRan.await(5, TimeUnit.SECONDS));
         assertTrue(result.get(5, TimeUnit.SECONDS));
+    }
+
+    /// Verifies lexical containment alone cannot retain a cleanup lease before alias identity resolution.
+    @Test
+    public void resourceAwareCompletionHandsOffForNestedCleanupResource() {
+        Path instance = temporaryDirectory.resolve("nested-cleanup/versions/example");
+        Task<?> prerequisite = Task.runAsync(() -> {
+        }).setResources(TaskResource.gameInstance(instance));
+
+        Task<?> completion = prerequisite.whenCompleteWithResources(
+                Runnable::run,
+                ignoredFailure -> {
+                },
+                TaskResource.downloadTarget(instance.resolve(".xyml-installers/temporary.jar")));
+
+        assertTrue(completion.releasesResourcesBeforeDependencies());
     }
 
     /// Verifies cancellation after finalizer startup still runs its independently resourced terminal cleanup.
