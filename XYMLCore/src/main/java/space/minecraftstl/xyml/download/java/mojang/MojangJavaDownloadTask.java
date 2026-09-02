@@ -112,9 +112,11 @@ public final class MojangJavaDownloadTask extends Task<MojangJavaDownloadTask.Re
                     }
                     throw new UnsupportedPlatformException("Candidates: " + JsonUtils.GSON.toJson(candidates));
                 })
+                .asOrchestration()
                 .thenApplyAsync(javaDownloadJson -> JsonUtils.fromNonNullJson(
                         javaDownloadJson,
-                        MojangJavaRemoteFiles.class));
+                        MojangJavaRemoteFiles.class))
+                .asOrchestration();
     }
 
     /// Returns the metadata lookup that must finish before runtime files can be selected.
@@ -198,7 +200,9 @@ public final class MojangJavaDownloadTask extends Task<MojangJavaDownloadTask.Re
                         if (file.isExecutable()) {
                             FileUtils.setExecutable(dest);
                         }
-                    }));
+                    }).setResources(
+                            TaskResource.javaRuntime(tempDir),
+                            TaskResource.javaRuntime(target)));
                 } else if (file.getDownloads().containsKey("raw")) {
                     DownloadInfo download = Objects.requireNonNull(
                             file.getDownloads().get("raw"),
@@ -209,7 +213,8 @@ public final class MojangJavaDownloadTask extends Task<MojangJavaDownloadTask.Re
                             new FileDownloadTask.IntegrityCheck("SHA-1", download.getSha1()));
                     task.setName(entry.getKey());
                     if (file.isExecutable()) {
-                        dependencies.add(task.thenRunAsync(() -> FileUtils.setExecutable(dest)));
+                        dependencies.add(task.thenRunAsync(() -> FileUtils.setExecutable(dest))
+                                .setResources(TaskResource.javaRuntime(target)));
                     } else {
                         dependencies.add(task);
                     }

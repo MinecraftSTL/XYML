@@ -129,7 +129,6 @@ final class ModpackProviderResourceTest {
         assertEquals(
                 Set.of(
                         TaskResource.repositoryOperation(repositoryRoot),
-                        TaskResource.gameInstance(repositoryRoot.resolve("versions/example")),
                         TaskResource.gameDirectory(repositoryRoot)),
                 root.getResources());
         Task<?> resolver = root.getDependents().iterator().next();

@@ -27,9 +27,14 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies audited version-list compositions use non-owning orchestration resources.
 @NotNullByDefault
@@ -72,6 +77,28 @@ public final class VersionListTaskResourceTest {
                 .map(TaskResource::getKind)
                 .collect(java.util.stream.Collectors.toUnmodifiableSet()));
         assertEquals(Set.of(TaskResource.conservative()), backendRefresh.getResources());
+    }
+
+    /// Defers catalog clearing and backend-task construction until the returned task actually starts.
+    @Test
+    public void multipleSourceRefreshDefersMutationUntilExecution() throws Exception {
+        AtomicInteger refreshRequests = new AtomicInteger();
+        StubVersionList backend = new StubVersionList(Task.runAsync(() -> {
+        }), refreshRequests);
+        MultipleSourceVersionList combined = new MultipleSourceVersionList(new VersionList<?>[]{backend});
+        combined.versions.put(
+                "1.21",
+                new RemoteVersion("test", "1.21", "1.0", Instant.EPOCH, List.of()));
+
+        Task<?> refreshTask = combined.refreshAsync("1.21");
+
+        assertTrue(combined.isLoaded("1.21"));
+        assertEquals(0, refreshRequests.get());
+
+        assertTrue(refreshTask.executor().test());
+
+        assertFalse(combined.isLoaded("1.21"));
+        assertEquals(1, refreshRequests.get());
     }
 
     /// Verifies metadata continuations that only decode and update in-memory catalogs are non-owning roots.
@@ -121,11 +148,23 @@ public final class VersionListTaskResourceTest {
         /// Stable refresh task returned by both refresh overloads.
         private final Task<?> refreshTask;
 
+        /// Number of times a backend refresh task is requested.
+        private final AtomicInteger refreshRequests;
+
         /// Creates a stub backed by one task.
         ///
         /// @param refreshTask stable task to return
         private StubVersionList(Task<?> refreshTask) {
+            this(refreshTask, new AtomicInteger());
+        }
+
+        /// Creates a stub backed by one task and an invocation counter.
+        ///
+        /// @param refreshTask stable task to return
+        /// @param refreshRequests counter incremented for each refresh request
+        private StubVersionList(Task<?> refreshTask, AtomicInteger refreshRequests) {
             this.refreshTask = refreshTask;
+            this.refreshRequests = refreshRequests;
         }
 
         /// Reports that this test list does not distinguish release types.
@@ -141,6 +180,7 @@ public final class VersionListTaskResourceTest {
         /// @return test refresh task
         @Override
         public Task<?> refreshAsync() {
+            refreshRequests.incrementAndGet();
             return refreshTask;
         }
     }

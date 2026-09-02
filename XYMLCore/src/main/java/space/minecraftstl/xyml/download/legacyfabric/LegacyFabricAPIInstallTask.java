@@ -17,17 +17,23 @@
  */
 package space.minecraftstl.xyml.download.legacyfabric;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+/// Downloads Legacy Fabric API into one game instance.
+///
+/// The API file and all dynamic download work stay below the instance root.
+@NotNullByDefault
 public final class LegacyFabricAPIInstallTask extends Task<GameInstancePatch> {
 
     private final DefaultDependencyManager dependencyManager;
@@ -35,10 +41,19 @@ public final class LegacyFabricAPIInstallTask extends Task<GameInstancePatch> {
     private final LegacyFabricAPIRemoteVersion remote;
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    public LegacyFabricAPIInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, LegacyFabricAPIRemoteVersion remoteVersion) {
+    /// Creates an instance-scoped Legacy Fabric API installation task.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param manifest destination game instance manifest
+    /// @param remoteVersion selected Legacy Fabric API version
+    public LegacyFabricAPIInstallTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            LegacyFabricAPIRemoteVersion remoteVersion) {
         this.dependencyManager = dependencyManager;
         this.manifest = manifest;
         this.remote = remoteVersion;
+        setResources(TaskResource.gameInstance(dependencyManager.getGameRepository().getInstanceRoot(manifest.id())));
     }
 
     @Override

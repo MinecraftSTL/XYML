@@ -19,29 +19,33 @@ package space.minecraftstl.xyml.download.quilt;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.download.UnsupportedInstallationException;
 import space.minecraftstl.xyml.game.Arguments;
 import space.minecraftstl.xyml.game.Artifact;
+import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
 import static space.minecraftstl.xyml.download.UnsupportedInstallationException.FABRIC_NOT_COMPATIBLE_WITH_FORGE;
 
-/**
- * <b>Note</b>: Quilt should be installed first.
- *
- * @author huangyuhui
- */
+/// Installs Quilt metadata and its shared libraries for one game instance.
+///
+/// Quilt must be installed before the API add-on. Repository metadata is serialized only while launch metadata and
+/// destination identity are resolved; the generated library task acquires its own shared-directory resources after
+/// this task hands off.
+@NotNullByDefault
 public final class QuiltInstallTask extends Task<GameInstancePatch> {
 
     private final DefaultDependencyManager dependencyManager;
@@ -50,13 +54,24 @@ public final class QuiltInstallTask extends Task<GameInstancePatch> {
     private final GetTask launchMetaTask;
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    public QuiltInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, QuiltRemoteVersion remoteVersion) {
+    /// Creates a repository-metadata-scoped Quilt installation task.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param manifest destination game instance manifest
+    /// @param remoteVersion selected Quilt version
+    public QuiltInstallTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            QuiltRemoteVersion remoteVersion) {
         this.dependencyManager = dependencyManager;
         this.manifest = manifest;
         this.remote = remoteVersion;
 
         launchMetaTask = new GetTask(dependencyManager.getDownloadProvider().injectURLsWithCandidates(remoteVersion.getUrls()));
         launchMetaTask.setCacheRepository(dependencyManager.getCacheRepository());
+        DefaultGameRepository gameRepository = dependencyManager.getGameRepository();
+        setResources(TaskResource.repositoryMetadata(gameRepository.getBaseDirectory()));
+        releaseResourcesBeforeDependencies();
     }
 
     @Override

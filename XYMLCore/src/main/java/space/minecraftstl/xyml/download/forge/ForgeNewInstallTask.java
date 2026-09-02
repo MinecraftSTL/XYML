@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.ZlibUtils;
@@ -215,6 +216,13 @@ public class ForgeNewInstallTask extends Task<GameInstancePatch> {
         this.installer = installer;
         this.selfVersion = selfVersion;
 
+        setResources(
+                TaskResource.gameInstance(gameRepository.getInstanceRoot(manifest.id())),
+                TaskResource.gameDirectory(gameRepository.getLibrariesDirectory(manifest)),
+                TaskResource.gameDirectory(gameRepository.getBaseDirectory().resolve("lib")),
+                TaskResource.archive(installer));
+        releaseResourcesBeforeDependencies();
+
         setSignificance(TaskSignificance.MAJOR);
     }
 
@@ -387,7 +395,11 @@ public class ForgeNewInstallTask extends Task<GameInstancePatch> {
 
     @Override
     public void execute() throws Exception {
-        tempDir = Files.createTempDirectory("forge_installer");
+        Path stagingDirectory = gameRepository.getInstanceRoot(manifest.id()).resolve(".xyml-installers");
+        Files.createDirectories(stagingDirectory);
+        tempDir = Files.createTempDirectory(stagingDirectory, "forge-installer-")
+                .toAbsolutePath()
+                .normalize();
 
         Map<String, String> vars = new HashMap<>();
 
@@ -422,9 +434,13 @@ public class ForgeNewInstallTask extends Task<GameInstancePatch> {
                         .map(processor -> createProcessorTask(processor, vars))
                         .toArray(Task<?>[]::new));
 
-        dependencies.add(
-                processorsTask.thenComposeAsync(
-                        dependencyManager.checkLibraryCompletionAsync(forgeVersion, true)));
+        Task<?> installation = processorsTask.thenComposeAsync(
+                dependencyManager.checkLibraryCompletionAsync(forgeVersion, true));
+        Path temporaryDirectory = Objects.requireNonNull(tempDir, "temporary installer directory");
+        dependencies.add(installation.whenCompleteWithResources(
+                getExecutor(),
+                failure -> FileUtils.deleteDirectory(temporaryDirectory),
+                TaskResource.gameDirectory(temporaryDirectory)).asOrchestration());
 
         setResult(GameInstancePatch.fromManifest(
                 forgeVersion,
@@ -440,6 +456,7 @@ public class ForgeNewInstallTask extends Task<GameInstancePatch> {
 
     @Override
     public void postExecute() throws Exception {
-        FileUtils.deleteDirectory(tempDir);
+        // Temporary-directory removal is a terminal cleanup dependency so it retains an exact directory lease after
+        // this task hands its shared library resources to the dynamically created installation branch.
     }
 }

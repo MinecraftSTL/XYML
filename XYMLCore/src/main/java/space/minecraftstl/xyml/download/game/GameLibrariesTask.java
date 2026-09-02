@@ -90,7 +90,18 @@ public final class GameLibrariesTask extends Task<Void> {
         setStage("xyml.install.libraries");
         setSignificance(TaskSignificance.MODERATE);
         GameRepository gameRepository = dependencyManager.getGameRepository();
-        setResources(TaskResource.gameDirectory(gameRepository.getLibrariesDirectory(manifest)));
+        TaskResource librariesResource = TaskResource.gameDirectory(gameRepository.getLibrariesDirectory(manifest));
+        if (gameRepository instanceof DefaultGameRepository defaultGameRepository) {
+            // Forge 1.5.2 publishes a second set of dependencies below <base>/lib rather than <base>/libraries.
+            setResources(
+                    librariesResource,
+                    TaskResource.gameDirectory(defaultGameRepository.getBaseDirectory().resolve("lib")));
+        } else {
+            setResources(librariesResource);
+        }
+        // The broad shared-directory lease protects parsing and the direct OptiFine/bootstrap/FML writes only. Each
+        // generated download task owns its exact target after this handoff.
+        releaseResourcesBeforeDependencies();
     }
 
     @Override

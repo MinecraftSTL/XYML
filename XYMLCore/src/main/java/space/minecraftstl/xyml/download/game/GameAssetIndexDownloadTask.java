@@ -45,9 +45,11 @@ public final class GameAssetIndexDownloadTask extends Task<Void> {
     private final AbstractDependencyManager dependencyManager;
     private final GameInstanceManifest manifest;
     private final boolean forceDownloading;
+    /// Immutable index destination used for both arbitration and publication.
+    private final Path assetIndexFile;
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    /// Creates a game-directory-scoped asset-index download task.
+    /// Creates an asset-index download task scoped to its exact publication file.
     ///
     /// @param dependencyManager repository and download services
     /// @param manifest resolved game manifest
@@ -59,11 +61,13 @@ public final class GameAssetIndexDownloadTask extends Task<Void> {
         this.dependencyManager = dependencyManager;
         this.manifest = manifest;
         this.forceDownloading = forceDownloading;
-        setSignificance(TaskSignificance.MODERATE);
         AssetIndexInfo assetIndexInfo = manifest.getAssetIndex();
-        setResources(TaskResource.gameDirectory(dependencyManager.getGameRepository().getAssetDirectory(
-                manifest.id(),
-                assetIndexInfo.getId())));
+        this.assetIndexFile = dependencyManager.getGameRepository()
+                .getIndexFile(manifest.id(), assetIndexInfo.getId())
+                .toAbsolutePath()
+                .normalize();
+        setSignificance(TaskSignificance.MODERATE);
+        setResources(TaskResource.downloadTarget(assetIndexFile));
     }
 
     @Override
@@ -74,7 +78,6 @@ public final class GameAssetIndexDownloadTask extends Task<Void> {
     @Override
     public void execute() {
         AssetIndexInfo assetIndexInfo = manifest.getAssetIndex();
-        Path assetIndexFile = dependencyManager.getGameRepository().getIndexFile(manifest.id(), assetIndexInfo.getId());
         boolean verifyHashCode = StringUtils.isNotBlank(assetIndexInfo.getSha1()) && assetIndexInfo.getUrl().contains(assetIndexInfo.getSha1());
 
         if (Files.exists(assetIndexFile) && !forceDownloading) {

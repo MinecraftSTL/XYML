@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.download.optifine.OptiFineInstallTask;
 import space.minecraftstl.xyml.game.Artifact;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
@@ -200,28 +201,41 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                 .setResources(operationResource, instanceResource);
     }
 
+    /// {@inheritDoc}
     @Override
-    public Task<GameInstanceManifest> installLibraryAsync(String gameVersion, GameInstanceManifest baseVersion, String libraryId, String libraryVersion) {
+    public Task<GameInstanceManifest> installLibraryAsync(
+            String gameVersion,
+            GameInstanceManifest baseVersion,
+            String libraryId,
+            String libraryVersion) {
         VersionList<?> versionList = getVersionList(libraryId);
-        return versionList.loadAsync(gameVersion)
+        TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(baseVersion.id()));
+        TaskResource librariesResource = TaskResource.gameDirectory(repository.getLibrariesDirectory(baseVersion));
+        Task<GameInstanceManifest> installation = versionList.loadAsync(gameVersion)
                 .thenComposeAsync(() -> installLibraryAsync(baseVersion, versionList.getVersion(gameVersion, libraryVersion)
                         .orElseThrow(() -> new IOException("Remote library " + libraryId + " has no version " + libraryVersion))))
-                .releaseResourcesBeforeDependencies()
-                .withStage(String.format("xyml.install.%s:%s", libraryId, libraryVersion))
-                .setResources(
-                        TaskResource.gameInstance(repository.getInstanceRoot(baseVersion.id())),
-                        TaskResource.gameDirectory(repository.getLibrariesDirectory(baseVersion)));
+                .setResources(instanceResource, librariesResource)
+                .releaseResourcesBeforeDependents()
+                .releaseResourcesBeforeDependencies();
+        return installation.withStage(String.format("xyml.install.%s:%s", libraryId, libraryVersion));
     }
 
+    /// {@inheritDoc}
     @Override
     public Task<GameInstanceManifest> installLibraryAsync(GameInstanceManifest baseVersion, RemoteVersion libraryVersion) {
         AtomicReference<GameInstanceManifest> removedLibraryVersion = new AtomicReference<>();
+        TaskResource instanceResource = TaskResource.gameInstance(repository.getInstanceRoot(baseVersion.id()));
+        TaskResource librariesResource = TaskResource.gameDirectory(repository.getLibrariesDirectory(baseVersion));
 
-        return removeLibraryAsync(baseVersion, libraryVersion.getLibraryId())
+        Task<GameInstancePatch> installation = removeLibraryAsync(baseVersion, libraryVersion.getLibraryId())
                 .thenComposeAsync(version -> {
                     removedLibraryVersion.set(version);
                     return libraryVersion.getInstallTask(this, version);
                 })
+                .setResources(instanceResource, librariesResource)
+                .releaseResourcesBeforeDependents()
+                .releaseResourcesBeforeDependencies();
+        return installation
                 .thenApplyAsync(patch -> {
                     if (patch == null) {
                         return removedLibraryVersion.get();
@@ -229,41 +243,51 @@ public class DefaultDependencyManager extends AbstractDependencyManager {
                         return removedLibraryVersion.get().addPatch(patch);
                     }
                 })
-                .withStage(String.format("xyml.install.%s:%s", libraryVersion.getLibraryId(), libraryVersion.getSelfVersion()))
-                .setResources(
-                        TaskResource.gameInstance(repository.getInstanceRoot(baseVersion.id())),
-                        TaskResource.gameDirectory(repository.getLibrariesDirectory(baseVersion)));
+                .setResources(instanceResource, librariesResource)
+                .releaseResourcesBeforeDependents()
+                .releaseResourcesBeforeDependencies()
+                .withStage(String.format(
+                        "xyml.install.%s:%s",
+                        libraryVersion.getLibraryId(),
+                        libraryVersion.getSelfVersion()));
     }
 
+    /// Selects and runs a supported local library installer under independently declared resource phases.
+    ///
+    /// @param oldVersion destination manifest before applying the selected patch
+    /// @param installer local installer archive
+    /// @return task producing the updated destination manifest
     public Task<GameInstanceManifest> installLibraryAsync(GameInstanceManifest oldVersion, Path installer) {
-        return Task
-                .composeAsync(() -> {
-                    try {
-                        return CleanroomInstallTask.install(this, oldVersion, installer);
-                    } catch (IOException ignore) {
-                    }
+        Path installerPath = installer.toAbsolutePath().normalize();
+        TaskResource operationResource = TaskResource.repositoryOperation(repository.getBaseDirectory());
+        TaskResource archiveResource = TaskResource.archive(installerPath);
+        Task<GameInstancePatch> selection = Task.composeAsync(() -> {
+            try {
+                return CleanroomInstallTask.install(this, oldVersion, installerPath);
+            } catch (IOException ignore) {
+            }
 
-                    try {
-                        return NeoForgeInstallTask.install(this, oldVersion, installer);
-                    } catch (IOException ignore) {
-                    }
+            try {
+                return NeoForgeInstallTask.install(this, oldVersion, installerPath);
+            } catch (IOException ignore) {
+            }
 
-                    try {
-                        return ForgeInstallTask.install(this, oldVersion, installer);
-                    } catch (IOException ignore) {
-                    }
+            try {
+                return ForgeInstallTask.install(this, oldVersion, installerPath);
+            } catch (IOException ignore) {
+            }
 
-                    try {
-                        return OptiFineInstallTask.install(this, oldVersion, installer);
-                    } catch (IOException ignore) {
-                    }
+            try {
+                return OptiFineInstallTask.install(this, oldVersion, installerPath);
+            } catch (IOException ignore) {
+            }
 
-                    throw new UnsupportedLibraryInstallerException();
-                })
+            throw new UnsupportedLibraryInstallerException();
+        })
+                .setResources(operationResource, archiveResource);
+        return selection
                 .thenApplyAsync(patch -> patch == null ? oldVersion : oldVersion.addPatch(patch))
-                .setResources(
-                        TaskResource.gameInstance(repository.getInstanceRoot(oldVersion.id())),
-                        TaskResource.gameDirectory(repository.getLibrariesDirectory(oldVersion)));
+                .asOrchestration();
     }
 
     public static class UnsupportedLibraryInstallerException extends Exception {

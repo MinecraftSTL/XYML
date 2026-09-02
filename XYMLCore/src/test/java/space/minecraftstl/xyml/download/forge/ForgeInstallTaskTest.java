@@ -18,13 +18,23 @@
 package space.minecraftstl.xyml.download.forge;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.download.DefaultCacheRepository;
+import space.minecraftstl.xyml.download.DefaultDependencyManager;
+import space.minecraftstl.xyml.download.MojangDownloadProvider;
 import space.minecraftstl.xyml.download.UnsupportedInstallationException;
+import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
+import space.minecraftstl.xyml.task.TaskResource;
 
+import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,6 +43,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /// Verifies Forge installation compatibility checks.
 @NotNullByDefault
 public final class ForgeInstallTaskTest {
+    /// Temporary repository root used by resource declaration tests.
+    @TempDir
+    private Path temporaryDirectory;
 
     /// Existing Cleanroom patches reject Forge with the stable compatibility reason.
     @Test
@@ -51,6 +64,43 @@ public final class ForgeInstallTaskTest {
     public void acceptsInstancesWithoutCleanroom() {
         assertDoesNotThrow(
                 () -> ForgeInstallTask.checkCleanroomCompatibility(resolvedWithPatch("fabric"), "1.12.2"));
+    }
+
+    /// Verifies Forge installation stages declare every repository tree written by processors and library checks.
+    @Test
+    public void declaresInstanceLibraryAndLegacyLibraryResources() {
+        DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("repository"));
+        DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
+                repository,
+                new MojangDownloadProvider(),
+                new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
+        GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("forge-resource-test"));
+        @Unmodifiable Set<TaskResource> expected = Set.of(
+                TaskResource.gameInstance(repository.getInstanceRoot(manifest.id())),
+                TaskResource.gameDirectory(repository.getLibrariesDirectory(manifest)),
+                TaskResource.gameDirectory(repository.getBaseDirectory().resolve("lib")));
+        ForgeRemoteVersion remote = new ForgeRemoteVersion(
+                "1.20.1",
+                "47.3.0",
+                Instant.EPOCH,
+                List.of("https://example.invalid/forge-installer.jar"));
+
+        assertEquals(expected, new ForgeInstallTask(dependencyManager, manifest, remote).getResources());
+        @Unmodifiable Set<TaskResource> expectedLocal = Set.of(
+                TaskResource.gameInstance(repository.getInstanceRoot(manifest.id())),
+                TaskResource.gameDirectory(repository.getLibrariesDirectory(manifest)),
+                TaskResource.gameDirectory(repository.getBaseDirectory().resolve("lib")),
+                TaskResource.archive(temporaryDirectory.resolve("forge-installer.jar")));
+        assertEquals(expectedLocal, new ForgeNewInstallTask(
+                dependencyManager,
+                manifest,
+                "47.3.0",
+                temporaryDirectory.resolve("forge-installer.jar")).getResources());
+        assertEquals(expectedLocal, new ForgeOldInstallTask(
+                dependencyManager,
+                manifest,
+                "47.3.0",
+                temporaryDirectory.resolve("forge-installer.jar")).getResources());
     }
 
     /// Creates resolved manifest views containing one loader patch.

@@ -90,23 +90,17 @@ public class GameInstallTask extends Task<GameInstancePatch> {
         setResult(patch);
 
         GameInstanceManifest version = new GameInstanceManifest(this.manifest.id()).addPatch(patch);
-        TaskResource instanceResource = TaskResource.gameInstance(gameRepository.getInstanceRoot(version.id()));
-        TaskResource assetResource = TaskResource.gameDirectory(
-                gameRepository.getAssetDirectory(version.id(), version.getAssetIndex().getId()));
-        TaskResource libraryResource = TaskResource.gameDirectory(gameRepository.getLibrariesDirectory(version));
         Task<?> assetsAndLibraries = Task.allOf(
                 new GameAssetDownloadTask(dependencyManager, version, GameAssetDownloadTask.DOWNLOAD_INDEX_FORCIBLY, true),
                 new GameLibrariesTask(dependencyManager, version, true)
-        ).setResources(assetResource, libraryResource).withRunAsync(() -> {
-            // ignore failure
-        }).setResources(assetResource, libraryResource).releaseResourcesBeforeDependencies();
+        ).withComposeAsync(Task.runAsync(() -> {
+            // Asset and library repair is intentionally optional during base-game installation.
+        }).asOrchestration()).asOrchestration();
         Task<?> installation = Task.allOf(
                 new GameDownloadTask(dependencyManager, remote.getGameVersion(), version),
                 assetsAndLibraries
-        ).setResources(instanceResource, assetResource, libraryResource).releaseResourcesBeforeDependencies();
-        dependencies.add(installation.thenComposeAsync(gameRepository.saveAsync(version))
-                .setResources(instanceResource, assetResource, libraryResource)
-                .releaseResourcesBeforeDependencies());
+        ).asOrchestration();
+        dependencies.add(installation.thenComposeAsync(gameRepository.saveAsync(version)));
     }
 
 }

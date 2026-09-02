@@ -63,13 +63,19 @@ public final class GameAssetDownloadTask extends Task<Void> {
         this.dependencyManager = dependencyManager;
         this.manifest = manifest.resolve(dependencyManager.getGameRepository());
         this.assetIndexInfo = this.manifest.getAssetIndex();
-        this.assetIndexFile = dependencyManager.getGameRepository().getIndexFile(manifest.id(), assetIndexInfo.getId());
+        this.assetIndexFile = dependencyManager.getGameRepository()
+                .getIndexFile(this.manifest.id(), assetIndexInfo.getId())
+                .toAbsolutePath()
+                .normalize();
         this.integrityCheck = integrityCheck;
 
         setStage("xyml.install.assets");
         setResources(TaskResource.gameDirectory(dependencyManager.getGameRepository().getAssetDirectory(
                 this.manifest.id(),
                 assetIndexInfo.getId())));
+        // Keep the shared asset-directory lease through index parsing and direct cache writes, then let each
+        // generated object download acquire its exact target independently.
+        releaseResourcesBeforeDependencies();
         dependents.add(new GameAssetIndexDownloadTask(dependencyManager, this.manifest, forceDownloadingIndex));
     }
 
