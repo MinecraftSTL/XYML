@@ -62,12 +62,27 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static space.minecraftstl.xyml.ui.swing.SwingFileTransferTestSupport.fileTransfer;
+import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Verifies lazy installer-state activation, safe local actions, and exact remote-version task handoff.
 @NotNullByDefault
 final class InstanceInstallerPanelTest {
     /// The common instance identifier supplied by all focused panel scenarios.
     private static final GameInstanceID INSTANCE_ID = new GameInstanceID("instance");
+
+    /// The visible installer heading identifies the instance whose components will change.
+    @Test
+    void titleIncludesTargetInstanceIdentifier() {
+        InstanceInstallerPanel panel = createPanel(
+                new RecordingInstallerService(),
+                wizardWith(List.of()),
+                new RecordingInteractions());
+
+        EdtDispatcher.executeAndWait(() -> {
+            assertEquals(i18n("install.change_version.title", INSTANCE_ID.id()), panel.title());
+            panel.close();
+        });
+    }
 
     /// Activation alone starts exactly one asynchronous snapshot read and seeds retained loader state locally.
     @Test

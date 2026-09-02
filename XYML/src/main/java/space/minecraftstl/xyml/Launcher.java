@@ -573,8 +573,8 @@ public final class Launcher {
             LOG.info("Current Directory: " + Metadata.CURRENT_DIRECTORY);
             LOG.info("XYML User Home: " + Metadata.XYML_USER_HOME);
             LOG.info("XYML Local Home: " + Metadata.XYML_LOCAL_HOME);
-            LOG.info("XYML Jar Path: " + Lang.requireNonNullElse(JarUtils.thisJarPath(), "Not Found"));
-            LOG.info("XYML Log File: " + Lang.requireNonNullElse(LOG.getLogFile(), "In Memory"));
+            LOG.info("XYML Jar Path: " + Objects.requireNonNullElse(JarUtils.thisJarPath(), "Not Found"));
+            LOG.info("XYML Log File: " + Objects.requireNonNullElse(LOG.getLogFile(), "In Memory"));
             LOG.info("JVM Max Memory: " + MEGABYTES.formatBytes(Runtime.getRuntime().maxMemory()));
             try {
                 for (MemoryPoolMXBean bean : ManagementFactory.getMemoryPoolMXBeans()) {

@@ -229,11 +229,11 @@ public final class InstanceInstallerPanel extends JPanel implements AutoCloseabl
                 this::installDroppedOffline);
     }
 
-    /// Returns the localized outer tab title used by the containing instance-management view.
+    /// Returns the localized page title including the target instance identifier.
     ///
     /// @return non-blank installer-management title
     public String title() {
-        return i18n("settings.tabs.installers");
+        return i18n("install.change_version.title", instanceId.id());
     }
 
     /// Returns the latest successfully rendered installer snapshot, or null before loading succeeds.

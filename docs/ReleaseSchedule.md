@@ -56,7 +56,8 @@ synchronization must carry that stable baseline to every release branch.
 | `alpha` | Alpha | Testing by a selected group |
 | `dev` | Dev | Default branch for feature and fix integration |
 
-GitHub's default branch should be `dev`. Feature and fix branches start from `dev` and merge back into `dev` after their focused tests pass.
+GitHub's default branch should be `dev`. Feature and fix branches start from `dev` and merge back into `dev` after
+their focused tests pass. A feature or fix branch is never a release-channel source.
 
 ```mermaid
 flowchart LR
@@ -65,14 +66,23 @@ flowchart LR
     A -->|"--no-ff promotion"| B["beta"]
     B -->|"--no-ff promotion"| S["main / stable"]
     H["hotfix/*"] -->|"--no-ff promotion"| S
-    S -. "forward sync" .-> B
-    B -. "forward sync" .-> A
-    A -. "forward sync" .-> D
+    S -. "Stable baseline sync" .-> B
+    B -. "Stable baseline sync" .-> A
+    A -. "Stable baseline sync" .-> D
 ```
 
-Every merge toward a more stable channel must use `git merge --no-ff`, including `hotfix/* -> main`. This preserves the tested candidate boundary as an explicit merge commit. After a stable hotfix or promotion, synchronize `main -> beta -> alpha -> dev` one adjacent branch at a time. Do not rebase or force-push shared release branches.
+Every merge toward a more stable channel must use `git merge --no-ff`, including `hotfix/* -> main`. Release branches
+may be synchronized toward a less stable channel only when a Stable promotion or hotfix has changed the Stable
+baseline, and only one adjacent channel at a time: `main -> beta -> alpha -> dev`. Ordinary `alpha -> dev` or
+`beta -> alpha` synchronization is not a release boundary and is not part of the normal workflow. Each synchronization
+must directly use the preceding baseline carrier: the Stable release or hotfix merge on `main`, then each preceding
+synchronization merge. Unrelated commits cannot be inserted into that reverse chain. Do not rebase or force-push
+shared release branches.
 
-The release-policy workflow validates adjacent branch flow before merge and audits the resulting promotion commit after merge. Repository rules must also allow merge commits for release PRs; a post-merge audit can detect, but cannot retroactively prevent, a squash or rebase merge.
+The release-policy workflow validates the exact base and source commits before merge, including the complete Stable
+baseline chain, and audits the resulting release merge afterward. The post-merge audit requires the merge result to
+take `stableVersion` from its second parent. Repository rules must also allow merge commits for release PRs; the
+post-merge audit still detects squash or rebase merges that bypass that requirement.
 
 ## Distribution and Feedback
 
@@ -98,13 +108,23 @@ The build accepts these release inputs:
 - `BUILD_NUMBER`: the final positive decimal component used for an ordinary CI build when `RELEASE_VERSION` is absent.
 - `STABLE_VERSION`: an optional override of `stableVersion` in `config/project.properties`.
 
-The root Gradle tasks in the `stl` group infer versions from Git topology. A channel counter is the number
-of first-parent commits from the merge base with its adjacent, more stable branch to the selected release commit.
-`buildMain`, `buildBeta`, `buildAlpha`, and `buildDev` inject that inferred version into their isolated builds.
+The root Gradle tasks in the `stl` group infer versions from Git topology. Beta, Alpha, and Dev form hierarchical
+epochs. A promotion snapshots the source channel's complete prefix and clears the target channel and every less stable
+counter. A new Stable baseline is carried by the explicit adjacent sync chain `main -> beta -> alpha -> dev`.
+Therefore, a new Beta `x.y.z.b` makes Alpha `x.y.z.b.0` and Dev `x.y.z.b.0.0`; a new Alpha `x.y.z.b.a` makes Dev
+`x.y.z.b.a.0`. A less stable branch does not need a reverse merge from the promoted channel: its first commit after
+the promotion inherits the new prefix. `buildMain`, `buildBeta`, `buildAlpha`, and `buildDev` inject the inferred
+version into their isolated builds. Histories without an identifiable promotion boundary retain the legacy merge-base
+calculation and are not renumbered.
 
-Feature and detached builds keep the six-component Dev shape `x.y.z.0.0.d`. Their `d` is the Dev counter inherited at
-the merge base with `dev`, plus the number of first-parent commits after that branch point. Uncommitted changes do not
-add a version component. Other official build invocations still reject missing or malformed release inputs.
+For a selective Dev promotion, suppose A is `1.0.0.0.0.0` and the following B is `1.0.0.0.0.1`. Merge A into Alpha,
+producing `1.0.0.0.1`. B remains `1.0.0.0.0.1`; the first subsequent Dev commit C, made after that Alpha promotion,
+starts the new epoch at `1.0.0.0.1.0`.
+
+Feature and detached builds keep the six-component Dev shape `x.y.z.0.0.d`. Their `d` is the first-parent distance
+from the Alpha merge base to the newest reachable commit on `dev`'s first-parent history. This keeps the third Dev
+commit at `.3`; commits made only on the feature branch and uncommitted changes do not advance it. Other official build
+invocations still reject missing or malformed release inputs.
 
 The Github Release publishing workflow runs only from `main`. It creates a Stable release and updates only the Stable
 channel descriptor; it does not publish Beta, Alpha, or Dev releases. Official-website distribution follows the table
