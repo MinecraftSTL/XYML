@@ -40,6 +40,7 @@ import java.util.Objects;
 /// @param javaRuntime immutable selected-runtime context and optional repair boundary
 /// @param maxMemoryMiB configured maximum heap in MiB, or null when automatic or unknown
 /// @param logLines immutable console or persisted-log lines in source order
+/// @param missingDependencySearch optional application boundary for searching named missing mods
 @NotNullByDefault
 public record LogAnalyzable(
         @Nullable String gameVersion,
@@ -50,7 +51,8 @@ public record LogAnalyzable(
         @Nullable Path gameDirectory,
         JavaRuntimeContext javaRuntime,
         @Nullable Integer maxMemoryMiB,
-        @Unmodifiable List<String> logLines) {
+        @Unmodifiable List<String> logLines,
+        @Nullable MissingDependencySearch missingDependencySearch) {
     /// Validates scalar context and defensively copies the log snapshot.
     public LogAnalyzable {
         Objects.requireNonNull(exitType, "exitType");
@@ -58,6 +60,42 @@ public record LogAnalyzable(
         Objects.requireNonNull(javaRuntime, "javaRuntime");
         validatePositive("maxMemoryMiB", maxMemoryMiB);
         logLines = List.copyOf(Objects.requireNonNull(logLines, "logLines"));
+    }
+
+    /// Creates analysis input from an immutable runtime context without an application search boundary.
+    ///
+    /// This overload preserves the pre-search-boundary constructor contract for Core and MCP callers.
+    ///
+    /// @param gameVersion detected Minecraft version, or null when unavailable
+    /// @param mainClass resolved launch main class, or null when unavailable
+    /// @param exitType classified process exit
+    /// @param operatingSystem operating system used for the launch
+    /// @param systemCodePage Windows ANSI code page, or a negative value when unavailable
+    /// @param gameDirectory resolved game directory, or null when unavailable
+    /// @param javaRuntime immutable selected-runtime context and optional repair boundary
+    /// @param maxMemoryMiB configured maximum heap in MiB, or null when automatic or unknown
+    /// @param logLines immutable console or persisted-log lines in source order
+    public LogAnalyzable(
+            @Nullable String gameVersion,
+            @Nullable String mainClass,
+            ProcessListener.ExitType exitType,
+            OperatingSystem operatingSystem,
+            int systemCodePage,
+            @Nullable Path gameDirectory,
+            JavaRuntimeContext javaRuntime,
+            @Nullable Integer maxMemoryMiB,
+            List<String> logLines) {
+        this(
+                gameVersion,
+                mainClass,
+                exitType,
+                operatingSystem,
+                systemCodePage,
+                gameDirectory,
+                javaRuntime,
+                maxMemoryMiB,
+                logLines,
+                null);
     }
 
     /// Creates analysis input without an application-level Java repair boundary.
@@ -101,7 +139,8 @@ public record LogAnalyzable(
                         javaBits,
                         null),
                 maxMemoryMiB,
-                logLines);
+                logLines,
+                null);
     }
 
     /// Returns the selected Java executable when launch context is available.
@@ -160,7 +199,8 @@ public record LogAnalyzable(
                 gameDirectory,
                 javaRuntime,
                 maxMemoryMiB,
-                replacementLogLines);
+                replacementLogLines,
+                missingDependencySearch);
     }
 
     /// Returns a context copy that can create an application-level Java replacement task.
@@ -177,7 +217,26 @@ public record LogAnalyzable(
                 gameDirectory,
                 javaRuntime.withRepair(Objects.requireNonNull(repair, "repair")),
                 maxMemoryMiB,
-                logLines);
+                logLines,
+                missingDependencySearch);
+    }
+
+    /// Returns a context copy that can create a search task for named missing dependencies.
+    ///
+    /// @param search missing-dependency search task factory
+    /// @return context copy retaining all launch metadata and logs
+    public LogAnalyzable withMissingDependencySearch(MissingDependencySearch search) {
+        return new LogAnalyzable(
+                gameVersion,
+                mainClass,
+                exitType,
+                operatingSystem,
+                systemCodePage,
+                gameDirectory,
+                javaRuntime,
+                maxMemoryMiB,
+                logLines,
+                Objects.requireNonNull(search, "search"));
     }
 
     /// Reports whether either launch path contains a character outside ASCII.
@@ -213,6 +272,20 @@ public record LogAnalyzable(
         ///
         /// @return task that replaces and selects a compatible Java runtime
         Task<?> createTask();
+    }
+
+    /// Creates a stopped task that searches for one or more validated missing mod identifiers.
+    @FunctionalInterface
+    @NotNullByDefault
+    public interface MissingDependencySearch {
+        /// Creates a fresh stopped search task.
+        ///
+        /// The supplied identifiers are immutable, ordered by their appearance in the diagnosis, and contain only
+        /// validated mod IDs. The application layer decides how the search is presented.
+        ///
+        /// @param dependencyIds validated missing mod identifiers
+        /// @return task that opens or prepares the corresponding search
+        Task<?> createTask(@Unmodifiable List<String> dependencyIds);
     }
 
     /// Immutable selected-runtime metadata and optional application repair boundary.

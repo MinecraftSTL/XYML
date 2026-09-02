@@ -85,7 +85,7 @@ class SolverTest {
         assertSame(task, configurator.task);
     }
 
-    /// Rejects the HMAT-style Java replacement factory when application repair context is unavailable.
+    /// Rejects the XYAT-style Java replacement factory when application repair context is unavailable.
     @Test
     void rejectsUninstallJreSolverWithoutRepairContext() {
         IllegalArgumentException exception = assertThrows(

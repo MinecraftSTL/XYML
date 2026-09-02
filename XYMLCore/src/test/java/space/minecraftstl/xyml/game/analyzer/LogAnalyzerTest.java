@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -289,6 +290,35 @@ class LogAnalyzerTest {
         assertEquals(List.of("vampirism (required by werewolves)"), result.solver().messageArguments());
     }
 
+    /// Exposes Forge's validated dependency ID to the application search boundary.
+    ///
+    /// @throws IOException when the real regression log cannot be read
+    @Test
+    void forgeMissingDependencySolverSearchesNamedDependency() throws IOException {
+        Task<?> searchTask = Task.completed(null);
+        AtomicReference<List<String>> searchedIds = new AtomicReference<>(List.of());
+        LogAnalyzable input = input(
+                loadLines("/logs/forgemod_resolution.txt"),
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR)
+                .withMissingDependencySearch(ids -> {
+                    searchedIds.set(ids);
+                    return searchTask;
+                });
+
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.FORGE_MISSING_DEPENDENCY,
+                ForgeMissingDependencyAnalyzer.class);
+        assertEquals(List.of("vampirism"), searchedIds.get());
+        assertSame(searchTask, result.solver().createTask());
+    }
+
     /// Rejects Forge's unsupported-version entry when no dependency is actually missing.
     ///
     /// @throws IOException when the real regression log cannot be read
@@ -330,6 +360,35 @@ class LogAnalyzerTest {
                 ResultID.FABRIC_MISSING_DEPENDENCY,
                 FabricMissingDependencyAnalyzer.class);
         assertEquals(List.of("fabric (required by pca)"), result.solver().messageArguments());
+    }
+
+    /// Exposes Fabric's validated dependency ID to the application search boundary.
+    ///
+    /// @throws IOException when the real regression log cannot be read
+    @Test
+    void fabricMissingDependencySolverSearchesNamedDependency() throws IOException {
+        Task<?> searchTask = Task.completed(null);
+        AtomicReference<List<String>> searchedIds = new AtomicReference<>(List.of());
+        LogAnalyzable input = input(
+                loadLines("/logs/fabric-mod-missing.txt"),
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                17,
+                17,
+                ProcessListener.ExitType.APPLICATION_ERROR)
+                .withMissingDependencySearch(ids -> {
+                    searchedIds.set(ids);
+                    return searchTask;
+                });
+
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.FABRIC_MISSING_DEPENDENCY,
+                FabricMissingDependencyAnalyzer.class);
+        assertEquals(List.of("fabric"), searchedIds.get());
+        assertSame(searchTask, result.solver().createTask());
     }
 
     /// Detects multiple Fabric missing dependencies from the older resolution-list format.

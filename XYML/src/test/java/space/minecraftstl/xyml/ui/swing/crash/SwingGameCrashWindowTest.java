@@ -20,8 +20,13 @@ package space.minecraftstl.xyml.ui.swing.crash;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.game.Log;
+import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
+import space.minecraftstl.xyml.game.analyzer.ForgeMissingDependencyAnalyzer;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
+import space.minecraftstl.xyml.game.analyzer.ResultID;
+import space.minecraftstl.xyml.game.analyzer.Solver;
 import space.minecraftstl.xyml.launch.ProcessListener;
+import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.platform.Bits;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
@@ -34,6 +39,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -83,6 +89,35 @@ class SwingGameCrashWindowTest {
 
         assertTrue(window.isClosed());
         assertTrue(worker.isShutdown());
+    }
+
+    /// Starts an automatic missing-dependency solver as soon as analysis completes, without a second user click.
+    @Test
+    void automaticallyRunsMissingDependencySearchAfterAnalysis() throws Exception {
+        ControlledAnalysisService service = new ControlledAnalysisService();
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        AtomicInteger searchCalls = new AtomicInteger();
+        SwingGameCrashWindow window = window(service, worker);
+        Solver solver = Solver.ofTask(Task.runAsync(Runnable::run, searchCalls::incrementAndGet));
+        AnalyzeResult<LogAnalyzable> result = new AnalyzeResult<>(
+                new ForgeMissingDependencyAnalyzer(),
+                ResultID.FORGE_MISSING_DEPENDENCY,
+                solver);
+
+        try {
+            window.show();
+            EdtDispatcher.executeAndWait(() -> { });
+            service.result.complete(new GameCrashAnalysis(List.of(), List.of(result), Set.of()));
+            EdtDispatcher.executeAndWait(() -> { });
+            worker.submit(() -> { }).get(5, java.util.concurrent.TimeUnit.SECONDS);
+            EdtDispatcher.executeAndWait(() -> { });
+
+            assertEquals(1, searchCalls.get());
+            assertTrue(window.followUpCompletion().toCompletableFuture().isDone());
+        } finally {
+            window.close();
+            EdtDispatcher.executeAndWait(() -> { });
+        }
     }
 
     /// Maps every process-exit classification to a deliberate localized headline.

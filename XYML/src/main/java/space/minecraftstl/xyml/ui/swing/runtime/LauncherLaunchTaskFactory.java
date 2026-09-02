@@ -50,6 +50,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -101,7 +102,8 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                 request,
                 this::registerVisibility,
                 launchInteraction,
-                accountReauthentication);
+                accountReauthentication,
+                this.visibilityActions.openModSearch());
         this.launchScriptTaskBuilder = (request, scriptFile) -> createProductionLaunchScriptTask(
                 request,
                 scriptFile,
@@ -229,17 +231,20 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
     /// @param visibilityRegistrar factory-owned policy registrar
     /// @param launchInteraction native production launch-decision boundary
     /// @param accountReauthentication stable-ID credential recovery boundary
+    /// @param openMissingModSearch application action opening the Mods search page
     /// @return unstarted real game-launch task
     private static Task<ManagedProcess> createProductionTask(
             LaunchRequest request,
             VisibilityRegistrar visibilityRegistrar,
             LaunchInteraction launchInteraction,
-            AccountReauthentication accountReauthentication) {
+            AccountReauthentication accountReauthentication,
+            Consumer<String> openMissingModSearch) {
         LauncherStateDispatcher.requireEventThread();
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(visibilityRegistrar, "visibilityRegistrar");
         Objects.requireNonNull(launchInteraction, "launchInteraction");
         Objects.requireNonNull(accountReauthentication, "accountReauthentication");
+        Objects.requireNonNull(openMissingModSearch, "openMissingModSearch");
 
         GameDirectoryID gameDirectoryId = GameDirectoryID.parse(request.gameDirectoryId());
         XYMLGameRepository repository = GameDirectoryManager.getRepository(gameDirectoryId);
@@ -250,7 +255,8 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                         request,
                         visibilityRegistrar,
                         launchInteraction,
-                        accountReauthentication),
+                        accountReauthentication,
+                        openMissingModSearch),
                 Schedulers.io());
     }
 
@@ -298,12 +304,14 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
     /// @param visibilityRegistrar factory-owned policy registrar
     /// @param launchInteraction native production launch-decision boundary
     /// @param accountReauthentication stable-ID credential recovery boundary
+    /// @param openMissingModSearch application action opening the Mods search page
     /// @return unstarted real game-launch task
     private static Task<ManagedProcess> createLoadedProductionTask(
             LaunchRequest request,
             VisibilityRegistrar visibilityRegistrar,
             LaunchInteraction launchInteraction,
-            AccountReauthentication accountReauthentication) {
+            AccountReauthentication accountReauthentication,
+            Consumer<String> openMissingModSearch) {
         AtomicReference<@Nullable Task<ManagedProcess>> result = new AtomicReference<>();
         LauncherStateDispatcher.executeAndWait(() -> {
             AccountID accountId = AccountID.parse(request.accountId());
@@ -325,7 +333,8 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                     account,
                     instanceId,
                     launchInteraction,
-                    accountReauthentication);
+                    accountReauthentication,
+                    openMissingModSearch);
             configureLaunchModes(request, helper::setQuickPlayOption, helper::setTestMode);
             LauncherVisibility originalVisibility = helper.getLauncherVisibility();
             Task<ManagedProcess> processTask = helper.createLaunchTask();
@@ -334,7 +343,8 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                 visibilityRegistrar.accept(
                         process,
                         originalVisibility,
-                        helper.processLifecycleCompletion());
+                        helper.processLifecycleCompletion(),
+                        helper::missingModSearchOpened);
                 return process;
             }));
         });
@@ -433,7 +443,11 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
     void registerVisibility(
             ManagedProcess process,
             LauncherVisibility visibility) {
-        registerVisibility(process, visibility, CompletableFuture.completedFuture(null));
+        registerVisibility(
+                process,
+                visibility,
+                CompletableFuture.completedFuture(null),
+                () -> false);
     }
 
     /// Registers one original policy and its full process-listener completion signal.
@@ -444,16 +458,19 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
     private void registerVisibility(
             ManagedProcess process,
             LauncherVisibility visibility,
-            CompletionStage<@Nullable Void> processLifecycleCompletion) {
+            CompletionStage<@Nullable Void> processLifecycleCompletion,
+            BooleanSupplier missingModSearchOpened) {
         Objects.requireNonNull(process, "process");
         Objects.requireNonNull(visibility, "visibility");
         Objects.requireNonNull(processLifecycleCompletion, "processLifecycleCompletion");
+        Objects.requireNonNull(missingModSearchOpened, "missingModSearchOpened");
         if (closed.get()) {
             return;
         }
         RegisteredVisibility registration = new RegisteredVisibility(
                 visibility,
-                processLifecycleCompletion);
+                processLifecycleCompletion,
+                missingModSearchOpened);
         pendingVisibilities.put(process, registration);
         if (closed.get()) {
             pendingVisibilities.remove(process, registration);
@@ -472,7 +489,8 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                         process,
                         registration.visibility(),
                         visibilityActions,
-                        registration.processLifecycleCompletion());
+                        registration.processLifecycleCompletion(),
+                        registration.missingModSearchOpened());
             } catch (RuntimeException | Error failure) {
                 reportVisibilityFailure(
                         "apply " + registration.visibility() + " policy",
@@ -496,10 +514,32 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
             LauncherVisibility visibility,
             LaunchVisibilityActions visibilityActions,
             CompletionStage<@Nullable Void> processLifecycleCompletion) {
+        applyVisibilityPolicy(
+                process,
+                visibility,
+                visibilityActions,
+                processLifecycleCompletion,
+                () -> false);
+    }
+
+    /// Applies one captured policy while preserving the launcher after a successful missing-mod search.
+    ///
+    /// @param process exact managed process committed by the launch session
+    /// @param visibility original effective launcher visibility
+    /// @param visibilityActions runtime-owned close, hide, and show commands
+    /// @param processLifecycleCompletion completion after log and crash bookkeeping
+    /// @param missingModSearchOpened reports whether the search action opened the launcher successfully
+    static void applyVisibilityPolicy(
+            ManagedProcess process,
+            LauncherVisibility visibility,
+            LaunchVisibilityActions visibilityActions,
+            CompletionStage<@Nullable Void> processLifecycleCompletion,
+            BooleanSupplier missingModSearchOpened) {
         Objects.requireNonNull(process, "process");
         Objects.requireNonNull(visibility, "visibility");
         Objects.requireNonNull(visibilityActions, "visibilityActions");
         Objects.requireNonNull(processLifecycleCompletion, "processLifecycleCompletion");
+        Objects.requireNonNull(missingModSearchOpened, "missingModSearchOpened");
         switch (visibility) {
             case CLOSE -> runVisibilityAction("close launcher", visibilityActions.close());
             case KEEP -> {
@@ -509,8 +549,14 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
                 runVisibilityAction("hide launcher", visibilityActions.hide());
                 runAfterProcessLifecycle(
                         processLifecycleCompletion,
-                        "close hidden launcher after process exit",
-                        visibilityActions.close());
+                        "finish hidden launcher after process exit",
+                        () -> {
+                            if (missingModSearchOpened.getAsBoolean()) {
+                                visibilityActions.show().run();
+                            } else {
+                                visibilityActions.close().run();
+                            }
+                        });
             }
             case HIDE_AND_REOPEN -> {
                 runVisibilityAction("hide launcher", visibilityActions.hide());
@@ -534,12 +580,26 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
         processLifecycleCompletion.whenComplete((
                 @Nullable Void ignored,
                 @Nullable Throwable failure) -> {
-            if (failure != null) {
-                reportVisibilityFailure(
-                        "observe process lifecycle before " + actionName,
-                        failure);
+            Runnable completion = () -> {
+                if (failure != null) {
+                    reportVisibilityFailure(
+                            "observe process lifecycle before " + actionName,
+                            failure);
+                }
+                runVisibilityAction(actionName, action);
+            };
+            if (!SwingUtilities.isEventDispatchThread()) {
+                completion.run();
+                return;
             }
-            runVisibilityAction(actionName, action);
+            try {
+                Schedulers.io().execute(completion);
+            } catch (RuntimeException schedulingFailure) {
+                reportVisibilityFailure(
+                        "schedule " + actionName + " after process lifecycle",
+                        schedulingFailure);
+                completion.run();
+            }
         });
     }
 
@@ -609,24 +669,29 @@ public final class LauncherLaunchTaskFactory implements LaunchTaskFactory, AutoC
         /// @param process created managed process
         /// @param visibility captured launcher visibility
         /// @param processLifecycleCompletion completion after listener bookkeeping
+        /// @param missingModSearchOpened reports whether the automatic search opened the launcher
         void accept(
                 ManagedProcess process,
                 LauncherVisibility visibility,
-                CompletionStage<@Nullable Void> processLifecycleCompletion);
+                CompletionStage<@Nullable Void> processLifecycleCompletion,
+                BooleanSupplier missingModSearchOpened);
     }
 
     /// Pending policy and listener-completion boundary for one exact managed process.
     ///
     /// @param visibility captured launcher visibility
     /// @param processLifecycleCompletion completion after listener bookkeeping
+    /// @param missingModSearchOpened reports whether the automatic search opened the launcher
     @NotNullByDefault
     private record RegisteredVisibility(
             LauncherVisibility visibility,
-            CompletionStage<@Nullable Void> processLifecycleCompletion) {
+            CompletionStage<@Nullable Void> processLifecycleCompletion,
+            BooleanSupplier missingModSearchOpened) {
         /// Rejects incomplete registrations before they enter the concurrent map.
         private RegisteredVisibility {
             Objects.requireNonNull(visibility, "visibility");
             Objects.requireNonNull(processLifecycleCompletion, "processLifecycleCompletion");
+            Objects.requireNonNull(missingModSearchOpened, "missingModSearchOpened");
         }
     }
 }

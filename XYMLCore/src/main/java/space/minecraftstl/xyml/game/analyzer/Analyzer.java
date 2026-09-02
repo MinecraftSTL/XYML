@@ -42,7 +42,7 @@ public interface Analyzer<T> {
     /// Runs an ordered analyzer snapshot while isolating failures from individual analyzers.
     ///
     /// One analyzer exception is logged and does not prevent later analyzers from running. An exclusive result still
-    /// stops the driver immediately, matching the HMAT control-flow contract.
+    /// stops the driver immediately, matching the XYAT control-flow contract.
     ///
     /// @param analyzers ordered analyzers to invoke
     /// @param input immutable analysis input

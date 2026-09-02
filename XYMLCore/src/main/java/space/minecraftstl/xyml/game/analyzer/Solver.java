@@ -82,9 +82,51 @@ public interface Solver {
                 Objects.requireNonNull(task, "task"));
     }
 
+    /// Creates a missing-dependency search solver when the application supplied a search boundary.
+    ///
+    /// Without that boundary the same diagnosis remains a text-only repair proposal, which keeps Core usable by
+    /// command-line and MCP callers that do not own a launcher window.
+    ///
+    /// @param input immutable launch context
+    /// @param dependencyIds validated missing mod identifiers in stable source order
+    /// @param messageKey localization key describing the diagnosis
+    /// @param messageArguments immutable localization arguments
+    /// @param fallbackMessage presentation-independent diagnosis and repair text
+    /// @return automatic search solver when available, otherwise a text solver
+    static Solver ofMissingDependencySearch(
+            LogAnalyzable input,
+            @Unmodifiable List<String> dependencyIds,
+            String messageKey,
+            @Unmodifiable List<Object> messageArguments,
+            String fallbackMessage) {
+        LogAnalyzable checkedInput = Objects.requireNonNull(input, "input");
+        @Unmodifiable List<String> checkedDependencyIds = List.copyOf(
+                Objects.requireNonNull(dependencyIds, "dependencyIds"));
+        if (checkedDependencyIds.isEmpty()) {
+            throw new IllegalArgumentException("dependencyIds must not be empty");
+        }
+
+        String checkedMessageKey = Objects.requireNonNull(messageKey, "messageKey");
+        @Unmodifiable List<Object> checkedMessageArguments = List.copyOf(
+                Objects.requireNonNull(messageArguments, "messageArguments"));
+        String checkedFallbackMessage = Objects.requireNonNull(fallbackMessage, "fallbackMessage");
+        LogAnalyzable.@Nullable MissingDependencySearch search = checkedInput.missingDependencySearch();
+        if (search == null) {
+            return new TextSolver(checkedMessageKey, checkedMessageArguments, checkedFallbackMessage);
+        }
+        Task<?> searchTask = Objects.requireNonNull(
+                search.createTask(checkedDependencyIds),
+                "missing dependency search task");
+        return new TaskSolver(
+                checkedMessageKey,
+                checkedMessageArguments,
+                checkedFallbackMessage,
+                searchTask);
+    }
+
     /// Creates the Java-runtime replacement solver for one analyzable launch.
     ///
-    /// The input owns a Core-neutral repair boundary supplied by the application layer. This preserves HMAT's
+    /// The input owns a Core-neutral repair boundary supplied by the application layer. This preserves XYAT's
     /// `ofUninstallJRE(LogAnalyzable)` contract without making Core depend on the launcher's Java manager.
     ///
     /// @param input immutable launch context with an application Java repair boundary

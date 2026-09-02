@@ -60,8 +60,10 @@ public final class ForgeMissingDependencyAnalyzer implements Analyzer<LogAnalyza
         }
 
         Set<String> dependencies = new LinkedHashSet<>();
+        Set<String> dependencyIds = new LinkedHashSet<>();
         Matcher matcher = MISSING_DEPENDENCY.matcher(evidence.matcher().group("reason"));
         while (matcher.find()) {
+            dependencyIds.add(matcher.group("dependency"));
             dependencies.add(formatDependency(matcher));
         }
         if (dependencies.isEmpty()) {
@@ -72,7 +74,9 @@ public final class ForgeMissingDependencyAnalyzer implements Analyzer<LogAnalyza
         results.add(new AnalyzeResult<>(
                 this,
                 ResultID.FORGE_MISSING_DEPENDENCY,
-                new TextSolver(
+                Solver.ofMissingDependencySearch(
+                        input,
+                        List.copyOf(dependencyIds),
                         "game.crash.reason.log.forge_missing_dependency",
                         List.of(summary),
                         "Forge reported missing required mod dependencies: " + summary)));

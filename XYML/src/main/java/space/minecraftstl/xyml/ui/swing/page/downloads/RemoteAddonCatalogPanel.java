@@ -49,6 +49,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JTextField;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import javax.swing.event.ChangeListener;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import java.awt.Component;
@@ -165,6 +166,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Sparse-list listener that retries a user selection after its visible placeholder materializes.
     private final ListDataListener listDataListener = new CatalogListDataListener();
 
+    /// Viewport listener that retries a deferred search after Swing publishes a new extent.
+    private final ChangeListener viewportListener = event -> schedulePendingSearchCheck();
+
     /// Last successfully completed query, or null before the first source response and after criteria change.
     private @Nullable RemoteAddonCatalogQuery completedQuery;
 
@@ -203,6 +207,13 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
     /// Whether sort selector mutations are internal source publication rather than user criteria edits.
     private boolean applyingSortOptions;
+
+    /// Missing-dependency query waiting for the first layout to establish a result-list viewport, or null when none is
+    /// pending.
+    private @Nullable String pendingSearchText;
+
+    /// Whether one deferred pending-search check is already queued on the EDT.
+    private boolean pendingSearchCheckQueued;
 
     /// Whether this panel has permanently rejected user commands and worker callbacks.
     private volatile boolean closed;
@@ -317,6 +328,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             throw new IllegalArgumentException("progressAnimationDuration must not be negative");
         }
         choiceList = new ViewportChoiceList<>(dataSource, RemoteAddonCatalogItem::displayText);
+        choiceList.getViewport().addChangeListener(viewportListener);
         progressHost = new TaskProgressHostPanel(
                 resolvedTaskProgressStrings,
                 animator,
@@ -333,6 +345,64 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         return choiceList;
     }
 
+    /// Prefills the project query and starts its first provider page after a usable result viewport exists.
+    ///
+    /// The panel is often created and selected before Swing has completed the first parent layout. In that
+    /// state the request is retained and retried from the next layout/visibility callback instead of being
+    /// rejected as an unavailable viewport. This method must be called on the Swing event dispatch thread.
+    ///
+    /// @param searchText non-blank project or dependency identifier
+    public void openSearch(String searchText) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        String query = Objects.requireNonNull(searchText, "searchText").trim();
+        if (query.isEmpty()) {
+            throw new IllegalArgumentException("searchText must not be blank");
+        }
+        searchField.setText(query);
+        pendingSearchText = query;
+        if (measuredPageSize() > 0 && !catalogLoading && activeExecutor == null) {
+            pendingSearchText = null;
+            submitFirstPageSearch();
+        } else {
+            schedulePendingSearchCheck();
+        }
+    }
+
+    /// Queues one pending-search check after the current EDT event completes.
+    private void schedulePendingSearchCheck() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || pendingSearchText == null || pendingSearchCheckQueued) {
+            return;
+        }
+        pendingSearchCheckQueued = true;
+        EdtDispatcher.executeLater(this::submitPendingSearchIfReady);
+    }
+
+    /// Submits a retained programmatic query only after layout has produced a positive page size.
+    private void submitPendingSearchIfReady() {
+        EdtDispatcher.requireEventDispatchThread();
+        pendingSearchCheckQueued = false;
+        @Nullable String query = pendingSearchText;
+        if (query == null || closed) {
+            return;
+        }
+        if (!query.equals(searchField.getText().trim())) {
+            pendingSearchText = null;
+            return;
+        }
+        if (catalogLoading || activeExecutor != null) {
+            return;
+        }
+        if (measuredPageSize() <= 0) {
+            return;
+        }
+        pendingSearchText = null;
+        submitFirstPageSearch();
+    }
+
     /// Starts category discovery only when this panel receives a peer while visible.
     @Override
     public void addNotify() {
@@ -340,6 +410,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         EdtDispatcher.requireEventDispatchThread();
         if (isVisible()) {
             requestCategoriesForSelectedSource();
+            schedulePendingSearchCheck();
         }
     }
 
@@ -352,6 +423,16 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         if (visible && isDisplayable()) {
             EdtDispatcher.requireEventDispatchThread();
             requestCategoriesForSelectedSource();
+            schedulePendingSearchCheck();
+        }
+    }
+
+    /// Completes the first parent layout before checking a retained programmatic search request.
+    @Override
+    public void doLayout() {
+        super.doLayout();
+        if (pendingSearchText != null) {
+            schedulePendingSearchCheck();
         }
     }
 
@@ -802,6 +883,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         choiceList.reloadData();
         setStatus(page.items().isEmpty() ? strings.noResultsStatus() : "");
         updateControls();
+        schedulePendingSearchCheck();
     }
 
     /// Restores controls after a current provider request fails.
@@ -815,6 +897,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             catalogLoading = false;
             setStatus(strings.searchFailedStatus());
             updateControls();
+            schedulePendingSearchCheck();
         });
     }
 
@@ -1027,6 +1110,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             activeExecutor = null;
             setStatus(succeeded ? strings.installSucceededStatus() : strings.installFailedStatus());
             updateControls();
+            schedulePendingSearchCheck();
         });
     }
 
@@ -1059,6 +1143,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
         progressHost.clear();
         presentation.close();
+        schedulePendingSearchCheck();
     }
 
     /// Invalidates stale source and selection state after local criteria edits without starting a query.
@@ -1200,6 +1285,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Cancels live task state and releases all owned listeners and child presentation resources on the EDT.
     private void closeOnEventDispatchThread() {
         EdtDispatcher.requireEventDispatchThread();
+        pendingSearchText = null;
+        pendingSearchCheckQueued = false;
         @Nullable TaskExecutor executor = activeExecutor;
         activeExecutor = null;
         if (executor != null) {
@@ -1218,6 +1305,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
         searchField.getDocument().removeDocumentListener(criteriaListener);
         gameVersionField.getDocument().removeDocumentListener(criteriaListener);
+        choiceList.getViewport().removeChangeListener(viewportListener);
         choiceList.getChoiceModel().removeListDataListener(listDataListener);
         choiceList.close();
         pageCache.clear();

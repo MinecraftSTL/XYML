@@ -54,8 +54,10 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -115,6 +117,12 @@ public final class LauncherHelper {
     /// Required production Swing interaction services.
     private final ProductionInteractions productionInteractions;
 
+    /// Application-level action that opens the Mods search for a missing dependency.
+    private final @Nullable Consumer<String> openMissingModSearch;
+
+    /// Records that the automatic missing-mod action successfully made the launcher visible.
+    private final AtomicBoolean missingModSearchOpened = new AtomicBoolean();
+
     /// Creates a production helper with explicit Swing launch and account-recovery boundaries.
     ///
     /// @param repository repository containing the selected instance
@@ -128,12 +136,37 @@ public final class LauncherHelper {
             GameInstanceID selectedInstanceId,
             LaunchInteraction launchInteraction,
             AccountReauthentication accountReauthentication) {
+        this(
+                repository,
+                account,
+                selectedInstanceId,
+                launchInteraction,
+                accountReauthentication,
+                null);
+    }
+
+    /// Creates a production helper with an explicit missing-mod search boundary.
+    ///
+    /// @param repository repository containing the selected instance
+    /// @param account account used for launch authentication
+    /// @param selectedInstanceId stable selected instance identifier
+    /// @param launchInteraction production launch-decision presenter
+    /// @param accountReauthentication production credential-expiry recovery service
+    /// @param openMissingModSearch action opening the Mods search page for one dependency ID, or null when unavailable
+    public LauncherHelper(
+            XYMLGameRepository repository,
+            Account account,
+            GameInstanceID selectedInstanceId,
+            LaunchInteraction launchInteraction,
+            AccountReauthentication accountReauthentication,
+            @Nullable Consumer<String> openMissingModSearch) {
         this.repository = Objects.requireNonNull(repository);
         this.account = Objects.requireNonNull(account);
         this.selectedInstanceId = Objects.requireNonNull(selectedInstanceId);
         this.productionInteractions = new ProductionInteractions(
                 launchInteraction,
                 accountReauthentication);
+        this.openMissingModSearch = openMissingModSearch;
         this.setting = repository.getEffectiveGameSettings(selectedInstanceId);
         this.launcherVisibility = setting.getInheritable(GameSettings::launcherVisibilityProperty);
         this.showLogs = setting.getInheritable(GameSettings::showLogsProperty);
@@ -149,10 +182,33 @@ public final class LauncherHelper {
         return launcherVisibility;
     }
 
+    /// Reports whether the missing-mod search action successfully opened the launcher.
+    ///
+    /// The launch visibility adapter uses this outcome to preserve the search results page when the original policy
+    /// was `HIDE`; a failed search or a window closed before searching keeps the original close behavior.
+    ///
+    /// @return true after the search callback returns normally
+    public boolean missingModSearchOpened() {
+        return missingModSearchOpened.get();
+    }
+
+    /// Opens the application search boundary and records the successful handoff.
+    ///
+    /// @param dependencyId missing mod identifier selected by the analyzer
+    private void openMissingModSearch(String dependencyId) {
+        Consumer<String> action = Objects.requireNonNull(
+                openMissingModSearch,
+                "missing-mod search action");
+        action.accept(Objects.requireNonNull(dependencyId, "dependencyId"));
+        missingModSearchOpened.set(true);
+    }
+
     /// Returns the non-blocking signal completed after process-exit bookkeeping finishes.
     ///
     /// Swing visibility policy waits for this signal instead of raw `Process#onExit()` so closing or
-    /// reopening the launcher cannot race log draining, abnormal-launch marking, or crash diagnostics.
+    /// reopening the launcher cannot race log draining, abnormal-launch marking, or crash diagnostics. When
+    /// a production hidden-launch policy opens a crash window, completion is held until analysis confirms that no
+    /// missing-dependency follow-up remains (or the user closes the window).
     ///
     /// @return shared process-listener completion
     public CompletionStage<@Nullable Void> processLifecycleCompletion() {
@@ -1073,6 +1129,9 @@ public final class LauncherHelper {
         /// Log batching queue, or null while the native log window is disabled or uninitialized.
         private @Nullable LinkedBlockingQueue<Log> logBuffer;
 
+        /// Crash-window follow-up boundary used to keep a hidden launcher alive for missing-mod search.
+        private @Nullable CompletionStage<@Nullable Void> crashWindowFollowUpCompletion;
+
         /// Creates a listener dedicated to one prepared launch.
         ///
         /// @param repository repository owning the launched instance
@@ -1228,14 +1287,20 @@ public final class LauncherHelper {
 
             if (exitType != ExitType.NORMAL) {
                 repository.markInstanceLaunchedAbnormally(manifest.id());
-                SwingGameCrashWindow.open(
+                SwingGameCrashWindow crashWindow = SwingGameCrashWindow.open(
                         Objects.requireNonNull(process, "managed process"),
                         exitType,
                         repository,
                         manifest,
                         launchOptions,
                         logs,
-                        this::showCrashLogs);
+                        this::showCrashLogs,
+                        openMissingModSearch == null ? null : LauncherHelper.this::openMissingModSearch);
+                if ((launcherVisibility == LauncherVisibility.HIDE
+                        || launcherVisibility == LauncherVisibility.HIDE_AND_REOPEN)
+                        && openMissingModSearch != null) {
+                    crashWindowFollowUpCompletion = crashWindow.followUpCompletion();
+                }
             }
         }
 
@@ -1244,10 +1309,32 @@ public final class LauncherHelper {
         /// @param failure monitor failure, or null after listener and post-exit work succeed
         @Override
         public void onMonitorComplete(@Nullable Throwable failure) {
-            if (failure == null) {
-                processLifecycleCompletion.complete(null);
+            @Nullable CompletionStage<@Nullable Void> followUpCompletion = crashWindowFollowUpCompletion;
+            if (followUpCompletion == null) {
+                completeProcessLifecycle(failure, null);
+                return;
+            }
+            followUpCompletion.whenComplete((
+                    @Nullable Void ignored,
+                    @Nullable Throwable followUpFailure) -> completeProcessLifecycle(failure, followUpFailure));
+        }
+
+        /// Completes the launch lifecycle after monitor work and any required crash-window follow-up boundary.
+        ///
+        /// @param monitorFailure monitor or post-exit failure, or null after successful bookkeeping
+        /// @param followUpFailure crash-window follow-up failure, or null after normal follow-up completion
+        private void completeProcessLifecycle(
+                @Nullable Throwable monitorFailure,
+                @Nullable Throwable followUpFailure) {
+            if (monitorFailure != null) {
+                if (followUpFailure != null && followUpFailure != monitorFailure) {
+                    monitorFailure.addSuppressed(followUpFailure);
+                }
+                processLifecycleCompletion.completeExceptionally(monitorFailure);
+            } else if (followUpFailure != null) {
+                processLifecycleCompletion.completeExceptionally(followUpFailure);
             } else {
-                processLifecycleCompletion.completeExceptionally(failure);
+                processLifecycleCompletion.complete(null);
             }
         }
 

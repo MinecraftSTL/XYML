@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.launch.ProcessListener;
+import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.platform.Architecture;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
@@ -42,6 +43,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import static space.minecraftstl.xyml.util.DataSizeUnit.MEGABYTES;
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
@@ -92,6 +94,25 @@ final class GameCrashWindowModel {
             GameInstanceManifest manifest,
             LaunchOptions launchOptions,
             List<Log> capturedLogs) {
+        return fromLaunch(exitType, repository, manifest, launchOptions, capturedLogs, null);
+    }
+
+    /// Builds the production model with an optional missing-dependency search boundary.
+    ///
+    /// @param exitType classified process-exit outcome
+    /// @param repository repository owning the launched instance
+    /// @param manifest launched game-instance manifest
+    /// @param launchOptions resolved launch configuration
+    /// @param capturedLogs captured in-memory process-output entries
+    /// @param openMissingModSearch action opening the Mods search page, or null when unavailable
+    /// @return immutable display and analysis model
+    static GameCrashWindowModel fromLaunch(
+            ProcessListener.ExitType exitType,
+            DefaultGameRepository repository,
+            GameInstanceManifest manifest,
+            LaunchOptions launchOptions,
+            List<Log> capturedLogs,
+            @Nullable Consumer<String> openMissingModSearch) {
         Objects.requireNonNull(repository, "repository");
         Objects.requireNonNull(manifest, "manifest");
         Objects.requireNonNull(launchOptions, "launchOptions");
@@ -144,6 +165,11 @@ final class GameCrashWindowModel {
                 launchOptions.getJava().getBits(),
                 launchOptions.getMaxMemory(),
                 capturedLogs.stream().map(Log::getLog).toList());
+        if (openMissingModSearch != null) {
+            Consumer<String> searchAction = openMissingModSearch;
+            logAnalyzable = logAnalyzable.withMissingDependencySearch(dependencyIds -> Task.runAsync(
+                    () -> searchAction.accept(dependencyIds.get(0))));
+        }
         if (repository instanceof XYMLGameRepository xymlRepository) {
             logAnalyzable = logAnalyzable.withJavaRuntimeRepair(() -> JavaRuntimeRepairTaskFactory.create(
                     xymlRepository,

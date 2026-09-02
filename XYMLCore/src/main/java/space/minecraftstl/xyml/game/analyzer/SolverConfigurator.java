@@ -46,7 +46,7 @@ public interface SolverConfigurator {
     /// Adds one manual choice and returns its stable selection identifier.
     ///
     /// Implementations reserve identifiers through `255` for standard commands and allocate custom identifiers above
-    /// that range, matching the HMAT callback contract.
+    /// that range, matching the XYAT callback contract.
     ///
     /// @param messageKey localization key
     /// @param messageArguments immutable localization arguments
