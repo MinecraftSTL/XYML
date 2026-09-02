@@ -277,12 +277,20 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         write(() -> settings.mcpPortProperty().set(port));
     }
 
-    /// Queues the MCP deletion-confirmation preference write.
+    /// Queues the MCP instance-deletion confirmation preference write.
     ///
-    /// @param required whether deletion confirmation is required
+    /// @param required whether instance-deletion confirmation is required
     @Override
-    public void setMcpConfirmDeletion(boolean required) {
-        write(() -> settings.mcpConfirmDeletionProperty().set(required));
+    public void setMcpConfirmInstanceDeletion(boolean required) {
+        write(() -> settings.mcpConfirmInstanceDeletionProperty().set(required));
+    }
+
+    /// Queues the MCP mod-deletion confirmation preference write.
+    ///
+    /// @param required whether mod-deletion confirmation is required
+    @Override
+    public void setMcpConfirmModDeletion(boolean required) {
+        write(() -> settings.mcpConfirmModDeletionProperty().set(required));
     }
 
     /// Releases subscriptions and blocks later writes.
@@ -318,7 +326,9 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         propertySubscriptions.add(settings.proxyPasswordProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.mcpEnabledProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.mcpPortProperty().subscribe(change -> scheduleRefreshSnapshot()));
-        propertySubscriptions.add(settings.mcpConfirmDeletionProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(
+                settings.mcpConfirmInstanceDeletionProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.mcpConfirmModDeletionProperty().subscribe(change -> scheduleRefreshSnapshot()));
     }
 
     /// Queues a launcher-state snapshot refresh after one property change.
@@ -375,7 +385,8 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
                 Objects.requireNonNullElse(configuredProxyPassword, ""),
                 settings.mcpEnabledProperty().get(),
                 settings.mcpPortProperty().get(),
-                settings.mcpConfirmDeletionProperty().get(),
+                settings.mcpConfirmInstanceDeletionProperty().get(),
+                settings.mcpConfirmModDeletionProperty().get(),
                 writableSupplier.getAsBoolean());
     }
 

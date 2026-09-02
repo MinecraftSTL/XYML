@@ -131,7 +131,21 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         normalized.remove("backgroundFallbackType");
         normalized.remove("backgroundFallbackPaint");
         normalized.remove("backgroundLoadPolicy");
+        boolean hasInstanceDeletionConfirmation = normalized.has("mcpConfirmInstanceDeletion");
+        boolean hasModDeletionConfirmation = normalized.has("mcpConfirmModDeletion");
+        @Nullable JsonElement legacyDeletionConfirmation = normalized.remove("mcpConfirmDeletion");
         LauncherSettings settings = SETTINGS_GSON.fromJson(normalized, LauncherSettings.class);
+        if (legacyDeletionConfirmation != null
+                && legacyDeletionConfirmation.isJsonPrimitive()
+                && legacyDeletionConfirmation.getAsJsonPrimitive().isBoolean()) {
+            boolean required = legacyDeletionConfirmation.getAsBoolean();
+            if (!hasInstanceDeletionConfirmation) {
+                settings.mcpConfirmInstanceDeletionProperty().set(required);
+            }
+            if (!hasModDeletionConfirmation) {
+                settings.mcpConfirmModDeletionProperty().set(required);
+            }
+        }
         int mcpPort = settings.mcpPortProperty().get();
         if (mcpPort < 1 || mcpPort > 0xFFFF) {
             settings.mcpPortProperty().set(DEFAULT_MCP_PORT);
@@ -621,13 +635,22 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         return mcpPort;
     }
 
-    /// Whether MCP deletion operations require interactive user confirmation.
-    @SerializedName("mcpConfirmDeletion")
-    private final BooleanProperty mcpConfirmDeletion = new SimpleBooleanProperty(true);
+    /// Whether deleting an instance through MCP requires interactive user confirmation.
+    @SerializedName("mcpConfirmInstanceDeletion")
+    private final BooleanProperty mcpConfirmInstanceDeletion = new SimpleBooleanProperty(true);
 
-    /// Returns the MCP deletion-confirmation preference.
-    public BooleanProperty mcpConfirmDeletionProperty() {
-        return mcpConfirmDeletion;
+    /// Returns the MCP instance-deletion confirmation preference.
+    public BooleanProperty mcpConfirmInstanceDeletionProperty() {
+        return mcpConfirmInstanceDeletion;
+    }
+
+    /// Whether deleting local mods through MCP requires interactive user confirmation.
+    @SerializedName("mcpConfirmModDeletion")
+    private final BooleanProperty mcpConfirmModDeletion = new SimpleBooleanProperty(true);
+
+    /// Returns the MCP mod-deletion confirmation preference.
+    public BooleanProperty mcpConfirmModDeletionProperty() {
+        return mcpConfirmModDeletion;
     }
 
     /// The selected game directory ID.

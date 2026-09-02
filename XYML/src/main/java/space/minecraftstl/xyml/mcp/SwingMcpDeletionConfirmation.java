@@ -26,31 +26,31 @@ import java.awt.Component;
 import java.awt.Window;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Presents launcher-owned deletion confirmation dialogs on the Swing event-dispatch thread.
 @NotNullByDefault
 public final class SwingMcpDeletionConfirmation implements McpDeletionConfirmation {
-    /// Supplies the latest persisted deletion-confirmation preference.
-    private final BooleanSupplier confirmationRequired;
+    /// Resolves the latest persisted confirmation preference for each deletion category.
+    private final Predicate<DeletionKind> confirmationRequired;
 
     /// Native dialog boundary used by production and headless tests.
     private final ConfirmationDialog dialog;
 
     /// Creates a production confirmation policy backed by `JOptionPane`.
     ///
-    /// @param confirmationRequired supplies whether destructive calls require manual approval
-    public SwingMcpDeletionConfirmation(BooleanSupplier confirmationRequired) {
+    /// @param confirmationRequired resolves whether each deletion category requires manual approval
+    public SwingMcpDeletionConfirmation(Predicate<DeletionKind> confirmationRequired) {
         this(confirmationRequired, SwingMcpDeletionConfirmation::showDialog);
     }
 
     /// Creates a policy with an explicit dialog boundary.
     ///
-    /// @param confirmationRequired supplies whether destructive calls require manual approval
+    /// @param confirmationRequired resolves whether each deletion category requires manual approval
     /// @param dialog confirmation presentation
-    SwingMcpDeletionConfirmation(BooleanSupplier confirmationRequired, ConfirmationDialog dialog) {
+    SwingMcpDeletionConfirmation(Predicate<DeletionKind> confirmationRequired, ConfirmationDialog dialog) {
         this.confirmationRequired = Objects.requireNonNull(confirmationRequired, "confirmationRequired");
         this.dialog = Objects.requireNonNull(dialog, "dialog");
     }
@@ -62,7 +62,7 @@ public final class SwingMcpDeletionConfirmation implements McpDeletionConfirmati
     @Override
     public boolean confirm(DeletionRequest request) {
         DeletionRequest checkedRequest = Objects.requireNonNull(request, "request");
-        if (!confirmationRequired.getAsBoolean()) {
+        if (!confirmationRequired.test(checkedRequest.kind())) {
             return true;
         }
 

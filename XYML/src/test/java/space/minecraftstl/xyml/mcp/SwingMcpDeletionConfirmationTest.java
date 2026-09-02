@@ -32,20 +32,35 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies launcher-owned confirmation behavior without opening a native dialog.
 @NotNullByDefault
 final class SwingMcpDeletionConfirmationTest {
-    /// Ensures disabling confirmation authorizes deletion without invoking the dialog boundary.
+    /// Ensures each deletion category independently controls whether its dialog is shown.
     @Test
-    void bypassesDialogWhenConfirmationIsDisabled() {
+    void routesEachCategoryToItsOwnPreference() {
         AtomicInteger dialogCalls = new AtomicInteger();
-        SwingMcpDeletionConfirmation confirmation = new SwingMcpDeletionConfirmation(
-                () -> false,
+        SwingMcpDeletionConfirmation instanceConfirmation = new SwingMcpDeletionConfirmation(
+                kind -> kind == McpDeletionConfirmation.DeletionKind.INSTANCE,
+                (owner, message, title) -> {
+                    dialogCalls.incrementAndGet();
+                    return false;
+                });
+        McpDeletionConfirmation.DeletionRequest instance = McpDeletionConfirmation.DeletionRequest.instance(
+                new GameInstanceID("demo"));
+        McpDeletionConfirmation.DeletionRequest mods = McpDeletionConfirmation.DeletionRequest.mods(
+                new GameInstanceID("demo"), 2);
+
+        assertFalse(instanceConfirmation.confirm(instance));
+        assertTrue(instanceConfirmation.confirm(mods));
+        assertEquals(1, dialogCalls.get());
+
+        SwingMcpDeletionConfirmation modConfirmation = new SwingMcpDeletionConfirmation(
+                kind -> kind == McpDeletionConfirmation.DeletionKind.MODS,
                 (owner, message, title) -> {
                     dialogCalls.incrementAndGet();
                     return false;
                 });
 
-        assertTrue(confirmation.confirm(McpDeletionConfirmation.DeletionRequest.instance(
-                new GameInstanceID("demo"))));
-        assertEquals(0, dialogCalls.get());
+        assertTrue(modConfirmation.confirm(instance));
+        assertFalse(modConfirmation.confirm(mods));
+        assertEquals(2, dialogCalls.get());
     }
 
     /// Ensures enabled confirmation runs on the EDT and returns the user's current decision.
@@ -54,7 +69,7 @@ final class SwingMcpDeletionConfirmationTest {
         AtomicBoolean decision = new AtomicBoolean();
         AtomicInteger dialogCalls = new AtomicInteger();
         SwingMcpDeletionConfirmation confirmation = new SwingMcpDeletionConfirmation(
-                () -> true,
+                kind -> true,
                 (owner, message, title) -> {
                     assertTrue(SwingUtilities.isEventDispatchThread());
                     assertTrue(message.contains("demo"));

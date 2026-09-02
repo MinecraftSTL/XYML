@@ -29,19 +29,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @NotNullByDefault
 public final class LauncherSettingsCenterStoreTest {
 
-    /// Persists the MCP deletion-confirmation preference and republishes its snapshot immediately.
+    /// Persists each MCP deletion-confirmation preference without changing the other category.
     @Test
-    public void persistsMcpDeletionConfirmationImmediately() {
+    public void persistsMcpDeletionConfirmationsIndependently() {
         LauncherStateDispatcher.executeAndWait(() -> {
             LauncherSettings settings = new LauncherSettings();
             LauncherSettingsCenterStore store = new LauncherSettingsCenterStore(settings, () -> true);
             try {
-                assertTrue(store.snapshot().mcpConfirmDeletion());
+                assertTrue(store.snapshot().mcpConfirmInstanceDeletion());
+                assertTrue(store.snapshot().mcpConfirmModDeletion());
 
-                store.setMcpConfirmDeletion(false);
+                store.setMcpConfirmInstanceDeletion(false);
 
-                assertFalse(settings.mcpConfirmDeletionProperty().get());
-                assertFalse(store.snapshot().mcpConfirmDeletion());
+                assertFalse(settings.mcpConfirmInstanceDeletionProperty().get());
+                assertTrue(settings.mcpConfirmModDeletionProperty().get());
+                assertFalse(store.snapshot().mcpConfirmInstanceDeletion());
+                assertTrue(store.snapshot().mcpConfirmModDeletion());
+
+                store.setMcpConfirmModDeletion(false);
+
+                assertFalse(settings.mcpConfirmInstanceDeletionProperty().get());
+                assertFalse(settings.mcpConfirmModDeletionProperty().get());
+                assertFalse(store.snapshot().mcpConfirmInstanceDeletion());
+                assertFalse(store.snapshot().mcpConfirmModDeletion());
             } finally {
                 store.close();
             }
