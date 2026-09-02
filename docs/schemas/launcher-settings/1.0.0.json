@@ -185,7 +185,10 @@
       "minimum": 1,
       "maximum": 65535
     },
-    "mcpConfirmDeletion": {
+    "mcpConfirmInstanceDeletion": {
+      "type": "boolean"
+    },
+    "mcpConfirmModDeletion": {
       "type": "boolean"
     },
     "selectedGameDirectory": {

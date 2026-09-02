@@ -21,37 +21,67 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JCheckBox;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
+import javax.swing.JPanel;
 import java.awt.Component;
 import java.awt.Window;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 
 /// Presents launcher-owned deletion confirmation dialogs on the Swing event-dispatch thread.
 @NotNullByDefault
 public final class SwingMcpDeletionConfirmation implements McpDeletionConfirmation {
-    /// Supplies the latest persisted deletion-confirmation preference.
-    private final BooleanSupplier confirmationRequired;
+    /// Resolves the latest persisted confirmation preference for each deletion category.
+    private final Predicate<DeletionKind> confirmationRequired;
+
+    /// Resolves whether launcher settings can persist an opt-out request.
+    private final BooleanSupplier confirmationWritable;
+
+    /// Disables future confirmation for one deletion category after explicit approval.
+    private final Consumer<DeletionKind> disableConfirmation;
 
     /// Native dialog boundary used by production and headless tests.
     private final ConfirmationDialog dialog;
 
     /// Creates a production confirmation policy backed by `JOptionPane`.
     ///
-    /// @param confirmationRequired supplies whether destructive calls require manual approval
-    public SwingMcpDeletionConfirmation(BooleanSupplier confirmationRequired) {
-        this(confirmationRequired, SwingMcpDeletionConfirmation::showDialog);
+    /// @param confirmationRequired resolves whether each deletion category requires manual approval
+    /// @param confirmationWritable resolves whether an opt-out request can be persisted
+    /// @param disableConfirmation disables future confirmation for one deletion category
+    public SwingMcpDeletionConfirmation(
+            Predicate<DeletionKind> confirmationRequired,
+            BooleanSupplier confirmationWritable,
+            Consumer<DeletionKind> disableConfirmation) {
+        this(
+                confirmationRequired,
+                confirmationWritable,
+                disableConfirmation,
+                SwingMcpDeletionConfirmation::showDialog);
     }
 
     /// Creates a policy with an explicit dialog boundary.
     ///
-    /// @param confirmationRequired supplies whether destructive calls require manual approval
+    /// @param confirmationRequired resolves whether each deletion category requires manual approval
+    /// @param confirmationWritable resolves whether an opt-out request can be persisted
+    /// @param disableConfirmation disables future confirmation for one deletion category
     /// @param dialog confirmation presentation
-    SwingMcpDeletionConfirmation(BooleanSupplier confirmationRequired, ConfirmationDialog dialog) {
+    SwingMcpDeletionConfirmation(
+            Predicate<DeletionKind> confirmationRequired,
+            BooleanSupplier confirmationWritable,
+            Consumer<DeletionKind> disableConfirmation,
+            ConfirmationDialog dialog) {
         this.confirmationRequired = Objects.requireNonNull(confirmationRequired, "confirmationRequired");
+        this.confirmationWritable = Objects.requireNonNull(confirmationWritable, "confirmationWritable");
+        this.disableConfirmation = Objects.requireNonNull(disableConfirmation, "disableConfirmation");
         this.dialog = Objects.requireNonNull(dialog, "dialog");
     }
 
@@ -62,16 +92,25 @@ public final class SwingMcpDeletionConfirmation implements McpDeletionConfirmati
     @Override
     public boolean confirm(DeletionRequest request) {
         DeletionRequest checkedRequest = Objects.requireNonNull(request, "request");
-        if (!confirmationRequired.getAsBoolean()) {
-            return true;
-        }
-
-        AtomicBoolean approved = new AtomicBoolean();
-        EdtDispatcher.executeAndWait(() -> approved.set(dialog.confirm(
-                activeWindow(),
-                message(checkedRequest),
-                i18n("mcp.deletion_confirmation.title"))));
-        return approved.get();
+        AtomicReference<ConfirmationDecision> decision = new AtomicReference<>(ConfirmationDecision.cancelled());
+        EdtDispatcher.executeAndWait(() -> {
+            if (!confirmationRequired.test(checkedRequest.kind())) {
+                decision.set(ConfirmationDecision.bypassed());
+                return;
+            }
+            boolean writable = confirmationWritable.getAsBoolean();
+            ConfirmationDecision currentDecision = dialog.confirm(
+                    activeWindow(),
+                    message(checkedRequest),
+                    disableConfirmationMessage(checkedRequest.kind()),
+                    i18n("mcp.deletion_confirmation.title"),
+                    writable);
+            decision.set(currentDecision);
+            if (writable && currentDecision.approved() && currentDecision.disableFutureConfirmation()) {
+                disableConfirmation.accept(checkedRequest.kind());
+            }
+        });
+        return decision.get().approved();
     }
 
     /// Formats the localized message for one deletion category.
@@ -85,6 +124,17 @@ public final class SwingMcpDeletionConfirmation implements McpDeletionConfirmati
                     "mcp.deletion_confirmation.mods",
                     request.itemCount(),
                     request.instanceId().id());
+        };
+    }
+
+    /// Formats the localized opt-out label for one deletion category.
+    ///
+    /// @param kind deletion category being presented
+    /// @return localized opt-out label
+    private static String disableConfirmationMessage(DeletionKind kind) {
+        return switch (kind) {
+            case INSTANCE -> i18n("mcp.deletion_confirmation.disable_instance");
+            case MODS -> i18n("mcp.deletion_confirmation.disable_mods");
         };
     }
 
@@ -108,15 +158,39 @@ public final class SwingMcpDeletionConfirmation implements McpDeletionConfirmati
     ///
     /// @param owner active launcher window, or null before one exists
     /// @param message localized deletion warning
+    /// @param disableConfirmationMessage localized label for disabling future confirmation
     /// @param title localized dialog title
-    /// @return whether the user chose the affirmative action
-    private static boolean showDialog(@Nullable Component owner, String message, String title) {
-        return JOptionPane.showConfirmDialog(
+    /// @param confirmationWritable whether an opt-out request can be persisted
+    /// @return immutable dialog decision
+    private static ConfirmationDecision showDialog(
+            @Nullable Component owner,
+            String message,
+            String disableConfirmationMessage,
+            String title,
+            boolean confirmationWritable) {
+        JLabel warningLabel = new JLabel(message);
+        warningLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JCheckBox disableConfirmationBox = new JCheckBox(disableConfirmationMessage);
+        disableConfirmationBox.setName("mcpDeletionDisableConfirmation");
+        disableConfirmationBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel content = new JPanel();
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.add(warningLabel);
+        if (confirmationWritable) {
+            content.add(Box.createVerticalStrut(12));
+            content.add(disableConfirmationBox);
+        }
+
+        int option = JOptionPane.showConfirmDialog(
                 owner,
-                message,
+                content,
                 title,
                 JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.WARNING_MESSAGE) == JOptionPane.OK_OPTION;
+                JOptionPane.WARNING_MESSAGE);
+        return new ConfirmationDecision(
+                option == JOptionPane.OK_OPTION,
+                confirmationWritable && disableConfirmationBox.isSelected());
     }
 
     /// Abstracts the native dialog for deterministic tests.
@@ -127,8 +201,40 @@ public final class SwingMcpDeletionConfirmation implements McpDeletionConfirmati
         ///
         /// @param owner active launcher window, or null
         /// @param message localized warning
+        /// @param disableConfirmationMessage localized label for disabling future confirmation
         /// @param title localized title
-        /// @return whether the user approved the deletion
-        boolean confirm(@Nullable Component owner, String message, String title);
+        /// @param confirmationWritable whether an opt-out request can be persisted
+        /// @return immutable dialog decision
+        ConfirmationDecision confirm(
+                @Nullable Component owner,
+                String message,
+                String disableConfirmationMessage,
+                String title,
+                boolean confirmationWritable);
+    }
+
+    /// Captures the user's decision and optional preference change from one confirmation dialog.
+    ///
+    /// @param approved whether the current deletion was approved
+    /// @param disableFutureConfirmation whether future confirmation should be disabled for this category
+    @NotNullByDefault
+    record ConfirmationDecision(boolean approved, boolean disableFutureConfirmation) {
+        /// Creates a decision returned by the confirmation dialog.
+        ConfirmationDecision {
+        }
+
+        /// Creates the initial cancelled decision used before the EDT completes.
+        ///
+        /// @return cancelled decision without a preference change
+        static ConfirmationDecision cancelled() {
+            return new ConfirmationDecision(false, false);
+        }
+
+        /// Creates an approved decision that bypasses a disabled confirmation dialog.
+        ///
+        /// @return approved decision without a preference change
+        static ConfirmationDecision bypassed() {
+            return new ConfirmationDecision(true, false);
+        }
     }
 }

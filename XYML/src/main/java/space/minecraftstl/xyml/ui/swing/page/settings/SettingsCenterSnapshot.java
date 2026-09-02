@@ -47,7 +47,8 @@ import java.util.Objects;
 /// @param proxyPassword proxy authentication password, or an empty string when unused
 /// @param mcpEnabled whether the local MCP server is enabled
 /// @param mcpPort loopback port used by the local MCP server
-/// @param mcpConfirmDeletion whether MCP deletion operations require interactive confirmation
+/// @param mcpConfirmInstanceDeletion whether MCP instance deletion requires interactive confirmation
+/// @param mcpConfirmModDeletion whether MCP mod deletion requires interactive confirmation
 /// @param writable whether changes can be persisted to launcher settings
 @NotNullByDefault
 public record SettingsCenterSnapshot(
@@ -71,7 +72,8 @@ public record SettingsCenterSnapshot(
         String proxyPassword,
         boolean mcpEnabled,
         int mcpPort,
-        boolean mcpConfirmDeletion,
+        boolean mcpConfirmInstanceDeletion,
+        boolean mcpConfirmModDeletion,
         boolean writable) {
     /// Validates non-null values and the numeric setting invariants.
     public SettingsCenterSnapshot {

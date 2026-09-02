@@ -426,7 +426,17 @@ public final class Launcher {
                     new XYMLMcpService(
                             GameDirectoryManager.getSelectedRepository(),
                             new SwingMcpDeletionConfirmation(
-                                    () -> settings().mcpConfirmDeletionProperty().get())));
+                                    kind -> switch (kind) {
+                                        case INSTANCE -> settings().mcpConfirmInstanceDeletionProperty().get();
+                                        case MODS -> settings().mcpConfirmModDeletionProperty().get();
+                                    },
+                                    () -> !SettingsManager.hasReadOnlyCoreSettings(),
+                                    kind -> {
+                                        switch (kind) {
+                                            case INSTANCE -> settings().mcpConfirmInstanceDeletionProperty().set(false);
+                                            case MODS -> settings().mcpConfirmModDeletionProperty().set(false);
+                                        }
+                                    })));
             server.startListener();
             mcpServer = server;
             LOG.info("MCP server listening on http://127.0.0.1:" + server.getListeningPort() + "/mcp");

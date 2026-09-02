@@ -18,34 +18,67 @@
 package space.minecraftstl.xyml.mcp;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.game.GameInstanceID;
+import space.minecraftstl.xyml.mcp.McpDeletionConfirmation.DeletionKind;
 
 import javax.swing.SwingUtilities;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies launcher-owned confirmation behavior without opening a native dialog.
 @NotNullByDefault
 final class SwingMcpDeletionConfirmationTest {
-    /// Ensures disabling confirmation authorizes deletion without invoking the dialog boundary.
+    /// Ensures each deletion category independently controls whether its dialog is shown.
     @Test
-    void bypassesDialogWhenConfirmationIsDisabled() {
+    void routesEachCategoryToItsOwnPreference() {
         AtomicInteger dialogCalls = new AtomicInteger();
-        SwingMcpDeletionConfirmation confirmation = new SwingMcpDeletionConfirmation(
-                () -> false,
-                (owner, message, title) -> {
+        SwingMcpDeletionConfirmation instanceConfirmation = new SwingMcpDeletionConfirmation(
+                kind -> {
+                    assertTrue(SwingUtilities.isEventDispatchThread());
+                    return kind == McpDeletionConfirmation.DeletionKind.INSTANCE;
+                },
+                () -> true,
+                kind -> {
+                    throw new AssertionError("Unexpected confirmation preference change for " + kind);
+                },
+                (owner, message, disableConfirmationMessage, title, confirmationWritable) -> {
                     dialogCalls.incrementAndGet();
-                    return false;
+                    return new SwingMcpDeletionConfirmation.ConfirmationDecision(false, false);
+                });
+        McpDeletionConfirmation.DeletionRequest instance = McpDeletionConfirmation.DeletionRequest.instance(
+                new GameInstanceID("demo"));
+        McpDeletionConfirmation.DeletionRequest mods = McpDeletionConfirmation.DeletionRequest.mods(
+                new GameInstanceID("demo"), 2);
+
+        assertFalse(instanceConfirmation.confirm(instance));
+        assertTrue(instanceConfirmation.confirm(mods));
+        assertEquals(1, dialogCalls.get());
+
+        SwingMcpDeletionConfirmation modConfirmation = new SwingMcpDeletionConfirmation(
+                kind -> {
+                    assertTrue(SwingUtilities.isEventDispatchThread());
+                    return kind == McpDeletionConfirmation.DeletionKind.MODS;
+                },
+                () -> true,
+                kind -> {
+                    throw new AssertionError("Unexpected confirmation preference change for " + kind);
+                },
+                (owner, message, disableConfirmationMessage, title, confirmationWritable) -> {
+                    dialogCalls.incrementAndGet();
+                    return new SwingMcpDeletionConfirmation.ConfirmationDecision(false, false);
                 });
 
-        assertTrue(confirmation.confirm(McpDeletionConfirmation.DeletionRequest.instance(
-                new GameInstanceID("demo"))));
-        assertEquals(0, dialogCalls.get());
+        assertTrue(modConfirmation.confirm(instance));
+        assertFalse(modConfirmation.confirm(mods));
+        assertEquals(2, dialogCalls.get());
     }
 
     /// Ensures enabled confirmation runs on the EDT and returns the user's current decision.
@@ -54,13 +87,22 @@ final class SwingMcpDeletionConfirmationTest {
         AtomicBoolean decision = new AtomicBoolean();
         AtomicInteger dialogCalls = new AtomicInteger();
         SwingMcpDeletionConfirmation confirmation = new SwingMcpDeletionConfirmation(
-                () -> true,
-                (owner, message, title) -> {
+                kind -> true,
+                () -> {
+                    assertTrue(SwingUtilities.isEventDispatchThread());
+                    return true;
+                },
+                kind -> {
+                    throw new AssertionError("Unexpected confirmation preference change for " + kind);
+                },
+                (owner, message, disableConfirmationMessage, title, confirmationWritable) -> {
                     assertTrue(SwingUtilities.isEventDispatchThread());
                     assertTrue(message.contains("demo"));
+                    assertFalse(disableConfirmationMessage.isBlank());
                     assertFalse(title.isBlank());
+                    assertTrue(confirmationWritable);
                     dialogCalls.incrementAndGet();
-                    return decision.get();
+                    return new SwingMcpDeletionConfirmation.ConfirmationDecision(decision.get(), false);
                 });
 
         McpDeletionConfirmation.DeletionRequest request = McpDeletionConfirmation.DeletionRequest.mods(
@@ -68,6 +110,104 @@ final class SwingMcpDeletionConfirmationTest {
         assertFalse(confirmation.confirm(request));
         decision.set(true);
         assertTrue(confirmation.confirm(request));
+        assertEquals(2, dialogCalls.get());
+    }
+
+    /// Ensures opting out affects only an approved deletion category.
+    @Test
+    void disablesMatchingCategoryOnlyAfterApproval() {
+        AtomicReference<@Nullable DeletionKind> disabledKind = new AtomicReference<>();
+        McpDeletionConfirmation.DeletionRequest instance = McpDeletionConfirmation.DeletionRequest.instance(
+                new GameInstanceID("demo"));
+
+        SwingMcpDeletionConfirmation cancelled = new SwingMcpDeletionConfirmation(
+                kind -> true,
+                () -> true,
+                disabledKind::set,
+                (owner, message, disableConfirmationMessage, title, confirmationWritable) ->
+                        new SwingMcpDeletionConfirmation.ConfirmationDecision(false, true));
+        assertFalse(cancelled.confirm(instance));
+        assertNull(disabledKind.get());
+
+        SwingMcpDeletionConfirmation unchecked = new SwingMcpDeletionConfirmation(
+                kind -> true,
+                () -> true,
+                disabledKind::set,
+                (owner, message, disableConfirmationMessage, title, confirmationWritable) ->
+                        new SwingMcpDeletionConfirmation.ConfirmationDecision(true, false));
+        assertTrue(unchecked.confirm(instance));
+        assertNull(disabledKind.get());
+
+        McpDeletionConfirmation.DeletionRequest mods = McpDeletionConfirmation.DeletionRequest.mods(
+                new GameInstanceID("demo"), 2);
+        SwingMcpDeletionConfirmation approved = new SwingMcpDeletionConfirmation(
+                kind -> true,
+                () -> true,
+                kind -> {
+                    assertTrue(SwingUtilities.isEventDispatchThread());
+                    disabledKind.set(kind);
+                },
+                (owner, message, disableConfirmationMessage, title, confirmationWritable) ->
+                        new SwingMcpDeletionConfirmation.ConfirmationDecision(true, true));
+        assertTrue(approved.confirm(mods));
+        assertEquals(McpDeletionConfirmation.DeletionKind.MODS, disabledKind.get());
+    }
+
+    /// Ensures read-only settings never offer or apply the opt-out request.
+    @Test
+    void rejectsOptOutWhenSettingsAreReadOnly() {
+        AtomicBoolean disableCalled = new AtomicBoolean();
+        SwingMcpDeletionConfirmation confirmation = new SwingMcpDeletionConfirmation(
+                kind -> true,
+                () -> {
+                    assertTrue(SwingUtilities.isEventDispatchThread());
+                    return false;
+                },
+                kind -> disableCalled.set(true),
+                (owner, message, disableConfirmationMessage, title, confirmationWritable) -> {
+                    assertFalse(confirmationWritable);
+                    return new SwingMcpDeletionConfirmation.ConfirmationDecision(true, true);
+                });
+
+        assertTrue(confirmation.confirm(McpDeletionConfirmation.DeletionRequest.instance(
+                new GameInstanceID("demo"))));
+        assertFalse(disableCalled.get());
+    }
+
+    /// Ensures an approved opt-out immediately bypasses only later requests of the same category.
+    @Test
+    void appliesEachOptOutImmediatelyAndIndependently() {
+        AtomicBoolean instanceRequired = new AtomicBoolean(true);
+        AtomicBoolean modsRequired = new AtomicBoolean(true);
+        AtomicInteger dialogCalls = new AtomicInteger();
+        SwingMcpDeletionConfirmation confirmation = new SwingMcpDeletionConfirmation(
+                kind -> switch (kind) {
+                    case INSTANCE -> instanceRequired.get();
+                    case MODS -> modsRequired.get();
+                },
+                () -> true,
+                kind -> {
+                    switch (kind) {
+                        case INSTANCE -> instanceRequired.set(false);
+                        case MODS -> modsRequired.set(false);
+                    }
+                },
+                (owner, message, disableConfirmationMessage, title, confirmationWritable) -> {
+                    dialogCalls.incrementAndGet();
+                    return new SwingMcpDeletionConfirmation.ConfirmationDecision(true, true);
+                });
+        McpDeletionConfirmation.DeletionRequest instance = McpDeletionConfirmation.DeletionRequest.instance(
+                new GameInstanceID("demo"));
+        McpDeletionConfirmation.DeletionRequest mods = McpDeletionConfirmation.DeletionRequest.mods(
+                new GameInstanceID("demo"), 2);
+
+        assertTrue(confirmation.confirm(instance));
+        assertTrue(confirmation.confirm(instance));
+        assertEquals(1, dialogCalls.get());
+        assertTrue(modsRequired.get());
+
+        assertTrue(confirmation.confirm(mods));
+        assertTrue(confirmation.confirm(mods));
         assertEquals(2, dialogCalls.get());
     }
 }
