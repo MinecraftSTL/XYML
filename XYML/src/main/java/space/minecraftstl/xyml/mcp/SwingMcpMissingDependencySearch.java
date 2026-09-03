@@ -103,7 +103,7 @@ public final class SwingMcpMissingDependencySearch implements LogAnalyzable.Miss
                 throw new IllegalStateException("Launcher Swing application runtime is closed");
             }
             EdtDispatcher.executeAndWait(() -> runtime.openModSearch(dependencyId));
-        });
+        }).asOrchestration();
     }
 
     /// Adapts the production Swing runtime supplier without resolving it eagerly.

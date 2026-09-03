@@ -26,11 +26,15 @@ import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.platform.Platform;
+import space.minecraftstl.xyml.util.function.ExceptionalConsumer;
 import space.minecraftstl.xyml.util.function.ExceptionalRunnable;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
@@ -58,19 +62,28 @@ public final class JavaRuntimeRepairTaskFactory {
             GameInstanceManifest manifest) {
         XYMLGameRepository checkedRepository = Objects.requireNonNull(repository, "repository");
         GameInstanceManifest checkedManifest = Objects.requireNonNull(manifest, "manifest");
+        GameInstanceID instanceId = checkedManifest.id();
+        Path repositoryDirectory = checkedRepository.getBaseDirectory().toAbsolutePath().normalize();
+        Path instanceDirectory = checkedRepository.getInstanceRoot(instanceId).toAbsolutePath().normalize();
+        Path settingsFile = checkedRepository.getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
         GameVersionNumber gameVersion = GameVersionNumber.asGameVersion(
                 checkedRepository.getGameVersion(checkedManifest));
 
         Task<@Nullable Void> preflight = Task.runAsync(
                 Schedulers.io(),
-                () -> requireWritableSettings(checkedRepository, checkedManifest.id()));
+                () -> checkedRepository.callWithStableBaseDirectory(
+                        repositoryDirectory,
+                        () -> requireWritableSettings(checkedRepository, instanceId)))
+                .setResources(
+                        TaskResource.gameInstance(instanceDirectory),
+                        TaskResource.configuration(settingsFile));
         Function<GameJavaVersion, Task<@Nullable JavaRuntime>> selectionTaskFactory =
                 targetJava -> Task.supplyAsync(() -> selectTargetJava(
                         JavaManager.getAllJava(),
                         gameVersion,
                         checkedManifest,
-                        targetJava));
-        return preflight
+                        targetJava)).asOrchestration();
+        Task<JavaRuntime> selection = preflight
                 .thenComposeAsync(() -> resolveCompatibleJava(
                         checkedManifest,
                         gameVersion,
@@ -79,12 +92,52 @@ public final class JavaRuntimeRepairTaskFactory {
                                 checkedRepository.getDependency().getDownloadProvider(),
                                 Platform.SYSTEM_PLATFORM,
                                 targetJava)))
-                .thenAcceptAsync(
+                .asOrchestration();
+        return createPersistenceTask(
+                selection,
+                instanceDirectory,
+                settingsFile,
+                selectedJava -> checkedRepository.callWithStableBaseDirectory(repositoryDirectory, () -> {
+                    persistJavaSelectionAndDrain(
+                            () -> requireWritableSettings(checkedRepository, instanceId),
+                            selectedJava,
+                            () -> checkedRepository.saveGameSettingsSync(instanceId),
+                            FileSaver::waitForAllSaves);
+                    return null;
+                }));
+    }
+
+    /// Creates the final independently resourced settings-persistence stage.
+    ///
+    /// The selection task runs before this stage acquires its instance resources, so a Java download keeps its own
+    /// audited runtime, archive, cache, and configuration declaration instead of inheriting an unrelated instance
+    /// owner. Both the complete instance tree and the exact settings path are declared so canonical path resolution
+    /// retains a settings file that escapes through a symbolic-link or junction alias.
+    ///
+    /// @param selectionTask task yielding the selected compatible runtime
+    /// @param instanceDirectory captured affected instance root
+    /// @param settingsFile captured instance settings file
+    /// @param persistence applies and durably persists the selected runtime
+    /// @return stopped final persistence task
+    static Task<@Nullable Void> createPersistenceTask(
+            Task<JavaRuntime> selectionTask,
+            Path instanceDirectory,
+            Path settingsFile,
+            ExceptionalConsumer<JavaRuntime, ?> persistence) {
+        Task<JavaRuntime> checkedSelectionTask = Objects.requireNonNull(selectionTask, "selectionTask");
+        Path checkedInstanceDirectory = Objects.requireNonNull(instanceDirectory, "instanceDirectory")
+                .toAbsolutePath().normalize();
+        Path checkedSettingsFile = Objects.requireNonNull(settingsFile, "settingsFile")
+                .toAbsolutePath().normalize();
+        ExceptionalConsumer<JavaRuntime, ?> checkedPersistence = Objects.requireNonNull(persistence, "persistence");
+        return checkedSelectionTask.thenAcceptAsync(
                         Schedulers.io(),
-                        (@Nullable JavaRuntime selectedJava) -> persistJavaSelection(
-                                () -> requireWritableSettings(checkedRepository, checkedManifest.id()),
-                                Objects.requireNonNull(selectedJava, "selected Java runtime"),
-                                () -> checkedRepository.saveGameSettingsSync(checkedManifest.id())));
+                        (@Nullable JavaRuntime selectedJava) -> checkedPersistence.accept(
+                                Objects.requireNonNull(selectedJava, "selected Java runtime")))
+                .setResources(
+                        TaskResource.gameInstance(checkedInstanceDirectory),
+                        TaskResource.configuration(checkedSettingsFile))
+                .releaseResourcesBeforeDependents();
     }
 
     /// Ensures a compatible runtime is registered, then reevaluates the registry for the final selection.
@@ -121,18 +174,21 @@ public final class JavaRuntimeRepairTaskFactory {
                     return Objects.requireNonNull(
                             checkedDownloadTaskFactory.apply(targetJava),
                             "download task factory result");
-                });
+                })
+                .asOrchestration();
         return availability
                 .thenComposeAsync(() -> Objects.requireNonNull(
                         checkedSelectionTaskFactory.apply(targetJava),
                         "selection task factory result"))
+                .asOrchestration()
                 .thenApplyAsync((@Nullable JavaRuntime selectedJava) -> {
                     if (selectedJava == null) {
                         throw new IllegalStateException(
                                 "No compatible Java runtime is registered after acquisition");
                     }
                     return selectedJava;
-                });
+                })
+                .asOrchestration();
     }
 
     /// Selects a runtime that satisfies both launcher constraints and the Java target diagnosed for this repair.
@@ -263,6 +319,89 @@ public final class JavaRuntimeRepairTaskFactory {
             }
             rethrowPersistenceFailure(failure);
         }
+    }
+
+    /// Applies a Java selection and drains every queued settings write before returning or rethrowing.
+    ///
+    /// Property listeners may enqueue FileSaver writes both while applying the new selection and while rolling it back.
+    /// The barrier therefore runs for success, [Exception], and [Error] paths. A later barrier failure is suppressed on
+    /// the original failure, while an otherwise successful operation reports the barrier failure directly.
+    ///
+    /// @param settingsSupplier obtains the affected writable instance settings on the EDT
+    /// @param selectedJava compatible selected runtime
+    /// @param persistence writes the updated settings on the caller's background thread
+    /// @param saveBarrier waits for queued settings writes to finish
+    /// @throws Exception when applying, persisting, or draining the selection fails
+    static void persistJavaSelectionAndDrain(
+            Supplier<GameSettings.Instance> settingsSupplier,
+            JavaRuntime selectedJava,
+            ExceptionalRunnable<?> persistence,
+            SaveBarrier saveBarrier) throws Exception {
+        SaveBarrier checkedSaveBarrier = Objects.requireNonNull(saveBarrier, "saveBarrier");
+        @Nullable Throwable failure = null;
+        try {
+            persistJavaSelection(settingsSupplier, selectedJava, persistence);
+        } catch (Throwable operationFailure) {
+            failure = operationFailure;
+        }
+
+        try {
+            runSaveBarrierUninterruptibly(checkedSaveBarrier);
+        } catch (Throwable saveFailure) {
+            if (failure == null) {
+                failure = saveFailure;
+            } else if (failure != saveFailure) {
+                failure.addSuppressed(saveFailure);
+            }
+        }
+        if (failure != null) {
+            rethrowPersistenceFailure(failure);
+        }
+    }
+
+    /// Reaches a save barrier despite interruption, then restores and reports the first interruption.
+    ///
+    /// @param saveBarrier barrier operation to retry after interruption
+    /// @throws Exception when the barrier fails or the completed wait observed interruption
+    private static void runSaveBarrierUninterruptibly(SaveBarrier saveBarrier) throws Exception {
+        @Nullable InterruptedException interruption = null;
+        try {
+            while (true) {
+                try {
+                    saveBarrier.await();
+                    break;
+                } catch (InterruptedException current) {
+                    if (interruption == null) {
+                        interruption = current;
+                    } else if (interruption != current) {
+                        interruption.addSuppressed(current);
+                    }
+                    Thread.interrupted();
+                }
+            }
+        } catch (Throwable barrierFailure) {
+            if (interruption != null) {
+                Thread.currentThread().interrupt();
+                if (barrierFailure != interruption) {
+                    barrierFailure.addSuppressed(interruption);
+                }
+            }
+            rethrowPersistenceFailure(barrierFailure);
+        }
+        if (interruption != null) {
+            Thread.currentThread().interrupt();
+            throw interruption;
+        }
+    }
+
+    /// Checked settings-save barrier whose interruption can be handled without erasing its precise type.
+    @FunctionalInterface
+    @NotNullByDefault
+    interface SaveBarrier {
+        /// Waits until every settings save queued before this call has reached a terminal state.
+        ///
+        /// @throws Exception when waiting is interrupted or the barrier otherwise fails
+        void await() throws Exception;
     }
 
     /// Applies a compatible Java selection to writable instance settings.

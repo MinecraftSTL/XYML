@@ -20,18 +20,23 @@ package space.minecraftstl.xyml.game;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.java.JavaInfo;
 import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -66,9 +71,37 @@ final class JavaRuntimeRepairTaskFactoryTest {
                     throw new AssertionError("Download factory must not be called for a compatible runtime");
                 });
 
+        assertEquals(TaskResource.Kind.ORCHESTRATION, repair.getResources().iterator().next().getKind());
         assertSame(finalSelection, repair.run());
         assertEquals(2, selections.get());
         assertEquals(0, downloads.get());
+    }
+
+    /// Runs a precisely resourced Java selection before acquiring the unrelated instance persistence resources.
+    @Test
+    void persistenceStageHandsOffSelectionAndDeclaresExactResources(@TempDir Path temporaryDirectory) {
+        JavaRuntime selected = runtime("resource-handoff");
+        Path javaDirectory = temporaryDirectory.resolve("java-runtime");
+        Path instanceDirectory = temporaryDirectory.resolve("instances").resolve("example");
+        Path settingsFile = temporaryDirectory.resolve("external-config").resolve("settings.json");
+        TaskResource javaResource = TaskResource.javaRuntime(javaDirectory);
+        Task<JavaRuntime> selection = Task.supplyAsync(() -> selected).setResources(javaResource);
+        AtomicReference<@Nullable JavaRuntime> persisted = new AtomicReference<>();
+
+        Task<@Nullable Void> persistence = JavaRuntimeRepairTaskFactory.createPersistenceTask(
+                selection,
+                instanceDirectory,
+                settingsFile,
+                persisted::set);
+
+        assertEquals(
+                Set.of(
+                        TaskResource.gameInstance(instanceDirectory),
+                        TaskResource.configuration(settingsFile)),
+                persistence.getResources());
+        assertEquals(Set.of(javaResource), selection.getResources());
+        assertTrue(persistence.test(), () -> "Persistence task failed: " + persistence.getException());
+        assertSame(selected, persisted.get());
     }
 
     /// Downloads only after an empty first decision and uses the post-download decision instead of the download result.
@@ -237,6 +270,74 @@ final class JavaRuntimeRepairTaskFactoryTest {
         assertSame(previousJava, setting.detectedJavaProperty().getValue());
         assertTrue(setting.getOverrideProperties().contains(GameSettings.PROPERTY_JAVA_TYPE));
         assertFalse(setting.getOverrideProperties().contains(GameSettings.PROPERTY_DETECTED_JAVA));
+    }
+
+    /// Waits for a real FileSaver write before the persistence boundary returns.
+    ///
+    /// @throws Exception when the selection or save barrier unexpectedly fails
+    @Test
+    void persistenceBoundaryDrainsQueuedFileSaverWrites(@TempDir Path temporaryDirectory) throws Exception {
+        Path savedFile = temporaryDirectory.resolve("instance-settings.json");
+        GameSettings.Instance setting = new GameSettings.Instance();
+
+        JavaRuntimeRepairTaskFactory.persistJavaSelectionAndDrain(
+                () -> setting,
+                runtime("drained-selection"),
+                () -> FileSaver.save(savedFile, "saved"),
+                FileSaver::waitForAllSaves);
+
+        assertEquals("saved", Files.readString(savedFile));
+    }
+
+    /// Preserves an Error as the primary failure and suppresses a later save-barrier failure on it.
+    @Test
+    void saveBarrierFailureDoesNotReplacePersistenceError() {
+        GameSettings.Instance setting = new GameSettings.Instance();
+        AssertionError persistenceFailure = new AssertionError("persistence failed");
+        IOException barrierFailure = new IOException("barrier failed");
+
+        AssertionError thrown = assertThrows(AssertionError.class, () ->
+                JavaRuntimeRepairTaskFactory.persistJavaSelectionAndDrain(
+                        () -> setting,
+                        runtime("error-selection"),
+                        () -> {
+                            throw persistenceFailure;
+                        },
+                        () -> {
+                            throw barrierFailure;
+                        }));
+
+        assertSame(persistenceFailure, thrown);
+        assertEquals(1, thrown.getSuppressed().length);
+        assertSame(barrierFailure, thrown.getSuppressed()[0]);
+    }
+
+    /// Retries an interrupted save barrier to completion and restores the caller's interrupted state.
+    @Test
+    void interruptedSaveBarrierCompletesBeforeReportingInterruption() {
+        GameSettings.Instance setting = new GameSettings.Instance();
+        InterruptedException interruption = new InterruptedException("barrier interrupted");
+        AtomicInteger attempts = new AtomicInteger();
+
+        try {
+            InterruptedException thrown = assertThrows(InterruptedException.class, () ->
+                    JavaRuntimeRepairTaskFactory.persistJavaSelectionAndDrain(
+                            () -> setting,
+                            runtime("interrupted-selection"),
+                            () -> {
+                            },
+                            () -> {
+                                if (attempts.incrementAndGet() == 1) {
+                                    throw interruption;
+                                }
+                            }));
+
+            assertSame(interruption, thrown);
+            assertEquals(2, attempts.get());
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     /// Creates a manifest that explicitly requests Java 17.
