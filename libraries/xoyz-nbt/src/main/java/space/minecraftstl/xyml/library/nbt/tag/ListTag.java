@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.library.nbt.tag;
 import space.minecraftstl.xyml.library.nbt.internal.input.DataReader;
 import space.minecraftstl.xyml.library.nbt.internal.output.DataWriter;
 import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -33,6 +34,7 @@ import java.util.Objects;
 ///
 /// @see Tag
 /// @see ParentTag
+@NotNullByDefault
 public final class ListTag<T extends Tag> extends ParentTag<T> {
 
     /// The type of the elements in the list.
@@ -129,34 +131,83 @@ public final class ListTag<T extends Tag> extends ParentTag<T> {
     @Override
     @Contract(value = "_ -> this", mutates = "this,param1")
     public ListTag<T> addTag(T tag) {
-        if (tag.getType() != elementType) { // implicit null check
-            if (this.elementType == null) {
-                assert isEmpty();
-                this.elementType = tag.getType();
-            } else {
-                throw new IllegalArgumentException("Cannot add a tag of type " + tag.getType() + " to a list of type " + elementType);
-            }
+        Objects.requireNonNull(tag, "tag");
+        if (elementType != null && tag.getType() != elementType) {
+            throw new IllegalArgumentException("Cannot add a tag of type " + tag.getType() + " to a list of type " + elementType);
         }
-
-        if (tag.getParentTag() != null) {
-            if (tag.getParentTag() == this) {
-                moveTagToLast(tag);
-                return this;
-            } else {
-                tag.getParentTag().removeElement(tag);
-            }
+        validateTagForAttach(tag);
+        if (tag.getParent() == this) {
+            moveTagToLast(tag);
+            return this;
         }
-
-        // Clear the name of the tag.
-        tag.name = "";
-
-        // Set the parent and index of the tag.
-        tag.setParent(this, size);
-
-        // Add the tag to the subTags list.
-        ensureTagsCapacityForAdd();
-        tags[size++] = tag;
+        detachFromCurrentParent(tag);
+        if (elementType == null) {
+            elementType = tag.getType();
+        }
+        tag.setName0("");
+        insertTagInternal(size, tag);
         return this;
+    }
+
+    /// Inserts a detached tag at an exact position while preserving list homogeneity.
+    ///
+    /// @param index insertion index, including `size()` to append
+    /// @param tag detached tag with the list element type
+    /// @return this list
+    /// @throws IllegalArgumentException if the tag is attached, named, or has the wrong type
+    @Override
+    @Contract(value = "_, _ -> this", mutates = "this,param2")
+    public ListTag<T> insertTag(int index, T tag) throws IllegalArgumentException {
+        if (index < 0 || index > size) {
+            throw new IndexOutOfBoundsException("index: " + index + ", size: " + size);
+        }
+        Objects.requireNonNull(tag, "tag");
+        if (elementType != null && tag.getType() != elementType) {
+            throw new IllegalArgumentException("Cannot insert a tag of type " + tag.getType() + " to a list of type " + elementType);
+        }
+        validateTagForAttach(tag);
+        if (tag.getParent() != null) {
+            throw new IllegalArgumentException("The tag must be detached before insertion");
+        }
+        if (!tag.getName().isEmpty()) {
+            throw new IllegalArgumentException("List elements must have an empty name");
+        }
+        if (elementType == null) {
+            elementType = tag.getType();
+        }
+        insertTagInternal(index, tag);
+        return this;
+    }
+
+    /// Replaces an element at an exact position without changing the list element type.
+    ///
+    /// @param index element index
+    /// @param replacement detached replacement
+    /// @return the former element
+    @Override
+    @Contract(value = "_, _ -> new", mutates = "this,param2")
+    public T replaceTagAt(int index, T replacement) throws IllegalArgumentException {
+        Objects.checkIndex(index, size);
+        Objects.requireNonNull(replacement, "replacement");
+        if (replacement.getType() != elementType) {
+            throw new IllegalArgumentException("Cannot replace a list element with a different type");
+        }
+        validateTagForAttach(replacement);
+        if (replacement.getParent() != null) {
+            throw new IllegalArgumentException("The replacement must be detached before insertion");
+        }
+        if (!replacement.getName().isEmpty()) {
+            throw new IllegalArgumentException("List elements must have an empty name");
+        }
+        @SuppressWarnings("unchecked")
+        T previous = (T) tags[index];
+        if (previous == null) {
+            previous = getTag(index);
+        }
+        tags[index] = replacement;
+        previous.setParent(null, -1);
+        replacement.setParent(this, index);
+        return previous;
     }
 
     /// For the heterogeneous list in SNBT, this method can be used to add any tag to the list.
@@ -189,8 +240,10 @@ public final class ListTag<T extends Tag> extends ParentTag<T> {
     public T removeTagAt(int index) throws IndexOutOfBoundsException {
         Objects.checkIndex(index, size);
 
-        T tag = removeTagFromArray(index);
-        assert tag.getIndex() == index && tag.getParentTag() == this;
+        @SuppressWarnings("unchecked")
+        T tag = (T) tags[index];
+        validateChildIdentity(index, tag);
+        removeTagFromArray(index);
 
         // Clear the tag's parent and index.
         tag.setParent(null, -1);
@@ -283,13 +336,10 @@ public final class ListTag<T extends Tag> extends ParentTag<T> {
     @SuppressWarnings("unchecked")
     public ListTag<T> clone() {
         var newTag = new ListTag<>((TagType<T>) this.elementType).setName(this.name);
-        if (size > 0) {
-            Tag[] newArray = new Tag[size];
-            for (int i = 0; i < size; i++) {
-                newArray[i] = tags[i].clone();
-            }
-            newTag.tags = newArray;
-            newTag.size = size;
+        for (int i = 0; i < size; i++) {
+            @SuppressWarnings("unchecked")
+            T cloned = (T) tags[i].clone();
+            newTag.addTag(cloned);
         }
         return newTag;
     }

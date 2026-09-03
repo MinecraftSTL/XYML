@@ -21,6 +21,7 @@ import space.minecraftstl.xyml.library.nbt.internal.ArrayAccessor;
 import org.intellij.lang.annotations.Flow;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.UnknownNullability;
 
 import java.util.*;
@@ -42,11 +43,12 @@ import java.util.stream.StreamSupport;
 /// @see CompoundTag
 /// @see ListTag
 /// @see ArrayTag
+@NotNullByDefault
 public sealed abstract class ParentTag<T extends Tag> extends Tag
         implements NBTParent<T>, Iterable<T>
         permits CompoundTag, ListTag, ArrayTag {
 
-    private final Tag[] EMPTY_TAGS = new Tag[0];
+    private static final Tag[] EMPTY_TAGS = new Tag[0];
 
     // Store all sub-tags in an array.
     //
@@ -174,6 +176,98 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
         }
     }
 
+    /// Validates that a tag can be attached below this parent without changing either tree.
+    ///
+    /// The check deliberately follows the complete parent chain by identity. This catches both
+    /// direct self references and attempts to attach an ancestor below one of its descendants.
+    ///
+    /// @param tag candidate child
+    /// @throws IllegalArgumentException if the candidate would create an invalid ownership link
+    final void validateTagForAttach(T tag) throws IllegalArgumentException {
+        Objects.requireNonNull(tag, "tag");
+        if (tag == this) {
+            throw new IllegalArgumentException("A tag cannot contain itself");
+        }
+
+        NBTParent<?> cursor = this;
+        while (cursor != null) {
+            if (cursor == tag) {
+                throw new IllegalArgumentException("A tag cannot contain one of its ancestors");
+            }
+            cursor = cursor.getParent();
+        }
+
+        NBTParent<?> oldParent = tag.getParent();
+        if (oldParent != null && oldParent != this) {
+            if (tag.getIndex() < 0) {
+                throw new IllegalArgumentException("The tag has an invalid parent index");
+            }
+            if (oldParent instanceof ParentTag<?> oldParentTag) {
+                if (tag.getIndex() >= oldParentTag.size() || oldParentTag.getTag(tag.getIndex()) != tag) {
+                    throw new IllegalArgumentException("The tag has an invalid parent index");
+                }
+            }
+        }
+    }
+
+    /// Validates that an index identifies the expected child before a structural operation.
+    ///
+    /// @param index child index
+    /// @param expected expected child identity
+    /// @throws IllegalArgumentException if the backing array and child metadata disagree
+    final void validateChildIdentity(int index, Tag expected) throws IllegalArgumentException {
+        if (index < 0 || index >= size || index >= tags.length || tags[index] != expected
+                || expected.getParent() != this || expected.getIndex() != index) {
+            throw new IllegalArgumentException("The parent-child ownership invariant is inconsistent");
+        }
+    }
+
+    /// Detaches a child from its current parent after all destination checks have passed.
+    ///
+    /// @param tag child to detach
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    final void detachFromCurrentParent(Tag tag) {
+        NBTParent oldParent = tag.getParent();
+        if (oldParent != null && oldParent != this) {
+            oldParent.removeElement(tag);
+        }
+    }
+
+    /// Inserts an already validated, detached child into the backing array.
+    ///
+    /// @param index insertion index
+    /// @param tag detached child
+    final void insertTagInternal(int index, T tag) {
+        ensureTagsCapacityForAdd();
+        if (index < size) {
+            System.arraycopy(tags, index, tags, index + 1, size - index);
+        }
+        tags[index] = tag;
+        size++;
+        tag.setParent(this, index);
+        updateIndexes(index + 1);
+    }
+
+    /// Validates a complete child collection before attaching any element.
+    ///
+    /// @param candidates candidate children in their intended order
+    /// @throws IllegalArgumentException if an ownership, cycle, or index invariant would fail
+    final void validateTagBatch(Iterable<? extends T> candidates) throws IllegalArgumentException {
+        Objects.requireNonNull(candidates, "candidates");
+        Set<Tag> identities = Collections.newSetFromMap(new IdentityHashMap<>());
+        int index = 0;
+        for (T candidate : candidates) {
+            validateTagForAttach(candidate);
+            if (!identities.add(candidate)) {
+                throw new IllegalArgumentException("A child cannot occur more than once in a batch");
+            }
+            if (candidate.getParent() == this && candidate.getIndex() != index) {
+                throw new IllegalArgumentException("A batch cannot reorder attached children");
+            }
+            index++;
+        }
+    }
+
     /// Adds the `tag` to this tag.
     ///
     /// If the `tag` is already a child of this tag, move it to the end of the list.
@@ -192,7 +286,13 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
             return;
         }
 
+        // Snapshot first: adding a parent's own children otherwise mutates the iterator and skips
+        // every successor that shifts into the current cursor.
+        List<T> snapshot = new ArrayList<>();
         for (T tag : tags) {
+            snapshot.add(tag);
+        }
+        for (T tag : snapshot) {
             this.addTag(tag);
         }
     }
@@ -233,13 +333,92 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
     /// @throws IllegalArgumentException if the `tag` is not a child of this tag.
     @Contract(mutates = "this,param1")
     public void removeTag(Tag tag) throws IllegalArgumentException {
-        if (tag.getParentTag() != this) {
+        Objects.requireNonNull(tag, "tag");
+        if (tag.getParent() != this) {
             throw new IllegalArgumentException("The tag is not a child of this tag");
         }
 
-        assert tag.getIndex() >= 0 && tag.getIndex() < size;
-
+        if (tag.getIndex() < 0 || tag.getIndex() >= size || tags[tag.getIndex()] != tag) {
+            throw new IllegalArgumentException("The tag has an invalid index in this tag");
+        }
         removeAt(tag.getIndex());
+    }
+
+    /// Inserts a tag at an exact position while preserving the order of existing children.
+    ///
+    /// @param index insertion index, including `size()` to append
+    /// @param tag tag to attach
+    /// @return this parent
+    /// @throws IndexOutOfBoundsException if the index is outside `0..size()`
+    /// @throws IllegalArgumentException if the tag cannot be attached
+    @Contract(value = "_, _ -> this", mutates = "this,param2")
+    public ParentTag<T> insertTag(int index, T tag) throws IllegalArgumentException {
+        if (index < 0 || index > size) {
+            throw new IndexOutOfBoundsException("index: " + index + ", size: " + size);
+        }
+        validateTagForAttach(tag);
+        if (tag.getParent() == this) {
+            throw new IllegalArgumentException("The tag is already a child of this tag");
+        }
+        detachFromCurrentParent(tag);
+        insertTagInternal(index, tag);
+        return this;
+    }
+
+    /// Replaces one child without exposing an intermediate invalid destination.
+    ///
+    /// @param index child index
+    /// @param replacement replacement tag
+    /// @return the detached former child
+    /// @throws IndexOutOfBoundsException if the index is outside the current children
+    /// @throws IllegalArgumentException if the replacement cannot be attached
+    @Contract(value = "_, _ -> new", mutates = "this,param2")
+    public T replaceTagAt(int index, T replacement) throws IllegalArgumentException {
+        Objects.checkIndex(index, size);
+        Objects.requireNonNull(replacement, "replacement");
+        validateTagForAttach(replacement);
+        if (replacement.getParent() == this) {
+            throw new IllegalArgumentException("The replacement is already a child of this tag");
+        }
+        detachFromCurrentParent(replacement);
+        T previous = removeTagAt(index);
+        insertTagInternal(index, replacement);
+        return previous;
+    }
+
+    /// Moves one child to another position in this parent.
+    ///
+    /// @param fromIndex current index
+    /// @param toIndex destination index
+    /// @return this parent
+    /// @throws IndexOutOfBoundsException if either index is outside the current children
+    @Contract(value = "_, _ -> this", mutates = "this")
+    public ParentTag<T> moveTag(int fromIndex, int toIndex) {
+        Objects.checkIndex(fromIndex, size);
+        Objects.checkIndex(toIndex, size);
+        if (fromIndex == toIndex) {
+            return this;
+        }
+        @SuppressWarnings("unchecked")
+        T moved = (T) tags[fromIndex];
+        if (fromIndex < toIndex) {
+            System.arraycopy(tags, fromIndex + 1, tags, fromIndex, toIndex - fromIndex);
+        } else {
+            System.arraycopy(tags, toIndex, tags, toIndex + 1, fromIndex - toIndex);
+        }
+        tags[toIndex] = moved;
+        updateIndexes(Math.min(fromIndex, toIndex));
+        return this;
+    }
+
+    /// Returns the child at an exact index without exposing internal storage.
+    ///
+    /// @param index child index
+    /// @return child at the index
+    /// @throws IndexOutOfBoundsException if the index is outside this parent
+    @Contract(pure = true)
+    public final T childAt(int index) throws IndexOutOfBoundsException {
+        return getTag(index);
     }
 
     /// @see #removeTag(Tag)
