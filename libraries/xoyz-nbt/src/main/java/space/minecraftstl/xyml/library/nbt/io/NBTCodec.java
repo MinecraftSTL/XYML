@@ -16,7 +16,9 @@
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 package space.minecraftstl.xyml.library.nbt.io;
 
+import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
+import space.minecraftstl.xyml.library.nbt.internal.ChunkUtils;
 import space.minecraftstl.xyml.library.nbt.internal.TextUtils;
 import space.minecraftstl.xyml.library.nbt.internal.input.InputSource;
 import space.minecraftstl.xyml.library.nbt.internal.input.NBTInput;
@@ -28,6 +30,7 @@ import space.minecraftstl.xyml.library.nbt.validation.NBTStructureValidator;
 import space.minecraftstl.xyml.library.nbt.validation.NBTValidationException;
 import space.minecraftstl.xyml.library.nbt.tag.*;
 import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -137,6 +140,7 @@ import java.util.zip.CRC32;
 /// For other variants (like [#readRegion(InputStream)]), the default behavior is not to support external chunk files.
 /// They will throw an exception when trying to access external chunk files.
 /// However, you can use [#readRegion(InputStream, ExternalChunkAccessor)] or [#readRegion(ReadableByteChannel, ExternalChunkAccessor)] to manually specify the external chunk accessor.
+@NotNullByDefault
 public final class NBTCodec {
     private static final NBTCodec JE = new NBTCodec(MinecraftEdition.JAVA_EDITION, ExternalChunkAccessor.defaultFactory());
     private static final NBTCodec BE = new NBTCodec(MinecraftEdition.BEDROCK_EDITION, ExternalChunkAccessor.defaultFactory());
@@ -313,7 +317,25 @@ public final class NBTCodec {
         return encoded.length >= 2 && (encoded[0] & 0xFF) == 0x1F && (encoded[1] & 0xFF) == 0x8B;
     }
 
+    /// Decodes exactly one GZIP member without applying an output-size limit.
+    ///
+    /// @param encoded complete GZIP member
+    /// @return complete uncompressed bytes
+    /// @throws IOException if the header, stream, footer, or input boundary is invalid
     private static byte[] decodeGzipStrict(byte[] encoded) throws IOException {
+        return decodeGzipStrict(encoded, Integer.MAX_VALUE);
+    }
+
+    /// Decodes exactly one GZIP member with a defensive output-size limit.
+    ///
+    /// @param encoded complete GZIP member
+    /// @param maximumOutputBytes largest accepted uncompressed size
+    /// @return complete uncompressed bytes
+    /// @throws IOException if the member is invalid, trailing, truncated, or too large
+    static byte[] decodeGzipStrict(byte[] encoded, int maximumOutputBytes) throws IOException {
+        if (maximumOutputBytes < 0) {
+            throw new IllegalArgumentException("maximumOutputBytes must not be negative");
+        }
         if (encoded.length < 18 || (encoded[0] & 0xFF) != 0x1F || (encoded[1] & 0xFF) != 0x8B
                 || (encoded[2] & 0xFF) != 8) {
             throw new IOException("Invalid GZIP header");
@@ -358,6 +380,9 @@ public final class NBTCodec {
                     throw new IOException("Invalid GZIP deflate stream", exception);
                 }
                 if (count > 0) {
+                    if (output.size() > maximumOutputBytes - count) {
+                        throw new IOException("GZIP payload is too large after decompression");
+                    }
                     output.write(buffer, 0, count);
                     checksum.update(buffer, 0, count);
                 } else if (inflater.needsDictionary() || inflater.needsInput()) {
@@ -658,26 +683,42 @@ public final class NBTCodec {
         }
     }
 
-    /// Writes a chunk region to a file.
+    /// Safely replaces a chunk region through path-backed copy-on-write storage.
     ///
+    /// @param file destination region path
+    /// @param region validated region snapshot to publish
+    /// @throws IOException if validation, encoding, or transactional publication fails
     /// @see ExternalChunkAccessor#of(Path)
     public void writeRegion(Path file, ChunkRegion region) throws IOException {
         writeRegion(file, region, ExternalChunkAccessor.of(file));
     }
 
-    /// Writes a chunk region to a file.
+    /// Safely replaces a chunk region with an explicit external-companion accessor.
+    ///
+    /// Existing chunks are compared semantically and only changed slots are published. The
+    /// destination is opened and validated before any update; it is never truncated first.
+    ///
+    /// @param file destination region path
+    /// @param region validated region snapshot to publish
+    /// @param accessor external companion accessor for this path
+    /// @throws IOException if validation, source opening, encoding, or transactional publication fails
     public void writeRegion(Path file, ChunkRegion region, ExternalChunkAccessor accessor) throws IOException {
+        Objects.requireNonNull(file, "file");
+        Objects.requireNonNull(region, "region");
+        Objects.requireNonNull(accessor, "accessor");
         try {
             NBTStructureValidator.validate(region, MinecraftEdition.JAVA_EDITION);
         } catch (NBTValidationException exception) {
             throw new IOException("Cannot write an invalid chunk region", exception);
         }
-        try (var channel = Files.newByteChannel(file,
-                StandardOpenOption.WRITE,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.TRUNCATE_EXISTING
-        )) {
-            writeRegion(channel, region, accessor);
+        try (NBTRegionFile storage = NBTRegionFile.open(file, accessor)) {
+            for (int localIndex = 0; localIndex < ChunkUtils.CHUNKS_PRE_REGION; localIndex++) {
+                Chunk desired = region.getChunk(localIndex);
+                if (!desired.equals(storage.readChunk(localIndex))) {
+                    storage.writeChunk(localIndex, desired);
+                }
+            }
+            storage.flush();
         }
     }
 
