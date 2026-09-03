@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.XYMLCacheRepository;
 import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.mcp.SwingMcpDeletionConfirmation;
+import space.minecraftstl.xyml.mcp.SwingMcpMissingDependencySearch;
 import space.minecraftstl.xyml.mcp.XYMLMcpServer;
 import space.minecraftstl.xyml.mcp.XYMLMcpService;
 import space.minecraftstl.xyml.setting.*;
@@ -107,6 +108,9 @@ public final class Launcher {
 
     /// Prevents repeated application-stop cleanup.
     private final AtomicBoolean stopped = new AtomicBoolean();
+
+    /// Whether the mandatory startup agreement has enabled launcher-owned MCP repair side effects.
+    private final AtomicBoolean mcpRepairActionsAllowed = new AtomicBoolean();
 
     /// Runtime owned by this launcher instance, or null before successful creation.
     private @Nullable SwingApplicationRuntime swingRuntime;
@@ -268,6 +272,7 @@ public final class Launcher {
                         }
                         try {
                             runtime.setInteractionEnabled(true);
+                            mcpRepairActionsAllowed.set(true);
                         } catch (IllegalStateException failure) {
                             if (!runtime.isClosed()) {
                                 throw failure;
@@ -436,7 +441,10 @@ public final class Launcher {
                                             case INSTANCE -> settings().mcpConfirmInstanceDeletionProperty().set(false);
                                             case MODS -> settings().mcpConfirmModDeletionProperty().set(false);
                                         }
-                                    })));
+                                    }),
+                            new SwingMcpMissingDependencySearch(
+                                    ACTIVE_SWING_RUNTIME::get,
+                                    mcpRepairActionsAllowed::get)));
             server.startListener();
             mcpServer = server;
             LOG.info("MCP server listening on http://127.0.0.1:" + server.getListeningPort() + "/mcp");
@@ -504,6 +512,7 @@ public final class Launcher {
         if (!stopped.compareAndSet(false, true)) {
             return;
         }
+        mcpRepairActionsAllowed.set(false);
         ACTIVE_LAUNCHER.compareAndSet(this, null);
 
         @Nullable Throwable failure = null;

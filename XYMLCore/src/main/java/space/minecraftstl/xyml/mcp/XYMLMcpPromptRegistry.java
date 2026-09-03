@@ -62,7 +62,10 @@ public final class XYMLMcpPromptRegistry implements McpPromptProvider {
         }
         String text = "请先读取实例“" + instanceId + "”的最新日志资源和崩溃报告目录资源。"
                 + "如目录中存在报告，请将直接文件名作为 crash_report_path 调用 analyze_crash；"
-                + "然后根据合并后的规则、关键词和警告总结崩溃原因及适用的启动器设置调整。";
+                + "先总结崩溃原因，再对用户选择的 solution_id 调用 plan_crash_solution。"
+                + "只有计划明确返回 executable=true 时，才可调用 execute_crash_solution；"
+                + "执行后使用 get_crash_repair_status 轮询至终态。"
+                + "通过 log_text 提供的外部日志只能用于分析，不得据此规划或执行修复。";
         return Map.of(
                 "description", "实例崩溃诊断",
                 "messages", List.of(Map.of(

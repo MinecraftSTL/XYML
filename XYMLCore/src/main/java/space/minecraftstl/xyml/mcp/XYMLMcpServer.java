@@ -37,11 +37,15 @@ public final class XYMLMcpServer implements AutoCloseable {
     /// Transport and protocol implementation owned by XoyzMCP.
     private final McpServer delegate;
 
+    /// Application operation service released after the protocol listener stops.
+    private final @Nullable XYMLMcpOperations service;
+
     /// Creates a launcher MCP server without starting its listener.
     ///
     /// @param port loopback TCP port, or zero to select an available port
     /// @param service initialized launcher operation service, or `null` for schema-only use
     public XYMLMcpServer(int port, @Nullable XYMLMcpOperations service) {
+        this.service = service;
         delegate = new McpServer(
                 port,
                 SERVER_INFO,
@@ -65,9 +69,42 @@ public final class XYMLMcpServer implements AutoCloseable {
         return delegate.getListeningPort();
     }
 
-    /// Stops the listener and discards all sessions.
+    /// Stops the listener, discards all sessions, and releases application operation state.
     @Override
     public void close() {
-        delegate.close();
+        @Nullable Throwable failure = null;
+        try {
+            delegate.close();
+        } catch (Throwable closeFailure) {
+            failure = closeFailure;
+        }
+        if (service instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (Throwable serviceFailure) {
+                if (failure == null) {
+                    failure = serviceFailure;
+                } else if (failure != serviceFailure) {
+                    failure.addSuppressed(serviceFailure);
+                }
+            }
+        }
+        rethrowCloseFailure(failure);
+    }
+
+    /// Rethrows the first cleanup failure without erasing unchecked failure identity.
+    ///
+    /// @param failure first cleanup failure, or null when every close step succeeded
+    private static void rethrowCloseFailure(@Nullable Throwable failure) {
+        if (failure == null) {
+            return;
+        }
+        if (failure instanceof RuntimeException runtimeException) {
+            throw runtimeException;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        throw new IllegalStateException("Failed to close MCP operations", failure);
     }
 }
