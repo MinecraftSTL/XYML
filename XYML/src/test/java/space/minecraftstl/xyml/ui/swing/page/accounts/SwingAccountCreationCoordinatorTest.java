@@ -425,6 +425,7 @@ public final class SwingAccountCreationCoordinatorTest {
             return List.of(new AuthlibServerOption(
                     "https://example.test/",
                     "Example",
+                    "example.test/",
                     true));
         }
 

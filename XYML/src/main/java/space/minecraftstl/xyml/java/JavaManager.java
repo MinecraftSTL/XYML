@@ -38,7 +38,6 @@ import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.CacheRepository;
 import space.minecraftstl.xyml.util.DigestUtils;
-import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.platform.Architecture;
@@ -532,7 +531,7 @@ public final class JavaManager {
             FileUtils.tryGetPath(System.getenv("localappdata"), "Packages\\Microsoft.4297127D64EC6_8wekyb3d8bbwe\\LocalCache\\Local\\runtime")
                     .ifPresent(it -> searcher.searchAllOfficialJava(it, false));
 
-            FileUtils.tryGetPath(Lang.requireNonNullElse(System.getenv("ProgramFiles(x86)"), "C:\\Program Files (x86)"), "Minecraft Launcher\\runtime")
+            FileUtils.tryGetPath(Objects.requireNonNullElse(System.getenv("ProgramFiles(x86)"), "C:\\Program Files (x86)"), "Minecraft Launcher\\runtime")
                     .ifPresent(it -> searcher.searchAllOfficialJava(it, false));
         } else if (OperatingSystem.CURRENT_OS == OperatingSystem.LINUX && Architecture.SYSTEM_ARCH == Architecture.X86_64) {
             searcher.searchAllOfficialJava(Path.of(System.getProperty("user.home"), ".minecraft/runtime"), false);
@@ -597,7 +596,7 @@ public final class JavaManager {
                         it.isJDK() ? "JDK" : "JRE",
                         it.getVersion(),
                         it.getPlatform().getArchitecture().getDisplayName(),
-                        Lang.requireNonNullElse(it.getVendor(), "Unknown"),
+                        Objects.requireNonNullElse(it.getVendor(), "Unknown"),
                         it.getBinary()))
                 .collect(Collectors.joining("\n", "Finished Java lookup, found " + searcher.javaRuntimes.size() + "\n", "")));
         return searcher.javaRuntimes;
@@ -1008,7 +1007,7 @@ public final class JavaManager {
         /// @param env environment variable naming the root
         /// @param defaultValue fallback root when the environment variable is absent
         void searchJavaInProgramFiles(String env, String defaultValue) {
-            String programFiles = Lang.requireNonNullElse(System.getenv(env), defaultValue);
+            String programFiles = Objects.requireNonNullElse(System.getenv(env), defaultValue);
             Path path;
             try {
                 path = Path.of(programFiles);

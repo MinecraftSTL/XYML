@@ -18,16 +18,21 @@
 package space.minecraftstl.xyml.game;
 
 import org.intellij.lang.annotations.Language;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.util.function.ExceptionalFunction;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/// Matches existing launcher crash rules and extracts referenced or embedded crash reports.
+@NotNullByDefault
 public final class CrashReportAnalyzer {
 
     private CrashReportAnalyzer() {
@@ -179,22 +184,57 @@ public final class CrashReportAnalyzer {
         return results;
     }
 
-    private static final Pattern CRASH_REPORT_LOCATION_PATTERN = Pattern.compile("#@!@# Game crashed! Crash report saved to: #@!@# (?<location>.*)");
+    /// Matches one crash-report path marker without consuming the line terminator.
+    private static final Pattern CRASH_REPORT_LOCATION_PATTERN = Pattern.compile(
+            "#@!@# Game crashed! Crash report saved to: #@!@# (?<location>[^\\r\\n]+)");
 
+    /// Reads the latest crash report referenced by one launcher log through the default filesystem boundary.
+    ///
+    /// When multiple markers exist, the final marker represents the latest launch attempt.
+    ///
+    /// @param log launcher log that may contain crash-report location markers
+    /// @return referenced report text, or `null` when no marker exists
+    /// @throws IOException if the referenced report cannot be read
+    /// @throws InvalidPathException if the marker contains an invalid path
     @Nullable
     public static String findCrashReport(String log) throws IOException, InvalidPathException {
-        Matcher matcher = CRASH_REPORT_LOCATION_PATTERN.matcher(log);
-        if (matcher.find()) {
-            return Files.readString(Paths.get(matcher.group("location")));
-        } else {
-            return null;
-        }
+        return findCrashReport(log, Files::readString);
     }
 
-    public static String extractCrashReport(String rawLog) {
-        int begin = rawLog.lastIndexOf("---- Minecraft Crash Report ----");
+    /// Resolves the latest crash-report path in one launcher log through a caller-owned reader.
+    ///
+    /// This overload lets callers retain their own path-ownership checks before any report text is returned.
+    /// When multiple markers exist, the final marker represents the latest launch attempt.
+    ///
+    /// @param log launcher log that may contain crash-report location markers
+    /// @param reportReader reader that validates and reads the referenced path
+    /// @return referenced report text, or `null` when no marker exists or the reader declines the path
+    /// @throws IOException if the reader cannot inspect or read the referenced report
+    /// @throws InvalidPathException if the marker contains an invalid path
+    public static @Nullable String findCrashReport(
+            String log,
+            ExceptionalFunction<Path, @Nullable String, IOException> reportReader)
+            throws IOException, InvalidPathException {
+        Matcher matcher = CRASH_REPORT_LOCATION_PATTERN.matcher(log);
+        if (!matcher.find()) return null;
+
+        String location;
+        do {
+            location = matcher.group("location");
+        } while (matcher.find());
+        return reportReader.apply(Paths.get(location));
+    }
+
+    /// Extracts the last complete crash-report block embedded in launcher output.
+    ///
+    /// @param rawLog raw launcher output
+    /// @return embedded crash-report text, or `null` when no complete block exists
+    public static @Nullable String extractCrashReport(String rawLog) {
         int end = rawLog.lastIndexOf("#@!@# Game crashed! Crash report saved to");
-        if (begin == -1 || end == -1 || begin >= end) return null;
+        if (end == -1) return null;
+
+        int begin = rawLog.lastIndexOf("---- Minecraft Crash Report ----", end - 1);
+        if (begin == -1) return null;
         return rawLog.substring(begin, end);
     }
 

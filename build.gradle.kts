@@ -1,4 +1,5 @@
 import space.minecraftstl.xyml.gradle.docs.UpdateDocuments
+import space.minecraftstl.xyml.gradle.cache.RunLibraryCache
 import space.minecraftstl.xyml.gradle.ci.GitHubActionUtils
 import space.minecraftstl.xyml.gradle.ci.JenkinsUtils
 import space.minecraftstl.xyml.gradle.l10n.ParseLanguageSubtagRegistry
@@ -247,6 +248,20 @@ val releaseBranchBuilds = mapOf(
 )
 val localBuildTasks = subprojects.map { "${it.path}:build" }
 val localCleanTasks = subprojects.map { "${it.path}:clean" }
+val runLibraryNames = listOf("xoyz-nbt", "xoyz-mcp")
+val runLibraryCacheDirectory = layout.buildDirectory.dir("run-library-cache")
+
+fun promoteRunLibraryCache() {
+    val artifacts = runLibraryNames.associateWith { library ->
+        project(":$library").tasks.named<Jar>("jar").get().archiveFile.get().asFile.toPath()
+    }
+    RunLibraryCache.promote(
+        runLibraryCacheDirectory.get().asFile.toPath(),
+        xymlReleaseVersion,
+        artifacts
+    )
+    logger.lifecycle("XYML run-library cache recorded for {}", runLibraryNames.joinToString(", "))
+}
 
 tasks.register<Delete>("clean") {
     group = xymlWorkflowGroup
@@ -275,8 +290,8 @@ if (nestedBranchBuild.get() || xymlBranchReleaseType == null) {
             logger.lifecycle("XYML inferred feature version: $xymlReleaseVersion")
         }
 
-        if (!nestedBranchBuild.get()) {
-            doLast {
+        doLast {
+            if (!nestedBranchBuild.get()) {
                 val xymlArtifact = project(":XYML").tasks.named<Jar>("shadowJar").get().archiveFile.get().asFile
                 recordRootBuildResult(
                     xymlArtifact,
@@ -285,6 +300,7 @@ if (nestedBranchBuild.get() || xymlBranchReleaseType == null) {
                     xymlBranchName ?: "<detached>"
                 )
             }
+            promoteRunLibraryCache()
         }
     }
 } else {
@@ -308,6 +324,22 @@ val runBuildRequested = gradle.startParameter.taskNames.any { taskName ->
         ":XYML:runCurrent"
     )
 }
+val runCleanRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.substringAfterLast(':') == "clean"
+}
+val runLifecycleRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.substringAfterLast(':').let { name ->
+        name == "build" || name == "check" || name in setOf("buildMain", "buildBeta", "buildAlpha", "buildDev")
+    }
+}
+val reusableRunLibraries = if (runBuildRequested && !runCleanRequested && !runLifecycleRequested) {
+    RunLibraryCache.resolve(runLibraryCacheDirectory.get().asFile.toPath(), runLibraryNames)
+} else {
+    emptyMap()
+}
+extra["xymlRunLibraryArtifacts"] = reusableRunLibraries.mapValues { (_, artifact) -> artifact.toFile() }
+val temporaryRunLibraries = runBuildRequested && !runLifecycleRequested && reusableRunLibraries.isEmpty()
+val temporaryRunLibraryDirectory = layout.buildDirectory.dir("temporary-run-libraries")
 
 if (runBuildRequested) {
     setOf(":XYML", ":XYMLCore", ":XYMLBoot").forEach { projectPath ->
@@ -328,6 +360,30 @@ if (runBuildRequested) {
             }
         }
     }
+
+    if (temporaryRunLibraries) {
+        runLibraryNames.forEach { library ->
+            project(":$library").layout.buildDirectory.set(temporaryRunLibraryDirectory.map { it.dir(library) })
+            project(":$library").tasks.configureEach {
+                outputs.upToDateWhen { false }
+                outputs.doNotCacheIf("XYML run uses a temporary $library build") { true }
+            }
+        }
+    }
+}
+
+val cleanTemporaryRunLibraries = tasks.register<Delete>("cleanTemporaryRunLibraries") {
+    group = "internal"
+    description = "Removes library outputs built only for the current run invocation."
+    delete(temporaryRunLibraryDirectory)
+}
+
+if (temporaryRunLibraries) {
+    project(":XYML").tasks.configureEach {
+        if (name == "shadowJar") {
+            finalizedBy(cleanTemporaryRunLibraries)
+        }
+    }
 }
 
 val prepareRunBuild = tasks.register("prepareRunBuild") {
@@ -338,6 +394,16 @@ val prepareRunBuild = tasks.register("prepareRunBuild") {
     doLast {
         val runArtifact = project(":XYML").tasks.named<Jar>("shadowJar").get().archiveFile.get().asFile
         logger.lifecycle("XYML run: rebuilt the current checkout artifact at $runArtifact")
+        when {
+            reusableRunLibraries.isNotEmpty() -> logger.lifecycle(
+                "XYML run: reused the most recent successful build of {}",
+                runLibraryNames.joinToString(", ")
+            )
+            temporaryRunLibraries -> logger.lifecycle(
+                "XYML run: used temporary library builds; they were not added to the run-library cache"
+            )
+            else -> logger.lifecycle("XYML run: used current library project outputs for this combined workflow")
+        }
     }
 }
 

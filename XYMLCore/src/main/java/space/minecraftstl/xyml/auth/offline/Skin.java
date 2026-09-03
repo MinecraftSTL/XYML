@@ -26,7 +26,6 @@ import space.minecraftstl.xyml.auth.yggdrasil.TextureModel;
 import space.minecraftstl.xyml.task.FetchTask;
 import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Task;
-import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
@@ -41,6 +40,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 
 /// Persisted offline-account skin configuration and toolkit-neutral loading workflow.
@@ -183,7 +183,7 @@ public record Skin(
                 String realCslApi = type == Type.LITTLE_SKIN
                         ? "https://littleskin.cn/csl"
                         : NetworkUtils.addHttpsIfMissing(
-                                StringUtils.removeSuffix(Lang.requireNonNullElse(cslApi, ""), "/"));
+                                StringUtils.removeSuffix(Objects.requireNonNullElse(cslApi, ""), "/"));
                 return Task.composeAsync(() -> new GetTask(String.format("%s/%s.json", realCslApi, username)))
                         .asOrchestration()
                         .thenComposeAsync(json -> {

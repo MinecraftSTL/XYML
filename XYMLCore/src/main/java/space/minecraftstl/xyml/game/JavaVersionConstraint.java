@@ -17,21 +17,24 @@
  */
 package space.minecraftstl.xyml.game;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.java.JavaRuntime;
-import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.platform.Architecture;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionNumber;
 import space.minecraftstl.xyml.util.versioning.VersionRange;
-import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 import java.util.Objects;
 
 import static space.minecraftstl.xyml.download.LibraryAnalyzer.LAUNCH_WRAPPER_MAIN;
 
+/// Describes Java runtime constraints for recognized Minecraft launch configurations.
+@NotNullByDefault
 public enum JavaVersionConstraint {
     VANILLA(true, VersionRange.all(), VersionRange.all()) {
         @Override
@@ -275,5 +278,6 @@ public enum JavaVersionConstraint {
         return getJavaVersionRange(version, analyzer).contains(java.getVersionNumber());
     }
 
-    public static final List<JavaVersionConstraint> ALL = Lang.immutableListOf(values());
+    /// Immutable declaration-order view of every Java constraint.
+    public static final @Unmodifiable List<JavaVersionConstraint> ALL = List.of(values());
 }

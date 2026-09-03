@@ -55,6 +55,9 @@ import static space.minecraftstl.xyml.util.Pair.pair;
 @NotNullByDefault
 public class YggdrasilService {
 
+    /// Maximum number of response characters retained in malformed-response diagnostics.
+    private static final int MALFORMED_RESPONSE_PREVIEW_LIMIT = 256;
+
     /// Shared executor for asynchronous profile-property cache fetches.
     private static final ThreadPoolExecutor POOL = threadPool("YggdrasilProfileProperties", true, 2, 10, TimeUnit.SECONDS);
 
@@ -338,11 +341,34 @@ public class YggdrasilService {
     /// @return parsed object, or `null` when the response is JSON `null`
     /// @throws ServerResponseMalformedException if the response cannot be parsed
     private static <T> @Nullable T fromJson(String text, Class<T> typeOfT) throws ServerResponseMalformedException {
+        String normalized = text.strip();
+        if ("null".equals(normalized)) {
+            return null;
+        }
+        if (!normalized.startsWith("{")) {
+            throw new ServerResponseMalformedException(
+                    "Expected a JSON object response, but received: " + responsePreview(normalized));
+        }
+
         try {
-            return GSON.fromJson(text, typeOfT);
+            return GSON.fromJson(normalized, typeOfT);
         } catch (JsonParseException e) {
             throw new ServerResponseMalformedException(text, e);
         }
+    }
+
+    /// Builds a bounded response preview suitable for exception messages and logs.
+    ///
+    /// @param response normalized malformed response body
+    /// @return bounded response preview
+    private static String responsePreview(String response) {
+        if (response.isEmpty()) {
+            return "<empty>";
+        }
+        if (response.length() <= MALFORMED_RESPONSE_PREVIEW_LIMIT) {
+            return response;
+        }
+        return response.substring(0, MALFORMED_RESPONSE_PREVIEW_LIMIT) + "...";
     }
 
     /// Models the decoded payload of a Yggdrasil `textures` property.

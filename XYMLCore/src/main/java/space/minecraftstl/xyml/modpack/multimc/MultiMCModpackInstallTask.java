@@ -268,7 +268,7 @@ public final class MultiMCModpackInstallTask extends Task<MultiMCInstancePatch.R
                 for (MultiMCManifest.MultiMCManifestCachedRequires requirement : patch.getRequires()) {
                     String componentID = requirement.getID();
                     if (!existing.containsKey(componentID)) {
-                        @Nullable String version = Lang.requireNonNullElse(
+                        String version = Objects.requireNonNullElse(
                                 requirement.getEqualsVersion(),
                                 requirement.getSuggests());
                         Task<MultiMCInstancePatch> task = Objects.requireNonNull(

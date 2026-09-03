@@ -254,7 +254,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         return getInstanceManifests().stream()
                 .filter(v -> !v.isHidden())
                 .sorted(Comparator.comparing((GameInstanceManifest v) -> VersionNumber.asVersion(v.id().id()))
-                        .thenComparing(v -> Lang.requireNonNullElse(v.releaseTime(), Instant.EPOCH)));
+                        .thenComparing(v -> Objects.requireNonNullElse(v.releaseTime(), Instant.EPOCH)));
     }
 
     /// Detects the Minecraft version from one already captured primary JAR path.
@@ -652,7 +652,8 @@ public final class XYMLGameRepository extends DefaultGameRepository {
 
         @Nullable GameSettings.Instance instanceSetting = getInstanceGameSettings(instanceId);
         GameSettings.Preset preset = getParentGameSettings(instanceSetting);
-        DefaultIsolationType type = Lang.requireNonNullElse(preset.defaultIsolationTypeProperty().getValue(), DefaultIsolationType.MODDED);
+        DefaultIsolationType type = Objects.requireNonNullElse(
+                preset.defaultIsolationTypeProperty().getValue(), DefaultIsolationType.MODDED);
         boolean isolated = switch (type) {
             case NEVER -> false;
             case ALWAYS -> true;
@@ -672,7 +673,8 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// Returns whether a new instance should use an isolated running directory under the default isolation settings.
     public boolean shouldIsolateNewInstance(boolean modded) {
         GameSettings.Preset preset = getParentGameSettings(null);
-        DefaultIsolationType type = Lang.requireNonNullElse(preset.defaultIsolationTypeProperty().getValue(), DefaultIsolationType.MODDED);
+        DefaultIsolationType type = Objects.requireNonNullElse(
+                preset.defaultIsolationTypeProperty().getValue(), DefaultIsolationType.MODDED);
         return switch (type) {
             case NEVER -> false;
             case ALWAYS -> true;
@@ -879,7 +881,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
                 .setEnableDebugLogOutput(vs.getInheritable(GameSettings::enableDebugLogOutputProperty))
                 .setAllowAutoAgent(vs.getInheritable(GameSettings::allowAutoAgentProperty))
                 .setDisableAutoGameOptions(vs.getInheritable(GameSettings::disableAutoGameOptionsProperty))
-                .setUseNativeGLFW(vs.getInheritable(GameSettings::useNativeGLFWProperty))
+                .setUseNativeGLFWorSDL(vs.getInheritable(GameSettings::useNativeGLFWorSDLProperty))
                 .setUseNativeOpenAL(vs.getInheritable(GameSettings::useNativeOpenALProperty))
                 .setDaemon(!makeLaunchScript && vs.getInheritable(GameSettings::launcherVisibilityProperty).isDaemon())
                 .setJavaAgents(javaAgents)

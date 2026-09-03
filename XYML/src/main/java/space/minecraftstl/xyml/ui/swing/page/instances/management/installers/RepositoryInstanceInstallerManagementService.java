@@ -99,6 +99,7 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
             Collection<? extends RemoteVersion> remoteVersions) {
         GameInstanceID id = Objects.requireNonNull(instanceId, "instanceId");
         @Unmodifiable List<RemoteVersion> capturedVersions = copyRemoteVersions(remoteVersions);
+        @Unmodifiable List<Task.StagesHint> stages = remoteInstallationStages(capturedVersions);
         return Task.composeAsync(ioExecutor, () -> {
             InstanceInstallerSnapshot snapshot = readSnapshot(id);
             @Unmodifiable List<RemoteVersion> validatedVersions =
@@ -117,7 +118,26 @@ public final class RepositoryInstanceInstallerManagementService implements Insta
             }
             return completeMutation(id, mutation);
         }).setResources(metadataResource(), instanceResource(id))
-                .releaseResourcesBeforeDependencies();
+                .releaseResourcesBeforeDependencies()
+                .withStagesHints(stages);
+    }
+
+    /// Builds the ordered progress stages needed to group each loader's dependency downloads.
+    ///
+    /// @param remoteVersions immutable selected remote versions
+    /// @return immutable dependency and component stage sequence
+    static @Unmodifiable List<Task.StagesHint> remoteInstallationStages(
+            Collection<? extends RemoteVersion> remoteVersions) {
+        @Unmodifiable List<RemoteVersion> versions = copyRemoteVersions(remoteVersions);
+        List<Task.StagesHint> stages = new ArrayList<>(versions.size() * 2);
+        for (RemoteVersion remoteVersion : versions) {
+            stages.add(new Task.StagesHint("xyml.install.libraries"));
+            stages.add(new Task.StagesHint(String.format(
+                    "xyml.install.%s:%s",
+                    remoteVersion.getLibraryId(),
+                    remoteVersion.getSelfVersion())));
+        }
+        return List.copyOf(stages);
     }
 
     /// Builds one deferred removal chain after checking parent-loader safety against the latest snapshot.
