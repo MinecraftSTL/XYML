@@ -86,16 +86,18 @@ After importing the repository as a Gradle project, open the Gradle tool window 
 
 | Task | Behavior |
 | --- | --- |
-| `buildMain` | Fetches and builds the latest `origin/main` commit. |
-| `buildBeta` | Fetches and builds the latest `origin/beta` commit. |
-| `buildAlpha` | Fetches and builds the latest `origin/alpha` commit. |
-| `buildDev` | Fetches and builds the latest `origin/dev` commit. |
-| `build` | Routes a release checkout to the matching task above; builds a feature or detached checkout in place. |
+| `buildMain` | Builds the tip of the local `main` branch in an isolated worktree. |
+| `buildBeta` | Builds the tip of the local `beta` branch in an isolated worktree. |
+| `buildAlpha` | Builds the tip of the local `alpha` branch in an isolated worktree. |
+| `buildDev` | Builds the tip of the local `dev` branch in an isolated worktree. |
+| `build` | Builds the current checkout in place, including its uncommitted changes. |
 | `clean` | Cleans only the current checkout without inspecting or fetching any branch. |
 | `run` | Always rebuilds `XYML`, `XYMLCore`, and `XYMLBoot`, then runs the current checkout artifact. |
 
-The `run` task always uses the current repository root as XYML's working directory, including on `main`, `beta`,
-`alpha`, and `dev` checkouts.
+The `build` and `run` tasks always use the current repository root, including on `main`, `beta`, `alpha`, and `dev`
+checkouts. Neither task switches branches or delegates to a channel task. Without CI version inputs, the current
+branch and `HEAD` topology determine the artifact version; uncommitted changes are included in the artifact but do
+not increment the version.
 
 Every `run` invocation disables up-to-date and build-cache reuse for tasks in `XYML`, `XYMLCore`, and `XYMLBoot`.
 This includes Java compilation, generated language data, processed resources, and the final `shadowJar`. XoyzNBT and
@@ -108,24 +110,17 @@ unchanged native source may still reuse the XYMLL executable.
 
 `run` always rebuilds and selects the current `XYML/build/libs` application artifact; it never reuses an application
 JAR recorded by a previous root `:build`. It does not write the root result marker or start a second Wrapper process.
-Local release-branch builds without CI version inputs infer their version from Git topology.
 
 The subproject-level task is named `:XYML:runCurrent`; it is intentionally not named `run`, so Gradle does not select
 a second launcher process together with the root workflow.
 
-The four channel tasks refresh `main`, `beta`, `alpha`, and `dev` together, then build the selected commit in a
-temporary detached worktree without switching the current IDEA checkout. On Windows, the GitHub fetch uses the
-enabled Windows system proxy. Successful channel artifacts are copied to `build/channel-builds/<branch>` together
-with `build-info.properties`; feature artifacts remain in `XYML/build/libs`.
+The four channel tasks read only the local `main`, `beta`, `alpha`, and `dev` refs. They perform no fetch or other
+online Git operation, and build the selected local branch tip in a temporary detached worktree without switching the
+current IDEA checkout. Successful channel artifacts are copied to `build/channel-builds/<branch>` together with
+`build-info.properties`; the current-checkout `build` artifact remains in `XYML/build/libs`.
 
-To test cached remote-tracking refs without accessing GitHub, disable the refresh explicitly:
-
-```powershell
-.\gradlew.bat buildMain '-Pxyml.branchBuild.fetch=false'
-```
-
-An explicit proxy can be supplied with `-Pxyml.branchBuild.gitProxy=<proxy-url>` when the Windows system proxy is not
-available.
+On Windows, the Gradle Wrapper and nested channel builds allow Gradle distribution and dependency downloads to use
+the enabled Windows system proxy.
 
 ## Debug Options
 
