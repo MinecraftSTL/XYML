@@ -278,7 +278,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             TaskResourceLockManager.Owner owner = resourceLockManager.createOwner(
                     resourceExecution,
                     parentOwner,
-                    task.getDeclaredResources(),
+                    task.getResourceDeclarations(),
                     false);
             CompletableFuture<TaskResourceLockManager.Lease> acquisition = resourceLockManager.acquire(owner);
             leaseReference.trackPending(acquisition);
@@ -389,7 +389,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             TaskResourceLockManager.Owner owner = resourceLockManager.createOwner(
                     resourceExecution,
                     parentOwner,
-                    task.getDeclaredResources(),
+                    task.getResourceDeclarations(),
                     task.releasesResourcesBeforeDependencies() || task.releasesResourcesBeforeDependents());
             ownerForCompletion = owner;
             CompletableFuture<TaskResourceLockManager.Lease> acquisition = resourceLockManager.acquire(owner);

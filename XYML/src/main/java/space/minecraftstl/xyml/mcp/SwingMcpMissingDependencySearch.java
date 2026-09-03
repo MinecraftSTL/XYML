@@ -75,6 +75,9 @@ public final class SwingMcpMissingDependencySearch implements LogAnalyzable.Miss
 
     /// Creates a fresh stopped task that opens a search for the first diagnosed dependency identifier.
     ///
+    /// The task completes after the Swing runtime accepts the navigation command. Any subsequent catalog network query
+    /// belongs to the UI runtime and does not write a launcher filesystem resource.
+    ///
     /// @param dependencyIds immutable ordered missing-dependency identifiers
     /// @return fresh stopped search task
     /// @throws IllegalArgumentException if no non-blank dependency identifier is supplied

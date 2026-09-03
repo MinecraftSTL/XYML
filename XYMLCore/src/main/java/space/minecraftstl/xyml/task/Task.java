@@ -51,8 +51,8 @@ public abstract class Task<T> {
     /// Full declaration snapshot retained until asynchronous filesystem identity resolution.
     ///
     /// Unlike [#resources], this snapshot keeps lexical descendants that may resolve through a symbolic link or
-    /// junction to a path outside an apparent parent directory. It is package-private through [#getDeclaredResources]
-    /// so only the executor can pass the complete declaration set to the lock manager.
+    /// junction to a path outside an apparent parent directory. [#getResourceDeclarations()] exposes the immutable
+    /// snapshot for cross-module task composition; it contains no lock state or release handle.
     private @Unmodifiable Set<TaskResource> declaredResources = resources;
 
     /// Whether the acquired declaration may be handed off before this task's dependencies run.
@@ -79,12 +79,14 @@ public abstract class Task<T> {
 
     /// Returns the complete immutable declaration snapshot used by the asynchronous resource arbiter.
     ///
-    /// The snapshot may contain lexical descendants that [#getResources()] removes as apparent redundancies. Callers
-    /// outside the task subsystem should use [#getResources()] for the public minimized declaration; this method is
-    /// package-private so path identity resolution can preserve aliases until it has inspected the filesystem.
+    /// The snapshot may contain lexical descendants that [#getResources()] removes as apparent redundancies. A
+    /// cross-module task composer must use this method when it forwards one task's declaration into another task:
+    /// retaining those descendants lets the path-identity resolver inspect a symbolic link or junction before it
+    /// minimizes coverage. The returned set contains declarations only; it never exposes lock state or a release
+    /// handle.
     ///
-    /// @return immutable declarations before coverage minimization
-    final @Unmodifiable Set<TaskResource> getDeclaredResources() {
+    /// @return immutable declarations before lexical coverage minimization
+    public final @Unmodifiable Set<TaskResource> getResourceDeclarations() {
         return declaredResources;
     }
 

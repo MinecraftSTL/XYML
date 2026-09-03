@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.game;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.java.JavaInfo;
@@ -37,6 +38,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -95,13 +101,86 @@ final class JavaRuntimeRepairTaskFactoryTest {
                 persisted::set);
 
         assertEquals(
-                Set.of(
-                        TaskResource.gameInstance(instanceDirectory),
-                        TaskResource.configuration(settingsFile)),
-                persistence.getResources());
+                List.of(TaskResource.Kind.ORCHESTRATION),
+                persistence.getResources().stream().map(TaskResource::getKind).toList());
         assertEquals(Set.of(javaResource), selection.getResources());
         assertTrue(persistence.test(), () -> "Persistence task failed: " + persistence.getException());
         assertSame(selected, persisted.get());
+    }
+
+    /// Keeps a final source validator and settings persistence in one uninterrupted resource lease.
+    ///
+    /// @throws Exception when bounded task execution fails
+    @Test
+    void finalValidatorAndPersistenceAreAtomicAgainstConflictingTasks(@TempDir Path temporaryDirectory)
+            throws Exception {
+        Path instanceDirectory = temporaryDirectory.resolve("instances").resolve("atomic");
+        Path settingsFile = instanceDirectory.resolve("settings.json");
+        TaskResource instanceResource = TaskResource.gameInstance(instanceDirectory);
+        CountDownLatch validatorEntered = new CountDownLatch(1);
+        CountDownLatch releaseValidator = new CountDownLatch(1);
+        List<String> executionOrder = new CopyOnWriteArrayList<>();
+        Task<?> validator = Task.runAsync(() -> {
+            executionOrder.add("validator");
+            validatorEntered.countDown();
+            if (!releaseValidator.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out while holding the final validation lease");
+            }
+        }).setResources(instanceResource);
+        Task<@Nullable Void> persistence = JavaRuntimeRepairTaskFactory.createPersistenceTask(
+                Task.completed(runtime("atomic-selection")),
+                instanceDirectory,
+                settingsFile,
+                validator,
+                ignoredJava -> executionOrder.add("persistence"));
+        Task<@Nullable Void> contender = Task.runAsync(() -> executionOrder.add("contender"))
+                .setResources(instanceResource);
+
+        CompletableFuture<Boolean> persistenceResult = CompletableFuture.supplyAsync(persistence::test);
+        assertTrue(validatorEntered.await(5, TimeUnit.SECONDS));
+        CompletableFuture<Boolean> contenderResult = CompletableFuture.supplyAsync(contender::test);
+        try {
+            releaseValidator.countDown();
+            assertTrue(persistenceResult.get(5, TimeUnit.SECONDS));
+            assertTrue(contenderResult.get(5, TimeUnit.SECONDS));
+        } finally {
+            releaseValidator.countDown();
+        }
+
+        assertEquals(List.of("validator", "persistence", "contender"), executionOrder);
+    }
+
+    /// Keeps an external symbolic-link run directory in the final cross-module resource union.
+    ///
+    /// @throws Exception when bounded task execution or symbolic-link setup fails
+    @Test
+    void finalValidatorRetainsSymbolicLinkDescendantDeclaration(@TempDir Path temporaryDirectory) throws Exception {
+        Path instanceDirectory = Files.createDirectories(temporaryDirectory.resolve("instance"));
+        Path externalRunDirectory = Files.createDirectories(temporaryDirectory.resolve("external-run"));
+        Path linkedRunDirectory = instanceDirectory.resolve("run");
+        try {
+            Files.createSymbolicLink(linkedRunDirectory, externalRunDirectory);
+        } catch (IOException | UnsupportedOperationException | SecurityException unavailable) {
+            Assumptions.assumeTrue(false, "Symbolic links are unavailable: " + unavailable.getMessage());
+            return;
+        }
+
+        TaskResource instanceResource = TaskResource.gameInstance(instanceDirectory);
+        TaskResource runResource = TaskResource.gameDirectory(linkedRunDirectory);
+        Task<?> validator = Task.completed(null).setResources(instanceResource, runResource);
+        assertEquals(Set.of(instanceResource), validator.getResources());
+        assertEquals(Set.of(instanceResource, runResource), validator.getResourceDeclarations());
+
+        AtomicBoolean persisted = new AtomicBoolean();
+        Task<@Nullable Void> persistence = JavaRuntimeRepairTaskFactory.createPersistenceTask(
+                Task.completed(runtime("symbolic-link-selection")),
+                instanceDirectory,
+                instanceDirectory.resolve("settings.json"),
+                validator,
+                ignoredJava -> persisted.set(true));
+
+        assertTrue(persistence.test(), () -> "Symbolic-link persistence failed: " + persistence.getException());
+        assertTrue(persisted.get());
     }
 
     /// Downloads only after an empty first decision and uses the post-download decision instead of the download result.

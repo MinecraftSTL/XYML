@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.game;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.download.LibraryAnalyzer;
 import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
@@ -35,7 +36,9 @@ import space.minecraftstl.xyml.util.function.ExceptionalRunnable;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -60,6 +63,39 @@ public final class JavaRuntimeRepairTaskFactory {
     public static Task<@Nullable Void> create(
             XYMLGameRepository repository,
             GameInstanceManifest manifest) {
+        return createInternal(repository, manifest, null);
+    }
+
+    /// Creates a stopped Java repair task with a protected final source revalidation.
+    ///
+    /// The supplied validation task runs after any runtime download and immediately before settings mutation. Its
+    /// concrete resources are combined with the instance settings resources and held continuously through validation,
+    /// mutation, durable persistence, and queued-save drainage.
+    ///
+    /// @param repository repository owning the launched instance and its settings
+    /// @param manifest launched instance manifest
+    /// @param persistenceValidator fresh stopped task that revalidates the repair source before settings mutation
+    /// @return stopped task that validates the source and selects a compatible Java runtime
+    public static Task<@Nullable Void> create(
+            XYMLGameRepository repository,
+            GameInstanceManifest manifest,
+            Task<?> persistenceValidator) {
+        return createInternal(
+                repository,
+                manifest,
+                Objects.requireNonNull(persistenceValidator, "persistenceValidator"));
+    }
+
+    /// Builds the Java selection pipeline with an optional final validation task.
+    ///
+    /// @param repository repository owning the launched instance and its settings
+    /// @param manifest launched instance manifest
+    /// @param persistenceValidator final protected validator, or null when the caller has no retained source
+    /// @return stopped Java selection and persistence task
+    private static Task<@Nullable Void> createInternal(
+            XYMLGameRepository repository,
+            GameInstanceManifest manifest,
+            @Nullable Task<?> persistenceValidator) {
         XYMLGameRepository checkedRepository = Objects.requireNonNull(repository, "repository");
         GameInstanceManifest checkedManifest = Objects.requireNonNull(manifest, "manifest");
         GameInstanceID instanceId = checkedManifest.id();
@@ -97,7 +133,9 @@ public final class JavaRuntimeRepairTaskFactory {
                 selection,
                 instanceDirectory,
                 settingsFile,
+                persistenceValidator,
                 selectedJava -> checkedRepository.callWithStableBaseDirectory(repositoryDirectory, () -> {
+                    requireCurrentManifest(checkedRepository, checkedManifest);
                     persistJavaSelectionAndDrain(
                             () -> requireWritableSettings(checkedRepository, instanceId),
                             selectedJava,
@@ -105,6 +143,21 @@ public final class JavaRuntimeRepairTaskFactory {
                             FileSaver::waitForAllSaves);
                     return null;
                 }));
+    }
+
+    /// Rejects a Java selection produced for an instance manifest that has since changed.
+    ///
+    /// @param repository repository owning the affected instance
+    /// @param expectedManifest immutable manifest used to select the replacement runtime
+    private static void requireCurrentManifest(
+            XYMLGameRepository repository,
+            GameInstanceManifest expectedManifest) {
+        GameInstanceManifest currentManifest = repository
+                .getResolvedInstanceManifest(expectedManifest.id())
+                .launchManifest();
+        if (!expectedManifest.equals(currentManifest)) {
+            throw new IllegalStateException("Instance manifest changed before Java repair persistence");
+        }
     }
 
     /// Creates the final independently resourced settings-persistence stage.
@@ -124,20 +177,78 @@ public final class JavaRuntimeRepairTaskFactory {
             Path instanceDirectory,
             Path settingsFile,
             ExceptionalConsumer<JavaRuntime, ?> persistence) {
+        return createPersistenceTask(selectionTask, instanceDirectory, settingsFile, null, persistence);
+    }
+
+    /// Creates the final settings stage with an optional validator covered by the same resource lease.
+    ///
+    /// @param selectionTask task yielding the selected compatible runtime
+    /// @param instanceDirectory captured affected instance root
+    /// @param settingsFile captured instance settings file
+    /// @param persistenceValidator final protected validator, or null when no retained source must be checked
+    /// @param persistence applies and durably persists the selected runtime
+    /// @return stopped selection-to-persistence orchestration task
+    static Task<@Nullable Void> createPersistenceTask(
+            Task<JavaRuntime> selectionTask,
+            Path instanceDirectory,
+            Path settingsFile,
+            @Nullable Task<?> persistenceValidator,
+            ExceptionalConsumer<JavaRuntime, ?> persistence) {
         Task<JavaRuntime> checkedSelectionTask = Objects.requireNonNull(selectionTask, "selectionTask");
         Path checkedInstanceDirectory = Objects.requireNonNull(instanceDirectory, "instanceDirectory")
                 .toAbsolutePath().normalize();
         Path checkedSettingsFile = Objects.requireNonNull(settingsFile, "settingsFile")
                 .toAbsolutePath().normalize();
         ExceptionalConsumer<JavaRuntime, ?> checkedPersistence = Objects.requireNonNull(persistence, "persistence");
-        return checkedSelectionTask.thenAcceptAsync(
+        @Unmodifiable List<TaskResource> persistenceResources = persistenceResources(
+                checkedInstanceDirectory,
+                checkedSettingsFile,
+                persistenceValidator);
+        return checkedSelectionTask.thenComposeAsync((@Nullable JavaRuntime selectedJava) -> {
+            JavaRuntime checkedSelectedJava = Objects.requireNonNull(selectedJava, "selected Java runtime");
+            Task<@Nullable Void> persistenceTask;
+            if (persistenceValidator == null) {
+                persistenceTask = Task.runAsync(
+                        "Persist repaired Java selection",
                         Schedulers.io(),
-                        (@Nullable JavaRuntime selectedJava) -> checkedPersistence.accept(
-                                Objects.requireNonNull(selectedJava, "selected Java runtime")))
-                .setResources(
-                        TaskResource.gameInstance(checkedInstanceDirectory),
-                        TaskResource.configuration(checkedSettingsFile))
-                .releaseResourcesBeforeDependents();
+                        () -> checkedPersistence.accept(checkedSelectedJava));
+            } else {
+                persistenceTask = persistenceValidator.thenRunAsync(
+                        "Persist repaired Java selection",
+                        Schedulers.io(),
+                        () -> checkedPersistence.accept(checkedSelectedJava));
+            }
+            TaskResource @Unmodifiable [] additional = persistenceResources.subList(1, persistenceResources.size())
+                    .toArray(TaskResource[]::new);
+            return persistenceTask.setResources(persistenceResources.get(0), additional);
+        }).asOrchestration();
+    }
+
+    /// Builds the concrete resource union held across final validation and persistence.
+    ///
+    /// @param instanceDirectory captured affected instance root
+    /// @param settingsFile captured instance settings file
+    /// @param persistenceValidator final protected validator, or null when absent
+    /// @return immutable non-empty resource declaration
+    private static @Unmodifiable List<TaskResource> persistenceResources(
+            Path instanceDirectory,
+            Path settingsFile,
+            @Nullable Task<?> persistenceValidator) {
+        List<TaskResource> resources = new ArrayList<>();
+        resources.add(TaskResource.gameInstance(instanceDirectory));
+        resources.add(TaskResource.configuration(settingsFile));
+        if (persistenceValidator != null) {
+            if (persistenceValidator.getState() != Task.TaskState.READY) {
+                throw new IllegalArgumentException("persistenceValidator must be in the ready state");
+            }
+            if (persistenceValidator.getResourceDeclarations().stream().anyMatch(resource ->
+                    resource.getKind() == TaskResource.Kind.CONSERVATIVE
+                            || resource.getKind() == TaskResource.Kind.ORCHESTRATION)) {
+                throw new IllegalArgumentException("persistenceValidator must declare concrete protected resources");
+            }
+            resources.addAll(persistenceValidator.getResourceDeclarations());
+        }
+        return List.copyOf(resources);
     }
 
     /// Ensures a compatible runtime is registered, then reevaluates the registry for the final selection.

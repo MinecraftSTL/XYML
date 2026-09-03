@@ -1680,9 +1680,14 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
             boolean launcherOwnedLog) {
         String fingerprint = XYMLMcpCrashAnalysisSupport.fingerprint(rawLog);
         GameInstanceManifest manifest = context.manifest();
+        XYMLMcpCrashRepairCoordinator.@Nullable SourceValidator sourceValidator = launcherOwnedLog
+                ? () -> createLatestLogValidationTask(context, fingerprint)
+                : null;
         @Nullable LogAnalyzable.JavaRuntimeRepair javaRepair = manifest == null ? null : () -> guardRepairTask(
                 repairActionsAllowed,
-                () -> JavaRuntimeRepairTaskFactory.create(repository, manifest));
+                () -> sourceValidator == null
+                        ? JavaRuntimeRepairTaskFactory.create(repository, manifest)
+                        : JavaRuntimeRepairTaskFactory.create(repository, manifest, sourceValidator.createTask()));
         return XYMLMcpCrashAnalysisSupport.analyze(
                 context,
                 rawLog,
@@ -1692,7 +1697,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                 crashRepairCoordinator,
                 missingDependencySearch,
                 javaRepair,
-                launcherOwnedLog ? () -> validateLatestLog(context, fingerprint) : null);
+                sourceValidator);
     }
 
     /// Delays a repair task factory until execution and checks startup policy before creating the task.
@@ -1708,30 +1713,24 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                 throw new IllegalStateException(REPAIR_ACTIONS_UNAVAILABLE_MESSAGE);
             }
             return Objects.requireNonNull(checkedTaskFactory.get(), "repair task factory result");
-        });
+        }).asOrchestration();
     }
 
-    /// Revalidates that an instance still owns the exact latest log used for a repair plan.
+    /// Creates a precise task that revalidates the instance and latest log used for a repair plan.
     ///
     /// @param context immutable source context captured during analysis
     /// @param expectedFingerprint expected SHA-256 fingerprint
-    /// @throws IOException when the log cannot be read or its contents changed
-    private void validateLatestLog(
+    /// @return fresh stopped source-validation task
+    private Task<@Nullable Void> createLatestLogValidationTask(
             XYMLMcpCrashAnalysisSupport.Context context,
-            String expectedFingerprint) throws IOException {
-        repository.withStableBaseDirectory(context.repositoryDirectory(), () -> {
-            requireInstanceDirectory(context.instanceId(), context.instanceDirectory());
-            requireInstance(context.instanceId());
-            GameInstanceManifest manifest = context.manifest();
-            if (manifest != null
-                    && !manifest.equals(repository.getResolvedInstanceManifest(context.instanceId()).launchManifest())) {
-                throw new IOException("The instance manifest changed after crash analysis");
-            }
-            String actualFingerprint = XYMLMcpCrashAnalysisSupport.fingerprint(readLog(context.runDirectory()));
-            if (!actualFingerprint.equals(expectedFingerprint)) {
-                throw new IOException("The instance latest log changed after crash analysis");
-            }
-        });
+            String expectedFingerprint) {
+        return XYMLMcpCrashSourceValidationTask.create(
+                repository,
+                context,
+                expectedFingerprint,
+                () -> requireTrackedLaunchStopped(context.repositoryDirectory(), context.instanceId(), "repair a crash"),
+                () -> resolvedRunDirectory(context.instanceId()),
+                instanceSettingsFile(context.repositoryDirectory(), context.instanceId()));
     }
 
     /// Creates a text resource result.

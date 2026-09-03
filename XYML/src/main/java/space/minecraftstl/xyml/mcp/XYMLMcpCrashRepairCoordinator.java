@@ -25,8 +25,8 @@ import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzer;
 import space.minecraftstl.xyml.game.analyzer.RepairActionDescriptor;
 import space.minecraftstl.xyml.game.analyzer.Solver;
+import space.minecraftstl.xyml.task.Task;
 
-import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -223,22 +223,19 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             plan.consumed = true;
         }
 
-        SourceValidator validator = Objects.requireNonNull(
-                session.sourceValidator,
+        SourceValidator validator = Objects.requireNonNull(session.sourceValidator,
                 "Executable crash repair plan has no source validator");
-        try {
-            validator.validate();
-        } catch (IOException validationFailure) {
-            throw new IllegalStateException("Crash analysis source could not be revalidated", validationFailure);
-        }
-
         RepairActionDescriptor descriptor = solution.solver.repairAction();
         return operations.start(
                 descriptor.actionType().name(),
                 descriptor.actionType() == RepairActionDescriptor.ActionType.OPEN_MOD_SEARCH,
                 () -> Objects.requireNonNull(
-                        solution.solver.createTask(),
-                        "Crash repair solver did not create a task"));
+                        validator.createTask(),
+                        "Crash source validator did not create a task")
+                        .thenComposeAsync(() -> Objects.requireNonNull(
+                                solution.solver.createTask(),
+                                "Crash repair solver did not create a task"))
+                        .asOrchestration());
     }
 
     /// Returns the latest state of one repair operation.
@@ -478,14 +475,17 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         }
     }
 
-    /// Revalidates the exact launcher-owned source bound to a repair plan.
+    /// Creates a fresh stopped task that revalidates the exact launcher-owned source bound to a repair plan.
+    ///
+    /// Implementations must declare every resource read while validating and must not perform I/O while constructing
+    /// the task. The coordinator runs the task within the same cancellable execution chain as the selected repair.
     @FunctionalInterface
     @NotNullByDefault
     public interface SourceValidator {
-        /// Confirms the instance and source fingerprint still match the analysis.
+        /// Creates one independent source-validation task.
         ///
-        /// @throws IOException when the source cannot be read or no longer matches
-        void validate() throws IOException;
+        /// @return fresh stopped task with a concrete resource declaration
+        Task<?> createTask();
     }
 
     /// Immutable retained analysis and its application boundaries.

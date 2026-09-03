@@ -67,6 +67,19 @@ public final class TaskResourceLockManagerTest {
         TaskResource target = TaskResource.downloadTarget(temporaryDirectory.resolve("downloads/../game.jar"));
         assertSame(task, task.setResources(target));
         assertEquals(Set.of(target), task.getResources());
+
+        TaskResource instance = TaskResource.gameInstance(temporaryDirectory.resolve("instance"));
+        TaskResource nestedRunDirectory = TaskResource.gameDirectory(
+                temporaryDirectory.resolve("instance/run"));
+        task.setResources(instance, nestedRunDirectory);
+        assertEquals(Set.of(instance, nestedRunDirectory), task.getResources());
+        assertEquals(Set.of(instance, nestedRunDirectory), task.getResourceDeclarations());
+        assertThrows(UnsupportedOperationException.class, () -> task.getResourceDeclarations().clear());
+
+        TaskResource nestedInstance = TaskResource.gameInstance(temporaryDirectory.resolve("instance/nested"));
+        task.setResources(instance, nestedInstance);
+        assertEquals(Set.of(instance), task.getResources());
+        assertEquals(Set.of(instance, nestedInstance), task.getResourceDeclarations());
     }
 
     /// Verifies presentation-only wrappers retain precise resources while executable continuations stay conservative.

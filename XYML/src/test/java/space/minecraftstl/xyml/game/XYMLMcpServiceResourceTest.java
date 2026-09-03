@@ -196,7 +196,11 @@ public final class XYMLMcpServiceResourceTest {
         assertEquals(logResources, taskWithResources(logResolution, logResources).getResources());
 
         Task<?> crashResolution = service.analyzeCrash(instanceId.id(), "supplied log", null);
-        assertEquals(Set.of(TaskResource.gameInstance(instanceDirectory)), crashResolution.getResources());
+        assertEquals(Set.of(
+                        TaskResource.gameInstance(instanceDirectory),
+                        TaskResource.configuration(SettingsManager.gameSettingsLocation()),
+                        TaskResource.configuration(SettingsManager.settingsLocation())),
+                crashResolution.getResources());
         crashResolution.execute();
         assertEquals(TaskResource.Kind.ORCHESTRATION,
                 onlyDependency(crashResolution).getResources().iterator().next().getKind());
