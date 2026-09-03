@@ -22,6 +22,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.BorderFactory;
@@ -36,10 +39,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /// Provides the real rename, duplicate, and delete lifecycle controls for one managed instance.
 ///
-/// Input and irreversible-action confirmations use native dialogs on the EDT. Every repository and
-/// filesystem mutation runs on the caller-owned executor. After a successful mutation, the panel
-/// reconciles the selected instance on the EDT and calls the owner return command because its original
-/// management view has become stale.
+/// Input and irreversible-action confirmations use native dialogs on the EDT. The caller-owned executor
+/// creates and starts the lifecycle task away from the EDT; the task's scheduler owns repository and
+/// filesystem work. After a successful mutation, the panel calls the owner return command because its
+/// original management view has become stale.
 @NotNullByDefault
 public final class InstanceLifecyclePanel extends JPanel implements AutoCloseable {
     /// Stable source instance identifier represented by this management view.
@@ -48,7 +51,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     /// Background repository mutation boundary.
     private final InstanceLifecycleService service;
 
-    /// Caller-owned executor for blocking repository and filesystem work.
+    /// Caller-owned executor for creating and starting lifecycle tasks away from the EDT.
     private final Executor executor;
 
     /// Immutable visible text for labels, controls, and dialogs.
@@ -85,7 +88,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     ///
     /// @param repository repository containing the instance
     /// @param instanceId stable non-blank managed instance identifier
-    /// @param executor caller-owned executor for blocking file operations
+    /// @param executor caller-owned executor for creating and starting the lifecycle task
     /// @param mutationCompletedCommand return-to-list command after a successful mutation
     public InstanceLifecyclePanel(
             XYMLGameRepository repository,
@@ -105,7 +108,7 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
     ///
     /// @param instanceId stable non-blank managed instance identifier
     /// @param service lifecycle repository boundary
-    /// @param executor caller-owned executor for blocking file operations
+    /// @param executor caller-owned executor for creating and starting the lifecycle task
     /// @param strings immutable visible text
     /// @param interactions native dialog boundary
     /// @param mutationCompletedCommand return-to-list command after a successful mutation
@@ -301,14 +304,31 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
             boolean copySaves) {
         try {
             requireBackgroundThread();
-            switch (kind) {
-                case RENAME -> service.rename(instanceId, requireDestination(destinationId));
-                case DUPLICATE -> service.duplicate(instanceId, requireDestination(destinationId), copySaves);
-                case DELETE -> service.delete(instanceId);
-            }
-            EdtDispatcher.execute(() -> completeMutation(kind, destinationId, null));
-        } catch (Exception | Error failure) {
+            Task<@Nullable Void> mutation = switch (kind) {
+                case RENAME -> service.renameTask(instanceId, requireDestination(destinationId));
+                case DUPLICATE -> service.duplicateTask(instanceId, requireDestination(destinationId), copySaves);
+                case DELETE -> service.deleteTask(instanceId);
+            };
+            TaskExecutor taskExecutor = mutation.executor();
+            taskExecutor.subscribeTaskListener(new TaskListener() {
+                /// Delivers the complete task outcome to the Swing event-dispatch thread.
+                @Override
+                public void onStop(boolean success, TaskExecutor completedExecutor) {
+                    @Nullable Throwable failure = success ? null : completedExecutor.getFailure();
+                    if (!success && failure == null) {
+                        failure = new IllegalStateException(
+                                "Instance lifecycle task stopped without a terminal failure");
+                    }
+                    @Nullable Throwable terminalFailure = failure;
+                    EdtDispatcher.execute(() -> completeMutation(kind, destinationId, terminalFailure));
+                }
+            });
+            taskExecutor.start();
+        } catch (Exception failure) {
             EdtDispatcher.execute(() -> completeMutation(kind, destinationId, failure));
+        } catch (Error failure) {
+            EdtDispatcher.execute(() -> completeMutation(kind, destinationId, failure));
+            throw failure;
         }
     }
 
@@ -322,7 +342,9 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
             @Nullable GameInstanceID destinationId,
             @Nullable Throwable failure) {
         EdtDispatcher.requireEventDispatchThread();
-        operationPending.set(false);
+        if (!operationPending.compareAndSet(true, false)) {
+            return;
+        }
         if (closed.get()) {
             return;
         }
@@ -332,15 +354,8 @@ public final class InstanceLifecyclePanel extends JPanel implements AutoCloseabl
             showFailure(failureTitle(kind), failureDetail(failure));
             return;
         }
-        try {
-            service.reconcileSelection(kind == MutationKind.DELETE ? null : requireDestination(destinationId));
-            statusLabel.setText(strings.successStatus());
-            mutationCompletedCommand.run();
-        } catch (RuntimeException completionFailure) {
-            statusLabel.setText(failureStatus(kind));
-            updateActionState();
-            showFailure(failureTitle(kind), failureDetail(completionFailure));
-        }
+        statusLabel.setText(strings.successStatus());
+        mutationCompletedCommand.run();
     }
 
     /// Resolves the correct localized failure title for one mutation type.

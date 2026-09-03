@@ -23,12 +23,14 @@ import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies filesystem resource declarations for game-repository refresh roots.
 @NotNullByDefault
@@ -57,5 +59,47 @@ public final class DefaultGameRepositoryResourceTest {
 
         assertFalse(refreshTask.test());
         assertInstanceOf(IllegalStateException.class, refreshTask.getException());
+    }
+
+    /// A manifest save created for an obsolete root neither writes nor publishes into the replacement repository.
+    @Test
+    public void staleManifestSaveFailsBeforeExecution() {
+        Path original = temporaryDirectory.resolve("original-save");
+        Path replacement = temporaryDirectory.resolve("replacement-save");
+        DefaultGameRepository repository = new DefaultGameRepository(original);
+        GameInstanceID instanceId = new GameInstanceID("example");
+        Task<GameInstanceManifest> save = repository.saveAsync(new GameInstanceManifest(instanceId));
+        repository.setBaseDirectory(replacement);
+
+        assertFalse(save.test());
+        assertInstanceOf(IllegalStateException.class, save.getException());
+        assertTrue(Files.notExists(original.resolve("versions/example/example.json")));
+        assertTrue(Files.notExists(replacement.resolve("versions/example/example.json")));
+        assertFalse(repository.hasInstance(instanceId));
+    }
+
+    /// A same-root catalog refresh does not make an already-created manifest save stale.
+    @Test
+    public void sameRootRefreshDoesNotInvalidateManifestSave() {
+        Path root = temporaryDirectory.resolve("same-root-save");
+        DefaultGameRepository repository = new DefaultGameRepository(root);
+        GameInstanceID instanceId = new GameInstanceID("example");
+        Task<GameInstanceManifest> save = repository.saveAsync(new GameInstanceManifest(instanceId));
+        repository.refresh();
+
+        assertTrue(save.test());
+        assertTrue(Files.isRegularFile(root.resolve("versions/example/example.json")));
+        assertTrue(repository.hasInstance(instanceId));
+    }
+
+    /// Multiple refresh tasks captured for the same root remain valid after either one rebuilds the catalog.
+    @Test
+    public void sameRootRefreshTasksRemainValid() {
+        DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("same-root-refresh"));
+        Task<Void> first = repository.refreshAsync();
+        Task<Void> second = repository.refreshAsync();
+
+        assertTrue(first.test());
+        assertTrue(second.test());
     }
 }

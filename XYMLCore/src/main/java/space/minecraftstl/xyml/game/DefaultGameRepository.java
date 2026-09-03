@@ -136,15 +136,15 @@ public class DefaultGameRepository implements GameRepository {
     /// @return stopped refresh task occupying the complete captured game directory
     @Override
     public Task<Void> refreshAsync() {
-        Status expectedStatus = status;
+        Path expectedDirectory = getBaseDirectory().toAbsolutePath().normalize();
         return Task.runAsync(() -> {
             synchronized (this) {
-                if (status != expectedStatus) {
+                if (!expectedDirectory.equals(getBaseDirectory().toAbsolutePath().normalize())) {
                     throw new IllegalStateException("Game repository root changed before refresh execution");
                 }
                 refresh();
             }
-        }).setResources(TaskResource.gameDirectory(expectedStatus.baseDirectory));
+        }).setResources(TaskResource.gameDirectory(expectedDirectory));
     }
 
     protected void refreshImpl() {
@@ -637,23 +637,30 @@ public class DefaultGameRepository implements GameRepository {
     /// @return stopped task yielding the persisted manifest
     public Task<GameInstanceManifest> saveAsync(GameInstanceManifest instanceManifest) {
         GameInstanceManifest capturedManifest = Objects.requireNonNull(instanceManifest, "instanceManifest");
+        Path expectedDirectory = getBaseDirectory().toAbsolutePath().normalize();
         return Task.supplyAsync(() -> {
-            GameInstanceManifest savedManifest = capturedManifest.isResolvedPreservingPatches()
-                    ? MaintainTask.maintainPreservingPatches(this, capturedManifest)
-                    : capturedManifest;
+            synchronized (this) {
+                if (!expectedDirectory.equals(getBaseDirectory().toAbsolutePath().normalize())) {
+                    throw new IllegalStateException("Game repository root changed before manifest save execution");
+                }
+                GameInstanceManifest savedManifest = capturedManifest.isResolvedPreservingPatches()
+                        ? MaintainTask.maintainPreservingPatches(this, capturedManifest)
+                        : capturedManifest;
 
-            Path json = getInstanceJson(savedManifest.id()).toAbsolutePath();
-            Files.createDirectories(json.getParent());
-            JsonUtils.writeToJsonFile(json, savedManifest);
+                Path json = getInstanceJson(savedManifest.id()).toAbsolutePath();
+                Files.createDirectories(json.getParent());
+                JsonUtils.writeToJsonFile(json, savedManifest);
 
-            Status currentStatus = status;
-            currentStatus.instances.put(savedManifest.id(), new InstanceHolder(currentStatus, savedManifest.id(), savedManifest));
-            gameVersions.clear();
-            return savedManifest;
+                Status currentStatus = status;
+                currentStatus.instances.put(savedManifest.id(),
+                        new InstanceHolder(currentStatus, savedManifest.id(), savedManifest));
+                gameVersions.clear();
+                return savedManifest;
+            }
         }).setResources(
-                TaskResource.repositoryMetadata(getBaseDirectory()),
-                TaskResource.gameInstance(getInstanceRoot(capturedManifest.id())),
-                TaskResource.gameDirectory(getLibrariesDirectory(capturedManifest)));
+                TaskResource.repositoryMetadata(expectedDirectory),
+                TaskResource.gameInstance(expectedDirectory.resolve("versions").resolve(capturedManifest.id().id())),
+                TaskResource.gameDirectory(expectedDirectory.resolve("libraries")));
     }
 
     public Path getModpackConfiguration(GameInstanceID instanceId) {
