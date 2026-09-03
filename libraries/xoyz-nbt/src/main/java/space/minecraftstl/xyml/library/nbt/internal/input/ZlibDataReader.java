@@ -36,6 +36,7 @@ public final class ZlibDataReader extends BoundedDataReader {
     };
 
     private final Inflater inflater;
+    private boolean finished;
 
     public ZlibDataReader(RawDataReader rawReader, long limit) {
         super(rawReader, rawReader.getDecompressBuffer(), limit);
@@ -71,7 +72,10 @@ public final class ZlibDataReader extends BoundedDataReader {
                 }
 
                 try {
-                    inflater.inflate(output);
+                    int produced = inflater.inflate(output);
+                    if (produced == 0 && !inflater.finished() && !inflater.needsInput()) {
+                        throw new IOException("Invalid zlib stream: inflater made no progress");
+                    }
                 } catch (DataFormatException exception) {
                     throw new IOException(exception);
                 }
@@ -85,10 +89,54 @@ public final class ZlibDataReader extends BoundedDataReader {
 
     @Override
     public void close() throws IOException {
+        IOException failure = null;
+        try {
+            finish();
+        } catch (IOException exception) {
+            failure = exception;
+        }
         getRawReader().releaseDecompressBuffer(getBuffer());
         inflater.reset();
         INFLATER_CACHE_KEY.release(getRawReader(), inflater);
-        super.close();
+        try {
+            super.close();
+        } catch (IOException exception) {
+            if (failure == null) {
+                failure = exception;
+            } else {
+                failure.addSuppressed(exception);
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    /// Drains the zlib stream and verifies its checksum and bounded payload.
+    public void finish() throws IOException {
+        if (finished) {
+            return;
+        }
+        ByteBuffer sink = ByteBuffer.allocate(8192);
+        while (!inflater.finished()) {
+            sink.clear();
+            if (inflater.needsInput()) {
+                if (getRawReader().getBuffer().remaining() == 0) {
+                    getRawReader().ensureBufferRemaining(1);
+                }
+                inflater.setInput(getRawReader().getBuffer().getByteBuffer());
+            }
+            try {
+                int produced = inflater.inflate(sink);
+                if (produced == 0 && !inflater.finished() && !inflater.needsInput()) {
+                    throw new IOException("Invalid zlib stream: inflater made no progress");
+                }
+            } catch (DataFormatException exception) {
+                throw new IOException("Invalid zlib stream", exception);
+            }
+        }
+        requireFullyConsumed();
+        finished = true;
     }
 
     private static final byte[] EMPTY_BYTE_ARRAY = new byte[0];

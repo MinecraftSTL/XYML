@@ -60,6 +60,17 @@ public abstract non-sealed class BoundedDataReader extends DataReader {
         }
     }
 
+    /// Requires the bounded payload to have been consumed exactly.
+    public final void requireFullyConsumed() throws IOException {
+        if (endPosition >= 0) {
+            long currentPosition = rawReader.position();
+            if (currentPosition != endPosition) {
+                throw new IOException("Trailing or truncated bounded payload: expected position "
+                        + endPosition + ", got " + currentPosition);
+            }
+        }
+    }
+
     protected final InputStream asInputStream() {
         return new InputStream() {
             private byte @Nullable [] singleByte;
