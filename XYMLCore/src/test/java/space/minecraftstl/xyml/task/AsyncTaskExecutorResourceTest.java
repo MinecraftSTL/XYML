@@ -848,6 +848,106 @@ public final class AsyncTaskExecutorResourceTest {
         assertSuccessorRuns(manager, resource);
     }
 
+    /// Verifies an onStop Error is recorded after all task resources have been released.
+    @Test
+    public void stopListenerErrorIsRecordedAndReleasesResource() {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource resource = target("stop-listener-error.jar");
+        AssertionError original = new AssertionError("stop listener failure");
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(task(resource, () -> {
+        }), manager);
+        executor.subscribeTaskListener(new TaskListener() {
+            /// Raises the terminal listener Error under test.
+            @Override
+            public void onStop(boolean success, TaskExecutor completedExecutor) {
+                throw original;
+            }
+        });
+
+        assertFalse(assertTimeoutPreemptively(TIMEOUT, executor::test));
+        assertSame(original, executor.getFailure());
+        assertSuccessorRuns(manager, resource);
+    }
+
+    /// Verifies an onStop Error remains primary without discarding the task failure that preceded it.
+    @Test
+    public void stopListenerErrorRetainsTaskFailureAsSuppressed() {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        IOException taskFailure = new IOException("task failure");
+        AssertionError listenerFailure = new AssertionError("stop listener failure");
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(task(target("stop-after-failure.jar"), () -> {
+            throw taskFailure;
+        }), manager);
+        executor.subscribeTaskListener(new TaskListener() {
+            /// Raises the terminal listener Error after the task failure has been recorded.
+            @Override
+            public void onStop(boolean success, TaskExecutor completedExecutor) {
+                throw listenerFailure;
+            }
+        });
+
+        assertFalse(assertTimeoutPreemptively(TIMEOUT, executor::test));
+        assertSame(listenerFailure, executor.getFailure());
+        assertEquals(List.of(taskFailure), List.of(listenerFailure.getSuppressed()));
+        assertSuccessorRuns(manager, target("stop-after-failure.jar"));
+    }
+
+    /// Verifies an out-of-memory Error from onStop cannot trigger a duplicate terminal notification.
+    @Test
+    public void stopListenerOutOfMemoryErrorIsNotRenotified() {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource resource = target("stop-listener-oome.jar");
+        OutOfMemoryError original = new OutOfMemoryError("stop listener failure");
+        AtomicInteger stopCalls = new AtomicInteger();
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(task(resource, () -> {
+        }), manager);
+        executor.subscribeTaskListener(new TaskListener() {
+            /// Raises the terminal listener Error under test on the first and only notification.
+            @Override
+            public void onStop(boolean success, TaskExecutor completedExecutor) {
+                stopCalls.incrementAndGet();
+                throw original;
+            }
+        });
+
+        assertFalse(assertTimeoutPreemptively(TIMEOUT, executor::test));
+        assertEquals(1, stopCalls.get());
+        assertSame(original, executor.getFailure());
+        assertSuccessorRuns(manager, resource);
+    }
+
+    /// Verifies an onStart Error records failure and receives one matching terminal notification.
+    @Test
+    public void startListenerErrorRecordsFailureAndStopsOnce() {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        AssertionError original = new AssertionError("start listener failure");
+        AtomicInteger stopCalls = new AtomicInteger();
+        AtomicBoolean bodyRan = new AtomicBoolean();
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(task(target("start-listener-error.jar"),
+                () -> bodyRan.set(true)), manager);
+        executor.subscribeTaskListener(new TaskListener() {
+            /// Raises the start listener Error under test.
+            @Override
+            public void onStart() {
+                throw original;
+            }
+
+            /// Records the terminal notification paired with the attempted start.
+            @Override
+            public void onStop(boolean success, TaskExecutor completedExecutor) {
+                assertFalse(success);
+                stopCalls.incrementAndGet();
+            }
+        });
+
+        assertSame(original, assertThrows(AssertionError.class, executor::start));
+        assertSame(original, executor.getFailure());
+        assertEquals(1, stopCalls.get());
+        assertFalse(bodyRan.get());
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Verifies cancelling a waiter removes it, skips its body, and leaves no resource bookkeeping behind.
     @Test
     public void cancellingWaitingExecutorRemovesPendingAcquisition() throws Exception {
@@ -1076,6 +1176,141 @@ public final class AsyncTaskExecutorResourceTest {
         assertFalse(get(result));
         assertTrue(cleanupFailure.get() instanceof java.util.concurrent.CancellationException);
         assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies Throwable-aware terminal cleanup runs after an Error and preserves the original Error identity.
+    @Test
+    public void terminalResourceCompletionRunsCleanupAfterError() {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource operationResource = TaskResource.gameInstance(
+                temporaryDirectory.resolve("error-cleanup/versions/example"));
+        TaskResource cleanupResource = TaskResource.gameDirectory(temporaryDirectory.resolve("error-cleanup"));
+        AssertionError original = new AssertionError("committed mutation failure");
+        AtomicReference<@Nullable Throwable> cleanupFailure = new AtomicReference<>();
+        AtomicBoolean cleanupRan = new AtomicBoolean();
+        Task<?> prerequisite = Task.runAsync(() -> {
+            throw original;
+        }).setResources(operationResource);
+        Task<?> completion = prerequisite.whenTerminalWithResources(
+                Runnable::run,
+                failure -> {
+                    cleanupFailure.set(failure);
+                    cleanupRan.set(true);
+                },
+                cleanupResource);
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(completion, manager);
+
+        assertFalse(assertTimeoutPreemptively(TIMEOUT, executor::test));
+        assertTrue(cleanupRan.get());
+        assertSame(original, cleanupFailure.get());
+        assertSame(original, executor.getFailure());
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a terminal cleanup Error remains primary while retaining the original prerequisite Error as context.
+    @Test
+    public void terminalResourceCompletionRetainsOriginalFailureWhenCleanupFails() {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        AssertionError prerequisiteFailure = new AssertionError("prerequisite failure");
+        AssertionError cleanupFailure = new AssertionError("cleanup failure");
+        Task<?> prerequisite = Task.runAsync(() -> {
+            throw prerequisiteFailure;
+        }).setResources(target("terminal-prerequisite.jar"));
+        Task<?> completion = prerequisite.whenTerminalWithResources(
+                Runnable::run,
+                ignoredFailure -> {
+                    throw cleanupFailure;
+                },
+                target("terminal-cleanup.jar"));
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(completion, manager);
+
+        assertFalse(assertTimeoutPreemptively(TIMEOUT, executor::test));
+        assertSame(cleanupFailure, executor.getFailure());
+        assertEquals(List.of(prerequisiteFailure), List.of(cleanupFailure.getSuppressed()));
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a reused terminal coordinator does not retain a successful prerequisite outcome from its first run.
+    @Test
+    public void repeatedTerminalCompletionObservesCurrentPrerequisiteFailure() {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        AtomicInteger invocations = new AtomicInteger();
+        AssertionError secondFailure = new AssertionError("second prerequisite failure");
+        AtomicReference<@Nullable Throwable> observedFailure = new AtomicReference<>();
+        Task<?> prerequisite = Task.runAsync(() -> {
+            if (invocations.incrementAndGet() == 2) {
+                throw secondFailure;
+            }
+        }).setResources(target("repeated-prerequisite.jar"));
+        Task<?> completion = prerequisite.whenTerminalWithResources(
+                Runnable::run,
+                observedFailure::set,
+                target("repeated-cleanup.jar"));
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(completion, manager);
+
+        assertTrue(assertTimeoutPreemptively(TIMEOUT, executor::test));
+        assertFalse(assertTimeoutPreemptively(TIMEOUT, executor::test));
+        assertSame(secondFailure, observedFailure.get());
+        assertSame(secondFailure, executor.getFailure());
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// A reused task clears prior child outcomes before waiting, so cancellation cannot expose stale success flags.
+    @Test
+    public void reusedTaskCancelledWhileWaitingClearsPriorOutcomes() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource resource = target("reused-waiting-cancellation.jar");
+        Task<?> reused = task(resource, () -> {
+        });
+        AsyncTaskExecutor reusedExecutor = new AsyncTaskExecutor(reused, manager);
+
+        assertTrue(assertTimeoutPreemptively(TIMEOUT, reusedExecutor::test));
+        assertTrue(reused.isDependentsSucceeded());
+        assertTrue(reused.isDependenciesSucceeded());
+
+        CountDownLatch holderStarted = new CountDownLatch(1);
+        CountDownLatch releaseHolder = new CountDownLatch(1);
+        CountDownLatch holderStopped = new CountDownLatch(1);
+        Task<?> holder = task(resource, () -> {
+            holderStarted.countDown();
+            await(releaseHolder);
+        });
+        AsyncTaskExecutor holderExecutor = new AsyncTaskExecutor(holder, manager);
+        holderExecutor.subscribeTaskListener(new TaskListener() {
+            /// Records completion of the holder execution.
+            @Override
+            public void onStop(boolean success, TaskExecutor executor) {
+                holderStopped.countDown();
+            }
+        });
+        holderExecutor.start();
+        await(holderStarted);
+
+        CountDownLatch reusedStopped = new CountDownLatch(1);
+        reusedExecutor.subscribeTaskListener(new TaskListener() {
+            /// Records completion of the cancelled reused execution.
+            @Override
+            public void onStop(boolean success, TaskExecutor executor) {
+                reusedStopped.countDown();
+            }
+        });
+        try {
+            reusedExecutor.start();
+            awaitCondition(() -> manager.pendingWaiterCount() == 1);
+            reusedExecutor.cancel();
+            await(reusedStopped);
+
+            assertFalse(reused.isDependentsSucceeded());
+            assertFalse(reused.isDependenciesSucceeded());
+            assertEquals(0, manager.pendingWaiterCount());
+        } finally {
+            releaseHolder.countDown();
+        }
+        await(holderStopped);
         assertEquals(0, manager.trackedResourceCount());
     }
 

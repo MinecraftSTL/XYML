@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static space.minecraftstl.xyml.util.Lang.*;
@@ -76,11 +77,20 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         started = true;
         TaskResourceLockManager.Execution resourceExecution = resourceLockManager.createExecution();
         resourceExecutions.add(resourceExecution);
+        AtomicBoolean stopNotificationAttempted = new AtomicBoolean();
         try {
             notifyTaskListeners(TaskListener::onStart);
-        } catch (RuntimeException | Error failure) {
+        } catch (RuntimeException | Error startFailure) {
+            failure = startFailure;
             resourceExecutions.remove(resourceExecution);
-            throw failure;
+            try {
+                notifyStopOnce(stopNotificationAttempted, false);
+            } catch (RuntimeException | Error stopFailure) {
+                if (stopFailure != startFailure) {
+                    startFailure.addSuppressed(stopFailure);
+                }
+            }
+            throw startFailure;
         }
         future = executeTasks(null, null, resourceExecution, Collections.singleton(firstTask))
                 .handleAsync((@Nullable Exception exception, @Nullable Throwable throwable) -> {
@@ -110,15 +120,24 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                             }
                         }
                     } finally {
-                        notifyTaskListeners(it -> it.onStop(success, this));
+                        notifyStopOnce(stopNotificationAttempted, success);
                     }
 
                     return success;
                 })
                 .exceptionally(e -> {
                     Throwable resolved = resolveException(e);
-                    if (resolved instanceof OutOfMemoryError) {
-                        notifyTaskListeners(it -> it.onStop(false, this));
+                    @Nullable Throwable previousFailure = failure;
+                    if (previousFailure != null && previousFailure != resolved) {
+                        resolved.addSuppressed(previousFailure);
+                    }
+                    failure = resolved;
+                    try {
+                        notifyStopOnce(stopNotificationAttempted, false);
+                    } catch (RuntimeException | Error stopFailure) {
+                        if (stopFailure != resolved) {
+                            resolved.addSuppressed(stopFailure);
+                        }
                     }
                     Lang.handleUncaughtException(resolved);
                     return false;
@@ -126,6 +145,19 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                 .whenComplete((@Nullable Boolean success, @Nullable Throwable throwable) ->
                         resourceExecutions.remove(resourceExecution));
         return this;
+    }
+
+    /// Attempts the single terminal listener notification promised for one execution chain.
+    ///
+    /// The guard is set before invoking listeners so an [Error] raised by one terminal listener cannot recursively
+    /// trigger a second `onStop` notification from the future recovery stage.
+    ///
+    /// @param attempted per-execution terminal notification guard
+    /// @param success whether the execution chain completed successfully
+    private void notifyStopOnce(AtomicBoolean attempted, boolean success) {
+        if (attempted.compareAndSet(false, true)) {
+            notifyTaskListeners(it -> it.onStop(success, this));
+        }
     }
 
     /// Starts the chain, waits for its terminal future, and returns whether it succeeded.
@@ -211,12 +243,35 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                 });
     }
 
+    /// Executes prerequisite siblings and exposes an Error only to an explicitly opted-in recovery coordinator.
+    ///
+    /// Ordinary task graphs retain [#executeTasks] and propagate Error immediately. The recovery path converts the
+    /// complete terminal throwable to a value so the coordinator can construct its cleanup dependency first.
+    ///
+    /// @param task recovery coordinator requesting prerequisite execution
+    /// @param owner resource owner of the recovery coordinator
+    /// @param resourceExecution cancellation domain for the task chain
+    /// @return future carrying the complete optional prerequisite failure
+    private CompletableFuture<@Nullable Throwable> executeDependentsFor(
+            Task<?> task,
+            TaskResourceLockManager.Owner owner,
+            TaskResourceLockManager.Execution resourceExecution) {
+        if (!task.acceptsDependentErrors()) {
+            return executeTasks(task, owner, resourceExecution, task.getDependents())
+                    .thenApply(failure -> failure);
+        }
+        return executeTasksExceptionally(task, owner, resourceExecution, task.getDependents())
+                .handle((@Nullable Void ignored, @Nullable Throwable failure) ->
+                        failure == null ? null : resolveException(failure));
+    }
+
     /// Executes a task whose body supplies its own possibly nullable completable-future result.
     private <T> CompletableFuture<@Nullable T> executeCompletableFutureTask(
             @Nullable Task<?> parentTask,
             @Nullable TaskResourceLockManager.Owner parentOwner,
             TaskResourceLockManager.Execution resourceExecution,
             CompletableFutureTask<T> task) {
+        task.resetExecutionOutcome();
         LeaseReference leaseReference = new LeaseReference();
         CompletableFuture<@Nullable T> execution;
         try {
@@ -326,6 +381,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             @Nullable TaskResourceLockManager.Owner parentOwner,
             TaskResourceLockManager.Execution resourceExecution,
             Task<T> task) {
+        task.resetExecutionOutcome();
         LeaseReference leaseReference = new LeaseReference();
         @Nullable TaskResourceLockManager.Owner ownerForCompletion = null;
         CompletableFuture<@Nullable T> execution;
@@ -391,21 +447,21 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     }
                     return unused;
                 })
-                .thenComposeAsync((@Nullable Void unused) -> executeTasks(
-                        task,
-                        owner,
-                        resourceExecution,
-                        task.getDependents()))
-                .thenComposeAsync((@Nullable Exception dependentsException) -> {
-                    boolean isDependentsSucceeded = dependentsException == null;
+                .thenComposeAsync((@Nullable Void unused) -> executeDependentsFor(task, owner, resourceExecution))
+                .thenComposeAsync((@Nullable Throwable dependentsFailure) -> {
+                    boolean isDependentsSucceeded = dependentsFailure == null;
 
                     if (isDependentsSucceeded) {
                         task.setDependentsSucceeded();
+                        task.setDependentFailure(null);
                     } else {
-                        task.setException(dependentsException);
+                        task.setDependentFailure(dependentsFailure);
+                        if (dependentsFailure instanceof Exception exception) {
+                            task.setException(exception);
+                        }
 
                         if (task.isRelyingOnDependents()) {
-                            rethrow(dependentsException);
+                            rethrow(dependentsFailure);
                         }
                     }
 

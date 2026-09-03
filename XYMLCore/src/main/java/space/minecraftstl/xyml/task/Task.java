@@ -199,6 +199,17 @@ public abstract class Task<T> {
         return terminalCleanup;
     }
 
+    /// Returns whether this recovery coordinator can inspect an [Error] raised by a prerequisite.
+    ///
+    /// Ordinary task graphs preserve the historical behavior of propagating an [Error] immediately. Only a terminal
+    /// recovery coordinator overrides this method so the executor can carry the original throwable through its body
+    /// and run an independently resourced cleanup before rethrowing it unchanged.
+    ///
+    /// @return whether prerequisite errors may reach this task body
+    boolean acceptsDependentErrors() {
+        return false;
+    }
+
     /// The importance level that controls this task's logging and UI visibility.
     private TaskSignificance significance = TaskSignificance.MAJOR;
 
@@ -312,6 +323,23 @@ public abstract class Task<T> {
         exception = e;
     }
 
+    /// Complete prerequisite failure captured only for a Throwable-aware recovery coordinator.
+    private @Nullable Throwable dependentFailure;
+
+    /// Returns the complete prerequisite failure supplied by the executor, or null when none was captured.
+    ///
+    /// @return prerequisite failure including Error, or null
+    final @Nullable Throwable getDependentFailure() {
+        return dependentFailure;
+    }
+
+    /// Stores the complete prerequisite failure for a Throwable-aware recovery coordinator.
+    ///
+    /// @param failure prerequisite failure including Error, or null after prerequisite success
+    final void setDependentFailure(@Nullable Throwable failure) {
+        dependentFailure = failure;
+    }
+
     /// The executor used for asynchronous continuations created from this task.
     private Executor executor = Schedulers.defaultScheduler();
 
@@ -352,6 +380,17 @@ public abstract class Task<T> {
     /// Marks all follow-up tasks as successfully completed.
     void setDependenciesSucceeded() {
         dependenciesSucceeded = true;
+    }
+
+    /// Clears invocation-local failure and subtask outcome state before another executor-managed run.
+    ///
+    /// Task definitions may be started more than once. Without resetting these fields, a successful earlier invocation
+    /// can make a later recovery coordinator mistake a failed prerequisite for success.
+    final void resetExecutionOutcome() {
+        exception = null;
+        dependentFailure = null;
+        dependentsSucceeded = false;
+        dependenciesSucceeded = false;
     }
 
     /// Returns whether prerequisite failure prevents this task from executing.
@@ -887,6 +926,131 @@ public abstract class Task<T> {
         return coordinator.setExecutor(executor).setName(taskName).setSignificance(TaskSignificance.MODERATE);
     }
 
+    /// Creates a Throwable-aware terminal continuation with independently acquired cleanup resources.
+    ///
+    /// This method is intended for recovery required after an externally visible mutation has begun. Unlike
+    /// [#whenCompleteWithResources(Executor, FinalizedCallback, TaskResource, TaskResource...)], its callback also
+    /// receives an [Error] from the prerequisite. The cleanup callback runs after the prerequisite releases resources
+    /// that do not exactly match the cleanup declaration, survives cancellation once the coordinator has started, and
+    /// rethrows the original prerequisite failure unchanged when cleanup succeeds. A cleanup failure takes precedence.
+    ///
+    /// @param executor executor used for the coordinator and cleanup callback
+    /// @param action cleanup callback receiving the complete prerequisite failure, or null after success
+    /// @param first first resource occupied only by the cleanup callback
+    /// @param additional additional resources occupied only by the cleanup callback
+    /// @return completion coordinator with an explicitly resourced Throwable-aware cleanup child
+    public final Task<@Nullable Void> whenTerminalWithResources(
+            Executor executor,
+            TerminalCallback action,
+            TaskResource first,
+            TaskResource... additional) {
+        Objects.requireNonNull(executor, "executor");
+        Objects.requireNonNull(action, "action");
+        Objects.requireNonNull(first, "first");
+        Objects.requireNonNull(additional, "additional");
+        @Unmodifiable List<TaskResource> cleanupResources = Stream.concat(
+                Stream.of(first),
+                Arrays.stream(additional).map(resource -> Objects.requireNonNull(resource, "additional resource")))
+                .toList();
+        if (cleanupResources.stream().anyMatch(TaskResource::isConservative)
+                && (cleanupResources.size() != 1 || !cleanupResources.get(0).isConservative())) {
+            throw new IllegalArgumentException("The conservative task resource cannot be combined with explicit resources");
+        }
+        boolean handoffBeforeCleanup = cleanupResources.stream().anyMatch(cleanupResource ->
+                declaredResources.stream().noneMatch(parentResource ->
+                        !parentResource.isConservative()
+                                && (parentResource.getKind() == TaskResource.Kind.GLOBAL
+                                || parentResource.covers(cleanupResource) && cleanupResource.covers(parentResource))));
+        String taskName = getCaller();
+
+        Task<@Nullable Void> coordinator = new Task<@Nullable Void>() {
+            /// Cleanup child created after the prerequisite reaches any terminal outcome.
+            private @Nullable Task<@Nullable Void> cleanup;
+
+            {
+                inheritResourceDeclaration(this, Task.this);
+            }
+
+            /// Captures the complete prerequisite failure and creates the independently resourced cleanup child.
+            @Override
+            public void execute() {
+                @Nullable Throwable prerequisiteFailure = isDependentsSucceeded() ? null : getDependentFailure();
+                if (!isDependentsSucceeded() && prerequisiteFailure == null) {
+                    prerequisiteFailure = getException();
+                }
+                if (!isDependentsSucceeded() && prerequisiteFailure == null) {
+                    prerequisiteFailure = Task.this.getException();
+                }
+                if (isDependentsSucceeded() != (prerequisiteFailure == null)) {
+                    throw new AssertionError(
+                            "When terminal completion succeeded, Task failure must be null.",
+                            prerequisiteFailure);
+                }
+                @Nullable Throwable capturedFailure = prerequisiteFailure;
+
+                TaskResource @Unmodifiable [] remainingResources = cleanupResources.subList(1, cleanupResources.size())
+                        .toArray(TaskResource[]::new);
+                cleanup = Task.runAsync(taskName, executor, () -> {
+                    try {
+                        action.execute(capturedFailure);
+                    } catch (Exception | Error cleanupFailure) {
+                        if (capturedFailure != null && cleanupFailure != capturedFailure) {
+                            cleanupFailure.addSuppressed(capturedFailure);
+                        }
+                        throw cleanupFailure;
+                    }
+                    rethrowTerminalFailure(capturedFailure);
+                }).setResources(cleanupResources.get(0), remainingResources)
+                        .setSignificance(TaskSignificance.MINOR);
+                cleanup.terminalCleanup = true;
+            }
+
+            /// Returns the outer task as this coordinator's prerequisite.
+            @Override
+            public @Unmodifiable Collection<Task<?>> getDependents() {
+                return Collections.singleton(Task.this);
+            }
+
+            /// Returns the cleanup child after construction, or an empty immutable collection beforehand.
+            @Override
+            public @Unmodifiable Collection<Task<?>> getDependencies() {
+                return cleanup == null ? Collections.emptySet() : Collections.singleton(cleanup);
+            }
+
+            /// Allows cleanup construction after a failed prerequisite.
+            @Override
+            public boolean isRelyingOnDependents() {
+                return false;
+            }
+
+            /// Allows the executor to carry a prerequisite [Error] into this recovery coordinator.
+            @Override
+            boolean acceptsDependentErrors() {
+                return true;
+            }
+        };
+        if (handoffBeforeCleanup) {
+            coordinator.releaseResourcesBeforeDependencies();
+        }
+        return coordinator.setExecutor(executor).setName(taskName).setSignificance(TaskSignificance.MODERATE);
+    }
+
+    /// Rethrows a captured terminal failure without changing its classification or identity.
+    ///
+    /// @param failure failure to propagate, or null after success
+    /// @throws Exception when the captured failure is checked
+    private static void rethrowTerminalFailure(@Nullable Throwable failure) throws Exception {
+        if (failure instanceof Exception exception) {
+            throw exception;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        if (failure != null) {
+            throw new IllegalStateException("Unsupported task terminal failure", failure);
+        }
+    }
+
     /// Creates a completion continuation that receives this task's possibly absent result and failure.
     public Task<@Nullable Void> whenComplete(Executor executor, FinalizedCallbackWithResult<T> action) {
         return whenComplete(executor, (exception -> action.execute(getResult(), exception)));
@@ -1219,6 +1383,16 @@ public abstract class Task<T> {
     public interface FinalizedCallback {
         /// Handles task finalization with the failure, or null after success.
         void execute(@Nullable Exception exception) throws Exception;
+    }
+
+    /// Handles terminal recovery with the complete optional prerequisite failure.
+    @FunctionalInterface
+    @NotNullByDefault
+    public interface TerminalCallback {
+        /// Handles terminal recovery with the original failure, including [Error], or null after success.
+        ///
+        /// @param failure original prerequisite failure, or null after success
+        void execute(@Nullable Throwable failure) throws Exception;
     }
 
     /// Handles task finalization with a possibly absent result and failure.
