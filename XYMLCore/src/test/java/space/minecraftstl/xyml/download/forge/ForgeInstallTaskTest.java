@@ -25,15 +25,20 @@ import space.minecraftstl.xyml.download.DefaultCacheRepository;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.MojangDownloadProvider;
 import space.minecraftstl.xyml.download.UnsupportedInstallationException;
+import space.minecraftstl.xyml.download.forge.ForgeNewInstallProfile.Processor;
+import space.minecraftstl.xyml.game.Artifact;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
+import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 
+import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -101,6 +106,78 @@ public final class ForgeInstallTaskTest {
                 manifest,
                 "47.3.0",
                 temporaryDirectory.resolve("forge-installer.jar")).getResources());
+    }
+
+    /// Verifies dynamically created Forge processors keep exact installer resources after the outer handoff.
+    ///
+    /// @throws ReflectiveOperationException if the private processor factory cannot be inspected
+    @Test
+    public void processorDoesNotFallBackToGlobalResource() throws ReflectiveOperationException {
+        DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("repository"));
+        DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
+                repository,
+                new MojangDownloadProvider(),
+                new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
+        GameInstanceManifest manifest = new GameInstanceManifest(new GameInstanceID("forge-processor-resource-test"));
+        ForgeNewInstallTask installation = new ForgeNewInstallTask(
+                dependencyManager,
+                manifest,
+                "47.3.0",
+                temporaryDirectory.resolve("forge-installer.jar"));
+
+        Task<?> processorTask = createProcessorTask(installation, List.of());
+
+        assertEquals(installation.getResourceDeclarations(), processorTask.getResourceDeclarations());
+    }
+
+    /// Verifies the patched mappings coordinator is resource-free while its download child retains exact resources.
+    ///
+    /// @throws ReflectiveOperationException if the private processor factory cannot be inspected
+    @Test
+    public void mappingsPatchUsesOrchestrationResource() throws ReflectiveOperationException {
+        DefaultGameRepository repository = new DefaultGameRepository(temporaryDirectory.resolve("repository"));
+        DefaultDependencyManager dependencyManager = new DefaultDependencyManager(
+                repository,
+                new MojangDownloadProvider(),
+                new DefaultCacheRepository(temporaryDirectory.resolve("cache")));
+        ForgeNewInstallTask installation = new ForgeNewInstallTask(
+                dependencyManager,
+                new GameInstanceManifest(new GameInstanceID("forge-mappings-resource-test")),
+                "47.3.0",
+                temporaryDirectory.resolve("forge-installer.jar"));
+
+        Task<?> mappingsTask = createProcessorTask(installation, List.of(
+                "--task", "DOWNLOAD_MOJMAPS",
+                "--side", "client",
+                "--version", "1.20.1",
+                "--output", temporaryDirectory.resolve("client-mappings.txt").toString()));
+
+        assertEquals(Set.of(TaskResource.Kind.ORCHESTRATION), mappingsTask.getResources().stream()
+                .map(TaskResource::getKind)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet()));
+    }
+
+    /// Invokes the private dynamic processor factory without starting installer I/O.
+    ///
+    /// @param installation stopped Forge installer
+    /// @param arguments processor arguments
+    /// @return stopped dynamically created processor task
+    /// @throws ReflectiveOperationException if the private processor factory cannot be invoked
+    private static Task<?> createProcessorTask(
+            ForgeNewInstallTask installation,
+            @Unmodifiable List<String> arguments) throws ReflectiveOperationException {
+        Method factory = ForgeNewInstallTask.class.getDeclaredMethod(
+                "createProcessorTask",
+                Processor.class,
+                Map.class);
+        factory.setAccessible(true);
+        Processor processor = new Processor(
+                List.of("client"),
+                new Artifact("example", "processor", "1.0"),
+                List.of(),
+                arguments,
+                Map.of());
+        return (Task<?>) factory.invoke(installation, processor, Map.of());
     }
 
     /// Creates resolved manifest views containing one loader patch.
