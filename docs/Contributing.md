@@ -116,7 +116,7 @@ a second launcher process together with the root workflow.
 
 The four channel tasks read only the local `main`, `beta`, `alpha`, and `dev` refs. They perform no fetch or other
 online Git operation, and build the selected local branch tip in a temporary detached worktree without switching the
-current IDEA checkout. Successful channel artifacts are copied to `build/channel-builds/<branch>` together with
+current IDEA checkout. Successful channel artifacts are copied to `build/libs/<branch>` together with
 `build-info.properties`; the current-checkout `build` artifact remains in `XYML/build/libs`.
 
 On Windows, the Gradle Wrapper and nested channel builds allow Gradle distribution and dependency downloads to use

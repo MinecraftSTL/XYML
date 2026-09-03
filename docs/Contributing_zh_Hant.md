@@ -105,7 +105,7 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 
 四個渠道任務只讀取本機 `main`、`beta`、`alpha` 和 `dev` 引用，不會執行擷取或其他線上 Git 操作。任務會在臨時的游離 worktree
 中建置所選本機分支尖端，不會切換 IDEA 目前工作樹。成功的渠道建置產物會連同 `build-info.properties` 複製到
-`build/channel-builds/<branch>`；目前工作樹的 `build` 產物仍位於 `XYML/build/libs`。
+`build/libs/<branch>`；目前工作樹的 `build` 產物仍位於 `XYML/build/libs`。
 
 在 Windows 上，Gradle Wrapper 和巢狀渠道建置允許 Gradle 發行包及相依下載使用已啟用的 Windows 系統代理。
 

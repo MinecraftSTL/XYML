@@ -216,7 +216,7 @@ public abstract class GitBranchGradleTask extends DefaultTask {
             throw new IOException("Nested build did not produce XYML/build/libs at " + source);
         }
         Path target = getArtifactDirectory().get().getAsFile().toPath().toAbsolutePath().normalize();
-        Path allowedRoot = repository.resolve("build/channel-builds").toAbsolutePath().normalize();
+        Path allowedRoot = repository.resolve("build/libs").toAbsolutePath().normalize();
         if (!target.startsWith(allowedRoot)) {
             throw new IOException("Channel artifacts must remain under " + allowedRoot + ": " + target);
         }

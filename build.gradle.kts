@@ -211,7 +211,7 @@ fun registerReleaseBranchBuild(taskName: String, branchName: String, releaseType
             "--stacktrace"
         ))
         repositoryDirectory.set(layout.projectDirectory)
-        artifactDirectory.set(layout.buildDirectory.dir("channel-builds/$branchName"))
+        artifactDirectory.set(layout.buildDirectory.dir("libs/$branchName"))
     }
 
 registerReleaseBranchBuild("buildMain", "main", ReleaseType.STABLE)
