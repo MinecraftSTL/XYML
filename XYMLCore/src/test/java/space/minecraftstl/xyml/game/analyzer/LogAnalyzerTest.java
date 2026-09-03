@@ -541,7 +541,7 @@ class LogAnalyzerTest {
                 result.solver().repairAction().actionType());
         assertFalse(result.solver().repairAction().executable());
         assertEquals(
-                RepairActionDescriptor.ConfirmationRequirement.REQUIRED,
+                RepairActionDescriptor.ConfirmationRequirement.NOT_REQUIRED,
                 result.solver().repairAction().confirmationRequirement());
     }
 
@@ -638,6 +638,9 @@ class LogAnalyzerTest {
         assertEquals(
                 RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME,
                 result.solver().repairAction().actionType());
+        assertEquals(
+                RepairActionDescriptor.ConfirmationRequirement.NOT_REQUIRED,
+                result.solver().repairAction().confirmationRequirement());
         assertTrue(result.solver().repairAction().executable());
         Task<?> firstTask = result.solver().createTask();
         Task<?> secondTask = result.solver().createTask();

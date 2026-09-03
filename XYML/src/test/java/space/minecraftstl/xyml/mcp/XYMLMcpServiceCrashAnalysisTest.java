@@ -48,6 +48,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -63,6 +64,29 @@ final class XYMLMcpServiceCrashAnalysisTest {
     private static final String FABRIC_MISSING_DEPENDENCY_LOG =
             "net.fabricmc.loader.discovery.ModResolutionException: Could not find required mod: "
                     + "pca requires {fabric-api @ [>=0.39.2]}";
+
+    /// Checks startup policy before creating any underlying repair task or executing its side effects.
+    ///
+    /// @throws Exception when the allowed task unexpectedly fails
+    @Test
+    void gatesRepairTaskCreationAtExecutionTime() throws Exception {
+        AtomicInteger taskCreations = new AtomicInteger();
+        AtomicInteger taskExecutions = new AtomicInteger();
+        Supplier<Task<?>> taskFactory = () -> {
+            taskCreations.incrementAndGet();
+            return Task.runAsync(Runnable::run, taskExecutions::incrementAndGet);
+        };
+
+        Task<?> blockedTask = XYMLMcpService.guardRepairTask(() -> false, taskFactory);
+        IllegalStateException blocked = assertThrows(IllegalStateException.class, blockedTask::run);
+        assertTrue(blocked.getMessage().contains("startup agreements"));
+        assertEquals(0, taskCreations.get());
+        assertEquals(0, taskExecutions.get());
+
+        XYMLMcpService.guardRepairTask(() -> true, taskFactory).run();
+        assertEquals(1, taskCreations.get());
+        assertEquals(1, taskExecutions.get());
+    }
 
     /// Exercises real repository paths while replacing process-global settings only for this isolated test.
     ///

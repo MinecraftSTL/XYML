@@ -203,9 +203,9 @@ public record LogAnalyzable(
                 missingDependencySearch);
     }
 
-    /// Returns a context copy that can create an application-level Java replacement task.
+    /// Returns a context copy that can create an application-level Java selection task.
     ///
-    /// @param repair Java replacement task factory
+    /// @param repair Java selection task factory
     /// @return context copy retaining all launch metadata and logs
     public LogAnalyzable withJavaRuntimeRepair(JavaRuntimeRepair repair) {
         return new LogAnalyzable(
@@ -264,13 +264,13 @@ public record LogAnalyzable(
         return path != null && path.toString().codePoints().anyMatch(codePoint -> codePoint > 0x7F);
     }
 
-    /// Creates the stopped task that replaces an incompatible Java runtime and persists the new selection.
+    /// Creates the stopped task that selects a compatible Java runtime without removing registered runtimes.
     @FunctionalInterface
     @NotNullByDefault
     public interface JavaRuntimeRepair {
-        /// Creates a fresh stopped Java replacement task.
+        /// Creates a fresh stopped Java selection task.
         ///
-        /// @return task that replaces and selects a compatible Java runtime
+        /// @return task that selects a compatible Java runtime, downloading one only when necessary
         Task<?> createTask();
     }
 
@@ -311,15 +311,15 @@ public record LogAnalyzable(
 
         /// Returns a context copy with the supplied Java repair boundary.
         ///
-        /// @param replacementRepair Java replacement task factory
+        /// @param selectionRepair Java selection task factory
         /// @return runtime context retaining all selected-runtime metadata
-        public JavaRuntimeContext withRepair(JavaRuntimeRepair replacementRepair) {
+        public JavaRuntimeContext withRepair(JavaRuntimeRepair selectionRepair) {
             return new JavaRuntimeContext(
                     javaPath,
                     requiredJavaVersion,
                     currentJavaVersion,
                     javaBits,
-                    Objects.requireNonNull(replacementRepair, "replacementRepair"));
+                    Objects.requireNonNull(selectionRepair, "selectionRepair"));
         }
     }
 }

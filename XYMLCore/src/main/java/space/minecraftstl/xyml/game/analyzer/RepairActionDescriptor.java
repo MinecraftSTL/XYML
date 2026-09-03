@@ -96,16 +96,16 @@ public record RepairActionDescriptor(
                 dependencyIds);
     }
 
-    /// Creates a Java-runtime replacement descriptor.
+    /// Creates a non-destructive Java-runtime selection descriptor.
     ///
     /// @param executable whether the application supplied a Java-runtime repair boundary
-    /// @return structured Java-runtime replacement proposal
+    /// @return structured Java-runtime selection proposal
     public static RepairActionDescriptor replaceJavaRuntime(boolean executable) {
         return new RepairActionDescriptor(
                 ActionType.REPLACE_JAVA_RUNTIME,
                 executable ? Availability.EXECUTABLE : Availability.APPLICATION_BOUNDARY_UNAVAILABLE,
                 RiskLevel.SYSTEM_CONFIGURATION_CHANGE,
-                ConfirmationRequirement.REQUIRED,
+                ConfirmationRequirement.NOT_REQUIRED,
                 List.of());
     }
 
@@ -169,7 +169,7 @@ public record RepairActionDescriptor(
             case REPLACE_JAVA_RUNTIME -> requirePolicy(
                     availability != Availability.INFORMATION_ONLY
                             && riskLevel == RiskLevel.SYSTEM_CONFIGURATION_CHANGE
-                            && confirmationRequirement == ConfirmationRequirement.REQUIRED,
+                            && confirmationRequirement == ConfirmationRequirement.NOT_REQUIRED,
                     actionType);
             case AUTOMATIC_REPAIR -> requirePolicy(
                     availability == Availability.EXECUTABLE
@@ -198,7 +198,7 @@ public record RepairActionDescriptor(
         /// Opens or prepares a launcher-owned search for missing mods.
         OPEN_MOD_SEARCH,
 
-        /// Replaces and selects a compatible Java runtime.
+        /// Selects a compatible Java runtime, downloading one if the registry has no suitable candidate.
         REPLACE_JAVA_RUNTIME,
 
         /// Executes a legacy task whose precise effects are not described by Core.

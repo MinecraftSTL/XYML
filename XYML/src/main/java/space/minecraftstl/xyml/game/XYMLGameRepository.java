@@ -766,7 +766,7 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     ///
     /// @param instanceId the instance ID
     /// @throws IOException if saving the file fails
-    private void saveGameSettingsSync(GameInstanceID instanceId) throws IOException {
+    void saveGameSettingsSync(GameInstanceID instanceId) throws IOException {
         if (!instanceGameSettings.containsKey(instanceId) || readOnlyInstanceGameSettings.contains(instanceId)) {
             return;
         }

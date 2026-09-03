@@ -156,32 +156,51 @@ final class XYMLMcpCrashRepairCoordinatorTest {
         }
     }
 
-    /// Confirms Java replacement remains visible while its non-atomic task is excluded from MCP execution.
+    /// Confirms non-destructive Java selection can be planned and executed without per-use confirmation.
     @Test
-    void exposesButDoesNotPlanUnsafeJavaReplacement() {
+    void plansAndExecutesNonDestructiveJavaRepair() throws Exception {
+        AtomicInteger validations = new AtomicInteger();
+        AtomicInteger taskCreations = new AtomicInteger();
         String log = "java.lang.UnsupportedClassVersionError: example.Main has been compiled by a more recent "
                 + "version of the Java Runtime (class file version 61.0), this version of the Java Runtime only "
                 + "recognizes class file versions up to 52.0";
         LogAnalyzable input = baseInput(log, 17, 8)
-                .withJavaRuntimeRepair(() -> Task.completed(null));
+                .withJavaRuntimeRepair(() -> {
+                    taskCreations.incrementAndGet();
+                    return Task.completed(null);
+                });
         try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
             Map<String, Object> analysis = coordinator.analyze(
                     "demo",
                     XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
                     "sha256:java",
                     input,
-                    () -> {
-                    });
+                    validations::incrementAndGet);
             Map<String, Object> solution = solution(firstDiagnosis(analysis));
             Map<String, Object> plan = coordinator.plan(
                     String.valueOf(analysis.get("analysis_id")),
                     String.valueOf(solution.get("solution_id")));
 
             assertEquals("REPLACE_JAVA_RUNTIME", solution.get("action_type"));
-            assertEquals(false, solution.get("mcp_executable"));
-            assertEquals(XYMLMcpCrashRepairCoordinator.JAVA_REPAIR_NOT_ATOMIC,
-                    solution.get("blocked_reason"));
-            assertEquals(false, plan.get("planned"));
+            assertEquals("NOT_REQUIRED", solution.get("confirmation_requirement"));
+            assertEquals(true, solution.get("mcp_executable"));
+            assertEquals(
+                    List.of("OPEN_MOD_SEARCH", "REPLACE_JAVA_RUNTIME"),
+                    repairExecutionPolicy(analysis).get("supported_action_types"));
+            assertEquals(true, plan.get("planned"));
+            assertEquals(true, plan.get("executable"));
+            assertEquals(true, plan.get("single_use"));
+            assertEquals(0, taskCreations.get());
+
+            Map<String, Object> operation = coordinator.execute(String.valueOf(plan.get("plan_id")));
+            assertEquals(false, operation.get("cancellable"));
+            assertEquals(1, validations.get());
+            assertEquals(1, taskCreations.get());
+            assertEquals("SUCCEEDED", awaitTerminal(
+                    coordinator,
+                    String.valueOf(operation.get("operation_id"))).get("status"));
+            assertThrows(IllegalStateException.class,
+                    () -> coordinator.execute(String.valueOf(plan.get("plan_id"))));
         }
     }
 
@@ -250,6 +269,12 @@ final class XYMLMcpCrashRepairCoordinatorTest {
     @SuppressWarnings("unchecked")
     private static @Unmodifiable Map<String, Object> solution(Map<String, Object> diagnosis) {
         return (Map<String, Object>) diagnosis.get("solution");
+    }
+
+    /// Extracts the advertised MCP repair execution policy.
+    @SuppressWarnings("unchecked")
+    private static @Unmodifiable Map<String, Object> repairExecutionPolicy(Map<String, Object> analysis) {
+        return (Map<String, Object>) analysis.get("repair_execution_policy");
     }
 
     /// Polls one repair operation until its terminal state is visible.

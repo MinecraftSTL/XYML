@@ -61,7 +61,7 @@ class RepairActionDescriptorTest {
         assertEquals(List.of("cloth-config"), descriptor.dependencyIds());
     }
 
-    /// Marks Java replacement as a persistent operation requiring application confirmation.
+    /// Marks Java selection as a persistent but non-destructive operation that needs no per-use confirmation.
     @Test
     void describesJavaRuntimeReplacementPolicy() {
         RepairActionDescriptor descriptor = RepairActionDescriptor.replaceJavaRuntime(true);
@@ -69,7 +69,7 @@ class RepairActionDescriptorTest {
         assertEquals(RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME, descriptor.actionType());
         assertEquals(RepairActionDescriptor.RiskLevel.SYSTEM_CONFIGURATION_CHANGE, descriptor.riskLevel());
         assertEquals(
-                RepairActionDescriptor.ConfirmationRequirement.REQUIRED,
+                RepairActionDescriptor.ConfirmationRequirement.NOT_REQUIRED,
                 descriptor.confirmationRequirement());
         assertTrue(descriptor.executable());
         assertTrue(descriptor.dependencyIds().isEmpty());
@@ -105,8 +105,8 @@ class RepairActionDescriptorTest {
                 () -> new RepairActionDescriptor(
                         RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME,
                         RepairActionDescriptor.Availability.EXECUTABLE,
-                        RepairActionDescriptor.RiskLevel.INTERACTIVE_SIDE_EFFECT,
-                        RepairActionDescriptor.ConfirmationRequirement.NOT_REQUIRED,
+                        RepairActionDescriptor.RiskLevel.SYSTEM_CONFIGURATION_CHANGE,
+                        RepairActionDescriptor.ConfirmationRequirement.REQUIRED,
                         List.of()));
     }
 }

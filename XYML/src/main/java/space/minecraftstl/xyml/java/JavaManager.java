@@ -253,10 +253,13 @@ public final class JavaManager {
     /// @param platform target platform
     /// @param gameJavaVersion requested game Java component
     /// @return download and registration task
-    public static Task<JavaRuntime> getDownloadJavaTask(DownloadProvider downloadProvider, Platform platform, GameJavaVersion gameJavaVersion) {
+    public static Task<JavaRuntime> getDownloadJavaTask(
+            DownloadProvider downloadProvider,
+            Platform platform,
+            GameJavaVersion gameJavaVersion) {
         return REPOSITORY.getDownloadJavaTask(downloadProvider, platform, gameJavaVersion)
                 .thenApplyAsync(Schedulers.ui(), java -> {
-                    addJava(java);
+                    JAVA_RUNTIMES.upsert(java);
                     return java;
                 });
     }

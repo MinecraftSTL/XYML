@@ -52,9 +52,6 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
     /// Stable block reason for manual guidance with no automatic task.
     public static final String MANUAL_GUIDANCE = "manual_guidance";
 
-    /// Stable block reason for the currently non-atomic Java replacement task.
-    public static final String JAVA_REPAIR_NOT_ATOMIC = "java_runtime_repair_not_atomic";
-
     /// Stable block reason for an executable Core action not approved for MCP.
     public static final String UNSUPPORTED_ACTION_TYPE = "unsupported_action_type";
 
@@ -302,7 +299,8 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                 "repair_execution_policy", Map.of(
                         "launcher_owned_log_required", true,
                         "supported_action_types", List.of(
-                                RepairActionDescriptor.ActionType.OPEN_MOD_SEARCH.name())));
+                                RepairActionDescriptor.ActionType.OPEN_MOD_SEARCH.name(),
+                                RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME.name())));
     }
 
     /// Publishes one diagnosis and its structured solution descriptor.
@@ -374,8 +372,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             return new ExecutionDecision(false, reason);
         }
         return switch (action.actionType()) {
-            case OPEN_MOD_SEARCH -> new ExecutionDecision(true, "");
-            case REPLACE_JAVA_RUNTIME -> new ExecutionDecision(false, JAVA_REPAIR_NOT_ATOMIC);
+            case OPEN_MOD_SEARCH, REPLACE_JAVA_RUNTIME -> new ExecutionDecision(true, "");
             case MANUAL_GUIDANCE, AUTOMATIC_REPAIR -> new ExecutionDecision(false, UNSUPPORTED_ACTION_TYPE);
         };
     }

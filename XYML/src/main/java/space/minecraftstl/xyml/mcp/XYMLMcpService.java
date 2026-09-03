@@ -39,6 +39,7 @@ import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.property.InheritableProperty;
+import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceLifecycleService;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.RepositoryInstanceLifecycleService;
@@ -62,6 +63,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -94,6 +97,10 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     private static final String XYAT_JAVA_CONTEXT_UNAVAILABLE_WARNING =
             "XYAT Java runtime context is unavailable; analysis continued without selected Java metadata.";
 
+    /// Failure returned when launcher startup policy still blocks MCP repair side effects.
+    private static final String REPAIR_ACTIONS_UNAVAILABLE_MESSAGE =
+            "Crash repair actions are unavailable before startup agreements are accepted";
+
     /// URI matcher for the latest instance log.
     private static final Pattern LOG_RESOURCE = Pattern.compile(
             "^xyml://instances/([^/]+)/logs/latest\\.log$");
@@ -117,6 +124,9 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
 
     /// Optional late-bound application search action for missing dependencies.
     private final @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch;
+
+    /// Reports whether mandatory startup policy permits launcher-owned MCP repair side effects.
+    private final BooleanSupplier repairActionsAllowed;
 
     /// Bounded analysis, plan, and repair-operation coordinator.
     private final XYMLMcpCrashRepairCoordinator crashRepairCoordinator;
@@ -146,7 +156,29 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
             XYMLGameRepository repository,
             McpDeletionConfirmation deletionConfirmation,
             @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch) {
-        this(repository, deletionConfirmation, missingDependencySearch, new XYMLMcpCrashRepairCoordinator());
+        this(repository, deletionConfirmation, missingDependencySearch, () -> true);
+    }
+
+    /// Creates a service with application repair boundaries and the launcher's startup-policy gate.
+    ///
+    /// This gate is independent of per-operation confirmation. It prevents any repair side effect before mandatory
+    /// startup agreements have enabled application interaction.
+    ///
+    /// @param repository repository whose instances and settings are exposed
+    /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
+    /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
+    /// @param repairActionsAllowed reports whether startup policy permits repair side effects
+    public XYMLMcpService(
+            XYMLGameRepository repository,
+            McpDeletionConfirmation deletionConfirmation,
+            @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
+            BooleanSupplier repairActionsAllowed) {
+        this(
+                repository,
+                deletionConfirmation,
+                missingDependencySearch,
+                repairActionsAllowed,
+                new XYMLMcpCrashRepairCoordinator());
     }
 
     /// Creates a service with an explicit crash-repair coordinator for deterministic integration tests.
@@ -160,10 +192,27 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
             McpDeletionConfirmation deletionConfirmation,
             @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
             XYMLMcpCrashRepairCoordinator crashRepairCoordinator) {
+        this(repository, deletionConfirmation, missingDependencySearch, () -> true, crashRepairCoordinator);
+    }
+
+    /// Creates a service with explicit startup and coordinator boundaries for deterministic integration tests.
+    ///
+    /// @param repository repository whose instances and settings are exposed
+    /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
+    /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
+    /// @param repairActionsAllowed reports whether startup policy permits repair side effects
+    /// @param crashRepairCoordinator bounded analysis and repair-operation coordinator
+    XYMLMcpService(
+            XYMLGameRepository repository,
+            McpDeletionConfirmation deletionConfirmation,
+            @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
+            BooleanSupplier repairActionsAllowed,
+            XYMLMcpCrashRepairCoordinator crashRepairCoordinator) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.instanceLifecycle = new RepositoryInstanceLifecycleService(repository);
         this.deletionConfirmation = Objects.requireNonNull(deletionConfirmation, "deletionConfirmation");
         this.missingDependencySearch = missingDependencySearch;
+        this.repairActionsAllowed = Objects.requireNonNull(repairActionsAllowed, "repairActionsAllowed");
         this.crashRepairCoordinator = Objects.requireNonNull(crashRepairCoordinator, "crashRepairCoordinator");
     }
 
@@ -941,12 +990,27 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
         if (search != null) {
             input = input.withMissingDependencySearch(search);
         }
-        if (javaRuntime != null) {
-            JavaRuntime checkedJavaRuntime = javaRuntime;
-            input = input.withJavaRuntimeRepair(
-                    () -> JavaRuntimeRepairTaskFactory.create(repository, manifest, checkedJavaRuntime));
-        }
+        input = input.withJavaRuntimeRepair(
+                () -> guardRepairTask(
+                        repairActionsAllowed,
+                        () -> JavaRuntimeRepairTaskFactory.create(repository, manifest)));
         return input;
+    }
+
+    /// Delays a repair task factory until execution and checks startup policy before creating the task.
+    ///
+    /// @param executionAllowed reports whether repair side effects are currently permitted
+    /// @param taskFactory creates the underlying stopped repair task after policy acceptance
+    /// @return stopped task that fails before task creation while startup policy blocks repairs
+    static Task<?> guardRepairTask(BooleanSupplier executionAllowed, Supplier<Task<?>> taskFactory) {
+        BooleanSupplier checkedExecutionAllowed = Objects.requireNonNull(executionAllowed, "executionAllowed");
+        Supplier<Task<?>> checkedTaskFactory = Objects.requireNonNull(taskFactory, "taskFactory");
+        return Task.composeAsync(() -> {
+            if (!checkedExecutionAllowed.getAsBoolean()) {
+                throw new IllegalStateException(REPAIR_ACTIONS_UNAVAILABLE_MESSAGE);
+            }
+            return Objects.requireNonNull(checkedTaskFactory.get(), "repair task factory result");
+        });
     }
 
     /// Builds guaranteed non-blocking log-only XYAT input after optional instance-context collection fails.

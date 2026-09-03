@@ -149,29 +149,30 @@ public interface Solver {
                 () -> search.createTask(checkedDependencyIds));
     }
 
-    /// Creates the Java-runtime replacement solver for one analyzable launch.
+    /// Creates the Java-runtime selection solver for one analyzable launch.
     ///
     /// The input owns a Core-neutral repair boundary supplied by the application layer. This preserves XYAT's
-    /// `ofUninstallJRE(LogAnalyzable)` contract without making Core depend on the launcher's Java manager.
+    /// `ofUninstallJRE(LogAnalyzable)` contract without making Core depend on the launcher's Java manager. The legacy
+    /// method name does not imply that the application repair boundary removes an installed runtime.
     ///
     /// @param input immutable launch context with an application Java repair boundary
-    /// @return automatic Java-runtime replacement solver
+    /// @return automatic Java-runtime selection solver
     /// @throws IllegalArgumentException when the input has no Java repair boundary
     static Solver ofUninstallJRE(LogAnalyzable input) {
         return ofUninstallJRE(
                 input,
                 "game.crash.solver.replace_java",
                 List.of(),
-                "Replace the incompatible Java runtime and select a compatible runtime.");
+                "Select a compatible Java runtime, downloading one only if needed.");
     }
 
-    /// Creates a Java-runtime replacement solver while retaining analyzer-specific diagnosis text.
+    /// Creates a Java-runtime selection solver while retaining analyzer-specific diagnosis text.
     ///
     /// @param input immutable launch context with an application Java repair boundary
     /// @param messageKey localization key describing the diagnosed Java incompatibility
     /// @param messageArguments immutable localization arguments
     /// @param fallbackMessage presentation-independent English diagnosis and repair text
-    /// @return automatic Java-runtime replacement solver with analyzer-specific metadata
+    /// @return automatic Java-runtime selection solver with analyzer-specific metadata
     /// @throws IllegalArgumentException when the input has no Java repair boundary
     static Solver ofUninstallJRE(
             LogAnalyzable input,
