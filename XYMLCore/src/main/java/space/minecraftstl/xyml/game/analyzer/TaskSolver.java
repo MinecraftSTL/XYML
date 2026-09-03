@@ -24,24 +24,27 @@ import space.minecraftstl.xyml.task.Task;
 import java.util.List;
 import java.util.Objects;
 
-/// Automatic repair solver backed by one stopped task.
+/// Automatic repair solver backed by a fresh stopped-task factory.
 ///
 /// @param messageKey localization key used by non-wizard presentation layers
 /// @param messageArguments immutable localization arguments
 /// @param fallbackMessage presentation-independent English repair text
-/// @param task stopped repair task bound during configuration
+/// @param repairAction immutable structured repair proposal
+/// @param taskFactory factory that creates one independent stopped task per invocation
 @NotNullByDefault
 record TaskSolver(
         String messageKey,
         @Unmodifiable List<Object> messageArguments,
         String fallbackMessage,
-        Task<?> task) implements Solver {
-    /// Defensively copies repair metadata and validates the stopped task reference.
+        RepairActionDescriptor repairAction,
+        RepairTaskFactory taskFactory) implements Solver {
+    /// Defensively copies repair metadata and validates the task factory.
     TaskSolver {
         Objects.requireNonNull(messageKey, "messageKey");
         messageArguments = List.copyOf(Objects.requireNonNull(messageArguments, "messageArguments"));
         Objects.requireNonNull(fallbackMessage, "fallbackMessage");
-        Objects.requireNonNull(task, "task");
+        Objects.requireNonNull(repairAction, "repairAction");
+        Objects.requireNonNull(taskFactory, "taskFactory");
     }
 
     /// Binds the automatic repair task to the current solver step.
@@ -49,7 +52,7 @@ record TaskSolver(
     /// @param configurator presentation-neutral step configurator
     @Override
     public void configure(SolverConfigurator configurator) {
-        Objects.requireNonNull(configurator, "configurator").bindTask(task);
+        Objects.requireNonNull(configurator, "configurator").bindTask(createTask());
     }
 
     /// Advances after the automatic repair task completes.
@@ -61,11 +64,15 @@ record TaskSolver(
         Objects.requireNonNull(configurator, "configurator").transferTo(null);
     }
 
-    /// Returns the exact task bound during configuration.
+    /// Creates a fresh stopped task for one explicit repair execution.
     ///
-    /// @return stopped repair task
+    /// @return independent repair task in the ready state
     @Override
     public Task<?> createTask() {
+        Task<?> task = Objects.requireNonNull(taskFactory.createTask(), "repair task factory result");
+        if (task.getState() != Task.TaskState.READY) {
+            throw new IllegalStateException("Repair task factory must return a task in the ready state");
+        }
         return task;
     }
 }

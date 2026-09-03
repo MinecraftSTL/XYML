@@ -29,10 +29,11 @@ import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import java.net.URI;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -56,33 +57,63 @@ class SolverTest {
         assertNull(configurator.transferredSolver);
     }
 
-    /// Binds the exact stopped task and advances after automatic completion.
+    /// Creates a fresh stopped task only when an automatic execution is requested.
     @Test
     void configuresAutomaticTaskSolver() {
-        Task<?> task = Task.completed(null);
-        Solver solver = Solver.ofTask(task);
+        AtomicInteger creationCount = new AtomicInteger();
+        Solver solver = Solver.ofTask(() -> Task.completed(creationCount.incrementAndGet()));
         RecordingConfigurator configurator = new RecordingConfigurator();
 
+        assertEquals(0, creationCount.get());
+        Task<?> firstTask = solver.createTask();
+        Task<?> secondTask = solver.createTask();
+        assertNotSame(firstTask, secondTask);
+        assertEquals(2, creationCount.get());
+
         solver.configure(configurator);
-        assertSame(task, configurator.task);
-        assertSame(task, solver.createTask());
+        assertNotSame(secondTask, configurator.task);
+        assertEquals(3, creationCount.get());
+        assertEquals(RepairActionDescriptor.ActionType.AUTOMATIC_REPAIR, solver.repairAction().actionType());
 
         solver.callbackSelection(configurator, Solver.BTN_NEXT);
         assertTrue(configurator.transferred);
         assertNull(configurator.transferredSolver);
     }
 
-    /// Marks a complete Java replacement task with the dedicated repair metadata.
+    /// Creates Java replacement tasks lazily and exposes the dedicated repair metadata.
     @Test
     void createsUninstallJreSolver() {
-        Task<?> task = Task.completed(null);
-        LogAnalyzable input = repairableInput(task);
+        AtomicInteger creationCount = new AtomicInteger();
+        LogAnalyzable input = repairableInput(() -> Task.completed(creationCount.incrementAndGet()));
         Solver solver = Solver.ofUninstallJRE(input);
         RecordingConfigurator configurator = new RecordingConfigurator();
 
-        solver.configure(configurator);
+        assertEquals(0, creationCount.get());
         assertEquals("game.crash.solver.replace_java", solver.messageKey());
-        assertSame(task, configurator.task);
+        assertEquals(
+                RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME,
+                solver.repairAction().actionType());
+        assertTrue(solver.repairAction().executable());
+        Task<?> firstTask = solver.createTask();
+        Task<?> secondTask = solver.createTask();
+        assertNotSame(firstTask, secondTask);
+        assertEquals(2, creationCount.get());
+
+        solver.configure(configurator);
+        assertNotSame(secondTask, configurator.task);
+        assertEquals(3, creationCount.get());
+    }
+
+    /// Rejects a task factory that returns an already executed task.
+    @Test
+    void rejectsNonReadyRepairTask() {
+        Task<?> executedTask = Task.completed(null);
+        assertTrue(executedTask.test());
+        Solver solver = Solver.ofTask(() -> executedTask);
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class, solver::createTask);
+
+        assertEquals("Repair task factory must return a task in the ready state", exception.getMessage());
     }
 
     /// Rejects the XYAT-style Java replacement factory when application repair context is unavailable.
@@ -107,11 +138,11 @@ class SolverTest {
         assertEquals("input does not provide a Java runtime repair", exception.getMessage());
     }
 
-    /// Creates a minimal analysis input whose repair boundary returns the supplied stopped task.
+    /// Creates a minimal analysis input whose repair boundary delegates to the supplied factory.
     ///
-    /// @param task stopped Java replacement task
+    /// @param repair Java replacement task factory
     /// @return repairable immutable launch context
-    private static LogAnalyzable repairableInput(Task<?> task) {
+    private static LogAnalyzable repairableInput(LogAnalyzable.JavaRuntimeRepair repair) {
         return new LogAnalyzable(
                 null,
                 null,
@@ -124,7 +155,7 @@ class SolverTest {
                 null,
                 Bits.UNKNOWN,
                 null,
-                List.of()).withJavaRuntimeRepair(() -> task);
+                List.of()).withJavaRuntimeRepair(repair);
     }
 
     /// Minimal in-memory configurator used to inspect one solver step.

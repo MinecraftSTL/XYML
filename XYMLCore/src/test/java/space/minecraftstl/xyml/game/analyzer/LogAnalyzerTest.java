@@ -37,10 +37,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -288,6 +290,11 @@ class LogAnalyzerTest {
                 ResultID.FORGE_MISSING_DEPENDENCY,
                 ForgeMissingDependencyAnalyzer.class);
         assertEquals(List.of("vampirism (required by werewolves)"), result.solver().messageArguments());
+        assertEquals(
+                RepairActionDescriptor.ActionType.OPEN_MOD_SEARCH,
+                result.solver().repairAction().actionType());
+        assertEquals(List.of("vampirism"), result.solver().repairAction().dependencyIds());
+        assertFalse(result.solver().repairAction().executable());
     }
 
     /// Exposes Forge's validated dependency ID to the application search boundary.
@@ -295,7 +302,7 @@ class LogAnalyzerTest {
     /// @throws IOException when the real regression log cannot be read
     @Test
     void forgeMissingDependencySolverSearchesNamedDependency() throws IOException {
-        Task<?> searchTask = Task.completed(null);
+        AtomicInteger creationCount = new AtomicInteger();
         AtomicReference<List<String>> searchedIds = new AtomicReference<>(List.of());
         LogAnalyzable input = input(
                 loadLines("/logs/forgemod_resolution.txt"),
@@ -307,16 +314,24 @@ class LogAnalyzerTest {
                 17,
                 ProcessListener.ExitType.APPLICATION_ERROR)
                 .withMissingDependencySearch(ids -> {
+                    creationCount.incrementAndGet();
                     searchedIds.set(ids);
-                    return searchTask;
+                    return Task.completed(null);
                 });
 
         AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
                 input,
                 ResultID.FORGE_MISSING_DEPENDENCY,
                 ForgeMissingDependencyAnalyzer.class);
+
+        assertEquals(0, creationCount.get());
+        assertTrue(result.solver().repairAction().executable());
+        assertEquals(List.of("vampirism"), result.solver().repairAction().dependencyIds());
+        Task<?> firstTask = result.solver().createTask();
+        Task<?> secondTask = result.solver().createTask();
+        assertNotSame(firstTask, secondTask);
+        assertEquals(2, creationCount.get());
         assertEquals(List.of("vampirism"), searchedIds.get());
-        assertSame(searchTask, result.solver().createTask());
     }
 
     /// Rejects Forge's unsupported-version entry when no dependency is actually missing.
@@ -360,6 +375,11 @@ class LogAnalyzerTest {
                 ResultID.FABRIC_MISSING_DEPENDENCY,
                 FabricMissingDependencyAnalyzer.class);
         assertEquals(List.of("fabric (required by pca)"), result.solver().messageArguments());
+        assertEquals(
+                RepairActionDescriptor.ActionType.OPEN_MOD_SEARCH,
+                result.solver().repairAction().actionType());
+        assertEquals(List.of("fabric"), result.solver().repairAction().dependencyIds());
+        assertFalse(result.solver().repairAction().executable());
     }
 
     /// Exposes Fabric's validated dependency ID to the application search boundary.
@@ -367,7 +387,7 @@ class LogAnalyzerTest {
     /// @throws IOException when the real regression log cannot be read
     @Test
     void fabricMissingDependencySolverSearchesNamedDependency() throws IOException {
-        Task<?> searchTask = Task.completed(null);
+        AtomicInteger creationCount = new AtomicInteger();
         AtomicReference<List<String>> searchedIds = new AtomicReference<>(List.of());
         LogAnalyzable input = input(
                 loadLines("/logs/fabric-mod-missing.txt"),
@@ -379,16 +399,24 @@ class LogAnalyzerTest {
                 17,
                 ProcessListener.ExitType.APPLICATION_ERROR)
                 .withMissingDependencySearch(ids -> {
+                    creationCount.incrementAndGet();
                     searchedIds.set(ids);
-                    return searchTask;
+                    return Task.completed(null);
                 });
 
         AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
                 input,
                 ResultID.FABRIC_MISSING_DEPENDENCY,
                 FabricMissingDependencyAnalyzer.class);
+
+        assertEquals(0, creationCount.get());
+        assertTrue(result.solver().repairAction().executable());
+        assertEquals(List.of("fabric"), result.solver().repairAction().dependencyIds());
+        Task<?> firstTask = result.solver().createTask();
+        Task<?> secondTask = result.solver().createTask();
+        assertNotSame(firstTask, secondTask);
+        assertEquals(2, creationCount.get());
         assertEquals(List.of("fabric"), searchedIds.get());
-        assertSame(searchTask, result.solver().createTask());
     }
 
     /// Detects multiple Fabric missing dependencies from the older resolution-list format.
@@ -413,6 +441,7 @@ class LogAnalyzerTest {
         assertEquals(
                 List.of("fabricloader (required by test), fabric (required by test)"),
                 result.solver().messageArguments());
+        assertEquals(List.of("fabricloader", "fabric"), result.solver().repairAction().dependencyIds());
     }
 
     /// Detects the current Fabric loader's hard dependency format from a real launch log.
@@ -503,7 +532,17 @@ class LogAnalyzerTest {
                 8,
                 ProcessListener.ExitType.JVM_ERROR);
 
-        assertOnlyResult(input, ResultID.JRE_32BIT, JRE32BitAnalyzer.class);
+        AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
+                input,
+                ResultID.JRE_32BIT,
+                JRE32BitAnalyzer.class);
+        assertEquals(
+                RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME,
+                result.solver().repairAction().actionType());
+        assertFalse(result.solver().repairAction().executable());
+        assertEquals(
+                RepairActionDescriptor.ConfirmationRequirement.REQUIRED,
+                result.solver().repairAction().confirmationRequirement());
     }
 
     /// Reuses the established object-heap reservation variant for a verified 32-bit runtime.
@@ -562,6 +601,10 @@ class LogAnalyzerTest {
                 ResultID.JRE_VERSION,
                 JREVersionAnalyzer.class);
         assertEquals(List.of(16, 8), result.solver().messageArguments());
+        assertEquals(
+                RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME,
+                result.solver().repairAction().actionType());
+        assertFalse(result.solver().repairAction().executable());
     }
 
     /// Binds the application replacement task while retaining the specific Java-version diagnosis.
@@ -569,7 +612,7 @@ class LogAnalyzerTest {
     /// @throws IOException when the real regression log cannot be read
     @Test
     void jreVersionAnalyzerUsesApplicationRepairTask() throws IOException {
-        Task<?> replacementTask = Task.completed(null);
+        AtomicInteger creationCount = new AtomicInteger();
         LogAnalyzable input = input(
                 loadLines("/logs/too_old_java.txt"),
                 OperatingSystem.WINDOWS,
@@ -579,7 +622,10 @@ class LogAnalyzerTest {
                 16,
                 8,
                 ProcessListener.ExitType.APPLICATION_ERROR)
-                .withJavaRuntimeRepair(() -> replacementTask);
+                .withJavaRuntimeRepair(() -> {
+                    creationCount.incrementAndGet();
+                    return Task.completed(null);
+                });
 
         AnalyzeResult<LogAnalyzable> result = assertOnlyResult(
                 input,
@@ -588,7 +634,15 @@ class LogAnalyzerTest {
 
         assertEquals("game.crash.reason.log.jre_version", result.solver().messageKey());
         assertEquals(List.of(16, 8), result.solver().messageArguments());
-        assertSame(replacementTask, result.solver().createTask());
+        assertEquals(0, creationCount.get());
+        assertEquals(
+                RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME,
+                result.solver().repairAction().actionType());
+        assertTrue(result.solver().repairAction().executable());
+        Task<?> firstTask = result.solver().createTask();
+        Task<?> secondTask = result.solver().createTask();
+        assertNotSame(firstTask, secondTask);
+        assertEquals(2, creationCount.get());
     }
 
     /// Correlates a real legacy Forge failure with a selected Java runtime that is too new.

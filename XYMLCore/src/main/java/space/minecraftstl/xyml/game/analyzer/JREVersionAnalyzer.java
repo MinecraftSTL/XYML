@@ -60,7 +60,8 @@ public final class JREVersionAnalyzer implements Analyzer<LogAnalyzable> {
                 ? new TextSolver(
                         "game.crash.reason.log.jre_version",
                         List.of(required, current),
-                        "Install or select Java " + required + " instead of Java " + current + ".")
+                        "Install or select Java " + required + " instead of Java " + current + ".",
+                        RepairActionDescriptor.replaceJavaRuntime(false))
                 : Solver.ofUninstallJRE(
                         input,
                         "game.crash.reason.log.jre_version",

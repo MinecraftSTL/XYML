@@ -58,7 +58,9 @@ public final class JRE32BitAnalyzer implements Analyzer<LogAnalyzable> {
         Solver solver = input.javaRuntimeRepair() == null
                 ? new TextSolver(
                         "game.crash.reason.log.jre_32bit",
-                        "Install and select a 64-bit Java runtime, or reduce the configured heap.")
+                        List.of(),
+                        "Install and select a 64-bit Java runtime, or reduce the configured heap.",
+                        RepairActionDescriptor.replaceJavaRuntime(false))
                 : Solver.ofUninstallJRE(
                         input,
                         "game.crash.reason.log.jre_32bit",

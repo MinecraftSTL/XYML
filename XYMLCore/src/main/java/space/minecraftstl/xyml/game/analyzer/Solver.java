@@ -46,6 +46,11 @@ public interface Solver {
     /// @return fallback repair text suitable for Core and MCP callers
     String fallbackMessage();
 
+    /// Returns the immutable structured repair action proposed by this solver.
+    ///
+    /// @return serializable action metadata without executable task objects
+    RepairActionDescriptor repairAction();
+
     /// Configures the current manual or automatic repair step.
     ///
     /// Presentation layers invoke this method on their UI thread. Implementations must configure either descriptive
@@ -70,16 +75,31 @@ public interface Solver {
         return null;
     }
 
-    /// Creates an automatic solver around one stopped task.
+    /// Creates an automatic solver around a fresh-task factory.
     ///
-    /// @param task stopped repair task that a configurator may start
+    /// The generic action is deliberately classified conservatively because Core cannot infer the supplied task's
+    /// persistent effects. Prefer a domain-specific solver factory when one is available.
+    ///
+    /// @param taskFactory factory that creates an independent stopped repair task for each call
     /// @return automatic solver that advances after task completion
-    static Solver ofTask(Task<?> task) {
+    static Solver ofTask(RepairTaskFactory taskFactory) {
         return new TaskSolver(
                 "game.crash.solver.automatic",
                 List.of(),
                 "Apply the automatic repair.",
-                Objects.requireNonNull(task, "task"));
+                RepairActionDescriptor.automaticRepair(),
+                Objects.requireNonNull(taskFactory, "taskFactory"));
+    }
+
+    /// Creates a compatibility solver around one stopped task instance.
+    ///
+    /// @param task stopped repair task retained for compatibility
+    /// @return automatic solver that advances after task completion
+    /// @deprecated use [#ofTask(RepairTaskFactory)] so each execution receives a fresh task
+    @Deprecated(since = "1.0.3", forRemoval = false)
+    static Solver ofTask(Task<?> task) {
+        Task<?> checkedTask = Objects.requireNonNull(task, "task");
+        return ofTask(() -> checkedTask);
     }
 
     /// Creates a missing-dependency search solver when the application supplied a search boundary.
@@ -111,17 +131,22 @@ public interface Solver {
                 Objects.requireNonNull(messageArguments, "messageArguments"));
         String checkedFallbackMessage = Objects.requireNonNull(fallbackMessage, "fallbackMessage");
         LogAnalyzable.@Nullable MissingDependencySearch search = checkedInput.missingDependencySearch();
+        RepairActionDescriptor repairAction = RepairActionDescriptor.openModSearch(
+                checkedDependencyIds,
+                search != null);
         if (search == null) {
-            return new TextSolver(checkedMessageKey, checkedMessageArguments, checkedFallbackMessage);
+            return new TextSolver(
+                    checkedMessageKey,
+                    checkedMessageArguments,
+                    checkedFallbackMessage,
+                    repairAction);
         }
-        Task<?> searchTask = Objects.requireNonNull(
-                search.createTask(checkedDependencyIds),
-                "missing dependency search task");
         return new TaskSolver(
                 checkedMessageKey,
                 checkedMessageArguments,
                 checkedFallbackMessage,
-                searchTask);
+                repairAction,
+                () -> search.createTask(checkedDependencyIds));
     }
 
     /// Creates the Java-runtime replacement solver for one analyzable launch.
@@ -158,11 +183,11 @@ public interface Solver {
         if (repair == null) {
             throw new IllegalArgumentException("input does not provide a Java runtime repair");
         }
-        Task<?> replacementTask = Objects.requireNonNull(repair.createTask(), "Java runtime repair task");
         return new TaskSolver(
                 Objects.requireNonNull(messageKey, "messageKey"),
                 List.copyOf(Objects.requireNonNull(messageArguments, "messageArguments")),
                 Objects.requireNonNull(fallbackMessage, "fallbackMessage"),
-                replacementTask);
+                RepairActionDescriptor.replaceJavaRuntime(true),
+                repair::createTask);
     }
 }

@@ -28,16 +28,31 @@ import java.util.Objects;
 /// @param messageKey localization key used by presentation layers
 /// @param messageArguments immutable localization arguments
 /// @param fallbackMessage presentation-independent English repair text
+/// @param repairAction immutable structured repair proposal
 @NotNullByDefault
 public record TextSolver(
         String messageKey,
         @Unmodifiable List<Object> messageArguments,
-        String fallbackMessage) implements Solver {
+        String fallbackMessage,
+        RepairActionDescriptor repairAction) implements Solver {
     /// Defensively copies arguments and validates all text fields.
     public TextSolver {
         Objects.requireNonNull(messageKey, "messageKey");
         messageArguments = List.copyOf(Objects.requireNonNull(messageArguments, "messageArguments"));
         Objects.requireNonNull(fallbackMessage, "fallbackMessage");
+        Objects.requireNonNull(repairAction, "repairAction");
+    }
+
+    /// Creates a text-only proposal with the standard manual-guidance action.
+    ///
+    /// @param messageKey localization key used by presentation layers
+    /// @param messageArguments immutable localization arguments
+    /// @param fallbackMessage presentation-independent English repair text
+    public TextSolver(
+            String messageKey,
+            @Unmodifiable List<Object> messageArguments,
+            String fallbackMessage) {
+        this(messageKey, messageArguments, fallbackMessage, RepairActionDescriptor.manualGuidance());
     }
 
     /// Creates a text-only proposal without localization arguments.
