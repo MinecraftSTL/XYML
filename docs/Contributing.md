@@ -98,11 +98,17 @@ The `run` task always uses the current repository root as XYML's working directo
 `alpha`, and `dev` checkouts.
 
 Every `run` invocation disables up-to-date and build-cache reuse for tasks in `XYML`, `XYMLCore`, and `XYMLBoot`.
-This includes Java compilation, generated language data, processed resources, and the final `shadowJar`. Other project
-dependencies retain their normal Gradle reuse behavior; an unchanged native source may therefore reuse the existing
-XYMLL executable. `run` always selects the current `XYML/build/libs` artifact, never a JAR recorded by a previous root
-`:build`, and it does not write the root result marker or start a second Wrapper process. Local release-branch builds
-without CI version inputs infer their version from Git topology.
+This includes Java compilation, generated language data, processed resources, and the final `shadowJar`. XoyzNBT and
+XoyzMCP are handled separately: a successful root `build` records an integrity-checked library snapshot, and `run`
+prefers that snapshot until the next successful root `build`. If no complete snapshot is available, or `clean run` is
+requested, both libraries are built into a temporary directory with Gradle reuse disabled and are removed after the
+launcher JAR is assembled; this fallback never updates the snapshot. A combined `build run` or `check run` invocation
+uses the current project outputs instead. Other project dependencies retain their existing reuse behavior, so an
+unchanged native source may still reuse the XYMLL executable.
+
+`run` always rebuilds and selects the current `XYML/build/libs` application artifact; it never reuses an application
+JAR recorded by a previous root `:build`. It does not write the root result marker or start a second Wrapper process.
+Local release-branch builds without CI version inputs infer their version from Git topology.
 
 The subproject-level task is named `:XYML:runCurrent`; it is intentionally not named `run`, so Gradle does not select
 a second launcher process together with the root workflow.

@@ -270,6 +270,15 @@ public final class StringUtils {
         return suffixes.stream().anyMatch(str::endsWith);
     }
 
+    /// Tests a prefix without applying locale-sensitive case conversion.
+    ///
+    /// @param str candidate text
+    /// @param prefix required prefix
+    /// @return whether the candidate begins with the prefix ignoring case
+    public static boolean startsWithIgnoreCase(String str, String prefix) {
+        return str.regionMatches(true, 0, prefix, 0, prefix.length());
+    }
+
     public static Predicate<@Nullable String> compileQuery(String queryString) throws PatternSyntaxException {
         Predicate<@Nullable String> predicate;
         if (queryString.startsWith("regex:")) {

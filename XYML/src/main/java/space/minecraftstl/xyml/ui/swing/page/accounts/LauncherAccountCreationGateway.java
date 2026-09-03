@@ -104,6 +104,7 @@ public final class LauncherAccountCreationGateway implements AccountCreationGate
                 options.add(new AuthlibServerOption(
                         server.getUrl(),
                         server.getName(),
+                        server.getDisplayHostUrl(),
                         !server.isNonEmailLogin()));
             }
             result.set(List.copyOf(options));

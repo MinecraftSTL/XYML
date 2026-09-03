@@ -177,6 +177,20 @@
     "proxyPassword": {
       "type": "string"
     },
+    "mcpEnabled": {
+      "type": "boolean"
+    },
+    "mcpPort": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "mcpConfirmInstanceDeletion": {
+      "type": "boolean"
+    },
+    "mcpConfirmModDeletion": {
+      "type": "boolean"
+    },
     "selectedGameDirectory": {
       "$ref": "#/$defs/gameDirectoryID"
     },

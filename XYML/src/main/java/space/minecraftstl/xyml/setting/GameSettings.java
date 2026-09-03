@@ -803,16 +803,16 @@ public sealed abstract class GameSettings extends ObservableSetting {
         return nativesDirectory;
     }
 
-    /// Property name for using native GLFW.
-    public static final String PROPERTY_USE_NATIVE_GLFW = "useNativeGLFW";
+    /// Serialized property name for using the system GLFW or SDL library.
+    public static final String PROPERTY_USE_NATIVE_GLFW_OR_SDL = "useNativeGLFW";
 
-    /// If `true`, XYML will use native GLFW.
-    @SerializedName(PROPERTY_USE_NATIVE_GLFW)
-    private final InheritableProperty<Boolean> useNativeGLFW = newInheritableProperty(PROPERTY_USE_NATIVE_GLFW, false);
+    /// Whether XYML should use the system GLFW or SDL library.
+    @SerializedName(PROPERTY_USE_NATIVE_GLFW_OR_SDL)
+    private final InheritableProperty<Boolean> useNativeGLFWorSDL = newInheritableProperty(PROPERTY_USE_NATIVE_GLFW_OR_SDL, false);
 
-    /// Returns the native GLFW property.
-    public InheritableProperty<Boolean> useNativeGLFWProperty() {
-        return useNativeGLFW;
+    /// Returns the system GLFW-or-SDL property.
+    public InheritableProperty<Boolean> useNativeGLFWorSDLProperty() {
+        return useNativeGLFWorSDL;
     }
 
     /// Property name for using native OpenAL.

@@ -109,6 +109,9 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Default launcher animation speed percentage.
     public static final int DEFAULT_ANIMATION_SPEED_PERCENTAGE = AnimationSpeedSettings.DEFAULT_PERCENTAGE;
 
+    /// Default loopback port used by the local MCP server.
+    public static final int DEFAULT_MCP_PORT = 23968;
+
     /// Gson instance used for launcher settings and related toolkit-neutral settings objects.
     public static final Gson SETTINGS_GSON = new GsonBuilder()
             .registerTypeAdapter(Path.class, PathTypeAdapter.INSTANCE)
@@ -128,7 +131,25 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         normalized.remove("backgroundFallbackType");
         normalized.remove("backgroundFallbackPaint");
         normalized.remove("backgroundLoadPolicy");
+        boolean hasInstanceDeletionConfirmation = normalized.has("mcpConfirmInstanceDeletion");
+        boolean hasModDeletionConfirmation = normalized.has("mcpConfirmModDeletion");
+        @Nullable JsonElement legacyDeletionConfirmation = normalized.remove("mcpConfirmDeletion");
         LauncherSettings settings = SETTINGS_GSON.fromJson(normalized, LauncherSettings.class);
+        if (legacyDeletionConfirmation != null
+                && legacyDeletionConfirmation.isJsonPrimitive()
+                && legacyDeletionConfirmation.getAsJsonPrimitive().isBoolean()) {
+            boolean required = legacyDeletionConfirmation.getAsBoolean();
+            if (!hasInstanceDeletionConfirmation) {
+                settings.mcpConfirmInstanceDeletionProperty().set(required);
+            }
+            if (!hasModDeletionConfirmation) {
+                settings.mcpConfirmModDeletionProperty().set(required);
+            }
+        }
+        int mcpPort = settings.mcpPortProperty().get();
+        if (mcpPort < 1 || mcpPort > 0xFFFF) {
+            settings.mcpPortProperty().set(DEFAULT_MCP_PORT);
+        }
         settings.getThemeAppearanceOverrides().remove("windowTransparent");
         if (settings.themeColorTypeProperty().get() != ThemeColorType.CUSTOM) {
             settings.getThemeAppearanceOverrides().remove(THEME_APPEARANCE_COLOR);
@@ -594,6 +615,42 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Returns the proxy authentication password property.
     public StringProperty proxyPasswordProperty() {
         return proxyPassword;
+    }
+
+    /// Whether the local MCP server is enabled at launcher startup.
+    @SerializedName("mcpEnabled")
+    private final BooleanProperty mcpEnabled = new SimpleBooleanProperty(false);
+
+    /// Returns the local MCP server enablement property.
+    public BooleanProperty mcpEnabledProperty() {
+        return mcpEnabled;
+    }
+
+    /// Loopback port used by the local MCP server.
+    @SerializedName("mcpPort")
+    private final IntegerProperty mcpPort = new SimpleIntegerProperty(DEFAULT_MCP_PORT);
+
+    /// Returns the local MCP server port property.
+    public IntegerProperty mcpPortProperty() {
+        return mcpPort;
+    }
+
+    /// Whether deleting an instance through MCP requires interactive user confirmation.
+    @SerializedName("mcpConfirmInstanceDeletion")
+    private final BooleanProperty mcpConfirmInstanceDeletion = new SimpleBooleanProperty(true);
+
+    /// Returns the MCP instance-deletion confirmation preference.
+    public BooleanProperty mcpConfirmInstanceDeletionProperty() {
+        return mcpConfirmInstanceDeletion;
+    }
+
+    /// Whether deleting local mods through MCP requires interactive user confirmation.
+    @SerializedName("mcpConfirmModDeletion")
+    private final BooleanProperty mcpConfirmModDeletion = new SimpleBooleanProperty(true);
+
+    /// Returns the MCP mod-deletion confirmation preference.
+    public BooleanProperty mcpConfirmModDeletionProperty() {
+        return mcpConfirmModDeletion;
     }
 
     /// The selected game directory ID.

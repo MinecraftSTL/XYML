@@ -18,23 +18,19 @@
 package space.minecraftstl.xyml.download.forge;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.VersionList;
 import space.minecraftstl.xyml.task.GetTask;
 import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.util.Immutable;
-import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.Validation;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 import static space.minecraftstl.xyml.util.Lang.mapOf;
 import static space.minecraftstl.xyml.util.Pair.pair;
@@ -73,7 +69,7 @@ public final class ForgeBMCLVersionList extends VersionList<ForgeRemoteVersion> 
         if ("1.7.10-pre4".equals(gameVersion)) {
             return "prerelease";
         }
-        return Lang.requireNonNullElse(branch, "");
+        return Objects.requireNonNullElse(branch, "");
     }
 
     @Override

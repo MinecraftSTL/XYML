@@ -17,17 +17,15 @@
  */
 package space.minecraftstl.xyml.auth.authlibinjector;
 
-import static java.util.Collections.emptyMap;
-import static space.minecraftstl.xyml.util.Lang.tryCast;
-import static space.minecraftstl.xyml.util.logging.Logger.LOG;
-
-import java.io.IOException;
-import java.lang.reflect.Type;
-import java.net.HttpURLConnection;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Optional;
-
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonDeserializationContext;
+import com.google.gson.JsonDeserializer;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonPrimitive;
+import com.google.gson.annotations.JsonAdapter;
 import org.glavo.url.WebURL;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -38,15 +36,16 @@ import space.minecraftstl.xyml.observable.property.SimpleLongProperty;
 import space.minecraftstl.xyml.util.io.HttpRequest;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonDeserializationContext;
-import com.google.gson.JsonDeserializer;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParseException;
-import com.google.gson.JsonPrimitive;
-import com.google.gson.annotations.JsonAdapter;
+import java.io.IOException;
+import java.lang.reflect.Type;
+import java.net.HttpURLConnection;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
+
+import static java.util.Collections.emptyMap;
+import static space.minecraftstl.xyml.util.Lang.tryCast;
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 @JsonAdapter(AuthlibInjectorServer.Deserializer.class)
 @NotNullByDefault
@@ -289,6 +288,35 @@ public class AuthlibInjectorServer {
     /// Marks restored or fetched metadata as stale so the next fetch request refreshes it.
     public void invalidateMetadataCache() {
         metadataRefreshed = false;
+    }
+
+    /// Returns a compact presentation form for this authentication endpoint.
+    ///
+    /// HTTPS endpoints omit the scheme, default port, and conventional `/api/yggdrasil/` path.
+    /// Other or malformed endpoints are returned unchanged.
+    ///
+    /// @return display-safe host, port, and optional path
+    public String getDisplayHostUrl() {
+        String url = this.getUrl();
+
+        try {
+            WebURL parsed = WebURL.parseBrowserInput(url);
+            if ("https".equals(parsed.getScheme())) {
+                StringBuilder builder = new StringBuilder();
+                builder.append(parsed.getHost());
+                if (parsed.getPort() != 443) {
+                    builder.append(':').append(parsed.getPort());
+                }
+
+                if (!"/api/yggdrasil/".equals(parsed.getPath()))
+                    builder.append(parsed.getPath());
+
+                return builder.toString();
+            }
+        } catch (Exception e) {
+            LOG.warning("Unparsable authlib-injector server url " + url, e);
+        }
+        return url;
     }
 
     /// Computes endpoint-based identity hash code.

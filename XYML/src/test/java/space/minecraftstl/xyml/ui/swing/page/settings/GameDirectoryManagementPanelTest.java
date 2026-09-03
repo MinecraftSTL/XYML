@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.page.settings;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
@@ -91,8 +92,12 @@ public final class GameDirectoryManagementPanelTest {
             AbstractButton addButton = findComponent(panel, "gameDirectoryManagementAdd", AbstractButton.class);
             assertEquals(i18n("game_directory.new"), addButton.getText());
             addButton.doClick();
-            findComponent(panel, "gameDirectoryManagementName", JTextField.class).setText("Development");
-            findComponent(panel, "gameDirectoryManagementPath", JTextField.class).setText("instances/development");
+            JTextField nameField = findComponent(panel, "gameDirectoryManagementName", JTextField.class);
+            JTextField pathField = findComponent(panel, "gameDirectoryManagementPath", JTextField.class);
+            assertEquals(Objects.requireNonNull(Metadata.CURRENT_DIRECTORY.getFileName()).toString(), nameField.getText());
+            assertEquals(".minecraft", pathField.getText());
+            nameField.setText("Development");
+            pathField.setText("instances/development");
             findComponent(panel, "gameDirectoryManagementRelativePath", JCheckBox.class).setSelected(true);
             findComponent(panel, "gameDirectoryManagementSave", AbstractButton.class).doClick();
         });
@@ -107,6 +112,44 @@ public final class GameDirectoryManagementPanelTest {
                     () -> assertFalse(service.lastEdit.path().isAbsolute()),
                     () -> assertEquals("instances/development", service.lastEdit.path().getPath()),
                     () -> assertEquals(3, panel.displayedSnapshot().entries().size()));
+            panel.close();
+        });
+    }
+
+    /// Requires explicit confirmation before saving a filesystem root as a game directory.
+    @Test
+    public void confirmsFileSystemRootBeforeSaving() throws InterruptedException {
+        GameDirectoryManagementEntry current = entry("Current", ".minecraft", true);
+        FakeGameDirectoryManagementService service = new FakeGameDirectoryManagementService(current);
+        WorkerExecutor executor = new WorkerExecutor();
+        FakeInteraction interaction = new FakeInteraction();
+        interaction.rootDirectoryConfirmationAccepted = false;
+        GameDirectoryManagementPanel panel = onEventDispatchThread(() -> new GameDirectoryManagementPanel(
+                service,
+                interaction,
+                executor));
+        Path root = Objects.requireNonNull(Path.of(".").toAbsolutePath().getRoot(), "filesystem root");
+
+        onEventDispatchThread(() -> {
+            findComponent(panel, "gameDirectoryManagementAdd", AbstractButton.class).doClick();
+            findComponent(panel, "gameDirectoryManagementPath", JTextField.class).setText(root.toString());
+            findComponent(panel, "gameDirectoryManagementRelativePath", JCheckBox.class).setSelected(false);
+            findComponent(panel, "gameDirectoryManagementSave", AbstractButton.class).doClick();
+            assertAll(
+                    () -> assertEquals(1, interaction.rootDirectoryConfirmations.get()),
+                    () -> assertEquals(0, service.addCalls.get()));
+
+            interaction.rootDirectoryConfirmationAccepted = true;
+            findComponent(panel, "gameDirectoryManagementSave", AbstractButton.class).doClick();
+        });
+        executor.awaitLatest();
+        EdtDispatcher.executeAndWait(() -> { });
+
+        onEventDispatchThread(() -> {
+            assertAll(
+                    () -> assertEquals(2, interaction.rootDirectoryConfirmations.get()),
+                    () -> assertEquals(1, service.addCalls.get()),
+                    () -> assertEquals(root.toString(), service.lastEdit.path().getPath()));
             panel.close();
         });
     }
@@ -456,6 +499,12 @@ public final class GameDirectoryManagementPanelTest {
         /// Number of accepted read-only recovery confirmations.
         private final AtomicInteger overwriteConfirmations = new AtomicInteger();
 
+        /// Number of filesystem-root confirmations requested by the panel.
+        private final AtomicInteger rootDirectoryConfirmations = new AtomicInteger();
+
+        /// Whether the fake accepts use of a filesystem root.
+        private boolean rootDirectoryConfirmationAccepted = true;
+
         /// Cancels native chooser requests in this focused presentation test.
         ///
         /// @param owner chooser parent
@@ -464,6 +513,16 @@ public final class GameDirectoryManagementPanelTest {
         @Override
         public @Nullable Path chooseDirectory(Component owner, @Nullable Path initialDirectory) {
             return null;
+        }
+
+        /// Returns the configured filesystem-root confirmation response.
+        ///
+        /// @param owner confirmation parent
+        /// @return configured response
+        @Override
+        public boolean confirmRootDirectory(Component owner) {
+            rootDirectoryConfirmations.incrementAndGet();
+            return rootDirectoryConfirmationAccepted;
         }
 
         /// Accepts read-only recovery and records the confirmation.

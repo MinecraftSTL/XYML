@@ -33,6 +33,12 @@ interface GameDirectoryManagementInteraction {
     /// @return chosen directory, or `null` when the chooser is cancelled
     @Nullable Path chooseDirectory(Component owner, @Nullable Path initialDirectory);
 
+    /// Confirms use of a filesystem root as the game directory.
+    ///
+    /// @param owner confirmation parent component
+    /// @return whether saving the root directory may continue
+    boolean confirmRootDirectory(Component owner);
+
     /// Confirms backup and overwrite of a read-only game-directory settings file.
     ///
     /// @param owner confirmation parent component

@@ -32,7 +32,6 @@ import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.task.Task;
-import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.platform.Architecture;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 import space.minecraftstl.xyml.util.platform.SystemInfo;
@@ -131,7 +130,7 @@ final class GameCrashWindowModel {
         details.add(new Detail("Java", javaDescription(launchOptions)));
         details.add(new Detail(
                 i18n("system.operating_system"),
-                Lang.requireNonNullElse(OperatingSystem.OS_RELEASE_NAME, OperatingSystem.SYSTEM_NAME)));
+                Objects.requireNonNullElse(OperatingSystem.OS_RELEASE_NAME, OperatingSystem.SYSTEM_NAME)));
         details.add(new Detail(i18n("system.architecture"), Architecture.SYSTEM_ARCH.getDisplayName()));
 
         @Nullable String gameVersion = repository.getGameVersion(manifest).orElse(null);

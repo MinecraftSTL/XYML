@@ -896,14 +896,14 @@ public final class SwingAccountCreationDialog extends JDialog
         }
     }
 
-    /// Returns a renderer showing authlib server name and URL without retaining mutable configuration objects.
+    /// Returns a renderer showing the authlib server name and compact address without retaining mutable objects.
     ///
     /// @return combo-box renderer
     private static ListCellRenderer<? super AuthlibServerOption> serverRenderer() {
         return (list, value, index, selected, focus) -> {
             JLabel label = new JLabel(value == null
                     ? ""
-                    : value.displayName() + " - " + value.url());
+                    : value.displayName() + " - " + value.displayAddress());
             if (selected) {
                 label.setOpaque(true);
                 label.setBackground(list.getSelectionBackground());

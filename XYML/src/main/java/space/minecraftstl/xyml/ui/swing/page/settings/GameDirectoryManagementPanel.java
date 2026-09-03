@@ -63,6 +63,9 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// backup-and-overwrite behavior.
 @NotNullByDefault
 public final class GameDirectoryManagementPanel extends JPanel implements AutoCloseable {
+    /// Conventional game-directory path used to seed the add form.
+    private static final Path DEFAULT_GAME_DIRECTORY = Path.of(".minecraft");
+
     /// Outline icon used by inactive game-directory rows.
     private static final Icon FOLDER_ICON = new FlatSVGIcon("assets/swing/icons/folder.svg", 20, 20);
 
@@ -378,13 +381,34 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         }
         editorMode = EditorMode.ADD;
         editedEntry = null;
-        nameField.setText("");
-        pathField.setText(".minecraft");
+        nameField.setText(suggestedMinecraftDirectoryName(DEFAULT_GAME_DIRECTORY));
+        pathField.setText(DEFAULT_GAME_DIRECTORY.toString());
         relativePathBox.setSelected(true);
         statusLabel.setText("");
         setEditorEnabled(true);
         nameField.requestFocusInWindow();
         updateActionAvailability();
+    }
+
+    /// Derives the containing folder name for a conventional `.minecraft` directory.
+    ///
+    /// Relative paths are resolved from the launcher working directory so the initial add form and a later native
+    /// chooser selection use the same naming rule.
+    ///
+    /// @param directory candidate game directory
+    /// @return parent folder name, or an empty string when the path is not a conventional game directory
+    static String suggestedMinecraftDirectoryName(Path directory) {
+        Path supplied = Objects.requireNonNull(directory, "directory");
+        Path normalized = supplied.isAbsolute()
+                ? supplied.normalize()
+                : Metadata.CURRENT_DIRECTORY.resolve(supplied).normalize();
+        @Nullable Path fileName = normalized.getFileName();
+        if (fileName == null || !".minecraft".equals(fileName.toString())) {
+            return "";
+        }
+        @Nullable Path parent = normalized.getParent();
+        @Nullable Path parentName = parent == null ? null : parent.getFileName();
+        return parentName == null ? "" : parentName.toString();
     }
 
     /// Starts editing the currently selected directory entry.
@@ -437,6 +461,24 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         }
     }
 
+    /// Returns whether a path resolves syntactically to its filesystem root.
+    ///
+    /// @param text raw path text
+    /// @return whether the normalized absolute path equals its root
+    private static boolean isFileSystemRoot(String text) {
+        String candidate = Objects.requireNonNull(text, "text").trim();
+        if (candidate.isBlank()) {
+            return false;
+        }
+        try {
+            Path normalized = Path.of(candidate).toAbsolutePath().normalize();
+            @Nullable Path root = normalized.getRoot();
+            return root != null && normalized.equals(root);
+        } catch (InvalidPathException failure) {
+            return false;
+        }
+    }
+
     /// Begins background portable-path preparation before a state mutation.
     private void saveEditor() {
         EdtDispatcher.requireEventDispatchThread();
@@ -445,6 +487,9 @@ public final class GameDirectoryManagementPanel extends JPanel implements AutoCl
         }
         String requestedName = nameField.getText();
         String requestedPath = pathField.getText();
+        if (isFileSystemRoot(requestedPath) && !interaction.confirmRootDirectory(this)) {
+            return;
+        }
         boolean relative = relativePathBox.isSelected();
         EditorMode requestedMode = editorMode;
         @Nullable GameDirectoryManagementEntry requestedEntry = editedEntry;
