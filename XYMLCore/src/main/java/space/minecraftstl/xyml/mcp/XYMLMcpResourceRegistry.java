@@ -26,12 +26,14 @@ import space.minecraftstl.xyml.library.mcp.McpResourceProvider.ResourceReadResul
 import space.minecraftstl.xyml.library.mcp.McpResourceProvider.ResourceTemplateDefinition;
 import space.minecraftstl.xyml.task.Schedulers;
 
+import java.awt.EventQueue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 
 /// Registers and reads the launcher data exposed as MCP resources.
 ///
@@ -75,7 +77,7 @@ public final class XYMLMcpResourceRegistry implements McpResourceProvider {
         }
         return callOnIo(() -> {
             List<ResourceDefinition> result = new ArrayList<>();
-            for (Map<String, Object> instance : configuredService.listInstances()) {
+            for (Map<String, Object> instance : McpTaskExecution.execute(configuredService.listInstances())) {
                 @Nullable Object rawId = instance.get("id");
                 if (rawId instanceof String instanceId && !instanceId.isBlank()) {
                     String encodedId = encodePathSegment(instanceId);
@@ -118,7 +120,8 @@ public final class XYMLMcpResourceRegistry implements McpResourceProvider {
     public ResourceReadResult readResource(String uri) throws Exception {
         XYMLMcpOperations configuredService = Objects.requireNonNull(service,
                 "This registry has no launcher service");
-        Map<String, String> result = callOnIo(() -> configuredService.readResource(uri));
+        Map<String, String> result = callOnIo(
+                () -> McpTaskExecution.execute(configuredService.readResource(uri)));
         return new ResourceReadResult(
                 Objects.requireNonNull(result.get("uri"), "resource uri"),
                 Objects.requireNonNull(result.get("mime_type"), "resource mime type"),
@@ -134,16 +137,21 @@ public final class XYMLMcpResourceRegistry implements McpResourceProvider {
                 .replace("+", "%20");
     }
 
-    /// Executes launcher work on the shared XYML I/O scheduler.
+    /// Executes launcher work on the shared XYML I/O scheduler and propagates caller cancellation to that work.
     ///
     /// @param operation operation to execute
     /// @param <T> result type
     /// @return operation result
     /// @throws Exception when the operation fails or is interrupted
     private static <T> T callOnIo(Callable<T> operation) throws Exception {
+        if (EventQueue.isDispatchThread()) {
+            throw new IllegalStateException("MCP resource access cannot block the AWT event dispatch thread");
+        }
+        Future<T> future = Schedulers.io().submit(operation);
         try {
-            return Schedulers.io().submit(operation).get();
+            return future.get();
         } catch (InterruptedException exception) {
+            future.cancel(true);
             Thread.currentThread().interrupt();
             throw exception;
         } catch (ExecutionException exception) {

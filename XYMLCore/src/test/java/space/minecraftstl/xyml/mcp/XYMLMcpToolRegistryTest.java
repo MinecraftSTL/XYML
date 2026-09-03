@@ -18,26 +18,150 @@
 package space.minecraftstl.xyml.mcp;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.library.mcp.McpPromptProvider.PromptDefinition;
+import space.minecraftstl.xyml.library.mcp.McpToolProvider.ToolCallResult;
 import space.minecraftstl.xyml.library.mcp.McpToolProvider.ToolDefinition;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 
+import java.awt.EventQueue;
 import java.lang.reflect.Proxy;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies the SDK-independent MCP contract without a configured XYML workspace.
 @NotNullByDefault
 public final class XYMLMcpToolRegistryTest {
+
+    /// Ensures tool dispatch rejects the Swing event thread before submitting or constructing launcher work.
+    @Test
+    public void rejectsToolCallsOnAwtEventDispatchThreadBeforeSubmission() throws Exception {
+        AtomicBoolean serviceCalled = new AtomicBoolean();
+        AtomicBoolean taskExecuted = new AtomicBoolean();
+        Task<List<Map<String, Object>>> task = Task.supplyAsync(() -> {
+            taskExecuted.set(true);
+            return List.<Map<String, Object>>of(Map.of("id", "unexpected"));
+        }).setResources(TaskResource.configuration(pathFor("tool-awt")));
+        XYMLMcpOperations operations = (XYMLMcpOperations) Proxy.newProxyInstance(
+                XYMLMcpOperations.class.getClassLoader(), new Class<?>[]{XYMLMcpOperations.class},
+                (proxy, method, arguments) -> {
+                    serviceCalled.set(true);
+                    return task;
+                });
+        XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(operations);
+        AtomicReference<@Nullable ToolCallResult> observedResult = new AtomicReference<>();
+
+        EventQueue.invokeAndWait(() -> observedResult.set(registry.call("list_instances", Map.of())));
+
+        ToolCallResult result = assertInstanceOf(ToolCallResult.class, observedResult.get());
+        assertTrue(result.error());
+        assertFalse(serviceCalled.get());
+        assertFalse(taskExecuted.get());
+    }
+
+    /// Ensures resource enumeration rejects the Swing event thread before invoking the launcher service.
+    @Test
+    public void rejectsResourceAccessOnAwtEventDispatchThreadBeforeSubmission() throws Exception {
+        AtomicBoolean serviceCalled = new AtomicBoolean();
+        XYMLMcpOperations operations = (XYMLMcpOperations) Proxy.newProxyInstance(
+                XYMLMcpOperations.class.getClassLoader(), new Class<?>[]{XYMLMcpOperations.class},
+                (proxy, method, arguments) -> {
+                    serviceCalled.set(true);
+                    return Task.completed(List.of());
+                });
+        XYMLMcpResourceRegistry registry = new XYMLMcpResourceRegistry(operations);
+        AtomicReference<@Nullable Throwable> observedFailure = new AtomicReference<>();
+
+        EventQueue.invokeAndWait(() -> {
+            try {
+                registry.resourceDefinitions();
+            } catch (Throwable failure) {
+                observedFailure.set(failure);
+            }
+        });
+
+        assertInstanceOf(IllegalStateException.class, observedFailure.get());
+        assertFalse(serviceCalled.get());
+    }
+
+    /// Ensures interrupting a Registry caller cancels an inner Task that is waiting for a shared resource.
+    @Test
+    public void callerInterruptionCancelsPendingTask() throws Exception {
+        TaskResource resource = TaskResource.configuration(pathFor("pending-interruption"));
+        CountDownLatch holderStarted = new CountDownLatch(1);
+        CountDownLatch releaseHolder = new CountDownLatch(1);
+        CountDownLatch holderStopped = new CountDownLatch(1);
+        CountDownLatch serviceCalled = new CountDownLatch(1);
+        CountDownLatch contenderStopped = new CountDownLatch(1);
+        AtomicBoolean contenderExecuted = new AtomicBoolean();
+        AtomicReference<@Nullable Thread> operationThread = new AtomicReference<>();
+        Task<Boolean> holder = Task.supplyAsync(() -> {
+            holderStarted.countDown();
+            releaseHolder.await();
+            return true;
+        }).setResources(resource);
+        holder.onDone().register(holderStopped::countDown);
+        Task<List<Map<String, Object>>> contender = Task.supplyAsync(() -> {
+            contenderExecuted.set(true);
+            return List.<Map<String, Object>>of(Map.of("id", "unexpected"));
+        }).setResources(resource);
+        contender.onDone().register(contenderStopped::countDown);
+        XYMLMcpOperations operations = (XYMLMcpOperations) Proxy.newProxyInstance(
+                XYMLMcpOperations.class.getClassLoader(), new Class<?>[]{XYMLMcpOperations.class},
+                (proxy, method, arguments) -> {
+                    operationThread.set(Thread.currentThread());
+                    serviceCalled.countDown();
+                    return contender;
+                });
+        XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(operations);
+        AtomicReference<@Nullable ToolCallResult> observedResult = new AtomicReference<>();
+        AtomicBoolean interruptRetained = new AtomicBoolean();
+        Thread caller = new Thread(() -> {
+            observedResult.set(registry.call("list_instances", Map.of()));
+            interruptRetained.set(Thread.currentThread().isInterrupted());
+        }, "mcp-tool-registry-interruption-test");
+
+        holder.start();
+        try {
+            assertTrue(holderStarted.await(5, TimeUnit.SECONDS));
+            caller.start();
+            assertTrue(serviceCalled.await(5, TimeUnit.SECONDS));
+            awaitWaiting(operationThread);
+
+            caller.interrupt();
+            caller.join(TimeUnit.SECONDS.toMillis(5));
+
+            assertFalse(caller.isAlive());
+            ToolCallResult result = assertInstanceOf(ToolCallResult.class, observedResult.get());
+            assertTrue(result.error());
+            assertTrue(interruptRetained.get());
+            assertTrue(contenderStopped.await(5, TimeUnit.SECONDS));
+            assertFalse(contenderExecuted.get());
+        } finally {
+            releaseHolder.countDown();
+            caller.interrupt();
+            caller.join(TimeUnit.SECONDS.toMillis(5));
+        }
+        assertTrue(holderStopped.await(5, TimeUnit.SECONDS));
+        assertFalse(contenderExecuted.get());
+    }
 
     /// Ensures every approved tool is present exactly once.
     @Test
@@ -135,6 +259,30 @@ public final class XYMLMcpToolRegistryTest {
         assertFalse(calls.containsKey("setMemory"));
     }
 
+    /// Waits until the background operation is blocked in the Task bridge.
+    ///
+    /// @param operationThread background operation thread reference
+    private static void awaitWaiting(AtomicReference<@Nullable Thread> operationThread) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            @Nullable Thread thread = operationThread.get();
+            if (thread != null && (thread.getState() == Thread.State.WAITING
+                    || thread.getState() == Thread.State.TIMED_WAITING)) {
+                return;
+            }
+            Thread.onSpinWait();
+        }
+        throw new AssertionError("MCP operation did not enter a waiting state");
+    }
+
+    /// Returns a unique normalized path for one registry resource scenario.
+    ///
+    /// @param scenario scenario identifier
+    /// @return path used only as a semantic resource key
+    private static Path pathFor(String scenario) {
+        return Path.of("build", "mcp-tool-registry", scenario);
+    }
+
     /// Creates a proxy service that records operation arguments and returns typed placeholder results.
     ///
     /// @param calls operation argument records
@@ -147,9 +295,9 @@ public final class XYMLMcpToolRegistryTest {
                             ? List.of() : new ArrayList<>(Arrays.asList(arguments)));
                     return switch (method.getName()) {
                         case "renameInstance", "duplicateInstance", "deleteInstance", "removeMods", "setJavaVersion",
-                                "setMemory", "setJvmOptions", "setWindowOptions", "stopGame", "getLaunchStatus" -> Map.of(
-                                "operation", method.getName());
-                        case "launchGame" -> Map.of("operation", method.getName());
+                                "setMemory", "setJvmOptions", "setWindowOptions", "stopGame", "launchGame" ->
+                                Task.completed(Map.of("operation", method.getName()));
+                        case "getLaunchStatus" -> Map.of("operation", method.getName());
                         default -> throw new UnsupportedOperationException(method.getName());
                     };
                 });
@@ -161,8 +309,9 @@ public final class XYMLMcpToolRegistryTest {
         XYMLMcpOperations operations = (XYMLMcpOperations) Proxy.newProxyInstance(
                 XYMLMcpOperations.class.getClassLoader(), new Class<?>[]{XYMLMcpOperations.class},
                 (proxy, method, arguments) -> switch (method.getName()) {
-                    case "listInstances" -> List.of(Map.of("id", "demo"));
-                    case "readResource" -> Map.of("uri", "xyml://demo", "mime_type", "text/plain", "text", "ok");
+                    case "listInstances" -> Task.completed(List.of(Map.of("id", "demo")));
+                    case "readResource" -> Task.completed(
+                            Map.of("uri", "xyml://demo", "mime_type", "text/plain", "text", "ok"));
                     default -> throw new UnsupportedOperationException(method.getName());
                 });
         XYMLMcpResourceRegistry resources = new XYMLMcpResourceRegistry(operations);

@@ -74,17 +74,43 @@ public final class ModManager extends LocalAddonManager<LocalModFile> {
     }
 
     private final HashMap<Pair<String, ModLoaderType>, LocalMod> localMods = new HashMap<>();
+
+    /// Captured mods directory, or `null` when the manager follows repository settings dynamically.
+    private final @Nullable Path directorySnapshot;
+
     private @Nullable LibraryAnalyzer analyzer;
 
     private boolean loaded = false;
 
+    /// Creates a manager whose directory follows the repository's effective instance settings.
+    ///
+    /// @param repository repository owning the instance
+    /// @param id managed instance identifier
     public ModManager(GameRepository repository, GameInstanceID id) {
         super(repository, id);
+        this.directorySnapshot = null;
     }
 
+    /// Creates a manager bound to one captured mods directory.
+    ///
+    /// This form is intended for a task that has already resolved and acquired the corresponding filesystem resource.
+    /// Later repository-setting changes do not redirect the manager outside that protected directory.
+    ///
+    /// @param repository repository owning the instance manifest
+    /// @param id managed instance identifier
+    /// @param directorySnapshot captured mods directory used for every filesystem access
+    public ModManager(GameRepository repository, GameInstanceID id, Path directorySnapshot) {
+        super(repository, id);
+        this.directorySnapshot = Objects.requireNonNull(directorySnapshot, "directorySnapshot")
+                .toAbsolutePath().normalize();
+    }
+
+    /// Returns the captured mods directory, or the repository's current directory for a dynamic manager.
+    ///
+    /// @return directory used for every managed mod access
     @Override
     public Path getDirectory() {
-        return repository.getModsDirectory(instanceId);
+        return directorySnapshot != null ? directorySnapshot : repository.getModsDirectory(instanceId);
     }
 
     public @Nullable LibraryAnalyzer getLibraryAnalyzer() {
