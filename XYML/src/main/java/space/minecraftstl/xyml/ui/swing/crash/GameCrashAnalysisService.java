@@ -18,10 +18,9 @@
 package space.minecraftstl.xyml.ui.swing.crash;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import space.minecraftstl.xyml.game.Log;
+import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 
 import java.nio.file.Path;
-import java.util.List;
 import java.util.concurrent.CompletionStage;
 
 /// Analyzes both in-memory game output and the instance's latest on-disk log without UI dependencies.
@@ -29,10 +28,10 @@ import java.util.concurrent.CompletionStage;
 interface GameCrashAnalysisService {
     /// Starts both analysis sources and merges their rule and keyword results.
     ///
-    /// @param capturedLogs immutable process-output snapshot
+    /// @param logAnalyzable immutable launch context and captured-output snapshot
     /// @param latestLog on-disk `logs/latest.log` path
     /// @return asynchronous merged diagnosis
     CompletionStage<GameCrashAnalysis> analyze(
-            List<Log> capturedLogs,
+            LogAnalyzable logAnalyzable,
             Path latestLog);
 }

@@ -36,6 +36,7 @@ import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JList;
+import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -104,6 +105,57 @@ final class RemoteAddonCatalogPanelTest {
                 Insets listInsets = list.getBorder().getBorderInsets(list);
                 assertEquals(9, listInsets.bottom);
             });
+        } finally {
+            @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Retains a programmatic dependency query until the first layout establishes a measurable result viewport.
+    @Test
+    void opensProgrammaticSearchAfterFirstLayout() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteAddonCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new RemoteAddonCatalogPanel(
+                    RemoteAddonCatalogKind.MOD,
+                    backend,
+                    request -> Task.completed(null),
+                    kind -> Optional.of(fixtureTarget()),
+                    executor,
+                    RemoteAddonCatalogStrings.english(RemoteAddonCatalogKind.MOD),
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO)));
+            RemoteAddonCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> panel.openSearch("fixture-mod"));
+            drainEdt();
+            assertEquals(0, backend.searchRequests.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                prepareViewport(panel.choiceList(), 160);
+                panel.addNotify();
+                JTextField searchField = findNamed(panel, "remoteAddonSearch", JTextField.class);
+                assertNotNull(searchField);
+                assertEquals("fixture-mod", searchField.getText());
+            });
+            awaitBackgroundWork(executor);
+
+            RemoteAddonCatalogQuery query = backend.lastQuery.get();
+            assertNotNull(query);
+            assertEquals(1, backend.searchRequests.get());
+            assertEquals("fixture-mod", query.searchText());
+            assertEquals(0, query.pageOffset());
+            int rowHeight = panel.choiceList().getList().getFixedCellHeight();
+            assertEquals(
+                    Math.max(1, Math.floorDiv(160 + rowHeight - 1, rowHeight)),
+                    query.pageSize());
         } finally {
             @Nullable RemoteAddonCatalogPanel panel = panelReference.get();
             if (panel != null) {

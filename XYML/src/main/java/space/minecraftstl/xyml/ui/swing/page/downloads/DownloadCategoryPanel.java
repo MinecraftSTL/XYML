@@ -148,6 +148,18 @@ public final class DownloadCategoryPanel extends JPanel implements AutoCloseable
         return categoryTabs;
     }
 
+    /// Selects the Mods category, prefills its query, and starts the native remote search.
+    ///
+    /// @param searchText non-blank project or dependency identifier
+    public void openModSearch(String searchText) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        categoryTabs.setSelectedIndex(DownloadCategory.MODS.ordinal());
+        modsCatalog.openSearch(searchText);
+    }
+
     /// Selects the local-modpack category and displays a dropped archive.
     ///
     /// @param archive local modpack archive

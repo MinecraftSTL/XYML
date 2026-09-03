@@ -20,9 +20,13 @@ package space.minecraftstl.xyml.ui.swing.crash;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
+import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
+import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
+import space.minecraftstl.xyml.game.analyzer.ResultID;
 
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -35,15 +39,20 @@ final class GameCrashAnalysis {
     /// Detected rules in declaration order with at most one result per rule.
     private final @Unmodifiable List<CrashReportAnalyzer.Result> results;
 
+    /// Detected limited log causes in analyzer order with at most one result per ID.
+    private final @Unmodifiable List<AnalyzeResult<LogAnalyzable>> logResults;
+
     /// Sorted immutable stack-trace keywords used when no rule matches.
     private final @Unmodifiable Set<String> keywords;
 
     /// Creates one merged diagnosis snapshot.
     ///
     /// @param results detected rules in declaration order
+    /// @param logResults limited launch-log causes in analyzer order
     /// @param keywords stack-trace keywords for unknown crashes
     GameCrashAnalysis(
             List<CrashReportAnalyzer.Result> results,
+            List<AnalyzeResult<LogAnalyzable>> logResults,
             Set<String> keywords) {
         EnumMap<CrashReportAnalyzer.Rule, CrashReportAnalyzer.Result> byRule =
                 new EnumMap<>(CrashReportAnalyzer.Rule.class);
@@ -51,8 +60,24 @@ final class GameCrashAnalysis {
             byRule.put(result.rule(), result);
         }
         this.results = List.copyOf(byRule.values());
+
+        LinkedHashMap<ResultID, AnalyzeResult<LogAnalyzable>> byResultId = new LinkedHashMap<>();
+        for (AnalyzeResult<LogAnalyzable> result : Objects.requireNonNull(logResults, "logResults")) {
+            byResultId.put(result.resultId(), result);
+        }
+        this.logResults = List.copyOf(byResultId.values());
         this.keywords = Collections.unmodifiableSet(
                 new LinkedHashSet<>(new TreeSet<>(Objects.requireNonNull(keywords, "keywords"))));
+    }
+
+    /// Creates a legacy-only diagnosis snapshot.
+    ///
+    /// @param results detected crash-report rules in declaration order
+    /// @param keywords stack-trace keywords for unknown crashes
+    GameCrashAnalysis(
+            List<CrashReportAnalyzer.Result> results,
+            Set<String> keywords) {
+        this(results, List.of(), keywords);
     }
 
     /// Returns detected rules in stable declaration order.
@@ -60,6 +85,20 @@ final class GameCrashAnalysis {
     /// @return immutable detected-rule snapshot
     @Unmodifiable List<CrashReportAnalyzer.Result> results() {
         return results;
+    }
+
+    /// Returns limited launch-log diagnoses in stable analyzer order.
+    ///
+    /// @return immutable limited log-diagnosis snapshot
+    @Unmodifiable List<AnalyzeResult<LogAnalyzable>> logResults() {
+        return logResults;
+    }
+
+    /// Returns the combined number of established and limited diagnoses.
+    ///
+    /// @return combined diagnosis count
+    int resultCount() {
+        return results.size() + logResults.size();
     }
 
     /// Returns immutable stack-trace keywords.

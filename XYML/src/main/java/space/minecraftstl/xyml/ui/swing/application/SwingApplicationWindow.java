@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 
 import java.awt.Component;
+import java.util.Objects;
 
 /// Abstracts the native Swing window so composition lifecycle and factories can be tested headlessly.
 @NotNullByDefault
@@ -50,6 +51,17 @@ public interface SwingApplicationWindow extends AutoCloseable {
     ///
     /// @param page destination selected by a page command
     void navigateTo(ShellPageId page);
+
+    /// Opens the Mods catalog, pre-fills one dependency query, and starts its result search.
+    ///
+    /// The default keeps lightweight test windows source-compatible; production windows override it with the
+    /// shell-backed implementation.
+    ///
+    /// @param dependencyId missing mod identifier used as the search query
+    default void openModSearch(String dependencyId) {
+        Objects.requireNonNull(dependencyId, "dependencyId");
+        navigateTo(ShellPageId.DOWNLOADS);
+    }
 
     /// Disposes the native window idempotently.
     @Override

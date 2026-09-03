@@ -86,17 +86,45 @@ public interface XYMLMcpOperations {
     /// @throws IOException if the resource cannot be read
     @Unmodifiable Map<String, String> readResource(String uri) throws IOException;
 
-    /// Analyzes a game crash using XYML's crash analyzer.
+    /// Analyzes a game crash using CrashReportAnalyzer and XYAT structured repair proposals.
     ///
     /// @param instanceId instance identifier
     /// @param logText optional raw log text
     /// @param crashReportPath optional crash-report path
-    /// @return immutable merged analysis, report source, and non-fatal discovery warnings
+    /// @return immutable merged analysis, report source, XYAT solutions, and non-fatal discovery warnings
     /// @throws IOException if an input file cannot be read
     @Unmodifiable Map<String, Object> analyzeCrash(
             String instanceId,
             @Nullable String logText,
             @Nullable String crashReportPath) throws IOException;
+
+    /// Plans one repair solution returned by a previous crash analysis.
+    ///
+    /// @param analysisId server-issued crash-analysis identifier
+    /// @param solutionId solution identifier from that analysis
+    /// @return immutable repair plan or non-executable explanation
+    @Unmodifiable Map<String, Object> planCrashSolution(String analysisId, String solutionId);
+
+    /// Executes one server-issued crash-repair plan.
+    ///
+    /// The application implementation remains responsible for freshness checks, one-time plan
+    /// consumption, and any launcher-owned confirmation required by the selected repair.
+    ///
+    /// @param planId server-issued repair-plan identifier
+    /// @return immutable repair-operation status
+    @Unmodifiable Map<String, Object> executeCrashSolution(String planId);
+
+    /// Returns the current status of a crash-repair operation.
+    ///
+    /// @param operationId server-issued repair-operation identifier
+    /// @return immutable operation status
+    @Unmodifiable Map<String, Object> getCrashRepairStatus(String operationId);
+
+    /// Requests cancellation of a crash-repair operation.
+    ///
+    /// @param operationId server-issued repair-operation identifier
+    /// @return immutable operation status after the cancellation request
+    @Unmodifiable Map<String, Object> cancelCrashRepair(String operationId);
 
     /// Lists Java runtimes known to the launcher.
     ///

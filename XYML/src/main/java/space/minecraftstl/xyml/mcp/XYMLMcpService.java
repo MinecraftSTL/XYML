@@ -24,10 +24,13 @@ import space.minecraftstl.xyml.addon.mod.LocalModFile;
 import space.minecraftstl.xyml.addon.mod.ModManager;
 import space.minecraftstl.xyml.auth.AuthInfo;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
+import space.minecraftstl.xyml.game.GameJavaVersion;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.JavaRuntimeRepairTaskFactory;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.launch.DefaultLauncher;
@@ -36,40 +39,67 @@ import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.GameWindowType;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.property.InheritableProperty;
+import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.InstanceLifecycleService;
 import space.minecraftstl.xyml.ui.swing.page.instances.management.RepositoryInstanceLifecycleService;
+import space.minecraftstl.xyml.util.platform.Bits;
+import space.minecraftstl.xyml.util.platform.OperatingSystem;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Bridges the existing XYMLCore launcher services to MCP-safe structured operations.
 ///
 /// This class deliberately contains no new game or mod-management algorithms. It delegates to the
 /// repository, mod manager, Java manager, and launch monitor already used by XYML.
 @NotNullByDefault
-public final class XYMLMcpService implements XYMLMcpOperations {
+public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
 
     /// Maximum number of lines retained from one launch process.
     private static final int MAX_LOG_LINES = 20_000;
 
     /// Fixed lock-stripe count used to serialize operations without retaining client-provided identifiers.
     private static final int INSTANCE_OPERATION_LOCK_STRIPES = 64;
+
+    /// Warning returned when optional manifest or settings context cannot be collected for XYAT.
+    private static final String XYAT_CONTEXT_UNAVAILABLE_WARNING =
+            "XYAT instance context is unavailable; analysis continued with log-only metadata.";
+
+    /// Warning returned when Java discovery has not completed and must not block crash analysis.
+    private static final String XYAT_JAVA_DISCOVERY_PENDING_WARNING =
+            "XYAT Java runtime discovery is still pending; analysis continued without selected Java metadata.";
+
+    /// Warning returned when initialized Java metadata still cannot be collected.
+    private static final String XYAT_JAVA_CONTEXT_UNAVAILABLE_WARNING =
+            "XYAT Java runtime context is unavailable; analysis continued without selected Java metadata.";
+
+    /// Failure returned when launcher startup policy still blocks MCP repair side effects.
+    private static final String REPAIR_ACTIONS_UNAVAILABLE_MESSAGE =
+            "Crash repair actions are unavailable before startup agreements are accepted";
 
     /// URI matcher for the latest instance log.
     private static final Pattern LOG_RESOURCE = Pattern.compile(
@@ -92,6 +122,15 @@ public final class XYMLMcpService implements XYMLMcpOperations {
     /// Application-owned policy for every destructive MCP operation.
     private final McpDeletionConfirmation deletionConfirmation;
 
+    /// Optional late-bound application search action for missing dependencies.
+    private final @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch;
+
+    /// Reports whether mandatory startup policy permits launcher-owned MCP repair side effects.
+    private final BooleanSupplier repairActionsAllowed;
+
+    /// Bounded analysis, plan, and repair-operation coordinator.
+    private final XYMLMcpCrashRepairCoordinator crashRepairCoordinator;
+
     /// Last known process state for each instance.
     private final Map<GameInstanceID, LaunchState> launchStates = new ConcurrentHashMap<>();
 
@@ -105,9 +144,76 @@ public final class XYMLMcpService implements XYMLMcpOperations {
     public XYMLMcpService(
             XYMLGameRepository repository,
             McpDeletionConfirmation deletionConfirmation) {
+        this(repository, deletionConfirmation, null);
+    }
+
+    /// Creates a service with an optional application search boundary for XYAT repairs.
+    ///
+    /// @param repository repository whose instances and settings are exposed
+    /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
+    /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
+    public XYMLMcpService(
+            XYMLGameRepository repository,
+            McpDeletionConfirmation deletionConfirmation,
+            @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch) {
+        this(repository, deletionConfirmation, missingDependencySearch, () -> true);
+    }
+
+    /// Creates a service with application repair boundaries and the launcher's startup-policy gate.
+    ///
+    /// This gate is independent of per-operation confirmation. It prevents any repair side effect before mandatory
+    /// startup agreements have enabled application interaction.
+    ///
+    /// @param repository repository whose instances and settings are exposed
+    /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
+    /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
+    /// @param repairActionsAllowed reports whether startup policy permits repair side effects
+    public XYMLMcpService(
+            XYMLGameRepository repository,
+            McpDeletionConfirmation deletionConfirmation,
+            @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
+            BooleanSupplier repairActionsAllowed) {
+        this(
+                repository,
+                deletionConfirmation,
+                missingDependencySearch,
+                repairActionsAllowed,
+                new XYMLMcpCrashRepairCoordinator());
+    }
+
+    /// Creates a service with an explicit crash-repair coordinator for deterministic integration tests.
+    ///
+    /// @param repository repository whose instances and settings are exposed
+    /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
+    /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
+    /// @param crashRepairCoordinator bounded analysis and repair-operation coordinator
+    XYMLMcpService(
+            XYMLGameRepository repository,
+            McpDeletionConfirmation deletionConfirmation,
+            @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
+            XYMLMcpCrashRepairCoordinator crashRepairCoordinator) {
+        this(repository, deletionConfirmation, missingDependencySearch, () -> true, crashRepairCoordinator);
+    }
+
+    /// Creates a service with explicit startup and coordinator boundaries for deterministic integration tests.
+    ///
+    /// @param repository repository whose instances and settings are exposed
+    /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
+    /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
+    /// @param repairActionsAllowed reports whether startup policy permits repair side effects
+    /// @param crashRepairCoordinator bounded analysis and repair-operation coordinator
+    XYMLMcpService(
+            XYMLGameRepository repository,
+            McpDeletionConfirmation deletionConfirmation,
+            @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
+            BooleanSupplier repairActionsAllowed,
+            XYMLMcpCrashRepairCoordinator crashRepairCoordinator) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.instanceLifecycle = new RepositoryInstanceLifecycleService(repository);
         this.deletionConfirmation = Objects.requireNonNull(deletionConfirmation, "deletionConfirmation");
+        this.missingDependencySearch = missingDependencySearch;
+        this.repairActionsAllowed = Objects.requireNonNull(repairActionsAllowed, "repairActionsAllowed");
+        this.crashRepairCoordinator = Objects.requireNonNull(crashRepairCoordinator, "crashRepairCoordinator");
     }
 
     /// Returns all installed instances and their root directories.
@@ -246,7 +352,7 @@ public final class XYMLMcpService implements XYMLMcpOperations {
         return repository.getModsDirectory(id(instanceId)).toAbsolutePath().normalize().toString();
     }
 
-    /// Analyzes a supplied log or the latest instance log with CrashReportAnalyzer.
+    /// Analyzes a supplied log or the latest instance log with CrashReportAnalyzer and XYAT.
     ///
     /// @param instanceId instance identifier
     /// @param logText optional raw log text
@@ -269,8 +375,64 @@ public final class XYMLMcpService implements XYMLMcpOperations {
         Map<String, Object> result = new LinkedHashMap<>(analysis);
         result.put("instance_id", id.id());
         result.put("crash_report_source", resolution.source());
-        result.put("warnings", resolution.warnings());
+        boolean launcherOwnedLog = logText == null;
+        String fingerprint = fingerprint(rawLog);
+        List<String> warnings = new ArrayList<>(resolution.warnings());
+        LogAnalyzable analyzerInput;
+        try {
+            analyzerInput = crashAnalyzerInput(id, rawLog, launcherOwnedLog, warnings);
+        } catch (RuntimeException contextFailure) {
+            LOG.warning("Unable to collect optional XYAT instance context for " + id.id(), contextFailure);
+            warnings.add(XYAT_CONTEXT_UNAVAILABLE_WARNING);
+            analyzerInput = basicCrashAnalyzerInput(id, rawLog, launcherOwnedLog);
+        }
+        result.put("warnings", List.copyOf(warnings));
+        result.putAll(crashRepairCoordinator.analyze(
+                id.id(),
+                launcherOwnedLog
+                        ? XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG
+                        : XYMLMcpCrashRepairCoordinator.AnalysisSource.PROVIDED_LOG,
+                fingerprint,
+                analyzerInput,
+                launcherOwnedLog ? () -> validateLatestLog(id, fingerprint) : null));
         return Map.copyOf(result);
+    }
+
+    /// Plans one structured XYAT repair solution without executing its task.
+    ///
+    /// @param analysisId server-issued crash-analysis identifier
+    /// @param solutionId solution identifier returned by that analysis
+    /// @return immutable plan or non-executable explanation
+    @Override
+    public @Unmodifiable Map<String, Object> planCrashSolution(String analysisId, String solutionId) {
+        return crashRepairCoordinator.plan(analysisId, solutionId);
+    }
+
+    /// Executes one fresh repair task from a one-time, revalidated plan.
+    ///
+    /// @param planId server-issued repair-plan identifier
+    /// @return immutable asynchronous operation status
+    @Override
+    public @Unmodifiable Map<String, Object> executeCrashSolution(String planId) {
+        return crashRepairCoordinator.execute(planId);
+    }
+
+    /// Returns the current state of one crash-repair operation.
+    ///
+    /// @param operationId server-issued repair-operation identifier
+    /// @return immutable operation state
+    @Override
+    public @Unmodifiable Map<String, Object> getCrashRepairStatus(String operationId) {
+        return crashRepairCoordinator.status(operationId);
+    }
+
+    /// Requests cooperative cancellation of one crash-repair operation.
+    ///
+    /// @param operationId server-issued repair-operation identifier
+    /// @return immutable operation state and cancellation acceptance
+    @Override
+    public @Unmodifiable Map<String, Object> cancelCrashRepair(String operationId) {
+        return crashRepairCoordinator.cancel(operationId);
     }
 
     /// Analyzes log text without requiring an initialized game repository.
@@ -766,6 +928,168 @@ public final class XYMLMcpService implements XYMLMcpOperations {
         return setting;
     }
 
+    /// Builds the contextual XYAT input used by MCP crash analysis.
+    ///
+    /// Only a launcher-owned latest log receives application repair boundaries. Caller-supplied text retains instance
+    /// metadata for diagnosis accuracy but cannot acquire an executable solver.
+    ///
+    /// @param id analyzed instance identifier
+    /// @param rawLog immutable analyzed log text
+    /// @param launcherOwnedLog whether the text was read from the instance's current latest-log path
+    /// @param warnings mutable response warnings receiving non-fatal Java context failures
+    /// @return contextual immutable analyzer input
+    private LogAnalyzable crashAnalyzerInput(
+            GameInstanceID id,
+            String rawLog,
+            boolean launcherOwnedLog,
+            List<String> warnings) {
+        GameInstanceManifest manifest = repository.getResolvedInstanceManifest(id).launchManifest();
+        @Nullable String gameVersion = repository.getGameVersion(manifest).orElse(null);
+        GameSettings.Effective settings = repository.getEffectiveGameSettings(id);
+        @Nullable JavaRuntime javaRuntime = null;
+        if (JavaManager.isInitialized()) {
+            try {
+                javaRuntime = settings.getJava(
+                        gameVersion == null ? null : GameVersionNumber.asGameVersion(gameVersion),
+                        manifest);
+            } catch (InterruptedException interruption) {
+                Thread.currentThread().interrupt();
+                LOG.warning("Interrupted while collecting optional XYAT Java context for " + id.id(), interruption);
+                warnings.add(XYAT_JAVA_CONTEXT_UNAVAILABLE_WARNING);
+            } catch (RuntimeException javaContextFailure) {
+                LOG.warning("Unable to collect optional XYAT Java context for " + id.id(), javaContextFailure);
+                warnings.add(XYAT_JAVA_CONTEXT_UNAVAILABLE_WARNING);
+            }
+        } else {
+            warnings.add(XYAT_JAVA_DISCOVERY_PENDING_WARNING);
+        }
+
+        @Nullable LaunchState launchState = launchStates.get(id);
+        ProcessListener.ExitType exitType = launchState != null && launchState.exitType != null
+                ? launchState.exitType
+                : ProcessListener.ExitType.APPLICATION_ERROR;
+        @Nullable Integer requiredJavaVersion = requiredJavaVersion(gameVersion, manifest.javaVersion());
+        LogAnalyzable input = new LogAnalyzable(
+                gameVersion,
+                manifest.mainClass(),
+                exitType,
+                OperatingSystem.CURRENT_OS,
+                OperatingSystem.CODE_PAGE,
+                repository.getRunDirectory(id),
+                javaRuntime == null ? null : javaRuntime.getBinary(),
+                requiredJavaVersion,
+                javaRuntime == null ? null : javaRuntime.getParsedVersion(),
+                javaRuntime == null ? Bits.UNKNOWN : javaRuntime.getBits(),
+                settings.getMaxMemory(),
+                rawLog.lines().toList());
+        if (!launcherOwnedLog) {
+            return input;
+        }
+
+        @Nullable LogAnalyzable.MissingDependencySearch search = missingDependencySearch;
+        if (search != null) {
+            input = input.withMissingDependencySearch(search);
+        }
+        input = input.withJavaRuntimeRepair(
+                () -> guardRepairTask(
+                        repairActionsAllowed,
+                        () -> JavaRuntimeRepairTaskFactory.create(repository, manifest)));
+        return input;
+    }
+
+    /// Delays a repair task factory until execution and checks startup policy before creating the task.
+    ///
+    /// @param executionAllowed reports whether repair side effects are currently permitted
+    /// @param taskFactory creates the underlying stopped repair task after policy acceptance
+    /// @return stopped task that fails before task creation while startup policy blocks repairs
+    static Task<?> guardRepairTask(BooleanSupplier executionAllowed, Supplier<Task<?>> taskFactory) {
+        BooleanSupplier checkedExecutionAllowed = Objects.requireNonNull(executionAllowed, "executionAllowed");
+        Supplier<Task<?>> checkedTaskFactory = Objects.requireNonNull(taskFactory, "taskFactory");
+        return Task.composeAsync(() -> {
+            if (!checkedExecutionAllowed.getAsBoolean()) {
+                throw new IllegalStateException(REPAIR_ACTIONS_UNAVAILABLE_MESSAGE);
+            }
+            return Objects.requireNonNull(checkedTaskFactory.get(), "repair task factory result");
+        });
+    }
+
+    /// Builds guaranteed non-blocking log-only XYAT input after optional instance-context collection fails.
+    ///
+    /// @param id analyzed instance identifier
+    /// @param rawLog immutable analyzed log text
+    /// @param launcherOwnedLog whether the text was read from the instance's current latest-log path
+    /// @return minimal analyzer input retaining only process, platform, log, and safe application search context
+    private LogAnalyzable basicCrashAnalyzerInput(
+            GameInstanceID id,
+            String rawLog,
+            boolean launcherOwnedLog) {
+        @Nullable LaunchState launchState = launchStates.get(id);
+        ProcessListener.ExitType exitType = launchState != null && launchState.exitType != null
+                ? launchState.exitType
+                : ProcessListener.ExitType.APPLICATION_ERROR;
+        LogAnalyzable input = new LogAnalyzable(
+                null,
+                null,
+                exitType,
+                OperatingSystem.CURRENT_OS,
+                OperatingSystem.CODE_PAGE,
+                null,
+                null,
+                null,
+                null,
+                Bits.UNKNOWN,
+                null,
+                rawLog.lines().toList());
+        @Nullable LogAnalyzable.MissingDependencySearch search = missingDependencySearch;
+        return launcherOwnedLog && search != null ? input.withMissingDependencySearch(search) : input;
+    }
+
+    /// Resolves the exact manifest recommendation or vanilla minimum Java version.
+    ///
+    /// @param gameVersion detected Minecraft version, or null when unavailable
+    /// @param declaredVersion manifest-declared recommendation, or null when absent
+    /// @return recommended major version, or null when it cannot be determined safely
+    private static @Nullable Integer requiredJavaVersion(
+            @Nullable String gameVersion,
+            @Nullable GameJavaVersion declaredVersion) {
+        if (declaredVersion != null) {
+            return declaredVersion.majorVersion();
+        }
+        if (gameVersion == null) {
+            return null;
+        }
+        @Nullable GameJavaVersion minimum = GameJavaVersion.getMinimumJavaVersion(
+                GameVersionNumber.asGameVersion(gameVersion));
+        return minimum == null ? null : minimum.majorVersion();
+    }
+
+    /// Revalidates that an instance still owns the exact latest log used for a repair plan.
+    ///
+    /// @param id analyzed instance identifier
+    /// @param expectedFingerprint expected SHA-256 fingerprint
+    /// @throws IOException when the log cannot be read or its contents changed
+    private void validateLatestLog(GameInstanceID id, String expectedFingerprint) throws IOException {
+        requireInstance(id);
+        String actualFingerprint = fingerprint(readLog(id));
+        if (!actualFingerprint.equals(expectedFingerprint)) {
+            throw new IOException("The instance latest log changed after crash analysis");
+        }
+    }
+
+    /// Computes a stable SHA-256 fingerprint without retaining or exposing log contents.
+    ///
+    /// @param text text to fingerprint
+    /// @return lowercase SHA-256 value prefixed by its algorithm
+    private static String fingerprint(String text) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(Objects.requireNonNull(text, "text").getBytes(StandardCharsets.UTF_8));
+            return "sha256:" + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new AssertionError("SHA-256 is required by the Java platform", impossible);
+        }
+    }
+
     /// Returns the latest log path for an instance.
     private Path latestLog(GameInstanceID id) {
         Path run = repository.getRunDirectory(id);
@@ -853,6 +1177,12 @@ public final class XYMLMcpService implements XYMLMcpOperations {
     /// Reads a file as UTF-8 when it is a regular file.
     private String readIfPresent(Path path) throws IOException {
         return Files.isRegularFile(path) ? Files.readString(path, StandardCharsets.UTF_8) : "";
+    }
+
+    /// Releases retained analysis plans and requests cancellation of active repair tasks.
+    @Override
+    public void close() {
+        crashRepairCoordinator.close();
     }
 
     /// Converts a nullable number to a JSON-safe value.

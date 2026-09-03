@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.ui.swing.runtime;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /// Defines toolkit-neutral launcher-window actions applied at game-process lifecycle boundaries.
 ///
@@ -30,12 +31,29 @@ import java.util.Objects;
 /// @param close closes the complete launcher runtime
 /// @param hide hides the launcher window without disposing it
 /// @param show shows the existing launcher window when the runtime remains open
+/// @param openModSearch opens the Mods search page for one missing dependency
 @NotNullByDefault
-public record LaunchVisibilityActions(Runnable close, Runnable hide, Runnable show) {
+public record LaunchVisibilityActions(
+        Runnable close,
+        Runnable hide,
+        Runnable show,
+        Consumer<String> openModSearch) {
     /// Validates the complete action boundary.
     public LaunchVisibilityActions {
         Objects.requireNonNull(close, "close");
         Objects.requireNonNull(hide, "hide");
         Objects.requireNonNull(show, "show");
+        Objects.requireNonNull(openModSearch, "openModSearch");
+    }
+
+    /// Creates a compatibility action set without an application search destination.
+    ///
+    /// @param close closes the complete launcher runtime
+    /// @param hide hides the launcher window without disposing it
+    /// @param show shows the existing launcher window when the runtime remains open
+    public LaunchVisibilityActions(Runnable close, Runnable hide, Runnable show) {
+        this(close, hide, show, ignored -> {
+            throw new UnsupportedOperationException("Missing-mod search is unavailable");
+        });
     }
 }

@@ -312,6 +312,33 @@ final class LauncherLaunchTaskFactoryTest {
         assertEquals(0, fixture.showCount());
     }
 
+    /// Keeps the launcher visible after a missing-mod search has opened its result page.
+    @Test
+    void hideVisibilityPreservesLauncherAfterMissingModSearch() {
+        ControllableProcess rawProcess = new ControllableProcess();
+        ManagedProcess process = new ManagedProcess(rawProcess, List.of("java", "test.Main"));
+        CompletableFuture<@Nullable Void> lifecycleCompletion = new CompletableFuture<>();
+        AtomicInteger closeCount = new AtomicInteger();
+        AtomicInteger hideCount = new AtomicInteger();
+        AtomicInteger showCount = new AtomicInteger();
+
+        LauncherLaunchTaskFactory.applyVisibilityPolicy(
+                process,
+                LauncherVisibility.HIDE,
+                new LaunchVisibilityActions(
+                        closeCount::incrementAndGet,
+                        hideCount::incrementAndGet,
+                        showCount::incrementAndGet),
+                lifecycleCompletion,
+                () -> true);
+
+        assertEquals(1, hideCount.get());
+        lifecycleCompletion.complete(null);
+
+        assertEquals(0, closeCount.get());
+        assertEquals(1, showCount.get());
+    }
+
     /// Confirms that `HIDE_AND_REOPEN` hides immediately and shows the same runtime after process exit.
     @Test
     void hideAndReopenVisibilityShowsAfterProcessExit() {

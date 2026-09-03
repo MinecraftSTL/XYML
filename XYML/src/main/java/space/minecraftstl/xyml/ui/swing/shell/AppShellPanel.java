@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.ui.swing.SwingButtonRippleSupport;
 import space.minecraftstl.xyml.ui.swing.SwingContentTransition;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountsPanel;
+import space.minecraftstl.xyml.ui.swing.page.downloads.GameVersionCatalogPanel;
 import space.minecraftstl.xyml.ui.swing.page.downloads.SwingLocalModpackInstallDialog;
 import space.minecraftstl.xyml.ui.swing.page.home.HomeStrings;
 import space.minecraftstl.xyml.ui.swing.page.instances.InstancesPanel;
@@ -425,6 +426,23 @@ public final class AppShellPanel extends JPanel implements AutoCloseable {
         pageDeck.showPage(destinationPage, true, direction);
         showInstanceManagement();
         updateSelection(page);
+    }
+
+    /// Navigates to the download center and opens the Mods search for one dependency identifier.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    public void openModSearch(String dependencyId) {
+        EdtDispatcher.requireEventDispatchThread();
+        String query = Objects.requireNonNull(dependencyId, "dependencyId").trim();
+        if (query.isEmpty()) {
+            throw new IllegalArgumentException("dependencyId must not be blank");
+        }
+        navigateTo(ShellPageId.DOWNLOADS);
+        JComponent downloadsPage = pageCache.getOrCreate(ShellPageId.DOWNLOADS);
+        if (!(downloadsPage instanceof GameVersionCatalogPanel catalogPanel)) {
+            throw new IllegalStateException("Downloads page does not expose the game-version catalog");
+        }
+        catalogPanel.openModSearch(query);
     }
 
     /// Opens or toggles one side destination from the left navigation rail.

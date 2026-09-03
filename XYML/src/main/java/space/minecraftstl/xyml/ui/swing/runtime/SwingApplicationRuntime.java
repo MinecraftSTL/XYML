@@ -176,7 +176,8 @@ public final class SwingApplicationRuntime implements AutoCloseable {
         visibilityRelay.attach(new LaunchVisibilityActions(
                 runtime::close,
                 runtime::hideIfOpen,
-                runtime::showIfOpen));
+                runtime::showIfOpen,
+                runtime::openModSearchIfOpen));
         return runtime;
     }
 
@@ -214,6 +215,16 @@ public final class SwingApplicationRuntime implements AutoCloseable {
             throw new IllegalStateException("Launcher Swing application runtime is closed");
         }
         composition.setInteractionEnabled(enabled);
+    }
+
+    /// Opens the Mods search page while this runtime remains open.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    public void openModSearch(String dependencyId) {
+        if (closed.get()) {
+            throw new IllegalStateException("Launcher Swing application runtime is closed");
+        }
+        composition.openModSearch(Objects.requireNonNull(dependencyId, "dependencyId"));
     }
 
     /// Returns whether application cleanup has started.
@@ -271,6 +282,16 @@ public final class SwingApplicationRuntime implements AutoCloseable {
                 }
             }
         }
+    }
+
+    /// Opens a missing-dependency search only while the runtime remains usable.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    private void openModSearchIfOpen(String dependencyId) {
+        if (closed.get()) {
+            throw new IllegalStateException("Launcher Swing application runtime is closed");
+        }
+        composition.openModSearch(Objects.requireNonNull(dependencyId, "dependencyId"));
     }
 
     /// Closes one nullable partially constructed resource after factory failure.
@@ -382,6 +403,15 @@ public final class SwingApplicationRuntime implements AutoCloseable {
         /// @param enabled whether application pages accept user input
         void setInteractionEnabled(boolean enabled);
 
+        /// Opens the Mods search page for one missing dependency.
+        ///
+        /// Lightweight lifecycle test doubles may leave this optional boundary unimplemented.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        default void openModSearch(String dependencyId) {
+            Objects.requireNonNull(dependencyId, "dependencyId");
+        }
+
         /// Closes the application surface.
         @Override
         void close();
@@ -464,6 +494,14 @@ public final class SwingApplicationRuntime implements AutoCloseable {
             composition.setInteractionEnabled(enabled);
         }
 
+        /// Opens the concrete composition's Mods search page.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        @Override
+        public void openModSearch(String dependencyId) {
+            composition.openModSearch(Objects.requireNonNull(dependencyId, "dependencyId"));
+        }
+
         /// Closes the concrete Swing composition.
         @Override
         public void close() {
@@ -531,7 +569,8 @@ public final class SwingApplicationRuntime implements AutoCloseable {
             return new LaunchVisibilityActions(
                     () -> request(actions -> actions.close().run()),
                     () -> request(actions -> actions.hide().run()),
-                    () -> request(actions -> actions.show().run()));
+                    () -> request(actions -> actions.show().run()),
+                    this::requestModSearch);
         }
 
         /// Attaches the sole runtime target and drains earlier actions in their original order.
@@ -590,6 +629,14 @@ public final class SwingApplicationRuntime implements AutoCloseable {
                 }
                 throw failure;
             }
+        }
+
+        /// Queues or immediately forwards one missing-dependency search request.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        private void requestModSearch(String dependencyId) {
+            String query = Objects.requireNonNull(dependencyId, "dependencyId");
+            request(actions -> actions.openModSearch().accept(query));
         }
     }
 }
