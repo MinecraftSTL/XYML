@@ -153,10 +153,6 @@ val xymlWorkflowGroup = "stl"
 val nestedBranchBuild = providers.gradleProperty("xyml.branchBuild.nested")
     .map { it.toBooleanStrict() }
     .orElse(false)
-val fetchReleaseBranches = providers.gradleProperty("xyml.branchBuild.fetch")
-    .map { it.toBooleanStrict() }
-    .orElse(true)
-val configuredGitProxy = providers.gradleProperty("xyml.branchBuild.gitProxy")
 
 val rootBuildResultFile = layout.buildDirectory.file("root-build-result.properties")
 val xymlNativeSourceFiles = files(
@@ -191,22 +187,6 @@ fun recordRootBuildResult(artifact: File, version: String, channel: String, bran
     logger.lifecycle("XYML root :build result recorded: $artifactPath")
 }
 
-fun releaseBranchArtifact(branchName: String): Pair<File, String> {
-    val artifactDirectory = layout.buildDirectory.dir("channel-builds/$branchName").get().asFile
-    val buildInfoFile = artifactDirectory.resolve("build-info.properties")
-    check(buildInfoFile.isFile) {
-        "Root :build completed without channel build metadata: $buildInfoFile"
-    }
-
-    val buildInfo = PropertiesUtils.load(buildInfoFile.toPath())
-    check(buildInfo.getProperty("branch") == branchName) {
-        "Channel build metadata does not match branch $branchName: $buildInfoFile"
-    }
-    val version = buildInfo.getProperty("version")?.takeIf { it.isNotBlank() }
-        ?: error("Channel build metadata does not contain a version: $buildInfoFile")
-    return artifactDirectory.resolve("XYML-$version.jar") to version
-}
-
 fun reusableXYMLLNativeOutput(): Boolean {
     val executable = rootDir.resolve("libraries/XYMLL/build/cmake/Release/XYMLL.exe")
     if (!executable.isFile) {
@@ -219,7 +199,7 @@ fun reusableXYMLLNativeOutput(): Boolean {
 fun registerReleaseBranchBuild(taskName: String, branchName: String, releaseType: ReleaseType) =
     tasks.register<GitBranchGradleTask>(taskName) {
         group = xymlWorkflowGroup
-        description = "Builds the latest origin/$branchName commit with an inferred ${releaseType.getName()} version."
+        description = "Builds the local $branchName branch with an inferred ${releaseType.getName()} version."
         this.branchName.set(branchName)
         this.releaseType.set(releaseType)
         gradleArguments.set(listOf(
@@ -230,22 +210,14 @@ fun registerReleaseBranchBuild(taskName: String, branchName: String, releaseType
             "--parallel",
             "--stacktrace"
         ))
-        fetchRemote.set(fetchReleaseBranches)
-        gitProxy.set(configuredGitProxy)
         repositoryDirectory.set(layout.projectDirectory)
         artifactDirectory.set(layout.buildDirectory.dir("channel-builds/$branchName"))
     }
 
-val buildMain = registerReleaseBranchBuild("buildMain", "main", ReleaseType.STABLE)
-val buildBeta = registerReleaseBranchBuild("buildBeta", "beta", ReleaseType.BETA)
-val buildAlpha = registerReleaseBranchBuild("buildAlpha", "alpha", ReleaseType.ALPHA)
-val buildDev = registerReleaseBranchBuild("buildDev", "dev", ReleaseType.DEV)
-val releaseBranchBuilds = mapOf(
-    ReleaseType.STABLE to buildMain,
-    ReleaseType.BETA to buildBeta,
-    ReleaseType.ALPHA to buildAlpha,
-    ReleaseType.DEV to buildDev
-)
+registerReleaseBranchBuild("buildMain", "main", ReleaseType.STABLE)
+registerReleaseBranchBuild("buildBeta", "beta", ReleaseType.BETA)
+registerReleaseBranchBuild("buildAlpha", "alpha", ReleaseType.ALPHA)
+registerReleaseBranchBuild("buildDev", "dev", ReleaseType.DEV)
 val localBuildTasks = subprojects.map { "${it.path}:build" }
 val localCleanTasks = subprojects.map { "${it.path}:clean" }
 val runLibraryNames = listOf("xoyz-nbt", "xoyz-mcp")
@@ -272,45 +244,32 @@ tasks.register<Delete>("clean") {
 
 val rootBuild = tasks.register("build") {
     group = xymlWorkflowGroup
-    description = "Builds the latest matching release branch, or the current checkout as a Git-derived feature build."
+    description = "Builds the current checkout with a version inferred from its Git state."
+    dependsOn(localBuildTasks)
+
+    doFirst {
+        logger.lifecycle("XYML current checkout: ${xymlBranchName ?: "<detached>"}")
+        logger.lifecycle("XYML inferred current version: $xymlReleaseVersion")
+    }
+
+    doLast {
+        if (!nestedBranchBuild.get()) {
+            val xymlArtifact = project(":XYML").tasks.named<Jar>("shadowJar").get().archiveFile.get().asFile
+            recordRootBuildResult(
+                xymlArtifact,
+                project(":XYML").version.toString(),
+                xymlReleaseChannel,
+                xymlBranchName ?: "<detached>"
+            )
+        }
+        promoteRunLibraryCache()
+    }
 }
 
 if (!nestedBranchBuild.get()) {
     rootBuild.configure {
         outputs.upToDateWhen { false }
         outputs.file(rootBuildResultFile)
-    }
-}
-
-if (nestedBranchBuild.get() || xymlBranchReleaseType == null) {
-    rootBuild.configure {
-        dependsOn(localBuildTasks)
-        doFirst {
-            logger.lifecycle("XYML feature checkout: ${xymlBranchName ?: "<detached>"}")
-            logger.lifecycle("XYML inferred feature version: $xymlReleaseVersion")
-        }
-
-        doLast {
-            if (!nestedBranchBuild.get()) {
-                val xymlArtifact = project(":XYML").tasks.named<Jar>("shadowJar").get().archiveFile.get().asFile
-                recordRootBuildResult(
-                    xymlArtifact,
-                    project(":XYML").version.toString(),
-                    xymlReleaseChannel,
-                    xymlBranchName ?: "<detached>"
-                )
-            }
-            promoteRunLibraryCache()
-        }
-    }
-} else {
-    rootBuild.configure {
-        dependsOn(releaseBranchBuilds.getValue(xymlBranchReleaseType))
-        doLast {
-            val branchName = xymlBranchName ?: error("Release branch build is missing its branch name")
-            val (artifact, version) = releaseBranchArtifact(branchName)
-            recordRootBuildResult(artifact, version, xymlReleaseChannel, branchName)
-        }
     }
 }
 
