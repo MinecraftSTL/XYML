@@ -156,7 +156,7 @@ public final class RepositoryInstanceLifecycleServiceTest {
         assertNotNull(repository.getInstanceGameSettings(destination));
     }
 
-    /// Rename task mutation locks metadata, source, destination, and direct child manifests after name resolution.
+    /// Rename task mutation shares the repository operation domain and locks affected instances after name resolution.
     ///
     /// @throws Exception when fixtures or deferred task construction fail
     @Test
@@ -177,7 +177,7 @@ public final class RepositoryInstanceLifecycleServiceTest {
         assertEquals(Set.of(TaskResource.repositoryMetadata(repository.getBaseDirectory())), rename.getResources());
         rename.execute();
         Set<TaskResource> mutationResources = Set.of(
-                TaskResource.repositoryMetadata(repository.getBaseDirectory()),
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
                 TaskResource.gameInstance(repository.getInstanceRoot(source)),
                 TaskResource.gameInstance(repository.getInstanceRoot(destination)),
                 TaskResource.gameInstance(repository.getInstanceRoot(child)));

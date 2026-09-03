@@ -113,7 +113,7 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
             RenamePreparation preparation = repository.withStableBaseDirectory(
                     paths.repositoryDirectory(), () -> prepareRename(source, destination));
             List<TaskResource> resources = new ArrayList<>();
-            resources.add(TaskResource.repositoryMetadata(paths.repositoryDirectory()));
+            resources.add(TaskResource.repositoryOperation(paths.repositoryDirectory()));
             resources.add(TaskResource.gameInstance(paths.sourceDirectory()));
             resources.add(TaskResource.gameInstance(paths.destinationDirectory()));
             preparation.affectedChildren().stream()
@@ -236,19 +236,12 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
                     paths.repositoryDirectory(), () -> prepareDuplicate(source));
             Task<@Nullable Void> mutation = Task.runAsync("Duplicate game instance", Schedulers.io(), () -> {
                 repository.withStableBaseDirectory(paths.repositoryDirectory(), () -> {
-                    XYMLGameRepository.InstanceDuplicationSnapshot currentSnapshot = prepareDuplicate(source);
-                    if (!snapshot.equals(currentSnapshot)) {
-                        throw new IllegalStateException(
-                                "Source instance settings changed while waiting for resources");
-                    }
                     duplicateWithoutRefresh(source, destination, copySaves, snapshot);
                     committed.set(true);
                 });
             })
                     .setResources(
-                            TaskResource.configuration(repository.getInstanceGameSettingsFile(source)),
-                            TaskResource.configuration(SettingsManager.gameSettingsLocation()),
-                            TaskResource.configuration(SettingsManager.settingsLocation()),
+                            TaskResource.repositoryOperation(paths.repositoryDirectory()),
                             TaskResource.gameInstance(paths.sourceDirectory()),
                             TaskResource.gameInstance(paths.destinationDirectory()),
                             TaskResource.gameDirectory(snapshot.sourceRunDirectory()));
