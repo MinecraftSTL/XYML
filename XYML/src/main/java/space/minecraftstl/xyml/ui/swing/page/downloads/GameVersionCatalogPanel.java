@@ -446,6 +446,18 @@ public final class GameVersionCatalogPanel extends JPanel implements AutoCloseab
         return choiceList;
     }
 
+    /// Selects the download-content tab and opens the Mods search for one dependency identifier.
+    ///
+    /// @param searchText non-blank project or dependency identifier
+    public void openModSearch(String searchText) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed) {
+            return;
+        }
+        downloadCenterTabs.setSelectedComponent(downloadCategoryPanel);
+        downloadCategoryPanel.openModSearch(searchText);
+    }
+
     /// Starts the lazy source load after this page first becomes displayable.
     @Override
     public void addNotify() {

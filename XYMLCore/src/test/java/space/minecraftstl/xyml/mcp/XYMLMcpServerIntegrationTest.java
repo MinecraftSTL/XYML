@@ -24,13 +24,17 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Proxy;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies the launcher registries are connected to the reusable XoyzMCP transport.
@@ -45,7 +49,16 @@ final class XYMLMcpServerIntegrationTest {
     /// Starts the launcher facade and verifies every launcher-specific capability family.
     @Test
     void exposesLauncherRegistriesThroughXoyzMcp() throws Exception {
-        try (XYMLMcpServer server = new XYMLMcpServer(0, null)) {
+        XYMLMcpOperations operations = (XYMLMcpOperations) Proxy.newProxyInstance(
+                XYMLMcpOperations.class.getClassLoader(),
+                new Class<?>[]{XYMLMcpOperations.class},
+                (proxy, method, arguments) -> {
+                    if ("getCrashRepairStatus".equals(method.getName())) {
+                        return Map.of("operation_id", arguments[0], "state", "RUNNING");
+                    }
+                    throw new UnsupportedOperationException(method.getName());
+                });
+        try (XYMLMcpServer server = new XYMLMcpServer(0, operations)) {
             server.startListener();
             URI endpoint = URI.create("http://127.0.0.1:" + server.getListeningPort() + XYMLMcpServer.MCP_PATH);
             HttpClient client = HttpClient.newHttpClient();
@@ -74,9 +87,21 @@ final class XYMLMcpServerIntegrationTest {
             JsonArray tools = result(post(client, endpoint,
                     "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}", sessionId))
                     .getAsJsonArray("tools");
-            assertEquals(19, tools.size());
+            assertEquals(23, tools.size());
             assertTrue(tools.asList().stream()
                     .anyMatch(tool -> "analyze_crash".equals(tool.getAsJsonObject().get("name").getAsString())));
+            assertTrue(tools.asList().stream()
+                    .anyMatch(tool -> "execute_crash_solution".equals(
+                            tool.getAsJsonObject().get("name").getAsString())));
+
+            JsonObject callResult = result(post(client, endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"tools/call\","
+                            + "\"params\":{\"name\":\"get_crash_repair_status\","
+                            + "\"arguments\":{\"operation_id\":\"repair-1\"}}}", sessionId));
+            assertFalse(callResult.get("isError").getAsBoolean());
+            JsonObject structuredContent = callResult.getAsJsonObject("structuredContent");
+            assertEquals("repair-1", structuredContent.get("operation_id").getAsString());
+            assertEquals("RUNNING", structuredContent.get("state").getAsString());
 
             JsonArray templates = result(post(client, endpoint,
                     "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/templates/list\"}", sessionId))
@@ -88,6 +113,27 @@ final class XYMLMcpServerIntegrationTest {
                     .getAsJsonArray("prompts");
             assertEquals("diagnose_crash", prompts.get(0).getAsJsonObject().get("name").getAsString());
         }
+    }
+
+    /// Confirms server shutdown releases an application operation service that owns retained tasks.
+    @Test
+    void closesApplicationOperationService() {
+        AtomicBoolean closed = new AtomicBoolean();
+        XYMLMcpOperations operations = (XYMLMcpOperations) Proxy.newProxyInstance(
+                XYMLMcpOperations.class.getClassLoader(),
+                new Class<?>[]{XYMLMcpOperations.class, AutoCloseable.class},
+                (proxy, method, arguments) -> {
+                    if ("close".equals(method.getName())) {
+                        closed.set(true);
+                        return null;
+                    }
+                    throw new UnsupportedOperationException(method.getName());
+                });
+        XYMLMcpServer server = new XYMLMcpServer(0, operations);
+
+        server.close();
+
+        assertTrue(closed.get());
     }
 
     /// Sends one JSON-RPC POST request with optional initialized-session headers.

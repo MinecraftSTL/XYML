@@ -17,9 +17,6 @@
  */
 package space.minecraftstl.xyml.gradle.pack;
 
-import com.sun.jna.Platform;
-import com.sun.jna.platform.win32.Advapi32Util;
-import com.sun.jna.platform.win32.WinReg;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.provider.ListProperty;
@@ -34,6 +31,7 @@ import org.gradle.process.ExecSpec;
 import org.gradle.work.DisableCachingByDefault;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.gradle.cache.RunLibraryCache;
 
 import javax.inject.Inject;
@@ -46,30 +44,28 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Stream;
 
-/// Runs Gradle against the latest commit of one release branch in an isolated temporary Git worktree.
+/// Runs Gradle against the tip of one local release branch in an isolated temporary Git worktree.
 ///
-/// The task refreshes all four `origin` release refs together, infers a version from their topology, and passes that
-/// exact version to the nested build. Application artifacts and any supported run-library snapshot are copied back
-/// into the controlling checkout. Run tasks omit an output directory and keep the temporary worktree alive until the
-/// launched application exits.
+/// The task reads only local branch refs, infers a version from their topology, and passes that exact version to the
+/// nested build. Application artifacts and any supported run-library snapshot are copied back into the controlling
+/// checkout. Run tasks omit an output directory and keep the temporary worktree alive until the launched application
+/// exits.
 @NotNullByDefault
-@DisableCachingByDefault(because = "The task fetches remote Git refs and always evaluates their latest commits")
+@DisableCachingByDefault(because = "The task always evaluates the current local branch tip")
 public abstract class GitBranchGradleTask extends DefaultTask {
     /// Libraries whose successful branch-build artifacts can be reused by `run`.
     private static final List<String> RUN_LIBRARY_NAMES = List.of("xoyz-nbt", "xoyz-mcp");
 
-    /// Windows Internet Settings registry key containing the user's system proxy.
-    private static final String INTERNET_SETTINGS_KEY =
-            "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    /// JVM option that allows Wrapper downloads to follow the Windows system proxy.
+    private static final String USE_SYSTEM_PROXY_OPTION = "-Djava.net.useSystemProxies=true";
 
     /// Process execution service used for Git and nested Gradle commands.
     private final ExecOperations execOperations;
 
-    /// Release branch to refresh and check out.
+    /// Local release branch to check out.
     @Input
     public abstract Property<String> getBranchName();
 
@@ -81,15 +77,6 @@ public abstract class GitBranchGradleTask extends DefaultTask {
     @Input
     public abstract ListProperty<String> getGradleArguments();
 
-    /// Whether the task must refresh remote refs before resolving the target commit.
-    @Input
-    public abstract Property<Boolean> getFetchRemote();
-
-    /// Optional explicit Git HTTP proxy. When absent on Windows, the system proxy is detected from the registry.
-    @Input
-    @Optional
-    public abstract Property<String> getGitProxy();
-
     /// Root directory of the controlling Git repository.
     @Internal
     public abstract DirectoryProperty getRepositoryDirectory();
@@ -99,27 +86,23 @@ public abstract class GitBranchGradleTask extends DefaultTask {
     @Optional
     public abstract DirectoryProperty getArtifactDirectory();
 
-    /// Creates a task that always checks the current remote state.
+    /// Creates a task that always checks the current local branch state.
     ///
     /// @param execOperations process execution service used by this task
     @Inject
     public GitBranchGradleTask(ExecOperations execOperations) {
         this.execOperations = execOperations;
-        getFetchRemote().convention(true);
         getOutputs().upToDateWhen(ignored -> false);
     }
 
-    /// Fetches, checks out, versions, and executes the configured release-branch workflow.
+    /// Checks out, versions, and executes the configured local release-branch workflow.
     @TaskAction
     public void run() throws IOException {
         Path repository = getRepositoryDirectory().get().getAsFile().toPath().toAbsolutePath().normalize();
         String branchName = getBranchName().get();
         ReleaseType releaseType = getReleaseType().get();
-        if (getFetchRemote().get()) {
-            refreshReleaseRefs(repository);
-        }
 
-        String targetRef = "refs/remotes/origin/" + branchName;
+        String targetRef = localBranchRef(branchName);
         String commit = GitVersionResolver.resolveCommit(repository, targetRef);
         String stableVersion = GitVersionResolver.readStableVersion(repository, commit);
         String version = GitVersionResolver.resolveReleaseVersion(
@@ -147,31 +130,12 @@ public abstract class GitBranchGradleTask extends DefaultTask {
         }
     }
 
-    /// Refreshes all release refs in one fetch so channel counters use a consistent remote snapshot.
+    /// Resolves one branch name to its local Git ref.
     ///
-    /// @param repository Git repository root
-    private void refreshReleaseRefs(Path repository) {
-        List<String> arguments = new ArrayList<>();
-        arguments.add("fetch");
-        arguments.add("--prune");
-        arguments.add("origin");
-        for (String branch : List.of("main", "beta", "alpha", "dev")) {
-            arguments.add("+refs/heads/" + branch + ":refs/remotes/origin/" + branch);
-        }
-
-        String proxy = getGitProxy().getOrNull();
-        if (proxy == null) {
-            proxy = windowsSystemProxy();
-        }
-        List<String> command = new ArrayList<>();
-        command.add("git");
-        if (proxy != null) {
-            getLogger().lifecycle("Using the Windows system proxy for the GitHub branch refresh.");
-            command.add("-c");
-            command.add("http.proxy=" + proxy);
-        }
-        command.addAll(arguments);
-        execute(repository, command, false, null);
+    /// @param branchName local branch name
+    /// @return fully qualified local branch ref
+    static String localBranchRef(String branchName) {
+        return "refs/heads/" + branchName;
     }
 
     /// Runs the Gradle Wrapper inside the detached worktree with explicit release metadata.
@@ -189,17 +153,9 @@ public abstract class GitBranchGradleTask extends DefaultTask {
             ReleaseType releaseType,
             String stableVersion,
             String version) {
-        boolean windows = Platform.isWindows();
-        List<String> command = new ArrayList<>();
-        if (windows) {
-            command.add("cmd.exe");
-            command.add("/d");
-            command.add("/c");
-            command.add(checkout.resolve("gradlew.bat").toString());
-        } else {
-            command.add(checkout.resolve("gradlew").toString());
-        }
-        command.addAll(getGradleArguments().get());
+        boolean windows = System.getProperty("os.name", "").startsWith("Windows");
+        @Unmodifiable List<String> command = nestedGradleCommand(
+                checkout, windows, getGradleArguments().get());
 
         Map<String, Object> environment = new HashMap<>(System.getenv());
         environment.remove("BUILD_NUMBER");
@@ -212,7 +168,34 @@ public abstract class GitBranchGradleTask extends DefaultTask {
         environment.put("STABLE_VERSION", stableVersion);
         environment.put("JAVA_HOME", System.getProperty("java.home"));
         environment.put("GRADLE_USER_HOME", repository.resolve(".gradle-user-home").toString());
+        if (windows) {
+            getLogger().lifecycle("Allowing nested Gradle downloads to use the Windows system proxy.");
+        }
         execute(checkout, command, false, environment);
+    }
+
+    /// Builds the nested Wrapper command for the current platform.
+    ///
+    /// @param checkout temporary detached worktree
+    /// @param windows whether the command runs on Windows
+    /// @param gradleArguments arguments passed to Gradle
+    /// @return immutable command with Windows system-proxy discovery enabled when applicable
+    static @Unmodifiable List<String> nestedGradleCommand(
+            Path checkout,
+            boolean windows,
+            List<String> gradleArguments) {
+        List<String> command = new ArrayList<>();
+        if (windows) {
+            command.add("cmd.exe");
+            command.add("/d");
+            command.add("/c");
+            command.add(checkout.resolve("gradlew.bat").toString());
+            command.add(USE_SYSTEM_PROXY_OPTION);
+        } else {
+            command.add(checkout.resolve("gradlew").toString());
+        }
+        command.addAll(gradleArguments);
+        return List.copyOf(command);
     }
 
     /// Copies application artifacts, writes immutable build metadata, and installs any library snapshot.
@@ -233,7 +216,7 @@ public abstract class GitBranchGradleTask extends DefaultTask {
             throw new IOException("Nested build did not produce XYML/build/libs at " + source);
         }
         Path target = getArtifactDirectory().get().getAsFile().toPath().toAbsolutePath().normalize();
-        Path allowedRoot = repository.resolve("build/channel-builds").toAbsolutePath().normalize();
+        Path allowedRoot = repository.resolve("build/libs").toAbsolutePath().normalize();
         if (!target.startsWith(allowedRoot)) {
             throw new IOException("Channel artifacts must remain under " + allowedRoot + ": " + target);
         }
@@ -313,71 +296,17 @@ public abstract class GitBranchGradleTask extends DefaultTask {
         }
     }
 
-    /// Returns the adjacent, more stable remote-tracking ref for one release channel.
+    /// Returns the adjacent, more stable local ref for one release channel.
     ///
     /// @param releaseType target release type
-    /// @return adjacent remote ref, or `null` for Stable
+    /// @return adjacent local ref, or `null` for Stable
     private static @Nullable String adjacentStableRef(ReleaseType releaseType) {
         return switch (releaseType) {
             case STABLE -> null;
-            case BETA -> "refs/remotes/origin/main";
-            case ALPHA -> "refs/remotes/origin/beta";
-            case DEV -> "refs/remotes/origin/alpha";
+            case BETA -> "refs/heads/main";
+            case ALPHA -> "refs/heads/beta";
+            case DEV -> "refs/heads/alpha";
         };
-    }
-
-    /// Reads and normalizes the enabled Windows user proxy.
-    ///
-    /// @return Git-compatible proxy URL, or `null` when no static system proxy is enabled
-    private static @Nullable String windowsSystemProxy() {
-        if (!Platform.isWindows()) {
-            return null;
-        }
-        try {
-            int enabled = Advapi32Util.registryGetIntValue(
-                    WinReg.HKEY_CURRENT_USER, INTERNET_SETTINGS_KEY, "ProxyEnable");
-            if (enabled == 0) {
-                return null;
-            }
-            String proxyServer = Advapi32Util.registryGetStringValue(
-                    WinReg.HKEY_CURRENT_USER, INTERNET_SETTINGS_KEY, "ProxyServer");
-            return normalizeProxyServer(proxyServer);
-        } catch (RuntimeException ignored) {
-            return null;
-        }
-    }
-
-    /// Selects the HTTPS or HTTP endpoint from a Windows `ProxyServer` value.
-    ///
-    /// @param proxyServer registry value in direct or protocol-specific form
-    /// @return normalized proxy URL, or `null` for an empty value
-    static @Nullable String normalizeProxyServer(@Nullable String proxyServer) {
-        if (proxyServer == null || proxyServer.isBlank()) {
-            return null;
-        }
-        String selected = null;
-        for (String entry : proxyServer.split(";")) {
-            String trimmed = entry.trim();
-            int separator = trimmed.indexOf('=');
-            if (separator < 0) {
-                selected = trimmed;
-                break;
-            }
-            String protocol = trimmed.substring(0, separator).toLowerCase(Locale.ROOT);
-            if ("https".equals(protocol) || selected == null && "http".equals(protocol)) {
-                selected = trimmed.substring(separator + 1).trim();
-                if ("https".equals(protocol)) {
-                    break;
-                }
-            }
-        }
-        if (selected == null || selected.isBlank()) {
-            return null;
-        }
-        if (selected.contains("://")) {
-            return selected;
-        }
-        return "http://" + selected;
     }
 
     /// Deletes one task-owned directory tree without following external links.

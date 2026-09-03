@@ -26,8 +26,10 @@ import space.minecraftstl.xyml.auth.AuthInfo;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
+import space.minecraftstl.xyml.game.JavaRuntimeRepairTaskFactory;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
+import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.launch.DefaultLauncher;
@@ -61,6 +63,7 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
@@ -68,15 +71,25 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
+
 /// Bridges the existing XYMLCore launcher services to MCP-safe structured operations.
 ///
 /// This class deliberately contains no new game or mod-management algorithms. It delegates to the
 /// repository, mod manager, Java manager, and launch monitor already used by XYML.
 @NotNullByDefault
-public final class XYMLMcpService implements XYMLMcpOperations {
+public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
 
     /// Maximum number of lines retained from one launch process.
     private static final int MAX_LOG_LINES = 20_000;
+
+    /// Warning returned when optional manifest or settings context cannot be collected for XYAT.
+    private static final String XYAT_CONTEXT_UNAVAILABLE_WARNING =
+            "XYAT instance context is unavailable; analysis continued with log-only metadata.";
+
+    /// Failure returned when launcher startup policy still blocks MCP repair side effects.
+    private static final String REPAIR_ACTIONS_UNAVAILABLE_MESSAGE =
+            "Crash repair actions are unavailable before startup agreements are accepted";
 
     /// URI matcher for the latest instance log.
     private static final Pattern LOG_RESOURCE = Pattern.compile(
@@ -112,6 +125,15 @@ public final class XYMLMcpService implements XYMLMcpOperations {
     /// Application-owned policy for every destructive MCP operation.
     private final McpDeletionConfirmation deletionConfirmation;
 
+    /// Optional late-bound application search action for missing dependencies.
+    private final @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch;
+
+    /// Reports whether mandatory startup policy permits launcher-owned MCP repair side effects.
+    private final BooleanSupplier repairActionsAllowed;
+
+    /// Bounded analysis, plan, and repair-operation coordinator.
+    private final XYMLMcpCrashRepairCoordinator crashRepairCoordinator;
+
     /// Last known process state for each repository-scoped instance.
     private final Map<LaunchKey, LaunchState> launchStates = new ConcurrentHashMap<>();
 
@@ -122,9 +144,76 @@ public final class XYMLMcpService implements XYMLMcpOperations {
     public XYMLMcpService(
             XYMLGameRepository repository,
             McpDeletionConfirmation deletionConfirmation) {
+        this(repository, deletionConfirmation, null);
+    }
+
+    /// Creates a service with an optional application search boundary for XYAT repairs.
+    ///
+    /// @param repository repository whose instances and settings are exposed
+    /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
+    /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
+    public XYMLMcpService(
+            XYMLGameRepository repository,
+            McpDeletionConfirmation deletionConfirmation,
+            @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch) {
+        this(repository, deletionConfirmation, missingDependencySearch, () -> true);
+    }
+
+    /// Creates a service with application repair boundaries and the launcher's startup-policy gate.
+    ///
+    /// This gate is independent of per-operation confirmation. It prevents any repair side effect before mandatory
+    /// startup agreements have enabled application interaction.
+    ///
+    /// @param repository repository whose instances and settings are exposed
+    /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
+    /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
+    /// @param repairActionsAllowed reports whether startup policy permits repair side effects
+    public XYMLMcpService(
+            XYMLGameRepository repository,
+            McpDeletionConfirmation deletionConfirmation,
+            @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
+            BooleanSupplier repairActionsAllowed) {
+        this(
+                repository,
+                deletionConfirmation,
+                missingDependencySearch,
+                repairActionsAllowed,
+                new XYMLMcpCrashRepairCoordinator());
+    }
+
+    /// Creates a service with an explicit crash-repair coordinator for deterministic integration tests.
+    ///
+    /// @param repository repository whose instances and settings are exposed
+    /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
+    /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
+    /// @param crashRepairCoordinator bounded analysis and repair-operation coordinator
+    XYMLMcpService(
+            XYMLGameRepository repository,
+            McpDeletionConfirmation deletionConfirmation,
+            @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
+            XYMLMcpCrashRepairCoordinator crashRepairCoordinator) {
+        this(repository, deletionConfirmation, missingDependencySearch, () -> true, crashRepairCoordinator);
+    }
+
+    /// Creates a service with explicit startup and coordinator boundaries for deterministic integration tests.
+    ///
+    /// @param repository repository whose instances and settings are exposed
+    /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
+    /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
+    /// @param repairActionsAllowed reports whether startup policy permits repair side effects
+    /// @param crashRepairCoordinator bounded analysis and repair-operation coordinator
+    XYMLMcpService(
+            XYMLGameRepository repository,
+            McpDeletionConfirmation deletionConfirmation,
+            @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
+            BooleanSupplier repairActionsAllowed,
+            XYMLMcpCrashRepairCoordinator crashRepairCoordinator) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.instanceLifecycle = new RepositoryInstanceLifecycleService(repository);
         this.deletionConfirmation = Objects.requireNonNull(deletionConfirmation, "deletionConfirmation");
+        this.missingDependencySearch = missingDependencySearch;
+        this.repairActionsAllowed = Objects.requireNonNull(repairActionsAllowed, "repairActionsAllowed");
+        this.crashRepairCoordinator = Objects.requireNonNull(crashRepairCoordinator, "crashRepairCoordinator");
     }
 
     /// Returns all installed instances and their root directories.
@@ -409,7 +498,7 @@ public final class XYMLMcpService implements XYMLMcpOperations {
                 TaskResource.configuration(SettingsManager.settingsLocation()));
     }
 
-    /// Analyzes a supplied log or the latest instance log with CrashReportAnalyzer.
+    /// Analyzes a supplied log or the latest instance log with CrashReportAnalyzer and XYAT.
     ///
     /// @param instanceId instance identifier
     /// @param logText optional raw log text
@@ -423,29 +512,55 @@ public final class XYMLMcpService implements XYMLMcpOperations {
         GameInstanceID id = id(instanceId);
         Path repositoryDirectory = repositoryDirectory();
         Path instanceDirectory = instanceDirectory(repositoryDirectory, id);
-        if (logText != null && crashReportPath == null) {
-            String suppliedLog = logText;
-            return Task.<@Unmodifiable Map<String, Object>>composeAsync(
-                    "Validate MCP supplied crash text", () -> repository.callWithStableBaseDirectory(
-                            repositoryDirectory,
-                            () -> {
-                                requireInstanceDirectory(id, instanceDirectory);
-                                requireInstance(id);
-                                return Task.<@Unmodifiable Map<String, Object>>supplyAsync(
-                                        "Analyze supplied MCP crash text",
-                                        Schedulers.defaultScheduler(),
-                                        () -> withInstanceId(analyzeCrashText(suppliedLog), id))
-                                        .asOrchestration();
-                            }))
-                    .setExecutor(Schedulers.io())
-                    .setResources(TaskResource.gameInstance(instanceDirectory))
-                    .releaseResourcesBeforeDependencies();
-        }
         return Task.<@Unmodifiable Map<String, Object>>composeAsync("Resolve MCP crash inputs",
                 () -> repository.callWithStableBaseDirectory(repositoryDirectory, () -> {
                     requireInstanceDirectory(id, instanceDirectory);
                     requireInstance(id);
                     Path runDirectory = resolvedRunDirectory(id);
+                    List<String> contextWarnings = new ArrayList<>();
+                    @Nullable LaunchState launchState = launchStates.get(new LaunchKey(repositoryDirectory, id));
+                    ProcessListener.ExitType exitType = launchState != null && launchState.exitType != null
+                            ? launchState.exitType
+                            : ProcessListener.ExitType.APPLICATION_ERROR;
+                    XYMLMcpCrashAnalysisSupport.Context context;
+                    try {
+                        context = XYMLMcpCrashAnalysisSupport.contextual(
+                                repository,
+                                repositoryDirectory,
+                                instanceDirectory,
+                                runDirectory,
+                                id,
+                                exitType,
+                                effectiveSettings(id),
+                                contextWarnings);
+                    } catch (RuntimeException contextFailure) {
+                        LOG.warning("Unable to collect optional XYAT instance context for " + id.id(), contextFailure);
+                        contextWarnings.add(XYAT_CONTEXT_UNAVAILABLE_WARNING);
+                        context = XYMLMcpCrashAnalysisSupport.Context.basic(
+                                repositoryDirectory,
+                                instanceDirectory,
+                                runDirectory,
+                                id,
+                                exitType);
+                    }
+                    XYMLMcpCrashAnalysisSupport.Context capturedContext = context;
+                    if (logText != null && crashReportPath == null) {
+                        String suppliedLog = logText;
+                        return Task.<@Unmodifiable Map<String, Object>>supplyAsync(
+                                "Analyze supplied MCP crash text",
+                                Schedulers.defaultScheduler(),
+                                () -> analyzeCrashResult(
+                                        capturedContext,
+                                        suppliedLog,
+                                        XYMLMcpCrashReportResolver.resolve(
+                                                runDirectory.resolve("crash-reports"),
+                                                suppliedLog,
+                                                null,
+                                                false),
+                                        contextWarnings,
+                                        false))
+                                .asOrchestration();
+                    }
                     Path crashDirectory = runDirectory.resolve("crash-reports");
                     return repositoryTask("Analyze MCP game crash", repositoryDirectory, () -> {
                         requireInstanceDirectory(id, instanceDirectory);
@@ -456,35 +571,59 @@ public final class XYMLMcpService implements XYMLMcpOperations {
                                 rawLog,
                                 crashReportPath,
                                 logText == null);
-                        @Unmodifiable Map<String, Object> analysis = XYMLMcpCrashAnalyzer.analyze(
-                                rawLog, resolution.report());
-                        Map<String, Object> result = new LinkedHashMap<>(analysis);
-                        result.put("instance_id", id.id());
-                        result.put("crash_report_source", resolution.source());
-                        result.put("warnings", resolution.warnings());
-                        return Map.copyOf(result);
+                        return analyzeCrashResult(
+                                capturedContext,
+                                rawLog,
+                                resolution,
+                                contextWarnings,
+                                logText == null);
                     },
                             TaskResource.repositoryOperation(repositoryDirectory),
                             TaskResource.gameInstance(instanceDirectory),
                             TaskResource.gameDirectory(runDirectory));
                 })).setExecutor(Schedulers.io()).setResources(
+                TaskResource.gameInstance(instanceDirectory),
                 TaskResource.configuration(instanceSettingsFile(repositoryDirectory, id)),
                 TaskResource.configuration(SettingsManager.gameSettingsLocation()),
                 TaskResource.configuration(SettingsManager.settingsLocation()))
                 .releaseResourcesBeforeDependencies();
     }
 
-    /// Adds the validated instance identifier to one immutable crash-analysis result.
+    /// Plans one structured XYAT repair solution without executing its task.
     ///
-    /// @param analysis immutable crash analysis
-    /// @param id validated instance identifier
-    /// @return immutable analysis with its instance identifier
-    private static @Unmodifiable Map<String, Object> withInstanceId(
-            @Unmodifiable Map<String, Object> analysis,
-            GameInstanceID id) {
-        Map<String, Object> result = new LinkedHashMap<>(analysis);
-        result.put("instance_id", id.id());
-        return Map.copyOf(result);
+    /// @param analysisId server-issued crash-analysis identifier
+    /// @param solutionId solution identifier returned by that analysis
+    /// @return immutable plan or non-executable explanation
+    @Override
+    public @Unmodifiable Map<String, Object> planCrashSolution(String analysisId, String solutionId) {
+        return crashRepairCoordinator.plan(analysisId, solutionId);
+    }
+
+    /// Executes one fresh repair task from a one-time, revalidated plan.
+    ///
+    /// @param planId server-issued repair-plan identifier
+    /// @return immutable asynchronous operation status
+    @Override
+    public @Unmodifiable Map<String, Object> executeCrashSolution(String planId) {
+        return crashRepairCoordinator.execute(planId);
+    }
+
+    /// Returns the current state of one crash-repair operation.
+    ///
+    /// @param operationId server-issued repair-operation identifier
+    /// @return immutable operation state
+    @Override
+    public @Unmodifiable Map<String, Object> getCrashRepairStatus(String operationId) {
+        return crashRepairCoordinator.status(operationId);
+    }
+
+    /// Requests cooperative cancellation of one crash-repair operation.
+    ///
+    /// @param operationId server-issued repair-operation identifier
+    /// @return immutable operation state and cancellation acceptance
+    @Override
+    public @Unmodifiable Map<String, Object> cancelCrashRepair(String operationId) {
+        return crashRepairCoordinator.cancel(operationId);
     }
 
     /// Analyzes log text without requiring an initialized game repository.
@@ -1525,6 +1664,76 @@ public final class XYMLMcpService implements XYMLMcpOperations {
         return setting;
     }
 
+    /// Combines the legacy crash-report analysis with one retained XYAT analysis session.
+    ///
+    /// @param context immutable settings and repository snapshot
+    /// @param rawLog immutable analyzed log text
+    /// @param resolution resolved crash-report input
+    /// @param contextWarnings warnings collected while resolving optional context
+    /// @param launcherOwnedLog whether the text came from the captured instance latest-log path
+    /// @return immutable combined analysis response
+    private @Unmodifiable Map<String, Object> analyzeCrashResult(
+            XYMLMcpCrashAnalysisSupport.Context context,
+            String rawLog,
+            XYMLMcpCrashReportResolver.Resolution resolution,
+            List<String> contextWarnings,
+            boolean launcherOwnedLog) {
+        String fingerprint = XYMLMcpCrashAnalysisSupport.fingerprint(rawLog);
+        GameInstanceManifest manifest = context.manifest();
+        @Nullable LogAnalyzable.JavaRuntimeRepair javaRepair = manifest == null ? null : () -> guardRepairTask(
+                repairActionsAllowed,
+                () -> JavaRuntimeRepairTaskFactory.create(repository, manifest));
+        return XYMLMcpCrashAnalysisSupport.analyze(
+                context,
+                rawLog,
+                resolution,
+                List.copyOf(contextWarnings),
+                launcherOwnedLog,
+                crashRepairCoordinator,
+                missingDependencySearch,
+                javaRepair,
+                launcherOwnedLog ? () -> validateLatestLog(context, fingerprint) : null);
+    }
+
+    /// Delays a repair task factory until execution and checks startup policy before creating the task.
+    ///
+    /// @param executionAllowed reports whether repair side effects are currently permitted
+    /// @param taskFactory creates the underlying stopped repair task after policy acceptance
+    /// @return stopped task that fails before task creation while startup policy blocks repairs
+    static Task<?> guardRepairTask(BooleanSupplier executionAllowed, Supplier<Task<?>> taskFactory) {
+        BooleanSupplier checkedExecutionAllowed = Objects.requireNonNull(executionAllowed, "executionAllowed");
+        Supplier<Task<?>> checkedTaskFactory = Objects.requireNonNull(taskFactory, "taskFactory");
+        return Task.composeAsync(() -> {
+            if (!checkedExecutionAllowed.getAsBoolean()) {
+                throw new IllegalStateException(REPAIR_ACTIONS_UNAVAILABLE_MESSAGE);
+            }
+            return Objects.requireNonNull(checkedTaskFactory.get(), "repair task factory result");
+        });
+    }
+
+    /// Revalidates that an instance still owns the exact latest log used for a repair plan.
+    ///
+    /// @param context immutable source context captured during analysis
+    /// @param expectedFingerprint expected SHA-256 fingerprint
+    /// @throws IOException when the log cannot be read or its contents changed
+    private void validateLatestLog(
+            XYMLMcpCrashAnalysisSupport.Context context,
+            String expectedFingerprint) throws IOException {
+        repository.withStableBaseDirectory(context.repositoryDirectory(), () -> {
+            requireInstanceDirectory(context.instanceId(), context.instanceDirectory());
+            requireInstance(context.instanceId());
+            GameInstanceManifest manifest = context.manifest();
+            if (manifest != null
+                    && !manifest.equals(repository.getResolvedInstanceManifest(context.instanceId()).launchManifest())) {
+                throw new IOException("The instance manifest changed after crash analysis");
+            }
+            String actualFingerprint = XYMLMcpCrashAnalysisSupport.fingerprint(readLog(context.runDirectory()));
+            if (!actualFingerprint.equals(expectedFingerprint)) {
+                throw new IOException("The instance latest log changed after crash analysis");
+            }
+        });
+    }
+
     /// Creates a text resource result.
     ///
     /// @param uri resource URI
@@ -1601,6 +1810,12 @@ public final class XYMLMcpService implements XYMLMcpOperations {
     /// Reads a file as UTF-8 when it is a regular file.
     private static String readIfPresent(Path path) throws IOException {
         return Files.isRegularFile(path) ? Files.readString(path, StandardCharsets.UTF_8) : "";
+    }
+
+    /// Releases retained analysis plans and requests cancellation of active repair tasks.
+    @Override
+    public void close() {
+        crashRepairCoordinator.close();
     }
 
     /// Converts a nullable number to a JSON-safe value.

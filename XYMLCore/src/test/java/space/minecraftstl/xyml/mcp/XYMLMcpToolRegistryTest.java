@@ -170,12 +170,14 @@ public final class XYMLMcpToolRegistryTest {
         List<ToolDefinition> definitions = registry.toolDefinitions();
         Set<String> names = definitions.stream().map(ToolDefinition::name)
                 .collect(Collectors.toSet());
-        assertEquals(19, definitions.size());
-        assertEquals(19, names.size());
+        assertEquals(23, definitions.size());
+        assertEquals(23, names.size());
         assertEquals(Set.of("list_instances", "get_instance_settings", "rename_instance", "duplicate_instance",
                 "delete_instance", "get_mods_directory", "analyze_crash", "list_java_runtimes", "list_local_mods",
                 "set_java_version", "set_memory", "set_jvm_options", "set_window_options", "enable_mod",
-                "disable_mod", "remove_mods", "launch_game", "stop_game", "get_launch_status"), names);
+                "disable_mod", "remove_mods", "launch_game", "stop_game", "get_launch_status",
+                "plan_crash_solution", "execute_crash_solution", "get_crash_repair_status",
+                "cancel_crash_repair"), names);
         assertFalse(names.contains("get_logs"));
         assertFalse(names.contains("search_addons"));
         assertFalse(names.contains("create_instance"));
@@ -193,6 +195,32 @@ public final class XYMLMcpToolRegistryTest {
             @SuppressWarnings("unchecked")
             List<String> required = (List<String>) schema.getOrDefault("required", List.of());
             assertFalse(required.contains("confirmed"), tool.name());
+        }
+    }
+
+    /// Ensures crash-repair schemas accept only the server-issued identifiers required by each stage.
+    @Test
+    public void restrictsCrashRepairToolSchemas() {
+        XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(null);
+        Map<String, Set<String>> expectedProperties = Map.of(
+                "plan_crash_solution", Set.of("analysis_id", "solution_id"),
+                "execute_crash_solution", Set.of("plan_id"),
+                "get_crash_repair_status", Set.of("operation_id"),
+                "cancel_crash_repair", Set.of("operation_id"));
+
+        for (Map.Entry<String, Set<String>> expected : expectedProperties.entrySet()) {
+            ToolDefinition tool = registry.toolDefinitions().stream()
+                    .filter(definition -> expected.getKey().equals(definition.name()))
+                    .findFirst()
+                    .orElseThrow();
+            Map<String, Object> schema = tool.inputSchema();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
+            @SuppressWarnings("unchecked")
+            List<String> required = (List<String>) schema.get("required");
+            assertEquals(expected.getValue(), properties.keySet(), expected.getKey());
+            assertEquals(expected.getValue(), Set.copyOf(required), expected.getKey());
+            assertEquals(false, schema.get("additionalProperties"), expected.getKey());
         }
     }
 
@@ -223,6 +251,26 @@ public final class XYMLMcpToolRegistryTest {
         assertEquals(List.of("old"), calls.get("stopGame"));
         assertFalse(registry.call("get_launch_status", Map.of("instance_id", "old")).error());
         assertEquals(List.of("old"), calls.get("getLaunchStatus"));
+    }
+
+    /// Ensures crash-repair tools pass only server-issued identifiers to the launcher service.
+    @Test
+    public void dispatchesCrashRepairTools() {
+        Map<String, List<Object>> calls = new HashMap<>();
+        XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(recordingService(calls));
+
+        assertFalse(registry.call("plan_crash_solution", Map.of(
+                "analysis_id", "analysis-1", "solution_id", "solution-2")).error());
+        assertEquals(List.of("analysis-1", "solution-2"), calls.get("planCrashSolution"));
+
+        assertFalse(registry.call("execute_crash_solution", Map.of("plan_id", "plan-3")).error());
+        assertEquals(List.of("plan-3"), calls.get("executeCrashSolution"));
+
+        assertFalse(registry.call("get_crash_repair_status", Map.of("operation_id", "operation-4")).error());
+        assertEquals(List.of("operation-4"), calls.get("getCrashRepairStatus"));
+
+        assertFalse(registry.call("cancel_crash_repair", Map.of("operation_id", "operation-4")).error());
+        assertEquals(List.of("operation-4"), calls.get("cancelCrashRepair"));
     }
 
     /// Ensures each instance setting tool passes its inherit flag to the launcher service.
@@ -297,7 +345,9 @@ public final class XYMLMcpToolRegistryTest {
                         case "renameInstance", "duplicateInstance", "deleteInstance", "removeMods", "setJavaVersion",
                                 "setMemory", "setJvmOptions", "setWindowOptions", "stopGame", "launchGame" ->
                                 Task.completed(Map.of("operation", method.getName()));
-                        case "getLaunchStatus" -> Map.of("operation", method.getName());
+                        case "getLaunchStatus",
+                                "planCrashSolution", "executeCrashSolution", "getCrashRepairStatus",
+                                "cancelCrashRepair" -> Map.of("operation", method.getName());
                         default -> throw new UnsupportedOperationException(method.getName());
                     };
                 });
@@ -333,5 +383,11 @@ public final class XYMLMcpToolRegistryTest {
         assertTrue(messages.contains("实例“demo”"));
         assertTrue(messages.contains("崩溃报告目录资源"));
         assertTrue(messages.contains("crash_report_path"));
+        assertTrue(messages.contains("plan_crash_solution"));
+        assertTrue(messages.contains("executable=true"));
+        assertTrue(messages.contains("execute_crash_solution"));
+        assertTrue(messages.contains("get_crash_repair_status"));
+        assertTrue(messages.contains("log_text"));
+        assertTrue(messages.contains("不得据此规划或执行修复"));
     }
 }

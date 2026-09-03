@@ -82,15 +82,16 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 
 | 任务 | 行为 |
 | --- | --- |
-| `buildMain` | 拉取并构建最新的 `origin/main` 提交。 |
-| `buildBeta` | 拉取并构建最新的 `origin/beta` 提交。 |
-| `buildAlpha` | 拉取并构建最新的 `origin/alpha` 提交。 |
-| `buildDev` | 拉取并构建最新的 `origin/dev` 提交。 |
-| `build` | 发布分支调用上方对应任务；功能分支或游离提交直接构建当前工作树。 |
+| `buildMain` | 在隔离工作树中构建本地 `main` 分支尖端。 |
+| `buildBeta` | 在隔离工作树中构建本地 `beta` 分支尖端。 |
+| `buildAlpha` | 在隔离工作树中构建本地 `alpha` 分支尖端。 |
+| `buildDev` | 在隔离工作树中构建本地 `dev` 分支尖端。 |
+| `build` | 直接构建当前工作树，包括未提交改动。 |
 | `clean` | 只清理当前工作树，不检查或拉取任何分支。 |
 | `run` | 始终重新构建 `XYML`、`XYMLCore` 和 `XYMLBoot`，然后运行当前工作树制品。 |
 
-即使当前签出的是 `main`、`beta`、`alpha` 或 `dev`，`run` 也始终将当前仓库根目录作为 XYML 的运行目录。
+即使当前签出的是 `main`、`beta`、`alpha` 或 `dev`，`build` 和 `run` 也始终使用当前仓库根目录；两者都不会切换分支或委托渠道任务。
+没有 CI 版本输入时，制品版本由当前分支与 `HEAD` 拓扑决定；未提交改动会进入制品，但不会使版本号递增。
 
 每次调用 `run` 都会禁止 `XYML`、`XYMLCore` 和 `XYMLBoot` 中的任务复用最新输出或构建缓存，包括 Java 编译、语言数据生成、
 资源处理和最终 `shadowJar`。XoyzNBT 和 XoyzMCP 使用单独的规则：成功的根 `build` 会登记一份经过完整性校验的库快照，
@@ -99,20 +100,14 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 时则使用当前项目输出。其他项目依赖保留原有复用规则，因此原生源码未变化时仍可复用已有的 XYMLL 可执行文件。
 
 `run` 始终重新构建并选择当前 `XYML/build/libs` 中的应用制品，不会复用之前根 `:build` 记录的应用 JAR、写入根结果清单或
-启动第二个 Wrapper。没有 CI 版本输入时，发布分支的本地构建版本按当前 Git 拓扑推断。
+启动第二个 Wrapper。
 子项目任务改名为 `:XYML:runCurrent`，不再使用 `run`，以免 Gradle 执行根工作流时同时选中第二个启动器进程。
 
-四个渠道任务会同时刷新 `main`、`beta`、`alpha` 和 `dev`，再于临时的游离 worktree 中构建所选提交，
-不会切换 IDEA 当前工作树。在 Windows 上，GitHub 拉取会使用已启用的 Windows 系统代理。成功的渠道构建产物会连同
-`build-info.properties` 复制到 `build/channel-builds/<branch>`；功能分支产物仍位于 `XYML/build/libs`。
+四个渠道任务只读取本地 `main`、`beta`、`alpha` 和 `dev` 引用，不会执行拉取或其他在线 Git 操作。任务会在临时的游离 worktree
+中构建所选本地分支尖端，不会切换 IDEA 当前工作树。成功的渠道构建产物会连同 `build-info.properties` 复制到
+`build/libs/<branch>`；当前工作树的 `build` 产物仍位于 `XYML/build/libs`。
 
-如需在不访问 GitHub 的情况下测试已有远程跟踪引用，可显式关闭刷新：
-
-```powershell
-.\gradlew.bat buildMain '-Pxyml.branchBuild.fetch=false'
-```
-
-Windows 系统代理不可用时，也可以通过 `-Pxyml.branchBuild.gitProxy=<proxy-url>` 显式指定代理。
+在 Windows 上，Gradle Wrapper 和嵌套渠道构建允许 Gradle 发行包及依赖下载使用已启用的 Windows 系统代理。
 
 ## 调试选项
 

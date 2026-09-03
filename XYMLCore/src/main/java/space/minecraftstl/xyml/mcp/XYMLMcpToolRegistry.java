@@ -94,15 +94,38 @@ public final class XYMLMcpToolRegistry implements McpToolProvider {
                 arguments -> Map.of("path", McpTaskExecution.execute(
                         service().getModsDirectory(requiredString(arguments, "instance_id")))));
         register(definitions, handlers, "analyze_crash",
-                "[L1] Read-only CrashReportAnalyzer diagnosis that merges log and instance crash-report rules.",
+                "[L1] Read-only combined CrashReportAnalyzer and XYAT diagnosis with structured repair solutions.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier"),
                         "log_text", nullableStringSchema(
-                                "Raw log text; filesystem references in supplied text are not followed"),
+                                "Analysis-only raw log text; supplied text can never authorize repair execution"),
                         "crash_report_path", nullableStringSchema(
                                 "Direct file name inside the instance crash-reports directory")),
                         List.of("instance_id")),
                 arguments -> McpTaskExecution.execute(service().analyzeCrash(requiredString(arguments, "instance_id"),
                         optionalString(arguments, "log_text"), optionalString(arguments, "crash_report_path"))));
+        register(definitions, handlers, "plan_crash_solution",
+                "[L1] Plans one crash-analysis solution without applying launcher or system side effects.",
+                schema(Map.of(
+                        "analysis_id", stringSchema("Server-issued crash-analysis identifier"),
+                        "solution_id", stringSchema("Solution identifier from that analysis")),
+                        List.of("analysis_id", "solution_id")),
+                arguments -> service().planCrashSolution(
+                        requiredString(arguments, "analysis_id"), requiredString(arguments, "solution_id")));
+        register(definitions, handlers, "execute_crash_solution",
+                "[L2] Executes a server-issued crash-repair plan and may cause launcher or system side effects.",
+                schema(Map.of("plan_id", stringSchema("Server-issued repair-plan identifier")),
+                        List.of("plan_id")),
+                arguments -> service().executeCrashSolution(requiredString(arguments, "plan_id")));
+        register(definitions, handlers, "get_crash_repair_status",
+                "[L1] Read-only status for a crash-repair operation.",
+                schema(Map.of("operation_id", stringSchema("Server-issued repair-operation identifier")),
+                        List.of("operation_id")),
+                arguments -> service().getCrashRepairStatus(requiredString(arguments, "operation_id")));
+        register(definitions, handlers, "cancel_crash_repair",
+                "[L2] Requests cancellation of a crash-repair operation and may interrupt repair side effects.",
+                schema(Map.of("operation_id", stringSchema("Server-issued repair-operation identifier")),
+                        List.of("operation_id")),
+                arguments -> service().cancelCrashRepair(requiredString(arguments, "operation_id")));
         register(definitions, handlers, "list_java_runtimes", "[L1] Read-only Java runtimes known to XYML.",
                 schema(Map.of()), arguments -> Map.of("runtimes", service().listJavaRuntimes()));
         register(definitions, handlers, "list_local_mods", "[L1] Read-only local mod files and enabled states.",

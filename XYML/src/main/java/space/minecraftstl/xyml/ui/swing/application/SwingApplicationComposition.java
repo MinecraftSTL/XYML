@@ -378,6 +378,18 @@ public final class SwingApplicationComposition implements AutoCloseable {
         window.setInteractionEnabled(enabled);
     }
 
+    /// Opens the Mods search page for a missing dependency while retaining shell ownership of page creation.
+    ///
+    /// @param dependencyId validated missing mod identifier used as the search query
+    public void openModSearch(String dependencyId) {
+        if (closed.get()) {
+            throw new IllegalStateException("Swing application composition is closed");
+        }
+        String query = Objects.requireNonNull(dependencyId, "dependencyId");
+        window.open();
+        window.openModSearch(query);
+    }
+
     /// Returns whether this lifecycle has released its window, timers, models, and stores.
     ///
     /// @return `true` after the first close request begins cleanup
@@ -1289,6 +1301,25 @@ public final class SwingApplicationComposition implements AutoCloseable {
                 if (!closed.get()) {
                     frame.shellPanel().navigateTo(page);
                 }
+            });
+        }
+
+        /// Routes a missing-dependency search through the shell on the Swing EDT.
+        ///
+        /// @param dependencyId validated missing mod identifier used as the search query
+        @Override
+        public void openModSearch(String dependencyId) {
+            Objects.requireNonNull(dependencyId, "dependencyId");
+            if (closed.get()) {
+                throw new IllegalStateException("Swing application window is closed");
+            }
+            EdtDispatcher.executeAndWait(() -> {
+                if (closed.get()) {
+                    throw new IllegalStateException("Swing application window is closed");
+                }
+                frame.shellPanel().openModSearch(dependencyId);
+                frame.toFront();
+                frame.requestFocusInWindow();
             });
         }
 

@@ -25,7 +25,12 @@ import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.game.Log;
+import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
+import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
+import space.minecraftstl.xyml.game.analyzer.ResultID;
+import space.minecraftstl.xyml.game.analyzer.Solver;
 import space.minecraftstl.xyml.launch.ProcessListener;
+import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.platform.ManagedProcess;
@@ -109,6 +114,9 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// Prevents frame recreation and all late asynchronous UI updates after close.
     private final AtomicBoolean closed = new AtomicBoolean();
 
+    /// Completes once no missing-dependency follow-up action remains available in this window.
+    private final CompletableFuture<@Nullable Void> followUpCompletion = new CompletableFuture<>();
+
     /// Ensures analysis starts only once even when repeated calls raise the same window.
     private final AtomicBoolean analysisStarted = new AtomicBoolean();
 
@@ -133,11 +141,23 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// Export action disabled while a bundle is being produced, accessed only on the EDT.
     private @Nullable JButton exportButton;
 
+    /// Automatic missing-dependency search action, available after a matching diagnosis completes.
+    private @Nullable JButton searchMissingDependencyButton;
+
+    /// Search solver retained for the one currently displayed analysis.
+    private @Nullable Solver missingDependencySolver;
+
+    /// Stopped search task retained for the selected solver so task factories are evaluated only once.
+    private @Nullable Task<?> missingDependencyTask;
+
     /// Current analysis stage retained for best-effort cancellation.
     private @Nullable CompletableFuture<GameCrashAnalysis> analysisFuture;
 
     /// Current export stage retained for best-effort cancellation.
     private @Nullable CompletableFuture<Path> exportFuture;
+
+    /// Current missing-dependency search stage retained for best-effort cancellation.
+    private @Nullable CompletableFuture<Boolean> searchMissingDependencyFuture;
 
     /// Last reason assigned on the EDT, retained independently of native components for headless tests.
     private String displayedReason = i18n("game.crash.reason.analyzing");
@@ -163,13 +183,37 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             LaunchOptions launchOptions,
             List<Log> logs,
             Runnable showGameLogs) {
+        return open(process, exitType, repository, manifest, launchOptions, logs, showGameLogs, null);
+    }
+
+    /// Creates, opens, and returns a production crash window with an optional missing-mod search action.
+    ///
+    /// @param process completed managed game process
+    /// @param exitType classified abnormal exit type
+    /// @param repository repository owning the launched instance
+    /// @param manifest launched game-instance manifest
+    /// @param launchOptions resolved launch configuration
+    /// @param logs current captured process-output history, copied before asynchronous work starts
+    /// @param showGameLogs action opening or raising the Swing game-log window
+    /// @param openMissingModSearch action opening the Mods search page, or null when unavailable
+    /// @return closeable crash-window handle
+    public static SwingGameCrashWindow open(
+            ManagedProcess process,
+            ProcessListener.ExitType exitType,
+            DefaultGameRepository repository,
+            GameInstanceManifest manifest,
+            LaunchOptions launchOptions,
+            List<Log> logs,
+            Runnable showGameLogs,
+            @Nullable java.util.function.Consumer<String> openMissingModSearch) {
         @Unmodifiable List<Log> copiedLogs = List.copyOf(Objects.requireNonNull(logs, "logs"));
         GameCrashWindowModel model = GameCrashWindowModel.fromLaunch(
                 exitType,
                 repository,
                 manifest,
                 launchOptions,
-                copiedLogs);
+                copiedLogs,
+                openMissingModSearch);
         ExecutorService worker = newWorker();
         GameCrashWindowActions actions = new DefaultGameCrashWindowActions(
                 process,
@@ -233,8 +277,23 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         if (currentExport != null) {
             currentExport.cancel(true);
         }
+        @Nullable CompletableFuture<Boolean> currentSearch = searchMissingDependencyFuture;
+        if (currentSearch != null) {
+            currentSearch.cancel(true);
+        }
         worker.shutdownNow();
         EdtDispatcher.execute(this::disposeOnEdt);
+    }
+
+    /// Returns a stage completed when this window no longer needs the launcher runtime for a follow-up action.
+    ///
+    /// A window with no executable Forge/Fabric missing-dependency solver completes this stage after analysis. A
+    /// window with such a solver completes it after a successful search or when the user closes the window, preserving
+    /// the launcher runtime while the search command is available.
+    ///
+    /// @return follow-up completion stage
+    public CompletionStage<@Nullable Void> followUpCompletion() {
+        return followUpCompletion;
     }
 
     /// Reports whether this window has permanently closed.
@@ -274,25 +333,30 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         if (closed.get()) {
             return;
         }
-        JPanel root = contentOnEdt();
-        startAnalysisOnEdt();
-        if (!nativePresentationEnabled || GraphicsEnvironment.isHeadless()) {
-            return;
-        }
+        try {
+            JPanel root = contentOnEdt();
+            startAnalysisOnEdt();
+            if (!nativePresentationEnabled || GraphicsEnvironment.isHeadless()) {
+                return;
+            }
 
-        if (frame == null) {
-            JFrame createdFrame = new JFrame(i18n("game.crash.title"));
-            createdFrame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
-            createdFrame.setContentPane(root);
-            createdFrame.setMinimumSize(MINIMUM_SIZE);
-            createdFrame.setSize(INITIAL_SIZE);
-            createdFrame.setLocationByPlatform(true);
-            createdFrame.addWindowListener(new CloseWindowListener(this::close));
-            frame = createdFrame;
+            if (frame == null) {
+                JFrame createdFrame = new JFrame(i18n("game.crash.title"));
+                createdFrame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+                createdFrame.setContentPane(root);
+                createdFrame.setMinimumSize(MINIMUM_SIZE);
+                createdFrame.setSize(INITIAL_SIZE);
+                createdFrame.setLocationByPlatform(true);
+                createdFrame.addWindowListener(new CloseWindowListener(this::close));
+                frame = createdFrame;
+            }
+            JFrame currentFrame = Objects.requireNonNull(frame, "frame");
+            currentFrame.setVisible(true);
+            currentFrame.toFront();
+        } catch (RuntimeException | Error failure) {
+            followUpCompletion.completeExceptionally(failure);
+            throw failure;
         }
-        JFrame currentFrame = Objects.requireNonNull(frame, "frame");
-        currentFrame.setVisible(true);
-        currentFrame.toFront();
     }
 
     /// Lazily composes the header, selectable environment details, diagnosis viewport, and actions.
@@ -409,6 +473,12 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// @return action toolbar
     private Component createActionsOnEdt() {
         EdtDispatcher.requireEventDispatchThread();
+        JButton searchMissingDependency = new JButton(i18n("game.crash.search_missing_dependency"));
+        searchMissingDependency.setName("gameCrashSearchMissingDependency");
+        searchMissingDependency.setEnabled(false);
+        searchMissingDependency.addActionListener(event -> searchMissingDependencyOnEdt());
+        searchMissingDependencyButton = searchMissingDependency;
+
         JButton export = new JButton(i18n("logwindow.export_game_crash_logs"));
         export.addActionListener(event -> exportCrashLogsOnEdt());
         exportButton = export;
@@ -424,6 +494,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         operationStatus = status;
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.TRAILING, 8, 0));
+        buttons.add(searchMissingDependency);
         buttons.add(export);
         buttons.add(logs);
         buttons.add(help);
@@ -445,7 +516,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         }
         CompletionStage<GameCrashAnalysis> stage;
         try {
-            stage = analysisService.analyze(model.capturedLogs(), model.latestLog());
+            stage = analysisService.analyze(model.logAnalyzable(), model.latestLog());
         } catch (RuntimeException failure) {
             applyAnalysisOnEdt(null, failure);
             return;
@@ -473,17 +544,110 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             progress.setVisible(false);
         }
 
+        boolean followUpAvailable = false;
         if (failure != null || result == null) {
             LOG.warning("Failed to analyze crash report", unwrapFailure(failure));
             displayedReason = reasonFormatter.format(new GameCrashAnalysis(List.of(), Set.of()));
+            missingDependencySolver = null;
+            missingDependencyTask = null;
         } else {
             displayedReason = reasonFormatter.format(result);
+            try {
+                @Nullable MissingDependencyAction action = findMissingDependencyAction(result);
+                missingDependencySolver = action == null ? null : action.solver();
+                missingDependencyTask = action == null ? null : action.task();
+                followUpAvailable = action != null;
+            } catch (RuntimeException solverFailure) {
+                LOG.warning("Failed to prepare missing-dependency search", solverFailure);
+                missingDependencySolver = null;
+                missingDependencyTask = null;
+            }
+        }
+        if (!followUpAvailable) {
+            followUpCompletion.complete(null);
+        }
+        @Nullable JButton searchButton = searchMissingDependencyButton;
+        if (searchButton != null) {
+            searchButton.setEnabled(missingDependencySolver != null);
         }
         @Nullable JEditorPane reason = reasonPane;
         if (reason != null) {
             reason.setText(htmlDocument(displayedReason));
             reason.setCaretPosition(0);
         }
+        if (followUpAvailable) {
+            searchMissingDependencyOnEdt();
+        }
+    }
+
+    /// Starts the selected automatic missing-dependency search away from the Swing EDT.
+    private void searchMissingDependencyOnEdt() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) {
+            return;
+        }
+        Solver solver = missingDependencySolver;
+        @Nullable Task<?> task = missingDependencyTask;
+        if (solver == null || task == null) {
+            return;
+        }
+        @Nullable JButton searchButton = searchMissingDependencyButton;
+        if (searchButton != null) {
+            searchButton.setEnabled(false);
+        }
+        setOperationStatusOnEdt(i18n("game.crash.search_missing_dependency") + "...");
+        CompletableFuture<Boolean> future;
+        try {
+            future = CompletableFuture.supplyAsync(task::test, worker);
+        } catch (RuntimeException schedulingFailure) {
+            finishMissingDependencySearchOnEdt(false, schedulingFailure);
+            return;
+        }
+        searchMissingDependencyFuture = future;
+        future.whenComplete((@Nullable Boolean success, @Nullable Throwable failure) ->
+                EdtDispatcher.execute(() -> finishMissingDependencySearchOnEdt(
+                        Boolean.TRUE.equals(success),
+                        failure)));
+    }
+
+    /// Publishes the terminal state of the automatic missing-dependency search.
+    ///
+    /// @param success whether the task completed successfully
+    /// @param failure task or scheduling failure, or null after a normal terminal state
+    private void finishMissingDependencySearchOnEdt(boolean success, @Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) {
+            return;
+        }
+        if (success && failure == null) {
+            setOperationStatusOnEdt(i18n("game.crash.search_missing_dependency.done"));
+            followUpCompletion.complete(null);
+            return;
+        }
+        LOG.warning("Failed to open missing-dependency search", unwrapFailure(failure));
+        setOperationStatusOnEdt(i18n("game.crash.search_missing_dependency.failed"));
+        @Nullable JButton searchButton = searchMissingDependencyButton;
+        if (searchButton != null) {
+            searchButton.setEnabled(missingDependencySolver != null);
+        }
+    }
+
+    /// Selects the first executable Forge/Fabric missing-dependency action from one analysis.
+    ///
+    /// @param analysis merged diagnosis
+    /// @return executable missing-dependency action, or null when no search task is available
+    private static @Nullable MissingDependencyAction findMissingDependencyAction(GameCrashAnalysis analysis) {
+        for (AnalyzeResult<LogAnalyzable> result : analysis.logResults()) {
+            if (result.resultId() != ResultID.FORGE_MISSING_DEPENDENCY
+                    && result.resultId() != ResultID.FABRIC_MISSING_DEPENDENCY) {
+                continue;
+            }
+            @Nullable Task<?> task = result.solver().createTask();
+            if (task != null) {
+                return new MissingDependencyAction(result.solver(), task);
+            }
+        }
+        return null;
     }
 
     /// Starts one asynchronous crash-bundle export and disables duplicate requests until completion.
@@ -634,6 +798,23 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         reportQrCodeMarker = null;
         operationStatus = null;
         exportButton = null;
+        searchMissingDependencyButton = null;
+        missingDependencySolver = null;
+        missingDependencyTask = null;
+        followUpCompletion.complete(null);
+    }
+
+    /// Pairs one missing-dependency solver with its stopped task.
+    ///
+    /// @param solver executable solver metadata
+    /// @param task stopped task created by the solver
+    @NotNullByDefault
+    private record MissingDependencyAction(Solver solver, Task<?> task) {
+        /// Validates the paired automatic action.
+        private MissingDependencyAction {
+            Objects.requireNonNull(solver, "solver");
+            Objects.requireNonNull(task, "task");
+        }
     }
 
     /// Formats ordered environment details as selectable wrapped plain text.
