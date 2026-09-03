@@ -60,6 +60,19 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
     /// @throws IOException when the target conflicts or rename reports failure
     @Override
     public void rename(GameInstanceID sourceId, GameInstanceID destinationId) throws IOException {
+        renameWithoutRefresh(sourceId, destinationId);
+        refreshRepository();
+    }
+
+    /// Renames an existing instance without refreshing the complete repository.
+    ///
+    /// This method is the precise disk-mutation phase for callers that must release instance resources before a
+    /// separate repository-wide refresh.
+    ///
+    /// @param sourceId stable existing source identifier
+    /// @param destinationId validated target identifier
+    /// @throws IOException when the target conflicts or rename reports failure
+    public void renameWithoutRefresh(GameInstanceID sourceId, GameInstanceID destinationId) throws IOException {
         GameInstanceID source = Objects.requireNonNull(sourceId, "sourceId");
         GameInstanceID destination = Objects.requireNonNull(destinationId, "destinationId");
         if (source.equals(destination)) {
@@ -70,7 +83,6 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
         if (!gameRepository.renameInstance(source, destination)) {
             throw new IOException("The instance could not be renamed");
         }
-        repository.refresh();
     }
 
     /// Copies an instance through the repository's established copy routine and refreshes the index.
@@ -81,6 +93,20 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
     /// @throws IOException when the source is missing, destination conflicts, or copying fails
     @Override
     public void duplicate(GameInstanceID sourceId, GameInstanceID destinationId, boolean copySaves) throws IOException {
+        duplicateWithoutRefresh(sourceId, destinationId, copySaves);
+        refreshRepository();
+    }
+
+    /// Duplicates an existing instance without refreshing the complete repository.
+    ///
+    /// @param sourceId stable existing source identifier
+    /// @param destinationId validated target identifier
+    /// @param copySaves whether source worlds should be copied
+    /// @throws IOException when the source is missing, destination conflicts, or copying fails
+    public void duplicateWithoutRefresh(
+            GameInstanceID sourceId,
+            GameInstanceID destinationId,
+            boolean copySaves) throws IOException {
         GameInstanceID source = Objects.requireNonNull(sourceId, "sourceId");
         GameInstanceID destination = Objects.requireNonNull(destinationId, "destinationId");
         if (source.equals(destination)) {
@@ -88,7 +114,38 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
         }
         requireDestinationAvailable(source, destination);
         repository.duplicateInstance(source, destination, copySaves);
-        repository.refresh();
+    }
+
+    /// Captures setting-derived duplicate inputs before the long filesystem stage starts.
+    ///
+    /// @param sourceId stable existing source identifier
+    /// @return immutable source-running-directory and settings snapshot
+    /// @throws IOException when pending settings writes are interrupted
+    public XYMLGameRepository.InstanceDuplicationSnapshot prepareDuplicate(GameInstanceID sourceId)
+            throws IOException {
+        return repository.prepareInstanceDuplication(Objects.requireNonNull(sourceId, "sourceId"));
+    }
+
+    /// Duplicates an existing instance from an immutable preparation snapshot without refreshing the repository.
+    ///
+    /// @param sourceId stable existing source identifier
+    /// @param destinationId validated target identifier
+    /// @param copySaves whether source worlds should be copied
+    /// @param snapshot setting-derived inputs captured before filesystem resource acquisition
+    /// @throws IOException when the source is missing, destination conflicts, or copying fails
+    public void duplicateWithoutRefresh(
+            GameInstanceID sourceId,
+            GameInstanceID destinationId,
+            boolean copySaves,
+            XYMLGameRepository.InstanceDuplicationSnapshot snapshot) throws IOException {
+        GameInstanceID source = Objects.requireNonNull(sourceId, "sourceId");
+        GameInstanceID destination = Objects.requireNonNull(destinationId, "destinationId");
+        if (source.equals(destination)) {
+            throw new IOException("The duplicate instance name must differ from the source name");
+        }
+        requireDestinationAvailable(source, destination);
+        repository.duplicateInstance(
+                source, destination, copySaves, Objects.requireNonNull(snapshot, "snapshot"));
     }
 
     /// Removes an instance through XYML's recycle-bin-aware removal routine and refreshes the index.
@@ -97,10 +154,23 @@ public final class RepositoryInstanceLifecycleService implements InstanceLifecyc
     /// @throws IOException when removal reports failure
     @Override
     public void delete(GameInstanceID sourceId) throws IOException {
+        deleteWithoutRefresh(sourceId);
+        refreshRepository();
+    }
+
+    /// Removes an existing instance without refreshing the complete repository.
+    ///
+    /// @param sourceId stable existing source identifier
+    /// @throws IOException when removal reports failure
+    public void deleteWithoutRefresh(GameInstanceID sourceId) throws IOException {
         GameInstanceID source = Objects.requireNonNull(sourceId, "sourceId");
-        if (!repository.removeInstanceFromDisk(source)) {
+        if (!repository.removeInstanceFromDiskWithoutRefresh(source)) {
             throw new IOException("The instance could not be deleted");
         }
+    }
+
+    /// Rebuilds repository manifests and instance settings after a completed disk mutation.
+    public void refreshRepository() {
         repository.refresh();
     }
 

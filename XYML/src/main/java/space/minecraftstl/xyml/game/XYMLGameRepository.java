@@ -64,11 +64,13 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -85,6 +87,20 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param instanceId the game instance ID, or `null` when only repository context is available
     @NotNullByDefault
     public record InstanceReference(XYMLGameRepository repository, @Nullable GameInstanceID instanceId) {
+    }
+
+    /// Immutable settings and path snapshot used by a staged instance duplication.
+    ///
+    /// @param sourceRunDirectory normalized effective source running directory
+    /// @param instanceSettingsJson serialized independent destination settings
+    @NotNullByDefault
+    public record InstanceDuplicationSnapshot(Path sourceRunDirectory, String instanceSettingsJson) {
+        /// Creates a validated duplication snapshot with a stable absolute source path.
+        public InstanceDuplicationSnapshot {
+            sourceRunDirectory = Objects.requireNonNull(sourceRunDirectory, "sourceRunDirectory")
+                    .toAbsolutePath().normalize();
+            Objects.requireNonNull(instanceSettingsJson, "instanceSettingsJson");
+        }
     }
 
     /// Directory under the instance root that stores XYML-managed instance metadata.
@@ -115,13 +131,13 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     private final ValueChangeSupport<GameInstanceID> selectedInstanceChanges = new ValueChangeSupport<>(this);
 
     /// Loaded instance settings indexed by instance ID.
-    private final Map<GameInstanceID, GameSettings.Instance> instanceGameSettings = new HashMap<>();
+    private final Map<GameInstanceID, GameSettings.Instance> instanceGameSettings = new ConcurrentHashMap<>();
 
     /// Instance IDs whose local game settings file has already been checked.
-    private final Set<GameInstanceID> loadedInstanceGameSettings = new HashSet<>();
+    private final Set<GameInstanceID> loadedInstanceGameSettings = ConcurrentHashMap.newKeySet();
 
     /// Instance IDs whose newer settings schema must be preserved without writing.
-    private final Set<GameInstanceID> readOnlyInstanceGameSettings = new HashSet<>();
+    private final Set<GameInstanceID> readOnlyInstanceGameSettings = ConcurrentHashMap.newKeySet();
 
     /// Thread-safe instance IDs provisionally treated as modpacks while concurrent installations are in progress.
     private final Set<GameInstanceID> beingModpackInstances = Collections.synchronizedSet(new HashSet<>());
@@ -324,27 +340,71 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         clean(getRunDirectory(instanceId));
     }
 
+    /// Renames an instance after all queued settings writes have reached disk.
+    ///
+    /// Successful renames discard settings cached under both identifiers so the destination is lazily reloaded from
+    /// its moved configuration. A provisional modpack marker follows the renamed instance.
+    ///
+    /// @param from source instance ID
+    /// @param to destination instance ID
+    /// @return whether the instance was renamed
+    @Override
+    public boolean renameInstance(GameInstanceID from, GameInstanceID to) {
+        try {
+            waitForPendingSaves("renaming", from);
+        } catch (InterruptedIOException exception) {
+            LOG.warning("Interrupted while flushing settings before renaming instance " + from, exception);
+            return false;
+        }
+
+        boolean provisionalModpack = beingModpackInstances.contains(from);
+        boolean renamed = super.renameInstance(from, to);
+        if (renamed) {
+            discardInstanceCaches(from);
+            discardInstanceCaches(to);
+            if (provisionalModpack) {
+                beingModpackInstances.add(to);
+            }
+        }
+        return renamed;
+    }
+
     /// Removes an instance from disk and drops any cached instance settings for that instance.
     ///
     /// @param instanceId instance ID
     /// @return whether the instance was removed from disk
     @Override
     public boolean removeInstanceFromDisk(GameInstanceID instanceId) {
-        if (instanceGameSettings.containsKey(instanceId)) {
-            try {
-                FileSaver.waitForAllSaves();
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                LOG.warning("Interrupted while flushing settings for instance " + instanceId, exception);
-                return false;
-            }
+        return removeInstanceFromDisk(instanceId, true);
+    }
+
+    /// Removes an instance from disk without starting the repository-wide asynchronous refresh.
+    ///
+    /// @param instanceId instance ID
+    /// @return whether the instance was removed from disk
+    @Override
+    public boolean removeInstanceFromDiskWithoutRefresh(GameInstanceID instanceId) {
+        return removeInstanceFromDisk(instanceId, false);
+    }
+
+    /// Flushes settings, removes an instance through the selected superclass entry point, and clears local caches.
+    ///
+    /// @param instanceId instance ID
+    /// @param refreshAfterDeletion whether to preserve the legacy asynchronous refresh side effect
+    /// @return whether the instance was removed from disk
+    private boolean removeInstanceFromDisk(GameInstanceID instanceId, boolean refreshAfterDeletion) {
+        try {
+            waitForPendingSaves("deleting", instanceId);
+        } catch (InterruptedIOException exception) {
+            LOG.warning("Interrupted while flushing settings before deleting instance " + instanceId, exception);
+            return false;
         }
-        boolean removed = super.removeInstanceFromDisk(instanceId);
+
+        boolean removed = refreshAfterDeletion
+                ? super.removeInstanceFromDisk(instanceId)
+                : super.removeInstanceFromDiskWithoutRefresh(instanceId);
         if (removed) {
-            instanceGameSettings.remove(instanceId);
-            loadedInstanceGameSettings.remove(instanceId);
-            readOnlyInstanceGameSettings.remove(instanceId);
-            beingModpackInstances.remove(instanceId);
+            discardInstanceCaches(instanceId);
         }
         return removed;
     }
@@ -356,6 +416,36 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     /// @param copySaves whether save data should be copied
     /// @throws IOException if the destination already exists or copying fails
     public void duplicateInstance(GameInstanceID srcId, GameInstanceID dstId, boolean copySaves) throws IOException {
+        duplicateInstance(srcId, dstId, copySaves, prepareInstanceDuplication(srcId));
+    }
+
+    /// Captures every setting-derived input needed before a potentially long instance copy.
+    ///
+    /// @param srcId source instance ID
+    /// @return immutable duplication snapshot
+    /// @throws IOException if pending saves are interrupted or settings cannot be serialized
+    public InstanceDuplicationSnapshot prepareInstanceDuplication(GameInstanceID srcId) throws IOException {
+        waitForPendingSaves("duplicating", srcId);
+        Path sourceRunDirectory = getRunDirectory(srcId);
+        GameSettings.Instance newGameSettings = copyInstanceGameSettings(srcId);
+        return new InstanceDuplicationSnapshot(
+                sourceRunDirectory,
+                LauncherSettings.SETTINGS_GSON.toJson(newGameSettings));
+    }
+
+    /// Duplicates an instance using inputs captured before its precise filesystem resources were acquired.
+    ///
+    /// @param srcId source instance ID
+    /// @param dstId destination instance ID
+    /// @param copySaves whether save data should be copied
+    /// @param snapshot settings-derived inputs captured under their configuration resources
+    /// @throws IOException if the destination exists, the snapshot is invalid, or copying fails
+    public void duplicateInstance(
+            GameInstanceID srcId,
+            GameInstanceID dstId,
+            boolean copySaves,
+            InstanceDuplicationSnapshot snapshot) throws IOException {
+        InstanceDuplicationSnapshot checkedSnapshot = Objects.requireNonNull(snapshot, "snapshot");
         Path srcDir = getInstanceRoot(srcId);
         Path dstDir = getInstanceRoot(dstId);
 
@@ -384,25 +474,58 @@ public final class XYMLGameRepository extends DefaultGameRepository {
 
         JsonUtils.writeToJsonFile(toJson, fromManifest.withId(dstId).withJar(dstId));
 
+        Path srcGameDir = checkedSnapshot.sourceRunDirectory();
         boolean copyOriginalGameDir;
         try {
-            copyOriginalGameDir = !Files.isSameFile(getRunDirectory(srcId), getInstanceRoot(srcId));
+            copyOriginalGameDir = !Files.isSameFile(srcGameDir, srcDir);
         } catch (IOException e) {
             copyOriginalGameDir = true;
         }
 
-        Path srcGameDir = getRunDirectory(srcId);
-
-        GameSettings.Instance newGameSettings = copyInstanceGameSettings(srcId);
+        @Nullable GameSettings.Instance newGameSettings;
+        try {
+            newGameSettings = LauncherSettings.SETTINGS_GSON.fromJson(
+                    checkedSnapshot.instanceSettingsJson(), GameSettings.Instance.class);
+        } catch (JsonParseException exception) {
+            throw new IOException("Invalid captured instance settings", exception);
+        }
+        if (newGameSettings == null) {
+            throw new IOException("Captured instance settings are empty");
+        }
         newGameSettings.getOverrideProperties().add(GameSettings.PROPERTY_RUNNING_DIRECTORY);
         newGameSettings.runningDirectoryProperty().setValue("");
         initInstanceGameSettings(dstId, newGameSettings);
         saveGameSettingsSync(dstId);
 
-        Path dstGameDir = getRunDirectory(dstId);
-
         if (copyOriginalGameDir)
-            FileUtils.copyDirectory(srcGameDir, dstGameDir, path -> Modpack.acceptFile(path, blackList, null));
+            FileUtils.copyDirectory(srcGameDir, dstDir, path -> Modpack.acceptFile(path, blackList, null));
+    }
+
+    /// Waits until every settings write queued before this lifecycle mutation has completed.
+    ///
+    /// @param operation present-participle operation name used in interruption diagnostics
+    /// @param instanceId instance whose lifecycle mutation is about to begin
+    /// @throws InterruptedIOException when the caller is interrupted while waiting
+    private static void waitForPendingSaves(String operation, GameInstanceID instanceId) throws InterruptedIOException {
+        try {
+            FileSaver.waitForAllSaves();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            InterruptedIOException interrupted = new InterruptedIOException(
+                    "Interrupted while " + operation + " instance " + instanceId);
+            interrupted.initCause(exception);
+            throw interrupted;
+        }
+    }
+
+    /// Discards every repository-local cache entry associated with one instance identifier.
+    ///
+    /// @param instanceId instance identifier whose cached state is obsolete
+    private void discardInstanceCaches(GameInstanceID instanceId) {
+        instanceGameSettings.remove(instanceId);
+        loadedInstanceGameSettings.remove(instanceId);
+        readOnlyInstanceGameSettings.remove(instanceId);
+        beingModpackInstances.remove(instanceId);
     }
 
     /// Copies explicit instance settings or derives a new instance from the effective parent preset.
