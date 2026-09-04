@@ -31,6 +31,7 @@ import space.minecraftstl.xyml.library.nbt.validation.NBTStructureValidator;
 import space.minecraftstl.xyml.library.nbt.validation.NBTValidationException;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -471,6 +472,72 @@ public final class NBTEditor<E extends NBTElement> {
             throw error(NBTEditException.Reason.TYPE_MISMATCH, "Content replacement requires the same tag type");
         }
         return replace(target, replacement);
+    }
+
+    /// Returns the tag types to which the selected node can currently be converted.
+    ///
+    /// The current type is always present. The result accounts for both the conversion matrix and
+    /// the selected node's parent constraint, so every different type in the result can be passed
+    /// directly to [#convertType(NBTNode, TagType)].
+    ///
+    /// @param target current tag node
+    /// @return immutable list of currently valid target types
+    /// @throws NBTEditException if the handle is stale or does not identify a tag
+    public synchronized @Unmodifiable List<TagType<?>> getConvertibleTypes(NBTNode target)
+            throws NBTEditException {
+        NBTElement element = requireNode(target);
+        if (!(element instanceof Tag tag)) {
+            throw error(NBTEditException.Reason.INVALID_TARGET, "Only tags have a convertible type");
+        }
+        if (element == root || tag.getParent() == null) {
+            return List.of(tag.getType());
+        }
+        return NBTTagConverter.getConvertibleTypes(tag).stream()
+                .filter(type -> acceptsReplacementType(tag.getParent(), type))
+                .toList();
+    }
+
+    /// Converts a tag to another compatible NBT type as one transactional edit.
+    ///
+    /// Conversion constructs and validates a detached replacement before mutating the working tree.
+    /// The original name and position are retained. Selecting the current type is a no-op and does
+    /// not advance the revision or create a history entry.
+    ///
+    /// @param target current tag node
+    /// @param targetType requested target type
+    /// @return converted node in the new revision, or the current node for a no-op
+    /// @throws NBTEditException if the conversion or the parent container constraint rejects the type
+    public synchronized NBTNode convertType(NBTNode target, TagType<?> targetType)
+            throws NBTEditException {
+        NBTElement element = requireNode(target);
+        TagType<?> requestedType = Objects.requireNonNull(targetType, "targetType");
+        if (!(element instanceof Tag source)) {
+            throw error(NBTEditException.Reason.INVALID_TARGET, "Only tags can change type");
+        }
+        if (source.getType() == requestedType) {
+            return describe(source, target.address());
+        }
+        if (element == root || source.getParent() == null) {
+            throw error(NBTEditException.Reason.ROOT_OPERATION,
+                    "The root type cannot change because it defines the editor's root contract");
+        }
+        if (!acceptsReplacementType(source.getParent(), requestedType)) {
+            throw error(NBTEditException.Reason.TYPE_MISMATCH,
+                    "The parent container does not accept the requested tag type");
+        }
+        Tag replacement = NBTTagConverter.convert(source, requestedType);
+        return replace(target, replacement);
+    }
+
+    /// Converts the tag at an address to another compatible NBT type.
+    ///
+    /// @param address target address
+    /// @param targetType requested target type
+    /// @return converted node in the new revision, or the current node for a no-op
+    /// @throws NBTEditException if the address or conversion is invalid
+    public synchronized NBTNode convertType(NBTAddress address, TagType<?> targetType)
+            throws NBTEditException {
+        return convertType(resolve(address), targetType);
     }
 
     /// Replaces a scalar value using the strict parser for its existing tag type.
@@ -1103,6 +1170,24 @@ public final class NBTEditor<E extends NBTElement> {
         } else if (parent instanceof ArrayTag<?, ?, ?, ?> array && array.getElementType() != tag.getType()) {
             throw error(NBTEditException.Reason.TYPE_MISMATCH, "The destination array requires another tag type");
         }
+    }
+
+    /// Returns whether an existing parent can accept a replacement with the requested type.
+    ///
+    /// @param parent existing parent
+    /// @param type replacement type
+    /// @return whether replacement preserves the parent invariant
+    private static boolean acceptsReplacementType(NBTParent<?> parent, TagType<?> type) {
+        if (parent instanceof CompoundTag) {
+            return true;
+        }
+        if (parent instanceof ListTag<?> list) {
+            return list.getElementType() == type;
+        }
+        if (parent instanceof ArrayTag<?, ?, ?, ?> array) {
+            return array.getElementType() == type;
+        }
+        return parent instanceof Chunk && type == TagType.COMPOUND;
     }
 
     private static Tag parseScalar(ValueTag<?> source, String text) {
