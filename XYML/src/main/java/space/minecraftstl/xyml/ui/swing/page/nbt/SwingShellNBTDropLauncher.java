@@ -23,7 +23,6 @@ import space.minecraftstl.xyml.nbt.NBTFileType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.shell.AppShellFrame;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
-import space.minecraftstl.xyml.ui.swing.shell.ShellPageId;
 
 import javax.swing.JComponent;
 import java.awt.event.WindowAdapter;
@@ -33,18 +32,13 @@ import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 
-/// Installs the default-instance-workspace route for dropped NBT documents.
+/// Installs the application-wide route for dropped NBT documents.
 ///
 /// The route performs lexical file-family matching only and delegates all document I/O and modeless-window
-/// ownership to [SwingNBTEditorLauncher]. It is deliberately disabled on every side destination, including
-/// the explicit instance-list page, to match the former launcher's root-page behavior.
+/// ownership to the [SwingNBTEditorLauncher] shared by every entry point in the containing application window.
 @NotNullByDefault
 public final class SwingShellNBTDropLauncher implements AutoCloseable {
-    /// Supplies the currently selected side destination, or null for the default workspace.
-    private final Supplier<@Nullable ShellPageId> selectedPageSupplier;
-
     /// Existing direct-path NBT editor command.
     private final Consumer<Path> openCommand;
 
@@ -69,12 +63,11 @@ public final class SwingShellNBTDropLauncher implements AutoCloseable {
         Executor executor = Objects.requireNonNull(ioExecutor, "ioExecutor");
         AtomicReference<@Nullable SwingShellNBTDropLauncher> result = new AtomicReference<>();
         EdtDispatcher.executeAndWait(() -> {
-            SwingNBTEditorLauncher editor = SwingNBTEditorLauncher.createForDirectPaths(
+            SwingNBTEditorLauncher editor = SwingNBTEditorLauncher.installShared(
                     owner.shellPanel(),
                     executor);
             SwingShellNBTDropLauncher launcher = install(
                     owner.shellPanel(),
-                    owner.shellPanel()::selectedPage,
                     editor::open,
                     editor::close);
             owner.addWindowListener(new WindowAdapter() {
@@ -95,19 +88,16 @@ public final class SwingShellNBTDropLauncher implements AutoCloseable {
     /// Installs an injected launcher boundary for headless tests.
     ///
     /// @param target shell drop target
-    /// @param selectedPageSupplier current side-destination supplier
     /// @param openCommand direct-path NBT editor command
     /// @param closeCommand editor lifecycle close command
     /// @return installed launcher lifecycle
     static SwingShellNBTDropLauncher install(
             JComponent target,
-            Supplier<@Nullable ShellPageId> selectedPageSupplier,
             Consumer<Path> openCommand,
             Runnable closeCommand) {
         EdtDispatcher.requireEventDispatchThread();
         return new SwingShellNBTDropLauncher(
                 target,
-                selectedPageSupplier,
                 openCommand,
                 closeCommand);
     }
@@ -115,21 +105,18 @@ public final class SwingShellNBTDropLauncher implements AutoCloseable {
     /// Creates and registers one default-workspace route on the EDT.
     ///
     /// @param target shell drop target
-    /// @param selectedPageSupplier current side-destination supplier
     /// @param openCommand direct-path NBT editor command
     /// @param closeCommand editor lifecycle close command
     private SwingShellNBTDropLauncher(
             JComponent target,
-            Supplier<@Nullable ShellPageId> selectedPageSupplier,
             Consumer<Path> openCommand,
             Runnable closeCommand) {
         EdtDispatcher.requireEventDispatchThread();
-        this.selectedPageSupplier = Objects.requireNonNull(selectedPageSupplier, "selectedPageSupplier");
         this.openCommand = Objects.requireNonNull(openCommand, "openCommand");
         this.closeCommand = Objects.requireNonNull(closeCommand, "closeCommand");
         dropRegistration = ShellFileDropHandler.register(
                 Objects.requireNonNull(target, "target"),
-                this::supportsOnDefaultWorkspace,
+                this::supports,
                 this::open);
     }
 
@@ -146,13 +133,12 @@ public final class SwingShellNBTDropLauncher implements AutoCloseable {
         });
     }
 
-    /// Returns whether one path is supported while the default instance workspace is visible.
+    /// Returns whether one path is supported anywhere in the application shell.
     ///
     /// @param source normalized dropped path
     /// @return whether the path can be opened from the current shell page
-    private boolean supportsOnDefaultWorkspace(Path source) {
+    private boolean supports(Path source) {
         return !closed
-                && selectedPageSupplier.get() == null
                 && NBTFileType.supports(Objects.requireNonNull(source, "source"));
     }
 
@@ -162,7 +148,7 @@ public final class SwingShellNBTDropLauncher implements AutoCloseable {
     private void open(Path source) {
         EdtDispatcher.requireEventDispatchThread();
         Path candidate = Objects.requireNonNull(source, "source");
-        if (supportsOnDefaultWorkspace(candidate)) {
+        if (supports(candidate)) {
             openCommand.accept(candidate);
         }
     }

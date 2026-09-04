@@ -106,4 +106,24 @@ final class SwingNBTEditorInteractions implements NBTEditorInteractions {
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
     }
+
+    /// Shows a second explicit warning before clearing one fixed Region chunk root.
+    ///
+    /// @param currentFile current Region source
+    /// @param localIndex fixed chunk slot
+    /// @return whether clearing was confirmed
+    @Override
+    public boolean confirmClearChunk(Path currentFile, int localIndex) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(currentFile, "currentFile");
+        if (localIndex < 0 || localIndex >= 1024) {
+            throw new IndexOutOfBoundsException("localIndex: " + localIndex);
+        }
+        return JOptionPane.showConfirmDialog(
+                owner,
+                strings.clearChunkMessage(localIndex),
+                strings.clearChunkTitle(),
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
 }

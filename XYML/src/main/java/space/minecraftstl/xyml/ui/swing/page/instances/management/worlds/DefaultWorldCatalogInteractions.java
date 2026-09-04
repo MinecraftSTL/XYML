@@ -59,9 +59,6 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
     /// Caller-owned executor for filesystem and platform desktop work.
     private final Executor executor;
 
-    /// Lazily created modeless editor dedicated to direct world level-data paths.
-    private @Nullable SwingNBTEditorLauncher levelDataEditor;
-
     /// Creates the production interaction implementation.
     ///
     /// @param strings stable visible text
@@ -232,10 +229,10 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
     public void openLevelData(Component owner, Path levelDataPath) {
         EdtDispatcher.requireEventDispatchThread();
         Component checkedOwner = Objects.requireNonNull(owner, "owner");
-        if (levelDataEditor == null) {
-            levelDataEditor = SwingNBTEditorLauncher.createForDirectPaths(checkedOwner, executor);
+        @Nullable SwingNBTEditorLauncher editor = SwingNBTEditorLauncher.sharedFor(checkedOwner);
+        if (editor != null) {
+            editor.open(Objects.requireNonNull(levelDataPath, "levelDataPath"));
         }
-        levelDataEditor.open(Objects.requireNonNull(levelDataPath, "levelDataPath"));
     }
 
     /// Copies one world-detail value on the EDT.
@@ -338,16 +335,6 @@ public final class DefaultWorldCatalogInteractions implements WorldCatalogIntera
                 Objects.requireNonNull(detail, "detail"),
                 Objects.requireNonNull(title, "title"),
                 JOptionPane.ERROR_MESSAGE);
-    }
-
-    /// Closes the lazily owned modeless level-data editor, if any.
-    @Override
-    public void close() {
-        @Nullable SwingNBTEditorLauncher editor = levelDataEditor;
-        levelDataEditor = null;
-        if (editor != null) {
-            editor.close();
-        }
     }
 
     /// Opens one directory outside the EDT and completes the caller future.

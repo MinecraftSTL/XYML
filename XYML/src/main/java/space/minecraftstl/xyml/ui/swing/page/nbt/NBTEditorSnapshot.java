@@ -67,4 +67,14 @@ public record NBTEditorSnapshot(
     public boolean busy() {
         return status.busy();
     }
+
+    /// Returns whether the current document still requires a save attempt.
+    ///
+    /// A partial Region save remains recoverable even when undo returns the editor to its original
+    /// savepoint, because already committed chunks may still differ from that in-memory state.
+    ///
+    /// @return whether save should remain available
+    public boolean requiresSave() {
+        return dirty || status == NBTEditorStatus.PARTIAL_SAVE;
+    }
 }

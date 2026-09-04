@@ -106,6 +106,21 @@ public final class NBTDocumentService {
         }, ioExecutor);
     }
 
+    /// Closes one document on the configured background executor without publishing pending edits.
+    ///
+    /// @param document document whose file session must be released
+    /// @return future completed after all owned file handles are closed
+    public CompletableFuture<Void> close(NBTDocument document) {
+        NBTDocument selected = Objects.requireNonNull(document, "document");
+        return CompletableFuture.runAsync(() -> {
+            try {
+                selected.close();
+            } catch (IOException failure) {
+                throw new CompletionException(failure);
+            }
+        }, ioExecutor);
+    }
+
     /// Runs one non-null in-memory document operation on the configured background executor.
     ///
     /// The operation remains responsible for synchronizing access to its document. This scheduling

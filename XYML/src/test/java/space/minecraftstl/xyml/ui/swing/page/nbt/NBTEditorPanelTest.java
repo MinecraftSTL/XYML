@@ -19,6 +19,8 @@ package space.minecraftstl.xyml.ui.swing.page.nbt;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLightLaf;
+import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
+import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
 import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -35,16 +37,23 @@ import javax.swing.AbstractButton;
 import javax.swing.ImageIcon;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JProgressBar;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
+import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.JTree;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.imageio.ImageIO;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
@@ -80,6 +89,11 @@ final class NBTEditorPanelTest {
     void usesPureEmptyStateLabels() {
         assertEquals("No NBT file open.", NBTEditorStrings.english().emptyText());
         assertEquals("未打开 NBT 文件。", NBTEditorStrings.simplifiedChinese().emptyText());
+        assertTrue(NBTEditorStrings.english().fileFilter().contains("*.nbt"));
+        assertEquals("new_tag", NBTEditorStrings.traditionalChinese().defaultTagName());
+        assertEquals(
+                "Editing was interrupted. Reload this file before continuing.",
+                NBTEditorStrings.english().editUncertainText());
     }
 
     /// Exercises the complete headless page workflow without performing NBT I/O on the EDT.
@@ -123,6 +137,26 @@ final class NBTEditorPanelTest {
             assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
             JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
             NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+            JTabbedPane tabs = findNamed(panel, "nbtEditorTabs", JTabbedPane.class);
+            assertEquals(2, tabs.getTabCount());
+            assertEquals("Fields", tabs.getTitleAt(0));
+            assertEquals("Subtree SNBT", tabs.getTitleAt(1));
+            JPopupMenu popup = Objects.requireNonNull(tree.getComponentPopupMenu(), "tree popup");
+            assertEquals(7, popup.getComponentCount());
+            assertEquals("Add tag", ((JMenuItem) popup.getComponent(0)).getText());
+            assertEquals("Copy", ((JMenuItem) popup.getComponent(1)).getText());
+            assertEquals("Paste", ((JMenuItem) popup.getComponent(2)).getText());
+            assertEquals("Delete", ((JMenuItem) popup.getComponent(4)).getText());
+            assertEquals("Move up", ((JMenuItem) popup.getComponent(5)).getText());
+            assertEquals("Move down", ((JMenuItem) popup.getComponent(6)).getText());
+            assertEquals("save", panel.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                    .get(KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK)));
+            assertEquals("undo", panel.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                    .get(KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK)));
+            assertEquals("redo", panel.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                    .get(KeyStroke.getKeyStroke(KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK)));
+            assertEquals("delete", tree.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                    .get(KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0)));
             assertEquals(0, model.getRoot().materializedChildCount());
             tree.setSelectionPath(model.pathForAddress(List.of(0)));
             Component rendered = tree.getCellRenderer().getTreeCellRendererComponent(
@@ -143,8 +177,40 @@ final class NBTEditorPanelTest {
             AbstractButton apply = findNamed(panel, "nbtEditorApply", AbstractButton.class);
             assertNull(apply.getClientProperty("JButton.buttonType"));
             apply.doClick();
+            assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
+            assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+        });
+        assertEquals(1, ioExecutor.pendingCount());
+        ioExecutor.runNext();
+        flushEdt();
+
+        onEdt(() -> {
+            JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
             assertTrue(controller.snapshot().dirty());
-            assertTrue(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+            assertTrue(
+                    findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled(),
+                    findNamed(panel, "nbtEditorEditStatus", JLabel.class).getToolTipText());
+            assertEquals("41", value.getText());
+            AbstractButton undo = findNamed(panel, "nbtEditorUndo", AbstractButton.class);
+            AbstractButton redo = findNamed(panel, "nbtEditorRedo", AbstractButton.class);
+            assertTrue(undo.isEnabled());
+            undo.doClick();
+        });
+        ioExecutor.runNext();
+        flushEdt();
+        onEdt(() -> {
+            JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+            assertFalse(controller.snapshot().dirty());
+            assertEquals("1", value.getText());
+            AbstractButton redo = findNamed(panel, "nbtEditorRedo", AbstractButton.class);
+            assertTrue(redo.isEnabled());
+            redo.doClick();
+        });
+        ioExecutor.runNext();
+        flushEdt();
+        onEdt(() -> {
+            JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+            assertTrue(controller.snapshot().dirty());
             assertEquals("41", value.getText());
             assertPaintsOpaqueContent(panel);
         });
@@ -159,6 +225,7 @@ final class NBTEditorPanelTest {
         flushEdt();
         assertEquals(second.toAbsolutePath().normalize(), controller.snapshot().file());
         assertFalse(controller.snapshot().dirty());
+        ioExecutor.runAll();
 
         onEdt(() -> {
             JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
@@ -168,6 +235,8 @@ final class NBTEditorPanelTest {
             value.setText("6");
             findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
         });
+        ioExecutor.runNext();
+        flushEdt();
         interactions.confirmDiscard = false;
         onEdt(() -> findNamed(panel, "nbtEditorBack", AbstractButton.class).doClick());
         assertEquals(0, closeRequests.get());
@@ -188,6 +257,25 @@ final class NBTEditorPanelTest {
     @Test
     void rejectsSynchronousNbtIconDecodingOnTheEdt() {
         assertThrows(IllegalStateException.class, () -> onEdt(NBTTreeCellRenderer::loadIcons));
+    }
+
+    /// Disables Swing HTML interpretation for untrusted NBT names and scalar values.
+    @Test
+    void rendersNbtTextWithoutHtmlInterpretation() {
+        JLabel rendered = onEdt(() -> {
+            NBTTreeCellRenderer renderer = new NBTTreeCellRenderer(NBTEditorStrings.english());
+            return (JLabel) renderer.getTreeCellRendererComponent(
+                    new JTree(),
+                    "<html><img src='https://invalid.example/image'>",
+                    false,
+                    false,
+                    true,
+                    0,
+                    false);
+        });
+
+        assertEquals(Boolean.TRUE, rendered.getClientProperty("html.disable"));
+        assertNull(rendered.getClientProperty("html"));
     }
 
     /// Renders the real editor under both production FlatLaf modes for visual regression review.
@@ -236,6 +324,8 @@ final class NBTEditorPanelTest {
                 findNamed(panel, "nbtEditorValue", JTextArea.class).setText("2");
                 findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
             });
+            ioExecutor.runNext();
+            flushEdt();
             writeTag(source, new CompoundTag().addInt("value", 99));
             onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
             ioExecutor.runNext();
@@ -252,6 +342,318 @@ final class NBTEditorPanelTest {
         }
     }
 
+    /// Retains invalid scalar and name drafts while background validation disables the form.
+    @Test
+    void retainsRejectedFieldDraftsAcrossBackgroundValidation() throws Exception {
+        Path source = temporaryDirectory.resolve("invalid-fields.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1).addInt("other", 2));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                new RecordingInteractions(source),
+                () -> { }));
+        try {
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(0)));
+                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                value.setText("not-an-int");
+                findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
+                assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
+                assertEquals("not-an-int", value.getText());
+                assertFalse(value.isEnabled());
+            });
+            ioExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                assertEquals("not-an-int", value.getText());
+                assertEquals("error", value.getClientProperty("JComponent.outline"));
+                JTextField name = findNamed(panel, "nbtEditorNodeName", JTextField.class);
+                name.setText("other");
+                findNamed(panel, "nbtEditorRename", AbstractButton.class).doClick();
+                assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
+                assertEquals("other", name.getText());
+                assertFalse(name.isEnabled());
+            });
+            ioExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                assertEquals("other", findNamed(panel, "nbtEditorNodeName", JTextField.class).getText());
+                assertFalse(controller.snapshot().dirty());
+            });
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            flushEdt();
+        }
+    }
+
+    /// Keeps Region slots fixed and requires explicit confirmation before clearing a chunk root.
+    @Test
+    void protectsFixedRegionStructureAndChunkClearing() throws Exception {
+        Path source = temporaryDirectory.resolve("r.0.0.mca");
+        ChunkRegion region = new ChunkRegion();
+        region.setChunk(1023, new Chunk(new CompoundTag().addInt("DataVersion", 3953)));
+        NBTCodec.of().writeRegion(source, region);
+        ManualExecutor ioExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        RecordingInteractions interactions = new RecordingInteractions(source);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                interactions,
+                () -> { }));
+        try {
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of()));
+                assertEquals("Region",
+                        findNamed(panel, "nbtEditorNodeType", JTextField.class).getText());
+                tree.setSelectionPath(model.pathForAddress(List.of(1023)));
+                assertEquals("Chunk",
+                        findNamed(panel, "nbtEditorNodeType", JTextField.class).getText());
+                assertFalse(findNamed(panel, "nbtEditorValue", JTextArea.class).isEnabled());
+                assertFalse(findNamed(panel, "nbtEditorSnbt", JTextArea.class).isEnabled());
+                assertFalse(findNamed(panel, "nbtEditorDelete", AbstractButton.class).isEnabled());
+                assertFalse(findNamed(panel, "nbtEditorMoveUp", AbstractButton.class).isEnabled());
+                assertFalse(findNamed(panel, "nbtEditorMoveDown", AbstractButton.class).isEnabled());
+                Component rendered = tree.getCellRenderer().getTreeCellRendererComponent(
+                        tree,
+                        tree.getLastSelectedPathComponent(),
+                        true,
+                        false,
+                        false,
+                        1,
+                        false);
+                assertEquals("Chunk", ((JLabel) rendered).getToolTipText());
+
+                tree.setSelectionPath(model.pathForAddress(List.of(1023, 0)));
+                assertEquals("Chunk root",
+                        findNamed(panel, "nbtEditorNodeName", JTextField.class).getText());
+                assertFalse(findNamed(panel, "nbtEditorSnbt", JTextArea.class).isEnabled());
+                AbstractButton delete = findNamed(panel, "nbtEditorDelete", AbstractButton.class);
+                assertTrue(delete.isEnabled());
+                delete.doClick();
+                assertFalse(controller.snapshot().dirty());
+            });
+            assertEquals(1, interactions.clearChunkConfirmations);
+
+            interactions.confirmClearChunk = true;
+            onEdt(() -> findNamed(panel, "nbtEditorDelete", AbstractButton.class).doClick());
+            assertEquals(2, interactions.clearChunkConfirmations);
+            ioExecutor.runNext();
+            flushEdt();
+            assertTrue(controller.snapshot().dirty());
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                NBTEditorTreeNode chunk = (NBTEditorTreeNode) model.pathForAddress(List.of(1023))
+                        .getLastPathComponent();
+                assertEquals(0, chunk.childCount());
+            });
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            flushEdt();
+        }
+    }
+
+    /// Shows localized validation beside the SNBT editor while retaining technical hover detail.
+    @Test
+    void showsLocalizedSnbtValidationFeedback() throws Exception {
+        Path source = temporaryDirectory.resolve("invalid-snbt.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        ManualExecutor backgroundExecutor = new ManualExecutor();
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.simplifiedChinese(),
+                new RecordingInteractions(source),
+                () -> { },
+                backgroundExecutor));
+        try {
+            backgroundExecutor.runNext();
+            flushEdt();
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(0)));
+                JTabbedPane tabs = findNamed(panel, "nbtEditorTabs", JTabbedPane.class);
+                tabs.setSelectedIndex(1);
+                assertEquals("正在加载子树 SNBT...",
+                        findNamed(panel, "nbtEditorSnbtStatus", JLabel.class).getText());
+                assertFalse(findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).isEnabled());
+            });
+            assertEquals(1, backgroundExecutor.pendingCount());
+            backgroundExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JTextArea snbt = findNamed(panel, "nbtEditorSnbt", JTextArea.class);
+                assertTrue(snbt.isEnabled());
+                snbt.setText("{broken");
+                findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).doClick();
+                assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
+                assertEquals("{broken", snbt.getText());
+                assertFalse(snbt.isEnabled());
+            });
+            ioExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JTextArea snbt = findNamed(panel, "nbtEditorSnbt", JTextArea.class);
+                JLabel status = findNamed(panel, "nbtEditorSnbtStatus", JLabel.class);
+                assertEquals("{broken", snbt.getText());
+                assertEquals("请输入符合所选 NBT 类型的值。", status.getText());
+                assertNotNull(status.getToolTipText());
+                assertEquals("error", snbt.getClientProperty("JComponent.outline"));
+                assertFalse(controller.snapshot().dirty());
+            });
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            flushEdt();
+        }
+    }
+
+    /// Loads SNBT only for its visible tab and rejects a completion from an obsolete selection.
+    @Test
+    void loadsSnbtLazilyAndDiscardsObsoleteSelectionResults() throws Exception {
+        Path source = temporaryDirectory.resolve("lazy-snbt.dat");
+        writeTag(source, new CompoundTag().addInt("first", 1).addInt("second", 2));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualExecutor backgroundExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                new RecordingInteractions(source),
+                () -> { },
+                backgroundExecutor));
+        try {
+            assertEquals(1, backgroundExecutor.pendingCount());
+            backgroundExecutor.runNext();
+            flushEdt();
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            flushEdt();
+
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(0)));
+                assertFalse(findNamed(panel, "nbtEditorSnbt", JTextArea.class).isEnabled());
+            });
+            assertEquals(0, backgroundExecutor.pendingCount());
+
+            onEdt(() -> {
+                JTabbedPane tabs = findNamed(panel, "nbtEditorTabs", JTabbedPane.class);
+                tabs.setSelectedIndex(1);
+                assertEquals("Loading subtree SNBT...",
+                        findNamed(panel, "nbtEditorSnbtStatus", JLabel.class).getText());
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(1)));
+            });
+            assertEquals(2, backgroundExecutor.pendingCount());
+
+            backgroundExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                assertEquals("", findNamed(panel, "nbtEditorSnbt", JTextArea.class).getText());
+                assertEquals("Loading subtree SNBT...",
+                        findNamed(panel, "nbtEditorSnbtStatus", JLabel.class).getText());
+            });
+            backgroundExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JTextArea snbt = findNamed(panel, "nbtEditorSnbt", JTextArea.class);
+                assertEquals("2I", snbt.getText().trim());
+                assertTrue(snbt.isEnabled());
+                assertEquals(" ", findNamed(panel, "nbtEditorSnbtStatus", JLabel.class).getText());
+            });
+        } finally {
+            panel.close();
+            backgroundExecutor.runAll();
+            ioExecutor.runAll();
+            flushEdt();
+        }
+    }
+
+    /// Inserts a large serialized subtree over multiple EDT turns before enabling replacement.
+    @Test
+    void batchesLargeSnbtInsertionOnTheEdt() throws Exception {
+        Path source = temporaryDirectory.resolve("large-snbt.dat");
+        writeTag(source, new CompoundTag().addByteArray("large", new byte[100_000]));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualExecutor backgroundExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                new RecordingInteractions(source),
+                () -> { },
+                backgroundExecutor));
+        try {
+            backgroundExecutor.runNext();
+            flushEdt();
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            flushEdt();
+            onEdt(() -> findNamed(panel, "nbtEditorTabs", JTabbedPane.class).setSelectedIndex(1));
+            backgroundExecutor.runNext();
+            flushEdt();
+
+            int firstChunkLength = onEdt(() ->
+                    findNamed(panel, "nbtEditorSnbt", JTextArea.class).getText().length());
+            assertTrue(firstChunkLength > 0);
+            assertTrue(firstChunkLength < 100_000);
+            assertFalse(onEdt(() ->
+                    findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).isEnabled()));
+
+            int remainingTurns = 100;
+            while (!onEdt(() ->
+                    findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).isEnabled())
+                    && remainingTurns-- > 0) {
+                flushEdt();
+            }
+            assertTrue(onEdt(() ->
+                    findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).isEnabled()));
+            String complete = onEdt(() ->
+                    findNamed(panel, "nbtEditorSnbt", JTextArea.class).getText());
+            assertTrue(complete.length() > 250_000);
+            assertTrue(complete.contains("large"));
+        } finally {
+            panel.close();
+            backgroundExecutor.runAll();
+            ioExecutor.runAll();
+            flushEdt();
+        }
+    }
+
     /// Paints a stable desktop-sized surface and verifies that the panel is not blank.
     ///
     /// @param panel panel to render
@@ -261,6 +663,8 @@ final class NBTEditorPanelTest {
         BufferedImage image = new BufferedImage(1000, 700, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = image.createGraphics();
         try {
+            graphics.setColor(panel.getBackground());
+            graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
             panel.printAll(graphics);
         } finally {
             graphics.dispose();
@@ -326,21 +730,31 @@ final class NBTEditorPanelTest {
         Rectangle save = componentBounds(panel, findNamed(panel, "nbtEditorSave", AbstractButton.class));
         Rectangle value = componentBounds(panel, findNamed(panel, "nbtEditorValueScroll", JScrollPane.class));
         Rectangle apply = componentBounds(panel, findNamed(panel, "nbtEditorApply", AbstractButton.class));
+        Rectangle listTypeLabel = componentBounds(
+                panel,
+                findNamed(panel, "nbtEditorListTypeLabel", JLabel.class));
+        Rectangle listType = componentBounds(panel, findNamed(panel, "nbtEditorListType", JComponent.class));
         assertFalse(back.intersects(open));
         assertFalse(open.intersects(reload));
         assertFalse(reload.intersects(save));
         assertTrue(apply.y - value.getMaxY() <= 16.0D);
+        assertFalse(listTypeLabel.intersects(listType));
+        assertTrue(listType.y >= listTypeLabel.getMaxY());
         assertTrue(tree.getWidth() >= 300);
         assertTrue(findNamed(panel, "nbtEditorValue", JTextArea.class).getWidth() >= 200);
 
         BufferedImage image = new BufferedImage(1000, 700, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = image.createGraphics();
         try {
+            graphics.setColor(panel.getBackground());
+            graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
             panel.printAll(graphics);
         } finally {
             graphics.dispose();
         }
         assertTrue((image.getRGB(500, 350) >>> 24) != 0);
+        assertEquals(255, image.getRGB(0, 0) >>> 24);
+        assertEquals(255, image.getRGB(999, 699) >>> 24);
         return image;
     }
 
@@ -494,6 +908,12 @@ final class NBTEditorPanelTest {
         /// Whether dirty-document replacement is confirmed.
         private boolean confirmDiscard = true;
 
+        /// Whether destructive chunk-root clearing is confirmed.
+        private boolean confirmClearChunk;
+
+        /// Number of destructive chunk-root confirmations requested.
+        private int clearChunkConfirmations;
+
         /// Creates interactions with one initial chooser result.
         ///
         /// @param chosenFile initial chooser result
@@ -528,6 +948,21 @@ final class NBTEditorPanelTest {
         public boolean confirmDiscardChanges(Path currentFile) {
             Objects.requireNonNull(currentFile, "currentFile");
             return confirmDiscard;
+        }
+
+        /// Returns the configured chunk-root decision and records that confirmation was requested.
+        ///
+        /// @param source Region source
+        /// @param localIndex fixed chunk slot
+        /// @return configured confirmation
+        @Override
+        public boolean confirmClearChunk(Path source, int localIndex) {
+            Objects.requireNonNull(source, "source");
+            if (localIndex < 0 || localIndex >= 1024) {
+                throw new AssertionError("Invalid local chunk index: " + localIndex);
+            }
+            clearChunkConfirmations++;
+            return confirmClearChunk;
         }
     }
 }
