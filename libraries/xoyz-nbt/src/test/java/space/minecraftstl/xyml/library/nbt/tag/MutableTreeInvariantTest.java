@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -76,6 +77,25 @@ public final class MutableTreeInvariantTest {
         assertEquals(0, list.getTag(0).getIndex());
         assertEquals(1, list.getTag(1).getIndex());
         assertEquals(2, list.getTag(2).getIndex());
+    }
+
+    /// Ensures named insertion validates every condition before renaming a detached candidate.
+    @Test
+    void namedInsertionRejectsAtomically() {
+        CompoundTag root = new CompoundTag().addInt("taken", 1);
+        IntTag candidate = new IntTag(2).setName("before");
+
+        assertThrows(IndexOutOfBoundsException.class, () -> root.insertTag(2, "after", candidate));
+        assertEquals("before", candidate.getName());
+        assertNull(candidate.getParent());
+        assertEquals(-1, candidate.getIndex());
+        assertEquals(1, root.size());
+
+        assertThrows(IllegalArgumentException.class, () -> root.insertTag(0, "taken", candidate));
+        assertEquals("before", candidate.getName());
+        assertNull(candidate.getParent());
+        assertEquals(-1, candidate.getIndex());
+        assertEquals(1, root.size());
     }
 
     /// Ensures array values and lazy child tags move together.

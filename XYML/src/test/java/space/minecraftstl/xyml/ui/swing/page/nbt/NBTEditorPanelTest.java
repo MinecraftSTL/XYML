@@ -22,7 +22,12 @@ import com.formdev.flatlaf.FlatLightLaf;
 import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
 import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
+import space.minecraftstl.xyml.library.nbt.tag.ByteArrayTag;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.tag.IntTag;
+import space.minecraftstl.xyml.library.nbt.tag.ListTag;
+import space.minecraftstl.xyml.library.nbt.tag.StringTag;
+import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -35,7 +40,9 @@ import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 
 import javax.swing.AbstractButton;
 import javax.swing.ImageIcon;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JProgressBar;
@@ -44,9 +51,11 @@ import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.JTextPane;
 import javax.swing.JTree;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
+import javax.swing.text.StyleConstants;
 import javax.imageio.ImageIO;
 import java.awt.Component;
 import java.awt.Container;
@@ -70,9 +79,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.zip.GZIPOutputStream;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -397,6 +408,189 @@ final class NBTEditorPanelTest {
         }
     }
 
+    /// Exposes safe type conversion, per-element array editing, endpoint menus, and String preview.
+    @Test
+    void supportsAdvancedStructuredEditingWithoutLosingDrafts() throws Exception {
+        Path source = temporaryDirectory.resolve("advanced.dat");
+        ListTag<IntTag> numbers = new ListTag<>(TagType.INT);
+        numbers.addTag(new IntTag(1)).addTag(new IntTag(2));
+        CompoundTag discontinuous = new CompoundTag().addInt("0", 0).addInt("2", 2);
+        writeTag(source, new CompoundTag()
+                .addInt("number", 255)
+                .addByteArray("bytes", new byte[]{0, 127, -1})
+                .addString("message", "A\u00a7cB")
+                .addTag("numbers", numbers)
+                .addTag("map", discontinuous));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualExecutor backgroundExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor), SwingUiDispatcher.INSTANCE);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                new RecordingInteractions(source),
+                () -> { },
+                backgroundExecutor));
+        try {
+            backgroundExecutor.runNext();
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            flushEdt();
+
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(0)));
+                JComboBox<?> type = findNamed(panel, "nbtEditorNodeType", JComboBox.class);
+                assertTrue(type.isEnabled());
+                type.setSelectedItem(TagType.STRING.name());
+                assertTrue(findNamed(panel, "nbtEditorTypeApply", AbstractButton.class).isEnabled());
+                findNamed(panel, "nbtEditorTypeApply", AbstractButton.class).doClick();
+            });
+            ioExecutor.runNext();
+            flushEdt();
+            assertEquals("255", ((StringTag) ((CompoundTag) Objects.requireNonNull(
+                    controller.snapshot().document(), "document").rootSnapshot()).get("number")).getValue());
+
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(1)));
+                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                assertFalse(value.isEnabled());
+                assertFalse(findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).isEnabled());
+            });
+            backgroundExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(1)));
+                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                assertEquals("[0, 127, -1]", value.getText());
+                assertFalse(value.isEnabled());
+                assertFalse(findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).isEnabled());
+            });
+            ByteArrayTag bytes = (ByteArrayTag) ((CompoundTag) Objects.requireNonNull(
+                    controller.snapshot().document(), "document").rootSnapshot()).get("bytes");
+            assertArrayEquals(new byte[]{0, 127, -1}, bytes.getArray());
+
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(1, 0)));
+                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                assertEquals("0", value.getText());
+                assertTrue(value.isEnabled());
+                value.setText("-1");
+                findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
+            });
+            ioExecutor.runNext();
+            flushEdt();
+            bytes = (ByteArrayTag) ((CompoundTag) Objects.requireNonNull(
+                    controller.snapshot().document(), "document").rootSnapshot()).get("bytes");
+            assertArrayEquals(new byte[]{-1, 127, -1}, bytes.getArray());
+
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(2)));
+                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                value.setText("A\u00a7cB");
+                value.setCaretPosition(1);
+                findNamed(panel, "nbtEditorSectionSign", AbstractButton.class).doClick();
+                assertEquals("A\u00a7\u00a7cB", value.getText());
+                value.setText("A\u00a7cB");
+                findNamed(panel, "nbtEditorFormattingPreviewToggle", JCheckBox.class).doClick();
+                JTextPane preview = findNamed(panel, "nbtEditorFormattingPreview", JTextPane.class);
+                assertEquals("AB", preview.getText());
+                assertEquals(new java.awt.Color(0xFF5555), StyleConstants.getForeground(
+                        preview.getStyledDocument().getCharacterElement(1).getAttributes()));
+
+                tree.setSelectionPath(model.pathForAddress(List.of(3, 0)));
+                JPopupMenu popup = Objects.requireNonNull(tree.getComponentPopupMenu(), "tree popup");
+                assertFalse(popup.getComponent(5).isVisible());
+                assertTrue(popup.getComponent(6).isVisible());
+                assertTrue(popup.getComponent(6).isEnabled());
+                tree.setSelectionPath(model.pathForAddress(List.of(3, 1)));
+                assertTrue(popup.getComponent(5).isVisible());
+                assertTrue(popup.getComponent(5).isEnabled());
+                assertFalse(popup.getComponent(6).isVisible());
+
+                tree.setSelectionPath(model.pathForAddress(List.of(4)));
+                JComboBox<?> type = findNamed(panel, "nbtEditorNodeType", JComboBox.class);
+                assertEquals(1, type.getItemCount());
+                assertEquals(TagType.COMPOUND.name(), type.getSelectedItem());
+                tree.setSelectionPath(model.pathForAddress(List.of()));
+                assertFalse(type.isEnabled());
+            });
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            backgroundExecutor.runAll();
+            flushEdt();
+        }
+    }
+
+    /// Ignores late copy and delete completions after the user changes the selected row.
+    @Test
+    void ignoresLateContextCommandResultsAfterSelectionChanges() throws Exception {
+        Path source = temporaryDirectory.resolve("late-context-command.dat");
+        writeTag(source, new CompoundTag().addInt("first", 1).addInt("second", 2));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                new RecordingInteractions(source),
+                () -> { }));
+        try {
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            flushEdt();
+
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(0)));
+                findNamed(panel, "nbtEditorCopy", AbstractButton.class).doClick();
+                assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
+                tree.setSelectionPath(model.pathForAddress(List.of(1)));
+            });
+            ioExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTEditorTreeNode selected = (NBTEditorTreeNode) tree.getLastSelectedPathComponent();
+                assertEquals("second", selected.node().getName());
+                assertNotEquals("Copied", findNamed(panel, "nbtEditorEditStatus", JLabel.class).getText());
+            });
+
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(0)));
+                findNamed(panel, "nbtEditorDelete", AbstractButton.class).doClick();
+                assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
+                tree.setSelectionPath(model.pathForAddress(List.of(1)));
+            });
+            ioExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTEditorTreeNode selected = (NBTEditorTreeNode) tree.getLastSelectedPathComponent();
+                assertEquals("second", selected.node().getName());
+                assertEquals("second", findNamed(panel, "nbtEditorNodeName", JTextField.class).getText());
+            });
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            flushEdt();
+        }
+    }
+
     /// Keeps Region slots fixed and requires explicit confirmation before clearing a chunk root.
     @Test
     void protectsFixedRegionStructureAndChunkClearing() throws Exception {
@@ -423,10 +617,10 @@ final class NBTEditorPanelTest {
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of()));
                 assertEquals("Region",
-                        findNamed(panel, "nbtEditorNodeType", JTextField.class).getText());
+                        findNamed(panel, "nbtEditorNodeType", JComboBox.class).getSelectedItem());
                 tree.setSelectionPath(model.pathForAddress(List.of(1023)));
                 assertEquals("Chunk",
-                        findNamed(panel, "nbtEditorNodeType", JTextField.class).getText());
+                        findNamed(panel, "nbtEditorNodeType", JComboBox.class).getSelectedItem());
                 assertFalse(findNamed(panel, "nbtEditorValue", JTextArea.class).isEnabled());
                 assertFalse(findNamed(panel, "nbtEditorSnbt", JTextArea.class).isEnabled());
                 assertFalse(findNamed(panel, "nbtEditorDelete", AbstractButton.class).isEnabled());
@@ -599,6 +793,55 @@ final class NBTEditorPanelTest {
             ioExecutor.runAll();
             flushEdt();
         }
+    }
+
+    /// Releases a completed text load rejected by a changed backing revision so the row can retry.
+    @Test
+    void releasesRejectedCurrentTextLoad() {
+        ManualExecutor backgroundExecutor = new ManualExecutor();
+        JTextArea target = onEdt(() -> new JTextArea());
+        NBTAsyncTextLoader loader = onEdt(() -> new NBTAsyncTextLoader(target, 4, backgroundExecutor));
+        AtomicReference<Boolean> accepted = new AtomicReference<>(true);
+        onEdt(() -> loader.reset("row"));
+        onEdt(() -> loader.load(
+                "row",
+                () -> "stale",
+                accepted::get,
+                () -> { },
+                () -> { },
+                failure -> { }));
+        accepted.set(false);
+        backgroundExecutor.runNext();
+        flushEdt();
+        assertFalse(onEdt(loader::isLoading));
+
+        accepted.set(true);
+        onEdt(() -> loader.load(
+                "row",
+                () -> "fresh",
+                accepted::get,
+                () -> { },
+                () -> { },
+                failure -> { }));
+        assertTrue(onEdt(loader::isLoading));
+        backgroundExecutor.runNext();
+        flushEdt();
+        assertEquals("fresh", onEdt(() -> target.getText()));
+
+        AtomicInteger acceptedCalls = new AtomicInteger();
+        onEdt(() -> loader.reset("chunked"));
+        onEdt(() -> loader.load(
+                "chunked",
+                () -> "0123456789",
+                () -> acceptedCalls.getAndIncrement() < 2,
+                () -> { },
+                () -> { },
+                failure -> { }));
+        backgroundExecutor.runNext();
+        flushEdt();
+        flushEdt();
+        assertFalse(onEdt(loader::isLoading));
+        onEdt(loader::close);
     }
 
     /// Inserts a large serialized subtree over multiple EDT turns before enabling replacement.

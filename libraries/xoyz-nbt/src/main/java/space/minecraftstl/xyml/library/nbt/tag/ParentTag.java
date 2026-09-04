@@ -17,11 +17,13 @@
 package space.minecraftstl.xyml.library.nbt.tag;
 
 import space.minecraftstl.xyml.library.nbt.NBTParent;
+import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.internal.ArrayAccessor;
 import org.intellij.lang.annotations.Flow;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.UnknownNullability;
 
 import java.util.*;
@@ -203,7 +205,9 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
                 throw new IllegalArgumentException("The tag has an invalid parent index");
             }
             if (oldParent instanceof ParentTag<?> oldParentTag) {
-                if (tag.getIndex() >= oldParentTag.size() || oldParentTag.getTag(tag.getIndex()) != tag) {
+                if (tag.getIndex() >= oldParentTag.size()
+                        || tag.getIndex() >= oldParentTag.tags.length
+                        || oldParentTag.tags[tag.getIndex()] != tag) {
                     throw new IllegalArgumentException("The tag has an invalid parent index");
                 }
             }
@@ -254,18 +258,179 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
     /// @throws IllegalArgumentException if an ownership, cycle, or index invariant would fail
     final void validateTagBatch(Iterable<? extends T> candidates) throws IllegalArgumentException {
         Objects.requireNonNull(candidates, "candidates");
-        Set<Tag> identities = Collections.newSetFromMap(new IdentityHashMap<>());
-        int index = 0;
+        List<T> snapshot = new ArrayList<>();
         for (T candidate : candidates) {
-            validateTagForAttach(candidate);
+            snapshot.add(Objects.requireNonNull(candidate, "candidate"));
+        }
+        validateTagBatchSnapshot(snapshot);
+    }
+
+    /// Validates a materialized batch against a non-mutating simulation of all affected containers.
+    ///
+    /// The simulation follows the compatibility semantics of [#addTag(Tag)] while keeping every
+    /// real parent untouched. It is intentionally identity-based: two equal-but-distinct tags are
+    /// valid candidates, whereas attaching the same object twice would create an ambiguous move.
+    ///
+    /// @param candidates materialized candidate children in submission order
+    /// @throws IllegalArgumentException if any candidate or simulated intermediate state is invalid
+    private void validateTagBatchSnapshot(List<? extends T> candidates) throws IllegalArgumentException {
+        Set<Tag> identities = Collections.newSetFromMap(new IdentityHashMap<>());
+        IdentityHashMap<Tag, @Nullable NBTParent<?>> simulatedParents = new IdentityHashMap<>();
+        for (T candidate : candidates) {
             if (!identities.add(candidate)) {
                 throw new IllegalArgumentException("A child cannot occur more than once in a batch");
             }
-            if (candidate.getParent() == this && candidate.getIndex() != index) {
-                throw new IllegalArgumentException("A batch cannot reorder attached children");
-            }
-            index++;
+            validateTagForAttach(candidate);
+            validateCurrentOwnership(candidate);
+            simulatedParents.put(candidate, candidate.getParent());
         }
+
+        IdentityHashMap<NBTParent<?>, List<Tag>> simulatedChildren = new IdentityHashMap<>();
+        List<Tag> destination = snapshotChildren(this);
+        simulatedChildren.put(this, destination);
+        @Nullable TagType<?> listElementType = this instanceof ListTag<?> list
+                ? list.getElementType()
+                : null;
+
+        for (T candidate : candidates) {
+            @Nullable NBTParent<?> oldParent = simulatedParents.get(candidate);
+            if (oldParent == this) {
+                if (!removeIdentity(destination, candidate)) {
+                    throw new IllegalArgumentException("The parent-child ownership invariant is inconsistent");
+                }
+                destination.add(candidate);
+                continue;
+            }
+
+            if (oldParent != null) {
+                List<Tag> source = simulatedChildren.computeIfAbsent(oldParent,
+                        ParentTag::snapshotChildren);
+                if (!removeIdentity(source, candidate)) {
+                    // A Compound replacement may have detached a candidate that is also later
+                    // present in this batch. The real addTag sequence permits that candidate to
+                    // be attached again, so treat it as detached in the simulation as well.
+                    if (simulatedParents.get(candidate) != null) {
+                        throw new IllegalArgumentException(
+                                "The parent-child ownership invariant is inconsistent");
+                    }
+                }
+                simulatedParents.put(candidate, null);
+            }
+
+            if (this instanceof ListTag<?> list) {
+                if (listElementType != null && candidate.getType() != listElementType) {
+                    throw new IllegalArgumentException("Cannot add a tag of type " + candidate.getType()
+                            + " to a list of type " + listElementType);
+                }
+                if (listElementType == null) {
+                    listElementType = candidate.getType();
+                }
+            } else if (this instanceof ArrayTag<?, ?, ?, ?> array) {
+                if (candidate.getType() != array.getElementType()) {
+                    throw new IllegalArgumentException("Cannot add a tag of type " + candidate.getType()
+                            + " to an array of type " + array.getElementType());
+                }
+            } else if (this instanceof CompoundTag) {
+                Tag existing = findNamed(destination, candidate.getName());
+                if (existing != null) {
+                    destination.remove(existing);
+                    simulatedParents.put(existing, null);
+                }
+            }
+            destination.add(candidate);
+            simulatedParents.put(candidate, this);
+        }
+    }
+
+    /// Validates one candidate's current parent/index metadata without materializing lazy tags.
+    ///
+    /// @param tag candidate tag
+    /// @throws IllegalArgumentException if its ownership metadata is inconsistent
+    private static void validateCurrentOwnership(Tag tag) throws IllegalArgumentException {
+        @Nullable NBTParent<?> parent = tag.getParent();
+        int index = tag.getIndex();
+        if (parent == null) {
+            if (index != -1) {
+                throw new IllegalArgumentException("A detached tag must have index -1");
+            }
+            return;
+        }
+        if (index < 0) {
+            throw new IllegalArgumentException("An attached tag must have a non-negative index");
+        }
+        if (parent instanceof ParentTag<?> parentTag) {
+            if (index >= parentTag.size() || index >= parentTag.tags.length || parentTag.tags[index] != tag) {
+                throw new IllegalArgumentException("The parent-child ownership invariant is inconsistent");
+            }
+        } else if (parent instanceof Chunk chunk) {
+            if (index != 0 || chunk.getRootTag() != tag) {
+                throw new IllegalArgumentException("The chunk-child ownership invariant is inconsistent");
+            }
+        } else {
+            throw new IllegalArgumentException("Unsupported NBT parent implementation");
+        }
+    }
+
+    /// Captures materialized children of a parent without triggering lazy array-tag creation.
+    ///
+    /// @param parent source or destination parent
+    /// @return identity-preserving child snapshot
+    private static List<Tag> snapshotChildren(NBTParent<?> parent) throws IllegalArgumentException {
+        List<Tag> children = new ArrayList<>();
+        if (parent instanceof ParentTag<?> parentTag) {
+            Set<Tag> identities = Collections.newSetFromMap(new IdentityHashMap<>());
+            for (int index = 0; index < parentTag.size(); index++) {
+                @Nullable Tag child = index < parentTag.tags.length ? parentTag.tags[index] : null;
+                if (child != null) {
+                    validateCurrentOwnership(child);
+                    if (!identities.add(child)) {
+                        throw new IllegalArgumentException("A parent contains the same child more than once");
+                    }
+                    children.add(child);
+                } else if (!(parentTag instanceof ArrayTag<?, ?, ?, ?>)) {
+                    throw new IllegalArgumentException("A non-array parent contains a null child");
+                }
+            }
+            return children;
+        }
+        if (parent instanceof Chunk chunk) {
+            @Nullable CompoundTag root = chunk.getRootTag();
+            if (root != null) {
+                validateCurrentOwnership(root);
+                children.add(root);
+            }
+            return children;
+        }
+        throw new IllegalArgumentException("Unsupported NBT parent implementation");
+    }
+
+    /// Removes one identity from a simulated child list.
+    ///
+    /// @param children simulated children
+    /// @param candidate identity to remove
+    /// @return whether the identity was found
+    private static boolean removeIdentity(List<Tag> children, Tag candidate) {
+        for (int index = 0; index < children.size(); index++) {
+            if (children.get(index) == candidate) {
+                children.remove(index);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Finds a simulated Compound child by its current name.
+    ///
+    /// @param children simulated children
+    /// @param name candidate name
+    /// @return matching child, or `null`
+    private static @Nullable Tag findNamed(List<Tag> children, String name) {
+        for (Tag child : children) {
+            if (child.getName().equals(name)) {
+                return child;
+            }
+        }
+        return null;
     }
 
     /// Adds the `tag` to this tag.
@@ -290,8 +455,9 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
         // every successor that shifts into the current cursor.
         List<T> snapshot = new ArrayList<>();
         for (T tag : tags) {
-            snapshot.add(tag);
+            snapshot.add(Objects.requireNonNull(tag, "tag"));
         }
+        validateTagBatchSnapshot(snapshot);
         for (T tag : snapshot) {
             this.addTag(tag);
         }
@@ -303,7 +469,13 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
     @SafeVarargs
     public final void addTags(@Flow(sourceIsContainer = true, targetIsContainer = true)
                               T... tags) throws IllegalArgumentException {
+        Objects.requireNonNull(tags, "tags");
+        List<T> snapshot = new ArrayList<>(tags.length);
         for (T tag : tags) {
+            snapshot.add(Objects.requireNonNull(tag, "tag"));
+        }
+        validateTagBatchSnapshot(snapshot);
+        for (T tag : snapshot) {
             this.addTag(tag);
         }
     }

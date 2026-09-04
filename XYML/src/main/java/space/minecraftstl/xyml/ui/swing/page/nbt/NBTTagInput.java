@@ -91,13 +91,17 @@ final class NBTTagInput {
             } else if (selectedType == TagType.LONG) {
                 result = new LongTag(Long.parseLong(requiredNumber(text)));
             } else if (selectedType == TagType.FLOAT) {
-                float parsed = Float.parseFloat(requiredNumber(text));
+                String numeric = requiredNumber(text);
+                rejectHexadecimalLiteral(numeric);
+                float parsed = Float.parseFloat(numeric);
                 if (!Float.isFinite(parsed)) {
                     throw new NumberFormatException("non-finite float");
                 }
                 result = new FloatTag(parsed);
             } else if (selectedType == TagType.DOUBLE) {
-                double parsed = Double.parseDouble(requiredNumber(text));
+                String numeric = requiredNumber(text);
+                rejectHexadecimalLiteral(numeric);
+                double parsed = Double.parseDouble(numeric);
                 if (!Double.isFinite(parsed)) {
                     throw new NumberFormatException("non-finite double");
                 }
@@ -120,7 +124,11 @@ final class NBTTagInput {
     /// @return parsed detached tag
     /// @throws IOException if parsing fails or any trailing token remains
     static Tag parseSnbt(String input) throws IOException {
-        return SNBTCodec.of().readTag(Objects.requireNonNull(input, "input"));
+        String source = Objects.requireNonNull(input, "input");
+        if (containsHexadecimalLiteral(source)) {
+            throw new IOException("Hexadecimal numeric literals are not supported in the editor");
+        }
+        return SNBTCodec.of().readTag(source);
     }
 
     /// Serializes one detached subtree for the selected-subtree tab and clipboard.
@@ -155,5 +163,72 @@ final class NBTTagInput {
             throw new NumberFormatException("empty numeric value");
         }
         return trimmed;
+    }
+
+    /// Rejects Java hexadecimal literals in the decimal Add form.
+    ///
+    /// The Add dialog and structured value editor both use decimal-only numeric input and must not
+    /// silently interpret a hexadecimal floating value.
+    ///
+    /// @param value trimmed numeric input
+    /// @throws NumberFormatException when an optional sign is followed by `0x` or `0X`
+    private static void rejectHexadecimalLiteral(String value) {
+        String text = Objects.requireNonNull(value, "value");
+        int offset = text.startsWith("+") || text.startsWith("-") ? 1 : 0;
+        if (text.length() >= offset + 2 && text.regionMatches(true, offset, "0x", 0, 2)) {
+            throw new NumberFormatException("hexadecimal input requires hexadecimal mode");
+        }
+    }
+
+    /// Detects hexadecimal numeric tokens outside quoted SNBT strings.
+    ///
+    /// This presentation-layer restriction leaves the reusable SNBT codec unchanged while
+    /// preventing the editor's subtree text field from silently accepting hexadecimal numbers.
+    ///
+    /// @param source complete SNBT source
+    /// @return whether the source contains an unquoted hexadecimal numeric token
+    private static boolean containsHexadecimalLiteral(String source) {
+        boolean quoted = false;
+        char quote = '\0';
+        boolean escaped = false;
+        for (int i = 0; i < source.length(); i++) {
+            char character = source.charAt(i);
+            if (quoted) {
+                if (escaped) {
+                    escaped = false;
+                } else if (character == '\\') {
+                    escaped = true;
+                } else if (character == quote) {
+                    quoted = false;
+                }
+                continue;
+            }
+            if (character == '\'' || character == '"') {
+                quoted = true;
+                quote = character;
+                continue;
+            }
+
+            int tokenStart = character == '+' || character == '-' ? i + 1 : i;
+            if (tokenStart + 1 < source.length()
+                    && source.charAt(tokenStart) == '0'
+                    && (source.charAt(tokenStart + 1) == 'x' || source.charAt(tokenStart + 1) == 'X')
+                    && (i == 0 || !isUnquotedTokenPart(source.charAt(i - 1)))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Returns whether a character can continue an unquoted SNBT token.
+    ///
+    /// @param character source character
+    /// @return whether the character is part of an unquoted token
+    private static boolean isUnquotedTokenPart(char character) {
+        return Character.isLetterOrDigit(character)
+                || character == '_'
+                || character == '-'
+                || character == '+'
+                || character == '.';
     }
 }

@@ -40,6 +40,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
+import java.util.List;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
@@ -50,6 +51,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.zip.GZIPOutputStream;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -466,6 +468,44 @@ final class NBTEditorControllerTest {
         String subtree = ui.call(() -> controller.subtreeSnbt(node(controller, NBTAddress.root())));
         assertNotNull(subtree);
         assertTrue(subtree.contains("renamed"));
+        ui.run(controller::close);
+    }
+
+    /// Routes conversion and complete-array fields through revision-aware editor transactions.
+    @Test
+    void appliesGenericTypeConversionAndCompleteArrayValues() throws Exception {
+        Path source = temporaryDirectory.resolve("advanced-values.dat");
+        writeTag(source, new CompoundTag()
+                .addInt("number", 255)
+                .addByteArray("bytes", new byte[]{0, 1})
+                .addTag("map", new CompoundTag().addInt("0", 0).addInt("2", 2)));
+        ManualUiDispatcher ui = new ManualUiDispatcher();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(Runnable::run), ui);
+        ui.run(() -> controller.open(source));
+        ui.runNext();
+
+        NBTEditorTreeNode root = node(controller, NBTAddress.root());
+        assertEquals(List.of(TagType.COMPOUND), ui.call(() -> controller.convertibleTypes(root)));
+        NBTEditorTreeNode map = node(controller, NBTAddress.root().appendName("map"));
+        assertEquals(List.of(TagType.COMPOUND), ui.call(() -> controller.convertibleTypes(map)));
+
+        NBTEditorTreeNode number = node(controller, NBTAddress.root().appendName("number"));
+        assertTrue(ui.call(() -> controller.convertibleTypes(number)).contains(TagType.STRING));
+        assertTrue(ui.call(() -> controller.convertType(number, TagType.STRING)).applied());
+        assertEquals("255", ((CompoundTag) requiredDocument(controller).rootSnapshot()).getString("number"));
+
+        NBTEditorTreeNode bytes = node(controller, NBTAddress.root().appendName("bytes"));
+        assertEquals("[0, 1]", ui.call(() -> controller.structuredValue(bytes)));
+        assertFalse(ui.call(() -> controller.applyStructuredValue(bytes, "[1, 2]")).applied());
+        ByteArrayTag edited = (ByteArrayTag) ((CompoundTag) requiredDocument(controller).rootSnapshot()).get("bytes");
+        assertArrayEquals(new byte[]{0, 1}, edited.getArray());
+        assertTrue(ui.call(() -> controller.applyValueEdit(
+                node(controller, NBTAddress.root().appendName("bytes").appendIndex(0)),
+                "-1")).applied());
+        assertArrayEquals(new byte[]{-1, 1},
+                ((ByteArrayTag) ((CompoundTag) requiredDocument(controller).rootSnapshot()).get("bytes"))
+                        .getArray());
         ui.run(controller::close);
     }
 

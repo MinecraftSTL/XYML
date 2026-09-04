@@ -266,6 +266,16 @@ final class NBTEditorStrings {
         return locale.i18n("swing.nbt_editor.value");
     }
 
+    /// Returns the Minecraft formatting-preview toggle label.
+    String formattingPreviewText() {
+        return locale.i18n("swing.nbt_editor.formatting_preview");
+    }
+
+    /// Returns the primitive-array load-failure text.
+    String arrayLoadFailedText() {
+        return locale.i18n("swing.nbt_editor.array_load_failed");
+    }
+
     /// Returns the apply command text.
     String applyText() {
         return locale.i18n("swing.nbt_editor.apply");
@@ -326,6 +336,11 @@ final class NBTEditorStrings {
     /// Returns the asynchronous subtree-loading status.
     String loadingSnbtText() {
         return locale.i18n("swing.nbt_editor.loading_snbt");
+    }
+
+    /// Returns the asynchronous primitive-array loading status.
+    String loadingValueText() {
+        return locale.i18n("swing.nbt_editor.loading_value");
     }
 
     /// Returns the subtree-load failure status.

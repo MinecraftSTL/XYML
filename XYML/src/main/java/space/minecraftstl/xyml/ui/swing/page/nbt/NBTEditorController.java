@@ -30,6 +30,7 @@ import space.minecraftstl.xyml.library.nbt.io.NBTPartialSaveException;
 import space.minecraftstl.xyml.library.nbt.tag.ListTag;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
+import space.minecraftstl.xyml.library.nbt.tag.ValueTag;
 import space.minecraftstl.xyml.nbt.NBTDocument;
 import space.minecraftstl.xyml.nbt.NBTDocumentService;
 import space.minecraftstl.xyml.observable.Subscription;
@@ -221,6 +222,26 @@ public final class NBTEditorController implements AutoCloseable {
                 : NBTValueEditResult.failure(Objects.requireNonNull(result.errorMessage(), "errorMessage"));
     }
 
+    /// Applies one decimal scalar value.
+    ///
+    /// @param node selected current row
+    /// @param text proposed decimal value text
+    /// @return transactional command result
+    public NBTEditResult applyStructuredValue(NBTEditorTreeNode node, String text) {
+        String value = Objects.requireNonNull(text, "text");
+        return mutate(node, (editor, target) -> setStructuredValue(editor, target, value));
+    }
+
+    /// Converts one selected tag through the generic XoyzNBT conversion transaction.
+    ///
+    /// @param node selected current row
+    /// @param targetType requested target type
+    /// @return transactional command result
+    public NBTEditResult convertType(NBTEditorTreeNode node, TagType<?> targetType) {
+        TagType<?> selectedType = Objects.requireNonNull(targetType, "targetType");
+        return mutate(node, (editor, target) -> editor.convertType(target, selectedType));
+    }
+
     /// Renames one Compound child.
     ///
     /// @param node selected current row
@@ -355,6 +376,30 @@ public final class NBTEditorController implements AutoCloseable {
     public CompletableFuture<NBTEditResult> applyValueEditAsync(NBTEditorTreeNode node, String text) {
         String value = Objects.requireNonNull(text, "text");
         return mutateAsync(node, (editor, target) -> editor.setScalar(target, value));
+    }
+
+    /// Applies one decimal scalar field on the background executor.
+    ///
+    /// @param node selected current row
+    /// @param text proposed decimal value text
+    /// @return future result completed on the UI dispatcher
+    public CompletableFuture<NBTEditResult> applyStructuredValueAsync(
+            NBTEditorTreeNode node,
+            String text) {
+        String value = Objects.requireNonNull(text, "text");
+        return mutateAsync(node, (editor, target) -> setStructuredValue(editor, target, value));
+    }
+
+    /// Converts one selected tag on the background executor.
+    ///
+    /// @param node selected current row
+    /// @param targetType requested target type
+    /// @return future result completed on the UI dispatcher
+    public CompletableFuture<NBTEditResult> convertTypeAsync(
+            NBTEditorTreeNode node,
+            TagType<?> targetType) {
+        TagType<?> selectedType = Objects.requireNonNull(targetType, "targetType");
+        return mutateAsync(node, (editor, target) -> editor.convertType(target, selectedType));
     }
 
     /// Renames one Compound child on the background executor.
@@ -521,6 +566,56 @@ public final class NBTEditorController implements AutoCloseable {
         }
     }
 
+    /// Returns one structured decimal scalar value after validating the revision-bound node.
+    ///
+    /// @param node selected current row
+    /// @return editable value text, or `null` for a non-value container
+    public @Nullable String structuredValue(NBTEditorTreeNode node) {
+        NBTEditorTreeNode selected = Objects.requireNonNull(node, "node");
+        @Nullable TagType<?> type = selected.node().getType();
+        if (type == null) {
+            return null;
+        }
+        @Nullable NBTDocument document = currentDocument(selected);
+        if (document == null) {
+            return null;
+        }
+        try {
+            NBTElement detached = document.editor().snapshot(selected.node());
+            if (detached instanceof ValueTag<?> value) {
+                return NBTStructuredValueCodec.formatScalar(type, value.getValue().toString());
+            }
+            if (detached instanceof Tag tag && NBTStructuredValueCodec.isPrimitiveArray(type)) {
+                return NBTStructuredValueCodec.formatArray(tag);
+            }
+            return null;
+        } catch (NBTEditException failure) {
+            return null;
+        }
+    }
+
+    /// Returns value-, parent-, and root-aware conversion targets from the generic editor.
+    ///
+    /// @param node selected current tag row
+    /// @return immutable targets including the current type, or an empty list for a non-tag row
+    public @Unmodifiable List<TagType<?>> convertibleTypes(NBTEditorTreeNode node) {
+        requireUiThread();
+        NBTEditorTreeNode selected = Objects.requireNonNull(node, "node");
+        @Nullable TagType<?> type = selected.node().getType();
+        if (type == null) {
+            return List.of();
+        }
+        @Nullable NBTDocument document = currentDocument(selected);
+        if (document == null) {
+            return List.of(type);
+        }
+        try {
+            return List.copyOf(document.editor().getConvertibleTypes(selected.node()));
+        } catch (NBTEditException failure) {
+            return List.of(type);
+        }
+    }
+
     /// Returns the declared type of a selected List through a detached snapshot.
     ///
     /// @param node selected current row
@@ -662,6 +757,29 @@ public final class NBTEditorController implements AutoCloseable {
             NBTNode changed = selectedMutation.apply(editor, Objects.requireNonNull(target, "target"));
             return NBTEditResult.success(changed.getAddress());
         }, true);
+    }
+
+    /// Applies one structured value through the correct editor primitive.
+    ///
+    /// @param editor owning generic editor
+    /// @param target selected current node
+    /// @param text complete value-field text
+    /// @return changed current node
+    /// @throws IOException if structured parsing fails
+    /// @throws NBTEditException if the editor rejects the transaction
+    private static NBTNode setStructuredValue(
+            NBTEditor<? extends NBTElement> editor,
+            NBTNode target,
+            String text) throws IOException, NBTEditException {
+        @Nullable TagType<?> type = target.getType();
+        if (type == null) {
+            throw new IOException("The selected node has no editable tag value");
+        }
+        if (NBTStructuredValueCodec.isPrimitiveArray(type)) {
+            throw new IOException("Primitive arrays must be edited through their element rows");
+        }
+        String scalar = NBTStructuredValueCodec.parseScalar(type, text);
+        return editor.setScalar(target, scalar);
     }
 
     /// Schedules one history operation and calculates a conservative surviving selection.

@@ -17,7 +17,6 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
-import com.formdev.flatlaf.extras.FlatSVGIcon;
 import net.miginfocom.swing.MigLayout;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -26,19 +25,19 @@ import space.minecraftstl.xyml.library.nbt.edit.NBTAddress;
 import space.minecraftstl.xyml.library.nbt.edit.NBTEditException;
 import space.minecraftstl.xyml.library.nbt.edit.NBTNode;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
+import space.minecraftstl.xyml.library.nbt.tag.ValueTag;
 import space.minecraftstl.xyml.nbt.NBTDocument;
 import space.minecraftstl.xyml.nbt.NBTDocumentService;
 import space.minecraftstl.xyml.nbt.NBTNodeType;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
-import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
-import javax.swing.AbstractAction;
 import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -55,34 +54,18 @@ import javax.swing.JTextField;
 import javax.swing.JTree;
 import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
-import javax.swing.TransferHandler;
-import javax.swing.UIManager;
 import javax.swing.event.ChangeListener;
-import javax.swing.event.TreeExpansionEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.event.TreeSelectionEvent;
 import javax.swing.event.TreeSelectionListener;
 import javax.swing.event.TreeWillExpandListener;
-import javax.swing.tree.DefaultTreeModel;
-import javax.swing.tree.ExpandVetoException;
-import javax.swing.tree.TreeModel;
 import javax.swing.tree.TreePath;
 import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Component;
 import java.awt.Font;
-import java.awt.datatransfer.DataFlavor;
-import java.awt.datatransfer.Transferable;
-import java.awt.datatransfer.UnsupportedFlavorException;
-import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.io.File;
-import java.io.IOException;
 import java.io.Serial;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -90,6 +73,23 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
+
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.bind;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.configureIconButton;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.configureSymbolButton;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.detailLabel;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.documentChanges;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.menuItem;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.readOnlyField;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorPanelSupport.chunkLocalIndex;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorPanelSupport.defaultValue;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorPanelSupport.emptyTreeModel;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorPanelSupport.isChunkRoot;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorPanelSupport.isRegionSlot;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorPanelSupport.preloadTreeIcons;
+import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorPanelSupport.uniqueChildName;
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Complete Swing editor for standalone NBT tags and fixed-slot Region documents.
 ///
@@ -171,8 +171,11 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Applies a validated Compound child rename.
     private final JButton renameButton = new JButton();
 
-    /// Displays the selected stable NBT type.
-    private final JTextField typeField = readOnlyField("nbtEditorNodeType");
+    /// Selects one conversion target permitted for the selected NBT type.
+    private final JComboBox<String> typeCombo = new JComboBox<>();
+
+    /// Applies an explicit, potentially lossy type conversion.
+    private final JButton typeButton = new JButton();
 
     /// Displays the selected direct-child count.
     private final JTextField childrenField = readOnlyField("nbtEditorNodeChildren");
@@ -182,6 +185,18 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
 
     /// Applies a validated scalar mutation.
     private final JButton applyButton = new JButton();
+
+    /// Inserts a Minecraft formatting section sign at the value-field caret.
+    private final JButton sectionSignButton = new JButton("\u00a7");
+
+    /// Controls whether a selected String draft is rendered with Minecraft formatting.
+    private final JCheckBox formattingPreviewCheck = new JCheckBox();
+
+    /// Renders the selected String draft without changing its NBT value.
+    private final NBTStringFormattingPreview formattingPreview = new NBTStringFormattingPreview();
+
+    /// Collapsible viewport for the formatted String preview.
+    private final JScrollPane formattingPreviewScroll = new JScrollPane(formattingPreview);
 
     /// Selects the declared type of an empty List.
     private final JComboBox<String> listTypeCombo = new JComboBox<>();
@@ -214,10 +229,13 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     private final ChangeListener editorTabListener = this::editorTabChanged;
 
     /// Reveals dormant root children only when a real expansion begins.
-    private final TreeWillExpandListener rootExpansionListener = new RootExpansionListener();
+    private final TreeWillExpandListener rootExpansionListener;
 
     /// Selects a right-clicked row before showing its context menu.
-    private final TreePopupMouseListener treePopupMouseListener = new TreePopupMouseListener();
+    private final NBTTreePopupMouseListener treePopupMouseListener;
+
+    /// Updates the String preview when the value document changes.
+    private final DocumentListener valueDocumentListener;
 
     /// Owned controller subscription removed during closure.
     private final Subscription stateSubscription;
@@ -229,7 +247,13 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     private final @Nullable CompletableFuture<@Unmodifiable Map<NBTNodeType, Icon>> iconLoad;
 
     /// Transfer adapter that performs only lexical payload decoding on the EDT.
-    private final TransferHandler nbtTransferHandler = new NBTTransferHandler();
+    private final NBTFileTransferHandler nbtTransferHandler;
+
+    /// Context command hidden when index zero is already selected.
+    private final JMenuItem moveUpMenuItem;
+
+    /// Context command hidden when the final child is already selected.
+    private final JMenuItem moveDownMenuItem;
 
     /// Guards terminal teardown from any calling thread.
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -240,23 +264,11 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Editor revision currently represented by the tree model.
     private long renderedEditorRevision = -1L;
 
-    /// Current asynchronous subtree serialization, or `null` while idle.
-    private @Nullable CompletableFuture<@Nullable String> snbtLoad;
+    /// Bounded asynchronous subtree-SNBT loader.
+    private final NBTAsyncTextLoader snbtTextLoader;
 
-    /// Monotonic identity used to reject late subtree serialization results.
-    private long snbtRequestRevision;
-
-    /// Document identity associated with the SNBT editor content.
-    private @Nullable NBTDocument snbtDocument;
-
-    /// Editor revision associated with the SNBT editor content.
-    private long snbtEditorRevision = -1L;
-
-    /// Structural address associated with the SNBT editor content.
-    private @Nullable NBTAddress snbtAddress;
-
-    /// Whether the current SNBT key has completed serialization.
-    private boolean snbtLoaded;
+    /// Bounded asynchronous primitive-array value loader.
+    private final NBTAsyncTextLoader valueTextLoader;
 
     /// Suppresses automatic root expansion while a replacement model is installed.
     private boolean installingTreeModel;
@@ -315,6 +327,16 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         this.backgroundExecutor = backgroundExecutor == null
                 ? ForkJoinPool.commonPool()
                 : backgroundExecutor;
+        rootExpansionListener = new NBTTreeExpansionListener(tree, () -> installingTreeModel);
+        treePopupMouseListener = new NBTTreePopupMouseListener(tree);
+        snbtTextLoader = new NBTAsyncTextLoader(snbtArea, SNBT_INSERT_CHUNK_SIZE, this.backgroundExecutor);
+        valueTextLoader = new NBTAsyncTextLoader(valueArea, SNBT_INSERT_CHUNK_SIZE, this.backgroundExecutor);
+        valueDocumentListener = documentChanges(this::refreshFormattingPreview);
+        nbtTransferHandler = new NBTFileTransferHandler(
+                () -> !closed.get() && !this.controller.snapshot().busy(),
+                this::openDroppedPaths);
+        moveUpMenuItem = menuItem(strings.moveUpText(), null, () -> moveSelected(-1));
+        moveDownMenuItem = menuItem(strings.moveDownText(), null, () -> moveSelected(1));
         treeCellRenderer = new NBTTreeCellRenderer(this.strings);
 
         setName("nbtEditorPage");
@@ -334,7 +356,9 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
             }
         });
         render(this.controller.snapshot());
-        iconLoad = backgroundExecutor == null ? null : preloadTreeIcons(backgroundExecutor);
+        iconLoad = backgroundExecutor == null
+                ? null
+                : preloadTreeIcons(backgroundExecutor, treeCellRenderer, tree, () -> !closed.get());
     }
 
     /// Returns the localized title required by a page host.
@@ -406,16 +430,13 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 strings.backTooltip(),
                 this::requestClose);
         heading.add(backButton, "w 40!, h 40!");
-
         JLabel titleLabel = new JLabel(strings.title());
         titleLabel.setName("nbtEditorTitle");
         titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 22.0F));
         heading.add(titleLabel);
-
         pathLabel.setName("nbtEditorPath");
         pathLabel.setHorizontalAlignment(SwingConstants.LEADING);
         heading.add(pathLabel, "growx");
-
         configureIconButton(
                 undoButton,
                 "nbtEditorUndo",
@@ -423,7 +444,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 strings.undoTooltip(),
                 this::undo);
         heading.add(undoButton, "w 40!, h 40!");
-
         configureIconButton(
                 redoButton,
                 "nbtEditorRedo",
@@ -431,7 +451,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 strings.redoTooltip(),
                 this::redo);
         heading.add(redoButton, "w 40!, h 40!");
-
         configureIconButton(
                 openButton,
                 "nbtEditorOpen",
@@ -439,7 +458,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 strings.openTooltip(),
                 this::chooseAndOpen);
         heading.add(openButton, "w 40!, h 40!");
-
         configureIconButton(
                 reloadButton,
                 "nbtEditorReload",
@@ -447,7 +465,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 strings.reloadTooltip(),
                 this::reload);
         heading.add(reloadButton, "w 40!, h 40!");
-
         configureIconButton(
                 saveButton,
                 "nbtEditorSave",
@@ -542,9 +559,9 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// @return structured editor panel
     private JComponent createStructuredEditor() {
         JPanel details = new JPanel(new MigLayout(
-                "insets 16, fillx",
+                "insets 16, fillx, hidemode 3",
                 "[96!,fill][grow,fill][]",
-                "[][][]10[]8[]8[]4[]push"));
+                "[][][]10[]8[]4[]4[]4[]push"));
         details.setName("nbtEditorDetails");
 
         nameField.setName("nbtEditorNodeName");
@@ -555,21 +572,44 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         renameButton.addActionListener(event -> renameSelected());
         details.add(renameButton, "w 84!, h 34!, wrap");
 
-        details.add(detailLabel(strings.typeLabel(), typeField));
-        details.add(typeField, "span 2, growx, wrap");
+        typeCombo.setName("nbtEditorNodeType");
+        details.add(detailLabel(strings.typeLabel(), typeCombo));
+        details.add(typeCombo, "growx");
+        typeButton.setName("nbtEditorTypeApply");
+        typeButton.setText(strings.applyText());
+        typeButton.addActionListener(event -> convertSelectedType());
+        details.add(typeButton, "w 84!, h 34!, wrap");
         details.add(detailLabel(strings.childrenLabel(), childrenField));
         details.add(childrenField, "span 2, growx, wrap");
-
         details.add(detailLabel(strings.valueLabel(), valueArea), "top");
         JScrollPane valueScroll = new JScrollPane(valueArea);
         valueScroll.setName("nbtEditorValueScroll");
         details.add(valueScroll, "span 2, growx, h 120:180:280, wrap");
-
-        details.add(new JLabel(), "skip");
+        JPanel valueActions = new JPanel(new MigLayout(
+                "insets 0, fillx, hidemode 3",
+                "[]8[]8[]push[]",
+                "[34!]"));
+        valueActions.setOpaque(false);
+        sectionSignButton.setName("nbtEditorSectionSign");
+        sectionSignButton.setToolTipText("\u00a7");
+        sectionSignButton.getAccessibleContext().setAccessibleName("\u00a7");
+        sectionSignButton.addActionListener(event -> insertSectionSign());
+        valueActions.add(sectionSignButton, "w 38!, h 32!");
+        formattingPreviewCheck.setName("nbtEditorFormattingPreviewToggle");
+        formattingPreviewCheck.setText(strings.formattingPreviewText());
+        formattingPreviewCheck.addActionListener(event -> updateFormattingPreviewVisibility());
+        valueActions.add(formattingPreviewCheck);
         applyButton.setName("nbtEditorApply");
         applyButton.setText(strings.applyText());
         applyButton.addActionListener(event -> applySelectedValue());
-        details.add(applyButton, "span 2, right, w 84!, h 34!, wrap");
+        valueActions.add(applyButton, "w 84!, h 34!");
+        details.add(valueActions, "skip, span 2, growx, wrap");
+
+        formattingPreview.setName("nbtEditorFormattingPreview");
+        formattingPreviewScroll.setName("nbtEditorFormattingPreviewScroll");
+        formattingPreviewScroll.setBorder(BorderFactory.createEmptyBorder());
+        formattingPreviewScroll.getAccessibleContext().setAccessibleName(strings.formattingPreviewText());
+        details.add(formattingPreviewScroll, "skip, span 2, growx, h 72!, wrap");
 
         JLabel listTypeLabel = detailLabel(strings.listTypeLabel(), listTypeCombo);
         listTypeLabel.setName("nbtEditorListTypeLabel");
@@ -647,9 +687,14 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         valueArea.setName("nbtEditorValue");
         valueArea.setLineWrap(true);
         valueArea.setWrapStyleWord(true);
+        valueArea.getDocument().addDocumentListener(valueDocumentListener);
         nameField.setEnabled(false);
         valueArea.setEnabled(false);
         snbtArea.setEnabled(false);
+        typeCombo.addActionListener(event -> updateTypeConversionButton());
+        sectionSignButton.setVisible(false);
+        formattingPreviewCheck.setVisible(false);
+        formattingPreviewScroll.setVisible(false);
         listTypeCombo.setName("nbtEditorListType");
         listTypeCombo.addItem(strings.tagEndText());
         for (TagType<?> type : NBTTagInput.types()) {
@@ -678,8 +723,8 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         menu.add(menuItem(strings.pasteText(), "assets/swing/icons/file-import.svg", this::pasteSelected));
         menu.addSeparator();
         menu.add(menuItem(strings.deleteText(), "assets/swing/icons/delete.svg", this::deleteSelected));
-        menu.add(menuItem(strings.moveUpText(), null, () -> moveSelected(-1)));
-        menu.add(menuItem(strings.moveDownText(), null, () -> moveSelected(1)));
+        menu.add(moveUpMenuItem);
+        menu.add(moveDownMenuItem);
         return menu;
     }
 
@@ -725,7 +770,9 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         if (target == null || !mutationsAllowed()) {
             return;
         }
-        JTextField tagName = new JTextField(target.nameRequired() ? uniqueChildName(target.parent()) : "");
+        JTextField tagName = new JTextField(target.nameRequired()
+                ? uniqueChildName(strings, target.parent())
+                : "");
         tagName.setEnabled(target.nameRequired());
         JComboBox<TagType<?>> tagType = new JComboBox<>(target.types().toArray(TagType<?>[]::new));
         JTextArea tagValue = new JTextArea(5, 28);
@@ -788,21 +835,88 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 showAddTagFailure(validationLabel, tagName, tagValue, null, null);
                 continue;
             }
-            controller.createAndInsertAsync(target.parent(), target.index(), selectedType,
-                    tagName.getText(), tagValue.getText()).thenAccept(result -> {
-                if (result.applied()) {
-                    clearEditFailure();
-                    restoreSelection(Objects.requireNonNull(result.selection(), "selection"));
-                } else {
-                    showAddTagFailure(validationLabel, tagName, tagValue,
-                            result.reason(), result.errorMessage());
-                    if (mutationsAllowed()) {
-                        showAddTagForm(target, form, tagName, tagType, tagValue, validationLabel);
-                    }
-                }
-            });
+            @Nullable NBTDocument requestDocument = controller.snapshot().document();
+            NBTEditorTreeNode requestSelection = selectedNode();
+            if (requestDocument == null) {
+                return;
+            }
+            long requestRevision = target.parent().node().getRevision();
+            NBTDocument document = requestDocument;
+            CompletableFuture<NBTEditResult> future = controller.createAndInsertAsync(
+                    target.parent(), target.index(), selectedType, tagName.getText(), tagValue.getText());
+            future.whenComplete((@Nullable NBTEditResult result, @Nullable Throwable failure) ->
+                    EdtDispatcher.execute(() -> {
+                        if (controller.snapshot().busy()) {
+                            return;
+                        }
+                        if (failure != null) {
+                            NBTEditResult failed = NBTEditResult.failure(
+                                    NBTEditorAsyncResultGuard.detail(failure));
+                            if (!isCurrentInsertionResult(
+                                    target.parent(), requestSelection, document, requestRevision, failed)) {
+                                return;
+                            }
+                            Throwable cause = NBTEditorAsyncResultGuard.unwrap(failure);
+                            if (cause instanceof Error error) {
+                                throw error;
+                            }
+                            LOG.warning("Asynchronous NBT insertion failed", cause);
+                            showEditFailure(null, failed.errorMessage());
+                            return;
+                        }
+                        if (result == null
+                                || !isCurrentInsertionResult(
+                                target.parent(), requestSelection, document, requestRevision, result)) {
+                            return;
+                        }
+                        if (result.applied()) {
+                            clearEditFailure();
+                            restoreSelection(Objects.requireNonNull(result.selection(), "selection"));
+                        } else {
+                            showAddTagFailure(validationLabel, tagName, tagValue,
+                                    result.reason(), result.errorMessage());
+                            if (mutationsAllowed()) {
+                                showAddTagForm(target, form, tagName, tagType, tagValue, validationLabel);
+                            }
+                        }
+                    }));
             return;
         }
+    }
+
+    /// Returns whether an Add/Paste result still belongs to the visible form request.
+    /// @param parent insertion parent captured before submission
+    /// @param selection row selected while the form was submitted
+    /// @param document source document captured before submission
+    /// @param revision editor revision captured before submission
+    /// @param result completed insertion result
+    /// @return whether the result may update the form or selection
+    private boolean isCurrentInsertionResult(
+            NBTEditorTreeNode parent,
+            @Nullable NBTEditorTreeNode selection,
+            NBTDocument document,
+            long revision,
+            NBTEditResult result) {
+        NBTEditorSnapshot currentState = controller.snapshot();
+        if (closed.get() || currentState.busy() || currentState.document() != document) {
+            return false;
+        }
+        @Nullable NBTEditorTreeNode current = selectedNode();
+        if (current == null || !current.belongsTo(document)) {
+            return false;
+        }
+        if (!result.applied()) {
+            return selection != null
+                    && current == selection
+                    && parent.node().getRevision() == revision
+                    && document.editor().getRevision() == revision;
+        }
+        @Nullable NBTAddress resultAddress = result.selection();
+        return resultAddress != null
+                && document.editor().getRevision() >= revision
+                && (resultAddress.equals(current.address())
+                || parent.address().equals(current.address())
+                || (selection != null && selection.address().equals(current.address())));
     }
 
     /// Keeps a rejected Add form populated and displays localized validation inside the dialog.
@@ -827,32 +941,85 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         tagValue.putClientProperty("JComponent.outline", "error");
     }
 
+    /// Applies the explicitly selected generic type conversion.
+    private void convertSelectedType() {
+        @Nullable NBTEditorTreeNode selected = selectedNode();
+        @Nullable TagType<?> targetType = selectedConversionType();
+        if (selected == null || targetType == null || !mutationsAllowed()
+                || targetType == selected.node().getType()) {
+            return;
+        }
+        NBTEditorTreeNode submitted = selected;
+        String originalType = Objects.requireNonNull(selected.node().getType(), "selectedType").name();
+        handleAsyncResult(controller.convertTypeAsync(submitted, targetType), submitted,
+                () -> typeCombo.setSelectedItem(originalType));
+    }
+
     /// Applies one exact selected scalar value.
     private void applySelectedValue() {
         EdtDispatcher.requireEventDispatchThread();
         @Nullable NBTEditorTreeNode selected = selectedNode();
-        if (selected == null || !selected.editable() || !mutationsAllowed()) {
+        if (selected == null || !valueEditable(selected) || !mutationsAllowed()) {
             return;
         }
+        NBTEditorTreeNode submitted = selected;
         String draft = valueArea.getText();
-        handleAsyncResult(controller.applyValueEditAsync(selected, draft), () -> valueArea.setText(draft));
+        handleAsyncResult(controller.applyStructuredValueAsync(submitted, draft), submitted,
+                () -> valueArea.setText(draft));
+    }
+
+    /// Inserts one section sign at the current String-field selection or caret.
+    private void insertSectionSign() {
+        @Nullable NBTEditorTreeNode selected = selectedNode();
+        if (selected == null || selected.node().getType() != TagType.STRING || !mutationsAllowed()) {
+            return;
+        }
+        valueArea.replaceSelection("\u00a7");
+        valueArea.requestFocusInWindow();
+    }
+
+    /// Refreshes an already-visible formatting preview after a String draft changes.
+    private void refreshFormattingPreview() {
+        if (formattingPreviewScroll.isVisible()) {
+            formattingPreview.render(valueArea.getText());
+        }
+    }
+
+    /// Updates the optional Minecraft formatting preview after its toggle changes.
+    private void updateFormattingPreviewVisibility() {
+        @Nullable NBTEditorTreeNode selected = selectedNode();
+        boolean visible = selected != null
+                && selected.node().getType() == TagType.STRING
+                && formattingPreviewCheck.isSelected();
+        formattingPreviewScroll.setVisible(visible);
+        if (visible) {
+            formattingPreview.render(valueArea.getText());
+        }
+        revalidate();
+        repaint();
     }
 
     /// Applies a Compound child rename.
     private void renameSelected() {
         @Nullable NBTEditorTreeNode selected = selectedNode();
         if (selected != null && nameEditable(selected) && mutationsAllowed()) {
+            NBTEditorTreeNode submitted = selected;
             String draft = nameField.getText();
-            handleAsyncResult(controller.renameAsync(selected, draft), () -> nameField.setText(draft));
+            handleAsyncResult(controller.renameAsync(submitted, draft), submitted, () -> nameField.setText(draft));
         }
     }
 
     /// Replaces the selected tag from complete strict SNBT.
     private void replaceSelectedSnbt() {
         @Nullable NBTEditorTreeNode selected = selectedNode();
-        if (selected != null && selected.node().getType() != null && mutationsAllowed()) {
+        if (selected != null
+                && selected.node().getType() != null
+                && !NBTStructuredValueCodec.isPrimitiveArray(selected.node().getType())
+                && mutationsAllowed()) {
+            NBTEditorTreeNode submitted = selected;
             String draft = snbtArea.getText();
-            handleAsyncResult(controller.replaceSnbtAsync(selected, draft), () -> snbtArea.setText(draft));
+            handleAsyncResult(controller.replaceSnbtAsync(submitted, draft), submitted,
+                    () -> snbtArea.setText(draft));
         }
     }
 
@@ -866,7 +1033,8 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         @Nullable TagType<?> type = selectedIndex <= 0
                 ? null
                 : NBTTagInput.types().get(selectedIndex - 1);
-        handleAsyncResult(controller.setListElementTypeAsync(selected, type),
+        NBTEditorTreeNode submitted = selected;
+        handleAsyncResult(controller.setListElementTypeAsync(submitted, type), submitted,
                 () -> listTypeCombo.setSelectedIndex(selectedIndex));
     }
 
@@ -876,23 +1044,49 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         if (selected == null || selected.node().getType() == null || !mutationsAllowed()) {
             return;
         }
-        controller.copyAsync(selected).thenAccept(result -> {
-            if (result.applied()) {
-                editStatusLabel.setText(strings.copiedText());
-                editStatusLabel.setToolTipText(null);
-                updateSelectedNodeDetails();
-            } else {
-                showEditFailure(result.reason(), result.errorMessage());
-            }
-        });
+        @Nullable NBTDocument requestDocument = controller.snapshot().document();
+        if (requestDocument == null) {
+            return;
+        }
+        NBTEditorTreeNode submitted = selected;
+        NBTAddress requestAddress = submitted.address();
+        long requestRevision = submitted.node().getRevision();
+        handleCommandResult(
+                controller.copyAsync(submitted),
+                submitted,
+                requestAddress,
+                requestDocument,
+                requestRevision,
+                result -> {
+                    if (result.applied()) {
+                        editStatusLabel.setText(strings.copiedText());
+                        editStatusLabel.setToolTipText(null);
+                        updateSelectedNodeDetails();
+                    } else {
+                        showEditFailure(result.reason(), result.errorMessage());
+                    }
+                });
     }
 
     /// Pastes the detached controller clipboard into the current insertion target.
     private void pasteSelected() {
         @Nullable InsertionTarget target = insertionTarget();
-        if (target != null && controller.hasClipboard() && mutationsAllowed()) {
-            controller.pasteAsync(target.parent(), target.index()).thenAccept(this::handleResult);
+        @Nullable NBTEditorTreeNode selected = selectedNode();
+        if (target == null || selected == null || !controller.hasClipboard() || !mutationsAllowed()) {
+            return;
         }
+        @Nullable NBTDocument requestDocument = controller.snapshot().document();
+        if (requestDocument == null) {
+            return;
+        }
+        NBTEditorTreeNode submitted = selected;
+        handleCommandResult(
+                controller.pasteAsync(target.parent(), target.index()),
+                submitted,
+                submitted.address(),
+                requestDocument,
+                submitted.node().getRevision(),
+                this::handleResult);
     }
 
     /// Deletes the selected non-root tag after any required chunk-root confirmation.
@@ -909,7 +1103,18 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 return;
             }
         }
-        controller.deleteAsync(selected).thenAccept(this::handleResult);
+        @Nullable NBTDocument requestDocument = controller.snapshot().document();
+        if (requestDocument == null) {
+            return;
+        }
+        NBTEditorTreeNode submitted = selected;
+        handleCommandResult(
+                controller.deleteAsync(submitted),
+                submitted,
+                submitted.address(),
+                requestDocument,
+                submitted.node().getRevision(),
+                this::handleResult);
     }
 
     /// Moves the selected ordered child by one position.
@@ -918,21 +1123,56 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     private void moveSelected(int offset) {
         @Nullable NBTEditorTreeNode selected = selectedNode();
         if (selected != null && canMove(selected, offset) && mutationsAllowed()) {
-            controller.moveAsync(selected, offset).thenAccept(this::handleResult);
+            @Nullable NBTDocument requestDocument = controller.snapshot().document();
+            if (requestDocument == null) {
+                return;
+            }
+            NBTEditorTreeNode submitted = selected;
+            handleCommandResult(
+                    controller.moveAsync(submitted, offset),
+                    submitted,
+                    submitted.address(),
+                    requestDocument,
+                    submitted.node().getRevision(),
+                    this::handleResult);
         }
     }
 
     /// Undoes one transaction and restores the nearest surviving selection.
     private void undo() {
         if (mutationsAllowed() && controller.canUndo()) {
-            controller.undoAsync(selectedAddress()).thenAccept(this::handleResult);
+            @Nullable NBTDocument requestDocument = controller.snapshot().document();
+            if (requestDocument == null) {
+                return;
+            }
+            @Nullable NBTEditorTreeNode submitted = selectedNode();
+            NBTAddress requestAddress = selectedAddress();
+            handleCommandResult(
+                    controller.undoAsync(requestAddress),
+                    submitted,
+                    requestAddress,
+                    requestDocument,
+                    requestDocument.editor().getRevision(),
+                    this::handleResult);
         }
     }
 
     /// Redoes one transaction and restores the nearest surviving selection.
     private void redo() {
         if (mutationsAllowed() && controller.canRedo()) {
-            controller.redoAsync(selectedAddress()).thenAccept(this::handleResult);
+            @Nullable NBTDocument requestDocument = controller.snapshot().document();
+            if (requestDocument == null) {
+                return;
+            }
+            @Nullable NBTEditorTreeNode submitted = selectedNode();
+            NBTAddress requestAddress = selectedAddress();
+            handleCommandResult(
+                    controller.redoAsync(requestAddress),
+                    submitted,
+                    requestAddress,
+                    requestDocument,
+                    requestDocument.editor().getRevision(),
+                    this::handleResult);
         }
     }
 
@@ -958,16 +1198,94 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     }
 
     /// Applies one asynchronous result while retaining submitted input after validation failure.
+    ///
     /// @param future result completed by the controller on its UI dispatcher
+    /// @param submitted row that supplied the request
     /// @param restoreDraft restores the exact submitted field content after rejection
-    private void handleAsyncResult(CompletableFuture<NBTEditResult> future, Runnable restoreDraft) {
+    private void handleAsyncResult(
+            CompletableFuture<NBTEditResult> future,
+            NBTEditorTreeNode submitted,
+            Runnable restoreDraft) {
         Runnable draftRestorer = Objects.requireNonNull(restoreDraft, "restoreDraft");
-        Objects.requireNonNull(future, "future").thenAccept(result -> {
-            if (!result.applied()) {
-                draftRestorer.run();
-            }
-            handleResult(result);
-        });
+        NBTEditorTreeNode requestNode = Objects.requireNonNull(submitted, "submitted");
+        @Nullable NBTDocument requestDocument = controller.snapshot().document();
+        if (requestDocument == null) {
+            return;
+        }
+        long requestRevision = requestNode.node().getRevision();
+        handleCommandResult(
+                future,
+                requestNode,
+                requestNode.address(),
+                requestDocument,
+                requestRevision,
+                result -> {
+                    if (!result.applied()) {
+                        draftRestorer.run();
+                    }
+                    handleResult(result);
+                });
+    }
+
+    /// Applies one contextual command result only while its original request remains visible.
+    /// Captured document and revision guard feedback after selection changes or panel closure.
+    ///
+    /// @param future command result future
+    /// @param submitted row selected at submission, or `null` for an unselected history command
+    /// @param requestAddress address visible at submission
+    /// @param requestDocument document visible at submission
+    /// @param requestRevision editor revision visible at submission
+    /// @param resultHandler callback for an accepted result
+    private void handleCommandResult(
+            CompletableFuture<NBTEditResult> future,
+            @Nullable NBTEditorTreeNode submitted,
+            NBTAddress requestAddress,
+            NBTDocument requestDocument,
+            long requestRevision,
+            Consumer<NBTEditResult> resultHandler) {
+        NBTAddress address = Objects.requireNonNull(requestAddress, "requestAddress");
+        NBTDocument document = Objects.requireNonNull(requestDocument, "requestDocument");
+        Consumer<NBTEditResult> handler = Objects.requireNonNull(resultHandler, "resultHandler");
+        Objects.requireNonNull(future, "future").whenComplete((
+                @Nullable NBTEditResult result,
+                @Nullable Throwable failure) -> EdtDispatcher.execute(() -> {
+                    EdtDispatcher.requireEventDispatchThread();
+                    NBTEditorSnapshot currentState = controller.snapshot();
+                    if (currentState.busy()) {
+                        return;
+                    }
+                    @Nullable NBTDocument currentDocument = currentState.document();
+                    @Nullable NBTEditorTreeNode currentSelection = selectedNode();
+                    if (failure != null) {
+                        if (!NBTEditorAsyncResultGuard.acceptsFailure(
+                                submitted,
+                                address,
+                                document,
+                                requestRevision,
+                                closed.get(),
+                                currentDocument,
+                                currentSelection)) {
+                            return;
+                        }
+                        Throwable cause = NBTEditorAsyncResultGuard.unwrap(failure);
+                        if (cause instanceof Error error) {
+                            throw error;
+                        }
+                        LOG.warning("Asynchronous NBT command failed", cause);
+                        handler.accept(NBTEditResult.failure(NBTEditorAsyncResultGuard.detail(cause)));
+                    } else if (result != null
+                            && NBTEditorAsyncResultGuard.accepts(
+                            submitted,
+                            address,
+                            document,
+                            requestRevision,
+                            closed.get(),
+                            currentDocument,
+                            currentSelection,
+                            result)) {
+                        handler.accept(result);
+                    }
+                }));
     }
 
     /// Shows a localized edit error while retaining technical detail only as a tooltip.
@@ -992,7 +1310,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     private void clearEditFailure() {
         editStatusLabel.setText(" ");
         editStatusLabel.setToolTipText(null);
-        snbtStatusLabel.setText(snbtLoad == null ? " " : strings.loadingSnbtText());
+        snbtStatusLabel.setText(snbtTextLoader.isLoading() ? strings.loadingSnbtText() : " ");
         snbtStatusLabel.setToolTipText(null);
         valueArea.setToolTipText(null);
         snbtArea.setToolTipText(null);
@@ -1073,7 +1391,8 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 && current.status() != NBTEditorStatus.EDIT_UNCERTAIN);
         if (current.status() == NBTEditorStatus.EDITING || current.status() == NBTEditorStatus.EDIT_UNCERTAIN) {
             if (current.status() == NBTEditorStatus.EDIT_UNCERTAIN) {
-                invalidateSnbtLoad();
+                snbtTextLoader.reset(null);
+                valueTextLoader.reset(null);
             }
             disableEditingControls();
         } else {
@@ -1110,23 +1429,18 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         String displayName = strings.nodeName(selected);
         nameField.setText(node.getName().isEmpty() ? displayName : node.getName());
         @Nullable TagType<?> tagType = node.getType();
-        typeField.setText(strings.nodeType(selected));
         childrenField.setText(strings.entries(selected.childCount()));
-        @Nullable String scalar = selected.currentScalarValue();
-        valueArea.setText(scalar == null ? "" : scalar);
-
         boolean mutable = mutationsAllowed();
-        boolean scalarEditable = mutable && selected.editable();
         boolean renameEditable = mutable && nameEditable(selected);
-        boolean snbtEditable = mutable && tagType != null;
+        boolean snbtEditable = mutable
+                && tagType != null
+                && !NBTStructuredValueCodec.isPrimitiveArray(tagType);
+        updateTypeChoices(selected, tagType, mutable);
+        boolean structuredValueEditable = updateValueEditor(selected, tagType, mutable);
         nameField.setEnabled(renameEditable);
         nameField.setEditable(renameEditable);
         renameButton.setEnabled(renameEditable);
-        valueArea.setEnabled(scalarEditable);
-        valueArea.setEditable(scalarEditable);
-        applyButton.setEnabled(scalarEditable);
         updateSnbtEditor(selected, tagType, mutable);
-
         boolean emptyList = mutable && emptyListSelected(selected);
         listTypeCombo.setEnabled(emptyList);
         listTypeButton.setEnabled(emptyList);
@@ -1138,17 +1452,161 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         } else {
             listTypeCombo.setSelectedIndex(0);
         }
-
         @Nullable InsertionTarget target = insertionTarget();
         addButton.setEnabled(mutable && target != null);
         copyButton.setEnabled(mutable && tagType != null);
         pasteButton.setEnabled(mutable && target != null && controller.hasClipboard());
         deleteButton.setEnabled(mutable && !selected.address().isRoot() && !isRegionSlot(selected.address()));
-        moveUpButton.setEnabled(mutable && canMove(selected, -1));
-        moveDownButton.setEnabled(mutable && canMove(selected, 1));
-        if (!scalarEditable && !renameEditable && !snbtEditable && !emptyList) {
+        boolean canMoveUp = mutable && canMove(selected, -1);
+        boolean canMoveDown = mutable && canMove(selected, 1);
+        moveUpButton.setEnabled(canMoveUp);
+        moveDownButton.setEnabled(canMoveDown);
+        moveUpMenuItem.setVisible(canMoveUp);
+        moveDownMenuItem.setVisible(canMoveDown);
+        moveUpMenuItem.setEnabled(canMoveUp);
+        moveDownMenuItem.setEnabled(canMoveDown);
+        if (!structuredValueEditable && !renameEditable && !snbtEditable && !emptyList
+                && !valueTextLoader.isLoading()) {
             editStatusLabel.setText(strings.readOnlyText());
         }
+    }
+
+    /// Populates type conversions allowed by the selected tag family and its indexed parent.
+    ///
+    /// @param selected current row
+    /// @param tagType selected tag type, or `null` for non-tag containers
+    /// @param mutable whether edits are currently allowed
+    private void updateTypeChoices(
+            NBTEditorTreeNode selected,
+            @Nullable TagType<?> tagType,
+            boolean mutable) {
+        typeCombo.removeAllItems();
+        if (tagType == null) {
+            typeCombo.addItem(strings.nodeType(selected));
+            typeCombo.setEnabled(false);
+            typeButton.setEnabled(false);
+            return;
+        }
+        @Unmodifiable List<TagType<?>> targets = controller.convertibleTypes(selected);
+        for (TagType<?> target : targets) {
+            typeCombo.addItem(target.name());
+        }
+        typeCombo.setSelectedItem(tagType.name());
+        typeCombo.setEnabled(mutable && targets.size() > 1);
+        updateTypeConversionButton();
+    }
+
+    /// Reconciles the complete value field and String-only formatting controls.
+    ///
+    /// @param selected current row
+    /// @param tagType selected tag type, or `null`
+    /// @param mutable whether edits are currently allowed
+    /// @return whether the structured value can currently be submitted
+    private boolean updateValueEditor(
+            NBTEditorTreeNode selected,
+            @Nullable TagType<?> tagType,
+            boolean mutable) {
+        boolean stringValue = tagType == TagType.STRING;
+        boolean primitiveArray = NBTStructuredValueCodec.isPrimitiveArray(tagType);
+        sectionSignButton.setVisible(stringValue);
+        sectionSignButton.setEnabled(stringValue && mutable);
+        formattingPreviewCheck.setVisible(stringValue);
+        formattingPreviewCheck.setEnabled(stringValue);
+        if (!stringValue) {
+            formattingPreviewScroll.setVisible(false);
+        }
+        if (primitiveArray) {
+            ValueLoadKey key = new ValueLoadKey(selected);
+            valueTextLoader.reset(key);
+            @Nullable NBTDocument document = controller.snapshot().document();
+            boolean supported = document != null && selected.belongsTo(document);
+            if (supported) {
+                valueTextLoader.load(
+                        key,
+                        () -> controller.structuredValue(selected),
+                        () -> isCurrentValueKey(key),
+                        this::startValueLoad,
+                        () -> finishValueLoad(key),
+                        this::showValueLoadFailure);
+            }
+            boolean loaded = valueTextLoader.isLoaded(key);
+            boolean editable = false;
+            valueArea.setEnabled(false);
+            valueArea.setEditable(false);
+            applyButton.setEnabled(false);
+            if (!loaded && !valueTextLoader.isLoading() && supported) {
+                showValueLoadFailure(strings.arrayLoadFailedText());
+            }
+            return editable;
+        }
+        valueTextLoader.reset(null);
+        @Nullable String scalar = selected.currentScalarValue();
+        if (tagType != null && scalar != null) {
+            valueArea.setText(NBTStructuredValueCodec.formatScalar(tagType, scalar));
+            valueArea.setEnabled(mutable);
+            valueArea.setEditable(mutable);
+            applyButton.setEnabled(mutable);
+            updateFormattingPreviewVisibility();
+            return mutable;
+        }
+        valueArea.setText("");
+        valueArea.setEnabled(false);
+        valueArea.setEditable(false);
+        applyButton.setEnabled(false);
+        return false;
+    }
+
+    /// Marks primitive-array formatting as active while the detached snapshot is computed.
+    private void startValueLoad() {
+        editStatusLabel.setText(strings.loadingValueText());
+        valueArea.setToolTipText(null);
+        valueArea.putClientProperty("JComponent.outline", null);
+        valueArea.setEnabled(false);
+        valueArea.setEditable(false);
+        applyButton.setEnabled(false);
+    }
+
+    /// Keeps the primitive-array display read-only after its detached snapshot is loaded.
+    ///
+    /// @param key exact source row
+    private void finishValueLoad(ValueLoadKey key) {
+        if (!isCurrentValueKey(key)) {
+            return;
+        }
+        clearEditFailure();
+        valueArea.setEnabled(false);
+        valueArea.setEditable(false);
+        applyButton.setEnabled(false);
+    }
+
+    /// Returns whether one array snapshot key still owns the visible selection and revision.
+    ///
+    /// @param key exact source row
+    /// @return whether its result may update the form
+    private boolean isCurrentValueKey(ValueLoadKey key) {
+        ValueLoadKey selectedKey = Objects.requireNonNull(key, "key");
+        @Nullable NBTDocument document = controller.snapshot().document();
+        try {
+            return !closed.get()
+                    && selectedKey.node() == selectedNode()
+                    && document != null
+                    && selectedKey.node().belongsTo(document)
+                    && selectedKey.node().node().getRevision() == document.editor().getRevision();
+        } catch (IllegalStateException failure) {
+            return false;
+        }
+    }
+
+    /// Displays a localized primitive-array load failure without exposing a partial value.
+    ///
+    /// @param detail technical hover detail
+    private void showValueLoadFailure(String detail) {
+        valueArea.setEnabled(false);
+        valueArea.setEditable(false);
+        applyButton.setEnabled(false);
+        editStatusLabel.setText(strings.invalidValueText());
+        editStatusLabel.setToolTipText(Objects.requireNonNull(detail, "detail"));
+        valueArea.setToolTipText(detail);
     }
 
     /// Reconciles the SNBT editor with one immutable selection without serializing on the EDT.
@@ -1162,192 +1620,61 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
             boolean mutable) {
         NBTEditorTreeNode currentSelection = Objects.requireNonNull(selected, "selected");
         @Nullable NBTDocument document = controller.snapshot().document();
-        long revision = currentSelection.node().getRevision();
-        NBTAddress address = currentSelection.address();
-        if (document != snbtDocument
-                || revision != snbtEditorRevision
-                || !Objects.equals(address, snbtAddress)) {
-            resetSnbtSelection(document, revision, address);
-        }
-
         boolean supported = document != null
                 && currentSelection.belongsTo(document)
-                && tagType != null;
-        if (supported
-                && editorTabs.getSelectedIndex() == 1
-                && !snbtLoaded
-                && snbtLoad == null) {
-            startSnbtLoad(currentSelection, document, revision, address);
+                && tagType != null
+                && !NBTStructuredValueCodec.isPrimitiveArray(tagType);
+        snbtTextLoader.reset(supported ? currentSelection : null);
+        if (supported && editorTabs.getSelectedIndex() == 1) {
+            snbtTextLoader.load(
+                    currentSelection,
+                    () -> controller.subtreeSnbt(currentSelection),
+                    () -> isCurrentSnbtSelection(currentSelection),
+                    this::startSnbtLoad,
+                    this::finishSnbtLoad,
+                    this::showSnbtLoadFailure);
         }
-        boolean editable = supported && snbtLoaded && mutable;
+        boolean editable = supported && snbtTextLoader.isLoaded(currentSelection) && mutable;
         snbtArea.setEnabled(editable);
         snbtArea.setEditable(editable);
         replaceButton.setEnabled(editable);
     }
 
-    /// Starts one detached snapshot and pretty serialization on the caller-owned executor.
-    ///
-    /// @param selected immutable selected row
-    /// @param document exact document identity
-    /// @param revision exact editor revision
-    /// @param address exact selected address
-    private void startSnbtLoad(
-            NBTEditorTreeNode selected,
-            NBTDocument document,
-            long revision,
-            NBTAddress address) {
-        long request = ++snbtRequestRevision;
+    /// Marks subtree serialization as active.
+    private void startSnbtLoad() {
         snbtStatusLabel.setText(strings.loadingSnbtText());
         snbtStatusLabel.setToolTipText(null);
         snbtArea.setToolTipText(null);
         snbtArea.putClientProperty("JComponent.outline", null);
-        try {
-            CompletableFuture<@Nullable String> future = CompletableFuture.supplyAsync(
-                    () -> controller.subtreeSnbt(selected),
-                    backgroundExecutor);
-            snbtLoad = future;
-            future.whenComplete((@Nullable String snbt, @Nullable Throwable failure) ->
-                    EdtDispatcher.execute(() -> finishSnbtLoad(
-                            request,
-                            document,
-                            revision,
-                            address,
-                            snbt,
-                            failure)));
-        } catch (RuntimeException failure) {
-            showSnbtLoadFailure(failureDetail(failure));
-        }
     }
 
-    /// Publishes a subtree serialization only when its complete selection key is still current.
-    ///
-    /// @param request request identity
-    /// @param document exact document identity
-    /// @param revision exact editor revision
-    /// @param address exact selected address
-    /// @param snbt serialized subtree, or `null` when unavailable
-    /// @param failure asynchronous failure, or `null`
-    private void finishSnbtLoad(
-            long request,
-            NBTDocument document,
-            long revision,
-            NBTAddress address,
-            @Nullable String snbt,
-            @Nullable Throwable failure) {
-        EdtDispatcher.requireEventDispatchThread();
-        if (!acceptsSnbtRequest(request, document, revision, address)) {
-            return;
-        }
-        if (failure != null || snbt == null) {
-            snbtLoad = null;
-            String detail = failure == null
-                    ? "The selected NBT subtree is no longer available"
-                    : failureDetail(failure);
-            showSnbtLoadFailure(detail);
-            return;
-        }
-        snbtArea.setText("");
-        snbtArea.setCaretPosition(0);
-        appendSnbtChunk(request, document, revision, address, snbt, 0);
-    }
-
-    /// Appends bounded SNBT chunks across EDT turns so large arrays cannot monopolize input.
-    ///
-    /// @param request request identity
-    /// @param document exact document identity
-    /// @param revision exact editor revision
-    /// @param address exact selected address
-    /// @param snbt complete serialized subtree
-    /// @param offset first character not yet inserted
-    private void appendSnbtChunk(
-            long request,
-            NBTDocument document,
-            long revision,
-            NBTAddress address,
-            String snbt,
-            int offset) {
-        EdtDispatcher.requireEventDispatchThread();
-        if (!acceptsSnbtRequest(request, document, revision, address)) {
-            return;
-        }
-        int end = Math.min(offset + SNBT_INSERT_CHUNK_SIZE, snbt.length());
-        if (end > offset) {
-            snbtArea.append(snbt.substring(offset, end));
-        }
-        if (end < snbt.length()) {
-            EdtDispatcher.executeLater(() ->
-                    appendSnbtChunk(request, document, revision, address, snbt, end));
-            return;
-        }
-        snbtLoad = null;
-        snbtLoaded = true;
-        snbtArea.setCaretPosition(0);
+    /// Enables the subtree editor after complete bounded insertion.
+    private void finishSnbtLoad() {
         snbtStatusLabel.setText(" ");
         snbtStatusLabel.setToolTipText(null);
         @Nullable NBTEditorTreeNode selected = selectedNode();
         boolean editable = selected != null
                 && mutationsAllowed()
-                && selected.node().getType() != null;
+                && selected.node().getType() != null
+                && !NBTStructuredValueCodec.isPrimitiveArray(selected.node().getType());
         snbtArea.setEnabled(editable);
         snbtArea.setEditable(editable);
         replaceButton.setEnabled(editable);
     }
 
-    /// Returns whether a serialized subtree still belongs to the exact visible selection.
-    ///
-    /// @param request request identity
-    /// @param document exact document identity
-    /// @param revision exact editor revision
-    /// @param address exact selected address
-    /// @return whether the completion may update Swing state
-    private boolean acceptsSnbtRequest(
-            long request,
-            NBTDocument document,
-            long revision,
-            NBTAddress address) {
-        @Nullable NBTEditorTreeNode selected = selectedNode();
-        return !closed.get()
-                && request == snbtRequestRevision
-                && document == snbtDocument
-                && revision == snbtEditorRevision
-                && address.equals(snbtAddress)
-                && selected != null
-                && selected.belongsTo(document)
-                && selected.node().getRevision() == revision
-                && address.equals(selected.address());
-    }
-
-    /// Clears one obsolete SNBT key and invalidates any completion still in flight.
-    ///
-    /// @param document new document identity, or `null`
-    /// @param revision new editor revision, or `-1`
-    /// @param address new selected address, or `null`
-    private void resetSnbtSelection(
-            @Nullable NBTDocument document,
-            long revision,
-            @Nullable NBTAddress address) {
-        invalidateSnbtLoad();
-        snbtDocument = document;
-        snbtEditorRevision = revision;
-        snbtAddress = address;
-        snbtLoaded = false;
-        snbtArea.setText("");
-        snbtArea.setEnabled(false);
-        snbtArea.setEditable(false);
-        replaceButton.setEnabled(false);
-        snbtStatusLabel.setText(" ");
-        snbtStatusLabel.setToolTipText(null);
-        snbtArea.setToolTipText(null);
-        snbtArea.putClientProperty("JComponent.outline", null);
-    }
-
-    /// Invalidates and requests cancellation of the current subtree serialization.
-    private void invalidateSnbtLoad() {
-        snbtRequestRevision++;
-        @Nullable CompletableFuture<@Nullable String> current = snbtLoad;
-        snbtLoad = null;
-        if (current != null) {
-            current.cancel(true);
+    /// Returns whether one immutable row is still current at its captured editor revision.
+    /// @param expected expected selected row
+    /// @return whether a background result may be displayed
+    private boolean isCurrentSnbtSelection(NBTEditorTreeNode expected) {
+        @Nullable NBTDocument document = controller.snapshot().document();
+        try {
+            return !closed.get()
+                    && expected == selectedNode()
+                    && document != null
+                    && expected.belongsTo(document)
+                    && expected.node().getRevision() == document.editor().getRevision();
+        } catch (IllegalStateException failure) {
+            return false;
         }
     }
 
@@ -1355,7 +1682,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     ///
     /// @param detail technical hover detail
     private void showSnbtLoadFailure(String detail) {
-        snbtLoaded = false;
         snbtArea.setEnabled(false);
         snbtArea.setEditable(false);
         replaceButton.setEnabled(false);
@@ -1364,23 +1690,19 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         snbtArea.setToolTipText(detail);
     }
 
-    /// Returns concise non-empty detail for one asynchronous failure.
-    ///
-    /// @param failure asynchronous failure
-    /// @return technical failure detail
-    private static String failureDetail(Throwable failure) {
-        Throwable cause = Objects.requireNonNull(failure, "failure");
-        @Nullable String message = cause.getMessage();
-        return message == null || message.isBlank() ? cause.getClass().getSimpleName() : message;
-    }
-
     /// Clears details when no model row is selected.
     private void clearDetails() {
         nameField.setText("");
-        typeField.setText("");
+        typeCombo.removeAllItems();
+        typeCombo.setEnabled(false);
+        typeButton.setEnabled(false);
         childrenField.setText("");
         valueArea.setText("");
-        resetSnbtSelection(null, -1L, null);
+        sectionSignButton.setVisible(false);
+        formattingPreviewCheck.setVisible(false);
+        formattingPreviewScroll.setVisible(false);
+        snbtTextLoader.reset(null);
+        valueTextLoader.reset(null);
         nameField.setEnabled(false);
         renameButton.setEnabled(false);
         valueArea.setEnabled(false);
@@ -1394,6 +1716,10 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         deleteButton.setEnabled(false);
         moveUpButton.setEnabled(false);
         moveDownButton.setEnabled(false);
+        moveUpMenuItem.setVisible(false);
+        moveDownMenuItem.setVisible(false);
+        moveUpMenuItem.setEnabled(false);
+        moveDownMenuItem.setEnabled(false);
         clearEditFailure();
     }
 
@@ -1401,13 +1727,20 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     private void disableEditingControls() {
         nameField.setEnabled(false);
         nameField.setEditable(false);
+        typeCombo.setEnabled(false);
         valueArea.setEnabled(false);
         valueArea.setEditable(false);
+        sectionSignButton.setEnabled(false);
+        formattingPreviewCheck.setEnabled(false);
         listTypeCombo.setEnabled(false);
         snbtArea.setEnabled(false);
         snbtArea.setEditable(false);
+        moveUpMenuItem.setVisible(false);
+        moveDownMenuItem.setVisible(false);
+        moveUpMenuItem.setEnabled(false);
+        moveDownMenuItem.setEnabled(false);
         for (AbstractButton button : List.of(
-                renameButton, applyButton, listTypeButton, replaceButton, addButton, copyButton,
+                renameButton, typeButton, applyButton, listTypeButton, replaceButton, addButton, copyButton,
                 pasteButton, deleteButton, moveUpButton, moveDownButton)) {
             button.setEnabled(false);
         }
@@ -1443,6 +1776,44 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         }
         Object parent = selectedPath.getParentPath().getLastPathComponent();
         return parent instanceof NBTEditorTreeNode node ? node : null;
+    }
+
+    /// Resolves the type-combo display value to one standard non-END tag type.
+    ///
+    /// @return selected target type, or `null` for a non-tag row
+    private @Nullable TagType<?> selectedConversionType() {
+        @Nullable Object value = typeCombo.getSelectedItem();
+        if (!(value instanceof String name)) {
+            return null;
+        }
+        for (TagType<?> type : NBTTagInput.types()) {
+            if (type.name().equals(name)) {
+                return type;
+            }
+        }
+        return null;
+    }
+
+    /// Enables conversion submission only for a changed supported target.
+    private void updateTypeConversionButton() {
+        @Nullable NBTEditorTreeNode selected = selectedNode();
+        @Nullable TagType<?> target = selectedConversionType();
+        typeButton.setEnabled(selected != null
+                && target != null
+                && target != selected.node().getType()
+                && typeCombo.isEnabled()
+                && mutationsAllowed());
+    }
+
+    /// Returns whether the selected value field has a complete editable representation.
+    ///
+    /// @param selected selected row
+    /// @return whether Apply may submit its current text
+    private boolean valueEditable(NBTEditorTreeNode selected) {
+        @Nullable TagType<?> type = selected.node().getType();
+        return selected.editable() && type != null
+                && ValueTag.class.isAssignableFrom(type.tagClass())
+                && !NBTStructuredValueCodec.isPrimitiveArray(type);
     }
 
     /// Returns the selected immutable address.
@@ -1484,50 +1855,9 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// @return insertion target, or `null` when the current selection cannot accept a tag
     private @Nullable InsertionTarget insertionTarget() {
         @Nullable NBTEditorTreeNode selected = selectedNode();
-        if (selected == null) {
-            return null;
-        }
-        @Nullable InsertionTarget direct = targetForParent(selected, selected.childCount());
-        if (direct != null) {
-            return direct;
-        }
-        @Nullable NBTEditorTreeNode parent = selectedParentNode();
-        return parent == null ? null : targetForParent(parent, selected.parentIndex() + 1);
-    }
-
-    /// Builds insertion constraints for one candidate parent.
-    ///
-    /// @param parent candidate parent row
-    /// @param index requested insertion index
-    /// @return constrained target, or `null`
-    private @Nullable InsertionTarget targetForParent(NBTEditorTreeNode parent, int index) {
-        @Nullable TagType<?> type = parent.node().getType();
-        if (type == TagType.COMPOUND) {
-            return new InsertionTarget(parent, index, NBTTagInput.types(), true);
-        }
-        if (type == TagType.LIST) {
-            @Nullable TagType<?> elementType = parent.childCount() > 0
-                    ? parent.childAt(0).node().getType()
-                    : controller.listElementType(parent);
-            return new InsertionTarget(
-                    parent,
-                    index,
-                    elementType == null ? NBTTagInput.types() : List.of(elementType),
-                    false);
-        }
-        if (type == TagType.BYTE_ARRAY) {
-            return new InsertionTarget(parent, index, List.of(TagType.BYTE), false);
-        }
-        if (type == TagType.INT_ARRAY) {
-            return new InsertionTarget(parent, index, List.of(TagType.INT), false);
-        }
-        if (type == TagType.LONG_ARRAY) {
-            return new InsertionTarget(parent, index, List.of(TagType.LONG), false);
-        }
-        if (type == null && isRegionSlot(parent.address()) && parent.childCount() == 0) {
-            return new InsertionTarget(parent, 0, List.of(TagType.COMPOUND), false);
-        }
-        return null;
+        return selected == null
+                ? null
+                : NBTEditorPanelSupport.insertionTarget(selected, selectedParentNode(), controller);
     }
 
     /// Returns whether the selected row is an empty List.
@@ -1563,77 +1893,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         return parent != null && destination >= 0 && destination < parent.childCount();
     }
 
-    /// Returns whether an address identifies a fixed Region chunk slot.
-    ///
-    /// @param address candidate address
-    /// @return whether its final segment is a region slot
-    private static boolean isRegionSlot(NBTAddress address) {
-        @Unmodifiable List<NBTAddress.Segment> segments = address.segments();
-        return !segments.isEmpty()
-                && segments.get(segments.size() - 1) instanceof NBTAddress.RegionChunkSegment;
-    }
-
-    /// Returns whether an address identifies a fixed chunk root.
-    ///
-    /// @param address candidate address
-    /// @return whether its final segment is a chunk-root slot
-    private static boolean isChunkRoot(NBTAddress address) {
-        @Unmodifiable List<NBTAddress.Segment> segments = address.segments();
-        return !segments.isEmpty()
-                && segments.get(segments.size() - 1) instanceof NBTAddress.ChunkRootSegment;
-    }
-
-    /// Finds the owning Region local index for a chunk-root address.
-    ///
-    /// @param address chunk-root address
-    /// @return local index, or `-1` when absent
-    private static int chunkLocalIndex(NBTAddress address) {
-        for (NBTAddress.Segment segment : address.segments()) {
-            if (segment instanceof NBTAddress.RegionChunkSegment chunk) {
-                return chunk.localIndex();
-            }
-        }
-        return -1;
-    }
-
-    /// Generates a readable unused default Compound child name.
-    ///
-    /// @param parent Compound parent
-    /// @return unused default name
-    private String uniqueChildName(NBTEditorTreeNode parent) {
-        String base = strings.defaultTagName();
-        for (int suffix = 1; ; suffix++) {
-            String candidate = suffix == 1 ? base : base + '_' + suffix;
-            boolean used = false;
-            for (int index = 0; index < parent.childCount(); index++) {
-                if (candidate.equals(parent.childAt(index).node().getName())) {
-                    used = true;
-                    break;
-                }
-            }
-            if (!used) {
-                return candidate;
-            }
-        }
-    }
-
-    /// Returns a safe initial structured value for one selected type.
-    ///
-    /// @param type selected type
-    /// @return initial form value
-    private static String defaultValue(TagType<?> type) {
-        TagType<?> selected = Objects.requireNonNull(type, "type");
-        if (selected == TagType.BYTE
-                || selected == TagType.SHORT
-                || selected == TagType.INT
-                || selected == TagType.LONG
-                || selected == TagType.FLOAT
-                || selected == TagType.DOUBLE) {
-            return "0";
-        }
-        return "";
-    }
-
     /// Performs terminal Swing teardown on the EDT.
     private void closeOnEventDispatchThread() {
         EdtDispatcher.requireEventDispatchThread();
@@ -1642,7 +1901,9 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         tree.removeTreeWillExpandListener(rootExpansionListener);
         tree.removeMouseListener(treePopupMouseListener);
         editorTabs.removeChangeListener(editorTabListener);
-        invalidateSnbtLoad();
+        valueArea.getDocument().removeDocumentListener(valueDocumentListener);
+        valueTextLoader.close();
+        snbtTextLoader.close();
         setTransferHandler(null);
         tree.setModel(emptyTreeModel());
         renderedDocument = null;
@@ -1653,193 +1914,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         controller.close();
     }
 
-    /// Starts one background classpath read and injects decoded icons on the EDT.
-    ///
-    /// @param executor caller-owned background executor
-    /// @return started future, or `null` when submission is rejected
-    private @Nullable CompletableFuture<@Unmodifiable Map<NBTNodeType, Icon>> preloadTreeIcons(
-            Executor executor) {
-        try {
-            CompletableFuture<@Unmodifiable Map<NBTNodeType, Icon>> future = CompletableFuture.supplyAsync(
-                    NBTTreeCellRenderer::loadIcons,
-                    Objects.requireNonNull(executor, "executor"));
-            future.whenComplete((
-                    @Nullable @Unmodifiable Map<NBTNodeType, Icon> loaded,
-                    @Nullable Throwable failure) -> EdtDispatcher.execute(() -> {
-                        if (!closed.get() && failure == null && loaded != null) {
-                            treeCellRenderer.installIcons(loaded);
-                            tree.repaint();
-                        }
-                    }));
-            return future;
-        } catch (RuntimeException failure) {
-            return null;
-        }
-    }
-
-    /// Configures one fixed-size familiar-symbol icon command.
-    ///
-    /// @param button target button
-    /// @param name stable UI-audit name
-    /// @param iconResource classpath SVG resource
-    /// @param tooltip localized accessible text
-    /// @param action command action
-    private static void configureIconButton(
-            JButton button,
-            String name,
-            String iconResource,
-            String tooltip,
-            Runnable action) {
-        JButton target = Objects.requireNonNull(button, "button");
-        target.setName(Objects.requireNonNull(name, "name"));
-        target.setIcon(themeIcon(iconResource));
-        configureToolButton(target, tooltip, action);
-    }
-
-    /// Configures one fixed-size text-symbol tool button.
-    ///
-    /// @param button target button
-    /// @param name stable UI-audit name
-    /// @param symbol familiar symbol
-    /// @param tooltip localized accessible text
-    /// @param action command action
-    private static void configureSymbolButton(
-            JButton button,
-            String name,
-            String symbol,
-            String tooltip,
-            Runnable action) {
-        JButton target = Objects.requireNonNull(button, "button");
-        target.setName(Objects.requireNonNull(name, "name"));
-        target.setText(Objects.requireNonNull(symbol, "symbol"));
-        configureToolButton(target, tooltip, action);
-    }
-
-    /// Applies shared accessible behavior to one tool button.
-    ///
-    /// @param button target button
-    /// @param tooltip localized accessible text
-    /// @param action command action
-    private static void configureToolButton(JButton button, String tooltip, Runnable action) {
-        String text = Objects.requireNonNull(tooltip, "tooltip");
-        button.setToolTipText(text);
-        button.getAccessibleContext().setAccessibleName(text);
-        button.getAccessibleContext().setAccessibleDescription(text);
-        button.setHorizontalAlignment(SwingConstants.CENTER);
-        button.putClientProperty("JButton.buttonType", "toolBarButton");
-        button.addActionListener(event -> Objects.requireNonNull(action, "action").run());
-    }
-
-    /// Creates one context-menu command.
-    ///
-    /// @param text localized command
-    /// @param iconResource optional classpath icon
-    /// @param action command action
-    /// @return configured menu item
-    private static JMenuItem menuItem(String text, @Nullable String iconResource, Runnable action) {
-        JMenuItem item = new JMenuItem(Objects.requireNonNull(text, "text"));
-        if (iconResource != null) {
-            item.setIcon(themeIcon(iconResource));
-        }
-        item.addActionListener(event -> Objects.requireNonNull(action, "action").run());
-        return item;
-    }
-
-    /// Installs one keyboard command on a component's focused ancestry.
-    ///
-    /// @param component binding owner
-    /// @param key action-map key
-    /// @param stroke keyboard gesture
-    /// @param action command action
-    private static void bind(JComponent component, String key, KeyStroke stroke, Runnable action) {
-        JComponent target = Objects.requireNonNull(component, "component");
-        String actionKey = Objects.requireNonNull(key, "key");
-        target.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
-                .put(Objects.requireNonNull(stroke, "stroke"), actionKey);
-        target.getActionMap().put(actionKey, new RunnableAction(action));
-    }
-
-    /// Creates one detail label associated with its editor component.
-    ///
-    /// @param text localized label
-    /// @param component associated component
-    /// @return configured label
-    private static JLabel detailLabel(String text, JComponent component) {
-        JLabel label = new JLabel(Objects.requireNonNull(text, "text"));
-        label.setLabelFor(Objects.requireNonNull(component, "component"));
-        return label;
-    }
-
-    /// Creates one stable read-only detail field.
-    ///
-    /// @param name UI-audit component name
-    /// @return configured field
-    private static JTextField readOnlyField(String name) {
-        JTextField field = new JTextField();
-        field.setName(Objects.requireNonNull(name, "name"));
-        field.setEditable(false);
-        return field;
-    }
-
-    /// Creates an empty tree model without a synthetic placeholder node.
-    ///
-    /// @return empty model
-    private static TreeModel emptyTreeModel() {
-        return new DefaultTreeModel(null);
-    }
-
-    /// Creates a bundled SVG icon that follows component foreground.
-    ///
-    /// @param iconResource classpath SVG resource
-    /// @return theme-aware icon
-    private static FlatSVGIcon themeIcon(String iconResource) {
-        FlatSVGIcon icon = new FlatSVGIcon(Objects.requireNonNull(iconResource, "iconResource"), 18, 18);
-        icon.setColorFilter(new FlatSVGIcon.ColorFilter(NBTEditorPanel::resolveIconColor));
-        return icon;
-    }
-
-    /// Resolves icon color from its owner and current theme.
-    ///
-    /// @param component owning component, or `null`
-    /// @param originalColor authored fallback
-    /// @return current foreground or fallback
-    private static Color resolveIconColor(@Nullable Component component, Color originalColor) {
-        Color authored = Objects.requireNonNull(originalColor, "originalColor");
-        @Nullable Color foreground = component == null ? null : component.getForeground();
-        if (foreground != null) {
-            return foreground;
-        }
-        @Nullable Color themeForeground = UIManager.getColor("Button.foreground");
-        return themeForeground == null ? authored : themeForeground;
-    }
-
-    /// Decodes Java file-list transfers without filesystem access.
-    ///
-    /// @param transferable transfer payload
-    /// @return immutable paths, or `null` when unsupported
-    private static @Nullable @Unmodifiable List<Path> transferredPaths(Transferable transferable) {
-        Transferable payload = Objects.requireNonNull(transferable, "transferable");
-        if (!payload.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
-            return null;
-        }
-        try {
-            Object transferData = payload.getTransferData(DataFlavor.javaFileListFlavor);
-            if (!(transferData instanceof List<?> files)) {
-                return null;
-            }
-            List<Path> paths = new ArrayList<>(files.size());
-            for (Object value : files) {
-                if (!(value instanceof File file)) {
-                    return null;
-                }
-                paths.add(file.toPath().toAbsolutePath().normalize());
-            }
-            return List.copyOf(paths);
-        } catch (UnsupportedFlavorException | IOException | RuntimeException failure) {
-            return null;
-        }
-    }
-
     /// Parent-owned navigation operation emitted by this routable page.
     @NotNullByDefault
     @FunctionalInterface
@@ -1848,153 +1922,4 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         void closeRequested();
     }
 
-    /// Immutable constraints for one Add or Paste destination.
-    ///
-    /// @param parent destination parent row
-    /// @param index insertion index
-    /// @param types permitted tag types
-    /// @param nameRequired whether a non-empty Compound name is required
-    @NotNullByDefault
-    private record InsertionTarget(
-            NBTEditorTreeNode parent,
-            int index,
-            @Unmodifiable List<TagType<?>> types,
-            boolean nameRequired) {
-        /// Validates and snapshots insertion constraints.
-        private InsertionTarget {
-            Objects.requireNonNull(parent, "parent");
-            types = List.copyOf(Objects.requireNonNull(types, "types"));
-            if (index < 0 || index > parent.childCount() || types.isEmpty()) {
-                throw new IllegalArgumentException("Invalid insertion target");
-            }
-        }
-    }
-
-    /// Swing action that delegates to one prevalidated command.
-    @NotNullByDefault
-    private static final class RunnableAction extends AbstractAction {
-        /// Serialization identifier for the Swing action superclass.
-        @Serial
-        private static final long serialVersionUID = 1L;
-
-        /// Command executed on the EDT.
-        private final Runnable command;
-
-        /// Creates one action.
-        ///
-        /// @param command command to execute
-        private RunnableAction(Runnable command) {
-            this.command = Objects.requireNonNull(command, "command");
-        }
-
-        /// Runs the command.
-        ///
-        /// @param event Swing action event
-        @Override
-        public void actionPerformed(ActionEvent event) {
-            Objects.requireNonNull(event, "event");
-            command.run();
-        }
-    }
-
-    /// Selects a popup-trigger row before Swing opens its context menu.
-    @NotNullByDefault
-    private final class TreePopupMouseListener extends MouseAdapter {
-        /// Selects the row under a platform popup trigger.
-        ///
-        /// @param event mouse event
-        @Override
-        public void mousePressed(MouseEvent event) {
-            selectPopupRow(event);
-        }
-
-        /// Selects the row under a platform popup trigger.
-        ///
-        /// @param event mouse event
-        @Override
-        public void mouseReleased(MouseEvent event) {
-            selectPopupRow(event);
-        }
-
-        /// Selects the event row when it triggers a popup.
-        ///
-        /// @param event mouse event
-        private void selectPopupRow(MouseEvent event) {
-            MouseEvent mouseEvent = Objects.requireNonNull(event, "event");
-            if (!mouseEvent.isPopupTrigger()) {
-                return;
-            }
-            @Nullable TreePath path = tree.getPathForLocation(mouseEvent.getX(), mouseEvent.getY());
-            if (path != null) {
-                tree.setSelectionPath(path);
-            }
-        }
-    }
-
-    /// Activates deferred root children exactly when expansion begins.
-    @NotNullByDefault
-    private final class RootExpansionListener implements TreeWillExpandListener {
-        /// Reveals root children before Swing enumerates the expanding path.
-        ///
-        /// @param event pending expansion event
-        /// @throws ExpandVetoException never thrown
-        @Override
-        public void treeWillExpand(TreeExpansionEvent event) throws ExpandVetoException {
-            TreeExpansionEvent expansion = Objects.requireNonNull(event, "event");
-            @Nullable Object component = expansion.getPath().getLastPathComponent();
-            JTree source = (JTree) expansion.getSource();
-            if (!installingTreeModel
-                    && source.getModel() instanceof NBTLazyTreeModel model
-                    && component == model.getRoot()) {
-                model.revealRootChildren();
-            }
-        }
-
-        /// Accepts collapse without changing model visibility.
-        ///
-        /// @param event pending collapse event
-        /// @throws ExpandVetoException never thrown
-        @Override
-        public void treeWillCollapse(TreeExpansionEvent event) throws ExpandVetoException {
-            Objects.requireNonNull(event, "event");
-        }
-    }
-
-    /// Swing transfer adapter that forwards only decoded immutable paths.
-    @NotNullByDefault
-    private final class NBTTransferHandler extends TransferHandler {
-        /// Serialization identifier for the Swing transfer superclass.
-        @Serial
-        private static final long serialVersionUID = 1L;
-
-        /// Reports whether file-list input can be considered.
-        ///
-        /// @param support Swing transfer context
-        /// @return whether decoding may proceed
-        @Override
-        public boolean canImport(TransferSupport support) {
-            TransferSupport transferSupport = Objects.requireNonNull(support, "support");
-            return ShellFileDropHandler.canImportAncestorText(transferSupport)
-                    || (!closed.get()
-                    && !controller.snapshot().busy()
-                    && transferSupport.isDataFlavorSupported(DataFlavor.javaFileListFlavor));
-        }
-
-        /// Decodes and forwards one file-list transfer.
-        ///
-        /// @param support Swing transfer context
-        /// @return whether one source was accepted
-        @Override
-        public boolean importData(TransferSupport support) {
-            TransferSupport transferSupport = Objects.requireNonNull(support, "support");
-            if (ShellFileDropHandler.importAncestorText(transferSupport)) {
-                return true;
-            }
-            if (!canImport(transferSupport)) {
-                return false;
-            }
-            @Nullable @Unmodifiable List<Path> paths = transferredPaths(transferSupport.getTransferable());
-            return paths != null && openDroppedPaths(paths);
-        }
-    }
 }

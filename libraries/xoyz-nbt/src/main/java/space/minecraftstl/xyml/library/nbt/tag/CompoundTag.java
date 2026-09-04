@@ -359,14 +359,25 @@ public final class CompoundTag extends ParentTag<Tag> {
     public CompoundTag insertTag(int index, String name, Tag tag) throws IllegalArgumentException {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(tag, "tag");
+        if (index < 0 || index > size) {
+            throw new IndexOutOfBoundsException("index: " + index + ", size: " + size);
+        }
         if (name.isEmpty()) {
             throw new IllegalArgumentException("Compound children must have a non-empty name");
         }
+        validateTagForAttach(tag);
         if (tag.getParent() != null) {
             throw new IllegalArgumentException("The tag must be detached before insertion");
         }
+        if (subTagsByName.containsKey(name)) {
+            throw new IllegalArgumentException("The name '" + name + "' is already used by another subtag");
+        }
+
+        // All checks must complete before changing the detached candidate's name.
         tag.setName0(name);
-        return insertTag(index, tag);
+        insertTagInternal(index, tag);
+        subTagsByName.put(name, tag);
+        return this;
     }
 
     /// Removes the child with the given name, returning `null` when it is absent.

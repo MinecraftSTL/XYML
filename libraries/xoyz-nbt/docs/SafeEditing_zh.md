@@ -74,10 +74,27 @@ NBTNode currentNode = editor.resolve(address);
 - `remove` / `delete`：删除非根节点。
 - `move`：在兼容容器之间移动节点或在同一容器内排序。
 - `setScalar` / `setArrayElement`：按原类型严格解析并更新标量。
+- `getConvertibleTypes` / `convertType`：查询并执行不会破坏父容器约束的显式类型转换。
 - `setListElementType`：仅为符合约束的空 List 设置元素类型。
 - `setChunkTimestamp`：更新 Region chunk 的时间戳。
 
 编辑器会先完成全部预检，再一次性提交修改。名称冲突、List 异构、非法索引、循环引用、双重归属、根节点禁用操作或数值越界都不会留下部分修改。输入根、插入对象和替换对象都会被深拷贝。
+
+### 类型转换
+
+`convertType` 保留标签名称和父容器中的位置，并作为一条可撤销事务提交。选择当前类型是无修改操作，不会推进 revision。根标签的具体 Java 类型定义了 `NBTEditor<E>` 的泛型契约，因此根标签只会在 `getConvertibleTypes` 中返回当前类型。
+
+支持的转换遵循以下规则：
+
+- Byte、Short、Int 和 Long 可以互转，也可以转换为 Float、Double、String 或三种 primitive array。整型缩窄使用 Java 低位保留语义。
+- Float 和 Double 可以互转、转换为四种整型或 String。浮点与整数之间使用 Java 原生数值转换语义，包括向零截断、NaN 转零和超范围饱和后再缩窄。
+- 数值转换为 String 时使用对应 Java 数值类型的十进制文本。
+- String 按十进制解析为数值；不能解析的文本转换为零。整数目标保留解析结果的低位。
+- Byte Array、Int Array、Long Array 与四种整型可以互转。数组元素作为固定宽度二进制片段按大端序连接；标量目标保留低位，数组目标在最高位一侧补零后重新分组。
+- List 只能转换为 Compound，新键依次为 `0`、`1`、`2`。
+- Compound 只能转换为 List，并要求键恰好为从 `0` 开始、无间断且无其他形式的十进制索引；所有值还必须同型，以满足 NBT List 的格式约束。转换结果按数字索引排序。
+
+父容器约束始终优先。例如，List 或 primitive array 的单个子元素不能被转换为不同类型；这会使父容器异构。`getConvertibleTypes` 会排除当前节点实际不能使用的目标类型，失败的 `convertType` 则以 `TYPE_MISMATCH` 拒绝且不改变树、revision 或历史。
 
 `NBTEditException.reason()` 提供稳定的机器可读原因，例如 `STALE_NODE`、`DUPLICATE_NAME`、`TYPE_MISMATCH`、`CYCLE`、`ROOT_OPERATION`、`INVALID_FORMAT`、`NO_UNDO` 和 `NO_REDO`。
 
