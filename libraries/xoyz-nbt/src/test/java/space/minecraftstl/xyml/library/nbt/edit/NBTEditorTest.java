@@ -19,10 +19,12 @@
 package space.minecraftstl.xyml.library.nbt.edit;
 
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
+import space.minecraftstl.xyml.library.nbt.tag.ByteArrayTag;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.IntArrayTag;
 import space.minecraftstl.xyml.library.nbt.tag.IntTag;
 import space.minecraftstl.xyml.library.nbt.tag.ListTag;
+import space.minecraftstl.xyml.library.nbt.tag.StringTag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -105,6 +107,65 @@ public final class NBTEditorTest {
                 () -> editor.move(branchNode, childNode, 0));
         assertEquals(NBTEditException.Reason.CYCLE, cycleFailure.reason());
         assertEquals("branch", editor.resolve(NBTAddress.root().appendName("branch")).getName());
+    }
+
+    /// Ensures List and primitive-array replacements reject heterogeneous types before mutation.
+    @Test
+    void rejectsHeterogeneousReplacementsAtomically() throws Exception {
+        ListTag<IntTag> list = new ListTag<>(TagType.INT).addTag(new IntTag(1));
+        CompoundTag source = new CompoundTag()
+                .addTag("list", list)
+                .addTag("array", new ByteArrayTag(new byte[]{2}));
+        NBTEditor<CompoundTag> editor = NBTEditor.of(source);
+        CompoundTag before = editor.snapshot();
+        long revision = editor.getRevision();
+
+        NBTEditException listFailure = assertThrows(NBTEditException.class,
+                () -> editor.replace(
+                        editor.resolve(NBTAddress.root().appendName("list").appendIndex(0)),
+                        new StringTag("wrong")));
+        NBTEditException arrayFailure = assertThrows(NBTEditException.class,
+                () -> editor.replace(
+                        editor.resolve(NBTAddress.root().appendName("array").appendIndex(0)),
+                        new IntTag(3)));
+
+        assertEquals(NBTEditException.Reason.TYPE_MISMATCH, listFailure.reason());
+        assertEquals(NBTEditException.Reason.TYPE_MISMATCH, arrayFailure.reason());
+        assertEquals(revision, editor.getRevision());
+        assertEquals(before, editor.snapshot());
+        assertFalse(editor.isDirty());
+        assertFalse(editor.canUndo());
+    }
+
+    /// Ensures numeric scalar editing rejects hexadecimal syntax without changing session state.
+    @Test
+    void rejectsHexadecimalScalarInputAtomically() throws Exception {
+        NBTEditor<CompoundTag> editor = NBTEditor.of(new CompoundTag()
+                .addInt("integer", 7)
+                .addFloat("floating", 1.5F)
+                .addDouble("decimal", 2.5D));
+        long revision = editor.getRevision();
+
+        NBTEditException integerFailure = assertThrows(NBTEditException.class,
+                () -> editor.setScalar(
+                        editor.resolve(NBTAddress.root().appendName("integer")), "0x10"));
+        NBTEditException floatingFailure = assertThrows(NBTEditException.class,
+                () -> editor.setScalar(
+                        editor.resolve(NBTAddress.root().appendName("floating")), "-0X1.0p2"));
+        NBTEditException doubleFailure = assertThrows(NBTEditException.class,
+                () -> editor.setScalar(
+                        editor.resolve(NBTAddress.root().appendName("decimal")), "+0x1.0p1"));
+
+        assertEquals(NBTEditException.Reason.TYPE_MISMATCH, integerFailure.reason());
+        assertEquals(NBTEditException.Reason.TYPE_MISMATCH, floatingFailure.reason());
+        assertEquals(NBTEditException.Reason.TYPE_MISMATCH, doubleFailure.reason());
+        assertEquals(revision, editor.getRevision());
+        assertFalse(editor.isDirty());
+        assertFalse(editor.canUndo());
+        CompoundTag snapshot = editor.snapshot();
+        assertEquals(7, snapshot.getInt("integer"));
+        assertEquals(1.5F, snapshot.getFloat("floating"));
+        assertEquals(2.5D, snapshot.getDouble("decimal"));
     }
 
     /// Ensures stale and foreign handles cannot be applied to the working tree.

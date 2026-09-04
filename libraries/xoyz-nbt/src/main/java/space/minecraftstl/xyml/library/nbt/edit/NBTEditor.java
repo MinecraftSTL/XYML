@@ -426,6 +426,12 @@ public final class NBTEditor<E extends NBTElement> {
             if (compound.get(newTag.getName()) != oldTag && compound.get(newTag.getName()) != null) {
                 throw error(NBTEditException.Reason.DUPLICATE_NAME, "The replacement name is already in use");
             }
+        } else if (parent instanceof ListTag<?> list && list.getElementType() != newTag.getType()) {
+            throw error(NBTEditException.Reason.TYPE_MISMATCH,
+                    "The replacement type does not match the destination list");
+        } else if (parent instanceof ArrayTag<?, ?, ?, ?> array && array.getElementType() != newTag.getType()) {
+            throw error(NBTEditException.Reason.TYPE_MISMATCH,
+                    "The replacement type does not match the destination array");
         } else if (parent instanceof Chunk && !(newTag instanceof CompoundTag)) {
             throw error(NBTEditException.Reason.TYPE_MISMATCH, "A chunk root must be a compound tag");
         } else if (!newTag.getName().isEmpty()) {
@@ -1192,6 +1198,9 @@ public final class NBTEditor<E extends NBTElement> {
 
     private static Tag parseScalar(ValueTag<?> source, String text) {
         String input = text.trim();
+        if (source.getType() != TagType.STRING && isHexadecimalLiteral(input)) {
+            throw new NumberFormatException("Hexadecimal numeric values are not editable");
+        }
         if (source instanceof space.minecraftstl.xyml.library.nbt.tag.ByteTag) {
             return new space.minecraftstl.xyml.library.nbt.tag.ByteTag(Byte.parseByte(input)).setName(source.getName());
         }
@@ -1222,6 +1231,19 @@ public final class NBTEditor<E extends NBTElement> {
             return new space.minecraftstl.xyml.library.nbt.tag.StringTag(text).setName(source.getName());
         }
         throw new NumberFormatException("The selected value type is not editable");
+    }
+
+    /// Returns whether a numeric input starts with Java's hexadecimal literal prefix.
+    ///
+    /// The editor deliberately accepts decimal text only. A leading sign is ignored while
+    /// checking the prefix so both positive and negative hexadecimal floating-point forms are
+    /// rejected before Java's permissive floating-point parser sees them.
+    ///
+    /// @param input trimmed scalar input
+    /// @return whether the input starts with an optional sign followed by `0x` or `0X`
+    private static boolean isHexadecimalLiteral(String input) {
+        int offset = input.startsWith("+") || input.startsWith("-") ? 1 : 0;
+        return input.length() >= offset + 2 && input.regionMatches(true, offset, "0x", 0, 2);
     }
 
     private static NBTEditException translate(RuntimeException exception) {
