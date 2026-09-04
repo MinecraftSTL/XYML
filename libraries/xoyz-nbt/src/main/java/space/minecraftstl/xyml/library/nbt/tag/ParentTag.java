@@ -306,7 +306,13 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
                 List<Tag> source = simulatedChildren.computeIfAbsent(oldParent,
                         ParentTag::snapshotChildren);
                 if (!removeIdentity(source, candidate)) {
-                    throw new IllegalArgumentException("The parent-child ownership invariant is inconsistent");
+                    // A Compound replacement may have detached a candidate that is also later
+                    // present in this batch. The real addTag sequence permits that candidate to
+                    // be attached again, so treat it as detached in the simulation as well.
+                    if (simulatedParents.get(candidate) != null) {
+                        throw new IllegalArgumentException(
+                                "The parent-child ownership invariant is inconsistent");
+                    }
                 }
                 simulatedParents.put(candidate, null);
             }

@@ -133,4 +133,21 @@ public final class ParentTagBatchAtomicityTest {
         assertSame(source, child.getParent());
         assertEquals(0, child.getIndex());
     }
+
+    /// Ensures a candidate replaced earlier in the same Compound batch can be attached again.
+    @Test
+    void preservesSequentialCompoundReplacementCompatibility() {
+        CompoundTag destination = new CompoundTag();
+        IntTag original = new IntTag(1).setName("value");
+        destination.addTag(original);
+        IntTag replacement = new IntTag(2).setName("value");
+
+        destination.addTags(replacement, original);
+
+        assertEquals(1, destination.size());
+        assertSame(original, destination.get("value"));
+        assertSame(destination, original.getParent());
+        assertEquals(-1, replacement.getIndex());
+        assertNull(replacement.getParent());
+    }
 }

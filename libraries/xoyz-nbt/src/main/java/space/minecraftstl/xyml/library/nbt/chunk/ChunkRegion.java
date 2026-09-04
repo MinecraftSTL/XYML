@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.library.nbt.chunk;
 import space.minecraftstl.xyml.library.nbt.NBTElement;
 import space.minecraftstl.xyml.library.nbt.NBTParent;
 import space.minecraftstl.xyml.library.nbt.internal.ChunkUtils;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.Nullable;
 
@@ -33,6 +34,7 @@ import java.util.stream.Stream;
 ///
 /// @see <a href="https://minecraft.wiki/w/Anvil_file_format">Anvil file format - Minecraft Wiki</a>
 /// @see <a href="https://minecraft.wiki/w/Region_file_format">Region file format - Minecraft Wiki</a>
+@NotNullByDefault
 public final class ChunkRegion implements NBTParent<Chunk>, NBTElement, Iterable<Chunk> {
 
     private final @Nullable Chunk[] chunks = new Chunk[ChunkUtils.CHUNKS_PRE_REGION];
@@ -95,6 +97,9 @@ public final class ChunkRegion implements NBTParent<Chunk>, NBTElement, Iterable
         Objects.requireNonNull(chunk);
 
         Chunk old = chunks[localIndex];
+        if (old == chunk) {
+            return this;
+        }
         validateCurrentSlot(localIndex, old);
         @Nullable ChunkRegion oldRegion = chunk.getParent();
         validateCandidateChunk(chunk, oldRegion);

@@ -79,7 +79,9 @@ public final class NBTTypeConversionTest {
                 .addString("invalid", "not a decimal")
                 .addString("hex", "0x10")
                 .addString("exponent", "1.25e2")
-                .addString("hugeExponent", "1e999999999");
+                .addString("hugeExponent", "1e999999999")
+                .addString("floatOverflow", "1e9999")
+                .addString("doubleOverflow", "1e999999999");
         NBTEditor<CompoundTag> editor = NBTEditor.of(root);
 
         NBTNode number = editor.convertType(
@@ -100,6 +102,12 @@ public final class NBTTypeConversionTest {
         NBTNode hugeExponent = editor.convertType(
                 NBTAddress.root().appendName("hugeExponent"), TagType.LONG);
         assertEquals(0L, ((LongTag) editor.snapshot(hugeExponent)).get());
+        NBTNode floatOverflow = editor.convertType(
+                NBTAddress.root().appendName("floatOverflow"), TagType.FLOAT);
+        assertEquals(Float.POSITIVE_INFINITY, ((FloatTag) editor.snapshot(floatOverflow)).get());
+        NBTNode doubleOverflow = editor.convertType(
+                NBTAddress.root().appendName("doubleOverflow"), TagType.DOUBLE);
+        assertEquals(Double.POSITIVE_INFINITY, ((DoubleTag) editor.snapshot(doubleOverflow)).get());
     }
 
     /// Verifies floating-point conversions exactly follow Java primitive casts.
@@ -169,6 +177,22 @@ public final class NBTTypeConversionTest {
         ByteArrayTag longBytes = (ByteArrayTag) editor.snapshot(editor.convertType(
                 NBTAddress.root().appendName("longs"), TagType.BYTE_ARRAY));
         assertArrayEquals(new byte[]{1, 2, 3, 4, 5, 6, 7, 8}, bytes(longBytes));
+    }
+
+    /// Verifies that an integral array keeps the exact big-endian byte stream at partial widths.
+    @Test
+    void preservesPartialWidthArrayBytesWithoutSignGuessing() throws Exception {
+        NBTEditor<CompoundTag> editor = NBTEditor.of(new CompoundTag()
+                .addTag("bytes", new ByteArrayTag(new byte[]{-1, 0x01}))
+                .addTag("shortBytes", new ByteArrayTag(new byte[]{(byte) 0x80})));
+
+        IntArrayTag packed = (IntArrayTag) editor.snapshot(editor.convertType(
+                NBTAddress.root().appendName("bytes"), TagType.INT_ARRAY));
+        assertArrayEquals(new int[]{0x0000FF01}, ints(packed));
+
+        LongArrayTag wide = (LongArrayTag) editor.snapshot(editor.convertType(
+                NBTAddress.root().appendName("shortBytes"), TagType.LONG_ARRAY));
+        assertArrayEquals(new long[]{0x0000000000000080L}, longs(wide));
     }
 
     /// Verifies List-to-Compound conversion uses decimal indexes and remains undoable.

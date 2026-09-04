@@ -251,8 +251,9 @@ final class NBTTagConverter {
 
     /// Parses a base-ten string, returning numeric zero when parsing is impossible.
     ///
-    /// BigDecimal supplies truncation toward zero for integer targets and preserves decimal exponent
-    /// syntax without accepting hexadecimal input.
+    /// BigDecimal accepts ordinary decimal fractions and exponent notation but deliberately rejects
+    /// hexadecimal and special floating-point spellings. The caller applies the target type's
+    /// narrowing or finite-value rules after parsing.
     ///
     /// @param text source text
     /// @return parsed decimal value or zero
