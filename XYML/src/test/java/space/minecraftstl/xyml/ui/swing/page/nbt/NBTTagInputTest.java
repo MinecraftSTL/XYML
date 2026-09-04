@@ -102,9 +102,20 @@ final class NBTTagInputTest {
                 () -> NBTTagInput.create(TagType.LONG, "value", "9223372036854775808"));
         assertThrows(IOException.class, () -> NBTTagInput.create(TagType.FLOAT, "value", "NaN"));
         assertThrows(IOException.class, () -> NBTTagInput.create(TagType.DOUBLE, "value", "Infinity"));
+        assertThrows(IOException.class, () -> NBTTagInput.create(TagType.FLOAT, "value", "0x1.0p2"));
+        assertThrows(IOException.class, () -> NBTTagInput.create(TagType.DOUBLE, "value", "-0X1.0p2"));
         assertThrows(IOException.class, () -> NBTTagInput.create(TagType.INT, "value", ""));
         assertThrows(IOException.class, () -> NBTTagInput.create(TagType.LIST, "value", "{answer:42}"));
         assertThrows(IOException.class, () -> NBTTagInput.parseSnbt("{answer:42} trailing"));
+    }
+
+    /// Rejects hexadecimal numeric literals in editor SNBT while preserving quoted string content.
+    @Test
+    void rejectsHexadecimalSnbtNumbersOnlyOutsideStrings() throws Exception {
+        assertThrows(IOException.class, () -> NBTTagInput.parseSnbt("{answer:0x2A}"));
+        assertThrows(IOException.class, () -> NBTTagInput.parseSnbt("[B;0X2A]"));
+        assertEquals("0x2A", assertInstanceOf(StringTag.class,
+                NBTTagInput.parseSnbt("\"0x2A\"")).getValue());
     }
 
     /// Produces complete SNBT that can be parsed back as the same selected type.
