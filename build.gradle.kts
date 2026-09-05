@@ -218,8 +218,32 @@ registerReleaseBranchBuild("buildMain", "main", ReleaseType.STABLE)
 registerReleaseBranchBuild("buildBeta", "beta", ReleaseType.BETA)
 registerReleaseBranchBuild("buildAlpha", "alpha", ReleaseType.ALPHA)
 registerReleaseBranchBuild("buildDev", "dev", ReleaseType.DEV)
-val localBuildTasks = subprojects.map { "${it.path}:build" }
+val localBuildTasks = subprojects.map { "${it.path}:assemble" } + listOf(
+    ":XYML:makeExecutables",
+    ":XYML:makeDeb"
+)
+val localTestTasks = subprojects
+    .filter { it.path != ":XYMLL" }
+    .map { "${it.path}:test" }
 val localCleanTasks = subprojects.map { "${it.path}:clean" }
+
+// Gradle expands an unqualified `build` selector to every project's lifecycle task. Keep that
+// convenient IDEA invocation package-only while preserving normal module `:project:build` behavior.
+val buildTaskNames = gradle.startParameter.taskNames
+val unqualifiedBuildRequested = buildTaskNames.any { it == "build" }
+val qualifiedSubprojectBuildRequested = buildTaskNames.any {
+    it != ":build" && it.endsWith(":build") && ':' in it
+}
+if (unqualifiedBuildRequested && !qualifiedSubprojectBuildRequested && !nestedBranchBuild.get()) {
+    gradle.projectsEvaluated {
+        subprojects.forEach { subproject ->
+            subproject.tasks.named("build").get().setDependsOn(
+                listOf(subproject.tasks.named("assemble"))
+            )
+        }
+    }
+}
+
 val runLibraryNames = listOf("xoyz-nbt", "xoyz-mcp")
 val runLibraryCacheDirectory = layout.buildDirectory.dir("run-library-cache")
 
@@ -242,14 +266,18 @@ tasks.register<Delete>("clean") {
     delete(layout.buildDirectory, layout.projectDirectory.dir("buildSrc/build"))
 }
 
+fun logCurrentCheckoutAndVersion() {
+    logger.lifecycle("XYML current checkout: ${xymlBranchName ?: "<detached>"}")
+    logger.lifecycle("XYML inferred current version: $xymlReleaseVersion")
+}
+
 val rootBuild = tasks.register("build") {
     group = xymlWorkflowGroup
-    description = "Builds the current checkout with a version inferred from its Git state."
-    dependsOn(localBuildTasks)
+    description = "Assembles the current checkout with a version inferred from its Git state, without running tests."
+    setDependsOn(localBuildTasks)
 
     doFirst {
-        logger.lifecycle("XYML current checkout: ${xymlBranchName ?: "<detached>"}")
-        logger.lifecycle("XYML inferred current version: $xymlReleaseVersion")
+        logCurrentCheckoutAndVersion()
     }
 
     doLast {
@@ -264,6 +292,20 @@ val rootBuild = tasks.register("build") {
         }
         promoteRunLibraryCache()
     }
+}
+
+val rootTest = tasks.register("test") {
+    group = xymlWorkflowGroup
+    description = "Tests the current checkout with the version inferred from its Git state."
+    dependsOn(localTestTasks)
+
+    doFirst {
+        logCurrentCheckoutAndVersion()
+    }
+}
+
+rootTest.configure {
+    mustRunAfter(rootBuild)
 }
 
 if (!nestedBranchBuild.get()) {
@@ -288,7 +330,8 @@ val runCleanRequested = gradle.startParameter.taskNames.any { taskName ->
 }
 val runLifecycleRequested = gradle.startParameter.taskNames.any { taskName ->
     taskName.substringAfterLast(':').let { name ->
-        name == "build" || name == "check" || name in setOf("buildMain", "buildBeta", "buildAlpha", "buildDev")
+        name == "build" || name == "check" || name == "test"
+            || name in setOf("buildMain", "buildBeta", "buildAlpha", "buildDev")
     }
 }
 val reusableRunLibraries = if (runBuildRequested && !runCleanRequested && !runLifecycleRequested) {
@@ -372,7 +415,7 @@ tasks.register("run") {
     dependsOn(prepareRunBuild, ":XYML:runCurrent")
 }
 
-defaultTasks("clean", "build")
+defaultTasks("clean", ":build")
 
 tasks.register<ParseLanguageSubtagRegistry>("parseLanguageSubtagRegistry") {
     languageSubtagRegistryFile.set(layout.projectDirectory.file("language-subtag-registry"))
