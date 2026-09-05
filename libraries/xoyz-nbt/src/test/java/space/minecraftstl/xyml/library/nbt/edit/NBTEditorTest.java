@@ -137,35 +137,40 @@ public final class NBTEditorTest {
         assertFalse(editor.canUndo());
     }
 
-    /// Ensures numeric scalar editing rejects hexadecimal syntax without changing session state.
+    /// Accepts hexadecimal numeric edits and keeps only the low bits of integral destinations.
     @Test
-    void rejectsHexadecimalScalarInputAtomically() throws Exception {
+    void editsHexadecimalScalarsAtomically() throws Exception {
         NBTEditor<CompoundTag> editor = NBTEditor.of(new CompoundTag()
+                .addByte("byte", (byte) 0)
+                .addShort("short", (short) 0)
                 .addInt("integer", 7)
+                .addLong("long", 0L)
                 .addFloat("floating", 1.5F)
                 .addDouble("decimal", 2.5D));
-        long revision = editor.getRevision();
 
-        NBTEditException integerFailure = assertThrows(NBTEditException.class,
-                () -> editor.setScalar(
-                        editor.resolve(NBTAddress.root().appendName("integer")), "0x10"));
-        NBTEditException floatingFailure = assertThrows(NBTEditException.class,
-                () -> editor.setScalar(
-                        editor.resolve(NBTAddress.root().appendName("floating")), "-0X1.0p2"));
-        NBTEditException doubleFailure = assertThrows(NBTEditException.class,
-                () -> editor.setScalar(
-                        editor.resolve(NBTAddress.root().appendName("decimal")), "+0x1.0p1"));
+        editor.setScalar(editor.resolve(NBTAddress.root().appendName("byte")), "0x1FF");
+        editor.setScalar(editor.resolve(NBTAddress.root().appendName("short")), "0x1FFFF");
+        editor.setScalar(editor.resolve(NBTAddress.root().appendName("integer")), "0xFFFFFFFF");
+        editor.setScalar(editor.resolve(NBTAddress.root().appendName("long")), "0x1FFFFFFFFFFFFFFFF");
+        editor.setScalar(editor.resolve(NBTAddress.root().appendName("floating")), "-0X1.0p2");
+        editor.setScalar(editor.resolve(NBTAddress.root().appendName("decimal")), "+0x1.0p1");
 
-        assertEquals(NBTEditException.Reason.TYPE_MISMATCH, integerFailure.reason());
-        assertEquals(NBTEditException.Reason.TYPE_MISMATCH, floatingFailure.reason());
-        assertEquals(NBTEditException.Reason.TYPE_MISMATCH, doubleFailure.reason());
-        assertEquals(revision, editor.getRevision());
-        assertFalse(editor.isDirty());
-        assertFalse(editor.canUndo());
         CompoundTag snapshot = editor.snapshot();
-        assertEquals(7, snapshot.getInt("integer"));
-        assertEquals(1.5F, snapshot.getFloat("floating"));
-        assertEquals(2.5D, snapshot.getDouble("decimal"));
+        assertEquals((byte) -1, snapshot.getByte("byte"));
+        assertEquals((short) -1, snapshot.getShort("short"));
+        assertEquals(-1, snapshot.getInt("integer"));
+        assertEquals(-1L, snapshot.getLong("long"));
+        assertEquals(-4.0F, snapshot.getFloat("floating"));
+        assertEquals(2.0D, snapshot.getDouble("decimal"));
+
+        long revision = editor.getRevision();
+        CompoundTag beforeFailure = editor.snapshot();
+        NBTEditException failure = assertThrows(NBTEditException.class,
+                () -> editor.setScalar(
+                        editor.resolve(NBTAddress.root().appendName("integer")), "0x"));
+        assertEquals(NBTEditException.Reason.TYPE_MISMATCH, failure.reason());
+        assertEquals(revision, editor.getRevision());
+        assertEquals(beforeFailure, editor.snapshot());
     }
 
     /// Ensures stale and foreign handles cannot be applied to the working tree.

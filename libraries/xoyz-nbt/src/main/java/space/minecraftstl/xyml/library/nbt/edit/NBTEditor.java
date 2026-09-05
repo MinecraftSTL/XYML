@@ -33,6 +33,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.math.BigInteger;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -1196,22 +1197,42 @@ public final class NBTEditor<E extends NBTElement> {
         return parent instanceof Chunk && type == TagType.COMPOUND;
     }
 
+    /// Parses a scalar edit while preserving the selected wire type.
+    ///
+    /// Decimal integers retain their strict signed ranges. Hexadecimal integers accept an optional
+    /// sign and keep the low bits of the destination type, which permits natural bit-pattern input
+    /// such as `0xFF` for a byte value of `-1`. Java decimal and hexadecimal floating-point syntax
+    /// is accepted, but non-finite results remain invalid.
+    ///
+    /// @param source scalar whose wire type and name must be retained
+    /// @param text proposed scalar text
+    /// @return detached replacement scalar
+    /// @throws NumberFormatException if the input is empty or invalid for the selected type
     private static Tag parseScalar(ValueTag<?> source, String text) {
         String input = text.trim();
-        if (source.getType() != TagType.STRING && isHexadecimalLiteral(input)) {
-            throw new NumberFormatException("Hexadecimal numeric values are not editable");
-        }
         if (source instanceof space.minecraftstl.xyml.library.nbt.tag.ByteTag) {
-            return new space.minecraftstl.xyml.library.nbt.tag.ByteTag(Byte.parseByte(input)).setName(source.getName());
+            byte value = isHexadecimalLiteral(input)
+                    ? parseHexadecimalIntegral(input).byteValue()
+                    : Byte.parseByte(input);
+            return new space.minecraftstl.xyml.library.nbt.tag.ByteTag(value).setName(source.getName());
         }
         if (source instanceof space.minecraftstl.xyml.library.nbt.tag.ShortTag) {
-            return new space.minecraftstl.xyml.library.nbt.tag.ShortTag(Short.parseShort(input)).setName(source.getName());
+            short value = isHexadecimalLiteral(input)
+                    ? parseHexadecimalIntegral(input).shortValue()
+                    : Short.parseShort(input);
+            return new space.minecraftstl.xyml.library.nbt.tag.ShortTag(value).setName(source.getName());
         }
         if (source instanceof space.minecraftstl.xyml.library.nbt.tag.IntTag) {
-            return new space.minecraftstl.xyml.library.nbt.tag.IntTag(Integer.parseInt(input)).setName(source.getName());
+            int value = isHexadecimalLiteral(input)
+                    ? parseHexadecimalIntegral(input).intValue()
+                    : Integer.parseInt(input);
+            return new space.minecraftstl.xyml.library.nbt.tag.IntTag(value).setName(source.getName());
         }
         if (source instanceof space.minecraftstl.xyml.library.nbt.tag.LongTag) {
-            return new space.minecraftstl.xyml.library.nbt.tag.LongTag(Long.parseLong(input)).setName(source.getName());
+            long value = isHexadecimalLiteral(input)
+                    ? parseHexadecimalIntegral(input).longValue()
+                    : Long.parseLong(input);
+            return new space.minecraftstl.xyml.library.nbt.tag.LongTag(value).setName(source.getName());
         }
         if (source instanceof space.minecraftstl.xyml.library.nbt.tag.FloatTag) {
             float value = Float.parseFloat(input);
@@ -1235,15 +1256,26 @@ public final class NBTEditor<E extends NBTElement> {
 
     /// Returns whether a numeric input starts with Java's hexadecimal literal prefix.
     ///
-    /// The editor deliberately accepts decimal text only. A leading sign is ignored while
-    /// checking the prefix so both positive and negative hexadecimal floating-point forms are
-    /// rejected before Java's permissive floating-point parser sees them.
-    ///
     /// @param input trimmed scalar input
     /// @return whether the input starts with an optional sign followed by `0x` or `0X`
     private static boolean isHexadecimalLiteral(String input) {
         int offset = input.startsWith("+") || input.startsWith("-") ? 1 : 0;
         return input.length() >= offset + 2 && input.regionMatches(true, offset, "0x", 0, 2);
+    }
+
+    /// Parses an optionally signed hexadecimal integer without imposing an intermediate width.
+    ///
+    /// The caller selects the final primitive width through the corresponding `BigInteger`
+    /// conversion, which deliberately retains the low bits for oversized input.
+    ///
+    /// @param input trimmed input beginning with an optional sign and `0x`
+    /// @return arbitrary-width signed integer
+    /// @throws NumberFormatException if no hexadecimal digits follow the prefix
+    private static BigInteger parseHexadecimalIntegral(String input) {
+        int prefix = input.startsWith("+") || input.startsWith("-") ? 1 : 0;
+        boolean negative = prefix == 1 && input.charAt(0) == '-';
+        BigInteger magnitude = new BigInteger(input.substring(prefix + 2), 16);
+        return negative ? magnitude.negate() : magnitude;
     }
 
     private static NBTEditException translate(RuntimeException exception) {
