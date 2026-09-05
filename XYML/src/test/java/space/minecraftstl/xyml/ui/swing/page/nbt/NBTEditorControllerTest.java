@@ -525,6 +525,55 @@ final class NBTEditorControllerTest {
         ui.run(controller::close);
     }
 
+    /// Formats and atomically applies hexadecimal scalar, List, and array drafts.
+    @Test
+    void editsStructuredNumericValuesInHexadecimalMode() throws Exception {
+        Path source = temporaryDirectory.resolve("hexadecimal-values.dat");
+        ListTag<IntTag> numbers = new ListTag<>(TagType.INT);
+        numbers.addTag(new IntTag(-1)).addTag(new IntTag(16));
+        writeTag(source, new CompoundTag()
+                .addByte("byte", (byte) -1)
+                .addFloat("floating", 1.5F)
+                .addByteArray("bytes", new byte[]{-1, 0})
+                .addTag("numbers", numbers));
+        ManualUiDispatcher ui = new ManualUiDispatcher();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(Runnable::run), ui);
+        ui.run(() -> controller.open(source));
+        ui.runNext();
+
+        NBTAddress byteAddress = NBTAddress.root().appendName("byte");
+        NBTAddress floatAddress = NBTAddress.root().appendName("floating");
+        NBTAddress bytesAddress = NBTAddress.root().appendName("bytes");
+        NBTAddress numbersAddress = NBTAddress.root().appendName("numbers");
+        assertEquals("0xFF", ui.call(() -> controller.structuredValue(
+                node(controller, byteAddress), NBTNumberRadix.HEXADECIMAL)));
+        assertEquals("0x1.8p0", ui.call(() -> controller.structuredValue(
+                node(controller, floatAddress), NBTNumberRadix.HEXADECIMAL)));
+        assertEquals("0xFF, 0x0", ui.call(() -> controller.structuredValue(
+                node(controller, bytesAddress), NBTNumberRadix.HEXADECIMAL)));
+        assertEquals("0xFFFFFFFF, 0x10", ui.call(() -> controller.structuredValue(
+                node(controller, numbersAddress), NBTNumberRadix.HEXADECIMAL)));
+
+        assertTrue(ui.call(() -> controller.applyStructuredValue(
+                node(controller, byteAddress), "1FF", NBTNumberRadix.HEXADECIMAL)).applied());
+        assertTrue(ui.call(() -> controller.applyStructuredValue(
+                node(controller, floatAddress), "2.0", NBTNumberRadix.HEXADECIMAL)).applied());
+        assertTrue(ui.call(() -> controller.applyStructuredValue(
+                node(controller, bytesAddress), "7F, 100", NBTNumberRadix.HEXADECIMAL)).applied());
+        assertTrue(ui.call(() -> controller.applyStructuredValue(
+                node(controller, numbersAddress), "10, FFFFFFFF", NBTNumberRadix.HEXADECIMAL)).applied());
+
+        CompoundTag edited = rootSnapshot(controller);
+        assertEquals((byte) -1, edited.getByte("byte"));
+        assertEquals(2.0F, edited.getFloat("floating"));
+        assertArrayEquals(new byte[]{127, 0}, ((ByteArrayTag) edited.get("bytes")).getArray());
+        ListTag<?> editedNumbers = (ListTag<?>) edited.get("numbers");
+        assertEquals(16, ((IntTag) editedNumbers.getTag(0)).getValue());
+        assertEquals(-1, ((IntTag) editedNumbers.getTag(1)).getValue());
+        ui.run(controller::close);
+    }
+
     /// Treats the library's strict-open fingerprint race as an external source conflict.
     @Test
     void classifiesSourceChangesDuringReadAsConflicts() {

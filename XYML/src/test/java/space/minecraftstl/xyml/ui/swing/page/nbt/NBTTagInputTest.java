@@ -21,6 +21,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.library.nbt.tag.ByteArrayTag;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.tag.FloatTag;
+import space.minecraftstl.xyml.library.nbt.tag.IntTag;
 import space.minecraftstl.xyml.library.nbt.tag.ListTag;
 import space.minecraftstl.xyml.library.nbt.tag.StringTag;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
@@ -102,18 +104,20 @@ final class NBTTagInputTest {
                 () -> NBTTagInput.create(TagType.LONG, "value", "9223372036854775808"));
         assertThrows(IOException.class, () -> NBTTagInput.create(TagType.FLOAT, "value", "NaN"));
         assertThrows(IOException.class, () -> NBTTagInput.create(TagType.DOUBLE, "value", "Infinity"));
-        assertThrows(IOException.class, () -> NBTTagInput.create(TagType.FLOAT, "value", "0x1.0p2"));
-        assertThrows(IOException.class, () -> NBTTagInput.create(TagType.DOUBLE, "value", "-0X1.0p2"));
         assertThrows(IOException.class, () -> NBTTagInput.create(TagType.INT, "value", ""));
         assertThrows(IOException.class, () -> NBTTagInput.create(TagType.LIST, "value", "{answer:42}"));
         assertThrows(IOException.class, () -> NBTTagInput.parseSnbt("{answer:42} trailing"));
     }
 
-    /// Rejects hexadecimal numeric literals in editor SNBT while preserving quoted string content.
+    /// Accepts hexadecimal scalars and SNBT numbers while preserving quoted string content.
     @Test
-    void rejectsHexadecimalSnbtNumbersOnlyOutsideStrings() throws Exception {
-        assertThrows(IOException.class, () -> NBTTagInput.parseSnbt("{answer:0x2A}"));
-        assertThrows(IOException.class, () -> NBTTagInput.parseSnbt("[B;0X2A]"));
+    void acceptsHexadecimalNumbers() throws Exception {
+        assertEquals(-1, assertInstanceOf(IntTag.class,
+                NBTTagInput.create(TagType.INT, "value", "0xFFFFFFFF")).getValue());
+        assertEquals(4.0F, assertInstanceOf(FloatTag.class,
+                NBTTagInput.create(TagType.FLOAT, "value", "0x1.0p2")).getValue());
+        assertEquals(42, assertInstanceOf(CompoundTag.class,
+                NBTTagInput.parseSnbt("{answer:0x2A}")).getInt("answer"));
         assertEquals("0x2A", assertInstanceOf(StringTag.class,
                 NBTTagInput.parseSnbt("\"0x2A\"")).getValue());
     }

@@ -222,14 +222,25 @@ public final class NBTEditorController implements AutoCloseable {
                 : NBTValueEditResult.failure(Objects.requireNonNull(result.errorMessage(), "errorMessage"));
     }
 
-    /// Applies one decimal scalar value.
+    /// Applies one structured value in decimal mode.
     ///
     /// @param node selected current row
     /// @param text proposed decimal value text
     /// @return transactional command result
     public NBTEditResult applyStructuredValue(NBTEditorTreeNode node, String text) {
+        return applyStructuredValue(node, text, NBTNumberRadix.DECIMAL);
+    }
+
+    /// Applies one structured value in the selected numeric radix.
+    ///
+    /// @param node selected current row
+    /// @param text proposed scalar or aggregate value text
+    /// @param radix selected numeric input radix
+    /// @return transactional command result
+    NBTEditResult applyStructuredValue(NBTEditorTreeNode node, String text, NBTNumberRadix radix) {
         String value = Objects.requireNonNull(text, "text");
-        return mutate(node, (editor, target) -> setStructuredValue(editor, target, value));
+        NBTNumberRadix selectedRadix = Objects.requireNonNull(radix, "radix");
+        return mutate(node, (editor, target) -> setStructuredValue(editor, target, value, selectedRadix));
     }
 
     /// Converts one selected tag through the generic XoyzNBT conversion transaction.
@@ -378,7 +389,7 @@ public final class NBTEditorController implements AutoCloseable {
         return mutateAsync(node, (editor, target) -> editor.setScalar(target, value));
     }
 
-    /// Applies one decimal scalar field on the background executor.
+    /// Applies one structured value in decimal mode on the background executor.
     ///
     /// @param node selected current row
     /// @param text proposed decimal value text
@@ -386,8 +397,22 @@ public final class NBTEditorController implements AutoCloseable {
     public CompletableFuture<NBTEditResult> applyStructuredValueAsync(
             NBTEditorTreeNode node,
             String text) {
+        return applyStructuredValueAsync(node, text, NBTNumberRadix.DECIMAL);
+    }
+
+    /// Applies one structured value in the selected numeric radix on the background executor.
+    ///
+    /// @param node selected current row
+    /// @param text proposed scalar or aggregate value text
+    /// @param radix selected numeric input radix
+    /// @return future result completed on the UI dispatcher
+    CompletableFuture<NBTEditResult> applyStructuredValueAsync(
+            NBTEditorTreeNode node,
+            String text,
+            NBTNumberRadix radix) {
         String value = Objects.requireNonNull(text, "text");
-        return mutateAsync(node, (editor, target) -> setStructuredValue(editor, target, value));
+        NBTNumberRadix selectedRadix = Objects.requireNonNull(radix, "radix");
+        return mutateAsync(node, (editor, target) -> setStructuredValue(editor, target, value, selectedRadix));
     }
 
     /// Converts one selected tag on the background executor.
@@ -566,12 +591,22 @@ public final class NBTEditorController implements AutoCloseable {
         }
     }
 
-    /// Returns one structured decimal scalar value after validating the revision-bound node.
+    /// Returns one structured value in decimal mode after validating the revision-bound node.
     ///
     /// @param node selected current row
     /// @return editable value text, or `null` for a non-value container
     public @Nullable String structuredValue(NBTEditorTreeNode node) {
+        return structuredValue(node, NBTNumberRadix.DECIMAL);
+    }
+
+    /// Returns one structured value in the selected numeric display radix.
+    ///
+    /// @param node selected current row
+    /// @param radix requested numeric display radix
+    /// @return editable value text, or `null` for an unsupported container
+    @Nullable String structuredValue(NBTEditorTreeNode node, NBTNumberRadix radix) {
         NBTEditorTreeNode selected = Objects.requireNonNull(node, "node");
+        NBTNumberRadix selectedRadix = Objects.requireNonNull(radix, "radix");
         @Nullable TagType<?> type = selected.node().getType();
         if (type == null) {
             return null;
@@ -583,15 +618,57 @@ public final class NBTEditorController implements AutoCloseable {
         try {
             NBTElement detached = document.editor().snapshot(selected.node());
             if (detached instanceof ValueTag<?> value) {
-                return NBTStructuredValueCodec.formatScalar(type, value.getValue().toString());
+                return NBTStructuredValueCodec.formatScalar(type, value.getValue().toString(), selectedRadix);
             }
             if (detached instanceof Tag tag
                     && NBTStructuredValueCodec.isEditableAggregate(type, listElementType(tag))) {
-                return NBTStructuredValueCodec.formatAggregate(tag);
+                return NBTStructuredValueCodec.formatAggregate(tag, selectedRadix);
             }
             return null;
         } catch (NBTEditException failure) {
             return null;
+        }
+    }
+
+    /// Converts a visible structured-value draft between numeric display bases without editing it.
+    ///
+    /// The selected tag snapshot supplies only the exact scalar, List, or array type. The entered
+    /// text is parsed completely in the source radix before any reformatted text is returned.
+    ///
+    /// @param node selected current row
+    /// @param text complete visible draft
+    /// @param sourceRadix radix currently represented by the draft
+    /// @param targetRadix requested display radix
+    /// @return reformatted complete draft
+    /// @throws IllegalArgumentException if the draft is invalid in its current radix
+    /// @throws IllegalStateException if the selected node is stale or unsupported
+    String reformatStructuredValue(
+            NBTEditorTreeNode node,
+            String text,
+            NBTNumberRadix sourceRadix,
+            NBTNumberRadix targetRadix) {
+        NBTEditorTreeNode selected = Objects.requireNonNull(node, "node");
+        @Nullable TagType<?> type = selected.node().getType();
+        @Nullable NBTDocument document = currentDocument(selected);
+        if (type == null || document == null) {
+            throw new IllegalStateException("The selected numeric value is no longer available");
+        }
+        try {
+            NBTElement detached = document.editor().snapshot(selected.node());
+            if (detached instanceof ValueTag<?>) {
+                String scalar = NBTStructuredValueCodec.parseScalar(type, text, sourceRadix);
+                return NBTStructuredValueCodec.formatScalar(type, scalar, targetRadix);
+            }
+            if (detached instanceof Tag tag
+                    && NBTStructuredValueCodec.isEditableAggregate(type, listElementType(tag))) {
+                Tag parsed = NBTStructuredValueCodec.parseAggregate(tag, text, sourceRadix);
+                return NBTStructuredValueCodec.formatAggregate(parsed, targetRadix);
+            }
+            throw new IllegalStateException("The selected tag has no numeric structured value");
+        } catch (IOException failure) {
+            throw new IllegalArgumentException("The current numeric draft is invalid", failure);
+        } catch (NBTEditException failure) {
+            throw new IllegalStateException("The selected numeric value is no longer available", failure);
         }
     }
 
@@ -765,13 +842,15 @@ public final class NBTEditorController implements AutoCloseable {
     /// @param editor owning generic editor
     /// @param target selected current node
     /// @param text complete value-field text
+    /// @param radix selected numeric input radix
     /// @return changed current node
     /// @throws IOException if structured parsing fails
     /// @throws NBTEditException if the editor rejects the transaction
     private static NBTNode setStructuredValue(
             NBTEditor<? extends NBTElement> editor,
             NBTNode target,
-            String text) throws IOException, NBTEditException {
+            String text,
+            NBTNumberRadix radix) throws IOException, NBTEditException {
         @Nullable TagType<?> type = target.getType();
         if (type == null) {
             throw new IOException("The selected node has no editable tag value");
@@ -779,9 +858,9 @@ public final class NBTEditorController implements AutoCloseable {
         NBTElement detached = editor.snapshot(target);
         if (detached instanceof Tag source
                 && NBTStructuredValueCodec.isEditableAggregate(type, listElementType(source))) {
-            return editor.replaceContent(target, NBTStructuredValueCodec.parseAggregate(source, text));
+            return editor.replaceContent(target, NBTStructuredValueCodec.parseAggregate(source, text, radix));
         }
-        String scalar = NBTStructuredValueCodec.parseScalar(type, text);
+        String scalar = NBTStructuredValueCodec.parseScalar(type, text, radix);
         return editor.setScalar(target, scalar);
     }
 

@@ -271,6 +271,21 @@ final class NBTEditorStrings {
         return locale.i18n("swing.nbt_editor.formatting_preview");
     }
 
+    /// Returns the numeric-radix selector's accessible label.
+    String numberRadixText() {
+        return locale.i18n("swing.nbt_editor.number_radix");
+    }
+
+    /// Returns the decimal-radix option.
+    String decimalRadixText() {
+        return locale.i18n("swing.nbt_editor.radix_decimal");
+    }
+
+    /// Returns the hexadecimal-radix option.
+    String hexadecimalRadixText() {
+        return locale.i18n("swing.nbt_editor.radix_hexadecimal");
+    }
+
     /// Returns the primitive-array load-failure text.
     String arrayLoadFailedText() {
         return locale.i18n("swing.nbt_editor.array_load_failed");

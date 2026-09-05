@@ -19,20 +19,12 @@ package space.minecraftstl.xyml.ui.swing.page.nbt;
 
 import org.jetbrains.annotations.NotNullByDefault;
 
-import java.util.Objects;
-
-/// Identity key for one asynchronously formatted numeric value.
-///
-/// @param node revision-bound selected row
-/// @param radix numeric display radix represented by the loaded text
+/// Numeric display and input bases supported by the structured NBT value editor.
 @NotNullByDefault
-record ValueLoadKey(NBTEditorTreeNode node, NBTNumberRadix radix) {
-    /// Validates the immutable load key.
-    ///
-    /// @param node revision-bound selected row
-    /// @param radix numeric display radix represented by the loaded text
-    ValueLoadKey {
-        Objects.requireNonNull(node, "node");
-        Objects.requireNonNull(radix, "radix");
-    }
+enum NBTNumberRadix {
+    /// Base-10 signed values and Java decimal floating-point text.
+    DECIMAL,
+
+    /// Base-16 bit patterns and Java hexadecimal floating-point text.
+    HEXADECIMAL
 }

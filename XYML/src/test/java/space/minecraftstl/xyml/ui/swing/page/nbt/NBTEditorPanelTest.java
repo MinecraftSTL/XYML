@@ -441,6 +441,40 @@ final class NBTEditorPanelTest {
                 JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of(0)));
+                JComboBox<?> radix = findNamed(panel, "nbtEditorNumberRadix", JComboBox.class);
+                assertTrue(radix.isVisible());
+                assertEquals("Decimal", radix.getSelectedItem());
+                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                value.setText("invalid");
+                radix.setSelectedIndex(1);
+                assertEquals("invalid", value.getText());
+                assertFalse(radix.isEnabled());
+            });
+            backgroundExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JComboBox<?> radix = findNamed(panel, "nbtEditorNumberRadix", JComboBox.class);
+                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                assertEquals("Decimal", radix.getSelectedItem());
+                assertEquals("invalid", value.getText());
+                assertTrue(radix.isEnabled());
+                value.setText("511");
+                radix.setSelectedIndex(1);
+                assertEquals("511", value.getText());
+            });
+            backgroundExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JComboBox<?> radix = findNamed(panel, "nbtEditorNumberRadix", JComboBox.class);
+                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                assertEquals("0x1FF", value.getText());
+                radix.setSelectedIndex(0);
+                assertEquals("0x1FF", value.getText());
+            });
+            backgroundExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                assertEquals("511", findNamed(panel, "nbtEditorValue", JTextArea.class).getText());
                 JComboBox<?> type = findNamed(panel, "nbtEditorNodeType", JComboBox.class);
                 assertTrue(type.isEnabled());
                 type.setSelectedItem(TagType.STRING.name());
@@ -468,7 +502,14 @@ final class NBTEditorPanelTest {
                 JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
                 assertEquals("0, 127, -1", value.getText());
                 assertTrue(value.isEnabled());
-                value.setText("10, 20, -30");
+                findNamed(panel, "nbtEditorNumberRadix", JComboBox.class).setSelectedIndex(1);
+            });
+            backgroundExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                assertEquals("0x0, 0x7F, 0xFF", value.getText());
+                value.setText("A, 14, E2");
                 findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
             });
             ioExecutor.runNext();
@@ -486,6 +527,7 @@ final class NBTEditorPanelTest {
                 assertTrue(snbt.getText().contains("10B"));
                 assertTrue(findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).isEnabled());
                 findNamed(panel, "nbtEditorTabs", JTabbedPane.class).setSelectedIndex(0);
+                findNamed(panel, "nbtEditorNumberRadix", JComboBox.class).setSelectedIndex(0);
             });
 
             onEdt(() -> {
@@ -493,7 +535,7 @@ final class NBTEditorPanelTest {
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of(3)));
             });
-            backgroundExecutor.runNext();
+            backgroundExecutor.runAll();
             flushEdt();
             onEdt(() -> {
                 JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
@@ -508,6 +550,18 @@ final class NBTEditorPanelTest {
                     controller.snapshot().document(), "document").rootSnapshot()).get("numbers");
             assertEquals(7, ((IntTag) editedNumbers.getTag(0)).getValue());
             assertEquals(8, ((IntTag) editedNumbers.getTag(1)).getValue());
+
+            onEdt(() -> findNamed(panel, "nbtEditorTabs", JTabbedPane.class).setSelectedIndex(1));
+            backgroundExecutor.runAll();
+            flushEdt();
+            onEdt(() -> {
+                JTextArea snbt = findNamed(panel, "nbtEditorSnbt", JTextArea.class);
+                assertTrue(snbt.isEnabled());
+                assertTrue(snbt.getText().startsWith("["));
+                assertTrue(snbt.getText().contains("7"));
+                assertTrue(snbt.getText().contains("8"));
+                findNamed(panel, "nbtEditorTabs", JTabbedPane.class).setSelectedIndex(0);
+            });
 
             onEdt(() -> {
                 JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);

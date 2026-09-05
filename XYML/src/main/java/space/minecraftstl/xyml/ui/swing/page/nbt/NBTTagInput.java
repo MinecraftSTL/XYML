@@ -19,16 +19,13 @@ package space.minecraftstl.xyml.ui.swing.page.nbt;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.library.nbt.edit.NBTEditException;
+import space.minecraftstl.xyml.library.nbt.edit.NBTEditor;
 import space.minecraftstl.xyml.library.nbt.io.SNBTCodec;
-import space.minecraftstl.xyml.library.nbt.tag.ByteTag;
-import space.minecraftstl.xyml.library.nbt.tag.DoubleTag;
-import space.minecraftstl.xyml.library.nbt.tag.FloatTag;
-import space.minecraftstl.xyml.library.nbt.tag.IntTag;
-import space.minecraftstl.xyml.library.nbt.tag.LongTag;
-import space.minecraftstl.xyml.library.nbt.tag.ShortTag;
 import space.minecraftstl.xyml.library.nbt.tag.StringTag;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
+import space.minecraftstl.xyml.library.nbt.tag.ValueTag;
 
 import java.io.IOException;
 import java.util.List;
@@ -36,8 +33,8 @@ import java.util.Objects;
 
 /// Strict conversion boundary for structured NBT forms and subtree SNBT input.
 ///
-/// Scalar fields use exact Java range parsers, floating-point fields reject non-finite values,
-/// and container/array fields require a complete SNBT value of the explicitly selected type.
+/// Scalar fields delegate to the generic XoyzNBT editor parser, while container and array fields
+/// require a complete SNBT value of the explicitly selected type.
 @NotNullByDefault
 final class NBTTagInput {
     /// Every standard non-END NBT type in wire identifier order.
@@ -81,38 +78,12 @@ final class NBTTagInput {
         String selectedName = Objects.requireNonNull(name, "name");
         String text = Objects.requireNonNull(value, "value");
         Tag result;
-        try {
-            if (selectedType == TagType.BYTE) {
-                result = new ByteTag(Byte.parseByte(requiredNumber(text)));
-            } else if (selectedType == TagType.SHORT) {
-                result = new ShortTag(Short.parseShort(requiredNumber(text)));
-            } else if (selectedType == TagType.INT) {
-                result = new IntTag(Integer.parseInt(requiredNumber(text)));
-            } else if (selectedType == TagType.LONG) {
-                result = new LongTag(Long.parseLong(requiredNumber(text)));
-            } else if (selectedType == TagType.FLOAT) {
-                String numeric = requiredNumber(text);
-                rejectHexadecimalLiteral(numeric);
-                float parsed = Float.parseFloat(numeric);
-                if (!Float.isFinite(parsed)) {
-                    throw new NumberFormatException("non-finite float");
-                }
-                result = new FloatTag(parsed);
-            } else if (selectedType == TagType.DOUBLE) {
-                String numeric = requiredNumber(text);
-                rejectHexadecimalLiteral(numeric);
-                double parsed = Double.parseDouble(numeric);
-                if (!Double.isFinite(parsed)) {
-                    throw new NumberFormatException("non-finite double");
-                }
-                result = new DoubleTag(parsed);
-            } else if (selectedType == TagType.STRING) {
-                result = new StringTag(text);
-            } else {
-                result = text.isBlank() ? selectedType.createTag() : parseExactType(selectedType, text);
-            }
-        } catch (NumberFormatException failure) {
-            throw new IOException("Value is outside the exact range for " + selectedType.name(), failure);
+        if (selectedType == TagType.STRING) {
+            result = new StringTag(text);
+        } else if (ValueTag.class.isAssignableFrom(selectedType.tagClass())) {
+            result = parseScalar(selectedType, requiredNumber(text));
+        } else {
+            result = text.isBlank() ? selectedType.createTag() : parseExactType(selectedType, text);
         }
         result.setName(selectedName);
         return result;
@@ -124,11 +95,7 @@ final class NBTTagInput {
     /// @return parsed detached tag
     /// @throws IOException if parsing fails or any trailing token remains
     static Tag parseSnbt(String input) throws IOException {
-        String source = Objects.requireNonNull(input, "input");
-        if (containsHexadecimalLiteral(source)) {
-            throw new IOException("Hexadecimal numeric literals are not supported in the editor");
-        }
-        return SNBTCodec.of().readTag(source);
+        return SNBTCodec.of().readTag(Objects.requireNonNull(input, "input"));
     }
 
     /// Serializes one detached subtree for the selected-subtree tab and clipboard.
@@ -153,82 +120,34 @@ final class NBTTagInput {
         return parsed;
     }
 
+    /// Parses one numeric scalar through the public generic editor contract.
+    ///
+    /// @param type exact scalar type
+    /// @param text non-empty decimal or hexadecimal input
+    /// @return detached parsed scalar
+    /// @throws IOException if the generic editor rejects the value
+    private static Tag parseScalar(TagType<?> type, String text) throws IOException {
+        Tag blank = type.createTag();
+        NBTEditor<Tag> editor = NBTEditor.of(blank);
+        try {
+            editor.setScalar(editor.getRootNode(), text);
+            return editor.snapshot();
+        } catch (NBTEditException failure) {
+            throw new IOException("Value is invalid for " + type.name(), failure);
+        }
+    }
+
     /// Trims numeric input and rejects a missing scalar.
     ///
     /// @param value numeric input
     /// @return non-empty trimmed input
-    private static String requiredNumber(String value) {
+    /// @throws IOException if the value is blank
+    private static String requiredNumber(String value) throws IOException {
         String trimmed = value.trim();
         if (trimmed.isEmpty()) {
-            throw new NumberFormatException("empty numeric value");
+            throw new IOException("Numeric value must not be empty");
         }
         return trimmed;
     }
 
-    /// Rejects Java hexadecimal literals in the decimal Add form.
-    ///
-    /// The Add dialog and structured value editor both use decimal-only numeric input and must not
-    /// silently interpret a hexadecimal floating value.
-    ///
-    /// @param value trimmed numeric input
-    /// @throws NumberFormatException when an optional sign is followed by `0x` or `0X`
-    private static void rejectHexadecimalLiteral(String value) {
-        String text = Objects.requireNonNull(value, "value");
-        int offset = text.startsWith("+") || text.startsWith("-") ? 1 : 0;
-        if (text.length() >= offset + 2 && text.regionMatches(true, offset, "0x", 0, 2)) {
-            throw new NumberFormatException("hexadecimal input requires hexadecimal mode");
-        }
-    }
-
-    /// Detects hexadecimal numeric tokens outside quoted SNBT strings.
-    ///
-    /// This presentation-layer restriction leaves the reusable SNBT codec unchanged while
-    /// preventing the editor's subtree text field from silently accepting hexadecimal numbers.
-    ///
-    /// @param source complete SNBT source
-    /// @return whether the source contains an unquoted hexadecimal numeric token
-    private static boolean containsHexadecimalLiteral(String source) {
-        boolean quoted = false;
-        char quote = '\0';
-        boolean escaped = false;
-        for (int i = 0; i < source.length(); i++) {
-            char character = source.charAt(i);
-            if (quoted) {
-                if (escaped) {
-                    escaped = false;
-                } else if (character == '\\') {
-                    escaped = true;
-                } else if (character == quote) {
-                    quoted = false;
-                }
-                continue;
-            }
-            if (character == '\'' || character == '"') {
-                quoted = true;
-                quote = character;
-                continue;
-            }
-
-            int tokenStart = character == '+' || character == '-' ? i + 1 : i;
-            if (tokenStart + 1 < source.length()
-                    && source.charAt(tokenStart) == '0'
-                    && (source.charAt(tokenStart + 1) == 'x' || source.charAt(tokenStart + 1) == 'X')
-                    && (i == 0 || !isUnquotedTokenPart(source.charAt(i - 1)))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /// Returns whether a character can continue an unquoted SNBT token.
-    ///
-    /// @param character source character
-    /// @return whether the character is part of an unquoted token
-    private static boolean isUnquotedTokenPart(char character) {
-        return Character.isLetterOrDigit(character)
-                || character == '_'
-                || character == '-'
-                || character == '+'
-                || character == '.';
-    }
 }

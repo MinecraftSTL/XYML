@@ -192,6 +192,9 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Controls whether a selected String draft is rendered with Minecraft formatting.
     private final JCheckBox formattingPreviewCheck = new JCheckBox();
 
+    /// Selects decimal or hexadecimal display and input for numeric values.
+    private final JComboBox<String> numberRadixCombo = new JComboBox<>();
+
     /// Renders the selected String draft without changing its NBT value.
     private final NBTStringFormattingPreview formattingPreview = new NBTStringFormattingPreview();
 
@@ -270,6 +273,9 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Bounded asynchronous primitive-array value loader.
     private final NBTAsyncTextLoader valueTextLoader;
 
+    /// Preserves and reformats numeric drafts when the display radix changes.
+    private final NBTNumberRadixEditor numberRadixEditor;
+
     /// Suppresses automatic root expansion while a replacement model is installed.
     private boolean installingTreeModel;
 
@@ -331,6 +337,17 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         treePopupMouseListener = new NBTTreePopupMouseListener(tree);
         snbtTextLoader = new NBTAsyncTextLoader(snbtArea, SNBT_INSERT_CHUNK_SIZE, this.backgroundExecutor);
         valueTextLoader = new NBTAsyncTextLoader(valueArea, SNBT_INSERT_CHUNK_SIZE, this.backgroundExecutor);
+        numberRadixEditor = new NBTNumberRadixEditor(
+                this.controller,
+                numberRadixCombo,
+                valueArea,
+                valueTextLoader,
+                this::selectedNode,
+                this::isCurrentValueKey,
+                () -> !closed.get(),
+                this::startValueLoad,
+                this::finishValueLoad,
+                this::showNumberRadixFailure);
         valueDocumentListener = documentChanges(this::refreshFormattingPreview);
         nbtTransferHandler = new NBTFileTransferHandler(
                 () -> !closed.get() && !this.controller.snapshot().busy(),
@@ -587,7 +604,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         details.add(valueScroll, "span 2, growx, h 120:180:280, wrap");
         JPanel valueActions = new JPanel(new MigLayout(
                 "insets 0, fillx, hidemode 3",
-                "[]8[]8[]push[]",
+                "[]8[]8[]8[]push[]",
                 "[34!]"));
         valueActions.setOpaque(false);
         sectionSignButton.setName("nbtEditorSectionSign");
@@ -599,6 +616,9 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         formattingPreviewCheck.setText(strings.formattingPreviewText());
         formattingPreviewCheck.addActionListener(event -> updateFormattingPreviewVisibility());
         valueActions.add(formattingPreviewCheck);
+        numberRadixCombo.setName("nbtEditorNumberRadix");
+        numberRadixCombo.getAccessibleContext().setAccessibleName(strings.numberRadixText());
+        valueActions.add(numberRadixCombo, "w 132!");
         applyButton.setName("nbtEditorApply");
         applyButton.setText(strings.applyText());
         applyButton.addActionListener(event -> applySelectedValue());
@@ -695,6 +715,11 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         sectionSignButton.setVisible(false);
         formattingPreviewCheck.setVisible(false);
         formattingPreviewScroll.setVisible(false);
+        numberRadixCombo.addItem(strings.decimalRadixText());
+        numberRadixCombo.addItem(strings.hexadecimalRadixText());
+        numberRadixCombo.setMaximumRowCount(2);
+        numberRadixCombo.setVisible(false);
+        numberRadixCombo.addActionListener(event -> numberRadixEditor.selectionChanged());
         listTypeCombo.setName("nbtEditorListType");
         listTypeCombo.addItem(strings.tagEndText());
         for (TagType<?> type : NBTTagInput.types()) {
@@ -964,7 +989,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         }
         NBTEditorTreeNode submitted = selected;
         String draft = valueArea.getText();
-        handleAsyncResult(controller.applyStructuredValueAsync(submitted, draft), submitted,
+        handleAsyncResult(controller.applyStructuredValueAsync(submitted, draft, selectedNumberRadix()), submitted,
                 () -> valueArea.setText(draft));
     }
 
@@ -1508,22 +1533,26 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 ? controller.listElementType(selected)
                 : null;
         boolean aggregate = NBTStructuredValueCodec.isEditableAggregate(tagType, listElementType);
+        boolean numeric = aggregate || NBTStructuredValueCodec.isNumericScalar(tagType);
         sectionSignButton.setVisible(stringValue);
         sectionSignButton.setEnabled(stringValue && mutable);
         formattingPreviewCheck.setVisible(stringValue);
         formattingPreviewCheck.setEnabled(stringValue);
+        numberRadixCombo.setVisible(numeric);
+        numberRadixCombo.setEnabled(numeric && !controller.snapshot().busy());
         if (!stringValue) {
             formattingPreviewScroll.setVisible(false);
         }
         if (aggregate) {
-            ValueLoadKey key = new ValueLoadKey(selected);
+            NBTNumberRadix radix = selectedNumberRadix();
+            ValueLoadKey key = new ValueLoadKey(selected, radix);
             valueTextLoader.reset(key);
             @Nullable NBTDocument document = controller.snapshot().document();
             boolean supported = document != null && selected.belongsTo(document);
             if (supported) {
                 valueTextLoader.load(
                         key,
-                        () -> controller.structuredValue(selected),
+                        () -> controller.structuredValue(selected, radix),
                         () -> isCurrentValueKey(key),
                         this::startValueLoad,
                         () -> finishValueLoad(key),
@@ -1542,7 +1571,9 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         valueTextLoader.reset(null);
         @Nullable String scalar = selected.currentScalarValue();
         if (tagType != null && scalar != null) {
-            valueArea.setText(NBTStructuredValueCodec.formatScalar(tagType, scalar));
+            NBTNumberRadix radix = selectedNumberRadix();
+            valueArea.setText(NBTStructuredValueCodec.formatScalar(tagType, scalar, radix));
+            numberRadixEditor.markDisplayed(radix);
             valueArea.setEnabled(mutable);
             valueArea.setEditable(mutable);
             applyButton.setEnabled(mutable);
@@ -1553,6 +1584,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         valueArea.setEnabled(false);
         valueArea.setEditable(false);
         applyButton.setEnabled(false);
+        numberRadixCombo.setEnabled(false);
         return false;
     }
 
@@ -1564,6 +1596,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         valueArea.setEnabled(false);
         valueArea.setEditable(false);
         applyButton.setEnabled(false);
+        numberRadixCombo.setEnabled(false);
     }
 
     /// Enables a complete aggregate value after its detached snapshot is loaded.
@@ -1578,6 +1611,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         valueArea.setEnabled(editable);
         valueArea.setEditable(editable);
         applyButton.setEnabled(editable);
+        numberRadixCombo.setEnabled(!controller.snapshot().busy());
     }
 
     /// Returns whether one array snapshot key still owns the visible selection and revision.
@@ -1590,6 +1624,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         try {
             return !closed.get()
                     && selectedKey.node() == selectedNode()
+                    && selectedKey.radix() == selectedNumberRadix()
                     && document != null
                     && selectedKey.node().belongsTo(document)
                     && selectedKey.node().node().getRevision() == document.editor().getRevision();
@@ -1700,6 +1735,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         sectionSignButton.setVisible(false);
         formattingPreviewCheck.setVisible(false);
         formattingPreviewScroll.setVisible(false);
+        numberRadixCombo.setVisible(false);
         snbtTextLoader.reset(null);
         valueTextLoader.reset(null);
         nameField.setEnabled(false);
@@ -1731,6 +1767,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         valueArea.setEditable(false);
         sectionSignButton.setEnabled(false);
         formattingPreviewCheck.setEnabled(false);
+        numberRadixCombo.setEnabled(false);
         listTypeCombo.setEnabled(false);
         snbtArea.setEnabled(false);
         snbtArea.setEditable(false);
@@ -1775,6 +1812,25 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         }
         Object parent = selectedPath.getParentPath().getLastPathComponent();
         return parent instanceof NBTEditorTreeNode node ? node : null;
+    }
+
+    /// Restores value controls and displays a rejected radix conversion.
+    ///
+    /// @param detail technical parse or stale-node detail
+    private void showNumberRadixFailure(String detail) {
+        boolean editable = mutationsAllowed();
+        valueArea.setEnabled(editable);
+        valueArea.setEditable(editable);
+        applyButton.setEnabled(editable);
+        numberRadixCombo.setEnabled(!controller.snapshot().busy());
+        showEditFailure(NBTEditException.Reason.TYPE_MISMATCH, Objects.requireNonNull(detail, "detail"));
+    }
+
+    /// Returns the numeric radix selected by the structured value form.
+    ///
+    /// @return hexadecimal for the second option, otherwise decimal
+    private NBTNumberRadix selectedNumberRadix() {
+        return numberRadixEditor.selectedRadix();
     }
 
     /// Resolves the type-combo display value to one standard non-END tag type.
