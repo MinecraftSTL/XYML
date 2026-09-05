@@ -211,46 +211,67 @@ final class NBTStringValueEditorTest {
         });
     }
 
-    /// Replaces obfuscated glyph painting even inside a native Swing selection.
+    /// Paints fixed magenta-black obfuscated cells even inside a native Swing selection.
     @Test
     void paintsSubstituteGlyphsWithoutRevealingSelectedRawText() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             BufferedImage plain = render("\u00a7kA", false, false);
             BufferedImage obfuscated = render("\u00a7kA", true, false);
             assertNotEquals(pixelSignature(plain), pixelSignature(obfuscated));
+            assertTrue(pixelCount(obfuscated, new Color(0xF800F8)) > 0);
 
             BufferedImage selectedRaw = render("\u00a7kA", false, true);
             BufferedImage selectedObfuscated = render("\u00a7kA", true, true);
             assertNotEquals(pixelSignature(selectedRaw), pixelSignature(selectedObfuscated));
-            assertTrue(pixelCount(selectedObfuscated, new Color(0x2266AA)) > 0);
+            assertTrue(pixelCount(selectedObfuscated, new Color(0xF800F8)) > 0);
         });
     }
 
-    /// Keeps model-to-view geometry identical for mixed-width and supplementary characters.
+    /// Collapses formatting controls while retaining one raw model position per source character.
     @Test
-    void keepsOriginalTextGeometryWhileObfuscated() throws Exception {
+    void collapsesFormattingControlGeometry() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             NBTStringValueEditor editor = configuredEditor(
                     "A\u00a7kWide \u5bbd\ud83d\ude00i \u05d0\u05d1\u05d2\tZ\u00a7rQ");
-            List<Rectangle2D> original = positions(editor);
             editor.setFormattingEnabled(true);
             List<Rectangle2D> formatted = positions(editor);
 
-            assertEquals(original.size(), formatted.size());
-            for (int index = 0; index < original.size(); index++) {
-                assertEquals(original.get(index).getX(), formatted.get(index).getX(), 0.01);
-                assertEquals(original.get(index).getY(), formatted.get(index).getY(), 0.01);
-            }
+            assertEquals(editor.getDocument().getLength() + 1, formatted.size());
+            assertEquals(formatted.get(1).getX(), formatted.get(3).getX(), 0.01);
+            int reset = editor.getText().indexOf("\u00a7r");
+            assertEquals(formatted.get(reset).getX(), formatted.get(reset + 2).getX(), 0.01);
+            assertEquals(pixelSignature(render("AB", false, false)),
+                    pixelSignature(render("A\u00a70B", true, false)));
         });
     }
 
-    /// Confines one selected LTR substitute before an RTL run to its Forward-to-Backward cell.
+    /// Supports compact RGB, escaped section signs, and inert unknown formatting markers.
+    @Test
+    void parsesCompactRgbEscapesAndUnknownCodes() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            NBTStringValueEditor editor = configuredEditor("A\u00a7#123456B\u00a7\u00a7C\u00a7zD");
+            editor.setFormattingEnabled(true);
+            List<Rectangle2D> positions = positions(editor);
+
+            assertEquals(new Color(0x123456), foreground(editor, 9));
+            assertEquals(new Color(0x123456), foreground(editor, 11));
+            assertEquals(positions.get(1).getX(), positions.get(9).getX(), 0.01);
+            assertEquals(positions.get(10).getX(), positions.get(11).getX(), 0.01);
+            assertTrue(positions.get(12).getX() > positions.get(11).getX());
+            assertEquals(positions.get(13).getX(), positions.get(14).getX(), 0.01);
+            assertTrue(positions.get(15).getX() > positions.get(14).getX());
+            assertEquals(pixelSignature(render("A", false, false)),
+                    pixelSignature(render("A\u00a7", true, false)));
+            assertEquals("A\u00a7#123456B\u00a7\u00a7C\u00a7zD", editor.getText());
+        });
+    }
+
+    /// Confines one selected LTR placeholder before an RTL run to its Forward-to-Backward cell.
     @Test
     void keepsRtlObfuscationPaintingInsideItsModelRange() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
-            NBTStringValueEditor editor = configuredEditor("\u00a7c\u00a7kA\u05d0\u05d1\u00a7rZ");
+            NBTStringValueEditor editor = configuredEditor("\u00a7c\u00a7kA\u00a7r\u05d0\u05d1Z");
             editor.setFormattingEnabled(true);
-            editor.setSelectedTextColor(new Color(0x00CC44));
             editor.select(4, 5);
             editor.getCaret().setSelectionVisible(true);
             Rectangle expected;
@@ -264,19 +285,17 @@ final class NBTStringValueEditorTest {
                 throw new AssertionError("Could not locate RTL obfuscation range", failure);
             }
             BufferedImage image = render(editor, false);
-            int selectedGlyphPixels = 0;
+            int placeholderPixels = 0;
             for (int y = 0; y < image.getHeight(); y++) {
                 for (int x = 0; x < image.getWidth(); x++) {
                     Color pixel = new Color(image.getRGB(x, y), true);
-                    if (pixel.getAlpha() > 0
-                            && pixel.getGreen() > pixel.getRed() + 40
-                            && pixel.getGreen() > pixel.getBlue() + 20) {
-                        selectedGlyphPixels++;
+                    if (pixel.getRGB() == new Color(0xF800F8).getRGB()) {
+                        placeholderPixels++;
                         assertTrue(expected.contains(x, y), "RTL replacement escaped its model range");
                     }
                 }
             }
-            assertTrue(selectedGlyphPixels > 0);
+            assertTrue(placeholderPixels > 0);
         });
     }
 

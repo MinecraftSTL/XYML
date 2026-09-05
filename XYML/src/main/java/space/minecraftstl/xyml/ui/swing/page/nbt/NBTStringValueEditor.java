@@ -45,7 +45,6 @@ import javax.swing.text.TabExpander;
 import javax.swing.text.View;
 import javax.swing.text.ViewFactory;
 import java.awt.Color;
-import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Rectangle;
 import java.awt.Shape;
@@ -83,11 +82,17 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
             Map.entry('e', new Color(0xFFFF55)),
             Map.entry('f', new Color(0xFFFFFF)));
 
+    /// Magenta quadrant color used by the fixed obfuscated-text placeholder.
+    private static final Color OBFUSCATED_MAGENTA = new Color(0xF800F8);
+
+    /// Black quadrant color used by the fixed obfuscated-text placeholder.
+    private static final Color OBFUSCATED_BLACK = new Color(0x000000);
+
     /// Private styled-document marker selecting the obfuscated glyph painter.
     private static final Object OBFUSCATED_ATTRIBUTE = new Object();
 
-    /// Deterministic replacement glyph candidates for obfuscated text cells.
-    private static final String OBFUSCATED_GLYPHS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    /// Private styled-document marker selecting the hidden formatting-code painter.
+    private static final Object HIDDEN_ATTRIBUTE = new Object();
 
     /// View factory matching Swing's styled defaults except for content label views.
     private static final ViewFactory VIEW_FACTORY = NBTStringValueEditor::createView;
@@ -235,6 +240,7 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
         input.removeAttribute(StyleConstants.Underline);
         input.removeAttribute(StyleConstants.StrikeThrough);
         input.removeAttribute(OBFUSCATED_ATTRIBUTE);
+        input.removeAttribute(HIDDEN_ATTRIBUTE);
     }
 
     /// Applies legacy color, style, reset, and complete RGB sequences at raw document offsets.
@@ -255,19 +261,33 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
                 continue;
             }
             char code = Character.toLowerCase(source.charAt(index + 1));
+            if (code == '\u00a7') {
+                applyAttributes(document, segmentStart, index - segmentStart, active);
+                applyAttributes(document, index, 1, hiddenAttributes(base));
+                applyAttributes(document, index + 1, 1, active);
+                index += 2;
+                segmentStart = index;
+                continue;
+            }
             @Nullable Color legacyColor = LEGACY_COLORS.get(code);
             @Nullable Color rgbColor = code == 'x' ? rgbColor(source, index) : null;
-            if (legacyColor == null && rgbColor == null && "klmnor".indexOf(code) < 0) {
+            @Nullable Color hashColor = code == '#' ? hashColor(source, index) : null;
+            if (legacyColor == null && rgbColor == null && hashColor == null && "klmnor".indexOf(code) < 0) {
+                applyAttributes(document, segmentStart, index - segmentStart, active);
+                applyAttributes(document, index, 1, hiddenAttributes(base));
                 index++;
+                segmentStart = index;
                 continue;
             }
 
             applyAttributes(document, segmentStart, index - segmentStart, active);
-            int codeLength = rgbColor == null ? 2 : 14;
-            applyAttributes(document, index, codeLength, base);
-            if (legacyColor != null || rgbColor != null) {
+            int codeLength = rgbColor != null ? 14 : hashColor != null ? 8 : 2;
+            applyAttributes(document, index, codeLength, hiddenAttributes(base));
+            if (legacyColor != null || rgbColor != null || hashColor != null) {
                 active = coloredAttributes(base,
-                        legacyColor == null ? Objects.requireNonNull(rgbColor, "rgbColor") : legacyColor);
+                        legacyColor != null
+                                ? legacyColor
+                                : rgbColor != null ? rgbColor : Objects.requireNonNull(hashColor, "hashColor"));
             } else if (code == 'r') {
                 active = new SimpleAttributeSet(base);
             } else if (code == 'k') {
@@ -278,7 +298,13 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
             index += codeLength;
             segmentStart = index;
         }
-        applyAttributes(document, segmentStart, source.length() - segmentStart, active);
+        int trailingSectionSign = source.endsWith("\u00a7") ? source.length() - 1 : -1;
+        if (trailingSectionSign >= segmentStart) {
+            applyAttributes(document, segmentStart, trailingSectionSign - segmentStart, active);
+            applyAttributes(document, trailingSectionSign, 1, hiddenAttributes(base));
+        } else {
+            applyAttributes(document, segmentStart, source.length() - segmentStart, active);
+        }
     }
 
     /// Creates attributes reset to the component's current foreground.
@@ -292,6 +318,17 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
         StyleConstants.setUnderline(attributes, false);
         StyleConstants.setStrikeThrough(attributes, false);
         attributes.addAttribute(OBFUSCATED_ATTRIBUTE, Boolean.FALSE);
+        attributes.addAttribute(HIDDEN_ATTRIBUTE, Boolean.FALSE);
+        return attributes;
+    }
+
+    /// Creates attributes which suppress one formatting-control range during painting.
+    ///
+    /// @param base default component attributes
+    /// @return mutable hidden attributes
+    private static MutableAttributeSet hiddenAttributes(MutableAttributeSet base) {
+        MutableAttributeSet attributes = new SimpleAttributeSet(base);
+        attributes.addAttribute(HIDDEN_ATTRIBUTE, Boolean.TRUE);
         return attributes;
     }
 
@@ -363,6 +400,24 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
         return new Color(Integer.parseInt(digits.toString(), 16));
     }
 
+    /// Parses a compact `§#RRGGBB` color sequence.
+    ///
+    /// @param source complete source string
+    /// @param offset index of the section sign before `#`
+    /// @return decoded color, or `null` when the sequence is incomplete or malformed
+    private static @Nullable Color hashColor(String source, int offset) {
+        if (offset + 7 >= source.length()) {
+            return null;
+        }
+        String digits = source.substring(offset + 2, offset + 8);
+        for (int index = 0; index < digits.length(); index++) {
+            if (Character.digit(digits.charAt(index), 16) < 0) {
+                return null;
+            }
+        }
+        return new Color(Integer.parseInt(digits, 16));
+    }
+
     /// Creates the standard Swing styled views with an obfuscation-aware content view.
     ///
     /// @param element styled document element
@@ -419,9 +474,10 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
             super.checkPainter();
             GlyphPainter painter = Objects.requireNonNull(getGlyphPainter(), "glyphPainter");
             boolean obfuscated = Boolean.TRUE.equals(getAttributes().getAttribute(OBFUSCATED_ATTRIBUTE));
-            if (obfuscated && !(painter instanceof ObfuscatingGlyphPainter)) {
+            boolean hidden = Boolean.TRUE.equals(getAttributes().getAttribute(HIDDEN_ATTRIBUTE));
+            if ((obfuscated || hidden) && !(painter instanceof ObfuscatingGlyphPainter)) {
                 setGlyphPainter(new ObfuscatingGlyphPainter(painter));
-            } else if (!obfuscated && painter instanceof ObfuscatingGlyphPainter decorated) {
+            } else if (!obfuscated && !hidden && painter instanceof ObfuscatingGlyphPainter decorated) {
                 setGlyphPainter(decorated.delegate());
             }
         }
@@ -457,7 +513,7 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
         /// @return platform-calculated span
         @Override
         public float getSpan(GlyphView view, int startOffset, int endOffset, TabExpander expander, float x) {
-            return delegate.getSpan(view, startOffset, endOffset, expander, x);
+            return hidden(view) ? 0.0F : delegate.getSpan(view, startOffset, endOffset, expander, x);
         }
 
         /// Delegates authoritative line height calculation.
@@ -487,10 +543,10 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
             return delegate.getDescent(view);
         }
 
-        /// Paints deterministic substitute glyphs inside the original character cells.
+        /// Paints fixed placeholders inside obfuscated character cells and suppresses controls.
         ///
-        /// Swing invokes this method separately with normal or selected text colors, so selection
-        /// remains native while the raw character is never painted.
+        /// Swing invokes this method separately for styled runs. Hidden runs paint nothing, while
+        /// obfuscated runs use a deterministic missing-texture placeholder.
         ///
         /// @param view glyph view
         /// @param graphics active graphics context carrying Swing's chosen text color
@@ -499,14 +555,20 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
         /// @param endOffset exclusive model offset to paint
         @Override
         public void paint(GlyphView view, Graphics graphics, Shape allocation, int startOffset, int endOffset) {
+            if (hidden(view)) {
+                return;
+            }
+            boolean obfuscated = Boolean.TRUE.equals(view.getAttributes().getAttribute(OBFUSCATED_ATTRIBUTE));
+            if (!obfuscated) {
+                delegate.paint(view, graphics, allocation, startOffset, endOffset);
+                return;
+            }
             String source;
             try {
                 source = view.getDocument().getText(startOffset, endOffset - startOffset);
             } catch (BadLocationException failure) {
                 throw new IllegalStateException("Could not paint obfuscated String text", failure);
             }
-            Rectangle bounds = allocation.getBounds();
-            int baseline = bounds.y + Math.round(delegate.getHeight(view) - delegate.getDescent(view));
             int relativeOffset = 0;
             while (relativeOffset < source.length()) {
                 int codePoint = source.codePointAt(relativeOffset);
@@ -514,29 +576,25 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
                 int absoluteOffset = startOffset + relativeOffset;
                 int nextOffset = Math.min(endOffset, absoluteOffset + characterCount);
                 if (!Character.isWhitespace(codePoint)) {
-                    paintSubstitute(view, graphics, allocation, absoluteOffset, nextOffset, codePoint, baseline);
+                    paintObfuscatedCell(view, graphics, allocation, absoluteOffset, nextOffset);
                 }
                 relativeOffset += nextOffset - absoluteOffset;
             }
         }
 
-        /// Paints one replacement glyph without changing the platform-calculated character cell.
+        /// Paints one fixed four-quadrant placeholder without changing the platform-calculated cell.
         ///
         /// @param view glyph view
         /// @param graphics active graphics context
         /// @param allocation allocated view shape
         /// @param startOffset character start offset
         /// @param endOffset character end offset
-        /// @param originalCodePoint original code point, excluded from replacement selection
-        /// @param baseline platform line baseline
-        private void paintSubstitute(
+        private void paintObfuscatedCell(
                 GlyphView view,
                 Graphics graphics,
                 Shape allocation,
                 int startOffset,
-                int endOffset,
-                int originalCodePoint,
-                int baseline) {
+                int endOffset) {
             try {
                 Rectangle characterBounds = view.modelToView(
                         startOffset,
@@ -553,41 +611,24 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
                 Graphics cellGraphics = graphics.create();
                 try {
                     cellGraphics.clipRect(left, allocation.getBounds().y, width, allocation.getBounds().height);
-                    cellGraphics.setFont(view.getFont());
-                    FontMetrics metrics = cellGraphics.getFontMetrics();
-                    char replacement = replacementGlyph(metrics, width, startOffset, originalCodePoint);
-                    int replacementWidth = metrics.charWidth(replacement);
-                    cellGraphics.drawString(String.valueOf(replacement),
-                            left + Math.max(0, (width - replacementWidth) / 2), baseline);
+                    int top = allocation.getBounds().y;
+                    int height = allocation.getBounds().height;
+                    int halfWidth = Math.max(1, width / 2);
+                    int halfHeight = Math.max(1, height / 2);
+                    cellGraphics.setColor(OBFUSCATED_BLACK);
+                    cellGraphics.fillRect(left, top, halfWidth, halfHeight);
+                    cellGraphics.setColor(OBFUSCATED_MAGENTA);
+                    cellGraphics.fillRect(left + halfWidth, top, width - halfWidth, halfHeight);
+                    cellGraphics.fillRect(left, top + halfHeight, halfWidth, height - halfHeight);
+                    cellGraphics.setColor(OBFUSCATED_BLACK);
+                    cellGraphics.fillRect(left + halfWidth, top + halfHeight,
+                            width - halfWidth, height - halfHeight);
                 } finally {
                     cellGraphics.dispose();
                 }
             } catch (BadLocationException failure) {
                 throw new IllegalStateException("Could not locate obfuscated String glyph", failure);
             }
-        }
-
-        /// Selects a deterministic replacement which fits the original cell when possible.
-        ///
-        /// @param metrics active font metrics
-        /// @param width original character cell width
-        /// @param offset absolute model offset
-        /// @param originalCodePoint original character code point
-        /// @return replacement character distinct from the original
-        private static char replacementGlyph(
-                FontMetrics metrics,
-                int width,
-                int offset,
-                int originalCodePoint) {
-            int first = Math.floorMod(offset * 31 + originalCodePoint, OBFUSCATED_GLYPHS.length());
-            char fallback = '\u2022';
-            for (int attempt = 0; attempt < OBFUSCATED_GLYPHS.length(); attempt++) {
-                char candidate = OBFUSCATED_GLYPHS.charAt((first + attempt) % OBFUSCATED_GLYPHS.length());
-                if (candidate != originalCodePoint && metrics.charWidth(candidate) <= width) {
-                    return candidate;
-                }
-            }
-            return fallback == originalCodePoint ? '\u25a0' : fallback;
         }
 
         /// Delegates model-to-view geometry.
@@ -631,7 +672,17 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
         /// @return platform-calculated break position
         @Override
         public int getBoundedPosition(GlyphView view, int startOffset, float x, float length) {
-            return delegate.getBoundedPosition(view, startOffset, x, length);
+            return hidden(view)
+                    ? view.getEndOffset()
+                    : delegate.getBoundedPosition(view, startOffset, x, length);
+        }
+
+        /// Returns whether one formatted control range is collapsed from the preview.
+        ///
+        /// @param view glyph view
+        /// @return whether the view occupies no visible width
+        private static boolean hidden(GlyphView view) {
+            return Boolean.TRUE.equals(view.getAttributes().getAttribute(HIDDEN_ATTRIBUTE));
         }
 
         /// Wraps any fragment-specific platform painter.
