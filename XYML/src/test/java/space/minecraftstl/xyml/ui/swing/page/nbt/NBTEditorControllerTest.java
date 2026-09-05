@@ -475,9 +475,12 @@ final class NBTEditorControllerTest {
     @Test
     void appliesGenericTypeConversionAndCompleteArrayValues() throws Exception {
         Path source = temporaryDirectory.resolve("advanced-values.dat");
+        ListTag<IntTag> numbers = new ListTag<>(TagType.INT);
+        numbers.addTag(new IntTag(4)).addTag(new IntTag(5));
         writeTag(source, new CompoundTag()
                 .addInt("number", 255)
                 .addByteArray("bytes", new byte[]{0, 1})
+                .addTag("numbers", numbers)
                 .addTag("map", new CompoundTag().addInt("0", 0).addInt("2", 2)));
         ManualUiDispatcher ui = new ManualUiDispatcher();
         NBTEditorController controller = new NBTEditorController(
@@ -496,14 +499,27 @@ final class NBTEditorControllerTest {
         assertEquals("255", ((CompoundTag) requiredDocument(controller).rootSnapshot()).getString("number"));
 
         NBTEditorTreeNode bytes = node(controller, NBTAddress.root().appendName("bytes"));
-        assertEquals("[0, 1]", ui.call(() -> controller.structuredValue(bytes)));
+        assertEquals("0, 1", ui.call(() -> controller.structuredValue(bytes)));
         assertFalse(ui.call(() -> controller.applyStructuredValue(bytes, "[1, 2]")).applied());
+        assertTrue(ui.call(() -> controller.applyStructuredValue(
+                node(controller, NBTAddress.root().appendName("bytes")), "1, -2, 3")).applied());
         ByteArrayTag edited = (ByteArrayTag) ((CompoundTag) requiredDocument(controller).rootSnapshot()).get("bytes");
-        assertArrayEquals(new byte[]{0, 1}, edited.getArray());
+        assertArrayEquals(new byte[]{1, -2, 3}, edited.getArray());
+
+        NBTAddress numbersAddress = NBTAddress.root().appendName("numbers");
+        assertEquals("4, 5", ui.call(() -> controller.structuredValue(node(controller, numbersAddress))));
+        assertTrue(ui.call(() -> controller.applyStructuredValue(
+                node(controller, numbersAddress), "6, -7")).applied());
+        ListTag<?> editedNumbers = (ListTag<?>) ((CompoundTag) requiredDocument(controller).rootSnapshot())
+                .get("numbers");
+        assertSame(TagType.INT, editedNumbers.getElementType());
+        assertEquals(6, ((IntTag) editedNumbers.getTag(0)).getValue());
+        assertEquals(-7, ((IntTag) editedNumbers.getTag(1)).getValue());
+
         assertTrue(ui.call(() -> controller.applyValueEdit(
                 node(controller, NBTAddress.root().appendName("bytes").appendIndex(0)),
                 "-1")).applied());
-        assertArrayEquals(new byte[]{-1, 1},
+        assertArrayEquals(new byte[]{-1, -2, 3},
                 ((ByteArrayTag) ((CompoundTag) requiredDocument(controller).rootSnapshot()).get("bytes"))
                         .getArray());
         ui.run(controller::close);

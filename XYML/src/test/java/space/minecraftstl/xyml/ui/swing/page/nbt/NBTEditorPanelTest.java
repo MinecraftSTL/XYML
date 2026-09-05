@@ -408,7 +408,7 @@ final class NBTEditorPanelTest {
         }
     }
 
-    /// Exposes safe type conversion, per-element array editing, endpoint menus, and String preview.
+    /// Exposes type conversion, complete numeric aggregates, SNBT, endpoint menus, and String preview.
     @Test
     void supportsAdvancedStructuredEditingWithoutLosingDrafts() throws Exception {
         Path source = temporaryDirectory.resolve("advanced.dat");
@@ -458,7 +458,6 @@ final class NBTEditorPanelTest {
                 tree.setSelectionPath(model.pathForAddress(List.of(1)));
                 JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
                 assertFalse(value.isEnabled());
-                assertFalse(findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).isEnabled());
             });
             backgroundExecutor.runNext();
             flushEdt();
@@ -467,20 +466,55 @@ final class NBTEditorPanelTest {
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of(1)));
                 JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
-                assertEquals("[0, 127, -1]", value.getText());
-                assertFalse(value.isEnabled());
-                assertFalse(findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).isEnabled());
+                assertEquals("0, 127, -1", value.getText());
+                assertTrue(value.isEnabled());
+                value.setText("10, 20, -30");
+                findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
             });
+            ioExecutor.runNext();
+            flushEdt();
             ByteArrayTag bytes = (ByteArrayTag) ((CompoundTag) Objects.requireNonNull(
                     controller.snapshot().document(), "document").rootSnapshot()).get("bytes");
-            assertArrayEquals(new byte[]{0, 127, -1}, bytes.getArray());
+            assertArrayEquals(new byte[]{10, 20, -30}, bytes.getArray());
+
+            onEdt(() -> findNamed(panel, "nbtEditorTabs", JTabbedPane.class).setSelectedIndex(1));
+            backgroundExecutor.runAll();
+            flushEdt();
+            onEdt(() -> {
+                JTextArea snbt = findNamed(panel, "nbtEditorSnbt", JTextArea.class);
+                assertTrue(snbt.getText().startsWith("[B;"));
+                assertTrue(snbt.getText().contains("10B"));
+                assertTrue(findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).isEnabled());
+                findNamed(panel, "nbtEditorTabs", JTabbedPane.class).setSelectedIndex(0);
+            });
+
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(3)));
+            });
+            backgroundExecutor.runNext();
+            flushEdt();
+            onEdt(() -> {
+                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                assertEquals("1, 2", value.getText());
+                assertTrue(value.isEnabled());
+                value.setText("7, 8");
+                findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
+            });
+            ioExecutor.runNext();
+            flushEdt();
+            ListTag<?> editedNumbers = (ListTag<?>) ((CompoundTag) Objects.requireNonNull(
+                    controller.snapshot().document(), "document").rootSnapshot()).get("numbers");
+            assertEquals(7, ((IntTag) editedNumbers.getTag(0)).getValue());
+            assertEquals(8, ((IntTag) editedNumbers.getTag(1)).getValue());
 
             onEdt(() -> {
                 JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of(1, 0)));
                 JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
-                assertEquals("0", value.getText());
+                assertEquals("10", value.getText());
                 assertTrue(value.isEnabled());
                 value.setText("-1");
                 findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
@@ -489,7 +523,7 @@ final class NBTEditorPanelTest {
             flushEdt();
             bytes = (ByteArrayTag) ((CompoundTag) Objects.requireNonNull(
                     controller.snapshot().document(), "document").rootSnapshot()).get("bytes");
-            assertArrayEquals(new byte[]{-1, 127, -1}, bytes.getArray());
+            assertArrayEquals(new byte[]{-1, 20, -30}, bytes.getArray());
 
             onEdt(() -> {
                 JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);

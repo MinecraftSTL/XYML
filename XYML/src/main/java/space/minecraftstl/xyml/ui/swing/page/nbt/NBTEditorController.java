@@ -585,8 +585,9 @@ public final class NBTEditorController implements AutoCloseable {
             if (detached instanceof ValueTag<?> value) {
                 return NBTStructuredValueCodec.formatScalar(type, value.getValue().toString());
             }
-            if (detached instanceof Tag tag && NBTStructuredValueCodec.isPrimitiveArray(type)) {
-                return NBTStructuredValueCodec.formatArray(tag);
+            if (detached instanceof Tag tag
+                    && NBTStructuredValueCodec.isEditableAggregate(type, listElementType(tag))) {
+                return NBTStructuredValueCodec.formatAggregate(tag);
             }
             return null;
         } catch (NBTEditException failure) {
@@ -775,11 +776,21 @@ public final class NBTEditorController implements AutoCloseable {
         if (type == null) {
             throw new IOException("The selected node has no editable tag value");
         }
-        if (NBTStructuredValueCodec.isPrimitiveArray(type)) {
-            throw new IOException("Primitive arrays must be edited through their element rows");
+        NBTElement detached = editor.snapshot(target);
+        if (detached instanceof Tag source
+                && NBTStructuredValueCodec.isEditableAggregate(type, listElementType(source))) {
+            return editor.replaceContent(target, NBTStructuredValueCodec.parseAggregate(source, text));
         }
         String scalar = NBTStructuredValueCodec.parseScalar(type, text);
         return editor.setScalar(target, scalar);
+    }
+
+    /// Returns a detached List tag's declared element type.
+    ///
+    /// @param tag detached selected tag
+    /// @return declared List element type, or `null` for a non-List tag
+    private static @Nullable TagType<?> listElementType(Tag tag) {
+        return tag instanceof ListTag<?> list ? list.getElementType() : null;
     }
 
     /// Schedules one history operation and calculates a conservative surviving selection.

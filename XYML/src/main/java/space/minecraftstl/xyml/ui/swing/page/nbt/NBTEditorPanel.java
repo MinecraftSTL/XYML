@@ -1014,7 +1014,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         @Nullable NBTEditorTreeNode selected = selectedNode();
         if (selected != null
                 && selected.node().getType() != null
-                && !NBTStructuredValueCodec.isPrimitiveArray(selected.node().getType())
                 && mutationsAllowed()) {
             NBTEditorTreeNode submitted = selected;
             String draft = snbtArea.getText();
@@ -1432,9 +1431,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         childrenField.setText(strings.entries(selected.childCount()));
         boolean mutable = mutationsAllowed();
         boolean renameEditable = mutable && nameEditable(selected);
-        boolean snbtEditable = mutable
-                && tagType != null
-                && !NBTStructuredValueCodec.isPrimitiveArray(tagType);
+        boolean snbtEditable = mutable && tagType != null;
         updateTypeChoices(selected, tagType, mutable);
         boolean structuredValueEditable = updateValueEditor(selected, tagType, mutable);
         nameField.setEnabled(renameEditable);
@@ -1507,7 +1504,10 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
             @Nullable TagType<?> tagType,
             boolean mutable) {
         boolean stringValue = tagType == TagType.STRING;
-        boolean primitiveArray = NBTStructuredValueCodec.isPrimitiveArray(tagType);
+        @Nullable TagType<?> listElementType = tagType == TagType.LIST
+                ? controller.listElementType(selected)
+                : null;
+        boolean aggregate = NBTStructuredValueCodec.isEditableAggregate(tagType, listElementType);
         sectionSignButton.setVisible(stringValue);
         sectionSignButton.setEnabled(stringValue && mutable);
         formattingPreviewCheck.setVisible(stringValue);
@@ -1515,7 +1515,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         if (!stringValue) {
             formattingPreviewScroll.setVisible(false);
         }
-        if (primitiveArray) {
+        if (aggregate) {
             ValueLoadKey key = new ValueLoadKey(selected);
             valueTextLoader.reset(key);
             @Nullable NBTDocument document = controller.snapshot().document();
@@ -1530,10 +1530,10 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                         this::showValueLoadFailure);
             }
             boolean loaded = valueTextLoader.isLoaded(key);
-            boolean editable = false;
-            valueArea.setEnabled(false);
-            valueArea.setEditable(false);
-            applyButton.setEnabled(false);
+            boolean editable = loaded && mutable;
+            valueArea.setEnabled(editable);
+            valueArea.setEditable(editable);
+            applyButton.setEnabled(editable);
             if (!loaded && !valueTextLoader.isLoading() && supported) {
                 showValueLoadFailure(strings.arrayLoadFailedText());
             }
@@ -1566,7 +1566,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         applyButton.setEnabled(false);
     }
 
-    /// Keeps the primitive-array display read-only after its detached snapshot is loaded.
+    /// Enables a complete aggregate value after its detached snapshot is loaded.
     ///
     /// @param key exact source row
     private void finishValueLoad(ValueLoadKey key) {
@@ -1574,9 +1574,10 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
             return;
         }
         clearEditFailure();
-        valueArea.setEnabled(false);
-        valueArea.setEditable(false);
-        applyButton.setEnabled(false);
+        boolean editable = mutationsAllowed();
+        valueArea.setEnabled(editable);
+        valueArea.setEditable(editable);
+        applyButton.setEnabled(editable);
     }
 
     /// Returns whether one array snapshot key still owns the visible selection and revision.
@@ -1622,8 +1623,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         @Nullable NBTDocument document = controller.snapshot().document();
         boolean supported = document != null
                 && currentSelection.belongsTo(document)
-                && tagType != null
-                && !NBTStructuredValueCodec.isPrimitiveArray(tagType);
+                && tagType != null;
         snbtTextLoader.reset(supported ? currentSelection : null);
         if (supported && editorTabs.getSelectedIndex() == 1) {
             snbtTextLoader.load(
@@ -1655,8 +1655,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         @Nullable NBTEditorTreeNode selected = selectedNode();
         boolean editable = selected != null
                 && mutationsAllowed()
-                && selected.node().getType() != null
-                && !NBTStructuredValueCodec.isPrimitiveArray(selected.node().getType());
+                && selected.node().getType() != null;
         snbtArea.setEnabled(editable);
         snbtArea.setEditable(editable);
         replaceButton.setEnabled(editable);
@@ -1811,9 +1810,14 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// @return whether Apply may submit its current text
     private boolean valueEditable(NBTEditorTreeNode selected) {
         @Nullable TagType<?> type = selected.node().getType();
-        return selected.editable() && type != null
-                && ValueTag.class.isAssignableFrom(type.tagClass())
-                && !NBTStructuredValueCodec.isPrimitiveArray(type);
+        if (type == null) {
+            return false;
+        }
+        @Nullable TagType<?> elementType = type == TagType.LIST
+                ? controller.listElementType(selected)
+                : null;
+        return NBTStructuredValueCodec.isEditableAggregate(type, elementType)
+                || selected.editable() && ValueTag.class.isAssignableFrom(type.tagClass());
     }
 
     /// Returns the selected immutable address.
