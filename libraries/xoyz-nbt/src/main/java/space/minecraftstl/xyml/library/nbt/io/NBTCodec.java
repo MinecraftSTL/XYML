@@ -16,7 +16,9 @@
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 package space.minecraftstl.xyml.library.nbt.io;
 
+import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
+import space.minecraftstl.xyml.library.nbt.internal.ChunkUtils;
 import space.minecraftstl.xyml.library.nbt.internal.TextUtils;
 import space.minecraftstl.xyml.library.nbt.internal.input.InputSource;
 import space.minecraftstl.xyml.library.nbt.internal.input.NBTInput;
@@ -24,13 +26,17 @@ import space.minecraftstl.xyml.library.nbt.internal.input.RawDataReader;
 import space.minecraftstl.xyml.library.nbt.internal.output.NBTOutput;
 import space.minecraftstl.xyml.library.nbt.internal.output.OutputTarget;
 import space.minecraftstl.xyml.library.nbt.internal.output.RawDataWriter;
+import space.minecraftstl.xyml.library.nbt.validation.NBTStructureValidator;
+import space.minecraftstl.xyml.library.nbt.validation.NBTValidationException;
 import space.minecraftstl.xyml.library.nbt.tag.*;
 import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
@@ -41,6 +47,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Objects;
 import java.util.function.Function;
+import java.util.zip.DataFormatException;
+import java.util.zip.Inflater;
+import java.util.zip.CRC32;
 
 /// The codec for reading and writing NBT data.
 ///
@@ -131,6 +140,7 @@ import java.util.function.Function;
 /// For other variants (like [#readRegion(InputStream)]), the default behavior is not to support external chunk files.
 /// They will throw an exception when trying to access external chunk files.
 /// However, you can use [#readRegion(InputStream, ExternalChunkAccessor)] or [#readRegion(ReadableByteChannel, ExternalChunkAccessor)] to manually specify the external chunk accessor.
+@NotNullByDefault
 public final class NBTCodec {
     private static final NBTCodec JE = new NBTCodec(MinecraftEdition.JAVA_EDITION, ExternalChunkAccessor.defaultFactory());
     private static final NBTCodec BE = new NBTCodec(MinecraftEdition.BEDROCK_EDITION, ExternalChunkAccessor.defaultFactory());
@@ -285,6 +295,156 @@ public final class NBTCodec {
         return tag;
     }
 
+    private Tag readStandalone(RawDataReader reader) throws IOException {
+        Tag tag = check(NBTInput.readTagAutoDecompress(reader));
+        reader.requireExhausted();
+        return tag;
+    }
+
+    private Tag readStandaloneBytes(byte[] encoded) throws IOException {
+        Objects.requireNonNull(encoded, "encoded");
+        byte[] raw = isGzip(encoded) ? decodeGzipStrict(encoded) : encoded;
+        try (var reader = new RawDataReader(new InputSource.OfByteBuffer(raw), getEdition())) {
+            Tag tag = raw == encoded
+                    ? check(NBTInput.readTagAutoDecompress(reader))
+                    : check(NBTInput.readTag(reader));
+            reader.requireExhausted();
+            return tag;
+        }
+    }
+
+    private static boolean isGzip(byte[] encoded) {
+        return encoded.length >= 2 && (encoded[0] & 0xFF) == 0x1F && (encoded[1] & 0xFF) == 0x8B;
+    }
+
+    /// Decodes exactly one GZIP member without applying an output-size limit.
+    ///
+    /// @param encoded complete GZIP member
+    /// @return complete uncompressed bytes
+    /// @throws IOException if the header, stream, footer, or input boundary is invalid
+    private static byte[] decodeGzipStrict(byte[] encoded) throws IOException {
+        return decodeGzipStrict(encoded, Integer.MAX_VALUE);
+    }
+
+    /// Decodes exactly one GZIP member with a defensive output-size limit.
+    ///
+    /// @param encoded complete GZIP member
+    /// @param maximumOutputBytes largest accepted uncompressed size
+    /// @return complete uncompressed bytes
+    /// @throws IOException if the member is invalid, trailing, truncated, or too large
+    static byte[] decodeGzipStrict(byte[] encoded, int maximumOutputBytes) throws IOException {
+        if (maximumOutputBytes < 0) {
+            throw new IllegalArgumentException("maximumOutputBytes must not be negative");
+        }
+        if (encoded.length < 18 || (encoded[0] & 0xFF) != 0x1F || (encoded[1] & 0xFF) != 0x8B
+                || (encoded[2] & 0xFF) != 8) {
+            throw new IOException("Invalid GZIP header");
+        }
+        int flags = encoded[3] & 0xFF;
+        if ((flags & 0xE0) != 0) {
+            throw new IOException("Invalid GZIP flags");
+        }
+        int position = 10;
+        if ((flags & 0x04) != 0) {
+            requireBytes(encoded, position, 2);
+            int extraLength = littleUnsignedShort(encoded, position);
+            position += 2;
+            requireBytes(encoded, position, extraLength);
+            position += extraLength;
+        }
+        if ((flags & 0x08) != 0) {
+            position = skipZeroTerminated(encoded, position);
+        }
+        if ((flags & 0x10) != 0) {
+            position = skipZeroTerminated(encoded, position);
+        }
+        if ((flags & 0x02) != 0) {
+            requireBytes(encoded, position, 2);
+            CRC32 headerChecksum = new CRC32();
+            headerChecksum.update(encoded, 0, position);
+            int expectedHeaderChecksum = littleUnsignedShort(encoded, position);
+            if ((headerChecksum.getValue() & 0xFFFFL) != expectedHeaderChecksum) {
+                throw new IOException("GZIP header checksum does not match");
+            }
+            position += 2;
+        }
+        if (position >= encoded.length) {
+            throw new IOException("Truncated GZIP payload");
+        }
+
+        Inflater inflater = new Inflater(true);
+        ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(encoded.length * 2, 8192));
+        CRC32 checksum = new CRC32();
+        try {
+            inflater.setInput(encoded, position, encoded.length - position);
+            byte[] buffer = new byte[8192];
+            while (!inflater.finished()) {
+                int count;
+                try {
+                    count = inflater.inflate(buffer);
+                } catch (DataFormatException exception) {
+                    throw new IOException("Invalid GZIP deflate stream", exception);
+                }
+                if (count > 0) {
+                    if (output.size() > maximumOutputBytes - count) {
+                        throw new IOException("GZIP payload is too large after decompression");
+                    }
+                    output.write(buffer, 0, count);
+                    checksum.update(buffer, 0, count);
+                } else if (inflater.needsDictionary() || inflater.needsInput()) {
+                    throw new IOException("Truncated GZIP deflate stream");
+                }
+            }
+            int remaining = inflater.getRemaining();
+            int footer = encoded.length - remaining;
+            if (remaining != 8) {
+                throw new IOException("Trailing data after GZIP member");
+            }
+            long expectedChecksum = littleUnsignedInt(encoded, footer);
+            long expectedSize = littleUnsignedInt(encoded, footer + 4);
+            if (checksum.getValue() != expectedChecksum || (output.size() & 0xFFFF_FFFFL) != expectedSize) {
+                throw new IOException("GZIP footer checksum or size does not match");
+            }
+            return output.toByteArray();
+        } finally {
+            inflater.end();
+        }
+    }
+
+    private static void requireBytes(byte[] bytes, int offset, int count) throws IOException {
+        if (offset < 0 || count < 0 || offset > bytes.length - count) {
+            throw new IOException("Truncated GZIP header");
+        }
+    }
+
+    private static int skipZeroTerminated(byte[] bytes, int offset) throws IOException {
+        while (offset < bytes.length) {
+            if (bytes[offset++] == 0) {
+                return offset;
+            }
+        }
+        throw new IOException("Truncated GZIP header field");
+    }
+
+    private static int littleUnsignedShort(byte[] bytes, int offset) {
+        return (bytes[offset] & 0xFF) | ((bytes[offset + 1] & 0xFF) << 8);
+    }
+
+    private static long littleUnsignedInt(byte[] bytes, int offset) {
+        return (bytes[offset] & 0xFFL)
+                | ((bytes[offset + 1] & 0xFFL) << 8)
+                | ((bytes[offset + 2] & 0xFFL) << 16)
+                | ((bytes[offset + 3] & 0xFFL) << 24);
+    }
+
+    private void validateForWrite(Tag tag) throws IOException {
+        try {
+            NBTStructureValidator.validateSubtree(tag, edition);
+        } catch (NBTValidationException exception) {
+            throw new IOException("Cannot write an invalid NBT tree", exception);
+        }
+    }
+
     private static <T extends Tag> T check(@Nullable Tag tag, Class<T> tagClass) throws IOException {
         if (tag == null) {
             throw new IOException("Unexpected TAG_END");
@@ -299,9 +459,7 @@ public final class NBTCodec {
     /// Reads a NBT tag from a byte array.
     @Contract(pure = true)
     public Tag readTag(byte[] array) throws IOException {
-        try (var reader = new RawDataReader(new InputSource.OfByteBuffer(array), getEdition())) {
-            return check(NBTInput.readTagAutoDecompress(reader));
-        }
+        return readStandaloneBytes(array);
     }
 
     /// Reads the specified NBT tag from a byte array.
@@ -339,9 +497,11 @@ public final class NBTCodec {
     /// This method does not change the position and the limit of the buffer.
     @Contract(pure = true)
     public Tag readTag(ByteBuffer buffer) throws IOException {
-        try (var reader = new RawDataReader(new InputSource.OfByteBuffer(buffer), getEdition())) {
-            return check(NBTInput.readTagAutoDecompress(reader));
-        }
+        Objects.requireNonNull(buffer, "buffer");
+        ByteBuffer copy = buffer.slice();
+        byte[] encoded = new byte[copy.remaining()];
+        copy.get(encoded);
+        return readStandaloneBytes(encoded);
     }
 
     /// Reads the specified NBT tag from a byte buffer.
@@ -365,9 +525,8 @@ public final class NBTCodec {
     /// After this method is called, the state of the `inputStream` is undefined.
     @Contract(mutates = "param1")
     public Tag readTag(InputStream inputStream) throws IOException {
-        try (var reader = new RawDataReader(new InputSource.OfInputStream(inputStream, false), getEdition())) {
-            return check(NBTInput.readTagAutoDecompress(reader));
-        }
+        Objects.requireNonNull(inputStream, "inputStream");
+        return readStandaloneBytes(inputStream.readAllBytes());
     }
 
     /// Reads the specified NBT tag from an input stream.
@@ -391,9 +550,17 @@ public final class NBTCodec {
     /// After this method is called, the state of the `channel` is undefined.
     @Contract(mutates = "param1")
     public Tag readTag(ReadableByteChannel channel) throws IOException {
-        try (var reader = new RawDataReader(new InputSource.OfByteChannel(channel, false), getEdition())) {
-            return check(NBTInput.readTagAutoDecompress(reader));
+        Objects.requireNonNull(channel, "channel");
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ByteBuffer buffer = ByteBuffer.allocate(8192);
+        while (channel.read(buffer) >= 0) {
+            buffer.flip();
+            while (buffer.hasRemaining()) {
+                output.write(buffer.get());
+            }
+            buffer.clear();
         }
+        return readStandaloneBytes(output.toByteArray());
     }
 
     /// Reads the specified NBT tag from a readable byte channel.
@@ -414,10 +581,7 @@ public final class NBTCodec {
 
     /// Reads a NBT tag from a file.
     public Tag readTag(Path path) throws IOException {
-        try (var channel = Files.newByteChannel(path, StandardOpenOption.READ);
-             var reader = new RawDataReader(new InputSource.OfByteChannel(channel, false), getEdition())) {
-            return check(NBTInput.readTagAutoDecompress(reader));
-        }
+        return readStandaloneBytes(Files.readAllBytes(Objects.requireNonNull(path, "path")));
     }
 
     /// Reads the specified NBT tag from a file.
@@ -433,6 +597,7 @@ public final class NBTCodec {
     /// Writes a NBT tag to the output stream.
     @Contract(mutates = "param1")
     public void writeTag(OutputStream outputStream, Tag tag) throws IOException {
+        validateForWrite(tag);
         try (var writer = new RawDataWriter(new OutputTarget.OfOutputStream(outputStream, false), getEdition())) {
             NBTOutput.writeTag(writer, tag);
         }
@@ -441,6 +606,7 @@ public final class NBTCodec {
     /// Writes a NBT tag to the byte channel.
     @Contract(mutates = "param1")
     public void writeTag(WritableByteChannel channel, Tag tag) throws IOException {
+        validateForWrite(tag);
         try (var writer = new RawDataWriter(new OutputTarget.OfByteChannel(channel, false), getEdition())) {
             NBTOutput.writeTag(writer, tag);
         }
@@ -453,6 +619,7 @@ public final class NBTCodec {
     ///
     /// After the method call, `buffer.position()` will increase by [`byteSize(tag)`](#byteSize(Tag)).
     public void writeTag(ByteBuffer buffer, Tag tag) throws IOException {
+        validateForWrite(tag);
         try (var writer = new RawDataWriter(new OutputTarget.OfByteBuffer(buffer), getEdition())) {
             NBTOutput.writeTag(writer, tag);
         }
@@ -462,13 +629,13 @@ public final class NBTCodec {
     ///
     /// The returned byte array will have a length equal to [`byteSize(tag)`](#byteSize(Tag)).
     public byte[] writeTagToByteArray(Tag tag) throws IOException {
-        ByteBuffer buffer = ByteBuffer.allocate((int) byteSize(tag));
-
-        try {
-            writeTag(buffer, tag);
-        } catch (IOException e) {
-            throw new AssertionError("Unexpected error when writing tag to byte array", e);
+        validateForWrite(tag);
+        long encodedSize = byteSize(tag);
+        if (encodedSize > Integer.MAX_VALUE) {
+            throw new IOException("Encoded NBT tag exceeds the byte-array size limit: " + encodedSize);
         }
+        ByteBuffer buffer = ByteBuffer.allocate((int) encodedSize);
+        writeTag(buffer, tag);
 
         if (buffer.remaining() != 0) {
             throw new AssertionError("Unexpected remaining bytes in buffer: " + buffer.remaining());
@@ -522,21 +689,42 @@ public final class NBTCodec {
         }
     }
 
-    /// Writes a chunk region to a file.
+    /// Safely replaces a chunk region through path-backed copy-on-write storage.
     ///
+    /// @param file destination region path
+    /// @param region validated region snapshot to publish
+    /// @throws IOException if validation, encoding, or transactional publication fails
     /// @see ExternalChunkAccessor#of(Path)
     public void writeRegion(Path file, ChunkRegion region) throws IOException {
         writeRegion(file, region, ExternalChunkAccessor.of(file));
     }
 
-    /// Writes a chunk region to a file.
+    /// Safely replaces a chunk region with an explicit external-companion accessor.
+    ///
+    /// Existing chunks are compared semantically and only changed slots are published. The
+    /// destination is opened and validated before any update; it is never truncated first.
+    ///
+    /// @param file destination region path
+    /// @param region validated region snapshot to publish
+    /// @param accessor external companion accessor for this path
+    /// @throws IOException if validation, source opening, encoding, or transactional publication fails
     public void writeRegion(Path file, ChunkRegion region, ExternalChunkAccessor accessor) throws IOException {
-        try (var channel = Files.newByteChannel(file,
-                StandardOpenOption.WRITE,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.TRUNCATE_EXISTING
-        )) {
-            writeRegion(channel, region, accessor);
+        Objects.requireNonNull(file, "file");
+        Objects.requireNonNull(region, "region");
+        Objects.requireNonNull(accessor, "accessor");
+        try {
+            NBTStructureValidator.validate(region, MinecraftEdition.JAVA_EDITION);
+        } catch (NBTValidationException exception) {
+            throw new IOException("Cannot write an invalid chunk region", exception);
+        }
+        try (NBTRegionFile storage = NBTRegionFile.open(file, accessor)) {
+            for (int localIndex = 0; localIndex < ChunkUtils.CHUNKS_PRE_REGION; localIndex++) {
+                Chunk desired = region.getChunk(localIndex);
+                if (!desired.equals(storage.readChunk(localIndex))) {
+                    storage.writeChunk(localIndex, desired);
+                }
+            }
+            storage.flush();
         }
     }
 
@@ -547,6 +735,11 @@ public final class NBTCodec {
 
     /// Writes a chunk region to an output stream.
     public void writeRegion(OutputStream outputStream, ChunkRegion region, ExternalChunkAccessor accessor) throws IOException {
+        try {
+            NBTStructureValidator.validate(region, MinecraftEdition.JAVA_EDITION);
+        } catch (NBTValidationException exception) {
+            throw new IOException("Cannot write an invalid chunk region", exception);
+        }
         try (var writer = new RawDataWriter(new OutputTarget.OfOutputStream(outputStream, false), MinecraftEdition.JAVA_EDITION)) {
             NBTOutput.writeRegion(writer, region, accessor);
         }
@@ -559,6 +752,11 @@ public final class NBTCodec {
 
     /// Writes a chunk region to a seekable byte channel.
     public void writeRegion(SeekableByteChannel channel, ChunkRegion region, ExternalChunkAccessor accessor) throws IOException {
+        try {
+            NBTStructureValidator.validate(region, MinecraftEdition.JAVA_EDITION);
+        } catch (NBTValidationException exception) {
+            throw new IOException("Cannot write an invalid chunk region", exception);
+        }
         NBTOutput.writeRegion(channel, region, accessor);
     }
 

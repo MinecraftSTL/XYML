@@ -21,6 +21,7 @@ import space.minecraftstl.xyml.library.nbt.internal.StringCache;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.Closeable;
+import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -92,6 +93,19 @@ public final class RawDataReader extends DataReader implements Closeable {
         if (bytes > 0) {
             source.skip(bytes);
         }
+    }
+
+    /// Ensures that no bytes remain in the underlying source.
+    ///
+    /// This method is used by standalone codecs. Region readers deliberately do not use it because
+    /// sector padding is part of the region container rather than the encoded tag.
+    public void requireExhausted() throws IOException {
+        try {
+            ensureBufferRemaining(1);
+        } catch (EOFException exception) {
+            return;
+        }
+        throw new IOException("Trailing data after NBT tag");
     }
 
     private @Nullable InputBuffer decompressBuffer;

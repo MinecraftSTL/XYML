@@ -23,6 +23,7 @@ import org.jetbrains.annotations.Unmodifiable;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 
 /// Toolkit-neutral boundary for file selection, drop choice, and destructive replacement prompts.
 @NotNullByDefault
@@ -44,4 +45,20 @@ public interface NBTEditorInteractions {
     /// @param currentFile current dirty source
     /// @return whether unsaved edits may be discarded
     boolean confirmDiscardChanges(Path currentFile);
+
+    /// Confirms clearing the fixed compound root of one Region chunk slot.
+    ///
+    /// The fail-closed default keeps existing non-interactive integrations from approving a
+    /// destructive chunk clear without an explicit policy.
+    ///
+    /// @param currentFile current Region source
+    /// @param localIndex fixed chunk slot from 0 through 1023
+    /// @return whether the root may be cleared
+    default boolean confirmClearChunk(Path currentFile, int localIndex) {
+        Objects.requireNonNull(currentFile, "currentFile");
+        if (localIndex < 0 || localIndex >= 1024) {
+            throw new IndexOutOfBoundsException("localIndex: " + localIndex);
+        }
+        return false;
+    }
 }

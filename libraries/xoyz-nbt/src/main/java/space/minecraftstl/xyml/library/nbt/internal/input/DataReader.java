@@ -21,6 +21,8 @@ import space.minecraftstl.xyml.library.nbt.io.MinecraftEdition;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 
 public sealed abstract class DataReader implements Closeable
@@ -78,6 +80,19 @@ public sealed abstract class DataReader implements Closeable
         return getBuffer().lookAheadByte();
     }
 
+    /// Looks ahead by the given number of bytes without consuming input.
+    ///
+    /// @param offset number of bytes after the current position
+    /// @return byte at the requested offset
+    /// @throws IOException if the input ends before the requested byte
+    public byte lookAheadByte(int offset) throws IOException {
+        if (offset < 0) {
+            throw new IllegalArgumentException("offset must be non-negative");
+        }
+        ensureBufferRemaining(offset + 1);
+        return getBuffer().getByteBuffer().get(getBuffer().getByteBuffer().position() + offset);
+    }
+
     /// Read a short from the input stream.
     public short readShort() throws IOException {
         ensureBufferRemaining(Short.BYTES);
@@ -118,18 +133,30 @@ public sealed abstract class DataReader implements Closeable
         return getBuffer().getDouble();
     }
 
-    private String getUTF8(ByteBuffer buffer, int offset, int length) {
+    private String getUTF8(ByteBuffer buffer, int offset, int length) throws IOException {
         String cached = getRawReader().stringCache.get(buffer, offset, length);
         if (cached != null) {
             return cached;
         }
 
         if (buffer.hasArray() && !buffer.isReadOnly()) {
-            return new String(buffer.array(), offset + buffer.arrayOffset(), length, StandardCharsets.UTF_8);
+            return decodeUTF8(buffer.array(), offset + buffer.arrayOffset(), length);
         } else {
             byte[] bytes = new byte[length];
             buffer.get(offset, bytes);
-            return new String(bytes, StandardCharsets.UTF_8);
+            return decodeUTF8(bytes, 0, bytes.length);
+        }
+    }
+
+    private static String decodeUTF8(byte[] bytes, int offset, int length) throws IOException {
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes, offset, length))
+                    .toString();
+        } catch (CharacterCodingException exception) {
+            throw new IOException("Malformed UTF-8 string", exception);
         }
     }
 
@@ -196,18 +223,21 @@ public sealed abstract class DataReader implements Closeable
             c = (int) bytes.get(i) & 0xff;
             switch (c >> 4) {
                 case 0, 1, 2, 3, 4, 5, 6, 7 -> {
-                    /* 0xxxxxxx*/
                     i++;
                     charsBuffer.append((char) c);
                 }
                 case 12, 13 -> {
                     /* 110x xxxx   10xx xxxx*/
+                    if (i + 1 >= limit) {
+                        throw new IOException("Malformed modified UTF-8 string at byte " + i);
+                    }
                     i += 2;
                     if (i > limit)
-                        throw new IllegalArgumentException("malformed input: partial character at end");
+                        throw new IOException("Malformed modified UTF-8 string: partial character at end");
                     char2 = (int) bytes.get(i - 1) & 0xff;
-                    if ((char2 & 0xC0) != 0x80)
-                        throw new IllegalArgumentException("malformed input around byte " + (i - 1));
+                    if ((char2 & 0xC0) != 0x80 || c == 0xC0 && char2 != 0x80 || c == 0xC1) {
+                        throw new IOException("Malformed modified UTF-8 string around byte " + (i - 1));
+                    }
                     charsBuffer.append((char) (((c & 0x1F) << 6) |
                             (char2 & 0x3F)));
                 }
@@ -215,18 +245,20 @@ public sealed abstract class DataReader implements Closeable
                     /* 1110 xxxx  10xx xxxx  10xx xxxx */
                     i += 3;
                     if (i > limit)
-                        throw new IllegalArgumentException("malformed input: partial character at end");
-                    char2 = bytes.get(i - 2);
-                    char3 = bytes.get(i - 1);
-                    if (((char2 & 0xC0) != 0x80) || ((char3 & 0xC0) != 0x80))
-                        throw new IllegalArgumentException("malformed input around byte " + (i - 1));
+                        throw new IOException("Malformed modified UTF-8 string: partial character at end");
+                    char2 = bytes.get(i - 2) & 0xFF;
+                    char3 = bytes.get(i - 1) & 0xFF;
+                    if (((char2 & 0xC0) != 0x80) || ((char3 & 0xC0) != 0x80)
+                            || (c == 0xE0 && char2 < 0xA0)) {
+                        throw new IOException("Malformed modified UTF-8 string around byte " + (i - 1));
+                    }
                     charsBuffer.append((char) (((c & 0x0F) << 12) |
                             ((char2 & 0x3F) << 6) |
                             (char3 & 0x3F)));
                 }
                 default ->
                     /* 10xx xxxx,  1111 xxxx */
-                        throw new IllegalArgumentException("malformed input around byte " + i);
+                        throw new IOException("Malformed modified UTF-8 string around byte " + i);
             }
         }
         return charsBuffer.toString();

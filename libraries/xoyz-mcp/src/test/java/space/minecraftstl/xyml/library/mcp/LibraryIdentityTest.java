@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.library.mcp;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.w3c.dom.Document;
 
@@ -27,7 +28,12 @@ import javax.xml.xpath.XPathFactory;
 import java.io.IOException;
 import java.lang.module.ModuleDescriptor;
 import java.lang.module.ModuleFinder;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.nio.file.FileSystemNotFoundException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.CodeSource;
 import java.util.jar.JarFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,7 +45,8 @@ public final class LibraryIdentityTest {
     /// Verifies the module name and exported public package.
     @Test
     void moduleAndPublicPackageUseXoyzMcpIdentity() {
-        Path artifact = Path.of(System.getProperty("xyml.xoyzMcp.jar"));
+        Path artifact = resolveArtifact(
+                "xyml.xoyzMcp.jar", "xoyz-mcp", "space.minecraftstl.xyml.library.mcp");
         ModuleDescriptor descriptor = ModuleFinder.of(artifact).findAll().iterator().next().descriptor();
 
         assertEquals("space.minecraftstl.xyml.library.mcp", descriptor.name());
@@ -53,7 +60,8 @@ public final class LibraryIdentityTest {
     /// @throws IOException when the built artifact cannot be read
     @Test
     void manifestUsesXoyzMcpIdentity() throws IOException {
-        Path artifact = Path.of(System.getProperty("xyml.xoyzMcp.jar"));
+        Path artifact = resolveArtifact(
+                "xyml.xoyzMcp.jar", "xoyz-mcp", "space.minecraftstl.xyml.library.mcp");
         ModuleDescriptor descriptor = ModuleFinder.of(artifact).findAll().iterator().next().descriptor();
         try (JarFile jar = new JarFile(artifact.toFile())) {
             assertEquals(descriptor.rawVersion().orElseThrow(),
@@ -66,7 +74,7 @@ public final class LibraryIdentityTest {
     /// @throws Exception when the generated publication metadata cannot be parsed
     @Test
     void pomPublishesRequiredModulesForConsumerCompilation() throws Exception {
-        Path pom = Path.of(System.getProperty("xyml.xoyzMcp.pom"));
+        Path pom = resolveBuildFile("xyml.xoyzMcp.pom", "build/publications/maven/pom-default.xml");
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
         factory.setNamespaceAware(true);
@@ -74,6 +82,101 @@ public final class LibraryIdentityTest {
 
         assertEquals("compile", dependencyScope(document, "org.nanohttpd", "nanohttpd"));
         assertEquals("compile", dependencyScope(document, "com.google.code.gson", "gson"));
+    }
+
+    /// Resolves a Gradle-injected artifact path or the artifact matching the compiled module
+    /// for IntelliJ's JUnit runner.
+    ///
+    /// @param propertyName Gradle system property containing the artifact path
+    /// @param artifactName archive base name
+    /// @param moduleName compiled module name
+    /// @return executable library artifact
+    /// @throws IllegalStateException when no local artifact can be found
+    private static Path resolveArtifact(String propertyName, String artifactName, String moduleName) {
+        @Nullable String configuredPath = System.getProperty(propertyName);
+        if (configuredPath != null && !configuredPath.isBlank()) {
+            return Path.of(configuredPath);
+        }
+
+        Path libraryDirectory = moduleDirectory();
+        Path mainClasses = libraryDirectory.resolve("build/classes/java/main");
+        if (!Files.isDirectory(mainClasses)) {
+            throw new IllegalStateException("Compiled module classes were not found: " + mainClasses);
+        }
+
+        ModuleDescriptor descriptor = ModuleFinder.of(mainClasses).find(moduleName)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Compiled module descriptor was not found: " + moduleName))
+                .descriptor();
+        String version = descriptor.rawVersion()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Compiled module has no version: " + moduleName));
+        Path artifact = libraryDirectory.resolve("build/libs").resolve(artifactName + "-" + version + ".jar");
+        if (!Files.isRegularFile(artifact)) {
+            throw new IllegalStateException("Artifact for compiled version was not found: " + artifact);
+        }
+        return artifact;
+    }
+
+    /// Resolves a Gradle-injected path or a file relative to this library module.
+    ///
+    /// @param propertyName Gradle system property containing the file path
+    /// @param relativePath file path under the module directory
+    /// @return resolved file
+    /// @throws IllegalStateException when the local file does not exist
+    private static Path resolveBuildFile(String propertyName, String relativePath) {
+        @Nullable String configuredPath = System.getProperty(propertyName);
+        if (configuredPath != null && !configuredPath.isBlank()) {
+            return Path.of(configuredPath);
+        }
+
+        Path file = moduleDirectory().resolve(relativePath);
+        if (!Files.isRegularFile(file)) {
+            throw new IllegalStateException("Required build file was not found: " + file);
+        }
+        return file;
+    }
+
+    /// Locates the module containing the compiled test class.
+    ///
+    /// @return module directory
+    /// @throws IllegalStateException when the test output location cannot be mapped to a module
+    private static Path moduleDirectory() {
+        try {
+            @Nullable CodeSource codeSource = LibraryIdentityTest.class.getProtectionDomain().getCodeSource();
+            if (codeSource != null) {
+                @Nullable URL location = codeSource.getLocation();
+                if (location != null) {
+                    Path outputLocation = Path.of(location.toURI()).toAbsolutePath().normalize();
+                    for (@Nullable Path current = outputLocation;
+                         current != null;
+                         current = current.getParent()) {
+                        @Nullable Path fileName = current.getFileName();
+                        if (fileName != null && "build".equals(fileName.toString()) && Files.isDirectory(current)) {
+                            @Nullable Path moduleDirectory = current.getParent();
+                            if (moduleDirectory != null) {
+                                return moduleDirectory;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (URISyntaxException
+                 | FileSystemNotFoundException
+                 | IllegalArgumentException
+                 | SecurityException exception) {
+            throw new IllegalStateException("Unable to locate test output directory", exception);
+        }
+
+        Path workingDirectory = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+        Path modulePath = workingDirectory.resolve("libraries/xoyz-mcp");
+        if (Files.isDirectory(modulePath.resolve("build"))) {
+            return modulePath;
+        }
+        if (Files.isDirectory(workingDirectory.resolve("build"))) {
+            return workingDirectory;
+        }
+        throw new IllegalStateException("Unable to locate xoyz-mcp module directory from the test classpath");
     }
 
     /// Reads one dependency scope from Maven publication metadata.

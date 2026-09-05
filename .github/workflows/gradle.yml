@@ -46,7 +46,14 @@ jobs:
     - name: Build with Gradle
       run: >-
         xvfb-run --auto-servernum
-        ./gradlew build -Pxyml.branchBuild.nested=true --no-daemon --parallel
+        ./gradlew :build -Pxyml.branchBuild.nested=true --no-daemon --parallel
+      env:
+        MICROSOFT_AUTH_ID: ${{ secrets.MICROSOFT_AUTH_ID }}
+        CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+    - name: Test with Gradle
+      run: >-
+        xvfb-run --auto-servernum
+        ./gradlew :test -Pxyml.branchBuild.nested=true --no-daemon --parallel
       env:
         MICROSOFT_AUTH_ID: ${{ secrets.MICROSOFT_AUTH_ID }}
         CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}

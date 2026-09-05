@@ -18,330 +18,292 @@
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.library.nbt.edit.NBTAddress;
+import space.minecraftstl.xyml.library.nbt.edit.NBTEditException;
+import space.minecraftstl.xyml.library.nbt.tag.TagType;
+import space.minecraftstl.xyml.nbt.NBTNodeType;
 import space.minecraftstl.xyml.util.i18n.I18n;
+import space.minecraftstl.xyml.util.i18n.LocaleUtils;
+import space.minecraftstl.xyml.util.i18n.SupportedLocale;
 
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Objects;
 
-/// Stable localized labels for the NBT editor without extending the shared localization catalog.
+/// Resource wrapper and deterministic locale injection point for the Swing NBT editor.
 @NotNullByDefault
 final class NBTEditorStrings {
-    /// Shared English bundle for non-Chinese locales.
-    private static final NBTEditorStrings ENGLISH = new NBTEditorStrings(
-            "NBT Editor",
-            "Back",
-            "Open NBT file",
-            "Reload from disk",
-            "Save changes",
-            "Choose an NBT file",
-            "NBT files (*.dat, *.dat_old, *.mca, *.mcr)",
-            "Discard unsaved changes?",
-            "The unsaved changes to %s will be discarded.",
-            "No NBT file open.",
-            "Opening NBT data...",
-            "Saving NBT data...",
-            "Ready",
-            "Modified",
-            "The source changed outside the editor. Reload before saving again.",
-            "NBT operation failed",
-            "Name",
-            "Type",
-            "Children",
-            "Value",
-            "Apply",
-            "This NBT type is read-only.",
-            "Enter a valid value for the selected NBT type.",
-            "%d entries");
+    /// Shared English resources for deterministic tests and non-Chinese locales.
+    private static final NBTEditorStrings ENGLISH =
+            new NBTEditorStrings(SupportedLocale.getLocale(Locale.ENGLISH));
 
-    /// Shared Simplified Chinese bundle.
-    private static final NBTEditorStrings SIMPLIFIED_CHINESE = new NBTEditorStrings(
-            "NBT 编辑器",
-            "返回",
-            "打开 NBT 文件",
-            "从磁盘重新加载",
-            "保存修改",
-            "选择 NBT 文件",
-            "NBT 文件（*.dat、*.dat_old、*.mca、*.mcr）",
-            "放弃未保存的修改？",
-            "%s 的未保存修改将被放弃。",
-            "未打开 NBT 文件。",
-            "正在打开 NBT 数据...",
-            "正在保存 NBT 数据...",
-            "已就绪",
-            "已修改",
-            "源文件已在编辑器外部变化。请重新加载后再保存。",
-            "NBT 操作失败",
-            "名称",
-            "类型",
-            "子项",
-            "值",
-            "应用",
-            "此 NBT 类型为只读。",
-            "请输入符合所选 NBT 类型的值。",
-            "%d 项");
+    /// Shared Simplified Chinese resources for deterministic tests.
+    private static final NBTEditorStrings SIMPLIFIED_CHINESE =
+            new NBTEditorStrings(SupportedLocale.getLocale(Locale.SIMPLIFIED_CHINESE));
 
-    /// Visible page title.
-    private final String title;
+    /// Shared Traditional Chinese resources for deterministic tests.
+    private static final NBTEditorStrings TRADITIONAL_CHINESE =
+            new NBTEditorStrings(SupportedLocale.getLocale(Locale.TRADITIONAL_CHINESE));
 
-    /// Back-command accessible text.
-    private final String backTooltip;
+    /// Explicit resource locale used by every lookup.
+    private final SupportedLocale locale;
 
-    /// Open-command accessible text.
-    private final String openTooltip;
-
-    /// Reload-command accessible text.
-    private final String reloadTooltip;
-
-    /// Save-command accessible text.
-    private final String saveTooltip;
-
-    /// Native file-chooser title.
-    private final String chooserTitle;
-
-    /// Native file-filter description.
-    private final String fileFilter;
-
-    /// Dirty-document confirmation title.
-    private final String discardTitle;
-
-    /// Dirty-document confirmation format.
-    private final String discardMessageFormat;
-
-    /// Empty-state instruction.
-    private final String emptyText;
-
-    /// Opening-state text.
-    private final String openingText;
-
-    /// Saving-state text.
-    private final String savingText;
-
-    /// Clean ready-state text.
-    private final String readyText;
-
-    /// Dirty ready-state text.
-    private final String modifiedText;
-
-    /// Stale-source conflict explanation.
-    private final String conflictText;
-
-    /// Generic operation failure label.
-    private final String errorText;
-
-    /// Selected-node name label.
-    private final String nameLabel;
-
-    /// Selected-node type label.
-    private final String typeLabel;
-
-    /// Selected-node child-count label.
-    private final String childrenLabel;
-
-    /// Scalar editor label.
-    private final String valueLabel;
-
-    /// Typed edit command text.
-    private final String applyText;
-
-    /// Read-only detail message.
-    private final String readOnlyText;
-
-    /// Invalid scalar input message.
-    private final String invalidValueText;
-
-    /// Direct-child count format.
-    private final String entriesFormat;
-
-    /// Creates one complete immutable bundle.
-    private NBTEditorStrings(
-            String title,
-            String backTooltip,
-            String openTooltip,
-            String reloadTooltip,
-            String saveTooltip,
-            String chooserTitle,
-            String fileFilter,
-            String discardTitle,
-            String discardMessageFormat,
-            String emptyText,
-            String openingText,
-            String savingText,
-            String readyText,
-            String modifiedText,
-            String conflictText,
-            String errorText,
-            String nameLabel,
-            String typeLabel,
-            String childrenLabel,
-            String valueLabel,
-            String applyText,
-            String readOnlyText,
-            String invalidValueText,
-            String entriesFormat) {
-        this.title = requireText(title, "title");
-        this.backTooltip = requireText(backTooltip, "backTooltip");
-        this.openTooltip = requireText(openTooltip, "openTooltip");
-        this.reloadTooltip = requireText(reloadTooltip, "reloadTooltip");
-        this.saveTooltip = requireText(saveTooltip, "saveTooltip");
-        this.chooserTitle = requireText(chooserTitle, "chooserTitle");
-        this.fileFilter = requireText(fileFilter, "fileFilter");
-        this.discardTitle = requireText(discardTitle, "discardTitle");
-        this.discardMessageFormat = requireText(discardMessageFormat, "discardMessageFormat");
-        this.emptyText = requireText(emptyText, "emptyText");
-        this.openingText = requireText(openingText, "openingText");
-        this.savingText = requireText(savingText, "savingText");
-        this.readyText = requireText(readyText, "readyText");
-        this.modifiedText = requireText(modifiedText, "modifiedText");
-        this.conflictText = requireText(conflictText, "conflictText");
-        this.errorText = requireText(errorText, "errorText");
-        this.nameLabel = requireText(nameLabel, "nameLabel");
-        this.typeLabel = requireText(typeLabel, "typeLabel");
-        this.childrenLabel = requireText(childrenLabel, "childrenLabel");
-        this.valueLabel = requireText(valueLabel, "valueLabel");
-        this.applyText = requireText(applyText, "applyText");
-        this.readOnlyText = requireText(readOnlyText, "readOnlyText");
-        this.invalidValueText = requireText(invalidValueText, "invalidValueText");
-        this.entriesFormat = requireText(entriesFormat, "entriesFormat");
+    /// Creates one lightweight wrapper over an explicit resource locale.
+    ///
+    /// @param locale resource locale
+    private NBTEditorStrings(SupportedLocale locale) {
+        this.locale = Objects.requireNonNull(locale, "locale");
     }
 
-    /// Chooses Chinese text for Chinese display locales and English otherwise.
+    /// Chooses resources matching the current display script.
     ///
-    /// @return localized shared bundle
+    /// @return localized shared wrapper
     static NBTEditorStrings localized() {
-        return I18n.isUseChinese() ? SIMPLIFIED_CHINESE : ENGLISH;
+        SupportedLocale current = I18n.getLocale();
+        if (!LocaleUtils.isChinese(current.getDisplayLocale())) {
+            return ENGLISH;
+        }
+        return "Hant".equals(LocaleUtils.getScript(current.getDisplayLocale()))
+                ? TRADITIONAL_CHINESE
+                : SIMPLIFIED_CHINESE;
     }
 
-    /// Returns the deterministic English bundle for focused tests.
+    /// Returns deterministic English resources.
     ///
-    /// @return shared English bundle
+    /// @return English wrapper
     static NBTEditorStrings english() {
         return ENGLISH;
     }
 
-    /// Returns the deterministic Simplified Chinese bundle for focused tests.
+    /// Returns deterministic Simplified Chinese resources.
     ///
-    /// @return shared Simplified Chinese bundle
+    /// @return Simplified Chinese wrapper
     static NBTEditorStrings simplifiedChinese() {
         return SIMPLIFIED_CHINESE;
     }
 
-    /// Returns the visible title.
+    /// Returns deterministic Traditional Chinese resources.
+    ///
+    /// @return Traditional Chinese wrapper
+    static NBTEditorStrings traditionalChinese() {
+        return TRADITIONAL_CHINESE;
+    }
+
+    /// Returns the editor title.
     String title() {
-        return title;
+        return locale.i18n("swing.nbt_editor.title");
     }
 
-    /// Returns the back tooltip.
+    /// Returns the back command tooltip.
     String backTooltip() {
-        return backTooltip;
+        return locale.i18n("swing.nbt_editor.back");
     }
 
-    /// Returns the open tooltip.
+    /// Returns the open command tooltip.
     String openTooltip() {
-        return openTooltip;
+        return locale.i18n("swing.nbt_editor.open");
     }
 
-    /// Returns the reload tooltip.
+    /// Returns the reload command tooltip.
     String reloadTooltip() {
-        return reloadTooltip;
+        return locale.i18n("swing.nbt_editor.reload");
     }
 
-    /// Returns the save tooltip.
+    /// Returns the save command tooltip.
     String saveTooltip() {
-        return saveTooltip;
+        return locale.i18n("swing.nbt_editor.save");
+    }
+
+    /// Returns the undo command tooltip.
+    String undoTooltip() {
+        return locale.i18n("swing.nbt_editor.undo");
+    }
+
+    /// Returns the redo command tooltip.
+    String redoTooltip() {
+        return locale.i18n("swing.nbt_editor.redo");
+    }
+
+    /// Returns the add command text.
+    String addText() {
+        return locale.i18n("swing.nbt_editor.add");
+    }
+
+    /// Returns the copy command text.
+    String copyText() {
+        return locale.i18n("swing.nbt_editor.copy");
+    }
+
+    /// Returns the paste command text.
+    String pasteText() {
+        return locale.i18n("swing.nbt_editor.paste");
+    }
+
+    /// Returns the delete command text.
+    String deleteText() {
+        return locale.i18n("swing.nbt_editor.delete");
+    }
+
+    /// Returns the move-up command text.
+    String moveUpText() {
+        return locale.i18n("swing.nbt_editor.move_up");
+    }
+
+    /// Returns the move-down command text.
+    String moveDownText() {
+        return locale.i18n("swing.nbt_editor.move_down");
     }
 
     /// Returns the chooser title.
     String chooserTitle() {
-        return chooserTitle;
+        return locale.i18n("swing.nbt_editor.chooser_title");
     }
 
     /// Returns the file-filter description.
     String fileFilter() {
-        return fileFilter;
+        return locale.i18n("swing.nbt_editor.file_filter");
     }
 
-    /// Returns the discard confirmation title.
+    /// Returns the dirty-document confirmation title.
     String discardTitle() {
-        return discardTitle;
+        return locale.i18n("swing.nbt_editor.discard_title");
     }
 
-    /// Formats a dirty-document confirmation message.
+    /// Formats the dirty-document confirmation message.
     ///
     /// @param file dirty source
     /// @return localized confirmation text
     String discardMessage(Path file) {
-        return String.format(Locale.ROOT, discardMessageFormat, Objects.requireNonNull(file, "file"));
+        return locale.i18n("swing.nbt_editor.discard_message", Objects.requireNonNull(file, "file"));
     }
 
-    /// Returns the empty-state instruction.
+    /// Returns the destructive chunk-clear title.
+    String clearChunkTitle() {
+        return locale.i18n("swing.nbt_editor.clear_chunk_title");
+    }
+
+    /// Formats the destructive chunk-clear message.
+    ///
+    /// @param localIndex fixed region slot
+    /// @return localized confirmation text
+    String clearChunkMessage(int localIndex) {
+        return locale.i18n("swing.nbt_editor.clear_chunk_message", localIndex);
+    }
+
+    /// Returns the empty-state text.
     String emptyText() {
-        return emptyText;
+        return locale.i18n("swing.nbt_editor.empty");
     }
 
     /// Returns the opening-state text.
     String openingText() {
-        return openingText;
+        return locale.i18n("swing.nbt_editor.opening");
+    }
+
+    /// Returns the transactional-edit state text.
+    String editingText() {
+        return locale.i18n("swing.nbt_editor.editing");
+    }
+
+    /// Returns the fatal-edit recovery text.
+    String editUncertainText() {
+        return locale.i18n("swing.nbt_editor.edit_uncertain");
     }
 
     /// Returns the saving-state text.
     String savingText() {
-        return savingText;
+        return locale.i18n("swing.nbt_editor.saving");
     }
 
     /// Returns the clean ready-state text.
     String readyText() {
-        return readyText;
+        return locale.i18n("swing.nbt_editor.ready");
     }
 
-    /// Returns the dirty-state text.
+    /// Returns the dirty ready-state text.
     String modifiedText() {
-        return modifiedText;
+        return locale.i18n("swing.nbt_editor.modified");
     }
 
-    /// Returns the stale-source explanation.
+    /// Returns the external-conflict recovery text.
     String conflictText() {
-        return conflictText;
+        return locale.i18n("swing.nbt_editor.conflict");
     }
 
-    /// Returns the generic failure label.
+    /// Returns the partial-save recovery text.
+    String partialSaveText() {
+        return locale.i18n("swing.nbt_editor.partial_save");
+    }
+
+    /// Returns the uncertain-commit recovery text.
+    String commitUncertainText() {
+        return locale.i18n("swing.nbt_editor.commit_uncertain");
+    }
+
+    /// Returns the generic operation-failure text.
     String errorText() {
-        return errorText;
+        return locale.i18n("swing.nbt_editor.error");
     }
 
-    /// Returns the name detail label.
+    /// Returns the name label.
     String nameLabel() {
-        return nameLabel;
+        return locale.i18n("swing.nbt_editor.name");
     }
 
-    /// Returns the type detail label.
+    /// Returns the type label.
     String typeLabel() {
-        return typeLabel;
+        return locale.i18n("swing.nbt_editor.type");
     }
 
-    /// Returns the child-count detail label.
+    /// Returns the child-count label.
     String childrenLabel() {
-        return childrenLabel;
+        return locale.i18n("swing.nbt_editor.children");
     }
 
-    /// Returns the value editor label.
+    /// Returns the value label.
     String valueLabel() {
-        return valueLabel;
+        return locale.i18n("swing.nbt_editor.value");
     }
 
-    /// Returns the edit command text.
+    /// Returns the Minecraft formatting-preview toggle label.
+    String formattingPreviewText() {
+        return locale.i18n("swing.nbt_editor.formatting_preview");
+    }
+
+    /// Returns the numeric-radix selector's accessible label.
+    String numberRadixText() {
+        return locale.i18n("swing.nbt_editor.number_radix");
+    }
+
+    /// Returns the decimal-radix option.
+    String decimalRadixText() {
+        return locale.i18n("swing.nbt_editor.radix_decimal");
+    }
+
+    /// Returns the hexadecimal-radix option.
+    String hexadecimalRadixText() {
+        return locale.i18n("swing.nbt_editor.radix_hexadecimal");
+    }
+
+    /// Returns the primitive-array load-failure text.
+    String arrayLoadFailedText() {
+        return locale.i18n("swing.nbt_editor.array_load_failed");
+    }
+
+    /// Returns the apply command text.
     String applyText() {
-        return applyText;
+        return locale.i18n("swing.nbt_editor.apply");
     }
 
-    /// Returns the read-only detail text.
+    /// Returns the read-only selection text.
     String readOnlyText() {
-        return readOnlyText;
+        return locale.i18n("swing.nbt_editor.read_only");
     }
 
-    /// Returns the invalid-value message.
+    /// Returns the invalid-edit text.
     String invalidValueText() {
-        return invalidValueText;
+        return locale.i18n("swing.nbt_editor.invalid_value");
     }
 
     /// Formats one direct-child count.
@@ -349,19 +311,162 @@ final class NBTEditorStrings {
     /// @param count non-negative child count
     /// @return localized count text
     String entries(int count) {
-        return String.format(Locale.ROOT, entriesFormat, count);
+        return locale.i18n("swing.nbt_editor.entries", count);
     }
 
-    /// Rejects missing or blank bundle entries.
+    /// Formats one scalar tree row.
     ///
-    /// @param value candidate label
-    /// @param name logical field name
-    /// @return validated label
-    private static String requireText(String value, String name) {
-        String text = Objects.requireNonNull(value, name);
-        if (text.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
+    /// @param name contextual row name
+    /// @param value scalar value
+    /// @return localized complete row text
+    String treeValue(String name, String value) {
+        return locale.i18n(
+                "swing.nbt_editor.tree_value",
+                Objects.requireNonNull(name, "name"),
+                Objects.requireNonNull(value, "value"));
+    }
+
+    /// Formats one container tree row.
+    ///
+    /// @param name contextual row name
+    /// @param count direct-child count
+    /// @return localized complete row text
+    String treeEntries(String name, int count) {
+        return locale.i18n(
+                "swing.nbt_editor.tree_entries",
+                Objects.requireNonNull(name, "name"),
+                count);
+    }
+
+    /// Returns the structured-form tab title.
+    String structuredTab() {
+        return locale.i18n("swing.nbt_editor.structured_tab");
+    }
+
+    /// Returns the subtree-SNBT tab title.
+    String snbtTab() {
+        return locale.i18n("swing.nbt_editor.snbt_tab");
+    }
+
+    /// Returns the asynchronous subtree-loading status.
+    String loadingSnbtText() {
+        return locale.i18n("swing.nbt_editor.loading_snbt");
+    }
+
+    /// Returns the asynchronous primitive-array loading status.
+    String loadingValueText() {
+        return locale.i18n("swing.nbt_editor.loading_value");
+    }
+
+    /// Returns the subtree-load failure status.
+    String snbtLoadFailedText() {
+        return locale.i18n("swing.nbt_editor.snbt_load_failed");
+    }
+
+    /// Returns the SNBT replacement command text.
+    String replaceText() {
+        return locale.i18n("swing.nbt_editor.replace");
+    }
+
+    /// Returns the new-tag dialog title.
+    String addTitle() {
+        return locale.i18n("swing.nbt_editor.add_title");
+    }
+
+    /// Returns the insert command text.
+    String insertText() {
+        return locale.i18n("swing.nbt_editor.insert");
+    }
+
+    /// Returns the cancel command text.
+    String cancelText() {
+        return locale.i18n("swing.nbt_editor.cancel");
+    }
+
+    /// Returns the empty-List element-type label.
+    String listTypeLabel() {
+        return locale.i18n("swing.nbt_editor.list_type");
+    }
+
+    /// Returns the TAG_End display label.
+    String tagEndText() {
+        return locale.i18n("swing.nbt_editor.tag_end");
+    }
+
+    /// Returns the copy-success status text.
+    String copiedText() {
+        return locale.i18n("swing.nbt_editor.copied");
+    }
+
+    /// Returns the localized display name for one immutable tree row.
+    ///
+    /// @param node tree row
+    /// @return localized contextual name
+    String nodeName(NBTEditorTreeNode node) {
+        NBTEditorTreeNode selected = Objects.requireNonNull(node, "node");
+        var segments = selected.address().segments();
+        if (!segments.isEmpty()) {
+            NBTAddress.Segment segment = segments.get(segments.size() - 1);
+            if (segment instanceof NBTAddress.RegionChunkSegment chunk) {
+                int localIndex = chunk.localIndex();
+                return locale.i18n(
+                        "swing.nbt_editor.chunk",
+                        localIndex & 31,
+                        localIndex >>> 5);
+            }
+            if (segment instanceof NBTAddress.ChunkRootSegment) {
+                return locale.i18n("swing.nbt_editor.chunk_root");
+            }
         }
-        return text;
+        return selected.presentation().displayName();
+    }
+
+    /// Returns a localized type label for one immutable tree row.
+    ///
+    /// Standard tag names retain their format identity while Region and Chunk container names use
+    /// launcher resources instead of exposing internal enum constants.
+    ///
+    /// @param node tree row
+    /// @return localized or format-defined type label
+    String nodeType(NBTEditorTreeNode node) {
+        NBTEditorTreeNode selected = Objects.requireNonNull(node, "node");
+        @Nullable TagType<?> tagType = selected.node().getType();
+        if (tagType != null) {
+            return tagType.name();
+        }
+        NBTNodeType nodeType = selected.presentation().type();
+        if (nodeType == NBTNodeType.CHUNK_REGION) {
+            return locale.i18n("swing.nbt_editor.type_region");
+        }
+        if (nodeType == NBTNodeType.CHUNK) {
+            return locale.i18n("swing.nbt_editor.type_chunk");
+        }
+        return locale.i18n("swing.nbt_editor.type_unknown");
+    }
+
+    /// Returns the stable default Compound child name.
+    String defaultTagName() {
+        return locale.i18n("swing.nbt_editor.default_tag_name");
+    }
+
+    /// Returns a concise localized rejection for one stable editor reason.
+    ///
+    /// @param reason stable library reason, or `null` for parser and UI-state failures
+    /// @return localized user-facing rejection
+    String editFailureText(@Nullable NBTEditException.Reason reason) {
+        if (reason == null) {
+            return invalidValueText();
+        }
+        return switch (reason) {
+            case STALE_NODE, FOREIGN_NODE, NOT_FOUND ->
+                locale.i18n("swing.nbt_editor.edit_stale");
+            case INVALID_NAME, DUPLICATE_NAME ->
+                locale.i18n("swing.nbt_editor.edit_name");
+            case TYPE_MISMATCH -> locale.i18n("swing.nbt_editor.edit_type");
+            case CYCLE -> locale.i18n("swing.nbt_editor.edit_cycle");
+            case ROOT_OPERATION -> locale.i18n("swing.nbt_editor.edit_root");
+            case INVALID_INDEX, INVALID_TARGET, INVALID_FORMAT, NO_UNDO, NO_REDO ->
+                locale.i18n("swing.nbt_editor.edit_invalid");
+        };
     }
 }

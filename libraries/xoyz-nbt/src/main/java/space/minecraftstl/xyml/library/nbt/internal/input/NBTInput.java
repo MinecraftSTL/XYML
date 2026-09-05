@@ -26,12 +26,15 @@ import space.minecraftstl.xyml.library.nbt.io.MinecraftEdition;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
 
+/// Internal binary NBT decoding operations.
+@NotNullByDefault
 public final class NBTInput {
 
     public static @Nullable Tag readTag(DataReader reader) throws IOException {
@@ -56,14 +59,36 @@ public final class NBTInput {
         // GZip Magic Number: 0x1F 0x8B 0x08
         if (tagByte == 0x1F) {
             try (var decompressReader = DecompressStreamDataReader.newGZipDataReader(reader, -1)) {
-                return readTag(decompressReader);
+                Tag tag = readTag(decompressReader);
+                decompressReader.finish();
+                return tag;
             }
         }
 
         // LZ4 Magic Number: "LZ4Block"
         if (tagByte == 'L') {
             try (var decompressReader = DecompressStreamDataReader.newLZ4DataReader(reader, -1)) {
-                return readTag(decompressReader);
+                Tag tag = readTag(decompressReader);
+                decompressReader.finish();
+                return tag;
+            }
+        }
+
+        // The zlib streams emitted by Java's Deflater use a 0x78 CMF byte. Restricting detection
+        // to that value avoids treating a raw TAG_String (0x08) as a compressed stream. Other
+        // legal zlib window sizes are equally ambiguous, so standalone auto-detection keeps this
+        // safe subset; region chunks carry their compression type explicitly.
+        if (Byte.toUnsignedInt(tagByte) == 0x78) {
+            int flags = Byte.toUnsignedInt(reader.lookAheadByte(1));
+            if (((0x78 << 8) | flags) % 31 == 0) {
+                if ((flags & 0x20) != 0) {
+                    throw new IOException("Preset-dictionary zlib streams are not supported");
+                }
+                try (var decompressReader = new ZlibDataReader(reader, -1)) {
+                    Tag tag = readTag(decompressReader);
+                    decompressReader.finish();
+                    return tag;
+                }
             }
         }
 
@@ -122,7 +147,7 @@ public final class NBTInput {
             RawDataReader externalReader;
             if (external) {
                 if (chunkRawContentLength != 0L) {
-                    throw new IOException("Invalid chunk content length: %d (expected 0 for compression type %d)".formatted(chunkRawContentLength, compressType));
+                    throw new IOException("Invalid external chunk content length: %d (expected 0 for compression type %d)".formatted(chunkRawContentLength, compressType));
                 }
 
                 compressType -= 128;
@@ -137,25 +162,29 @@ public final class NBTInput {
             }
 
             try (externalReader) {
-                RawDataReader actualRawReader;
+                RawDataReader actualRawReader = external ? externalReader : rawReader;
 
-                if (external) {
-                    actualRawReader = externalReader;
-                    externalReader.skip(5L);
-                } else {
-                    actualRawReader = rawReader;
-                }
-
+                long compressedLimit = external ? -1L : chunkRawContentLength;
                 BoundedDataReader reader = switch (compressType) {
-                    case 1 -> DecompressStreamDataReader.newGZipDataReader(actualRawReader, chunkRawContentLength);
-                    case 2 -> new ZlibDataReader(actualRawReader, chunkRawContentLength);
-                    case 3 -> new UncompressedDataReader(actualRawReader, chunkRawContentLength);
-                    case 4 -> DecompressStreamDataReader.newLZ4DataReader(actualRawReader, chunkRawContentLength);
+                    case 1 -> DecompressStreamDataReader.newGZipDataReader(actualRawReader, compressedLimit);
+                    case 2 -> new ZlibDataReader(actualRawReader, compressedLimit);
+                    case 3 -> new UncompressedDataReader(actualRawReader, compressedLimit);
+                    case 4 -> DecompressStreamDataReader.newLZ4DataReader(actualRawReader, compressedLimit);
                     default -> throw new IOException("Unsupported compression type: " + compressType);
                 };
 
                 try (reader) {
                     var tag = readTag(reader);
+                    if (reader instanceof DecompressStreamDataReader decompressReader) {
+                        decompressReader.finish();
+                    } else if (reader instanceof ZlibDataReader zlibReader) {
+                        zlibReader.finish();
+                    } else {
+                        reader.requireFullyConsumed();
+                    }
+                    if (external) {
+                        actualRawReader.requireExhausted();
+                    }
                     if (tag instanceof CompoundTag rootTag) {
                         region.setChunk(localIndex, new Chunk(
                                 Instant.ofEpochSecond(header.getTimestampEpochSeconds(localIndex)),
