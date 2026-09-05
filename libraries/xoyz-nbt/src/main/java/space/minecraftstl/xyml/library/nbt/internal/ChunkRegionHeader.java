@@ -18,6 +18,7 @@
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 package space.minecraftstl.xyml.library.nbt.internal;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.library.nbt.internal.input.DataReader;
 
 import java.io.IOException;
@@ -26,12 +27,63 @@ import java.util.stream.IntStream;
 
 import static space.minecraftstl.xyml.library.nbt.internal.ChunkUtils.*;
 
+/// Mutable representation of the two fixed Anvil region header sectors.
+///
+/// This internal transport type retains its historical public arrays for the stream codec. Newly
+/// decoded headers are structurally validated before they are returned.
+@NotNullByDefault
 public final class ChunkRegionHeader {
+    /// Reads and structurally validates one complete region header.
+    ///
+    /// @param reader source positioned at the location table
+    /// @return decoded mutable header
+    /// @throws IOException if the header is truncated, inconsistent, or contains overlapping sectors
     public static ChunkRegionHeader readHeader(DataReader reader) throws IOException {
         int[] sectorInfo = reader.readIntArray(CHUNKS_PRE_REGION);
         int[] timestamps = reader.readIntArray(CHUNKS_PRE_REGION);
 
-        return new ChunkRegionHeader(sectorInfo, timestamps);
+        ChunkRegionHeader header = new ChunkRegionHeader(sectorInfo, timestamps);
+        header.validate();
+        return header;
+    }
+
+    /// Validates sector references without requiring access to the complete file length.
+    ///
+    /// Empty entries must use both an offset and length of zero. Occupied entries must begin
+    /// after the two-sector header and may not overlap any other occupied entry.
+    ///
+    /// @throws IOException if the header contains an invalid sector reference
+    public void validate() throws IOException {
+        int[] occupied = new int[CHUNKS_PRE_REGION];
+        int occupiedCount = 0;
+        for (int index = 0; index < CHUNKS_PRE_REGION; index++) {
+            int offset = getSectorOffset(index);
+            int length = getSectorLength(index);
+            if ((offset == 0) != (length == 0)) {
+                throw new IOException("Invalid region header entry at chunk " + index + ": offset and length must both be zero or non-zero");
+            }
+            if (length == 0) {
+                continue;
+            }
+            if (offset < 2) {
+                throw new IOException("Invalid region header entry at chunk " + index + ": sector offset " + offset + " overlaps the header");
+            }
+            occupied[occupiedCount++] = index;
+        }
+
+        for (int i = 0; i < occupiedCount; i++) {
+            int left = occupied[i];
+            int leftStart = getSectorOffset(left);
+            int leftEnd = leftStart + getSectorLength(left);
+            for (int j = i + 1; j < occupiedCount; j++) {
+                int right = occupied[j];
+                int rightStart = getSectorOffset(right);
+                int rightEnd = rightStart + getSectorLength(right);
+                if (leftStart < rightEnd && rightStart < leftEnd) {
+                    throw new IOException("Overlapping region sectors for chunks " + left + " and " + right);
+                }
+            }
+        }
     }
 
     public final int[] sectorInfo;

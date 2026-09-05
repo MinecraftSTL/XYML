@@ -17,6 +17,7 @@
 package space.minecraftstl.xyml.library.nbt.internal.output;
 
 import space.minecraftstl.xyml.library.nbt.io.MinecraftEdition;
+import space.minecraftstl.xyml.library.nbt.internal.TextUtils;
 
 import java.io.*;
 import java.nio.ByteBuffer;
@@ -196,7 +197,7 @@ public abstract class DataWriter implements Closeable, Flushable {
         if (getEdition() == MinecraftEdition.BEDROCK_EDITION) {
             // Need Optimization
             byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-            if (value.length() > 65535) {
+            if (bytes.length > 65535 || TextUtils.utf8Length(value) > 65535L) {
                 throw new UTFDataFormatException("String too long: " + value);
             }
             writeUnsignedShort(bytes.length);

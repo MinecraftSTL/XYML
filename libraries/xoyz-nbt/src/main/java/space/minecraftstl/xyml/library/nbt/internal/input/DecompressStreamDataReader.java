@@ -40,6 +40,7 @@ public abstract class DecompressStreamDataReader extends BoundedDataReader {
     }
 
     private final InputStream decompressStream;
+    private boolean finished;
 
     public DecompressStreamDataReader(RawDataReader rawReader, long limit) throws IOException {
         super(rawReader, rawReader.getDecompressBuffer(), limit);
@@ -49,6 +50,20 @@ public abstract class DecompressStreamDataReader extends BoundedDataReader {
     }
 
     protected abstract InputStream newDecompressStream(InputStream rawInputStream) throws IOException;
+
+    /// Drains the compressed stream so its checksum/footer is verified and no compressed bytes remain.
+    public final void finish() throws IOException {
+        if (finished) {
+            return;
+        }
+
+        byte[] drainBuffer = new byte[8192];
+        while (decompressStream.read(drainBuffer) >= 0) {
+            // Drain only; the decompressor performs checksum and framing checks at EOF.
+        }
+        requireFullyConsumed();
+        finished = true;
+    }
 
     @Override
     public void ensureBufferRemaining(int required) throws IOException {
@@ -82,8 +97,25 @@ public abstract class DecompressStreamDataReader extends BoundedDataReader {
 
     @Override
     public void close() throws IOException {
+        IOException failure = null;
+        try {
+            finish();
+        } catch (IOException exception) {
+            failure = exception;
+        }
         getRawReader().releaseDecompressBuffer(getBuffer());
-        super.close();
+        try {
+            super.close();
+        } catch (IOException exception) {
+            if (failure == null) {
+                failure = exception;
+            } else {
+                failure.addSuppressed(exception);
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
     }
 
     private static class LZ4Reader extends DecompressStreamDataReader {

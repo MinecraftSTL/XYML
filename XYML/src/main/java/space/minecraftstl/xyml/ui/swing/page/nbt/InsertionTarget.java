@@ -17,26 +17,26 @@
  */
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
-import space.minecraftstl.xyml.library.nbt.NBTElement;
-import space.minecraftstl.xyml.library.nbt.tag.ValueTag;
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.library.nbt.tag.TagType;
 
+import java.util.List;
 import java.util.Objects;
 
-/// Extracts live scalar text from exact XoyzNBT value elements.
+/// Immutable constraints for one NBT insertion destination.
 @NotNullByDefault
-final class NBTEditorTreeValues {
-    /// Prevents construction of this stateless utility.
-    private NBTEditorTreeValues() {
-    }
-
-    /// Returns the current XoyzNBT scalar text.
-    ///
-    /// @param element concrete element
-    /// @return scalar text, or `null` for non-value elements
-    static @Nullable String scalarText(NBTElement element) {
-        NBTElement candidate = Objects.requireNonNull(element, "element");
-        return candidate instanceof ValueTag<?> valueTag ? valueTag.getAsString() : null;
+record InsertionTarget(
+        NBTEditorTreeNode parent,
+        int index,
+        @Unmodifiable List<TagType<?>> types,
+        boolean nameRequired) {
+    /// Validates and snapshots insertion constraints.
+    InsertionTarget {
+        Objects.requireNonNull(parent, "parent");
+        types = List.copyOf(Objects.requireNonNull(types, "types"));
+        if (index < 0 || index > parent.childCount() || types.isEmpty()) {
+            throw new IllegalArgumentException("Invalid insertion target");
+        }
     }
 }

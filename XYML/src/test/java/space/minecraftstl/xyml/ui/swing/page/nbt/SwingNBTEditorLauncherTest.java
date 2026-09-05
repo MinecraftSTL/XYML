@@ -22,7 +22,11 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.DefaultWorldCatalogInteractions;
+import space.minecraftstl.xyml.ui.swing.page.instances.management.worlds.WorldCatalogStrings;
 
+import javax.swing.JPanel;
+import javax.swing.JRootPane;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +35,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 /// Verifies NBT file filtering, modeless editor reuse, and terminal lifecycle cleanup.
 @NotNullByDefault
@@ -86,6 +92,35 @@ final class SwingNBTEditorLauncherTest {
 
         EdtDispatcher.executeAndWait(() -> Objects.requireNonNull(launcherReference.get()).chooseAndOpen());
         assertEquals(2, windows.createdWindows().size());
+    }
+
+    /// Registers one launcher per application root and removes it only at application shutdown.
+    @Test
+    void sharesOneLauncherAcrossApplicationComponents() {
+        EdtDispatcher.executeAndWait(() -> {
+            JRootPane rootPane = new JRootPane();
+            JPanel firstEntry = new JPanel();
+            JPanel secondEntry = new JPanel();
+            JPanel content = new JPanel();
+            content.add(firstEntry);
+            content.add(secondEntry);
+            rootPane.setContentPane(content);
+
+            SwingNBTEditorLauncher launcher = SwingNBTEditorLauncher.installShared(firstEntry, Runnable::run);
+            assertSame(launcher, SwingNBTEditorLauncher.installShared(secondEntry, Runnable::run));
+            assertSame(launcher, SwingNBTEditorLauncher.sharedFor(firstEntry));
+            assertSame(launcher, SwingNBTEditorLauncher.sharedFor(secondEntry));
+
+            DefaultWorldCatalogInteractions worldInteractions = new DefaultWorldCatalogInteractions(
+                    WorldCatalogStrings.english(),
+                    Runnable::run);
+            worldInteractions.close();
+            assertSame(launcher, SwingNBTEditorLauncher.sharedFor(secondEntry));
+
+            launcher.close();
+            assertNull(SwingNBTEditorLauncher.sharedFor(firstEntry));
+            assertNull(SwingNBTEditorLauncher.sharedFor(secondEntry));
+        });
     }
 
     /// Records all temporary editor windows created by one launcher.
