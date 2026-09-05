@@ -71,10 +71,11 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 想要構建 XYML，請切換到 XYML 專案的根目錄下，並執行以下指令:
 
 ```shell
-./gradlew clean makeExecutables
+./gradlew clean :build
 ```
 
 構建出的 XYML 程式檔位於根目錄下的 `XYML/build/libs` 子目錄中。
+根 `:build` 任務只負責依目前工作樹組裝和封裝，不會呼叫 `check` 或測試任務；需要測試時請單獨執行 `:test`。
 
 ### IDEA Gradle 建置流程
 
@@ -86,17 +87,19 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 | `buildBeta` | 在隔離工作樹中建置本機 `beta` 分支尖端。 |
 | `buildAlpha` | 在隔離工作樹中建置本機 `alpha` 分支尖端。 |
 | `buildDev` | 在隔離工作樹中建置本機 `dev` 分支尖端。 |
-| `build` | 直接建置目前工作樹，包括未提交變更。 |
+| `build` | 依目前工作樹組裝並封裝，包括未提交變更，但不執行測試。 |
+| `test` | 使用與 `build` 相同的分支和版本解析規則測試目前工作樹。 |
 | `clean` | 只清理目前工作樹，不檢查或擷取任何分支。 |
 | `run` | 始終重新建置 `XYML`、`XYMLCore` 和 `XYMLBoot`，然後執行目前工作樹製品。 |
 
-即使目前簽出的是 `main`、`beta`、`alpha` 或 `dev`，`build` 和 `run` 也始終使用目前倉庫根目錄；兩者都不會切換分支或委託渠道任務。
+即使目前簽出的是 `main`、`beta`、`alpha` 或 `dev`，`build`、`test` 和 `run` 也始終使用目前倉庫根目錄；這些任務都不會切換分支或委託渠道任務。
 沒有 CI 版本輸入時，製品版本由目前分支與 `HEAD` 拓撲決定；未提交變更會進入製品，但不會使版本號遞增。
+從命令列呼叫時建議保留任務名前的 `:`（`:build` 或 `:test`）以精確指向根任務。IntelliJ 的 Gradle Tooling API 可能會傳送裸 `build`；根建置腳本也會將這種聚合呼叫規範化為只組裝子專案。
 
 每次呼叫 `run` 都會禁止 `XYML`、`XYMLCore` 和 `XYMLBoot` 中的任務複用最新輸出或建置快取，包括 Java 編譯、語言資料產生、
 資源處理和最終 `shadowJar`。XoyzNBT 和 XoyzMCP 使用單獨的規則：成功的根 `build` 會登記一份經過完整性校驗的庫快照，
 `run` 會優先使用該快照，直到下一次根 `build` 成功。若不存在完整快照，或執行 `clean run`，兩個庫會在停用 Gradle 複用的
-臨時目錄中建置，並在啓動器 JAR 組裝完成後刪除；這種臨時回退不會更新快照。同一次呼叫中包含 `build run` 或 `check run`
+臨時目錄中建置，並在啓動器 JAR 組裝完成後刪除；這種臨時回退不會更新快照。同一次呼叫中包含 `:build run`、`:test run` 或 `:check run`
 時則使用目前專案輸出。其他專案相依保留原有複用規則，因此原生源碼未變更時仍可複用現有的 XYMLL 可執行檔。
 
 `run` 始終重新建置並選擇目前 `XYML/build/libs` 中的應用製品，不會複用之前根 `:build` 記錄的應用 JAR、寫入根結果清單或

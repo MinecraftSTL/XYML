@@ -74,10 +74,12 @@ OpenJDK 64-Bit Server VM (build 17.0.8+7-LTS, mixed mode, sharing)
 To build XYML, switch to the root directory of the XYML project and run the following command:
 
 ```shell
-./gradlew clean makeExecutables
+./gradlew clean :build
 ```
 
 The built XYML program files are located in the `XYML/build/libs` subdirectory under the project root.
+The root `:build` task assembles and packages the current checkout without invoking `check` or test tasks. Run `:test`
+separately when you need the test suite.
 
 ### IDEA Gradle Workflows
 
@@ -90,23 +92,26 @@ After importing the repository as a Gradle project, open the Gradle tool window 
 | `buildBeta` | Builds the tip of the local `beta` branch in an isolated worktree. |
 | `buildAlpha` | Builds the tip of the local `alpha` branch in an isolated worktree. |
 | `buildDev` | Builds the tip of the local `dev` branch in an isolated worktree. |
-| `build` | Builds the current checkout in place, including its uncommitted changes. |
+| `build` | Assembles and packages the current checkout in place, including its uncommitted changes, without running tests. |
+| `test` | Tests the current checkout using the same branch and version inference as `build`. |
 | `clean` | Cleans only the current checkout without inspecting or fetching any branch. |
 | `run` | Always rebuilds `XYML`, `XYMLCore`, and `XYMLBoot`, then runs the current checkout artifact. |
 
-The `build` and `run` tasks always use the current repository root, including on `main`, `beta`, `alpha`, and `dev`
-checkouts. Neither task switches branches or delegates to a channel task. Without CI version inputs, the current
+The `build`, `test`, and `run` tasks always use the current repository root, including on `main`, `beta`, `alpha`, and
+`dev` checkouts. None of these tasks switches branches or delegates to a channel task. Without CI version inputs, the current
 branch and `HEAD` topology determine the artifact version; uncommitted changes are included in the artifact but do
-not increment the version.
+not increment the version. When invoking Gradle from a shell, keep the leading `:` (`:build` or `:test`) to target the
+root task exactly. IntelliJ's Gradle Tooling API may send a bare `build`; the root build script normalizes that
+aggregate invocation to package-only subproject builds as well.
 
 Every `run` invocation disables up-to-date and build-cache reuse for tasks in `XYML`, `XYMLCore`, and `XYMLBoot`.
 This includes Java compilation, generated language data, processed resources, and the final `shadowJar`. XoyzNBT and
 XoyzMCP are handled separately: a successful root `build` records an integrity-checked library snapshot, and `run`
 prefers that snapshot until the next successful root `build`. If no complete snapshot is available, or `clean run` is
 requested, both libraries are built into a temporary directory with Gradle reuse disabled and are removed after the
-launcher JAR is assembled; this fallback never updates the snapshot. A combined `build run` or `check run` invocation
-uses the current project outputs instead. Other project dependencies retain their existing reuse behavior, so an
-unchanged native source may still reuse the XYMLL executable.
+launcher JAR is assembled; this fallback never updates the snapshot. A combined `:build run`, `:test run`, or
+`:check run` invocation uses the current project outputs instead. Other project dependencies retain their existing
+reuse behavior, so an unchanged native source may still reuse the XYMLL executable.
 
 `run` always rebuilds and selects the current `XYML/build/libs` application artifact; it never reuses an application
 JAR recorded by a previous root `:build`. It does not write the root result marker or start a second Wrapper process.
