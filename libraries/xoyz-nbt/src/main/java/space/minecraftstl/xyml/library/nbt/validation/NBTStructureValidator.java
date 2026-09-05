@@ -20,6 +20,7 @@ import space.minecraftstl.xyml.library.nbt.NBTElement;
 import space.minecraftstl.xyml.library.nbt.NBTParent;
 import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
+import space.minecraftstl.xyml.library.nbt.internal.Access;
 import space.minecraftstl.xyml.library.nbt.internal.TextUtils;
 import space.minecraftstl.xyml.library.nbt.io.MinecraftEdition;
 import space.minecraftstl.xyml.library.nbt.tag.ArrayTag;
@@ -31,6 +32,7 @@ import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import space.minecraftstl.xyml.library.nbt.tag.ValueTag;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Array;
 import java.util.ArrayDeque;
@@ -271,6 +273,11 @@ public final class NBTStructureValidator {
         }
 
         if (element instanceof CompoundTag compound) {
+            try {
+                Access.TAG.validateCompoundNameIndexSize(compound);
+            } catch (IllegalArgumentException exception) {
+                fail("compound name index has a different cardinality from its children", frame.path);
+            }
             Set<String> names = new HashSet<>();
             for (int i = parent.size() - 1; i >= 0; i--) {
                 Tag child = ((CompoundTag) parent).getTag(i);
@@ -304,12 +311,19 @@ public final class NBTStructureValidator {
         }
 
         if (element instanceof ArrayTag<?, ?, ?, ?> array) {
-            Object values = array.getArray();
-            if (Array.getLength(values) != array.size() || array.getBuffer().remaining() != array.size()) {
+            Object values = Access.TAG.getInternalArray(array);
+            if (array.size() < 0 || Array.getLength(values) < array.size()) {
                 fail("primitive array length and backing storage disagree", frame.path);
             }
-            for (int i = parent.size() - 1; i >= 0; i--) {
-                Tag child = parentChild(parent, i);
+            int storageLength = Access.TAG.getArrayTagStorageLength(array);
+            for (int i = storageLength - 1; i >= 0; i--) {
+                @Nullable Tag child = Access.TAG.getMaterializedArrayTag(array, i);
+                if (child == null) {
+                    continue;
+                }
+                if (i >= array.size()) {
+                    fail("primitive array has a materialized element outside its logical size", frame.path);
+                }
                 if (child.getType() != array.getElementType()) {
                     fail("primitive array contains an element with a different type", frame.path + "[" + i + "]");
                 }

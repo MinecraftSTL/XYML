@@ -360,6 +360,12 @@ public final class NBTCodec {
         }
         if ((flags & 0x02) != 0) {
             requireBytes(encoded, position, 2);
+            CRC32 headerChecksum = new CRC32();
+            headerChecksum.update(encoded, 0, position);
+            int expectedHeaderChecksum = littleUnsignedShort(encoded, position);
+            if ((headerChecksum.getValue() & 0xFFFFL) != expectedHeaderChecksum) {
+                throw new IOException("GZIP header checksum does not match");
+            }
             position += 2;
         }
         if (position >= encoded.length) {
@@ -623,13 +629,13 @@ public final class NBTCodec {
     ///
     /// The returned byte array will have a length equal to [`byteSize(tag)`](#byteSize(Tag)).
     public byte[] writeTagToByteArray(Tag tag) throws IOException {
-        ByteBuffer buffer = ByteBuffer.allocate((int) byteSize(tag));
-
-        try {
-            writeTag(buffer, tag);
-        } catch (IOException e) {
-            throw new AssertionError("Unexpected error when writing tag to byte array", e);
+        validateForWrite(tag);
+        long encodedSize = byteSize(tag);
+        if (encodedSize > Integer.MAX_VALUE) {
+            throw new IOException("Encoded NBT tag exceeds the byte-array size limit: " + encodedSize);
         }
+        ByteBuffer buffer = ByteBuffer.allocate((int) encodedSize);
+        writeTag(buffer, tag);
 
         if (buffer.remaining() != 0) {
             throw new AssertionError("Unexpected remaining bytes in buffer: " + buffer.remaining());

@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.library.nbt.io;
 
 import net.jpountz.lz4.LZ4BlockOutputStream;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.tag.StringTag;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Arrays;
+import java.util.zip.CRC32;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.GZIPOutputStream;
 
@@ -76,6 +78,28 @@ public final class StrictNBTCodecTest {
         assertThrows(IOException.class, () -> NBTCodec.of().readTag(gzip));
     }
 
+    /// Ensures an optional GZIP header checksum is accepted only when it matches the complete header.
+    @Test
+    void validatesGzipHeaderChecksum() throws IOException {
+        Tag expected = sampleTag();
+        byte[] raw = NBTCodec.of().writeTagToByteArray(expected);
+        byte[] checked = addGzipHeaderChecksum(compress(raw, GZIPOutputStream::new));
+
+        assertEquals(expected, NBTCodec.of().readTag(checked));
+        checked[10] ^= 1;
+        assertThrows(IOException.class, () -> NBTCodec.of().readTag(checked));
+    }
+
+    /// Ensures a raw TAG_String root is not mistaken for a zlib stream by standalone auto-detection.
+    @Test
+    void rawStringRootIsNotMistakenForZlib() throws IOException {
+        Tag root = new StringTag("text");
+        byte[] encoded = NBTCodec.of().writeTagToByteArray(root);
+
+        assertEquals(NBTFileEncoding.RAW, NBTFileEncoding.detectStandalone(encoded));
+        assertEquals(root, NBTCodec.of().readTag(encoded));
+    }
+
     private static CompoundTag sampleTag() {
         return new CompoundTag()
                 .addString("name", "strict")
@@ -93,6 +117,23 @@ public final class StrictNBTCodecTest {
     private static byte[] append(byte[] input, byte value) {
         byte[] result = Arrays.copyOf(input, input.length + 1);
         result[input.length] = value;
+        return result;
+    }
+
+    /// Adds the optional little-endian FHCRC field to a basic ten-byte GZIP header.
+    ///
+    /// @param gzip complete GZIP member with a basic header
+    /// @return equivalent member with a valid header checksum
+    private static byte[] addGzipHeaderChecksum(byte[] gzip) {
+        byte[] result = new byte[gzip.length + 2];
+        System.arraycopy(gzip, 0, result, 0, 10);
+        result[3] |= 0x02;
+        CRC32 checksum = new CRC32();
+        checksum.update(result, 0, 10);
+        int checksumValue = (int) checksum.getValue();
+        result[10] = (byte) checksumValue;
+        result[11] = (byte) (checksumValue >>> 8);
+        System.arraycopy(gzip, 10, result, 12, gzip.length - 10);
         return result;
     }
 

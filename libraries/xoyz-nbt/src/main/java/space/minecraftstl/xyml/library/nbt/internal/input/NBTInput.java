@@ -26,12 +26,15 @@ import space.minecraftstl.xyml.library.nbt.io.MinecraftEdition;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
 
+/// Internal binary NBT decoding operations.
+@NotNullByDefault
 public final class NBTInput {
 
     public static @Nullable Tag readTag(DataReader reader) throws IOException {
@@ -72,10 +75,15 @@ public final class NBTInput {
         }
 
         // The zlib streams emitted by Java's Deflater use a 0x78 CMF byte. Restricting detection
-        // to that value avoids treating a raw TAG_String (0x08) as a compressed stream.
+        // to that value avoids treating a raw TAG_String (0x08) as a compressed stream. Other
+        // legal zlib window sizes are equally ambiguous, so standalone auto-detection keeps this
+        // safe subset; region chunks carry their compression type explicitly.
         if (Byte.toUnsignedInt(tagByte) == 0x78) {
             int flags = Byte.toUnsignedInt(reader.lookAheadByte(1));
-            if (((0x78 << 8) | flags) % 31 == 0 && (flags & 0x20) == 0) {
+            if (((0x78 << 8) | flags) % 31 == 0) {
+                if ((flags & 0x20) != 0) {
+                    throw new IOException("Preset-dictionary zlib streams are not supported");
+                }
                 try (var decompressReader = new ZlibDataReader(reader, -1)) {
                     Tag tag = readTag(decompressReader);
                     decompressReader.finish();

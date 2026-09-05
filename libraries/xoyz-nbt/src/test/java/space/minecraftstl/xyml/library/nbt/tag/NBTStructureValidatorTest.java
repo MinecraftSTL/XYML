@@ -29,6 +29,8 @@ import java.io.IOException;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /// Verifies complete tree validation and validation-before-write ordering.
@@ -45,6 +47,40 @@ public final class NBTStructureValidatorTest {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         assertThrows(IOException.class, () -> NBTCodec.of().writeTag(output, root));
         assertEquals(0, output.size());
+        IOException byteArrayFailure = assertThrows(IOException.class,
+                () -> NBTCodec.of().writeTagToByteArray(root));
+        assertInstanceOf(NBTValidationException.class, byteArrayFailure.getCause());
+    }
+
+    /// Ensures a stale extra compound name-index entry cannot pass complete validation.
+    @Test
+    void rejectsCompoundNameIndexCardinalityMismatch() {
+        CompoundTag root = new CompoundTag().addInt("value", 1);
+        root.size = 0;
+
+        assertThrows(NBTValidationException.class, () -> NBTStructureValidator.validate(root));
+    }
+
+    /// Ensures validation inspects only existing lazy array wrappers and does not create new ones.
+    @Test
+    void validatesPrimitiveArrayWithoutMaterializingChildren() throws NBTValidationException {
+        ByteArrayTag array = new ByteArrayTag(new byte[4096]);
+        Tag materialized = array.getTag(3);
+        Tag[] storage = array.tags;
+
+        NBTStructureValidator.validate(array);
+
+        assertSame(storage, array.tags);
+        assertSame(materialized, array.tags[3]);
+    }
+
+    /// Ensures primitive array logical sizes cannot exceed their backing value storage.
+    @Test
+    void rejectsPrimitiveArrayBackingLengthMismatch() {
+        ByteArrayTag array = new ByteArrayTag(new byte[]{1, 2});
+        array.values = new byte[1];
+
+        assertThrows(NBTValidationException.class, () -> NBTStructureValidator.validate(array));
     }
 
     /// Ensures Java Edition string lengths are measured in encoded bytes.
