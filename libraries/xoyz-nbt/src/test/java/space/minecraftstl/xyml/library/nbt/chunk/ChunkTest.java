@@ -18,6 +18,7 @@
 // Added by MinecraftSTL in 2026 for XoyzNBT mutable tree regression coverage.
 package space.minecraftstl.xyml.library.nbt.chunk;
 
+import space.minecraftstl.xyml.library.nbt.internal.Access;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -96,5 +97,33 @@ public final class ChunkTest {
         assertSame(movedRoot, destination.getRootTag());
         assertSame(destination, movedRoot.getParent());
         assertEquals(0, movedRoot.getIndex());
+    }
+
+    /// Verifies assigning the current root still rejects corrupt root metadata.
+    @Test
+    void setRootTagDoesNotHideCorruptSameObjectMetadata() {
+        CompoundTag root = new CompoundTag();
+        Chunk chunk = new Chunk(root);
+        Access.TAG.setParent(root, chunk, 7);
+
+        assertThrows(IllegalStateException.class, () -> chunk.setRootTag(root));
+
+        assertSame(root, chunk.getRootTag());
+        assertSame(chunk, root.getParent());
+        assertEquals(7, root.getIndex());
+    }
+
+    /// Verifies assigning a current Region slot still rejects corrupt local-index metadata.
+    @Test
+    void setChunkDoesNotHideCorruptSameObjectMetadata() {
+        ChunkRegion region = new ChunkRegion();
+        Chunk chunk = region.getChunk(4);
+        chunk.setParent(region, 7);
+
+        assertThrows(IllegalStateException.class, () -> region.setChunk(4, chunk));
+
+        assertSame(chunk, region.getChunk(4));
+        assertSame(region, chunk.getParent());
+        assertEquals(7, chunk.getLocalIndex());
     }
 }

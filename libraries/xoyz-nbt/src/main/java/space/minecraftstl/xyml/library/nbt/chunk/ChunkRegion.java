@@ -97,10 +97,10 @@ public final class ChunkRegion implements NBTParent<Chunk>, NBTElement, Iterable
         Objects.requireNonNull(chunk);
 
         Chunk old = chunks[localIndex];
+        validateCurrentSlot(localIndex, old);
         if (old == chunk) {
             return this;
         }
-        validateCurrentSlot(localIndex, old);
         @Nullable ChunkRegion oldRegion = chunk.getParent();
         validateCandidateChunk(chunk, oldRegion);
         if (oldRegion != null) {

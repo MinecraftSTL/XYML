@@ -130,11 +130,11 @@ public final class Chunk implements NBTParent<CompoundTag>, NBTElement {
     /// Sets the root tag of this chunk.
     @Contract(value = "_ -> this", mutates = "this,param1")
     public Chunk setRootTag(@Nullable CompoundTag rootTag) {
+        validateCurrentRoot();
         if (rootTag == this.rootTag) {
             return this;
         }
 
-        validateCurrentRoot();
         @Nullable NBTParent<? extends Tag> oldParent = rootTag == null ? null : rootTag.getParent();
         if (rootTag != null) {
             validateCandidateRoot(rootTag, oldParent);

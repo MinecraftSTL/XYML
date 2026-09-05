@@ -270,13 +270,12 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
     @MustBeInvokedByOverriders
     public ArrayTag<E, T, A, B> setAll(@Flow(sourceIsContainer = true, targetIsContainer = true)
                        A array) {
+        A source = Objects.requireNonNull(array, "array");
+        int newSize = accessor().getLength(source);
+        A replacement = newSize > 0 ? accessor().copyOf(source, newSize) : accessor().empty();
         clear();
-
-        int newSize = accessor().getLength(array);
-        if (newSize > 0) {
-            this.values = accessor().copyOf(array, newSize);
-            this.size = newSize;
-        }
+        this.values = replacement;
+        this.size = newSize;
         return this;
     }
 
@@ -289,12 +288,9 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
     @Contract(value = "_ -> this", mutates = "this,param1")
     public ArrayTag<E, T, A, B> setAll(@Flow(sourceIsContainer = true, targetIsContainer = true)
                              B buffer) {
-        clear();
-
-        if (buffer.hasRemaining()) {
-            A array = accessor().get(buffer);
-            setArrayWithoutClone(array, accessor().getLength(array));
-        }
+        B source = Objects.requireNonNull(buffer, "buffer");
+        A replacement = source.hasRemaining() ? accessor().get(source) : accessor().empty();
+        setArrayWithoutClone(replacement, accessor().getLength(replacement));
         return this;
     }
 
@@ -315,8 +311,10 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
         if (index < 0 || index > size) {
             throw new IndexOutOfBoundsException("index: " + index + ", size: " + size);
         }
-        insertValueAt(index, Objects.requireNonNull(value, "value"));
+        Objects.requireNonNull(value, "value");
+        validateChildRange(index, size - 1);
         ensureTagsCapacityForAdd();
+        insertValueAt(index, value);
         if (index < size) {
             System.arraycopy(tags, index, tags, index + 1, size - index);
         }
@@ -341,10 +339,11 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
             throw new IllegalArgumentException("Cannot add a tag of type " + tag.getType()
                     + " to an array of type " + getElementType());
         }
+        ensureTagsCapacityForAdd();
+        ensureValuesCapacityForAdd();
         detachFromCurrentParent(tag);
         tag.setName0("");
-        insertValueAt(size, tag.getValue());
-        ensureTagsCapacityForAdd();
+        accessor().set(values, size, tag.getValue());
         tags[size] = tag;
         tag.setParent(this, size);
         size++;
@@ -375,8 +374,9 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
         if (!tag.getName().isEmpty()) {
             throw new IllegalArgumentException("Array elements must have an empty name");
         }
-        insertValueAt(index, tag.getValue());
+        validateChildRange(index, size - 1);
         ensureTagsCapacityForAdd();
+        insertValueAt(index, tag.getValue());
         if (index < size) {
             System.arraycopy(tags, index, tags, index + 1, size - index);
         }
@@ -408,6 +408,7 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
             throw new IllegalArgumentException("Array elements must have an empty name");
         }
         T previous = getTag(index);
+        validateChildIdentity(index, previous);
         accessor().set(values, index, replacement.getValue());
         tags[index] = replacement;
         previous.setParent(null, -1);
@@ -425,9 +426,11 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
     public ArrayTag<E, T, A, B> moveTag(int fromIndex, int toIndex) {
         Objects.checkIndex(fromIndex, size);
         Objects.checkIndex(toIndex, size);
+        validateChildRange(Math.min(fromIndex, toIndex), Math.max(fromIndex, toIndex));
         if (fromIndex == toIndex) {
             return this;
         }
+        ensureTagsCapacity(size);
         E movedValue = accessor().get(values, fromIndex);
         if (fromIndex < toIndex) {
             for (int i = fromIndex; i < toIndex; i++) {
@@ -455,12 +458,10 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
     @Contract(mutates = "this")
     public final void removeAt(int index) throws IndexOutOfBoundsException {
         Objects.checkIndex(index, size);
+        validateChildRange(index, size - 1);
 
-        @SuppressWarnings("unchecked")
-        T tag = (T) tags[index];
+        T tag = getTagOrNull(index);
         if (tag != null) {
-            validateChildIdentity(index, tag);
-
             tag.setParent(null, -1);
         }
 
@@ -476,13 +477,11 @@ public sealed abstract class ArrayTag<E extends Number, T extends ValueTag<E>, A
     @Contract(mutates = "this")
     public final T removeTagAt(int index) throws IndexOutOfBoundsException {
         Objects.checkIndex(index, size);
+        validateChildRange(index, size - 1);
 
-        @SuppressWarnings("unchecked")
-        T tag = (T) tags[index];
+        T tag = getTagOrNull(index);
 
         if (tag != null) {
-            validateChildIdentity(index, tag);
-
             tag.setParent(null, -1);
         } else {
             tag = accessor().newTagFromElement(values, index);

@@ -159,6 +159,7 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
         assert tag.getParent() == this;
 
         int index = tag.getIndex();
+        validateChildRange(index, size - 1);
 
         if (tag.getIndex() == this.size() - 1) {
             // The tag is already the last child of this tag, so we don't need to do anything.
@@ -187,30 +188,24 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
     /// @throws IllegalArgumentException if the candidate would create an invalid ownership link
     final void validateTagForAttach(T tag) throws IllegalArgumentException {
         Objects.requireNonNull(tag, "tag");
+        validateCurrentOwnership(tag);
+        if (tag.getParent() instanceof ParentTag<?> source) {
+            source.validateChildRange(tag.getIndex(), source.size - 1);
+        }
         if (tag == this) {
             throw new IllegalArgumentException("A tag cannot contain itself");
         }
 
+        Set<NBTParent<?>> ancestors = Collections.newSetFromMap(new IdentityHashMap<>());
         NBTParent<?> cursor = this;
         while (cursor != null) {
+            if (!ancestors.add(cursor)) {
+                throw new IllegalArgumentException("The destination parent chain contains a cycle");
+            }
             if (cursor == tag) {
                 throw new IllegalArgumentException("A tag cannot contain one of its ancestors");
             }
             cursor = cursor.getParent();
-        }
-
-        NBTParent<?> oldParent = tag.getParent();
-        if (oldParent != null && oldParent != this) {
-            if (tag.getIndex() < 0) {
-                throw new IllegalArgumentException("The tag has an invalid parent index");
-            }
-            if (oldParent instanceof ParentTag<?> oldParentTag) {
-                if (tag.getIndex() >= oldParentTag.size()
-                        || tag.getIndex() >= oldParentTag.tags.length
-                        || oldParentTag.tags[tag.getIndex()] != tag) {
-                    throw new IllegalArgumentException("The tag has an invalid parent index");
-                }
-            }
         }
     }
 
@@ -223,6 +218,47 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
         if (index < 0 || index >= size || index >= tags.length || tags[index] != expected
                 || expected.getParent() != this || expected.getIndex() != index) {
             throw new IllegalArgumentException("The parent-child ownership invariant is inconsistent");
+        }
+        if (this instanceof CompoundTag compound && compound.get(expected.getName()) != expected) {
+            throw new IllegalArgumentException("The compound name index is inconsistent");
+        }
+        if (this instanceof ListTag<?> list
+                && (!expected.getName().isEmpty() || expected.getType() != list.getElementType())) {
+            throw new IllegalArgumentException("The list element invariant is inconsistent");
+        }
+        if (this instanceof ArrayTag<?, ?, ?, ?> array
+                && (!expected.getName().isEmpty() || expected.getType() != array.getElementType())) {
+            throw new IllegalArgumentException("The primitive-array element invariant is inconsistent");
+        }
+    }
+
+    /// Validates every materialized child in an inclusive range before an ordered mutation.
+    ///
+    /// Primitive arrays may leave unmaterialized positions as `null`; List and Compound storage
+    /// must contain an object at every logical index.
+    ///
+    /// @param firstIndex first affected index
+    /// @param lastIndex last affected index
+    /// @throws IllegalArgumentException if a materialized child has inconsistent ownership
+    final void validateChildRange(int firstIndex, int lastIndex) throws IllegalArgumentException {
+        if (this instanceof CompoundTag compound) {
+            compound.validateNameIndexSize();
+        }
+        if (firstIndex > lastIndex) {
+            return;
+        }
+        if (firstIndex < 0 || lastIndex >= size) {
+            throw new IllegalArgumentException("The child range is outside this parent");
+        }
+        for (int index = firstIndex; index <= lastIndex; index++) {
+            @Nullable Tag child = index < tags.length ? tags[index] : null;
+            if (child == null) {
+                if (!(this instanceof ArrayTag<?, ?, ?, ?>)) {
+                    throw new IllegalArgumentException("The parent-child ownership invariant is inconsistent");
+                }
+                continue;
+            }
+            validateChildIdentity(index, child);
         }
     }
 
@@ -242,6 +278,7 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
     /// @param index insertion index
     /// @param tag detached child
     final void insertTagInternal(int index, T tag) {
+        validateChildRange(index, size - 1);
         ensureTagsCapacityForAdd();
         if (index < size) {
             System.arraycopy(tags, index, tags, index + 1, size - index);
@@ -281,7 +318,6 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
                 throw new IllegalArgumentException("A child cannot occur more than once in a batch");
             }
             validateTagForAttach(candidate);
-            validateCurrentOwnership(candidate);
             simulatedParents.put(candidate, candidate.getParent());
         }
 
@@ -359,9 +395,7 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
             throw new IllegalArgumentException("An attached tag must have a non-negative index");
         }
         if (parent instanceof ParentTag<?> parentTag) {
-            if (index >= parentTag.size() || index >= parentTag.tags.length || parentTag.tags[index] != tag) {
-                throw new IllegalArgumentException("The parent-child ownership invariant is inconsistent");
-            }
+            parentTag.validateChildIdentity(index, tag);
         } else if (parent instanceof Chunk chunk) {
             if (index != 0 || chunk.getRootTag() != tag) {
                 throw new IllegalArgumentException("The chunk-child ownership invariant is inconsistent");
@@ -532,6 +566,8 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
         if (tag.getParent() == this) {
             throw new IllegalArgumentException("The tag is already a child of this tag");
         }
+        validateChildRange(index, size - 1);
+        ensureTagsCapacityForAdd();
         detachFromCurrentParent(tag);
         insertTagInternal(index, tag);
         return this;
@@ -552,6 +588,7 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
         if (replacement.getParent() == this) {
             throw new IllegalArgumentException("The replacement is already a child of this tag");
         }
+        validateChildRange(index, size - 1);
         detachFromCurrentParent(replacement);
         T previous = removeTagAt(index);
         insertTagInternal(index, replacement);
@@ -568,6 +605,7 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
     public ParentTag<T> moveTag(int fromIndex, int toIndex) {
         Objects.checkIndex(fromIndex, size);
         Objects.checkIndex(toIndex, size);
+        validateChildRange(Math.min(fromIndex, toIndex), Math.max(fromIndex, toIndex));
         if (fromIndex == toIndex) {
             return this;
         }
@@ -603,6 +641,7 @@ public sealed abstract class ParentTag<T extends Tag> extends Tag
     /// Removes all subtags from this tag.
     @Contract(mutates = "this")
     public void clear() {
+        validateChildRange(0, size - 1);
         for (int i = 0, end = Math.min(size, tags.length); i < end; i++) {
             Tag subTag = tags[i];
             if (subTag != null) {

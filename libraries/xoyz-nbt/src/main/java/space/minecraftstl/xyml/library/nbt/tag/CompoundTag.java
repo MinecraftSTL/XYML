@@ -62,6 +62,8 @@ public final class CompoundTag extends ParentTag<Tag> {
 
     @Override
     void preUpdateSubTagName(Tag tag, String oldName, String newName) throws IllegalArgumentException {
+        validateNameIndexSize();
+        validateChildIdentity(tag.getIndex(), tag);
         if (subTagsByName.containsKey(newName)) {
             throw new IllegalArgumentException("The name '" + newName + "' is already used by another subtag");
         }
@@ -256,23 +258,7 @@ public final class CompoundTag extends ParentTag<Tag> {
     }
 
     private void addTag0(Tag tag) {
-        if (tag.getParent() != null) {
-            throw new IllegalArgumentException("The tag must be detached before insertion");
-        }
-
-        // If a tag with the same name already exists, remove it first.
-        Tag oldTag = subTagsByName.get(tag.getName());
-        if (oldTag != null) {
-            this.removeElement(oldTag);
-        }
-
-        // Set the parent and index of the tag.
-        tag.setParent(this, size);
-
-        // Add the tag to the subTags list and subTagsByName map.
-        ensureTagsCapacityForAdd();
-        tags[size++] = tag;
-        subTagsByName.put(tag.getName(), tag);
+        addTag0(tag.getName(), tag);
     }
 
     /// {@inheritDoc}
@@ -286,22 +272,56 @@ public final class CompoundTag extends ParentTag<Tag> {
             if (tag.getParent() == this) {
                 moveTagToLast(tag);
                 return this;
-            } else {
-                // Remove the tag from its old parent.
-                detachFromCurrentParent(tag);
             }
         }
 
+        prepareAddition(tag.getName(), null);
+        detachFromCurrentParent(tag);
         addTag0(tag);
         return this;
     }
 
     private void addTag0(String name, Tag tag) {
-        if (tag.getParent() != null) {
-            throw new IllegalArgumentException("The tag must be detached before insertion");
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(tag, "tag");
+        if (tag.getParent() != null || tag.getIndex() != -1) {
+            throw new IllegalArgumentException("The tag must be detached with index -1 before insertion");
+        }
+        prepareAddition(name, null);
+        Tag oldTag = subTagsByName.get(name);
+        if (oldTag != null) {
+            removeTagAt(oldTag.getIndex());
         }
         tag.setName0(name);
-        addTag0(tag);
+        insertTagInternal(size, tag);
+        subTagsByName.put(name, tag);
+    }
+
+    /// Validates and reserves the destination state needed by a fluent compatibility addition.
+    ///
+    /// @param name final child name
+    /// @param childInThisParent candidate already owned by this compound, or `null`
+    private void prepareAddition(String name, @Nullable Tag childInThisParent) {
+        validateNameIndexSize();
+        int firstAffected = size;
+        if (childInThisParent != null) {
+            validateChildIdentity(childInThisParent.getIndex(), childInThisParent);
+            firstAffected = childInThisParent.getIndex();
+        }
+        @Nullable Tag displaced = subTagsByName.get(name);
+        if (displaced != null) {
+            validateChildIdentity(displaced.getIndex(), displaced);
+            firstAffected = Math.min(firstAffected, displaced.getIndex());
+        }
+        validateChildRange(firstAffected, size - 1);
+        ensureTagsCapacityForAdd();
+    }
+
+    /// Rejects a name map whose cardinality differs from the ordered child storage.
+    void validateNameIndexSize() {
+        if (subTagsByName.size() != size) {
+            throw new IllegalArgumentException("The compound name index is inconsistent");
+        }
     }
 
     /// Adds a tag with the given name to this compound tag.
@@ -317,6 +337,7 @@ public final class CompoundTag extends ParentTag<Tag> {
             moveTagToLast(tag);
             return this;
         }
+        prepareAddition(name, tag.getParent() == this ? tag : null);
         if (tag.getParent() == this) {
             removeTagAt(tag.getIndex());
         }
@@ -344,6 +365,8 @@ public final class CompoundTag extends ParentTag<Tag> {
         if (subTagsByName.containsKey(tag.getName())) {
             throw new IllegalArgumentException("The name '" + tag.getName() + "' is already used by another subtag");
         }
+        validateChildRange(index, size - 1);
+        ensureTagsCapacityForAdd();
         insertTagInternal(index, tag);
         subTagsByName.put(tag.getName(), tag);
         return this;
@@ -372,6 +395,8 @@ public final class CompoundTag extends ParentTag<Tag> {
         if (subTagsByName.containsKey(name)) {
             throw new IllegalArgumentException("The name '" + name + "' is already used by another subtag");
         }
+        validateChildRange(index, size - 1);
+        ensureTagsCapacityForAdd();
 
         // All checks must complete before changing the detached candidate's name.
         tag.setName0(name);
@@ -407,9 +432,13 @@ public final class CompoundTag extends ParentTag<Tag> {
         if (existing == null) {
             throw new IllegalArgumentException("No child with name '" + name + "'");
         }
+        validateChildRange(existing.getIndex(), existing.getIndex());
         validateTagForAttach(replacement);
         if (replacement.getParent() != null) {
             throw new IllegalArgumentException("The replacement must be detached before insertion");
+        }
+        if (name.isEmpty()) {
+            throw new IllegalArgumentException("Compound children must have a non-empty name");
         }
         replacement.setName0(name);
         return replaceTagAt(existing.getIndex(), replacement);
@@ -431,6 +460,7 @@ public final class CompoundTag extends ParentTag<Tag> {
         }
         String name = replacement.getName();
         Tag previous = tags[index];
+        validateChildRange(index, index);
         if (name.isEmpty()) {
             throw new IllegalArgumentException("Compound children must have a non-empty name");
         }
@@ -709,7 +739,7 @@ public final class CompoundTag extends ParentTag<Tag> {
         Objects.checkIndex(index, size);
 
         Tag tag = tags[index];
-        validateChildIdentity(index, tag);
+        validateChildRange(index, size - 1);
         removeTagFromArray(index);
 
         // Clear the tag's parent and index.
@@ -733,6 +763,7 @@ public final class CompoundTag extends ParentTag<Tag> {
     @Override
     @Contract(mutates = "this")
     public void clear() {
+        validateNameIndexSize();
         super.clear();
         subTagsByName.clear();
     }

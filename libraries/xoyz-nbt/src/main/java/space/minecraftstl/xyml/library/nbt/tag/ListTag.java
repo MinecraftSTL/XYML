@@ -99,6 +99,7 @@ public final class ListTag<T extends Tag> extends ParentTag<T> {
         } else if (!elementType.equals(TagType.COMPOUND)) {
             throw new IllegalStateException("Cannot set element type to " + elementType + " for a " + this.elementType + " list");
         } else {
+            validateChildRange(0, size - 1);
             var oldTags = Arrays.copyOf(tags, size);
 
             this.clear();
@@ -140,6 +141,7 @@ public final class ListTag<T extends Tag> extends ParentTag<T> {
             moveTagToLast(tag);
             return this;
         }
+        ensureTagsCapacityForAdd();
         detachFromCurrentParent(tag);
         if (elementType == null) {
             elementType = tag.getType();
@@ -172,6 +174,8 @@ public final class ListTag<T extends Tag> extends ParentTag<T> {
         if (!tag.getName().isEmpty()) {
             throw new IllegalArgumentException("List elements must have an empty name");
         }
+        validateChildRange(index, size - 1);
+        ensureTagsCapacityForAdd();
         if (elementType == null) {
             elementType = tag.getType();
         }
@@ -204,6 +208,7 @@ public final class ListTag<T extends Tag> extends ParentTag<T> {
         if (previous == null) {
             previous = getTag(index);
         }
+        validateChildIdentity(index, previous);
         tags[index] = replacement;
         previous.setParent(null, -1);
         replacement.setParent(this, index);
@@ -221,12 +226,16 @@ public final class ListTag<T extends Tag> extends ParentTag<T> {
     @Contract(value = "_ -> this", mutates = "this,param1")
     @SuppressWarnings("unchecked")
     public ListTag<T> addAnyTag(T tag) {
+        Objects.requireNonNull(tag, "tag");
+        validateTagForAttach(tag);
         if (elementType == null || tag.getType() == elementType) {
             addTag(tag);
         } else if (this.isEmpty()) {
+            ensureTagsCapacityForAdd();
             elementType = tag.getType();
             addTag(tag);
         } else {
+            validateChildRange(0, size - 1);
             ((ListTag<Tag>) this).setElementType(TagType.COMPOUND);
 
             CompoundTag subTag = new CompoundTag();
@@ -242,7 +251,7 @@ public final class ListTag<T extends Tag> extends ParentTag<T> {
 
         @SuppressWarnings("unchecked")
         T tag = (T) tags[index];
-        validateChildIdentity(index, tag);
+        validateChildRange(index, size - 1);
         removeTagFromArray(index);
 
         // Clear the tag's parent and index.
