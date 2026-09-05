@@ -60,12 +60,12 @@ final class NBTStructuredValueCodec {
         return type == TagType.BYTE || type == TagType.SHORT || type == TagType.INT || type == TagType.LONG;
     }
 
-    /// Returns whether a type is a numeric scalar with decimal and hexadecimal representations.
+    /// Returns whether a type is an integral scalar with decimal and hexadecimal representations.
     ///
     /// @param type candidate scalar type
     /// @return whether the type supports radix switching
-    static boolean isNumericScalar(@Nullable TagType<?> type) {
-        return isIntegral(type) || type == TagType.FLOAT || type == TagType.DOUBLE;
+    static boolean supportsRadixSwitch(@Nullable TagType<?> type) {
+        return isIntegral(type);
     }
 
     /// Returns whether a selected container has the compact aggregate value representation.
@@ -86,7 +86,7 @@ final class NBTStructuredValueCodec {
     static String formatScalar(TagType<?> type, String value, NBTNumberRadix radix) {
         TagType<?> selected = Objects.requireNonNull(type, "type");
         String text = Objects.requireNonNull(value, "value");
-        if (Objects.requireNonNull(radix, "radix") == NBTNumberRadix.DECIMAL || !isNumericScalar(selected)) {
+        if (Objects.requireNonNull(radix, "radix") == NBTNumberRadix.DECIMAL || !supportsRadixSwitch(selected)) {
             return text;
         }
         if (selected == TagType.BYTE) {
@@ -100,12 +100,6 @@ final class NBTStructuredValueCodec {
         }
         if (selected == TagType.LONG) {
             return "0x" + Long.toUnsignedString(Long.parseLong(text), 16).toUpperCase(Locale.ROOT);
-        }
-        if (selected == TagType.FLOAT) {
-            return Float.toHexString(Float.parseFloat(text));
-        }
-        if (selected == TagType.DOUBLE) {
-            return Double.toHexString(Double.parseDouble(text));
         }
         throw new IllegalArgumentException("Unsupported numeric scalar type: " + selected.name());
     }
@@ -247,8 +241,7 @@ final class NBTStructuredValueCodec {
 
     /// Converts a draft token into syntax accepted by the generic scalar parser for its mode.
     ///
-    /// Bare integral digits in hexadecimal mode are interpreted as hexadecimal. Floating-point
-    /// drafts additionally receive Java's required `p0` binary exponent when it is omitted.
+    /// Bare integral digits in hexadecimal mode are interpreted as hexadecimal.
     ///
     /// @param type numeric scalar type
     /// @param input entered token
@@ -260,7 +253,14 @@ final class NBTStructuredValueCodec {
             String input,
             NBTNumberRadix radix) throws IOException {
         String text = input.trim();
-        if (!isNumericScalar(type)) {
+        boolean floatingPoint = type == TagType.FLOAT || type == TagType.DOUBLE;
+        if (!supportsRadixSwitch(type) && !floatingPoint) {
+            return text;
+        }
+        if (floatingPoint) {
+            if (hasHexadecimalPrefix(text)) {
+                throw new IOException("Floating-point values require decimal input");
+            }
             return text;
         }
         if (radix == NBTNumberRadix.DECIMAL) {
@@ -270,11 +270,6 @@ final class NBTStructuredValueCodec {
             return text;
         }
         String hexadecimal = addHexadecimalPrefix(text);
-        if ((type == TagType.FLOAT || type == TagType.DOUBLE)
-                && hexadecimal.indexOf('p') < 0
-                && hexadecimal.indexOf('P') < 0) {
-            return hexadecimal + "p0";
-        }
         return hexadecimal;
     }
 

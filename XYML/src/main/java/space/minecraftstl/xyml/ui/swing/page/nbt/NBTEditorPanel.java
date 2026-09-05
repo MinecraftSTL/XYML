@@ -1499,7 +1499,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 ? controller.listElementType(selected)
                 : null;
         boolean aggregate = NBTStructuredValueCodec.isEditableAggregate(tagType, listElementType);
-        boolean numeric = aggregate || NBTStructuredValueCodec.isNumericScalar(tagType);
+        boolean numeric = aggregate || NBTStructuredValueCodec.supportsRadixSwitch(tagType);
         sectionSignButton.setVisible(stringValue);
         sectionSignButton.setEnabled(stringValue && mutable);
         formattingPreviewCheck.setVisible(stringValue);

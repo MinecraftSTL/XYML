@@ -548,7 +548,7 @@ final class NBTEditorControllerTest {
         NBTAddress numbersAddress = NBTAddress.root().appendName("numbers");
         assertEquals("0xFF", ui.call(() -> controller.structuredValue(
                 node(controller, byteAddress), NBTNumberRadix.HEXADECIMAL)));
-        assertEquals("0x1.8p0", ui.call(() -> controller.structuredValue(
+        assertEquals("1.5", ui.call(() -> controller.structuredValue(
                 node(controller, floatAddress), NBTNumberRadix.HEXADECIMAL)));
         assertEquals("0xFF, 0x0", ui.call(() -> controller.structuredValue(
                 node(controller, bytesAddress), NBTNumberRadix.HEXADECIMAL)));

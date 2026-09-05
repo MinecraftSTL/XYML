@@ -153,7 +153,7 @@ final class NBTNumberRadixEditor {
         @Nullable TagType<?> elementType = type == TagType.LIST
                 ? controller.listElementType(selected)
                 : null;
-        return NBTStructuredValueCodec.isNumericScalar(type)
+        return NBTStructuredValueCodec.supportsRadixSwitch(type)
                 || NBTStructuredValueCodec.isEditableAggregate(type, elementType);
     }
 

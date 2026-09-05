@@ -30,6 +30,7 @@ import java.io.IOException;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -53,7 +54,7 @@ final class NBTStructuredValueCodecTest {
                 TagType.DOUBLE, "0x1.0p2", NBTNumberRadix.DECIMAL));
     }
 
-    /// Formats and parses integer bit patterns and Java hexadecimal floating-point values.
+    /// Formats and parses integer bit patterns without switching floating-point values.
     @Test
     void formatsAndParsesHexadecimalScalars() throws Exception {
         assertEquals("0xFF", NBTStructuredValueCodec.formatScalar(
@@ -64,10 +65,10 @@ final class NBTStructuredValueCodecTest {
                 TagType.INT, "-1", NBTNumberRadix.HEXADECIMAL));
         assertEquals("0xFFFFFFFFFFFFFFFF", NBTStructuredValueCodec.formatScalar(
                 TagType.LONG, "-1", NBTNumberRadix.HEXADECIMAL));
-        assertEquals("0x1.8p0", NBTStructuredValueCodec.formatScalar(
+        assertEquals("1.5", NBTStructuredValueCodec.formatScalar(
                 TagType.FLOAT, "1.5", NBTNumberRadix.HEXADECIMAL));
-        assertEquals("0x1.8p0", NBTStructuredValueCodec.formatScalar(
-                TagType.DOUBLE, "1.5", NBTNumberRadix.HEXADECIMAL));
+        assertEquals("0.0", NBTStructuredValueCodec.formatScalar(
+                TagType.DOUBLE, "0.0", NBTNumberRadix.HEXADECIMAL));
         assertEquals("-1", NBTStructuredValueCodec.parseScalar(
                 TagType.BYTE, "1FF", NBTNumberRadix.HEXADECIMAL));
         assertEquals("-1", NBTStructuredValueCodec.parseScalar(
@@ -76,10 +77,12 @@ final class NBTStructuredValueCodecTest {
                 TagType.INT, "0x10", NBTNumberRadix.HEXADECIMAL));
         assertEquals("-1", NBTStructuredValueCodec.parseScalar(
                 TagType.LONG, "1FFFFFFFFFFFFFFFF", NBTNumberRadix.HEXADECIMAL));
-        assertEquals("1.5", NBTStructuredValueCodec.parseScalar(
+        assertEquals("1.8", NBTStructuredValueCodec.parseScalar(
                 TagType.FLOAT, "1.8", NBTNumberRadix.HEXADECIMAL));
-        assertEquals("1.5", NBTStructuredValueCodec.parseScalar(
+        assertEquals("1.8", NBTStructuredValueCodec.parseScalar(
                 TagType.DOUBLE, "1.8", NBTNumberRadix.HEXADECIMAL));
+        assertFalse(NBTStructuredValueCodec.supportsRadixSwitch(TagType.FLOAT));
+        assertFalse(NBTStructuredValueCodec.supportsRadixSwitch(TagType.DOUBLE));
     }
 
     /// Formats numeric Lists and primitive arrays without SNBT brackets.

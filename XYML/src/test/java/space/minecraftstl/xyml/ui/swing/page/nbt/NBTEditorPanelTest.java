@@ -423,7 +423,8 @@ final class NBTEditorPanelTest {
                 .addByteArray("bytes", new byte[]{0, 127, -1})
                 .addString("message", "A\u00a7cB")
                 .addTag("numbers", numbers)
-                .addTag("map", discontinuous));
+                .addTag("map", discontinuous)
+                .addDouble("floating", 0.0D));
         ManualExecutor ioExecutor = new ManualExecutor();
         ManualExecutor backgroundExecutor = new ManualExecutor();
         NBTEditorController controller = new NBTEditorController(
@@ -607,6 +608,10 @@ final class NBTEditorPanelTest {
                 assertTrue(popup.getComponent(5).isVisible());
                 assertTrue(popup.getComponent(5).isEnabled());
                 assertFalse(popup.getComponent(6).isVisible());
+
+                tree.setSelectionPath(model.pathForAddress(List.of(5)));
+                assertEquals("0.0", findNamed(panel, "nbtEditorValue", JTextPane.class).getText());
+                assertFalse(findNamed(panel, "nbtEditorNumberRadix", JComboBox.class).isVisible());
 
                 tree.setSelectionPath(model.pathForAddress(List.of(4)));
                 JComboBox<?> type = findNamed(panel, "nbtEditorNodeType", JComboBox.class);
