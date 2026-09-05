@@ -274,8 +274,8 @@ final class NBTStringValueEditor extends JTextPane implements DocumentListener {
             @Nullable Color hashColor = code == '#' ? hashColor(source, index) : null;
             if (legacyColor == null && rgbColor == null && hashColor == null && "klmnor".indexOf(code) < 0) {
                 applyAttributes(document, segmentStart, index - segmentStart, active);
-                applyAttributes(document, index, 1, hiddenAttributes(base));
-                index++;
+                applyAttributes(document, index, 2, hiddenAttributes(base));
+                index += 2;
                 segmentStart = index;
                 continue;
             }

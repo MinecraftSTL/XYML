@@ -245,11 +245,11 @@ final class NBTStringValueEditorTest {
         });
     }
 
-    /// Supports compact RGB, escaped section signs, and inert unknown formatting markers.
+    /// Supports compact RGB, escaped section signs, and hidden unknown formatting markers.
     @Test
     void parsesCompactRgbEscapesAndUnknownCodes() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
-            NBTStringValueEditor editor = configuredEditor("A\u00a7#123456B\u00a7\u00a7C\u00a7zD");
+            NBTStringValueEditor editor = configuredEditor("A\u00a7#123456B\u00a7\u00a7C\u00a7vD");
             editor.setFormattingEnabled(true);
             List<Rectangle2D> positions = positions(editor);
 
@@ -258,11 +258,11 @@ final class NBTStringValueEditorTest {
             assertEquals(positions.get(1).getX(), positions.get(9).getX(), 0.01);
             assertEquals(positions.get(10).getX(), positions.get(11).getX(), 0.01);
             assertTrue(positions.get(12).getX() > positions.get(11).getX());
-            assertEquals(positions.get(13).getX(), positions.get(14).getX(), 0.01);
-            assertTrue(positions.get(15).getX() > positions.get(14).getX());
+            assertEquals(positions.get(13).getX(), positions.get(15).getX(), 0.01);
+            assertTrue(positions.get(16).getX() > positions.get(15).getX());
             assertEquals(pixelSignature(render("A", false, false)),
                     pixelSignature(render("A\u00a7", true, false)));
-            assertEquals("A\u00a7#123456B\u00a7\u00a7C\u00a7zD", editor.getText());
+            assertEquals("A\u00a7#123456B\u00a7\u00a7C\u00a7vD", editor.getText());
         });
     }
 
