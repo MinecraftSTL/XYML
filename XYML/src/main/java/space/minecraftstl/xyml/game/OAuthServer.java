@@ -86,7 +86,7 @@ public final class OAuthServer extends NanoHTTPD implements OAuth.Session {
     ///
     /// @param port loopback TCP port to bind
     private OAuthServer(int port) {
-        super(port);
+        super("localhost", port);
 
         this.port = port;
 

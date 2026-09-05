@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.addon.repository;
 
 import com.google.gson.reflect.TypeToken;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.addon.RemoteAddon;
 import space.minecraftstl.xyml.addon.RemoteAddonRepository;
 import space.minecraftstl.xyml.addon.mod.ModLoaderType;
@@ -29,10 +31,11 @@ import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.io.HttpRequest;
 import space.minecraftstl.xyml.util.io.JarUtils;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
+import space.minecraftstl.xyml.util.io.NoCandidatesException;
+import space.minecraftstl.xyml.util.io.ResponseCodeException;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
-import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -134,6 +137,7 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
         return (int) Math.ceil((double) Math.min(response.pagination.totalCount, 10000) / pageSize);
     }
 
+    /// {@inheritDoc}
     @Override
     public SearchResult search(DownloadProvider downloadProvider, String gameVersion, @Nullable RemoteAddonRepository.Category category, int pageOffset, int pageSize, String searchFilter, SortType sortType, SortOrder sortOrder) throws IOException {
         if (type == null) throw new UnsupportedOperationException();
@@ -183,7 +187,7 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
             }
 
             if (response == null) {
-                throw exception != null ? exception : new IOException("No candidates found");
+                throw exception != null ? exception : new NoCandidatesException();
             }
 
             // https://github.com/HMCL-dev/HMCL/issues/1549
@@ -304,6 +308,20 @@ public final class CurseForgeRemoteAddonRepository implements RemoteAddonReposit
             return response.data.toAddon();
         } finally {
             SEMAPHORE.release();
+        }
+    }
+
+    /// {@inheritDoc}
+    @Override
+    public RemoteAddon resolveDependency(DownloadProvider downloadProvider, String id) throws IOException {
+        try {
+            return getAddonById(downloadProvider, id);
+        } catch (IOException e) {
+            if (e instanceof NoCandidatesException) throw e;
+            if (e instanceof FileNotFoundException
+                    || e instanceof ResponseCodeException rce && rce.getResponseCode() == 404)
+                return RemoteAddon.BROKEN;
+            throw e;
         }
     }
 
