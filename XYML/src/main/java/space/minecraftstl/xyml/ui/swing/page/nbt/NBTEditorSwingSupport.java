@@ -30,8 +30,6 @@ import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import javax.swing.UIManager;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.event.ActionEvent;
@@ -105,11 +103,6 @@ final class NBTEditorSwingSupport {
         return field;
     }
 
-    /// Creates one document listener that routes every change kind to the same EDT callback.
-    static DocumentListener documentChanges(Runnable callback) {
-        return new SharedDocumentListener(Objects.requireNonNull(callback, "callback"));
-    }
-
     /// Applies accessible behavior shared by toolbar buttons.
     private static void configureToolButton(JButton button, String tooltip, Runnable action) {
         String text = Objects.requireNonNull(tooltip, "tooltip");
@@ -137,39 +130,6 @@ final class NBTEditorSwingSupport {
         }
         @Nullable Color themeForeground = UIManager.getColor("Button.foreground");
         return themeForeground == null ? authored : themeForeground;
-    }
-
-    /// Document listener which collapses Swing's three change methods into one callback.
-    @NotNullByDefault
-    private static final class SharedDocumentListener implements DocumentListener {
-        /// Callback executed for every document change.
-        private final Runnable callback;
-
-        /// Creates one shared callback listener.
-        private SharedDocumentListener(Runnable callback) {
-            this.callback = Objects.requireNonNull(callback, "callback");
-        }
-
-        /// Handles inserted text.
-        @Override
-        public void insertUpdate(DocumentEvent event) {
-            Objects.requireNonNull(event, "event");
-            callback.run();
-        }
-
-        /// Handles removed text.
-        @Override
-        public void removeUpdate(DocumentEvent event) {
-            Objects.requireNonNull(event, "event");
-            callback.run();
-        }
-
-        /// Handles styled-attribute changes.
-        @Override
-        public void changedUpdate(DocumentEvent event) {
-            Objects.requireNonNull(event, "event");
-            callback.run();
-        }
     }
 
     /// Swing action that delegates to one prevalidated command.

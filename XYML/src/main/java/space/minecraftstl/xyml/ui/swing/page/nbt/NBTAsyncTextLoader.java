@@ -21,7 +21,10 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
-import javax.swing.JTextArea;
+import javax.swing.text.AbstractDocument;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.Document;
+import javax.swing.text.JTextComponent;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -33,7 +36,7 @@ import java.util.function.Supplier;
 @NotNullByDefault
 final class NBTAsyncTextLoader implements AutoCloseable {
     /// Destination text component.
-    private final JTextArea target;
+    private final JTextComponent target;
 
     /// Maximum characters inserted during one EDT turn.
     private final int chunkSize;
@@ -57,10 +60,10 @@ final class NBTAsyncTextLoader implements AutoCloseable {
     private boolean closed;
 
     /// Creates one loader for a specific text component.
-    /// @param target destination text area
+    /// @param target destination text component
     /// @param chunkSize positive per-turn character limit
     /// @param executor caller-owned background executor
-    NBTAsyncTextLoader(JTextArea target, int chunkSize, Executor executor) {
+    NBTAsyncTextLoader(JTextComponent target, int chunkSize, Executor executor) {
         this.target = Objects.requireNonNull(target, "target");
         if (chunkSize <= 0) {
             throw new IllegalArgumentException("chunkSize must be positive");
@@ -202,8 +205,24 @@ final class NBTAsyncTextLoader implements AutoCloseable {
             failed.accept(cause == null ? "The selected value is no longer available" : detail(cause));
             return;
         }
-        target.setText("");
-        append(request, selectedKey, accepted, succeeded, text, 0);
+        String previousText;
+        try {
+            previousText = readText();
+        } catch (BadLocationException failure) {
+            load = null;
+            failed.accept(detail(failure));
+            return;
+        }
+        int previousDot = target.getCaret().getDot();
+        int previousMark = target.getCaret().getMark();
+        try {
+            replaceText("");
+        } catch (BadLocationException failure) {
+            failAndRestore(request, previousText, previousDot, previousMark, failed, failure);
+            return;
+        }
+        append(request, selectedKey, accepted, succeeded, failed,
+                previousText, previousDot, previousMark, text, 0);
     }
 
     /// Inserts the next bounded chunk and schedules any remainder.
@@ -212,26 +231,134 @@ final class NBTAsyncTextLoader implements AutoCloseable {
             Object selectedKey,
             BooleanSupplier accepted,
             Runnable succeeded,
+            Consumer<String> failed,
+            String previousText,
+            int previousDot,
+            int previousMark,
             String text,
             int offset) {
         if (!accepts(request, selectedKey, accepted)) {
             if (request == revision) {
                 load = null;
+                loaded = false;
+                restoreOrReport(previousText, previousDot, previousMark, failed);
             }
             return;
         }
         int end = Math.min(offset + chunkSize, text.length());
         if (end > offset) {
-            target.append(text.substring(offset, end));
+            try {
+                String chunk = text.substring(offset, end);
+                Document document = target.getDocument();
+                int insertionOffset = document.getLength();
+                document.insertString(insertionOffset, chunk, null);
+                if (document.getLength() != insertionOffset + chunk.length()
+                        || !chunk.equals(document.getText(insertionOffset, chunk.length()))) {
+                    throw new BadLocationException("The editor document changed a loaded text chunk", insertionOffset);
+                }
+            } catch (BadLocationException failure) {
+                failAndRestore(request, previousText, previousDot, previousMark, failed, failure);
+                return;
+            }
         }
         if (end < text.length()) {
-            EdtDispatcher.executeLater(() -> append(request, selectedKey, accepted, succeeded, text, end));
+            EdtDispatcher.executeLater(() -> append(
+                    request, selectedKey, accepted, succeeded, failed,
+                    previousText, previousDot, previousMark, text, end));
             return;
         }
         load = null;
         loaded = true;
         target.setCaretPosition(0);
         succeeded.run();
+    }
+
+    /// Releases a current failed request, restores its prior draft, and reports the root cause.
+    ///
+    /// @param request failed request identity
+    /// @param previousText exact text visible before loading began
+    /// @param previousDot prior caret dot
+    /// @param previousMark prior caret mark
+    /// @param failed caller-owned failure callback
+    /// @param problem insertion or replacement failure
+    private void failAndRestore(
+            long request,
+            String previousText,
+            int previousDot,
+            int previousMark,
+            Consumer<String> failed,
+            BadLocationException problem) {
+        if (request != revision) {
+            return;
+        }
+        load = null;
+        loaded = false;
+        @Nullable String restorationFailure = restore(previousText, previousDot, previousMark);
+        String failureDetail = detail(problem);
+        failed.accept(restorationFailure == null
+                ? failureDetail
+                : failureDetail + "; previous editor text could not be restored: " + restorationFailure);
+    }
+
+    /// Restores an abandoned current request, reporting only if restoration itself fails.
+    ///
+    /// @param previousText exact text visible before loading began
+    /// @param previousDot prior caret dot
+    /// @param previousMark prior caret mark
+    /// @param failed caller-owned failure callback
+    private void restoreOrReport(
+            String previousText,
+            int previousDot,
+            int previousMark,
+            Consumer<String> failed) {
+        @Nullable String restorationFailure = restore(previousText, previousDot, previousMark);
+        if (restorationFailure != null) {
+            failed.accept("Previous editor text could not be restored: " + restorationFailure);
+        }
+    }
+
+    /// Restores exact prior text and selection direction after an interrupted replacement.
+    ///
+    /// @param previousText exact prior text
+    /// @param previousDot prior caret dot
+    /// @param previousMark prior caret mark
+    /// @return failure detail, or `null` after complete restoration
+    private @Nullable String restore(String previousText, int previousDot, int previousMark) {
+        try {
+            replaceText(previousText);
+            int length = target.getDocument().getLength();
+            target.getCaret().setDot(Math.min(previousMark, length));
+            target.getCaret().moveDot(Math.min(previousDot, length));
+            return null;
+        } catch (BadLocationException | RuntimeException failure) {
+            return detail(failure);
+        }
+    }
+
+    /// Strictly replaces the complete target document and verifies filters did not alter the text.
+    ///
+    /// @param text exact replacement text
+    /// @throws BadLocationException if replacement fails or a filter changes the text
+    private void replaceText(String text) throws BadLocationException {
+        Document document = target.getDocument();
+        if (document instanceof AbstractDocument abstractDocument) {
+            abstractDocument.replace(0, document.getLength(), text, null);
+        } else {
+            document.remove(0, document.getLength());
+            document.insertString(0, text, null);
+        }
+        if (!text.equals(readText())) {
+            throw new BadLocationException("The editor document changed replacement text", 0);
+        }
+    }
+
+    /// Reads the complete target document without JTextComponent's nullable fallback.
+    ///
+    /// @return exact target text
+    /// @throws BadLocationException if the document cannot provide its own valid range
+    private String readText() throws BadLocationException {
+        Document document = target.getDocument();
+        return document.getText(0, document.getLength());
     }
 
     /// Returns whether one request still owns the destination.

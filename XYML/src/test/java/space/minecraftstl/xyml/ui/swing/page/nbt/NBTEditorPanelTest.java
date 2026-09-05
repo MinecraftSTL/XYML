@@ -55,6 +55,9 @@ import javax.swing.JTextPane;
 import javax.swing.JTree;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
+import javax.swing.text.AttributeSet;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.DefaultStyledDocument;
 import javax.swing.text.StyleConstants;
 import javax.imageio.ImageIO;
 import java.awt.Component;
@@ -181,7 +184,7 @@ final class NBTEditorPanelTest {
             assertTrue(((JLabel) rendered).getIcon() instanceof ImageIcon);
             assertEquals(16, ((JLabel) rendered).getIcon().getIconWidth());
             assertEquals(16, ((JLabel) rendered).getIcon().getIconHeight());
-            JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+            JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
             assertTrue(value.isEnabled());
             assertEquals("1", value.getText());
             value.setText("41");
@@ -196,7 +199,7 @@ final class NBTEditorPanelTest {
         flushEdt();
 
         onEdt(() -> {
-            JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+            JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
             assertTrue(controller.snapshot().dirty());
             assertTrue(
                     findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled(),
@@ -210,7 +213,7 @@ final class NBTEditorPanelTest {
         ioExecutor.runNext();
         flushEdt();
         onEdt(() -> {
-            JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+            JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
             assertFalse(controller.snapshot().dirty());
             assertEquals("1", value.getText());
             AbstractButton redo = findNamed(panel, "nbtEditorRedo", AbstractButton.class);
@@ -220,7 +223,7 @@ final class NBTEditorPanelTest {
         ioExecutor.runNext();
         flushEdt();
         onEdt(() -> {
-            JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+            JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
             assertTrue(controller.snapshot().dirty());
             assertEquals("41", value.getText());
             assertPaintsOpaqueContent(panel);
@@ -242,7 +245,7 @@ final class NBTEditorPanelTest {
             JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
             NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
             tree.setSelectionPath(model.pathForAddress(List.of(0)));
-            JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+            JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
             value.setText("6");
             findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
         });
@@ -332,7 +335,7 @@ final class NBTEditorPanelTest {
                 JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of(0)));
-                findNamed(panel, "nbtEditorValue", JTextArea.class).setText("2");
+                findNamed(panel, "nbtEditorValue", JTextPane.class).setText("2");
                 findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
             });
             ioExecutor.runNext();
@@ -375,7 +378,7 @@ final class NBTEditorPanelTest {
                 JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of(0)));
-                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
                 value.setText("not-an-int");
                 findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
                 assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
@@ -385,7 +388,7 @@ final class NBTEditorPanelTest {
             ioExecutor.runNext();
             flushEdt();
             onEdt(() -> {
-                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
                 assertEquals("not-an-int", value.getText());
                 assertEquals("error", value.getClientProperty("JComponent.outline"));
                 JTextField name = findNamed(panel, "nbtEditorNodeName", JTextField.class);
@@ -444,7 +447,7 @@ final class NBTEditorPanelTest {
                 JComboBox<?> radix = findNamed(panel, "nbtEditorNumberRadix", JComboBox.class);
                 assertTrue(radix.isVisible());
                 assertEquals("Decimal", radix.getSelectedItem());
-                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
                 value.setText("invalid");
                 radix.setSelectedIndex(1);
                 assertEquals("invalid", value.getText());
@@ -454,7 +457,7 @@ final class NBTEditorPanelTest {
             flushEdt();
             onEdt(() -> {
                 JComboBox<?> radix = findNamed(panel, "nbtEditorNumberRadix", JComboBox.class);
-                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
                 assertEquals("Decimal", radix.getSelectedItem());
                 assertEquals("invalid", value.getText());
                 assertTrue(radix.isEnabled());
@@ -466,7 +469,7 @@ final class NBTEditorPanelTest {
             flushEdt();
             onEdt(() -> {
                 JComboBox<?> radix = findNamed(panel, "nbtEditorNumberRadix", JComboBox.class);
-                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
                 assertEquals("0x1FF", value.getText());
                 radix.setSelectedIndex(0);
                 assertEquals("0x1FF", value.getText());
@@ -474,7 +477,7 @@ final class NBTEditorPanelTest {
             backgroundExecutor.runNext();
             flushEdt();
             onEdt(() -> {
-                assertEquals("511", findNamed(panel, "nbtEditorValue", JTextArea.class).getText());
+                assertEquals("511", findNamed(panel, "nbtEditorValue", JTextPane.class).getText());
                 JComboBox<?> type = findNamed(panel, "nbtEditorNodeType", JComboBox.class);
                 assertTrue(type.isEnabled());
                 type.setSelectedItem(TagType.STRING.name());
@@ -490,7 +493,7 @@ final class NBTEditorPanelTest {
                 JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of(1)));
-                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
                 assertFalse(value.isEnabled());
             });
             backgroundExecutor.runNext();
@@ -499,7 +502,7 @@ final class NBTEditorPanelTest {
                 JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of(1)));
-                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
                 assertEquals("0, 127, -1", value.getText());
                 assertTrue(value.isEnabled());
                 findNamed(panel, "nbtEditorNumberRadix", JComboBox.class).setSelectedIndex(1);
@@ -507,7 +510,7 @@ final class NBTEditorPanelTest {
             backgroundExecutor.runNext();
             flushEdt();
             onEdt(() -> {
-                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
                 assertEquals("0x0, 0x7F, 0xFF", value.getText());
                 value.setText("A, 14, E2");
                 findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
@@ -538,7 +541,7 @@ final class NBTEditorPanelTest {
             backgroundExecutor.runAll();
             flushEdt();
             onEdt(() -> {
-                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
                 assertEquals("1, 2", value.getText());
                 assertTrue(value.isEnabled());
                 value.setText("7, 8");
@@ -567,7 +570,7 @@ final class NBTEditorPanelTest {
                 JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of(1, 0)));
-                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
                 assertEquals("10", value.getText());
                 assertTrue(value.isEnabled());
                 value.setText("-1");
@@ -583,17 +586,17 @@ final class NBTEditorPanelTest {
                 JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of(2)));
-                JTextArea value = findNamed(panel, "nbtEditorValue", JTextArea.class);
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
                 value.setText("A\u00a7cB");
                 value.setCaretPosition(1);
                 findNamed(panel, "nbtEditorSectionSign", AbstractButton.class).doClick();
                 assertEquals("A\u00a7\u00a7cB", value.getText());
                 value.setText("A\u00a7cB");
                 findNamed(panel, "nbtEditorFormattingPreviewToggle", JCheckBox.class).doClick();
-                JTextPane preview = findNamed(panel, "nbtEditorFormattingPreview", JTextPane.class);
-                assertEquals("AB", preview.getText());
+                assertEquals("A\u00a7cB", value.getText());
                 assertEquals(new java.awt.Color(0xFF5555), StyleConstants.getForeground(
-                        preview.getStyledDocument().getCharacterElement(1).getAttributes()));
+                        value.getStyledDocument().getCharacterElement(3).getAttributes()));
+                assertNull(findNamedOrNull(panel, "nbtEditorFormattingPreview", JComponent.class));
 
                 tree.setSelectionPath(model.pathForAddress(List.of(3, 0)));
                 JPopupMenu popup = Objects.requireNonNull(tree.getComponentPopupMenu(), "tree popup");
@@ -709,7 +712,7 @@ final class NBTEditorPanelTest {
                 tree.setSelectionPath(model.pathForAddress(List.of(1023)));
                 assertEquals("Chunk",
                         findNamed(panel, "nbtEditorNodeType", JComboBox.class).getSelectedItem());
-                assertFalse(findNamed(panel, "nbtEditorValue", JTextArea.class).isEnabled());
+                assertFalse(findNamed(panel, "nbtEditorValue", JTextPane.class).isEnabled());
                 assertFalse(findNamed(panel, "nbtEditorSnbt", JTextArea.class).isEnabled());
                 assertFalse(findNamed(panel, "nbtEditorDelete", AbstractButton.class).isEnabled());
                 assertFalse(findNamed(panel, "nbtEditorMoveUp", AbstractButton.class).isEnabled());
@@ -887,7 +890,7 @@ final class NBTEditorPanelTest {
     @Test
     void releasesRejectedCurrentTextLoad() {
         ManualExecutor backgroundExecutor = new ManualExecutor();
-        JTextArea target = onEdt(() -> new JTextArea());
+        JTextPane target = onEdt(() -> new JTextPane());
         NBTAsyncTextLoader loader = onEdt(() -> new NBTAsyncTextLoader(target, 4, backgroundExecutor));
         AtomicReference<Boolean> accepted = new AtomicReference<>(true);
         onEdt(() -> loader.reset("row"));
@@ -917,7 +920,10 @@ final class NBTEditorPanelTest {
         assertEquals("fresh", onEdt(() -> target.getText()));
 
         AtomicInteger acceptedCalls = new AtomicInteger();
-        onEdt(() -> loader.reset("chunked"));
+        onEdt(() -> {
+            loader.reset("chunked");
+            target.setText("draft");
+        });
         onEdt(() -> loader.load(
                 "chunked",
                 () -> "0123456789",
@@ -929,6 +935,60 @@ final class NBTEditorPanelTest {
         flushEdt();
         flushEdt();
         assertFalse(onEdt(loader::isLoading));
+        assertEquals("draft", onEdt(() -> target.getText()));
+        onEdt(loader::close);
+    }
+
+    /// Restores the complete prior draft when a later styled-document chunk is rejected.
+    @Test
+    void reportsStyledDocumentInsertionFailure() {
+        ManualExecutor backgroundExecutor = new ManualExecutor();
+        DefaultStyledDocument rejectingDocument = new DefaultStyledDocument() {
+            /// Serialization identifier for the Swing document superclass contract.
+            private static final long serialVersionUID = 1L;
+
+            /// Rejects the second asynchronous chunk to exercise rollback after partial insertion.
+            /// @param offset requested insertion offset
+            /// @param text requested text
+            /// @param attributes requested attributes
+            /// @throws BadLocationException for the configured second chunk
+            @Override
+            public void insertString(int offset, String text, @Nullable AttributeSet attributes)
+                    throws BadLocationException {
+                if ("4567".equals(text)) {
+                    throw new BadLocationException("rejected chunk", offset);
+                }
+                super.insertString(offset, text, attributes);
+            }
+        };
+        JTextPane target = onEdt(() -> new JTextPane(rejectingDocument));
+        NBTAsyncTextLoader loader = onEdt(() -> new NBTAsyncTextLoader(target, 4, backgroundExecutor));
+        AtomicReference<@Nullable String> failure = new AtomicReference<>();
+        AtomicInteger successes = new AtomicInteger();
+
+        onEdt(() -> {
+            loader.reset("row");
+            target.setText("draft");
+            target.setCaretPosition(1);
+            target.moveCaretPosition(4);
+        });
+        onEdt(() -> loader.load(
+                "row",
+                () -> "0123456789",
+                () -> true,
+                () -> { },
+                successes::incrementAndGet,
+                failure::set));
+        backgroundExecutor.runNext();
+        flushEdt();
+
+        assertFalse(onEdt(loader::isLoading));
+        assertFalse(onEdt(() -> loader.isLoaded("row")));
+        assertEquals(0, successes.get());
+        assertEquals("rejected chunk", failure.get());
+        assertEquals("draft", onEdt(() -> target.getText()));
+        assertEquals(4, onEdt(() -> target.getCaret().getDot()));
+        assertEquals(1, onEdt(() -> target.getCaret().getMark()));
         onEdt(loader::close);
     }
 
@@ -1072,7 +1132,7 @@ final class NBTEditorPanelTest {
         assertFalse(listTypeLabel.intersects(listType));
         assertTrue(listType.y >= listTypeLabel.getMaxY());
         assertTrue(tree.getWidth() >= 300);
-        assertTrue(findNamed(panel, "nbtEditorValue", JTextArea.class).getWidth() >= 200);
+        assertTrue(findNamed(panel, "nbtEditorValue", JTextPane.class).getWidth() >= 200);
 
         BufferedImage image = new BufferedImage(1000, 700, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = image.createGraphics();

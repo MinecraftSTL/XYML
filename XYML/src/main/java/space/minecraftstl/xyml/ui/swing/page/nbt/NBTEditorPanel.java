@@ -55,7 +55,6 @@ import javax.swing.JTree;
 import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import javax.swing.event.ChangeListener;
-import javax.swing.event.DocumentListener;
 import javax.swing.event.TreeSelectionEvent;
 import javax.swing.event.TreeSelectionListener;
 import javax.swing.event.TreeWillExpandListener;
@@ -79,7 +78,6 @@ import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.bi
 import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.configureIconButton;
 import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.configureSymbolButton;
 import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.detailLabel;
-import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.documentChanges;
 import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.menuItem;
 import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorSwingSupport.readOnlyField;
 import static space.minecraftstl.xyml.ui.swing.page.nbt.NBTEditorPanelSupport.chunkLocalIndex;
@@ -180,8 +178,8 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Displays the selected direct-child count.
     private final JTextField childrenField = readOnlyField("nbtEditorNodeChildren");
 
-    /// Edits an exact scalar value.
-    private final JTextArea valueArea = new JTextArea(6, 24);
+    /// Edits an exact scalar or compact aggregate value with optional in-place String formatting.
+    private final NBTStringValueEditor valueArea = new NBTStringValueEditor();
 
     /// Applies a validated scalar mutation.
     private final JButton applyButton = new JButton();
@@ -194,12 +192,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
 
     /// Selects decimal or hexadecimal display and input for numeric values.
     private final JComboBox<String> numberRadixCombo = new JComboBox<>();
-
-    /// Renders the selected String draft without changing its NBT value.
-    private final NBTStringFormattingPreview formattingPreview = new NBTStringFormattingPreview();
-
-    /// Collapsible viewport for the formatted String preview.
-    private final JScrollPane formattingPreviewScroll = new JScrollPane(formattingPreview);
 
     /// Selects the declared type of an empty List.
     private final JComboBox<String> listTypeCombo = new JComboBox<>();
@@ -236,9 +228,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
 
     /// Selects a right-clicked row before showing its context menu.
     private final NBTTreePopupMouseListener treePopupMouseListener;
-
-    /// Updates the String preview when the value document changes.
-    private final DocumentListener valueDocumentListener;
 
     /// Owned controller subscription removed during closure.
     private final Subscription stateSubscription;
@@ -348,7 +337,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 this::startValueLoad,
                 this::finishValueLoad,
                 this::showNumberRadixFailure);
-        valueDocumentListener = documentChanges(this::refreshFormattingPreview);
         nbtTransferHandler = new NBTFileTransferHandler(
                 () -> !closed.get() && !this.controller.snapshot().busy(),
                 this::openDroppedPaths);
@@ -625,12 +613,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         valueActions.add(applyButton, "w 84!, h 34!");
         details.add(valueActions, "skip, span 2, growx, wrap");
 
-        formattingPreview.setName("nbtEditorFormattingPreview");
-        formattingPreviewScroll.setName("nbtEditorFormattingPreviewScroll");
-        formattingPreviewScroll.setBorder(BorderFactory.createEmptyBorder());
-        formattingPreviewScroll.getAccessibleContext().setAccessibleName(strings.formattingPreviewText());
-        details.add(formattingPreviewScroll, "skip, span 2, growx, h 72!, wrap");
-
         JLabel listTypeLabel = detailLabel(strings.listTypeLabel(), listTypeCombo);
         listTypeLabel.setName("nbtEditorListTypeLabel");
         details.add(listTypeLabel, "span 3, wrap");
@@ -705,16 +687,12 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Configures exact text behavior and empty-List choices.
     private void configureEditors() {
         valueArea.setName("nbtEditorValue");
-        valueArea.setLineWrap(true);
-        valueArea.setWrapStyleWord(true);
-        valueArea.getDocument().addDocumentListener(valueDocumentListener);
         nameField.setEnabled(false);
         valueArea.setEnabled(false);
         snbtArea.setEnabled(false);
         typeCombo.addActionListener(event -> updateTypeConversionButton());
         sectionSignButton.setVisible(false);
         formattingPreviewCheck.setVisible(false);
-        formattingPreviewScroll.setVisible(false);
         numberRadixCombo.addItem(strings.decimalRadixText());
         numberRadixCombo.addItem(strings.hexadecimalRadixText());
         numberRadixCombo.setMaximumRowCount(2);
@@ -1003,25 +981,13 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         valueArea.requestFocusInWindow();
     }
 
-    /// Refreshes an already-visible formatting preview after a String draft changes.
-    private void refreshFormattingPreview() {
-        if (formattingPreviewScroll.isVisible()) {
-            formattingPreview.render(valueArea.getText());
-        }
-    }
-
-    /// Updates the optional Minecraft formatting preview after its toggle changes.
+    /// Updates in-place Minecraft formatting after its toggle changes.
     private void updateFormattingPreviewVisibility() {
         @Nullable NBTEditorTreeNode selected = selectedNode();
-        boolean visible = selected != null
+        boolean enabled = selected != null
                 && selected.node().getType() == TagType.STRING
                 && formattingPreviewCheck.isSelected();
-        formattingPreviewScroll.setVisible(visible);
-        if (visible) {
-            formattingPreview.render(valueArea.getText());
-        }
-        revalidate();
-        repaint();
+        valueArea.setFormattingEnabled(enabled);
     }
 
     /// Applies a Compound child rename.
@@ -1538,11 +1504,11 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         sectionSignButton.setEnabled(stringValue && mutable);
         formattingPreviewCheck.setVisible(stringValue);
         formattingPreviewCheck.setEnabled(stringValue);
+        if (!stringValue) {
+            valueArea.setFormattingEnabled(false);
+        }
         numberRadixCombo.setVisible(numeric);
         numberRadixCombo.setEnabled(numeric && !controller.snapshot().busy());
-        if (!stringValue) {
-            formattingPreviewScroll.setVisible(false);
-        }
         if (aggregate) {
             NBTNumberRadix radix = selectedNumberRadix();
             ValueLoadKey key = new ValueLoadKey(selected, radix);
@@ -1732,9 +1698,9 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         typeButton.setEnabled(false);
         childrenField.setText("");
         valueArea.setText("");
+        valueArea.setFormattingEnabled(false);
         sectionSignButton.setVisible(false);
         formattingPreviewCheck.setVisible(false);
-        formattingPreviewScroll.setVisible(false);
         numberRadixCombo.setVisible(false);
         snbtTextLoader.reset(null);
         valueTextLoader.reset(null);
@@ -1961,7 +1927,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         tree.removeTreeWillExpandListener(rootExpansionListener);
         tree.removeMouseListener(treePopupMouseListener);
         editorTabs.removeChangeListener(editorTabListener);
-        valueArea.getDocument().removeDocumentListener(valueDocumentListener);
         valueTextLoader.close();
         snbtTextLoader.close();
         setTransferHandler(null);
