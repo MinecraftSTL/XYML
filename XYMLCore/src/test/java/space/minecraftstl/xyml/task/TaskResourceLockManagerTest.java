@@ -279,6 +279,31 @@ public final class TaskResourceLockManagerTest {
         assertTrue(downloadTarget.conflictsWith(addonFile));
     }
 
+    /// Verifies world and NBT resources conflict by filesystem range without serializing distinct saved worlds.
+    @Test
+    public void gameWorldAndNbtResourcesPreserveWorldLevelConcurrency() {
+        Path instancePath = temporaryDirectory.resolve("instances/example");
+        Path firstWorldPath = instancePath.resolve("saves/first");
+        Path secondWorldPath = instancePath.resolve("saves/second");
+        TaskResource instance = TaskResource.gameInstance(instancePath);
+        TaskResource firstWorld = TaskResource.gameWorld(firstWorldPath);
+        TaskResource secondWorld = TaskResource.gameWorld(secondWorldPath);
+        TaskResource levelData = TaskResource.nbtFile(firstWorldPath.resolve("level.dat"));
+        TaskResource regionDirectory = TaskResource.nbtDirectory(firstWorldPath.resolve("region"));
+
+        assertEquals(TaskResource.Kind.GAME_WORLD, firstWorld.getKind());
+        assertEquals(TaskResource.Kind.NBT_FILE, levelData.getKind());
+        assertEquals(TaskResource.Kind.NBT_DIRECTORY, regionDirectory.getKind());
+        assertTrue(instance.conflictsWith(firstWorld));
+        assertTrue(firstWorld.conflictsWith(instance));
+        assertTrue(firstWorld.conflictsWith(levelData));
+        assertTrue(levelData.conflictsWith(firstWorld));
+        assertTrue(firstWorld.conflictsWith(regionDirectory));
+        assertTrue(regionDirectory.conflictsWith(firstWorld));
+        assertFalse(firstWorld.conflictsWith(secondWorld));
+        assertFalse(secondWorld.conflictsWith(firstWorld));
+    }
+
     /// Verifies normalization preserves distinct exact-file semantics at one path while still deduplicating repeats.
     @Test
     public void normalizationRetainsDistinctExactFileKindsAtSamePath() {

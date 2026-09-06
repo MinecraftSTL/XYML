@@ -155,6 +155,18 @@ public final class TaskResource {
         return directory(Kind.GAME_INSTANCE, directory);
     }
 
+    /// Creates a resource covering one complete saved-world tree.
+    ///
+    /// A saved-world resource conflicts with an overlapping game-instance or game-directory resource, while distinct
+    /// world directories remain independent. It is intended for world metadata, region, player-data, icon, import,
+    /// copy, and deletion transactions whose complete boundary is known.
+    ///
+    /// @param directory saved-world directory
+    /// @return normalized saved-world resource
+    public static TaskResource gameWorld(Path directory) {
+        return directory(Kind.GAME_WORLD, directory);
+    }
+
     /// Creates a resource covering one exact download destination.
     ///
     /// @param target download destination
@@ -214,6 +226,31 @@ public final class TaskResource {
     /// @return normalized exact-file resource
     public static TaskResource configuration(Path file) {
         return file(Kind.CONFIGURATION, file);
+    }
+
+    /// Creates a resource covering one exact NBT source or publication target.
+    ///
+    /// NBT sessions may publish temporary siblings, backups, or region companions. Callers must declare those
+    /// additional paths (or a containing directory resource) when they are part of the same transaction. The key is
+    /// intentionally distinct from [#configuration(Path)] so diagnostics can distinguish document editing from
+    /// ordinary launcher configuration writes while retaining the same exact-file conflict semantics.
+    ///
+    /// @param file NBT source or publication target
+    /// @return normalized exact-file NBT resource
+    public static TaskResource nbtFile(Path file) {
+        return file(Kind.NBT_FILE, file);
+    }
+
+    /// Creates a resource covering one NBT publication directory tree.
+    ///
+    /// Region sessions use this boundary because copy-on-write publication can create external chunk companions and
+    /// temporary identity links whose exact names are not known before the region header is read. Distinct region
+    /// directories remain independent, and diagnostics retain the NBT-specific category.
+    ///
+    /// @param directory NBT publication directory
+    /// @return normalized NBT directory resource
+    public static TaskResource nbtDirectory(Path directory) {
+        return directory(Kind.NBT_DIRECTORY, directory);
     }
 
     /// Creates a resource covering one exact input archive.
@@ -607,6 +644,8 @@ public final class TaskResource {
         REPOSITORY_OPERATION,
         /// Complete game-instance tree.
         GAME_INSTANCE,
+        /// Complete saved-world tree.
+        GAME_WORLD,
         /// Exact download destination.
         DOWNLOAD_TARGET,
         /// Exact managed add-on source, archive, or destination.
@@ -621,6 +660,10 @@ public final class TaskResource {
         CACHE_OPERATION,
         /// Exact configuration file.
         CONFIGURATION,
+        /// Exact NBT source or publication target.
+        NBT_FILE,
+        /// Complete NBT publication directory tree.
+        NBT_DIRECTORY,
         /// Exact input archive.
         ARCHIVE,
         /// Exact export destination.
