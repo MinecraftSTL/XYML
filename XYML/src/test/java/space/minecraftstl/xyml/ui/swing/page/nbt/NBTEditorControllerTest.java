@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.library.nbt.tag.ListTag;
 import space.minecraftstl.xyml.library.nbt.tag.StringTag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.nbt.NBTDocument;
@@ -45,6 +46,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -166,7 +168,7 @@ final class NBTEditorControllerTest {
         ioExecutor.runAll();
     }
 
-    /// Locks the document and propagates an executor Error raised while an edit is submitted.
+    /// Locks the document and keeps an executor Error primary when a failure listener also throws.
     @Test
     void failsClosedAfterAFatalEditSubmission() throws Exception {
         Path source = temporaryDirectory.resolve("fatal-edit.dat");
@@ -184,10 +186,22 @@ final class NBTEditorControllerTest {
         ui.run(() -> controller.open(source));
         ui.runNext();
         NBTEditorTreeNode value = child(controller, 0);
+        AssertionError listenerFailure = new AssertionError("synthetic fatal listener failure");
+        AtomicBoolean failFatalPublication = new AtomicBoolean(true);
+        controller.subscribe(change -> {
+            @Nullable NBTEditorSnapshot current = change.currentValue();
+            if (current != null
+                    && current.status() == NBTEditorStatus.EDIT_UNCERTAIN
+                    && failFatalPublication.compareAndSet(true, false)) {
+                throw listenerFailure;
+            }
+        });
 
         reject.set(true);
         assertSame(fatal, assertThrows(AssertionError.class, () ->
                 ui.run(() -> controller.applyValueEditAsync(value, "2"))));
+        assertEquals(1, fatal.getSuppressed().length);
+        assertSame(listenerFailure, fatal.getSuppressed()[0]);
 
         assertEquals(NBTEditorStatus.EDIT_UNCERTAIN, controller.snapshot().status());
         assertTrue(controller.snapshot().dirty());
@@ -681,7 +695,7 @@ final class NBTEditorControllerTest {
         ioExecutor.runAll();
     }
 
-    /// Defers a new open until an already committed reload is visible and retains that replacement on failure.
+    /// Defers a new open despite a READY listener Error and retains the committed replacement on later failure.
     @Test
     void defersOpenBehindCommittedReload() throws Exception {
         Path source = temporaryDirectory.resolve("committed-reload.dat");
@@ -696,6 +710,17 @@ final class NBTEditorControllerTest {
         ioExecutor.runNext();
         ui.runNext();
         NBTDocument original = requiredDocument(controller);
+        AssertionError listenerFailure = new AssertionError("reload listener failed");
+        AtomicBoolean failReloadPublication = new AtomicBoolean(true);
+        controller.subscribe(change -> {
+            @Nullable NBTEditorSnapshot current = change.currentValue();
+            if (current != null
+                    && current.status() == NBTEditorStatus.READY
+                    && current.document() != original
+                    && failReloadPublication.compareAndSet(true, false)) {
+                throw listenerFailure;
+            }
+        });
         writeTag(source, new CompoundTag().addInt("value", 2));
 
         ui.run(controller::reload);
@@ -705,7 +730,7 @@ final class NBTEditorControllerTest {
         ui.run(() -> controller.open(missing));
         assertSame(original, controller.snapshot().document());
 
-        ui.runNext();
+        assertSame(listenerFailure, assertThrows(AssertionError.class, ui::runNext));
         NBTDocument replacement = requiredDocument(controller);
         assertNotSame(original, replacement);
         assertEquals(2, ((CompoundTag) replacement.rootSnapshot()).getInt("value"));
@@ -720,6 +745,27 @@ final class NBTEditorControllerTest {
         ui.run(controller::close);
         ioExecutor.awaitPendingCount(1);
         ioExecutor.runAll();
+    }
+
+    /// A rejected UI completion closes an undelivered document so another owner can acquire the same resource.
+    @Test
+    void releasesOpenedSessionWhenUiDispatcherRejectsCompletion() throws Exception {
+        Path source = temporaryDirectory.resolve("rejected-delivery.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                new RejectingUiDispatcher());
+
+        controller.open(source);
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runNext();
+        ioExecutor.runAll();
+
+        NBTDocumentService competingService = new NBTDocumentService(Runnable::run);
+        NBTDocument competing = competingService.open(source).get(5L, TimeUnit.SECONDS);
+        assertFalse(competing.isClosed());
+        competingService.close(competing).get(5L, TimeUnit.SECONDS);
     }
 
     /// Isolates ordinary listener failures after a committed edit and still notifies later listeners.
@@ -1008,6 +1054,25 @@ final class NBTEditorControllerTest {
             while (!commands.isEmpty()) {
                 runNext();
             }
+        }
+    }
+
+    /// UI dispatcher fixture that accepts direct controller calls but rejects every completion submission.
+    @NotNullByDefault
+    private static final class RejectingUiDispatcher implements UiDispatcher {
+        /// Treats the test thread as the UI context for the initial controller call.
+        @Override
+        public boolean isDispatchThread() {
+            return true;
+        }
+
+        /// Rejects asynchronous completion delivery deterministically.
+        ///
+        /// @param operation rejected callback
+        @Override
+        public void dispatch(Runnable operation) {
+            Objects.requireNonNull(operation, "operation");
+            throw new RejectedExecutionException("synthetic UI rejection");
         }
     }
 }

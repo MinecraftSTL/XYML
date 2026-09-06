@@ -72,6 +72,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
@@ -267,6 +268,115 @@ final class NBTEditorPanelTest {
         ioExecutor.runAll();
         flushEdt();
         assertEquals(NBTEditorStatus.CLOSED, controller.snapshot().status());
+    }
+
+    /// Coalesces busy routes and prevents a stale confirmation from overtaking a reentrant newer route.
+    @Test
+    void opensOnlyTheLatestRouteRequestAfterBusyEditing() throws Exception {
+        Path source = temporaryDirectory.resolve("busy-source.dat");
+        Path superseded = temporaryDirectory.resolve("superseded.dat");
+        Path pending = temporaryDirectory.resolve("pending.dat");
+        Path expected = temporaryDirectory.resolve("reentrant-latest.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        writeTag(superseded, new CompoundTag().addInt("value", 2));
+        writeTag(pending, new CompoundTag().addInt("value", 3));
+        writeTag(expected, new CompoundTag().addInt("value", 4));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        List<Path> openingPaths = new ArrayList<>();
+        controller.subscribe(change -> {
+            @Nullable NBTEditorSnapshot current = change.currentValue();
+            if (current != null && current.status() == NBTEditorStatus.OPENING && current.file() != null) {
+                openingPaths.add(current.file());
+            }
+        });
+        RecordingInteractions interactions = new RecordingInteractions(source);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                interactions,
+                () -> { }));
+        try {
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            flushEdt();
+
+            onEdt(() -> {
+                JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+                NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+                tree.setSelectionPath(model.pathForAddress(List.of(0)));
+                JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
+                value.setText("4");
+                findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
+                assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
+                panel.open(superseded);
+                panel.open(pending.getParent().resolve("child").resolve("..").resolve(pending.getFileName()));
+            });
+            assertEquals(0, interactions.discardConfirmations);
+            interactions.discardConfirmationAction = () -> panel.open(expected);
+
+            ioExecutor.runNext();
+            awaitControllerStatus(controller, NBTEditorStatus.OPENING);
+            assertEquals(2, interactions.discardConfirmations);
+            ioExecutor.awaitPendingCount(1);
+            assertEquals(1, ioExecutor.pendingCount());
+
+            ioExecutor.runNext();
+            flushEdt();
+            assertEquals(expected.toAbsolutePath().normalize(), controller.snapshot().file());
+            assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
+            assertEquals(2, interactions.discardConfirmations);
+            assertEquals(4, ioExecutor.submissionCount());
+            assertEquals(List.of(source.toAbsolutePath().normalize(), expected.toAbsolutePath().normalize()),
+                    openingPaths);
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            flushEdt();
+        }
+    }
+
+    /// Discards a retained route request when the panel closes during controller work.
+    @Test
+    void doesNotOpenARetainedRouteAfterClose() throws Exception {
+        Path source = temporaryDirectory.resolve("closing-source.dat");
+        Path retained = temporaryDirectory.resolve("retained.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        writeTag(retained, new CompoundTag().addInt("value", 2));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        RecordingInteractions interactions = new RecordingInteractions(source);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                interactions,
+                () -> { }));
+        onEdt(() -> panel.open(source));
+        ioExecutor.runNext();
+        flushEdt();
+
+        onEdt(() -> {
+            JTree tree = findNamed(panel, "nbtEditorTree", JTree.class);
+            NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
+            tree.setSelectionPath(model.pathForAddress(List.of(0)));
+            JTextPane value = findNamed(panel, "nbtEditorValue", JTextPane.class);
+            value.setText("3");
+            findNamed(panel, "nbtEditorApply", AbstractButton.class).doClick();
+            assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
+            panel.open(retained);
+        });
+        assertEquals(2, ioExecutor.submissionCount());
+
+        panel.close();
+        ioExecutor.runAll();
+        flushEdt();
+        assertEquals(NBTEditorStatus.CLOSED, controller.snapshot().status());
+        assertEquals(0, interactions.discardConfirmations);
+        assertEquals(3, ioExecutor.submissionCount());
     }
 
     /// Prevents accidental classpath image reads from being moved back onto the EDT.
@@ -1298,11 +1408,15 @@ final class NBTEditorPanelTest {
         /// FIFO of submitted blocking operations.
         private final BlockingQueue<Runnable> commands = new LinkedBlockingQueue<>();
 
+        /// Total operations submitted over this executor's lifetime.
+        private final AtomicInteger submissions = new AtomicInteger();
+
         /// Queues one operation.
         ///
         /// @param command submitted operation
         @Override
         public void execute(Runnable command) {
+            submissions.incrementAndGet();
             commands.add(command);
         }
 
@@ -1311,6 +1425,13 @@ final class NBTEditorPanelTest {
         /// @return queued count
         private int pendingCount() {
             return commands.size();
+        }
+
+        /// Returns the total operation count submitted so far.
+        ///
+        /// @return submitted operation count
+        private int submissionCount() {
+            return submissions.get();
         }
 
         /// Waits until at least the requested number of operations has been submitted.
@@ -1356,6 +1477,12 @@ final class NBTEditorPanelTest {
         /// Whether dirty-document replacement is confirmed.
         private boolean confirmDiscard = true;
 
+        /// Number of dirty-document replacement confirmations requested.
+        private int discardConfirmations;
+
+        /// One-shot action invoked inside dirty confirmation to model a nested EDT event, or `null`.
+        private @Nullable Runnable discardConfirmationAction;
+
         /// Whether destructive chunk-root clearing is confirmed.
         private boolean confirmClearChunk;
 
@@ -1395,6 +1522,12 @@ final class NBTEditorPanelTest {
         @Override
         public boolean confirmDiscardChanges(Path currentFile) {
             Objects.requireNonNull(currentFile, "currentFile");
+            discardConfirmations++;
+            @Nullable Runnable action = discardConfirmationAction;
+            discardConfirmationAction = null;
+            if (action != null) {
+                action.run();
+            }
             return confirmDiscard;
         }
 

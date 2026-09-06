@@ -558,7 +558,10 @@ public final class NBTDocumentService {
             } catch (IOException | RuntimeException | Error failure) {
                 if (replacement != null && !installed) {
                     SESSIONS.remove(replacement, this);
-                    closeAfterCancelledOpen(replacement);
+                    @Nullable Throwable cleanupFailure = closeAfterCancelledOpen(replacement);
+                    if (cleanupFailure != null && cleanupFailure != failure) {
+                        failure.addSuppressed(cleanupFailure);
+                    }
                 }
                 throw failure;
             }
@@ -847,7 +850,9 @@ public final class NBTDocumentService {
                 }
                 closeRequested = true;
                 physicalCloseObserved = true;
-                terminalFailure = mergeFailures(replacementCloseFailure, failure);
+                terminalFailure = failure == null
+                        ? replacementCloseFailure
+                        : mergeFailures(replacementCloseFailure, failure);
                 replacementCloseFailure = null;
                 physicalCloseFailure = terminalFailure;
                 tail = operationTail;

@@ -285,20 +285,27 @@ final class NBTBackendTest {
         assertTrue(taskStopped.await(5L, TimeUnit.SECONDS));
     }
 
-    /// Reopens a managed document under its existing lease without waiting behind the old handle.
+    /// Reopens under the existing lease without admitting a competing same-file session between handles.
     @Test
     void reloadReusesSessionWithoutSelfDeadlock() throws Exception {
         Path source = temporaryDirectory.resolve("reload-level.dat");
         writeTag(source, NBTFileEncoding.RAW, sampleRoot());
         NBTDocumentService service = new NBTDocumentService(Runnable::run);
+        NBTDocumentService competingService = new NBTDocumentService(Runnable::run);
         NBTDocument original = service.open(source).get(5L, TimeUnit.SECONDS);
+        CompletableFuture<NBTDocument> waiting = competingService.open(source);
+        assertThrows(TimeoutException.class, () -> waiting.get(200L, TimeUnit.MILLISECONDS));
 
         NBTDocument replacement = service.reload(original).get(5L, TimeUnit.SECONDS);
 
         assertNotSame(original, replacement);
         assertTrue(original.isClosed());
         assertFalse(replacement.isClosed());
+        assertThrows(TimeoutException.class, () -> waiting.get(200L, TimeUnit.MILLISECONDS));
         replacement.close();
+        NBTDocument competing = waiting.get(5L, TimeUnit.SECONDS);
+        assertFalse(competing.isClosed());
+        competing.close();
     }
 
     /// A cancelled queued reload leaves the current session open and usable instead of discarding its recovery state.
