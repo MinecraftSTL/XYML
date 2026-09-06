@@ -285,6 +285,50 @@ final class NBTBackendTest {
         assertTrue(taskStopped.await(5L, TimeUnit.SECONDS));
     }
 
+    /// Reopens a managed document under its existing lease without waiting behind the old handle.
+    @Test
+    void reloadReusesSessionWithoutSelfDeadlock() throws Exception {
+        Path source = temporaryDirectory.resolve("reload-level.dat");
+        writeTag(source, NBTFileEncoding.RAW, sampleRoot());
+        NBTDocumentService service = new NBTDocumentService(Runnable::run);
+        NBTDocument original = service.open(source).get(5L, TimeUnit.SECONDS);
+
+        NBTDocument replacement = service.reload(original).get(5L, TimeUnit.SECONDS);
+
+        assertNotSame(original, replacement);
+        assertTrue(original.isClosed());
+        assertFalse(replacement.isClosed());
+        replacement.close();
+    }
+
+    /// A cancelled queued reload leaves the current session open and usable instead of discarding its recovery state.
+    @Test
+    void cancelledReloadKeepsOriginalSession() throws Exception {
+        Path source = temporaryDirectory.resolve("cancelled-reload-level.dat");
+        writeTag(source, NBTFileEncoding.RAW, sampleRoot());
+        ManualExecutor executor = new ManualExecutor();
+        NBTDocumentService service = new NBTDocumentService(executor);
+        CompletableFuture<NBTDocument> opening = service.open(source);
+        executor.runNext();
+        NBTDocument original = opening.get(5L, TimeUnit.SECONDS);
+
+        CompletableFuture<NBTDocument> reload = service.reload(original);
+        Runnable reloadCommand = executor.takeNext();
+        assertTrue(reload.cancel(false));
+        reloadCommand.run();
+
+        assertTrue(reload.isCancelled());
+        assertFalse(original.isClosed());
+        setScalar(original.editor(), NBTAddress.root().appendName("value"), "2");
+        CompletableFuture<Void> save = service.save(original);
+        executor.runNext();
+        save.get(5L, TimeUnit.SECONDS);
+        CompletableFuture<Void> close = service.close(original);
+        executor.runNext();
+        close.get(5L, TimeUnit.SECONDS);
+        assertTrue(original.isClosed());
+    }
+
     /// Serializes distinct region files in one directory because their external companions share that directory.
     @Test
     void serializesRegionDirectorySessionsForCompanionSafety() throws Exception {

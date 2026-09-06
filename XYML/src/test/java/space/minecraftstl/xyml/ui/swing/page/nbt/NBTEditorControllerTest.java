@@ -39,10 +39,8 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Objects;
-import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -58,6 +56,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -85,7 +84,7 @@ final class NBTEditorControllerTest {
         ioExecutor.awaitPendingCount(1);
         ioExecutor.runNext();
         assertEquals(NBTEditorStatus.OPENING, controller.snapshot().status());
-        assertEquals(1, ui.pendingCount());
+        ui.awaitPendingCount(1);
         ui.runNext();
         assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
 
@@ -156,7 +155,7 @@ final class NBTEditorControllerTest {
 
         ioExecutor.runNext();
         assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
-        assertEquals(1, ui.pendingCount());
+        ui.awaitPendingCount(1);
         ui.runNext();
 
         assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
@@ -238,7 +237,7 @@ final class NBTEditorControllerTest {
         AtomicReference<CompletableFuture<NBTEditResult>> completed = new AtomicReference<>();
         ui.run(() -> completed.set(second.applyValueEditAsync(child(second, 0), "3")));
         ioExecutor.runNext();
-        assertEquals(1, ui.pendingCount());
+        ui.awaitPendingCount(1);
         ui.run(second::close);
         ui.runAll();
         ioExecutor.runAll();
@@ -650,6 +649,79 @@ final class NBTEditorControllerTest {
                 NBTEditorController.retainedOpenFailureStatus(NBTEditorStatus.COMMIT_UNCERTAIN, false));
     }
 
+    /// Cancelling a queued reload to open another file preserves the old session when the replacement open fails.
+    @Test
+    void cancelledReloadPreservesRecoveryDocumentAfterReplacementFailure() throws Exception {
+        Path source = temporaryDirectory.resolve("reload-recovery.dat");
+        Path missing = temporaryDirectory.resolve("missing-replacement.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualUiDispatcher ui = new ManualUiDispatcher();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                ui);
+        ui.run(() -> controller.open(source));
+        ioExecutor.runNext();
+        ui.runNext();
+        NBTDocument original = requiredDocument(controller);
+
+        ui.run(controller::reload);
+        ioExecutor.awaitPendingCount(1);
+        ui.run(() -> controller.open(missing));
+        ioExecutor.runNext();
+        ioExecutor.runNext();
+        ui.runAll();
+
+        assertEquals(NBTEditorStatus.ERROR, controller.snapshot().status());
+        assertSame(original, controller.snapshot().document());
+        assertFalse(original.isClosed());
+        assertEquals(1, rootSnapshot(controller).getInt("value"));
+        ui.run(controller::close);
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runAll();
+    }
+
+    /// Defers a new open until an already committed reload is visible and retains that replacement on failure.
+    @Test
+    void defersOpenBehindCommittedReload() throws Exception {
+        Path source = temporaryDirectory.resolve("committed-reload.dat");
+        Path missing = temporaryDirectory.resolve("missing-after-commit.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualUiDispatcher ui = new ManualUiDispatcher();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                ui);
+        ui.run(() -> controller.open(source));
+        ioExecutor.runNext();
+        ui.runNext();
+        NBTDocument original = requiredDocument(controller);
+        writeTag(source, new CompoundTag().addInt("value", 2));
+
+        ui.run(controller::reload);
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runNext();
+        ui.awaitPendingCount(1);
+        ui.run(() -> controller.open(missing));
+        assertSame(original, controller.snapshot().document());
+
+        ui.runNext();
+        NBTDocument replacement = requiredDocument(controller);
+        assertNotSame(original, replacement);
+        assertEquals(2, ((CompoundTag) replacement.rootSnapshot()).getInt("value"));
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runAll();
+        ui.runAll();
+
+        assertEquals(NBTEditorStatus.ERROR, controller.snapshot().status());
+        assertSame(replacement, controller.snapshot().document());
+        assertFalse(replacement.isClosed());
+        assertTrue(original.isClosed());
+        ui.run(controller::close);
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runAll();
+    }
+
     /// Isolates ordinary listener failures after a committed edit and still notifies later listeners.
     @Test
     void preservesCommittedResultWhenAStateListenerFails() throws Exception {
@@ -721,7 +793,11 @@ final class NBTEditorControllerTest {
 
         ui.run(() -> controller.open(first));
         ui.run(() -> controller.open(second));
-        ioExecutor.runAll();
+        // The replacement cancels the first session before its resource-resolution callback can enqueue a command;
+        // only the surviving second open reaches this caller-owned executor.
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runNext();
+        ui.awaitPendingCount(1);
         ui.runAll();
         assertEquals(second.toAbsolutePath().normalize(), controller.snapshot().file());
         CompoundTag loaded = (CompoundTag) requiredDocument(controller).rootSnapshot();
@@ -845,8 +921,11 @@ final class NBTEditorControllerTest {
     /// Deterministic toolkit-neutral UI queue that exposes its dispatch context to the controller.
     @NotNullByDefault
     private static final class ManualUiDispatcher implements UiDispatcher {
+        /// Maximum time a test waits for a background completion to enqueue a UI callback.
+        private static final long CALLBACK_TIMEOUT_SECONDS = 5L;
+
         /// FIFO of asynchronously dispatched UI operations.
-        private final Queue<Runnable> commands = new ArrayDeque<>();
+        private final BlockingQueue<Runnable> commands = new LinkedBlockingQueue<>();
 
         /// Whether the current test call is executing in the simulated UI context.
         private boolean dispatchThread;
@@ -898,10 +977,30 @@ final class NBTEditorControllerTest {
             return commands.size();
         }
 
+        /// Waits until at least the requested number of callbacks has been submitted.
+        ///
+        /// @param expected minimum callback count
+        private void awaitPendingCount(int expected) {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(CALLBACK_TIMEOUT_SECONDS);
+            while (commands.size() < expected && System.nanoTime() < deadline) {
+                Thread.yield();
+            }
+            assertTrue(commands.size() >= expected,
+                    () -> "Timed out waiting for " + expected + " UI callback(s)");
+        }
+
         /// Runs the next queued callback in the simulated UI context.
         private void runNext() {
-            Runnable command = commands.remove();
-            run(command);
+            try {
+                Runnable command = commands.poll(CALLBACK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (command == null) {
+                    throw new AssertionError("Timed out waiting for a UI callback");
+                }
+                run(command);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for a UI callback", interrupted);
+            }
         }
 
         /// Drains every queued callback.

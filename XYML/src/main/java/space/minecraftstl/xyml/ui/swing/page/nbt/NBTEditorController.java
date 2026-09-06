@@ -72,6 +72,9 @@ public final class NBTEditorController implements AutoCloseable {
     /// Current open, edit, or save future, or `null` while idle.
     private @Nullable CompletableFuture<?> activeOperation;
 
+    /// Latest open request deferred behind an operation that has already crossed its commit point.
+    private @Nullable Path deferredOpen;
+
     /// Detached in-process clipboard tag, or `null` before a successful copy.
     private @Nullable Tag clipboard;
 
@@ -146,7 +149,12 @@ public final class NBTEditorController implements AutoCloseable {
         ensureOpen();
         Path target = Objects.requireNonNull(file, "file").toAbsolutePath().normalize();
         NBTEditorSnapshot previous = snapshot;
-        long operation = beginOperation();
+        if (!tryBeginOperation()) {
+            deferredOpen = target;
+            return;
+        }
+        deferredOpen = null;
+        long operation = operationRevision;
         publish(new NBTEditorSnapshot(
                 NBTEditorStatus.OPENING,
                 target,
@@ -174,7 +182,7 @@ public final class NBTEditorController implements AutoCloseable {
                 previous.dirty(),
                 null,
                 nextRevision()));
-        startOpen(operation, previous, file);
+        startReload(operation, previous, file);
     }
 
     /// Saves the current dirty document with library-owned conflict and publication checks.
@@ -729,10 +737,35 @@ public final class NBTEditorController implements AutoCloseable {
     /// @param target normalized source
     private void startOpen(long operation, NBTEditorSnapshot previous, Path target) {
         try {
-            CompletableFuture<NBTDocument> future = documentService.open(target);
+            @Nullable NBTDocument previousDocument = previous.document();
+            CompletableFuture<NBTDocument> future = previousDocument != null
+                    && previousDocument.file().equals(target)
+                    ? documentService.reload(previousDocument)
+                    : documentService.open(target);
             activeOperation = future;
             future.whenComplete((@Nullable NBTDocument document, @Nullable Throwable failure) ->
                     uiDispatcher.dispatch(() -> finishOpen(operation, previous, target, document, failure)));
+        } catch (RuntimeException failure) {
+            finishOpen(operation, previous, target, null, failure);
+        }
+    }
+
+    /// Starts an in-session reload while retaining the old document until its replacement is ready.
+    ///
+    /// @param operation operation identity
+    /// @param previous state restored on failure
+    /// @param target normalized source
+    private void startReload(long operation, NBTEditorSnapshot previous, Path target) {
+        @Nullable NBTDocument document = previous.document();
+        if (document == null) {
+            startOpen(operation, previous, target);
+            return;
+        }
+        try {
+            CompletableFuture<NBTDocument> future = documentService.reload(document);
+            activeOperation = future;
+            future.whenComplete((@Nullable NBTDocument replacement, @Nullable Throwable failure) ->
+                    uiDispatcher.dispatch(() -> finishOpen(operation, previous, target, replacement, failure)));
         } catch (RuntimeException failure) {
             finishOpen(operation, previous, target, null, failure);
         }
@@ -770,10 +803,14 @@ public final class NBTEditorController implements AutoCloseable {
                     document.isDirty(),
                     null,
                     nextRevision()));
+            startDeferredOpen();
             return;
         }
         release(document);
         @Nullable NBTDocument retainedDocument = previous.document();
+        if (retainedDocument != null && retainedDocument.isClosed()) {
+            retainedDocument = null;
+        }
         Path visibleFile = retainedDocument == null ? target : retainedDocument.file();
         publish(new NBTEditorSnapshot(
                 retainedOpenFailureStatus(previous.status(), retainedDocument != null),
@@ -782,6 +819,7 @@ public final class NBTEditorController implements AutoCloseable {
                 retainedDocument != null && previous.dirty(),
                 failureMessage(failure),
                 nextRevision()));
+        startDeferredOpen();
     }
 
     /// Completes one save and preserves late dirty edits through the editor savepoint.
@@ -809,6 +847,7 @@ public final class NBTEditorController implements AutoCloseable {
                     dirty,
                     null,
                     nextRevision()));
+            startDeferredOpen();
             return;
         }
         Throwable cause = unwrap(failure);
@@ -819,6 +858,7 @@ public final class NBTEditorController implements AutoCloseable {
                 dirty,
                 failureMessage(cause),
                 nextRevision()));
+        startDeferredOpen();
     }
 
     /// Schedules one node mutation without running deep-copy or validation work on the UI thread.
@@ -1011,6 +1051,7 @@ public final class NBTEditorController implements AutoCloseable {
                     nextRevision()));
         }
         delivery.complete(completed);
+        startDeferredOpen();
     }
 
     /// Locks an editor document after a fatal background failure and propagates the original error.
@@ -1037,6 +1078,7 @@ public final class NBTEditorController implements AutoCloseable {
                 failureMessage(failure),
                 nextRevision()));
         delivery.completeExceptionally(failure);
+        startDeferredOpen();
     }
 
     /// Applies one current-node editor operation and publishes only after it commits.
@@ -1201,13 +1243,32 @@ public final class NBTEditorController implements AutoCloseable {
     ///
     /// @return new operation identity
     private long beginOperation() {
-        @Nullable CompletableFuture<?> current = activeOperation;
-        activeOperation = null;
-        operationRevision++;
-        if (current != null) {
-            current.cancel(true);
+        if (!tryBeginOperation()) {
+            throw new IllegalStateException("Cannot replace an NBT operation after its commit point");
         }
         return operationRevision;
+    }
+
+    /// Attempts to start replacement work without invalidating a committed result awaiting UI reconciliation.
+    ///
+    /// @return whether a new operation identity was allocated
+    private boolean tryBeginOperation() {
+        @Nullable CompletableFuture<?> current = activeOperation;
+        if (current != null && !current.cancel(true)) {
+            return false;
+        }
+        activeOperation = null;
+        operationRevision++;
+        return true;
+    }
+
+    /// Starts the latest open request deferred behind a committed operation, if any.
+    private void startDeferredOpen() {
+        @Nullable Path target = deferredOpen;
+        deferredOpen = null;
+        if (target != null && !closed) {
+            open(target);
+        }
     }
 
     /// Returns whether a completion still owns the visible state.
@@ -1242,6 +1303,7 @@ public final class NBTEditorController implements AutoCloseable {
         }
         closed = true;
         operationRevision++;
+        deferredOpen = null;
         @Nullable CompletableFuture<?> current = activeOperation;
         activeOperation = null;
         if (current != null) {

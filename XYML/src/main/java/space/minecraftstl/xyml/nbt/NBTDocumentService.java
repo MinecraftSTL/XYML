@@ -47,6 +47,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
@@ -97,6 +98,25 @@ public final class NBTDocumentService {
     public CompletableFuture<NBTDocument> open(Path file) {
         Path normalized = Objects.requireNonNull(file, "file").toAbsolutePath().normalize();
         return new DocumentSession(normalized).start();
+    }
+
+    /// Reopens a document within its existing resource-owning session.
+    ///
+    /// The replacement is opened while the current session lease remains held, then the session switches to the new
+    /// document and closes the old handle. This is the resource-safe form of an editor reload: an independent
+    /// [#open(Path)] for the same file must still wait until the session closes, but a replacement cannot deadlock
+    /// behind the document it is about to replace. When the document is not managed by this service, this method
+    /// opens a new independent session using the document's normalized source path.
+    ///
+    /// @param document currently open document
+    /// @return cancellable future containing the replacement document
+    public CompletableFuture<NBTDocument> reload(NBTDocument document) {
+        NBTDocument selected = Objects.requireNonNull(document, "document");
+        @Nullable DocumentSession session = SESSIONS.get(selected);
+        if (session != null) {
+            return session.reload(selected, ioExecutor);
+        }
+        return open(selected.file());
     }
 
     /// Saves one document through its owning session task.
@@ -201,7 +221,8 @@ public final class NBTDocumentService {
     /// Selects the semantic resource set for one NBT file transaction.
     ///
     /// Region publication is directory-scoped because the library may create or replace files whose names are not
-    /// known before reading the region header. Standalone publication names every deterministic target and backup.
+    /// known before reading the region header. Standalone publication names every deterministic source and backup;
+    /// its temporary sibling is private to that exact publication transaction.
     ///
     /// @param file normalized NBT path
     /// @param fileType filename-derived type
@@ -213,16 +234,24 @@ public final class NBTDocumentService {
             @Nullable NBTSaveOptions options) {
         ArrayList<TaskResource> resources = new ArrayList<>();
         if (fileType == NBTFileType.ANVIL || fileType == NBTFileType.REGION) {
-            @Nullable Path parent = file.getParent();
-            if (parent != null) {
-                resources.add(TaskResource.nbtDirectory(parent));
-            }
+            addParentDirectoryResource(resources, file);
         }
         resources.add(TaskResource.nbtFile(file));
         if (options != null && options.backupPath() != null) {
             resources.add(TaskResource.nbtFile(options.backupPath()));
         }
         return List.copyOf(resources);
+    }
+
+    /// Adds the directory containing one publication path when it has a parent.
+    ///
+    /// @param resources mutable resource accumulator
+    /// @param file publication path
+    private static void addParentDirectoryResource(ArrayList<TaskResource> resources, Path file) {
+        @Nullable Path parent = file.getParent();
+        if (parent != null) {
+            resources.add(TaskResource.nbtDirectory(parent));
+        }
     }
 
     /// Applies a non-empty immutable resource list to a task.
@@ -357,6 +386,13 @@ public final class NBTDocumentService {
         /// Open document, or null before publication/after closure.
         private @Nullable NBTDocument document;
 
+        /// Document whose physical close call is currently in progress.
+        ///
+        /// A replacement closes its former handle after the new handle becomes current. Tracking the explicit close
+        /// target lets the callback distinguish that stale replacement from a service-owned close whose current pointer
+        /// was cleared before invoking the library.
+        private @Nullable NBTDocument closingDocument;
+
         /// Whether cancellation or close has been requested.
         private boolean closeRequested;
 
@@ -368,6 +404,12 @@ public final class NBTDocumentService {
 
         /// Whether the library session has already reported physical closure.
         private boolean physicalCloseObserved;
+
+        /// Cleanup failure from an old handle which was replaced successfully.
+        ///
+        /// The replacement remains usable, but the failure is retained and reported together with the eventual session
+        /// close instead of being discarded by the reload boundary.
+        private @Nullable Throwable replacementCloseFailure;
 
         /// Physical close failure reported by the library session, or null after a successful close.
         private @Nullable Throwable physicalCloseFailure;
@@ -423,6 +465,103 @@ public final class NBTDocumentService {
                 selected.saveFromService(options);
                 return null;
             }, operationExecutor);
+        }
+
+        /// Reopens the current source under this session's already-held resource lease.
+        ///
+        /// The old document remains available if opening the replacement fails. On success the current pointer is
+        /// switched before the old handle is closed, so its close callback is treated as a non-terminal replacement.
+        ///
+        /// @param selected document expected to be the current session document
+        /// @param operationExecutor executor for blocking replacement work
+        /// @return cancellable replacement result
+        private CompletableFuture<NBTDocument> reload(NBTDocument selected, Executor operationExecutor) {
+            Objects.requireNonNull(selected, "document");
+            Objects.requireNonNull(operationExecutor, "operationExecutor");
+            ReloadFuture visible = new ReloadFuture();
+            CompletableFuture<NBTDocument> operation = enqueue(
+                    () -> reloadOnExecutor(selected, visible),
+                    operationExecutor);
+            operation.whenComplete((@Nullable NBTDocument replacement, @Nullable Throwable failure) -> {
+                if (failure != null) {
+                    visible.completeFailure(failure);
+                } else if (replacement == null) {
+                    visible.completeFailure(new IllegalStateException("NBT reload produced no replacement document"));
+                } else if (!visible.completeCommitted(replacement)) {
+                    closeReplacementIfCurrent(replacement, operationExecutor);
+                }
+            });
+            return visible;
+        }
+
+        /// Closes a replacement whose caller-visible future was cancelled after installation.
+        ///
+        /// @param replacement replacement document
+        /// @param operationExecutor executor preferred for physical closure
+        private void closeReplacementIfCurrent(NBTDocument replacement, Executor operationExecutor) {
+            synchronized (operationLock) {
+                if (document != replacement || closeRequested) {
+                    return;
+                }
+            }
+            close(operationExecutor);
+        }
+
+        /// Opens and installs one replacement document without releasing the session lease.
+        ///
+        /// @param selected current document
+        /// @param visible caller-visible result which arbitrates cancellation against replacement installation
+        /// @return newly opened document
+        private NBTDocument reloadOnExecutor(NBTDocument selected, ReloadFuture visible) throws IOException {
+            synchronized (operationLock) {
+                if (closeRequested || document != selected || physicalCloseObserved || visible.isCancelled()) {
+                    throw new CancellationException("NBT document reload was cancelled");
+                }
+            }
+
+            @Nullable NBTDocument replacement = null;
+            boolean installed = false;
+            try {
+                NBTDocument created = NBTDocumentService.openOnExecutor(path);
+                replacement = created;
+                created.setClosedListener(failure -> documentClosed(created, failure));
+                SESSIONS.put(created, this);
+                synchronized (operationLock) {
+                    if (closeRequested
+                            || document != selected
+                            || physicalCloseObserved
+                            || !visible.beginCommit()) {
+                        throw new CancellationException("NBT document reload was cancelled");
+                    }
+                    document = created;
+                    installed = true;
+                }
+                try {
+                    selected.close();
+                } catch (IOException | RuntimeException closeFailure) {
+                    // The old handle is already marked closed by NBTDocument. Preserve the usable replacement and
+                    // retain the cleanup failure for the session's eventual close result.
+                    synchronized (operationLock) {
+                        replacementCloseFailure = mergeFailures(replacementCloseFailure, closeFailure);
+                    }
+                    LOG.warning("NBT reload replaced a document whose old handle reported a close failure",
+                            closeFailure);
+                } catch (Error closeFailure) {
+                    // Fatal failures still propagate, but queue replacement cleanup so the session lease cannot leak.
+                    synchronized (operationLock) {
+                        replacementCloseFailure = mergeFailures(replacementCloseFailure, closeFailure);
+                    }
+                    close(ioExecutor);
+                    throw closeFailure;
+                }
+                return created;
+            } catch (IOException | RuntimeException | Error failure) {
+                if (replacement != null && !installed) {
+                    SESSIONS.remove(replacement, this);
+                    closeAfterCancelledOpen(replacement);
+                }
+                throw failure;
+            }
         }
 
         /// Requests idempotent closure and returns a view that cannot cancel the internal close task.
@@ -658,6 +797,7 @@ public final class NBTDocumentService {
             synchronized (operationLock) {
                 selected = document;
                 document = null;
+                closingDocument = selected;
                 alreadyClosed = physicalCloseObserved;
             }
             if (selected == null) {
@@ -669,7 +809,15 @@ public final class NBTDocumentService {
             try {
                 selected.close();
             } catch (Throwable failure) {
-                closeFailure(failure);
+                boolean observed;
+                synchronized (operationLock) {
+                    observed = physicalCloseObserved;
+                }
+                if (!observed) {
+                    // NBTDocument normally reports the physical outcome through its listener before rethrowing. Only
+                    // synthesize terminal failure when that callback itself could not record the close.
+                    closeFailure(failure);
+                }
             }
         }
 
@@ -680,22 +828,52 @@ public final class NBTDocumentService {
         private void documentClosed(NBTDocument closedDocument, @Nullable Throwable failure) {
             SESSIONS.remove(closedDocument, this);
             CompletableFuture<Void> tail;
+            @Nullable Throwable terminalFailure;
             synchronized (operationLock) {
+                if (document != closedDocument && closingDocument != closedDocument) {
+                    // A replacement or a cancelled replacement closes a stale handle after the new/current pointer has
+                    // moved. That callback never terminates the session lease, but its physical failure still belongs
+                    // to the eventual session-close result.
+                    if (failure != null) {
+                        replacementCloseFailure = mergeFailures(replacementCloseFailure, failure);
+                    }
+                    return;
+                }
                 if (document == closedDocument) {
                     document = null;
                 }
+                if (closingDocument == closedDocument) {
+                    closingDocument = null;
+                }
                 closeRequested = true;
                 physicalCloseObserved = true;
-                physicalCloseFailure = failure;
+                terminalFailure = mergeFailures(replacementCloseFailure, failure);
+                replacementCloseFailure = null;
+                physicalCloseFailure = terminalFailure;
                 tail = operationTail;
             }
             tail.whenComplete((@Nullable Void ignored, @Nullable Throwable operationFailure) -> {
-                if (failure == null) {
+                if (terminalFailure == null) {
                     terminal.complete(closedDocument);
                 } else {
-                    terminal.completeExceptionally(failure);
+                    terminal.completeExceptionally(terminalFailure);
                 }
             });
+        }
+
+        /// Retains two cleanup failures without replacing the first failure identity.
+        ///
+        /// @param first earlier failure, or null
+        /// @param second later failure
+        /// @return first failure with the later one suppressed, or the later failure when no first exists
+        private static @Nullable Throwable mergeFailures(@Nullable Throwable first, Throwable second) {
+            if (first == null) {
+                return second;
+            }
+            if (first != second) {
+                first.addSuppressed(second);
+            }
+            return first;
         }
 
         /// Completes a close result from the physical close outcome without running callbacks under operationLock.
@@ -753,14 +931,12 @@ public final class NBTDocumentService {
                     closeFailure = physicalCloseFailure;
                 }
                 if (!openResult.isDone() && completedDocument != null) {
-                    openResult.complete(completedDocument);
+                    if (!openResult.complete(completedDocument)) {
+                        close(ioExecutor);
+                    }
                 }
                 if (result != null) {
-                    if (closeFailure == null) {
-                        result.complete(null);
-                    } else {
-                        result.completeExceptionally(closeFailure);
-                    }
+                    completeCloseResult(result, closeFailure);
                 }
                 return;
             }
@@ -805,10 +981,17 @@ public final class NBTDocumentService {
 
         /// Completes close and terminal futures after a scheduling or close failure.
         private void closeFailure(Throwable failure) {
-            @Nullable CompletableFuture<Void> result = closeResult;
-            terminal.completeExceptionally(failure);
+            @Nullable CompletableFuture<Void> result;
+            Throwable terminalFailure;
+            synchronized (operationLock) {
+                terminalFailure = mergeFailures(replacementCloseFailure, Objects.requireNonNull(failure, "failure"));
+                replacementCloseFailure = null;
+                physicalCloseFailure = terminalFailure;
+                result = closeResult;
+            }
+            terminal.completeExceptionally(terminalFailure);
             if (result != null) {
-                completeOnContinuation(() -> result.completeExceptionally(failure));
+                completeOnContinuation(() -> result.completeExceptionally(terminalFailure));
             }
         }
 
@@ -864,6 +1047,73 @@ public final class NBTDocumentService {
                 cancellationAction.run();
             }
             return changed;
+        }
+    }
+
+    /// Caller-visible reload result with an atomic cancellation-versus-installation commit point.
+    ///
+    /// Once the worker claims replacement installation, cancellation returns false and the future is completed with
+    /// that committed replacement or its installation failure. If cancellation wins first, the worker leaves the old
+    /// document installed and closes only the uncommitted replacement.
+    @NotNullByDefault
+    private static final class ReloadFuture extends CompletableFuture<NBTDocument> {
+        /// Initial state in which either cancellation or the reload worker may claim completion.
+        private static final int PENDING = 0;
+
+        /// State owned by the reload worker after it commits to replacement installation.
+        private static final int COMMITTING = 1;
+
+        /// State owned by the caller after successful cancellation.
+        private static final int CANCELLED = 2;
+
+        /// Atomic completion owner state.
+        private final AtomicInteger completionOwner = new AtomicInteger(PENDING);
+
+        /// Claims the replacement commit before changing the current session document.
+        ///
+        /// @return whether installation won the race with cancellation
+        private boolean beginCommit() {
+            return completionOwner.compareAndSet(PENDING, COMMITTING);
+        }
+
+        /// Publishes the replacement after the worker has committed its installation.
+        ///
+        /// @param replacement installed replacement document
+        /// @return whether the caller-visible future accepted the result
+        private boolean completeCommitted(NBTDocument replacement) {
+            if (completionOwner.get() != COMMITTING) {
+                return false;
+            }
+            return super.complete(Objects.requireNonNull(replacement, "replacement"));
+        }
+
+        /// Publishes a failure unless cancellation already owns completion.
+        ///
+        /// A failure after [#beginCommit()] remains authoritative because the old document may already have been
+        /// replaced. A pre-commit failure atomically claims the same completion state before publication.
+        ///
+        /// @param failure reload failure
+        private void completeFailure(Throwable failure) {
+            Throwable selected = Objects.requireNonNull(failure, "failure");
+            int owner = completionOwner.get();
+            if (owner == CANCELLED) {
+                return;
+            }
+            if (owner == PENDING && !completionOwner.compareAndSet(PENDING, COMMITTING)) {
+                if (completionOwner.get() == CANCELLED) {
+                    return;
+                }
+            }
+            super.completeExceptionally(selected);
+        }
+
+        /// Cancels only before the reload worker claims replacement installation.
+        @Override
+        public boolean cancel(boolean mayInterruptIfRunning) {
+            if (!completionOwner.compareAndSet(PENDING, CANCELLED)) {
+                return false;
+            }
+            return super.cancel(mayInterruptIfRunning);
         }
     }
 

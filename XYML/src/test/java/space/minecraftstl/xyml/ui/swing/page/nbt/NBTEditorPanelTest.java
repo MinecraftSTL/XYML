@@ -72,16 +72,15 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Objects;
-import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import java.util.zip.GZIPOutputStream;
 
@@ -346,6 +345,7 @@ final class NBTEditorPanelTest {
             writeTag(source, new CompoundTag().addInt("value", 99));
             onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
             ioExecutor.runNext();
+            awaitControllerStatus(controller, NBTEditorStatus.CONFLICT);
             flushEdt();
             onEdt(() -> {
                 assertEquals(NBTEditorStatus.CONFLICT, controller.snapshot().status());
@@ -356,6 +356,8 @@ final class NBTEditorPanelTest {
             assertEquals(0, ioExecutor.pendingCount());
         } finally {
             panel.close();
+            ioExecutor.runAll();
+            flushEdt();
         }
     }
 
@@ -1109,6 +1111,8 @@ final class NBTEditorPanelTest {
             assertTrue(ImageIO.write(image, "PNG", report.toFile()));
         } finally {
             panel.close();
+            ioExecutor.runAll();
+            flushEdt();
         }
     }
 
@@ -1262,6 +1266,27 @@ final class NBTEditorPanelTest {
     /// Waits until every previously queued EDT callback has run.
     private static void flushEdt() {
         EdtDispatcher.executeAndWait(() -> { });
+    }
+
+    /// Waits for an asynchronous controller transition while keeping the Swing event queue responsive.
+    ///
+    /// @param condition expected state predicate
+    private static void awaitEdtCondition(BooleanSupplier condition) {
+        BooleanSupplier selected = Objects.requireNonNull(condition, "condition");
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5L);
+        while (!selected.getAsBoolean() && System.nanoTime() < deadline) {
+            flushEdt();
+            Thread.yield();
+        }
+        assertTrue(selected.getAsBoolean(), "Timed out waiting for the Swing controller transition");
+    }
+
+    /// Waits for one controller status from a non-EDT test call.
+    ///
+    /// @param controller controller under test
+    /// @param expected expected status
+    private static void awaitControllerStatus(NBTEditorController controller, NBTEditorStatus expected) {
+        awaitEdtCondition(() -> controller.snapshot().status() == expected);
     }
 
     /// Deterministic executor proving when blocking work is allowed to run.
