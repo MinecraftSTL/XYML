@@ -343,8 +343,8 @@ public final class JavaManager {
     /// @param source task whose resources already describe that operation
     /// @param <T> task result type
     /// @return target with the source declaration copied defensively
-    private static <T> Task<T> copyResourceDeclaration(Task<T> target, Task<?> source) {
-        @Unmodifiable List<TaskResource> resources = List.copyOf(source.getResources());
+    static <T> Task<T> copyResourceDeclaration(Task<T> target, Task<?> source) {
+        @Unmodifiable List<TaskResource> resources = List.copyOf(source.getResourceDeclarations());
         TaskResource @Unmodifiable [] additional = resources.subList(1, resources.size())
                 .toArray(TaskResource[]::new);
         return target.setResources(resources.get(0), additional);

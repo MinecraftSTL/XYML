@@ -73,4 +73,20 @@ public final class JavaManagerTaskResourceTest {
         assertFalse(download.getResources().contains(TaskResource.conservative()));
         assertFalse(install.getResources().contains(TaskResource.conservative()));
     }
+
+    /// Resource forwarding preserves a lexical descendant for later symlink and junction identity resolution.
+    @Test
+    public void copiedDeclarationRetainsLexicallyCoveredDescendant() {
+        Path runtime = temporaryDirectory.resolve("runtime");
+        TaskResource boundary = TaskResource.javaRuntime(runtime);
+        TaskResource possibleAlias = TaskResource.configuration(runtime.resolve("linked/settings.json"));
+        Task<String> source = Task.supplyAsync(() -> "source").setResources(boundary, possibleAlias);
+        Task<String> target = Task.supplyAsync(() -> "target");
+
+        JavaManager.copyResourceDeclaration(target, source);
+
+        assertEquals(Set.of(boundary), source.getResources());
+        assertEquals(Set.of(boundary, possibleAlias), source.getResourceDeclarations());
+        assertEquals(source.getResourceDeclarations(), target.getResourceDeclarations());
+    }
 }

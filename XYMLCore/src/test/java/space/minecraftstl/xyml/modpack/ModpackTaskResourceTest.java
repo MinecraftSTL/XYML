@@ -18,9 +18,13 @@
 package space.minecraftstl.xyml.modpack;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.game.DefaultGameRepository;
+import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.curse.CurseModpackProvider;
+import space.minecraftstl.xyml.task.Task;
 import space.minecraftstl.xyml.task.TaskResource;
 
 import java.nio.charset.StandardCharsets;
@@ -29,6 +33,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies precise archive, destination, and configuration resources for generic modpack tasks.
 @NotNullByDefault
@@ -79,5 +84,25 @@ final class ModpackTaskResourceTest {
                         TaskResource.archive(archive),
                         TaskResource.configuration(configuration)),
                 task.getResources());
+    }
+
+    /// Retains a lexical descendant while forwarding declarations so filesystem identity resolution can inspect it.
+    @Test
+    void updateTaskForwardsCoveredDescendantDeclaration() {
+        Path repositoryRoot = temporaryDirectory.resolve("repository");
+        Path externalRoot = temporaryDirectory.resolve("external");
+        Path coveredConfiguration = externalRoot.resolve("settings.json");
+        Task<?> updateTask = Task.completed(null).setResources(
+                TaskResource.gameDirectory(externalRoot),
+                TaskResource.configuration(coveredConfiguration));
+        @Unmodifiable Set<TaskResource> minimized = updateTask.getResources();
+        assertEquals(Set.of(TaskResource.gameDirectory(externalRoot)), minimized);
+
+        ModpackUpdateTask wrapper = new ModpackUpdateTask(
+                new DefaultGameRepository(repositoryRoot),
+                new GameInstanceID("example"),
+                updateTask);
+
+        assertTrue(wrapper.getResourceDeclarations().contains(TaskResource.configuration(coveredConfiguration)));
     }
 }

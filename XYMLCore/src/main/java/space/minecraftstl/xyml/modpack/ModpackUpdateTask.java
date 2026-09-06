@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.modpack;
 
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.task.Task;
@@ -35,9 +36,16 @@ import java.util.Set;
 @NotNullByDefault
 public class ModpackUpdateTask extends Task<Void> {
 
+    /// Repository containing the instance being updated.
     private final DefaultGameRepository repository;
+
+    /// Stable identifier of the instance being updated.
     private final GameInstanceID id;
+
+    /// Format-specific update operation executed after the backup is created.
     private final Task<?> updateTask;
+
+    /// Invocation-specific backup directory used for failure recovery.
     private final Path backupFolder;
 
     /// Creates an update task covering one instance, its effective run tree, and this invocation's backup tree.
@@ -63,7 +71,7 @@ public class ModpackUpdateTask extends Task<Void> {
             }
         }
 
-        Set<TaskResource> updateResources = updateTask.getResources();
+        @Unmodifiable Set<TaskResource> updateResources = updateTask.getResourceDeclarations();
         if (updateResources.equals(Set.of(TaskResource.conservative()))) {
             setResources(TaskResource.gameDirectory(repository.getBaseDirectory()));
         } else {
@@ -77,16 +85,19 @@ public class ModpackUpdateTask extends Task<Void> {
         }
     }
 
+    /// {@inheritDoc}
     @Override
     public Collection<Task<?>> getDependencies() {
         return Collections.singleton(updateTask);
     }
 
+    /// {@inheritDoc}
     @Override
     public void execute() throws Exception {
         FileUtils.copyDirectory(repository.getInstanceRoot(id), backupFolder);
     }
 
+    /// {@inheritDoc}
     @Override
     public boolean doPostExecute() {
         return true;
