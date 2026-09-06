@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.util.gson.JsonSerializable;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.HttpRequest;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
+import space.minecraftstl.xyml.util.io.NoCandidatesException;
 import space.minecraftstl.xyml.util.io.ResponseCodeException;
 
 import java.io.FileNotFoundException;
@@ -164,6 +165,7 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
                 : List.of();
     }
 
+    /// {@inheritDoc}
     @Override
     public SearchResult search(DownloadProvider downloadProvider, String gameVersion, @Nullable RemoteAddonRepository.Category category, int pageOffset, int pageSize, String searchFilter, SortType sort, SortOrder sortOrder) throws IOException {
         if (projectType == null) throw new UnsupportedOperationException();
@@ -208,7 +210,7 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
                 }
             }
 
-            throw exception != null ? exception : new IOException("No candidates found");
+            throw exception != null ? exception : new NoCandidatesException();
         } finally {
             SEMAPHORE.release();
         }
@@ -237,6 +239,7 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
         }
     }
 
+    /// {@inheritDoc}
     @Override
     public RemoteAddon getAddonById(DownloadProvider downloadProvider, String id) throws IOException {
         SEMAPHORE.acquireUninterruptibly();
@@ -262,23 +265,30 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
                 }
             }
 
-            throw exception != null ? exception : new IOException("No candidates found");
+            throw exception != null ? exception : new NoCandidatesException();
         } finally {
             SEMAPHORE.release();
         }
     }
 
+    /// {@inheritDoc}
     @Override
     public RemoteAddon resolveDependency(DownloadProvider downloadProvider, String id) throws IOException {
         try {
             return getAddonById(downloadProvider, id);
-        } catch (ResponseCodeException e) {
-            if (e.getResponseCode() == 502 || e.getResponseCode() == 404) {
+        } catch (IOException e) {
+            if (e instanceof NoCandidatesException) throw e;
+            List<Throwable> l = new ArrayList<>(List.of(e));
+            l.addAll(List.of(e.getSuppressed()));
+            if (l.stream().allMatch(t -> {
+                var cause = t.getCause();
+                return cause == null
+                        || cause instanceof FileNotFoundException
+                        || cause instanceof ResponseCodeException rce && rce.getResponseCode() == 404;
+            })) { // Which means the file does not exist
                 return RemoteAddon.BROKEN;
             }
             throw e;
-        } catch (FileNotFoundException e) {
-            return RemoteAddon.BROKEN;
         }
     }
 
@@ -287,6 +297,7 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
         throw new UnsupportedOperationException();
     }
 
+    /// {@inheritDoc}
     @Override
     public Stream<RemoteAddon.Version> getRemoteVersionsById(DownloadProvider downloadProvider, String id) throws IOException {
         SEMAPHORE.acquireUninterruptibly();
@@ -314,7 +325,7 @@ public final class ModrinthRemoteAddonRepository implements RemoteAddonRepositor
                 }
             }
 
-            throw exception != null ? exception : new IOException("No candidates found");
+            throw exception != null ? exception : new NoCandidatesException();
         } finally {
             SEMAPHORE.release();
         }
