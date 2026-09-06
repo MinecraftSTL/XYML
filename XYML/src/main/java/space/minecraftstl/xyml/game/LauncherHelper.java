@@ -1179,14 +1179,14 @@ public final class LauncherHelper {
                         i18n("account.login.skip"),
                         i18n("account.login.retry"),
                         i18n("button.cancel"));
-                return presentProductionPrompt(prompt).thenComposeAsync(
+                return configureAuthenticationRecoveryDispatch(presentProductionPrompt(prompt).thenComposeAsync(
                         (@Nullable LaunchInteractionPrompt.Action selected) ->
                                 resolveProductionAuthenticationRecovery(
                                         account,
                                         Objects.requireNonNull(
                                                 selected,
                                                 "authentication recovery action"),
-                                        () -> logIn(account)));
+                                        () -> logIn(account))));
             }
         }));
     }
@@ -1243,6 +1243,18 @@ public final class LauncherHelper {
             default -> throw new IllegalArgumentException(
                     "Unexpected authentication recovery action: " + selected);
         };
+    }
+
+    /// Marks the prompt-result continuation as resource-free authentication dispatch.
+    ///
+    /// The continuation only selects a separately classified recovery task. In particular, it must not retain the
+    /// conservative default while the user-facing prompt is open after the authentication task handed off its lease.
+    ///
+    /// @param task prompt continuation to classify
+    /// @param <T> continuation result type
+    /// @return the same task with the orchestration resource declaration
+    static <T> Task<T> configureAuthenticationRecoveryDispatch(Task<T> task) {
+        return Objects.requireNonNull(task, "task").asOrchestration();
     }
 
     /// Applies the bounded account-storage resources used by authentication recovery callbacks.

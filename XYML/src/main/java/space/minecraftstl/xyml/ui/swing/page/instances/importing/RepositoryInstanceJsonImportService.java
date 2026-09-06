@@ -121,15 +121,14 @@ public final class RepositoryInstanceJsonImportService implements InstanceJsonIm
                         importedManifest,
                         GameAssetDownloadTask.DOWNLOAD_INDEX_FORCIBLY,
                         true),
-                new GameLibrariesTask(dependencyManager, importedManifest, true))
-                .withRunAsync(ioExecutor, () -> {
-                    // Match the import contract: core game download and JSON save remain fatal,
-                    // while optional asset/library repair can be retried from instance maintenance.
-                });
+                new GameLibrariesTask(dependencyManager, importedManifest, true));
+        Task<@Nullable Void> ignoredOptionalFailure = ignoreOptionalDownloadFailure(
+                optionalAssetsAndLibraries,
+                ioExecutor);
 
         Task<?> downloads = Task.allOf(
                 new GameDownloadTask(dependencyManager, null, importedManifest),
-                optionalAssetsAndLibraries);
+                ignoredOptionalFailure);
         Task<?> operation = availabilityCheck
                 .thenComposeAsync(ioExecutor, ignored -> downloads)
                 .setResources(operationResource, instanceResource)
@@ -147,5 +146,19 @@ public final class RepositoryInstanceJsonImportService implements InstanceJsonIm
                         () -> repository.setSelectedInstance(instanceId))
                 .setResources(TaskResource.configuration(SettingsManager.settingsLocation())))
                 .asOrchestration();
+    }
+
+    /// Converts optional asset and library completion into a resource-free best-effort barrier.
+    ///
+    /// The fixed-task compose overload lets the successor run after predecessor failure and classifies both the
+    /// continuation and its already-completed successor as orchestration. Core game download and JSON persistence stay
+    /// fatal; optional repair can still be retried from instance maintenance.
+    ///
+    /// @param optionalDownloads optional asset and library task group
+    /// @param executor executor retained for the completed successor
+    /// @return successful orchestration barrier even when optional downloads fail
+    static Task<@Nullable Void> ignoreOptionalDownloadFailure(Task<?> optionalDownloads, Executor executor) {
+        return Objects.requireNonNull(optionalDownloads, "optionalDownloads").withComposeAsync(
+                Task.<@Nullable Void>completed(null).setExecutor(Objects.requireNonNull(executor, "executor")));
     }
 }
