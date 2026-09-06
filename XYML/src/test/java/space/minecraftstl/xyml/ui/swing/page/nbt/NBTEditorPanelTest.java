@@ -76,7 +76,10 @@ import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Objects;
 import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -130,7 +133,7 @@ final class NBTEditorPanelTest {
                 interactions,
                 closeRequests::incrementAndGet,
                 iconExecutor));
-        assertEquals(1, iconExecutor.pendingCount());
+        iconExecutor.awaitPendingCount(1);
         iconExecutor.runNext();
         flushEdt();
 
@@ -143,7 +146,7 @@ final class NBTEditorPanelTest {
             assertTrue(findNamed(panel, "nbtEditorProgress", JProgressBar.class).isVisible());
             assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
         });
-        assertEquals(1, ioExecutor.pendingCount());
+        ioExecutor.awaitPendingCount(1);
         ioExecutor.runNext();
         flushEdt();
 
@@ -194,7 +197,7 @@ final class NBTEditorPanelTest {
             assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
             assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
         });
-        assertEquals(1, ioExecutor.pendingCount());
+        ioExecutor.awaitPendingCount(1);
         ioExecutor.runNext();
         flushEdt();
 
@@ -234,7 +237,7 @@ final class NBTEditorPanelTest {
         assertEquals(0, ioExecutor.pendingCount());
         interactions.confirmDiscard = true;
         assertTrue(onEdt(() -> panel.openDroppedPaths(List.of(second))));
-        assertEquals(1, ioExecutor.pendingCount());
+        ioExecutor.awaitPendingCount(1);
         ioExecutor.runNext();
         flushEdt();
         assertEquals(second.toAbsolutePath().normalize(), controller.snapshot().file());
@@ -795,7 +798,7 @@ final class NBTEditorPanelTest {
                         findNamed(panel, "nbtEditorSnbtStatus", JLabel.class).getText());
                 assertFalse(findNamed(panel, "nbtEditorReplaceSnbt", AbstractButton.class).isEnabled());
             });
-            assertEquals(1, backgroundExecutor.pendingCount());
+            backgroundExecutor.awaitPendingCount(1);
             backgroundExecutor.runNext();
             flushEdt();
             onEdt(() -> {
@@ -842,7 +845,7 @@ final class NBTEditorPanelTest {
                 () -> { },
                 backgroundExecutor));
         try {
-            assertEquals(1, backgroundExecutor.pendingCount());
+            backgroundExecutor.awaitPendingCount(1);
             backgroundExecutor.runNext();
             flushEdt();
             onEdt(() -> panel.open(source));
@@ -866,7 +869,7 @@ final class NBTEditorPanelTest {
                 NBTLazyTreeModel model = (NBTLazyTreeModel) tree.getModel();
                 tree.setSelectionPath(model.pathForAddress(List.of(1)));
             });
-            assertEquals(2, backgroundExecutor.pendingCount());
+            backgroundExecutor.awaitPendingCount(2);
 
             backgroundExecutor.runNext();
             flushEdt();
@@ -1264,8 +1267,11 @@ final class NBTEditorPanelTest {
     /// Deterministic executor proving when blocking work is allowed to run.
     @NotNullByDefault
     private static final class ManualExecutor implements Executor {
+        /// Maximum time a test waits for asynchronous resource resolution to enqueue its command.
+        private static final long COMMAND_TIMEOUT_SECONDS = 5L;
+
         /// FIFO of submitted blocking operations.
-        private final Queue<Runnable> commands = new ArrayDeque<>();
+        private final BlockingQueue<Runnable> commands = new LinkedBlockingQueue<>();
 
         /// Queues one operation.
         ///
@@ -1282,9 +1288,30 @@ final class NBTEditorPanelTest {
             return commands.size();
         }
 
+        /// Waits until at least the requested number of operations has been submitted.
+        ///
+        /// @param expected minimum operation count
+        private void awaitPendingCount(int expected) {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(COMMAND_TIMEOUT_SECONDS);
+            while (commands.size() < expected && System.nanoTime() < deadline) {
+                Thread.yield();
+            }
+            assertTrue(commands.size() >= expected,
+                    () -> "Timed out waiting for " + expected + " executor operation(s)");
+        }
+
         /// Runs the next operation.
         private void runNext() {
-            commands.remove().run();
+            try {
+                Runnable command = commands.poll(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (command == null) {
+                    throw new AssertionError("Timed out waiting for an executor operation");
+                }
+                command.run();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for an executor operation", interrupted);
+            }
         }
 
         /// Drains every operation.

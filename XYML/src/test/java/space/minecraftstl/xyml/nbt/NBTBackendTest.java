@@ -18,6 +18,10 @@
 package space.minecraftstl.xyml.nbt;
 
 import net.jpountz.lz4.LZ4BlockOutputStream;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.library.nbt.NBTElement;
 import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
@@ -33,9 +37,10 @@ import space.minecraftstl.xyml.library.nbt.tag.IntTag;
 import space.minecraftstl.xyml.library.nbt.tag.ListTag;
 import space.minecraftstl.xyml.library.nbt.tag.LongArrayTag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
-import org.jetbrains.annotations.NotNullByDefault;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskListener;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.io.BufferedOutputStream;
 import java.io.IOException;
@@ -43,11 +48,16 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayDeque;
-import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.GZIPOutputStream;
 
@@ -90,9 +100,10 @@ final class NBTBackendTest {
 
         CompletableFuture<NBTDocument> future = service.open(source);
         assertFalse(future.isDone());
-        assertEquals(1, executor.pendingCount());
+        Runnable openCommand = executor.takeNext();
+        assertEquals(0, executor.pendingCount());
 
-        executor.runNext();
+        openCommand.run();
         try (NBTDocument document = future.join()) {
             assertEquals(source.toAbsolutePath().normalize(), document.file());
             assertEquals(NBTFileEncoding.GZIP, document.encoding());
@@ -118,6 +129,29 @@ final class NBTBackendTest {
         future.join();
         assertEquals(2, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
         document.close();
+    }
+
+    /// Allows a synchronous save continuation to close and wait without blocking the session operation queue.
+    @Test
+    void completesSaveAwayFromTheOperationWorkerBeforeQueuedClose() throws Exception {
+        Path source = temporaryDirectory.resolve("save-then-close.nbt");
+        writeTag(source, NBTFileEncoding.RAW, sampleRoot());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        NBTDocumentService service = new NBTDocumentService(executor);
+        try {
+            NBTDocument document = service.open(source).get(5L, TimeUnit.SECONDS);
+            setScalar(document.editor(), NBTAddress.root().appendName("value"), "2");
+
+            service.save(document)
+                    .thenRun(() -> service.close(document).join())
+                    .get(5L, TimeUnit.SECONDS);
+
+            assertTrue(document.isClosed());
+            assertEquals(2, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
+        } finally {
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5L, TimeUnit.SECONDS));
+        }
     }
 
     /// Reports an unsupported extension as an asynchronous I/O failure.
@@ -155,8 +189,9 @@ final class NBTBackendTest {
         NBTDocumentService service = new NBTDocumentService(executor);
 
         CompletableFuture<NBTDocument> future = service.open(source);
+        Runnable openCommand = executor.takeNext();
         assertTrue(future.cancel(false));
-        executor.runNext();
+        openCommand.run();
         assertTrue(future.isCancelled());
 
         Path moved = temporaryDirectory.resolve("cancelled-open-moved.mca");
@@ -164,6 +199,158 @@ final class NBTBackendTest {
         assertEquals(1, assertInstanceOf(
                 CompoundTag.class,
                 NBTCodec.of().readRegion(moved).getChunk(0).getRootTag()).getInt("DataVersion"));
+    }
+
+    /// Keeps one exact source lease until direct document closure lets a second service open the same path.
+    @Test
+    void serializesSameFileSessionsUntilDocumentClose() throws Exception {
+        Path source = temporaryDirectory.resolve("shared.nbt");
+        writeTag(source, NBTFileEncoding.RAW, sampleRoot());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        NBTDocumentService firstService = new NBTDocumentService(executor);
+        NBTDocumentService secondService = new NBTDocumentService(executor);
+        @Nullable NBTDocument first = null;
+        @Nullable NBTDocument second = null;
+        try {
+            first = firstService.open(source).get(5L, TimeUnit.SECONDS);
+            CompletableFuture<NBTDocument> waiting = secondService.open(source);
+
+            assertThrows(TimeoutException.class, () -> waiting.get(200L, TimeUnit.MILLISECONDS));
+            first.close();
+            first = null;
+            second = waiting.get(5L, TimeUnit.SECONDS);
+        } finally {
+            if (first != null) {
+                first.close();
+            }
+            if (second != null) {
+                second.close();
+            }
+            executor.shutdownNow();
+        }
+    }
+
+    /// Allows two standalone files to remain open concurrently under distinct exact-file resources.
+    @Test
+    void allowsDifferentFileSessionsToRunConcurrently() throws Exception {
+        Path firstSource = temporaryDirectory.resolve("first.nbt");
+        Path secondSource = temporaryDirectory.resolve("second.nbt");
+        writeTag(firstSource, NBTFileEncoding.RAW, sampleRoot());
+        writeTag(secondSource, NBTFileEncoding.RAW, sampleRoot());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        NBTDocumentService service = new NBTDocumentService(executor);
+        @Nullable NBTDocument first = null;
+        @Nullable NBTDocument second = null;
+        try {
+            CompletableFuture<NBTDocument> firstOpen = service.open(firstSource);
+            CompletableFuture<NBTDocument> secondOpen = service.open(secondSource);
+
+            first = firstOpen.get(5L, TimeUnit.SECONDS);
+            second = secondOpen.get(5L, TimeUnit.SECONDS);
+        } finally {
+            if (first != null) {
+                first.close();
+            }
+            if (second != null) {
+                second.close();
+            }
+            executor.shutdownNow();
+        }
+    }
+
+    /// Protects the deterministic `.dat_old` target for the complete level-data editing session.
+    @Test
+    void holdsRollingBackupResourceUntilDocumentClose() throws Exception {
+        Path source = temporaryDirectory.resolve("level.dat");
+        Path backup = temporaryDirectory.resolve("level.dat_old");
+        writeTag(source, NBTFileEncoding.GZIP, sampleRoot());
+        NBTDocumentService service = new NBTDocumentService(Runnable::run);
+        NBTDocument document = service.open(source).get(5L, TimeUnit.SECONDS);
+        CountDownLatch taskEntered = new CountDownLatch(1);
+        CountDownLatch taskStopped = new CountDownLatch(1);
+        Task<?> backupTask = Task.runAsync(taskEntered::countDown)
+                .setResources(TaskResource.nbtFile(backup));
+        TaskExecutor taskExecutor = backupTask.executor(new TaskListener() {
+            @Override
+            public void onStop(boolean success, TaskExecutor executor) {
+                taskStopped.countDown();
+            }
+        });
+
+        taskExecutor.start();
+        assertFalse(taskEntered.await(200L, TimeUnit.MILLISECONDS));
+        document.close();
+
+        assertTrue(taskEntered.await(5L, TimeUnit.SECONDS));
+        assertTrue(taskStopped.await(5L, TimeUnit.SECONDS));
+    }
+
+    /// Serializes distinct region files in one directory because their external companions share that directory.
+    @Test
+    void serializesRegionDirectorySessionsForCompanionSafety() throws Exception {
+        Path firstSource = temporaryDirectory.resolve("r.0.0.mca");
+        Path secondSource = temporaryDirectory.resolve("r.1.0.mca");
+        NBTCodec.of().writeRegion(firstSource, new ChunkRegion());
+        NBTCodec.of().writeRegion(secondSource, new ChunkRegion());
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        NBTDocumentService service = new NBTDocumentService(executor);
+        @Nullable NBTDocument first = null;
+        @Nullable NBTDocument second = null;
+        try {
+            first = service.open(firstSource).get(5L, TimeUnit.SECONDS);
+            CompletableFuture<NBTDocument> waiting = service.open(secondSource);
+
+            assertThrows(TimeoutException.class, () -> waiting.get(200L, TimeUnit.MILLISECONDS));
+            first.close();
+            first = null;
+            second = waiting.get(5L, TimeUnit.SECONDS);
+        } finally {
+            if (first != null) {
+                first.close();
+            }
+            if (second != null) {
+                second.close();
+            }
+            executor.shutdownNow();
+        }
+    }
+
+    /// Falls back to the shared I/O scheduler when a caller-owned executor rejects delayed physical closure.
+    @Test
+    void closesAndReleasesSessionAfterCallerExecutorShutdown() throws Exception {
+        Path source = temporaryDirectory.resolve("rejected-close.nbt");
+        writeTag(source, NBTFileEncoding.RAW, sampleRoot());
+        ExecutorService rejectedExecutor = Executors.newSingleThreadExecutor();
+        NBTDocumentService rejectedService = new NBTDocumentService(rejectedExecutor);
+        NBTDocument first = rejectedService.open(source).get(5L, TimeUnit.SECONDS);
+        rejectedExecutor.shutdownNow();
+        assertTrue(rejectedExecutor.awaitTermination(5L, TimeUnit.SECONDS));
+
+        rejectedService.close(first).get(5L, TimeUnit.SECONDS);
+        try (NBTDocument second = new NBTDocumentService(Runnable::run)
+                .open(source)
+                .get(5L, TimeUnit.SECONDS)) {
+            assertEquals(source.toAbsolutePath().normalize(), second.file());
+        }
+    }
+
+    /// Treats a direct physical close as the successful completion of an already queued service close.
+    @Test
+    void keepsServiceCloseIdempotentWhenDirectCloseWinsTheRace() throws Exception {
+        Path source = temporaryDirectory.resolve("concurrent-close.nbt");
+        writeTag(source, NBTFileEncoding.RAW, sampleRoot());
+        NBTDocument document = new NBTDocumentService(Runnable::run)
+                .open(source)
+                .get(5L, TimeUnit.SECONDS);
+        ManualExecutor closeExecutor = new ManualExecutor();
+
+        CompletableFuture<Void> close = new NBTDocumentService(closeExecutor).close(document);
+        Runnable closeCommand = closeExecutor.takeNext();
+        document.close();
+        closeCommand.run();
+
+        close.get(5L, TimeUnit.SECONDS);
+        assertTrue(document.isClosed());
     }
 
     /// Exposes editor handles for mutation while every compatibility root remains detached.
@@ -515,7 +702,7 @@ final class NBTBackendTest {
     @NotNullByDefault
     private static final class ManualExecutor implements Executor {
         /// FIFO of submitted operations awaiting explicit test execution.
-        private final Queue<Runnable> commands = new ArrayDeque<>();
+        private final BlockingQueue<Runnable> commands = new LinkedBlockingQueue<>();
 
         /// Queues one operation without running it.
         ///
@@ -526,8 +713,20 @@ final class NBTBackendTest {
         }
 
         /// Runs and removes the next queued operation.
-        private void runNext() {
-            commands.remove().run();
+        private void runNext() throws InterruptedException {
+            takeNext().run();
+        }
+
+        /// Waits for and removes the next command without executing it.
+        ///
+        /// @return next submitted command
+        /// @throws InterruptedException if the test thread is interrupted
+        private Runnable takeNext() throws InterruptedException {
+            Runnable command = commands.poll(5L, TimeUnit.SECONDS);
+            if (command == null) {
+                throw new AssertionError("Timed out waiting for an executor command");
+            }
+            return command;
         }
 
         /// Returns the exact number of operations not yet run.

@@ -30,6 +30,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /// One lifecycle-bound XYML view of a safe XoyzNBT file session.
 ///
@@ -46,6 +47,9 @@ public final class NBTDocument implements AutoCloseable {
 
     /// Whether this launcher document has released its file session.
     private boolean closed;
+
+    /// Package-owned callback notified exactly once after the physical file session closes, or null when unmanaged.
+    private @Nullable Consumer<@Nullable Throwable> closedListener;
 
     /// Creates a launcher document around one successfully opened XoyzNBT session.
     ///
@@ -177,6 +181,22 @@ public final class NBTDocument implements AutoCloseable {
         save(options);
     }
 
+    /// Installs the asynchronous service callback which releases this document's task resource lease.
+    ///
+    /// The listener is cleared before invocation and is therefore notified at most once, including when callers use
+    /// this document directly in a try-with-resources statement. It receives the physical close failure, or null when
+    /// every library handle and identity link closed successfully.
+    ///
+    /// @param listener package-owned close listener
+    /// @throws IllegalStateException if this document is closed or already managed
+    synchronized void setClosedListener(Consumer<@Nullable Throwable> listener) {
+        ensureOpen();
+        if (closedListener != null) {
+            throw new IllegalStateException("NBT document already has a close listener");
+        }
+        closedListener = Objects.requireNonNull(listener, "listener");
+    }
+
     /// Releases any region channel without publishing pending in-memory edits.
     ///
     /// Standalone sessions have no persistent channel, but are closed as well so a late save
@@ -188,10 +208,19 @@ public final class NBTDocument implements AutoCloseable {
         if (closed) {
             return;
         }
+        @Nullable Throwable failure = null;
         try {
             fileSession.close();
+        } catch (IOException | RuntimeException | Error closeFailure) {
+            failure = closeFailure;
+            throw closeFailure;
         } finally {
             closed = true;
+            @Nullable Consumer<@Nullable Throwable> listener = closedListener;
+            closedListener = null;
+            if (listener != null) {
+                listener.accept(failure);
+            }
         }
     }
 

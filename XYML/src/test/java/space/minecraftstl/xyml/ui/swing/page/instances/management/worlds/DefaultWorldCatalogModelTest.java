@@ -23,6 +23,10 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskListener;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -31,9 +35,12 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -41,6 +48,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies that a World tab indexes only paths first and materializes NBT rows per viewport range.
@@ -94,6 +102,84 @@ final class DefaultWorldCatalogModelTest {
             model.close();
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// A refresh waits on the saves-catalog resource instead of racing a concurrent world creation or deletion.
+    @Test
+    void refreshDeclaresWorldCatalogResource() throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        RecordingAccess access = new RecordingAccess(temporaryDirectory, 2);
+        DefaultWorldCatalogModel model = new DefaultWorldCatalogModel(
+                access,
+                executor,
+                WorldCatalogStrings.english());
+        CountDownLatch holderEntered = new CountDownLatch(1);
+        CountDownLatch releaseHolder = new CountDownLatch(1);
+        CountDownLatch holderStopped = new CountDownLatch(1);
+        try {
+            CompletableFuture<WorldCatalogSnapshot> initialReady = nextReadySnapshot(model);
+            model.loadIfNeeded();
+            initialReady.get(5L, TimeUnit.SECONDS);
+            Task<?> holder = Task.runAsync(executor, () -> {
+                holderEntered.countDown();
+                if (!releaseHolder.await(5L, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Timed out waiting to release the catalog resource");
+                }
+            }).setResources(TaskResource.worldCatalog(access.savesDirectory()));
+            TaskExecutor holderExecutor = holder.executor(new TaskListener() {
+                @Override
+                public void onStop(boolean success, TaskExecutor stoppedExecutor) {
+                    holderStopped.countDown();
+                }
+            });
+            holderExecutor.start();
+            assertTrue(holderEntered.await(5L, TimeUnit.SECONDS));
+
+            CompletableFuture<WorldCatalogSnapshot> refreshed = nextReadySnapshot(model);
+            model.refresh();
+            assertEquals(1, access.indexCalls());
+            releaseHolder.countDown();
+            assertTrue(holderStopped.await(5L, TimeUnit.SECONDS));
+            refreshed.get(5L, TimeUnit.SECONDS);
+            assertEquals(2, access.indexCalls());
+        } finally {
+            releaseHolder.countDown();
+            model.close();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5L, TimeUnit.SECONDS));
+        }
+    }
+
+    /// A listener failure while publishing LOADING cannot strand a refresh in the loading state.
+    @Test
+    void refreshListenerFailureLeavesRetryableFailedState() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        RecordingAccess access = new RecordingAccess(temporaryDirectory, 1);
+        DefaultWorldCatalogModel model = new DefaultWorldCatalogModel(
+                access,
+                executor,
+                WorldCatalogStrings.english());
+        Subscription subscription = model.subscribe(change -> {
+            WorldCatalogSnapshot current = Objects.requireNonNull(change.currentValue(), "currentValue");
+            if (current.status() == WorldCatalogStatus.LOADING) {
+                throw new IllegalStateException("listener failed during loading publication");
+            }
+        });
+        try {
+            try {
+                assertThrows(IllegalStateException.class, model::refresh);
+                assertEquals(WorldCatalogStatus.FAILED, model.snapshot().status());
+            } finally {
+                subscription.unsubscribe();
+            }
+            CompletableFuture<WorldCatalogSnapshot> ready = nextReadySnapshot(model);
+            model.refresh();
+            assertEquals(WorldCatalogStatus.READY, ready.get(5L, TimeUnit.SECONDS).status());
+        } finally {
+            model.close();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5L, TimeUnit.SECONDS));
         }
     }
 
@@ -176,6 +262,99 @@ final class DefaultWorldCatalogModelTest {
             model.close();
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// User world names cannot collide with the import staging namespace or disappear from the catalog.
+    @Test
+    void rejectsReservedStagingWorldNameBeforeCopyStarts() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        RecordingAccess access = new RecordingAccess(temporaryDirectory, 1);
+        DefaultWorldCatalogModel model = new DefaultWorldCatalogModel(
+                access,
+                executor,
+                WorldCatalogStrings.english());
+        try {
+            CompletableFuture<WorldCatalogSnapshot> ready = nextReadySnapshot(model);
+            model.loadIfNeeded();
+            ready.get(5L, TimeUnit.SECONDS);
+            WorldCatalogItem selected = model.load(
+                            IndexRange.ofLength(0, 1),
+                            new LoadCancellation())
+                    .toCompletableFuture()
+                    .get(5L, TimeUnit.SECONDS)
+                    .items()
+                    .get(0);
+
+            CompletableFuture<WorldCatalogSnapshot> rejected = model.copyWorld(
+                    selected,
+                    ".XYML-WORLD-STAGE-user").toCompletableFuture();
+            assertThrows(ExecutionException.class, () -> rejected.get(5L, TimeUnit.SECONDS));
+            assertTrue(access.copiedWorld() == null);
+        } finally {
+            model.close();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5L, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Waits for a conflicting world lease before entering a detail mutation and resumes after that lease releases.
+    @Test
+    void coordinatesWorldDetailsWithTaskResourceArbitration() throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        RecordingAccess access = new RecordingAccess(temporaryDirectory, 1);
+        DefaultWorldCatalogModel model = new DefaultWorldCatalogModel(
+                access,
+                executor,
+                WorldCatalogStrings.english());
+        CountDownLatch holderEntered = new CountDownLatch(1);
+        CountDownLatch releaseHolder = new CountDownLatch(1);
+        CountDownLatch holderStopped = new CountDownLatch(1);
+        try {
+            CompletableFuture<WorldCatalogSnapshot> ready = nextReadySnapshot(model);
+            model.loadIfNeeded();
+            ready.get(5L, TimeUnit.SECONDS);
+            WorldCatalogItem selected = model.load(
+                            IndexRange.ofLength(0, 1),
+                            new LoadCancellation())
+                    .toCompletableFuture()
+                    .get(5L, TimeUnit.SECONDS)
+                    .items()
+                    .get(0);
+            Task<?> holder = Task.runAsync(executor, () -> {
+                        holderEntered.countDown();
+                        if (!releaseHolder.await(5L, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("Timed out waiting to release the world resource");
+                        }
+                    })
+                    .setResources(TaskResource.gameWorld(selected.path()));
+            TaskExecutor holderExecutor = holder.executor(new TaskListener() {
+                @Override
+                public void onStop(boolean success, TaskExecutor stoppedExecutor) {
+                    holderStopped.countDown();
+                }
+            });
+            holderExecutor.start();
+            assertTrue(holderEntered.await(5L, TimeUnit.SECONDS));
+
+            WorldDetailsUpdate update = new WorldDetailsUpdate(
+                    "Resource coordinated",
+                    new WorldCatalogDetails.WorldSettings(false, false, null, null),
+                    null);
+            CompletableFuture<WorldCatalogSnapshot> mutation = model.updateWorldDetails(selected, update)
+                    .toCompletableFuture();
+
+            assertFalse(access.detailsEntered().await(200L, TimeUnit.MILLISECONDS));
+            releaseHolder.countDown();
+            assertTrue(holderStopped.await(5L, TimeUnit.SECONDS));
+            mutation.get(5L, TimeUnit.SECONDS);
+            assertTrue(access.detailsEntered().await(5L, TimeUnit.SECONDS));
+            assertEquals(update, access.detailsUpdate());
+        } finally {
+            releaseHolder.countDown();
+            model.close();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5L, TimeUnit.SECONDS));
         }
     }
 
@@ -295,6 +474,9 @@ final class DefaultWorldCatalogModelTest {
         /// Detail values most recently delegated.
         private volatile @Nullable WorldDetailsUpdate detailsUpdate;
 
+        /// Signal emitted when the Core detail mutation actually enters its write boundary.
+        private final CountDownLatch detailsEntered = new CountDownLatch(1);
+
         /// World most recently delegated to icon replacement.
         private volatile @Nullable WorldCatalogItem iconWorld;
 
@@ -364,7 +546,10 @@ final class DefaultWorldCatalogModelTest {
         /// @param cancellation cooperative cancellation signal
         /// @return immutable ordered path source
         @Override
-        public @Unmodifiable List<Path> indexWorldDirectories(LoadCancellation cancellation) {
+        public @Unmodifiable List<Path> indexWorldDirectories(
+                Path savesDirectory,
+                LoadCancellation cancellation) {
+            Objects.requireNonNull(savesDirectory, "savesDirectory");
             cancellation.throwIfCancelled();
             indexCalls.incrementAndGet();
             return directories;
@@ -413,8 +598,10 @@ final class DefaultWorldCatalogModelTest {
         @Override
         public void install(
                 WorldCatalogImport world,
+                Path savesDirectory,
                 String targetName,
                 LoadCancellation cancellation) throws IOException {
+            Objects.requireNonNull(savesDirectory, "savesDirectory");
             cancellation.throwIfCancelled();
         }
 
@@ -438,6 +625,7 @@ final class DefaultWorldCatalogModelTest {
                 WorldDetailsUpdate update,
                 LoadCancellation cancellation) {
             cancellation.throwIfCancelled();
+            detailsEntered.countDown();
             updatedWorld = world;
             detailsUpdate = update;
         }
@@ -560,6 +748,13 @@ final class DefaultWorldCatalogModelTest {
         /// @return submitted update, or null before editing
         private @Nullable WorldDetailsUpdate detailsUpdate() {
             return detailsUpdate;
+        }
+
+        /// Returns the signal emitted when a detail mutation enters the Core write boundary.
+        ///
+        /// @return shared detail-entry latch
+        private CountDownLatch detailsEntered() {
+            return detailsEntered;
         }
 
         /// Returns the most recently icon-edited row.

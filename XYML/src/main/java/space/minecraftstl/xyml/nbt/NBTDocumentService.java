@@ -17,37 +17,57 @@
  */
 package space.minecraftstl.xyml.nbt;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.library.nbt.NBTElement;
 import space.minecraftstl.xyml.library.nbt.io.NBTFile;
 import space.minecraftstl.xyml.library.nbt.io.NBTSaveOptions;
+import space.minecraftstl.xyml.task.CompletableFutureTask;
 import space.minecraftstl.xyml.task.Schedulers;
-import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskCompletableFuture;
+import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskListener;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/// Dispatches safe XoyzNBT file-session operations and applies launcher filename policy.
+/// Dispatches safe XoyzNBT file-session operations through the task resource arbiter.
 ///
-/// Compression detection, strict parsing, structural validation, fingerprints, staging, region
-/// copy-on-write publication, and savepoint handling all remain inside [NBTFile]. This launcher
-/// service only chooses the tag or region entry point and selects the conventional `.dat_old`
-/// rolling backup for a main `.dat` file.
+/// A document session is represented by one [CompletableFutureTask] whose resource lease remains held from the
+/// asynchronous open through [#close(NBTDocument)]. Saves are serialized behind that session owner, so a region
+/// channel, identity link, external companion, backup, or staging sibling cannot race another launcher task. Pure
+/// in-memory editor operations continue to use [#supplyAsync(Supplier)] and do not claim a filesystem resource.
+///
+/// Compression detection, strict parsing, structural validation, fingerprints, staging, region copy-on-write
+/// publication, and savepoint handling remain inside [NBTFile]. This adapter only chooses the file entry point and
+/// launcher backup policy.
 @NotNullByDefault
 public final class NBTDocumentService {
     /// Executor that owns all blocking NBT and filesystem operations.
     private final Executor ioExecutor;
+
+    /// Process-wide open sessions indexed by document object so any service facade reuses the owning task token.
+    private static final Map<NBTDocument, DocumentSession> SESSIONS = new ConcurrentHashMap<>();
 
     /// Creates a service using the launcher's shared I/O scheduler.
     public NBTDocumentService() {
@@ -56,7 +76,10 @@ public final class NBTDocumentService {
 
     /// Creates a service whose operations are dispatched to the supplied executor.
     ///
-    /// The executor remains caller-owned and is never shut down by this service.
+    /// The executor remains caller-owned and is never shut down by this service. It must continue executing every
+    /// accepted command until documents opened through this service have been closed; discarding an accepted open or
+    /// save command can leave that caller-visible operation pending because the generic [Executor] API reports no such
+    /// discard to this service.
     ///
     /// @param ioExecutor executor for blocking file-session work
     public NBTDocumentService(Executor ioExecutor) {
@@ -65,67 +88,69 @@ public final class NBTDocumentService {
 
     /// Opens one supported NBT file on the configured background executor.
     ///
-    /// The future fails with `IOException` as its completion cause for unsupported extensions,
-    /// invalid complete input, stale source state, or invalid region storage.
+    /// The returned future is completed as soon as the document is available, while the underlying task keeps its
+    /// resource lease until the document is closed. Cancelling the future cancels the task and closes a session which
+    /// races publication.
     ///
     /// @param file candidate source path
-    /// @return future loaded document
+    /// @return cancellable future loaded document
     public CompletableFuture<NBTDocument> open(Path file) {
         Path normalized = Objects.requireNonNull(file, "file").toAbsolutePath().normalize();
-        CompletableFuture<NBTDocument> result = new CompletableFuture<>();
-        ioExecutor.execute(() -> {
-            @Nullable NBTDocument document = null;
-            try {
-                document = openOnExecutor(normalized);
-                if (!result.complete(document)) {
-                    closeAfterCancelledOpen(document);
-                }
-            } catch (IOException | RuntimeException failure) {
-                result.completeExceptionally(failure);
-            }
-        });
-        return result;
+        return new DocumentSession(normalized).start();
     }
 
-    /// Saves one document through its safe XoyzNBT file session on the background executor.
+    /// Saves one document through its owning session task.
     ///
-    /// Standalone files ending in `.dat` receive a single rolling sibling backup ending in
-    /// `.dat_old`. Files already ending in `.dat_old`, `.nbt`, and region files do not recursively
-    /// create backup history.
+    /// Standalone files ending in `.dat` receive a single rolling sibling backup ending in `.dat_old`. Region
+    /// sessions claim their containing region directory because publication may touch external `.mcc` companions,
+    /// temporary siblings, and the session identity link.
     ///
     /// @param document open document
     /// @return future completed after publication and force operations finish
     public CompletableFuture<Void> save(NBTDocument document) {
         NBTDocument selected = Objects.requireNonNull(document, "document");
-        return CompletableFuture.runAsync(() -> {
-            try {
-                selected.saveFromService(saveOptions(selected));
-            } catch (IOException failure) {
-                throw new CompletionException(failure);
-            }
-        }, ioExecutor);
+        @Nullable DocumentSession session = SESSIONS.get(selected);
+        if (session != null) {
+            return session.save(selected, ioExecutor);
+        }
+        if (selected.isClosed()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("NBT document is closed"));
+        }
+
+        NBTSaveOptions options = saveOptions(selected);
+        Task<@Nullable Void> task = Task.runAsync("Save NBT document", ioExecutor, () ->
+                selected.saveFromService(options))
+                .setSignificance(Task.TaskSignificance.MINOR);
+        return executeOneShot(withResources(task, resourcesFor(selected.file(), selected.fileType(), options)));
     }
 
-    /// Closes one document on the configured background executor without publishing pending edits.
+    /// Closes one document through its owning session task without publishing pending edits.
+    ///
+    /// Closure is idempotent. A session task retains its resource lease until this operation has closed all library
+    /// channels and deleted its identity link.
     ///
     /// @param document document whose file session must be released
     /// @return future completed after all owned file handles are closed
     public CompletableFuture<Void> close(NBTDocument document) {
         NBTDocument selected = Objects.requireNonNull(document, "document");
-        return CompletableFuture.runAsync(() -> {
-            try {
-                selected.close();
-            } catch (IOException failure) {
-                throw new CompletionException(failure);
-            }
-        }, ioExecutor);
+        @Nullable DocumentSession session = SESSIONS.get(selected);
+        if (session != null) {
+            return session.close(ioExecutor);
+        }
+        if (selected.isClosed()) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        Task<@Nullable Void> task = Task.runAsync("Close NBT document", ioExecutor, selected::close)
+                .setSignificance(Task.TaskSignificance.MINOR);
+        return executeOneShot(withResources(task, resourcesFor(selected.file(), selected.fileType(), null)));
     }
 
     /// Runs one non-null in-memory document operation on the configured background executor.
     ///
-    /// The operation remains responsible for synchronizing access to its document. This scheduling
-    /// boundary lets the Swing controller keep deep copies, strict SNBT parsing, and whole-tree
-    /// validation off the event dispatch thread without learning which executor XYML owns.
+    /// The operation remains responsible for synchronizing access to its document. This scheduling boundary is
+    /// intentionally not a filesystem task: callers use it for detached snapshots, validation, and editor-memory
+    /// mutations only. Any future file I/O must be added as a resource-bearing operation above.
     ///
     /// @param operation non-null result supplier
     /// @param <T> result type
@@ -135,6 +160,81 @@ public final class NBTDocumentService {
         return CompletableFuture.supplyAsync(
                 () -> Objects.requireNonNull(selected.get(), "operation result"),
                 ioExecutor);
+    }
+
+    /// Starts one ordinary task and bridges its terminal listener to a cancellable future without exposing its lock
+    /// state. The task's own future remains authoritative, so cancelling the returned view cannot suppress release.
+    ///
+    /// @param task task to execute
+    /// @param <T> task result type
+    /// @return independently cancellable result view
+    private <T> CompletableFuture<T> executeOneShot(Task<T> task) {
+        final TaskExecutor[] executorHolder = new TaskExecutor[1];
+        CancellationAwareFuture<T> result = new CancellationAwareFuture<>(() -> {
+            TaskExecutor executor = executorHolder[0];
+            if (executor != null && !executor.isCancelled()) {
+                executor.cancel();
+            }
+        });
+        TaskExecutor executor = task.executor(new TaskListener() {
+            @Override
+            public void onStop(boolean success, TaskExecutor stoppedExecutor) {
+                if (success) {
+                    result.complete(task.getResult());
+                } else {
+                    result.completeExceptionally(terminalFailure(stoppedExecutor));
+                }
+            }
+        });
+        executorHolder[0] = executor;
+        try {
+            executor.start();
+        } catch (RuntimeException failure) {
+            result.completeExceptionally(failure);
+        } catch (Error failure) {
+            result.completeExceptionally(failure);
+            throw failure;
+        }
+        return result;
+    }
+
+    /// Selects the semantic resource set for one NBT file transaction.
+    ///
+    /// Region publication is directory-scoped because the library may create or replace files whose names are not
+    /// known before reading the region header. Standalone publication names every deterministic target and backup.
+    ///
+    /// @param file normalized NBT path
+    /// @param fileType filename-derived type
+    /// @param options save options, or null for open/close
+    /// @return immutable resource declarations
+    private static @Unmodifiable List<TaskResource> resourcesFor(
+            Path file,
+            NBTFileType fileType,
+            @Nullable NBTSaveOptions options) {
+        ArrayList<TaskResource> resources = new ArrayList<>();
+        if (fileType == NBTFileType.ANVIL || fileType == NBTFileType.REGION) {
+            @Nullable Path parent = file.getParent();
+            if (parent != null) {
+                resources.add(TaskResource.nbtDirectory(parent));
+            }
+        }
+        resources.add(TaskResource.nbtFile(file));
+        if (options != null && options.backupPath() != null) {
+            resources.add(TaskResource.nbtFile(options.backupPath()));
+        }
+        return List.copyOf(resources);
+    }
+
+    /// Applies a non-empty immutable resource list to a task.
+    private static <T> Task<T> withResources(Task<T> task, @Unmodifiable List<TaskResource> resources) {
+        Objects.requireNonNull(task, "task");
+        Objects.requireNonNull(resources, "resources");
+        if (resources.isEmpty()) {
+            throw new IllegalArgumentException("NBT task resources cannot be empty");
+        }
+        TaskResource first = resources.get(0);
+        TaskResource[] additional = resources.subList(1, resources.size()).toArray(TaskResource[]::new);
+        return task.setResources(first, additional);
     }
 
     /// Selects the library entry point for one normalized source.
@@ -177,7 +277,14 @@ public final class NBTDocumentService {
         if (document.fileType() != NBTFileType.TAG) {
             return NBTSaveOptions.withoutBackup();
         }
-        Path file = document.file();
+        return saveOptions(document.file());
+    }
+
+    /// Selects a deterministic standalone backup from one normalized source path.
+    ///
+    /// @param file standalone NBT source
+    /// @return immutable generic XoyzNBT save options
+    private static NBTSaveOptions saveOptions(Path file) {
         @Nullable Path fileName = file.getFileName();
         if (fileName == null) {
             return NBTSaveOptions.withoutBackup();
@@ -190,18 +297,594 @@ public final class NBTDocumentService {
         if (parent == null) {
             return NBTSaveOptions.withoutBackup();
         }
-        String backupName = name + "_old";
-        return NBTSaveOptions.withBackup(parent.resolve(backupName));
+        return NBTSaveOptions.withBackup(parent.resolve(name + "_old"));
     }
 
-    /// Releases a region channel when its open future was cancelled before publication.
+    /// Returns the terminal failure recorded by one task executor, preserving cancellation classification.
+    private static Throwable terminalFailure(TaskExecutor executor) {
+        @Nullable Throwable failure = executor.getFailure();
+        return failure == null ? new CancellationException("NBT task was cancelled") : failure;
+    }
+
+    /// Delivers a caller-visible completion away from the operation worker.
     ///
-    /// @param document successfully opened document rejected by the cancelled future
-    private static void closeAfterCancelledOpen(NBTDocument document) {
+    /// CompletableFuture invokes synchronous dependents on the thread that calls `complete`. Keeping those callbacks
+    /// off a caller-owned I/O worker prevents a continuation such as `save().thenRun(() -> close().join())` from
+    /// waiting for work queued behind the same worker. The inline fallback is used only when the common scheduler is
+    /// itself unavailable during process shutdown.
+    ///
+    /// @param action completion action
+    private static void completeOnContinuation(Runnable action) {
+        Runnable selected = Objects.requireNonNull(action, "action");
+        try {
+            Schedulers.defaultScheduler().execute(selected);
+        } catch (RuntimeException | Error dispatchFailure) {
+            LOG.warning("Completion scheduler rejected an NBT continuation; completing inline", dispatchFailure);
+            selected.run();
+        }
+    }
+
+    /// Keeps one document's resource owner alive from open publication until explicit close.
+    @NotNullByDefault
+    private final class DocumentSession {
+        /// Normalized source path captured at session creation.
+        private final Path path;
+
+        /// Resource declarations covering the session and all known publication sidecars.
+        private final @Unmodifiable List<TaskResource> resources;
+
+        /// Future completed when open has either published a document or failed.
+        private final CompletableFuture<Void> openReady = new CompletableFuture<>();
+
+        /// Internal task result; completion releases the session lease.
+        private final CompletableFuture<NBTDocument> terminal = new CompletableFuture<>();
+
+        /// Caller-visible open result whose cancellation requests session shutdown.
+        private final CancellationAwareFuture<NBTDocument> openResult;
+
+        /// Serializes operation queue state and document ownership.
+        private final Object operationLock = new Object();
+
+        /// Tail of save/close operations, initialized to the open barrier.
+        private CompletableFuture<Void> operationTail = openReady;
+
+        /// Session task carrying the actual resource lease.
+        private final SessionTask task;
+
+        /// Executor started for this session, or null before startup.
+        private @Nullable TaskExecutor executor;
+
+        /// Open document, or null before publication/after closure.
+        private @Nullable NBTDocument document;
+
+        /// Whether cancellation or close has been requested.
+        private boolean closeRequested;
+
+        /// Whether the accepted open command has entered its protected execution boundary.
+        private boolean openStarted;
+
+        /// Internal idempotent close result, or null before the first close request.
+        private @Nullable CompletableFuture<Void> closeResult;
+
+        /// Whether the library session has already reported physical closure.
+        private boolean physicalCloseObserved;
+
+        /// Physical close failure reported by the library session, or null after a successful close.
+        private @Nullable Throwable physicalCloseFailure;
+
+        /// Creates one session with a stable resource snapshot.
+        ///
+        /// @param path normalized source path
+        private DocumentSession(Path path) {
+            this.path = Objects.requireNonNull(path, "path");
+            @Nullable NBTFileType detected = NBTFileType.detect(path);
+            @Nullable NBTSaveOptions options = detected == NBTFileType.TAG
+                    ? saveOptions(path)
+                    : null;
+            this.resources = resourcesFor(
+                    path,
+                    detected == null ? NBTFileType.TAG : detected,
+                    options);
+            this.openResult = new CancellationAwareFuture<>(this::requestCancel);
+            this.task = new SessionTask();
+        }
+
+        /// Starts the session task and returns its early document-publication view.
+        private CompletableFuture<NBTDocument> start() {
+            TaskExecutor startedExecutor = task.executor(new TaskListener() {
+                @Override
+                public void onStop(boolean success, TaskExecutor stoppedExecutor) {
+                    stopped(success, stoppedExecutor);
+                }
+            });
+            synchronized (operationLock) {
+                executor = startedExecutor;
+            }
+            try {
+                startedExecutor.start();
+            } catch (RuntimeException failure) {
+                openFailed(failure);
+            } catch (Error failure) {
+                openFailed(failure);
+                throw failure;
+            }
+            return openResult;
+        }
+
+        /// Queues one save behind the session open barrier and every earlier publication operation.
+        private CompletableFuture<Void> save(NBTDocument selected, Executor operationExecutor) {
+            NBTSaveOptions options;
+            try {
+                options = saveOptions(Objects.requireNonNull(selected, "document"));
+            } catch (RuntimeException failure) {
+                return CompletableFuture.failedFuture(failure);
+            }
+            return enqueue(() -> {
+                selected.saveFromService(options);
+                return null;
+            }, operationExecutor);
+        }
+
+        /// Requests idempotent closure and returns a view that cannot cancel the internal close task.
+        private CompletableFuture<Void> close(Executor operationExecutor) {
+            CompletableFuture<Void> visible;
+            @Nullable CompletableFuture<Void> predecessor = null;
+            @Nullable CompletableFuture<Void> closeStage = null;
+            @Nullable Throwable observedFailure = null;
+            boolean alreadyClosed;
+            synchronized (operationLock) {
+                if (closeResult != null) {
+                    return closeResult.copy();
+                }
+                closeRequested = true;
+                closeResult = new CompletableFuture<>();
+                visible = closeResult;
+                alreadyClosed = physicalCloseObserved;
+                if (alreadyClosed) {
+                    observedFailure = physicalCloseFailure;
+                }
+                if (!alreadyClosed) {
+                    predecessor = operationTail;
+                    closeStage = new CompletableFuture<>();
+                    operationTail = closeStage.handle((@Nullable Void ignored, @Nullable Throwable failure) -> null);
+                } else {
+                    predecessor = null;
+                    closeStage = null;
+                }
+            }
+            if (alreadyClosed) {
+                completeCloseResult(visible, observedFailure);
+                return visible.copy();
+            }
+            CompletableFuture<Void> queuedPredecessor = Objects.requireNonNull(predecessor, "close predecessor");
+            CompletableFuture<Void> queuedStage = Objects.requireNonNull(closeStage, "close stage");
+            queuedPredecessor.whenComplete((@Nullable Void ignored, @Nullable Throwable failure) ->
+                    dispatchClose(queuedStage, operationExecutor));
+            return visible.copy();
+        }
+
+        /// Dispatches physical closure without blocking the completion or UI thread that ended the predecessor.
+        ///
+        /// A caller-owned executor may shut down between queue construction and predecessor completion. In that case,
+        /// the launcher's shared I/O scheduler performs the already-authorized close so the session lease and region
+        /// channel cannot leak. A rejection from the shared I/O scheduler falls back once more to the common scheduler;
+        /// if all existing schedulers reject, an emergency daemon performs closure before any lease can terminate.
+        ///
+        /// @param closeStage internal stage controlling the operation tail
+        /// @param operationExecutor preferred caller-owned executor
+        private void dispatchClose(CompletableFuture<Void> closeStage, Executor operationExecutor) {
+            Runnable action = () -> {
+                try {
+                    closeOnExecutor();
+                } catch (Throwable failure) {
+                    closeFailure(failure);
+                } finally {
+                    closeStage.complete(null);
+                }
+            };
+            try {
+                operationExecutor.execute(action);
+                return;
+            } catch (RuntimeException | Error preferredFailure) {
+                LOG.warning("NBT close executor rejected work; falling back to the shared I/O scheduler",
+                        preferredFailure);
+            }
+
+            try {
+                Schedulers.io().execute(action);
+            } catch (RuntimeException | Error ioFailure) {
+                LOG.warning("Shared I/O scheduler rejected NBT close; falling back to the common scheduler", ioFailure);
+                try {
+                    Schedulers.defaultScheduler().execute(action);
+                } catch (RuntimeException | Error terminalFailure) {
+                    LOG.warning("Common scheduler rejected NBT close; starting an emergency close worker",
+                            terminalFailure);
+                    startEmergencyClose(action);
+                }
+            }
+        }
+
+        /// Starts the last-resort close worker, falling back synchronously only if the JVM rejects thread creation.
+        ///
+        /// This path is reserved for simultaneous rejection by the caller, shared I/O, and common schedulers. It keeps
+        /// physical closure ahead of lease termination even during process shutdown or severe executor failure.
+        ///
+        /// @param action idempotent physical close action
+        private void startEmergencyClose(Runnable action) {
+            try {
+                Thread emergencyWorker = new Thread(action, "NBT emergency close");
+                emergencyWorker.setDaemon(true);
+                emergencyWorker.start();
+            } catch (RuntimeException | Error threadFailure) {
+                LOG.warning("Failed to start the NBT emergency close worker; closing on the current thread",
+                        threadFailure);
+                action.run();
+            }
+        }
+
+        /// Queues one cancellable operation while preserving a successful tail after ordinary operation failure.
+        private <T> CompletableFuture<T> enqueue(Callable<? extends T> operation, Executor operationExecutor) {
+            CancellationAwareFuture<T> result = new CancellationAwareFuture<>(() -> {
+            });
+            CompletableFuture<Void> predecessor;
+            CompletableFuture<Void> operationStage = new CompletableFuture<>();
+            synchronized (operationLock) {
+                if (closeRequested) {
+                    result.completeExceptionally(new CancellationException("NBT document is closing"));
+                    return result;
+                }
+                predecessor = operationTail;
+                operationTail = operationStage;
+            }
+
+            // Register the successor only after leaving operationLock. A synchronous executor is allowed to invoke
+            // the command inline; doing so here cannot invert the document monitor and operationLock order used by
+            // NBTDocument.close().
+            predecessor.<Void>handle((@Nullable Void ignored, @Nullable Throwable failure) -> null)
+                    .whenComplete((@Nullable Void ignored, @Nullable Throwable failure) ->
+                            dispatchOperation(operationStage, result, operation, operationExecutor));
+            return result;
+        }
+
+        /// Dispatches one reserved operation without holding the session queue lock.
+        ///
+        /// The internal stage is completed before the caller-visible result. This lets a synchronous result
+        /// continuation enqueue a close after the operation slot has become available. The visible completion itself
+        /// is delivered on the common scheduler so a continuation that waits for a subsequently queued operation
+        /// cannot block the caller-owned single-thread executor that is still returning from this command.
+        ///
+        /// @param operationStage reserved queue slot
+        /// @param result caller-visible result
+        /// @param operation operation body
+        /// @param operationExecutor caller-owned operation executor
+        private <T> void dispatchOperation(
+                CompletableFuture<Void> operationStage,
+                CancellationAwareFuture<T> result,
+                Callable<? extends T> operation,
+                Executor operationExecutor) {
+            Runnable command = () -> {
+                if (result.isCancelled()) {
+                    operationStage.complete(null);
+                    return;
+                }
+                @Nullable T value = null;
+                @Nullable Throwable failure = null;
+                try {
+                    value = operation.call();
+                } catch (Throwable operationFailure) {
+                    failure = operationFailure;
+                } finally {
+                    operationStage.complete(null);
+                }
+                @Nullable T completedValue = value;
+                @Nullable Throwable completedFailure = failure;
+                completeOnContinuation(() -> {
+                    if (completedFailure == null) {
+                        result.complete(completedValue);
+                    } else {
+                        result.completeExceptionally(completedFailure);
+                    }
+                });
+            };
+            try {
+                operationExecutor.execute(command);
+            } catch (Throwable dispatchFailure) {
+                operationStage.complete(null);
+                completeOnContinuation(() -> result.completeExceptionally(dispatchFailure));
+            }
+        }
+
+        /// Opens the library session on the blocking executor and publishes its document before user continuations.
+        private void openOnExecutor() {
+            boolean cancelledBeforeStart;
+            synchronized (operationLock) {
+                cancelledBeforeStart = closeRequested;
+                if (!cancelledBeforeStart) {
+                    openStarted = true;
+                }
+            }
+            if (cancelledBeforeStart) {
+                openFailed(new CancellationException("NBT document open was cancelled"));
+                return;
+            }
+            @Nullable NBTDocument opened = null;
+            try {
+                NBTDocument created = NBTDocumentService.openOnExecutor(path);
+                opened = created;
+                boolean reject;
+                synchronized (operationLock) {
+                    reject = closeRequested;
+                    if (!reject) {
+                        document = created;
+                    }
+                }
+                if (reject) {
+                    CancellationException cancellation = new CancellationException("NBT document open was cancelled");
+                    @Nullable Throwable closeFailure = closeAfterCancelledOpen(created);
+                    if (closeFailure != null) {
+                        cancellation.addSuppressed(closeFailure);
+                    }
+                    openFailed(cancellation);
+                    return;
+                }
+                created.setClosedListener(failure -> documentClosed(created, failure));
+                SESSIONS.put(created, this);
+                openReady.complete(null);
+                if (!openResult.complete(created)) {
+                    close(ioExecutor);
+                }
+            } catch (Throwable failure) {
+                @Nullable Throwable cleanupFailure = null;
+                if (opened != null) {
+                    SESSIONS.remove(opened, this);
+                    synchronized (operationLock) {
+                        if (document == opened) {
+                            document = null;
+                        }
+                    }
+                    cleanupFailure = closeAfterCancelledOpen(opened);
+                }
+                if (cleanupFailure != null && cleanupFailure != failure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+                openFailed(failure);
+            }
+        }
+
+        /// Closes the owned document after all queued saves have terminated.
+        private void closeOnExecutor() {
+            @Nullable NBTDocument selected;
+            boolean alreadyClosed;
+            synchronized (operationLock) {
+                selected = document;
+                document = null;
+                alreadyClosed = physicalCloseObserved;
+            }
+            if (selected == null) {
+                if (!alreadyClosed) {
+                    closeFailure(new CancellationException("NBT document was not opened"));
+                }
+                return;
+            }
+            try {
+                selected.close();
+            } catch (Throwable failure) {
+                closeFailure(failure);
+            }
+        }
+
+        /// Retains the session lease until every save queued before a direct or service-managed close terminates.
+        ///
+        /// @param closedDocument document whose physical file session has closed
+        /// @param failure physical close failure, or null
+        private void documentClosed(NBTDocument closedDocument, @Nullable Throwable failure) {
+            SESSIONS.remove(closedDocument, this);
+            CompletableFuture<Void> tail;
+            synchronized (operationLock) {
+                if (document == closedDocument) {
+                    document = null;
+                }
+                closeRequested = true;
+                physicalCloseObserved = true;
+                physicalCloseFailure = failure;
+                tail = operationTail;
+            }
+            tail.whenComplete((@Nullable Void ignored, @Nullable Throwable operationFailure) -> {
+                if (failure == null) {
+                    terminal.complete(closedDocument);
+                } else {
+                    terminal.completeExceptionally(failure);
+                }
+            });
+        }
+
+        /// Completes a close result from the physical close outcome without running callbacks under operationLock.
+        ///
+        /// @param result close result owned by this session
+        /// @param failure physical close failure, or null after successful closure
+        private void completeCloseResult(CompletableFuture<Void> result, @Nullable Throwable failure) {
+            completeOnContinuation(() -> {
+                if (failure == null) {
+                    result.complete(null);
+                } else {
+                    result.completeExceptionally(failure);
+                }
+            });
+        }
+
+        /// Requests task cancellation and schedules close without blocking the caller.
+        private void requestCancel() {
+            boolean cancelBeforeOpen;
+            @Nullable TaskExecutor current;
+            synchronized (operationLock) {
+                closeRequested = true;
+                cancelBeforeOpen = !openStarted && document == null;
+                current = executor;
+            }
+            @Nullable Throwable cancellationFailure = null;
+            if (current != null && !current.isCancelled()) {
+                try {
+                    current.cancel();
+                } catch (Throwable failure) {
+                    cancellationFailure = failure;
+                    LOG.warning("Failed to cancel the NBT session task; continuing close cleanup", failure);
+                }
+            }
+            if (cancelBeforeOpen) {
+                CancellationException cancellation = new CancellationException("NBT document open was cancelled");
+                if (cancellationFailure != null) {
+                    cancellation.addSuppressed(cancellationFailure);
+                }
+                openFailed(cancellation);
+            } else {
+                close(ioExecutor);
+            }
+        }
+
+        /// Handles terminal task completion, including cancellation before resource acquisition.
+        private void stopped(boolean success, TaskExecutor stoppedExecutor) {
+            if (success) {
+                @Nullable NBTDocument completedDocument;
+                @Nullable CompletableFuture<Void> result;
+                @Nullable Throwable closeFailure;
+                synchronized (operationLock) {
+                    completedDocument = document;
+                    result = closeResult;
+                    closeFailure = physicalCloseFailure;
+                }
+                if (!openResult.isDone() && completedDocument != null) {
+                    openResult.complete(completedDocument);
+                }
+                if (result != null) {
+                    if (closeFailure == null) {
+                        result.complete(null);
+                    } else {
+                        result.completeExceptionally(closeFailure);
+                    }
+                }
+                return;
+            }
+
+            Throwable failure = terminalFailure(stoppedExecutor);
+            closeLeakedDocument();
+            openReady.completeExceptionally(failure);
+            openResult.completeExceptionally(failure);
+            @Nullable CompletableFuture<Void> result;
+            synchronized (operationLock) {
+                result = closeResult;
+            }
+            if (result != null) {
+                completeOnContinuation(() -> result.completeExceptionally(failure));
+            }
+        }
+
+        /// Closes a document left open after an Error or cancellation bypassed the normal close operation.
+        private void closeLeakedDocument() {
+            @Nullable NBTDocument leaked;
+            synchronized (operationLock) {
+                leaked = document;
+                document = null;
+            }
+            if (leaked == null) {
+                return;
+            }
+            SESSIONS.remove(leaked, this);
+            try {
+                leaked.close();
+            } catch (Throwable failure) {
+                LOG.warning("Failed to close an NBT document after task termination", failure);
+            }
+        }
+
+        /// Completes all open-side futures exceptionally and stops the internal task source.
+        private void openFailed(Throwable failure) {
+            terminal.completeExceptionally(failure);
+            openReady.completeExceptionally(failure);
+            openResult.completeExceptionally(failure);
+        }
+
+        /// Completes close and terminal futures after a scheduling or close failure.
+        private void closeFailure(Throwable failure) {
+            @Nullable CompletableFuture<Void> result = closeResult;
+            terminal.completeExceptionally(failure);
+            if (result != null) {
+                completeOnContinuation(() -> result.completeExceptionally(failure));
+            }
+        }
+
+        /// Creates the task whose future remains pending until explicit close.
+        @NotNullByDefault
+        private final class SessionTask extends CompletableFutureTask<NBTDocument> {
+            /// Creates one resource-bearing document session task.
+            private SessionTask() {
+                setExecutor(ioExecutor);
+                setName("NBT document session");
+                setSignificance(Task.TaskSignificance.MINOR);
+                TaskResource first = resources.get(0);
+                TaskResource[] additional = resources.subList(1, resources.size())
+                        .toArray(TaskResource[]::new);
+                setResources(first, additional);
+            }
+
+            /// Schedules open while retaining the future and its resource lease until close.
+            @Override
+            public CompletableFuture<NBTDocument> getFuture(TaskCompletableFuture context) {
+                Objects.requireNonNull(context, "context");
+                try {
+                    ioExecutor.execute(DocumentSession.this::openOnExecutor);
+                } catch (RuntimeException failure) {
+                    openFailed(failure);
+                } catch (Error failure) {
+                    openFailed(failure);
+                    throw failure;
+                }
+                return terminal;
+            }
+        }
+    }
+
+    /// Future whose cancellation invokes a non-blocking owner action exactly after the visible state changes.
+    @NotNullByDefault
+    private static final class CancellationAwareFuture<T> extends CompletableFuture<T> {
+        /// Action that cancels or marks the internal source.
+        private final Runnable cancellationAction;
+
+        /// Creates a future with one cancellation callback.
+        ///
+        /// @param cancellationAction callback invoked after successful cancellation
+        private CancellationAwareFuture(Runnable cancellationAction) {
+            this.cancellationAction = Objects.requireNonNull(cancellationAction, "cancellationAction");
+        }
+
+        /// Cancels this visible view and then requests cancellation of its internal source.
+        @Override
+        public boolean cancel(boolean mayInterruptIfRunning) {
+            boolean changed = super.cancel(mayInterruptIfRunning);
+            if (changed) {
+                cancellationAction.run();
+            }
+            return changed;
+        }
+    }
+
+    /// Unwraps one completion wrapper without replacing its original failure.
+    private static Throwable resolveCompletionFailure(Throwable failure) {
+        Throwable current = Objects.requireNonNull(failure, "failure");
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = Objects.requireNonNull(current.getCause(), "completion cause");
+        }
+        return current;
+    }
+
+    /// Closes a document when an open result was cancelled after the library session was created.
+    private static @Nullable Throwable closeAfterCancelledOpen(NBTDocument document) {
+        Objects.requireNonNull(document, "document");
         try {
             document.close();
-        } catch (IOException | RuntimeException failure) {
+            return null;
+        } catch (Throwable failure) {
             LOG.warning("Failed to close an NBT document after its open operation was cancelled", failure);
+            return failure;
         }
     }
 }

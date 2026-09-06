@@ -43,8 +43,11 @@ import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Objects;
 import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -79,7 +82,7 @@ final class NBTEditorControllerTest {
 
         ui.run(() -> controller.open(source));
         assertEquals(NBTEditorStatus.OPENING, controller.snapshot().status());
-        assertEquals(1, ioExecutor.pendingCount());
+        ioExecutor.awaitPendingCount(1);
         ioExecutor.runNext();
         assertEquals(NBTEditorStatus.OPENING, controller.snapshot().status());
         assertEquals(1, ui.pendingCount());
@@ -147,7 +150,7 @@ final class NBTEditorControllerTest {
         ui.run(() -> result.set(controller.replaceSnbtAsync(root, "{value:2}")));
 
         assertEquals(NBTEditorStatus.EDITING, controller.snapshot().status());
-        assertEquals(1, ioExecutor.pendingCount());
+        ioExecutor.awaitPendingCount(1);
         assertFalse(Objects.requireNonNull(result.get()).isDone());
         assertEquals(1, rootSnapshot(controller).getInt("value"));
 
@@ -784,8 +787,11 @@ final class NBTEditorControllerTest {
     /// Deterministic caller-owned blocking executor.
     @NotNullByDefault
     private static final class ManualExecutor implements Executor {
+        /// Maximum time a test waits for asynchronous resource resolution to enqueue its command.
+        private static final long COMMAND_TIMEOUT_SECONDS = 5L;
+
         /// FIFO of submitted operations.
-        private final Queue<Runnable> commands = new ArrayDeque<>();
+        private final BlockingQueue<Runnable> commands = new LinkedBlockingQueue<>();
 
         /// Queues one operation without running it.
         ///
@@ -802,9 +808,30 @@ final class NBTEditorControllerTest {
             return commands.size();
         }
 
+        /// Waits until at least the requested number of commands has been submitted.
+        ///
+        /// @param expected minimum command count
+        private void awaitPendingCount(int expected) {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(COMMAND_TIMEOUT_SECONDS);
+            while (commands.size() < expected && System.nanoTime() < deadline) {
+                Thread.yield();
+            }
+            assertTrue(commands.size() >= expected,
+                    () -> "Timed out waiting for " + expected + " executor command(s)");
+        }
+
         /// Runs the next submitted command.
         private void runNext() {
-            commands.remove().run();
+            try {
+                Runnable command = commands.poll(COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                if (command == null) {
+                    throw new AssertionError("Timed out waiting for an executor command");
+                }
+                command.run();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted while waiting for an executor command", interrupted);
+            }
         }
 
         /// Drains every submitted command, including commands added while draining.

@@ -150,6 +150,18 @@ final class WorldArchiveImporterTest {
         assertNoStagingDirectories(savesDirectory);
     }
 
+    /// Temporary importer directories cannot be exposed as user-visible world names.
+    @Test
+    void rejectsReservedStagingWorldName() throws IOException {
+        Path archive = createWorldArchive("source-world", List.of());
+        Path savesDirectory = Files.createDirectories(temporaryDirectory.resolve("saves"));
+
+        assertThrows(IOException.class, () -> new WorldArchiveImporter(testLimits())
+                .importArchive(archive, savesDirectory, ".XYML-WORLD-STAGE-user"));
+
+        assertNoStagingDirectories(savesDirectory);
+    }
+
     /// Creates a compact import policy suitable for fixture ZIPs.
     ///
     /// @return strict but small test limits

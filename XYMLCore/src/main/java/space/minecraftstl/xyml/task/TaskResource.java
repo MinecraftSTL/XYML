@@ -167,6 +167,18 @@ public final class TaskResource {
         return directory(Kind.GAME_WORLD, directory);
     }
 
+    /// Creates an exclusive saved-world catalog key for one `saves` directory.
+    ///
+    /// This logical key protects direct-child creation, deletion, and shallow indexing without claiming every world's
+    /// contents. It conflicts with the same or an overlapping catalog and with a complete game-instance/game-directory
+    /// resource, while ordinary operations on distinct existing worlds remain independent.
+    ///
+    /// @param directory saved-world catalog directory
+    /// @return normalized world-catalog resource
+    public static TaskResource worldCatalog(Path directory) {
+        return new TaskResource(Kind.WORLD_CATALOG, Scope.WORLD_CATALOG, normalizePath(directory));
+    }
+
     /// Creates a resource covering one exact download destination.
     ///
     /// @param target download destination
@@ -251,6 +263,17 @@ public final class TaskResource {
     /// @return normalized NBT directory resource
     public static TaskResource nbtDirectory(Path directory) {
         return directory(Kind.NBT_DIRECTORY, directory);
+    }
+
+    /// Creates a resource covering one exact input file.
+    ///
+    /// The key is intended for a non-archive source whose bytes must remain stable for a complete transaction. It
+    /// conflicts with every exact key at the same path and any directory resource covering that path.
+    ///
+    /// @param file exact input file
+    /// @return normalized exact-file resource
+    public static TaskResource inputFile(Path file) {
+        return file(Kind.INPUT_FILE, file);
     }
 
     /// Creates a resource covering one exact input archive.
@@ -341,6 +364,9 @@ public final class TaskResource {
         if (isCacheOperationScope() || other.isCacheOperationScope()) {
             return cacheOperationConflicts(other);
         }
+        if (isWorldCatalogScope() || other.isWorldCatalogScope()) {
+            return worldCatalogConflicts(other);
+        }
 
         Path thisPath = Objects.requireNonNull(comparisonPath, "comparisonPath");
         Path otherPath = Objects.requireNonNull(other.comparisonPath, "other comparisonPath");
@@ -379,6 +405,21 @@ public final class TaskResource {
                         .equals(other.comparisonPath);
             }
             if (scope != Scope.DIRECTORY) {
+                return false;
+            }
+            Path thisPath = Objects.requireNonNull(comparisonPath, "comparisonPath");
+            Path otherPath = Objects.requireNonNull(other.comparisonPath, "other comparisonPath");
+            return otherPath.startsWith(thisPath);
+        }
+        if (isWorldCatalogScope() || other.isWorldCatalogScope()) {
+            if (scope == Scope.WORLD_CATALOG && other.scope == Scope.WORLD_CATALOG) {
+                return Objects.requireNonNull(comparisonPath, "comparisonPath")
+                        .equals(other.comparisonPath);
+            }
+            if (scope != Scope.DIRECTORY || other.scope != Scope.WORLD_CATALOG) {
+                return false;
+            }
+            if (kind != Kind.GAME_DIRECTORY && kind != Kind.GAME_INSTANCE) {
                 return false;
             }
             Path thisPath = Objects.requireNonNull(comparisonPath, "comparisonPath");
@@ -544,6 +585,11 @@ public final class TaskResource {
         return scope == Scope.CACHE_OPERATION;
     }
 
+    /// Returns whether this resource is a saved-world catalog coordination key.
+    private boolean isWorldCatalogScope() {
+        return scope == Scope.WORLD_CATALOG;
+    }
+
     /// Returns whether a logical repository request conflicts with another semantic resource.
     private boolean repositoryScopeConflicts(TaskResource other) {
         if (isRepositoryScope() && other.isRepositoryScope()) {
@@ -587,6 +633,25 @@ public final class TaskResource {
             return cachePath.startsWith(candidatePath) || candidatePath.startsWith(cachePath);
         }
         return candidate.scope == Scope.FILE && candidatePath.startsWith(cachePath);
+    }
+
+    /// Returns whether a saved-world catalog request conflicts with another semantic resource.
+    private boolean worldCatalogConflicts(TaskResource other) {
+        if (isWorldCatalogScope() && other.isWorldCatalogScope()) {
+            Path thisPath = Objects.requireNonNull(comparisonPath, "world catalog comparisonPath");
+            Path otherPath = Objects.requireNonNull(other.comparisonPath, "other world catalog comparisonPath");
+            return thisPath.startsWith(otherPath) || otherPath.startsWith(thisPath);
+        }
+
+        TaskResource catalogResource = isWorldCatalogScope() ? this : other;
+        TaskResource candidate = isWorldCatalogScope() ? other : this;
+        if (candidate.scope != Scope.DIRECTORY
+                || (candidate.kind != Kind.GAME_DIRECTORY && candidate.kind != Kind.GAME_INSTANCE)) {
+            return false;
+        }
+        Path catalogPath = Objects.requireNonNull(catalogResource.comparisonPath, "world catalog comparisonPath");
+        Path candidatePath = Objects.requireNonNull(candidate.comparisonPath, "candidate comparisonPath");
+        return catalogPath.startsWith(candidatePath) || candidatePath.startsWith(catalogPath);
     }
 
     /// Returns stable text for resource ordering.
@@ -646,6 +711,8 @@ public final class TaskResource {
         GAME_INSTANCE,
         /// Complete saved-world tree.
         GAME_WORLD,
+        /// Direct-child catalog for one saved-world directory.
+        WORLD_CATALOG,
         /// Exact download destination.
         DOWNLOAD_TARGET,
         /// Exact managed add-on source, archive, or destination.
@@ -664,6 +731,8 @@ public final class TaskResource {
         NBT_FILE,
         /// Complete NBT publication directory tree.
         NBT_DIRECTORY,
+        /// Exact non-archive input file.
+        INPUT_FILE,
         /// Exact input archive.
         ARCHIVE,
         /// Exact export destination.
@@ -686,6 +755,8 @@ public final class TaskResource {
         REPOSITORY_OPERATION(2),
         /// Exclusive cache transaction keyed by one normalized cache path.
         CACHE_OPERATION(2),
+        /// Exclusive direct-child world-catalog coordination scope.
+        WORLD_CATALOG(2),
         /// Exact filesystem path.
         FILE(3);
 

@@ -290,16 +290,28 @@ public final class TaskResourceLockManagerTest {
         TaskResource secondWorld = TaskResource.gameWorld(secondWorldPath);
         TaskResource levelData = TaskResource.nbtFile(firstWorldPath.resolve("level.dat"));
         TaskResource regionDirectory = TaskResource.nbtDirectory(firstWorldPath.resolve("region"));
+        TaskResource firstCatalog = TaskResource.worldCatalog(instancePath.resolve("saves"));
+        TaskResource secondCatalog = TaskResource.worldCatalog(instancePath.resolve("other-saves"));
+        TaskResource iconInput = TaskResource.inputFile(firstWorldPath.resolve("icon.png"));
 
         assertEquals(TaskResource.Kind.GAME_WORLD, firstWorld.getKind());
         assertEquals(TaskResource.Kind.NBT_FILE, levelData.getKind());
         assertEquals(TaskResource.Kind.NBT_DIRECTORY, regionDirectory.getKind());
+        assertEquals(TaskResource.Kind.WORLD_CATALOG, firstCatalog.getKind());
+        assertEquals(TaskResource.Kind.INPUT_FILE, iconInput.getKind());
         assertTrue(instance.conflictsWith(firstWorld));
         assertTrue(firstWorld.conflictsWith(instance));
+        assertTrue(instance.conflictsWith(firstCatalog));
+        assertTrue(firstCatalog.conflictsWith(instance));
         assertTrue(firstWorld.conflictsWith(levelData));
         assertTrue(levelData.conflictsWith(firstWorld));
         assertTrue(firstWorld.conflictsWith(regionDirectory));
         assertTrue(regionDirectory.conflictsWith(firstWorld));
+        assertTrue(firstWorld.conflictsWith(iconInput));
+        assertTrue(iconInput.conflictsWith(firstWorld));
+        assertFalse(firstWorld.conflictsWith(firstCatalog));
+        assertFalse(firstCatalog.conflictsWith(firstWorld));
+        assertFalse(firstCatalog.conflictsWith(secondCatalog));
         assertFalse(firstWorld.conflictsWith(secondWorld));
         assertFalse(secondWorld.conflictsWith(firstWorld));
     }
