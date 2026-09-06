@@ -776,7 +776,11 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
         }
     }
 
-    /// Commits one current complete shallow index.
+    /// Commits one current complete shallow index and retains ownership through READY publication.
+    ///
+    /// The refresh remains active until all synchronous listeners have accepted the READY transition. If a listener
+    /// fails, the still-owned operation can publish a retryable FAILED state; clearing [#activeRefresh] before
+    /// publication would make the failure callback a no-op and leave a misleading READY snapshot behind.
     ///
     /// @param operation current refresh owner
     /// @param directories immutable direct-child paths
@@ -790,7 +794,6 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
             if (!ownsRefresh(operation)) {
                 return;
             }
-            activeRefresh = null;
             currentGameVersion = Objects.requireNonNull(resolvedGameVersion, "resolvedGameVersion");
             WorldCatalogSnapshot previous = state.snapshot();
             WorldCatalogSnapshot ready = readySnapshot(
@@ -799,7 +802,23 @@ public final class DefaultWorldCatalogModel implements WorldCatalogModel {
                     "");
             transition = replaceStateLocked(directories, ready);
         }
-        publish(transition);
+        try {
+            publish(transition);
+        } catch (RuntimeException | Error publicationFailure) {
+            try {
+                failRefreshAfterStartFailure(operation, publicationFailure);
+            } catch (RuntimeException | Error failurePublicationFailure) {
+                if (failurePublicationFailure != publicationFailure) {
+                    publicationFailure.addSuppressed(failurePublicationFailure);
+                }
+            }
+            throw publicationFailure;
+        }
+        synchronized (stateLock) {
+            if (activeRefresh == operation) {
+                activeRefresh = null;
+            }
+        }
     }
 
     /// Commits a retryable shallow-index failure only when its owner remains current.

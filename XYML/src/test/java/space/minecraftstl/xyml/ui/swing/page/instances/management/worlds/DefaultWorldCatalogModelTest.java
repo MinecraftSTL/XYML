@@ -44,6 +44,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -177,6 +178,59 @@ final class DefaultWorldCatalogModelTest {
             model.refresh();
             assertEquals(WorldCatalogStatus.READY, ready.get(5L, TimeUnit.SECONDS).status());
         } finally {
+            model.close();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5L, TimeUnit.SECONDS));
+        }
+    }
+
+    /// A runtime listener failure while publishing READY becomes retryable instead of leaving a misleading ready state.
+    @Test
+    void readyRuntimeListenerFailureLeavesRetryableFailedState() throws Exception {
+        assertReadyListenerFailureLeavesRetryableFailedState(false);
+    }
+
+    /// A fatal listener failure while publishing READY also clears refresh ownership and permits a later retry.
+    @Test
+    void readyErrorListenerFailureLeavesRetryableFailedState() throws Exception {
+        assertReadyListenerFailureLeavesRetryableFailedState(true);
+    }
+
+    /// Verifies recovery from one unchecked READY listener failure and a subsequent successful refresh.
+    ///
+    /// @param fatal whether the listener throws an [Error] instead of a [RuntimeException]
+    private void assertReadyListenerFailureLeavesRetryableFailedState(boolean fatal) throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        RecordingAccess access = new RecordingAccess(temporaryDirectory, 1);
+        DefaultWorldCatalogModel model = new DefaultWorldCatalogModel(
+                access,
+                executor,
+                WorldCatalogStrings.english());
+        AtomicBoolean failReady = new AtomicBoolean(true);
+        CountDownLatch failedStateObserved = new CountDownLatch(1);
+        Subscription subscription = model.subscribe(change -> {
+            WorldCatalogSnapshot current = Objects.requireNonNull(change.currentValue(), "currentValue");
+            if (current.status() == WorldCatalogStatus.READY && failReady.get()) {
+                if (fatal) {
+                    throw new AssertionError("listener failed during ready publication");
+                }
+                throw new IllegalStateException("listener failed during ready publication");
+            }
+            if (current.status() == WorldCatalogStatus.FAILED) {
+                failedStateObserved.countDown();
+            }
+        });
+        try {
+            model.refresh();
+            assertTrue(failedStateObserved.await(5L, TimeUnit.SECONDS));
+            assertEquals(WorldCatalogStatus.FAILED, model.snapshot().status());
+
+            failReady.set(false);
+            CompletableFuture<WorldCatalogSnapshot> ready = nextReadySnapshot(model);
+            model.refresh();
+            assertEquals(WorldCatalogStatus.READY, ready.get(5L, TimeUnit.SECONDS).status());
+        } finally {
+            subscription.unsubscribe();
             model.close();
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(5L, TimeUnit.SECONDS));
