@@ -23,6 +23,9 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.util.function.ExceptionalRunnable;
 import space.minecraftstl.xyml.util.platform.Bits;
 import space.minecraftstl.xyml.util.platform.OperatingSystem;
 
@@ -35,11 +38,14 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /// Verifies source-bound planning and one-time execution of XYAT repair actions.
@@ -67,7 +73,7 @@ final class XYMLMcpCrashRepairCoordinatorTest {
                         taskCreations.incrementAndGet();
                         return Task.completed(null);
                     }),
-                    validations::incrementAndGet);
+                    () -> validationTask(validations::incrementAndGet));
             Map<String, Object> diagnosis = firstDiagnosis(analysis);
             Map<String, Object> solution = solution(diagnosis);
 
@@ -86,11 +92,11 @@ final class XYMLMcpCrashRepairCoordinatorTest {
             assertEquals(0, taskCreations.get());
 
             Map<String, Object> operation = coordinator.execute(String.valueOf(plan.get("plan_id")));
-            assertEquals(1, validations.get());
-            assertEquals(1, taskCreations.get());
             assertEquals("SUCCEEDED", awaitTerminal(
                     coordinator,
                     String.valueOf(operation.get("operation_id"))).get("status"));
+            assertEquals(1, validations.get());
+            assertEquals(1, taskCreations.get());
             assertThrows(IllegalStateException.class,
                     () -> coordinator.execute(String.valueOf(plan.get("plan_id"))));
         }
@@ -129,7 +135,7 @@ final class XYMLMcpCrashRepairCoordinatorTest {
 
     /// Confirms a source validation failure consumes the plan without starting its repair task.
     @Test
-    void consumesPlanWhenLatestLogChanged() {
+    void consumesPlanWhenLatestLogChanged() throws Exception {
         AtomicInteger taskCreations = new AtomicInteger();
         try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
             Map<String, Object> analysis = coordinator.analyze(
@@ -140,17 +146,24 @@ final class XYMLMcpCrashRepairCoordinatorTest {
                         taskCreations.incrementAndGet();
                         return Task.completed(null);
                     }),
-                    () -> {
-                        throw new IOException("latest log changed");
-                    });
+                    () -> validationTask(() -> {
+                        throw new IllegalStateException(
+                                "Crash analysis source could not be revalidated",
+                                new IOException("latest log changed"));
+                    }));
             Map<String, Object> solution = solution(firstDiagnosis(analysis));
             Map<String, Object> plan = coordinator.plan(
                     String.valueOf(analysis.get("analysis_id")),
                     String.valueOf(solution.get("solution_id")));
             String planId = String.valueOf(plan.get("plan_id"));
 
-            IllegalStateException stale = assertThrows(IllegalStateException.class, () -> coordinator.execute(planId));
-            assertTrue(stale.getMessage().contains("revalidated"));
+            Map<String, Object> operation = coordinator.execute(planId);
+            Map<String, Object> terminal = awaitTerminal(
+                    coordinator,
+                    String.valueOf(operation.get("operation_id")));
+            assertEquals("FAILED", terminal.get("status"));
+            assertEquals(IllegalStateException.class.getName(), terminal.get("failure_type"));
+            assertEquals("Crash analysis source could not be revalidated", terminal.get("failure_message"));
             assertEquals(0, taskCreations.get());
             assertThrows(IllegalStateException.class, () -> coordinator.execute(planId));
         }
@@ -175,7 +188,7 @@ final class XYMLMcpCrashRepairCoordinatorTest {
                     XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
                     "sha256:java",
                     input,
-                    validations::incrementAndGet);
+                    () -> validationTask(validations::incrementAndGet));
             Map<String, Object> solution = solution(firstDiagnosis(analysis));
             Map<String, Object> plan = coordinator.plan(
                     String.valueOf(analysis.get("analysis_id")),
@@ -194,13 +207,104 @@ final class XYMLMcpCrashRepairCoordinatorTest {
 
             Map<String, Object> operation = coordinator.execute(String.valueOf(plan.get("plan_id")));
             assertEquals(false, operation.get("cancellable"));
-            assertEquals(1, validations.get());
-            assertEquals(1, taskCreations.get());
             assertEquals("SUCCEEDED", awaitTerminal(
                     coordinator,
                     String.valueOf(operation.get("operation_id"))).get("status"));
+            assertEquals(1, validations.get());
+            assertEquals(1, taskCreations.get());
             assertThrows(IllegalStateException.class,
                     () -> coordinator.execute(String.valueOf(plan.get("plan_id"))));
+        }
+    }
+
+    /// Starts source validation asynchronously instead of blocking the MCP execute call.
+    ///
+    /// @throws Exception when bounded synchronization or operation completion fails
+    @Test
+    void executesSourceValidationInsideTheAsynchronousOperation() throws Exception {
+        CountDownLatch validationEntered = new CountDownLatch(1);
+        CountDownLatch releaseValidation = new CountDownLatch(1);
+        AtomicInteger taskCreations = new AtomicInteger();
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:current",
+                    missingDependencyInput(ignoredIds -> {
+                        taskCreations.incrementAndGet();
+                        return Task.completed(null);
+                    }),
+                    () -> validationTask(() -> {
+                        validationEntered.countDown();
+                        if (!releaseValidation.await(5, TimeUnit.SECONDS)) {
+                            throw new AssertionError("Timed out while holding source validation");
+                        }
+                    }));
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+
+            Map<String, Object> operation = assertTimeoutPreemptively(
+                    Duration.ofSeconds(1),
+                    () -> coordinator.execute(String.valueOf(plan.get("plan_id"))));
+            assertTrue(validationEntered.await(5, TimeUnit.SECONDS));
+            assertEquals(0, taskCreations.get());
+
+            releaseValidation.countDown();
+            assertEquals("SUCCEEDED", awaitTerminal(
+                    coordinator,
+                    String.valueOf(operation.get("operation_id"))).get("status"));
+            assertEquals(1, taskCreations.get());
+        } finally {
+            releaseValidation.countDown();
+        }
+    }
+
+    /// Cancels a source validator waiting on a conflicting resource without creating or running the repair task.
+    ///
+    /// @throws Exception when bounded synchronization or operation completion fails
+    @Test
+    void cancelsSourceValidationWhileWaitingForItsResource() throws Exception {
+        TaskResource resource = TaskResource.gameInstance(Path.of("C:/Games/cancelled-validation"));
+        CountDownLatch holderEntered = new CountDownLatch(1);
+        CountDownLatch releaseHolder = new CountDownLatch(1);
+        AtomicInteger validations = new AtomicInteger();
+        AtomicInteger taskCreations = new AtomicInteger();
+        Task<?> holder = validationTask(resource, () -> {
+            holderEntered.countDown();
+            if (!releaseHolder.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out while holding validation resource");
+            }
+        });
+        TaskExecutor holderExecutor = holder.executor();
+        holderExecutor.start();
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator()) {
+            assertTrue(holderEntered.await(5, TimeUnit.SECONDS));
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:current",
+                    missingDependencyInput(ignoredIds -> {
+                        taskCreations.incrementAndGet();
+                        return Task.completed(null);
+                    }),
+                    () -> validationTask(resource, validations::incrementAndGet));
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            Map<String, Object> operation = coordinator.execute(String.valueOf(plan.get("plan_id")));
+            String operationId = String.valueOf(operation.get("operation_id"));
+
+            Map<String, Object> cancellation = coordinator.cancel(operationId);
+            assertEquals(true, cancellation.get("cancellation_accepted"));
+            assertEquals("CANCELLED", awaitTerminal(coordinator, operationId).get("status"));
+            assertEquals(0, validations.get());
+            assertEquals(0, taskCreations.get());
+        } finally {
+            releaseHolder.countDown();
+            awaitTaskTerminal(holder);
         }
     }
 
@@ -220,8 +324,8 @@ final class XYMLMcpCrashRepairCoordinatorTest {
                     XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
                     "sha256:current",
                     missingDependencyInput(ignoredIds -> Task.completed(null)),
-                    () -> {
-                    });
+                    () -> validationTask(() -> {
+                    }));
             Map<String, Object> solution = solution(firstDiagnosis(analysis));
             Map<String, Object> plan = coordinator.plan(
                     String.valueOf(analysis.get("analysis_id")),
@@ -255,6 +359,23 @@ final class XYMLMcpCrashRepairCoordinatorTest {
                 Bits.BIT_64,
                 4096,
                 log.lines().toList());
+    }
+
+    /// Creates one concrete-resource source-validation task.
+    ///
+    /// @param action validation action
+    /// @return fresh stopped validation task
+    private static Task<?> validationTask(ExceptionalRunnable<?> action) {
+        return validationTask(TaskResource.gameInstance(Path.of("C:/Games/validation-demo")), action);
+    }
+
+    /// Creates one source-validation task for the supplied resource.
+    ///
+    /// @param resource concrete resource occupied by validation
+    /// @param action validation action
+    /// @return fresh stopped validation task
+    private static Task<?> validationTask(TaskResource resource, ExceptionalRunnable<?> action) {
+        return Task.runAsync("Validate crash source", Runnable::run, action).setResources(resource);
     }
 
     /// Extracts the first structured diagnosis.
@@ -293,6 +414,21 @@ final class XYMLMcpCrashRepairCoordinatorTest {
             Thread.sleep(10L);
         }
         throw new AssertionError("Crash repair operation did not finish before timeout");
+    }
+
+    /// Waits for an independently started task to reach a terminal state.
+    ///
+    /// @param task task whose terminal state is required
+    /// @throws InterruptedException when polling is interrupted
+    private static void awaitTaskTerminal(Task<?> task) throws InterruptedException {
+        Instant deadline = Instant.now().plus(OPERATION_TIMEOUT);
+        while (Instant.now().isBefore(deadline)) {
+            if (task.getState() == Task.TaskState.SUCCEEDED || task.getState() == Task.TaskState.FAILED) {
+                return;
+            }
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("Task did not finish before timeout");
     }
 
     /// Mutable UTC clock used to cross plan-expiry boundaries deterministically.

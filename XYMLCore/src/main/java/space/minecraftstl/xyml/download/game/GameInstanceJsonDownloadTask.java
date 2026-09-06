@@ -59,6 +59,7 @@ public final class GameInstanceJsonDownloadTask extends Task<String> {
         dependents.add(gameVersionList.loadAsync(gameVersion));
 
         setSignificance(TaskSignificance.MODERATE);
+        asOrchestration();
     }
 
     /// Returns JSON download work added after catalog resolution.

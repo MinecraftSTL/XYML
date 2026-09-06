@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.modpack.curse;
 import com.google.gson.JsonParseException;
 import kala.compress.archivers.zip.ZipArchiveEntry;
 import kala.compress.archivers.zip.ZipArchiveReader;
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.MismatchedModpackTypeException;
@@ -27,6 +28,7 @@ import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackProvider;
 import space.minecraftstl.xyml.modpack.ModpackUpdateTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 import space.minecraftstl.xyml.util.io.IOUtils;
@@ -35,6 +37,8 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
 
+/// Provides parsing, installation, update, and deferred completion for CurseForge-format modpacks.
+@NotNullByDefault
 public final class CurseModpackProvider implements ModpackProvider {
     public static final CurseModpackProvider INSTANCE = new CurseModpackProvider();
 
@@ -43,9 +47,26 @@ public final class CurseModpackProvider implements ModpackProvider {
         return "Curse";
     }
 
+    /// Creates a completion root that retains the selected instance while briefly resolving repository metadata.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
+    /// @return deferred completion task with continuous instance ownership and a short metadata phase
     @Override
     public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
-        return new CurseCompletionTask(dependencyManager, instanceId);
+        var repository = dependencyManager.getGameRepository();
+        Task<?> resolution = Task.composeAsync(() -> new CurseCompletionTask(dependencyManager, instanceId)
+                        .setResources(
+                                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                                TaskResource.gameDirectory(repository.getRunDirectory(instanceId))))
+                .setName(CurseCompletionTask.class.getName())
+                .setResources(TaskResource.repositoryMetadata(repository.getBaseDirectory()))
+                .releaseResourcesBeforeDependencies();
+        return resolution.thenApplyAsync(result -> result)
+                .setName(CurseCompletionTask.class.getName()).setResources(
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(repository.getRunDirectory(instanceId)));
     }
 
     @Override

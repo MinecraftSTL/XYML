@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.java.JavaInfo;
 import space.minecraftstl.xyml.java.JavaLocalFiles;
 import space.minecraftstl.xyml.java.JavaManifest;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.DigestUtils;
 import space.minecraftstl.xyml.util.tree.ArchiveFileTree;
 
@@ -56,7 +57,8 @@ import java.util.Set;
 /// The task is intentionally private to the Swing acquisition pipeline. It preserves the legacy Java manifest
 /// format while enforcing the publisher's ownership proof before and after every filesystem mutation. All archive
 /// directories and files are created exactly once, and regular files are opened with both `CREATE_NEW` and
-/// `NOFOLLOW_LINKS`, so a planted file, hard link, or symbolic link is rejected instead of truncated.
+/// `NOFOLLOW_LINKS`, so a planted file, hard link, or symbolic link is rejected instead of truncated. Its resource
+/// declaration covers the complete managed platform root, so direct execution cannot race another publisher.
 @NotNullByDefault
 final class SafeJavaRuntimeExtractionTask extends Task<JavaManifest> {
     /// Buffer size used while copying one archive entry.
@@ -116,6 +118,7 @@ final class SafeJavaRuntimeExtractionTask extends Task<JavaManifest> {
         markerIdentity = EntryIdentity.capture(requireRegularFile(ownership.markerFile()));
         requireExtractionOwnership();
         setName("Extract managed Java runtime into owned staging");
+        setResources(TaskResource.javaRuntime(ownership.platformRoot()));
     }
 
     /// Revalidates ownership, extracts the single Java Home root, and returns its managed-runtime manifest.

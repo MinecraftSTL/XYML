@@ -36,17 +36,23 @@ import static space.minecraftstl.xyml.util.gson.JsonUtils.listTypeOf;
 /// Loads Quilt game and loader versions from the Quilt metadata service.
 @NotNullByDefault
 public final class QuiltVersionList extends VersionList<QuiltRemoteVersion> {
+    /// Download provider used to rewrite metadata endpoints.
     private final DownloadProvider downloadProvider;
 
+    /// Creates a Quilt version list using the given download provider.
+    ///
+    /// @param downloadProvider provider used to resolve metadata endpoints
     public QuiltVersionList(DownloadProvider downloadProvider) {
         this.downloadProvider = downloadProvider;
     }
 
+    /// {@inheritDoc}
     @Override
     public boolean hasType() {
         return false;
     }
 
+    /// {@inheritDoc}
     @Override
     public Task<?> refreshAsync() {
         return Task.runAsync(() -> {
@@ -63,7 +69,7 @@ public final class QuiltVersionList extends VersionList<QuiltRemoteVersion> {
             } finally {
                 lock.writeLock().unlock();
             }
-        });
+        }).asOrchestration();
     }
 
     private static final String LOADER_META_URL = "https://meta.quiltmc.org/v3/versions/loader";

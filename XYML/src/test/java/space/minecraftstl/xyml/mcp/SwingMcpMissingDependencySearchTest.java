@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import javax.swing.SwingUtilities;
 import java.util.ArrayList;
@@ -55,6 +56,9 @@ final class SwingMcpMissingDependencySearchTest {
         assertNotSame(firstTask, secondTask);
         assertEquals(Task.TaskState.READY, firstTask.getState());
         assertEquals(Task.TaskState.READY, secondTask.getState());
+        assertEquals(
+                List.of(TaskResource.Kind.ORCHESTRATION),
+                firstTask.getResources().stream().map(TaskResource::getKind).toList());
 
         firstTask.execute();
 

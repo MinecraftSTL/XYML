@@ -36,6 +36,7 @@ import space.minecraftstl.xyml.setting.GameSettingsPresets;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.PortablePath;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.i18n.LocalizedText;
@@ -45,8 +46,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
@@ -78,6 +81,7 @@ final class XYMLMcpServiceCrashAnalysisTest {
         };
 
         Task<?> blockedTask = XYMLMcpService.guardRepairTask(() -> false, taskFactory);
+        assertEquals(TaskResource.Kind.ORCHESTRATION, blockedTask.getResources().iterator().next().getKind());
         IllegalStateException blocked = assertThrows(IllegalStateException.class, blockedTask::run);
         assertTrue(blocked.getMessage().contains("startup agreements"));
         assertEquals(0, taskCreations.get());
@@ -135,7 +139,7 @@ final class XYMLMcpServiceCrashAnalysisTest {
 
                 Map<String, Object> launcherAnalysis = assertTimeoutPreemptively(
                         Duration.ofSeconds(3),
-                        () -> service.analyzeCrash(validId.id(), null, null));
+                        () -> McpTaskExecution.execute(service.analyzeCrash(validId.id(), null, null)));
                 Map<String, Object> launcherSolution = firstSolution(launcherAnalysis);
                 assertEquals("launcher_latest_log", launcherAnalysis.get("input_source"));
                 assertEquals(true, launcherSolution.get("mcp_executable"));
@@ -149,18 +153,44 @@ final class XYMLMcpServiceCrashAnalysisTest {
                         String.valueOf(launcherSolution.get("solution_id")));
                 Files.writeString(latestLog, "log changed", StandardCharsets.UTF_8);
                 String planId = String.valueOf(plan.get("plan_id"));
-                assertThrows(IllegalStateException.class, () -> service.executeCrashSolution(planId));
+                Map<String, Object> staleOperation = service.executeCrashSolution(planId);
+                Map<String, Object> staleStatus = awaitTerminal(
+                        service,
+                        String.valueOf(staleOperation.get("operation_id")));
+                assertEquals("FAILED", staleStatus.get("status"));
+                assertEquals(IllegalStateException.class.getName(), staleStatus.get("failure_type"));
+                assertEquals("Crash analysis source could not be revalidated", staleStatus.get("failure_message"));
                 assertThrows(IllegalStateException.class, () -> service.executeCrashSolution(planId));
                 assertEquals(0, searchTaskCreations.get());
 
-                Map<String, Object> externalAnalysis = service.analyzeCrash(
-                        validId.id(), FABRIC_MISSING_DEPENDENCY_LOG, null);
+                Files.writeString(latestLog, FABRIC_MISSING_DEPENDENCY_LOG, StandardCharsets.UTF_8);
+                Map<String, Object> movedRunAnalysis = McpTaskExecution.execute(
+                        service.analyzeCrash(validId.id(), null, null));
+                Map<String, Object> movedRunSolution = firstSolution(movedRunAnalysis);
+                Map<String, Object> movedRunPlan = service.planCrashSolution(
+                        String.valueOf(movedRunAnalysis.get("analysis_id")),
+                        String.valueOf(movedRunSolution.get("solution_id")));
+                GameSettings.Instance instanceSettings = Objects.requireNonNull(
+                        repository.getInstanceGameSettingsOrCreate(validId));
+                instanceSettings.getOverrideProperties().add(GameSettings.PROPERTY_RUNNING_DIRECTORY);
+                instanceSettings.runningDirectoryProperty().setValue(repositoryRoot.resolve("moved-run").toString());
+                Map<String, Object> movedRunOperation = service.executeCrashSolution(
+                        String.valueOf(movedRunPlan.get("plan_id")));
+                Map<String, Object> movedRunStatus = awaitTerminal(
+                        service,
+                        String.valueOf(movedRunOperation.get("operation_id")));
+                assertEquals("FAILED", movedRunStatus.get("status"));
+                assertTrue(String.valueOf(movedRunStatus.get("failure_message")).contains("run directory changed"));
+                assertEquals(0, searchTaskCreations.get());
+
+                Map<String, Object> externalAnalysis = McpTaskExecution.execute(service.analyzeCrash(
+                        validId.id(), FABRIC_MISSING_DEPENDENCY_LOG, null));
                 assertEquals("provided_log", externalAnalysis.get("input_source"));
                 assertEquals(false, firstSolution(externalAnalysis).get("mcp_executable"));
 
                 removeLoadedInstance(repository, parentId);
-                Map<String, Object> degradedAnalysis = service.analyzeCrash(
-                        brokenId.id(), FABRIC_MISSING_DEPENDENCY_LOG, null);
+                Map<String, Object> degradedAnalysis = McpTaskExecution.execute(service.analyzeCrash(
+                        brokenId.id(), FABRIC_MISSING_DEPENDENCY_LOG, null));
                 assertTrue(degradedAnalysis.containsKey("matches"));
                 assertEquals("FABRIC_MISSING_DEPENDENCY", firstDiagnosis(degradedAnalysis).get("result_id"));
                 assertTrue(warnings(degradedAnalysis).stream()
@@ -238,5 +268,28 @@ final class XYMLMcpServiceCrashAnalysisTest {
     @SuppressWarnings("unchecked")
     private static @Unmodifiable List<String> warnings(Map<String, Object> analysis) {
         return (List<String>) analysis.get("warnings");
+    }
+
+    /// Polls one asynchronous crash-repair operation until it reaches a terminal state.
+    ///
+    /// @param service service owning the operation
+    /// @param operationId opaque operation identifier
+    /// @return immutable terminal status
+    /// @throws InterruptedException when polling is interrupted
+    private static @Unmodifiable Map<String, Object> awaitTerminal(
+            XYMLMcpService service,
+            String operationId) throws InterruptedException {
+        Instant deadline = Instant.now().plus(Duration.ofSeconds(5));
+        while (Instant.now().isBefore(deadline)) {
+            Map<String, Object> status = service.getCrashRepairStatus(operationId);
+            if (switch (String.valueOf(status.get("status"))) {
+                    case "SUCCEEDED", "FAILED", "CANCELLED" -> true;
+                    default -> false;
+                }) {
+                return status;
+            }
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("Crash repair operation did not finish before timeout");
     }
 }

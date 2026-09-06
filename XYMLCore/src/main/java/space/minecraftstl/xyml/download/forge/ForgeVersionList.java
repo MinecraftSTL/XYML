@@ -93,7 +93,7 @@ public final class ForgeVersionList extends VersionList<ForgeRemoteVersion> {
                     } finally {
                         lock.writeLock().unlock();
                     }
-                });
+                }).asOrchestration();
     }
 
     public static final URI FORGE_LIST = URI.create("https://hmcl.glavo.site/metadata/forge/");

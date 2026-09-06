@@ -18,6 +18,8 @@
 package space.minecraftstl.xyml.modpack.curse;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
@@ -25,6 +27,7 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.*;
 import space.minecraftstl.xyml.task.CacheFileTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
@@ -39,11 +42,8 @@ import java.util.*;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * Install a downloaded CurseForge modpack.
- *
- * @author huangyuhui
- */
+/// Installs a downloaded CurseForge-format archive into one game repository.
+@NotNullByDefault
 public final class CurseInstallTask extends Task<Void> {
 
     private final DefaultDependencyManager dependencyManager;
@@ -52,23 +52,35 @@ public final class CurseInstallTask extends Task<Void> {
     private final Modpack modpack;
     private final CurseManifest manifest;
     private final GameInstanceID instanceId;
-    private final String iconUrl;
+    /// Optional remote icon URL.
+    private final @Nullable String iconUrl;
     private final Path run;
-    private final ModpackConfiguration<CurseManifest> config;
-    private String iconExt;
-    private Task<Path> downloadIconTask;
+    /// Existing modpack configuration, or null for a fresh installation.
+    private final @Nullable ModpackConfiguration<CurseManifest> config;
+
+    /// Validated icon extension, or null when no icon should be installed.
+    private @Nullable String iconExt;
+
+    /// Optional icon download task created for a supported remote icon.
+    private @Nullable Task<Path> downloadIconTask;
     private final List<Task<?>> dependents = new ArrayList<>(4);
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    /**
-     * Constructor.
-     *
-     * @param dependencyManager the dependency manager.
-     * @param zipFile           the CurseForge modpack file.
-     * @param manifest          The manifest content of given CurseForge modpack.
-     * @param instanceId        the new instance ID
-     */
-    public CurseInstallTask(DefaultDependencyManager dependencyManager, Path zipFile, Modpack modpack, CurseManifest manifest, GameInstanceID instanceId, String iconUrl) {
+    /// Creates a repository-scoped installation that also owns its input archive.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param zipFile input modpack archive
+    /// @param modpack parsed modpack metadata
+    /// @param manifest CurseForge manifest
+    /// @param instanceId destination instance
+    /// @param iconUrl optional remote icon URL
+    public CurseInstallTask(
+            DefaultDependencyManager dependencyManager,
+            Path zipFile,
+            Modpack modpack,
+            CurseManifest manifest,
+            GameInstanceID instanceId,
+            @Nullable String iconUrl) {
         this.dependencyManager = dependencyManager;
         this.zipFile = zipFile;
         this.modpack = modpack;
@@ -76,8 +88,12 @@ public final class CurseInstallTask extends Task<Void> {
         this.instanceId = instanceId;
         this.iconUrl = iconUrl;
         this.repository = dependencyManager.getGameRepository();
-
-        this.run = repository.getRunDirectory(instanceId);
+        this.run = repository.getRunDirectory(instanceId).toAbsolutePath().normalize();
+        setResources(
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(this.run),
+                TaskResource.archive(zipFile));
 
         Path json = repository.getModpackConfiguration(instanceId);
         if (repository.hasInstance(instanceId) && Files.notExists(json))
@@ -96,7 +112,7 @@ public final class CurseInstallTask extends Task<Void> {
         dependents.add(builder.buildAsync());
 
         onDone().register(event -> {
-            Exception ex = event.getTask().getException();
+            @Nullable Exception ex = event.getTask().getException();
             if (event.isFailed()) {
                 if (!(ex instanceof ModpackCompletionException)) {
                     repository.removeInstanceFromDisk(instanceId);
@@ -104,7 +120,7 @@ public final class CurseInstallTask extends Task<Void> {
             }
         });
 
-        ModpackConfiguration<CurseManifest> config = null;
+        @Nullable ModpackConfiguration<CurseManifest> config = null;
         try {
             if (Files.exists(json)) {
                 config = JsonUtils.fromJsonFile(json, ModpackConfiguration.typeOf(CurseManifest.class));
@@ -118,7 +134,7 @@ public final class CurseInstallTask extends Task<Void> {
         dependents.add(new ModpackInstallTask<>(zipFile, run, modpack.getEncoding(), Collections.singletonList(manifest.overrides()), any -> true, config).withStage("xyml.modpack"));
         dependents.add(new MinecraftInstanceTask<>(zipFile, modpack.getEncoding(), Collections.singletonList(manifest.overrides()), manifest, CurseModpackProvider.INSTANCE, manifest.name(), manifest.version(), repository.getModpackConfiguration(instanceId)).withStage("xyml.modpack"));
 
-        URI iconUri = NetworkUtils.toURIOrNull(iconUrl);
+        @Nullable URI iconUri = NetworkUtils.toURIOrNull(iconUrl);
         if (iconUri != null) {
             String ext = FileUtils.getExtension(StringUtils.substringAfter(iconUri.getPath(), '/')).toLowerCase(Locale.ROOT);
             if (Modpack.SUPPORTED_ICON_EXTS.contains(ext)) {

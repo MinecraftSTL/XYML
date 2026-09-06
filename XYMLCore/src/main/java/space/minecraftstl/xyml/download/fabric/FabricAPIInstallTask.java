@@ -17,22 +17,24 @@
  */
 package space.minecraftstl.xyml.download.fabric;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-/**
- * <b>Note</b>: Fabric should be installed first.
- *
- * @author huangyuhui
- */
+/// Downloads Fabric API into one game instance.
+///
+/// Fabric itself must be installed first. Its downloaded add-on remains under the instance root for the full task
+/// lifecycle.
+@NotNullByDefault
 public final class FabricAPIInstallTask extends Task<GameInstancePatch> {
 
     private final DefaultDependencyManager dependencyManager;
@@ -40,10 +42,19 @@ public final class FabricAPIInstallTask extends Task<GameInstancePatch> {
     private final FabricAPIRemoteVersion remote;
     private final List<Task<?>> dependencies = new ArrayList<>(1);
 
-    public FabricAPIInstallTask(DefaultDependencyManager dependencyManager, GameInstanceManifest manifest, FabricAPIRemoteVersion remoteVersion) {
+    /// Creates an instance-scoped Fabric API installation task.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param manifest destination game instance manifest
+    /// @param remoteVersion selected Fabric API version
+    public FabricAPIInstallTask(
+            DefaultDependencyManager dependencyManager,
+            GameInstanceManifest manifest,
+            FabricAPIRemoteVersion remoteVersion) {
         this.dependencyManager = dependencyManager;
         this.manifest = manifest;
         this.remote = remoteVersion;
+        setResources(TaskResource.gameInstance(dependencyManager.getGameRepository().getInstanceRoot(manifest.id())));
     }
 
     @Override

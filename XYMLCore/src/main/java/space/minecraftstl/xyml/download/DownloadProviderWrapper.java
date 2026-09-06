@@ -92,7 +92,7 @@ public final class DownloadProviderWrapper implements DownloadProvider {
                                 lock.writeLock().unlock();
                             }
                             return null;
-                        });
+                        }).asOrchestration();
             }
         };
     }

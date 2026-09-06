@@ -45,6 +45,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
@@ -71,6 +72,9 @@ public final class NBTEditorController implements AutoCloseable {
 
     /// Current open, edit, or save future, or `null` while idle.
     private @Nullable CompletableFuture<?> activeOperation;
+
+    /// Latest open request deferred behind an operation that has already crossed its commit point.
+    private @Nullable Path deferredOpen;
 
     /// Detached in-process clipboard tag, or `null` before a successful copy.
     private @Nullable Tag clipboard;
@@ -146,7 +150,12 @@ public final class NBTEditorController implements AutoCloseable {
         ensureOpen();
         Path target = Objects.requireNonNull(file, "file").toAbsolutePath().normalize();
         NBTEditorSnapshot previous = snapshot;
-        long operation = beginOperation();
+        if (!tryBeginOperation()) {
+            deferredOpen = target;
+            return;
+        }
+        deferredOpen = null;
+        long operation = operationRevision;
         publish(new NBTEditorSnapshot(
                 NBTEditorStatus.OPENING,
                 target,
@@ -174,7 +183,7 @@ public final class NBTEditorController implements AutoCloseable {
                 previous.dirty(),
                 null,
                 nextRevision()));
-        startOpen(operation, previous, file);
+        startReload(operation, previous, file);
     }
 
     /// Saves the current dirty document with library-owned conflict and publication checks.
@@ -203,7 +212,9 @@ public final class NBTEditorController implements AutoCloseable {
             CompletableFuture<Void> future = documentService.save(document);
             activeOperation = future;
             future.whenComplete((@Nullable Void ignored, @Nullable Throwable failure) ->
-                    uiDispatcher.dispatch(() -> finishSave(operation, document, previous.status(), failure)));
+                    dispatchCompletion(
+                            () -> finishSave(operation, document, previous.status(), failure),
+                            null));
         } catch (RuntimeException failure) {
             finishSave(operation, document, previous.status(), failure);
         }
@@ -729,10 +740,39 @@ public final class NBTEditorController implements AutoCloseable {
     /// @param target normalized source
     private void startOpen(long operation, NBTEditorSnapshot previous, Path target) {
         try {
-            CompletableFuture<NBTDocument> future = documentService.open(target);
+            @Nullable NBTDocument previousDocument = previous.document();
+            CompletableFuture<NBTDocument> future = previousDocument != null
+                    && previousDocument.file().equals(target)
+                    ? documentService.reload(previousDocument)
+                    : documentService.open(target);
             activeOperation = future;
             future.whenComplete((@Nullable NBTDocument document, @Nullable Throwable failure) ->
-                    uiDispatcher.dispatch(() -> finishOpen(operation, previous, target, document, failure)));
+                    dispatchCompletion(
+                            () -> finishOpen(operation, previous, target, document, failure),
+                            document));
+        } catch (RuntimeException failure) {
+            finishOpen(operation, previous, target, null, failure);
+        }
+    }
+
+    /// Starts an in-session reload while retaining the old document until its replacement is ready.
+    ///
+    /// @param operation operation identity
+    /// @param previous state restored on failure
+    /// @param target normalized source
+    private void startReload(long operation, NBTEditorSnapshot previous, Path target) {
+        @Nullable NBTDocument document = previous.document();
+        if (document == null) {
+            startOpen(operation, previous, target);
+            return;
+        }
+        try {
+            CompletableFuture<NBTDocument> future = documentService.reload(document);
+            activeOperation = future;
+            future.whenComplete((@Nullable NBTDocument replacement, @Nullable Throwable failure) ->
+                    dispatchCompletion(
+                            () -> finishOpen(operation, previous, target, replacement, failure),
+                            replacement));
         } catch (RuntimeException failure) {
             finishOpen(operation, previous, target, null, failure);
         }
@@ -763,25 +803,35 @@ public final class NBTEditorController implements AutoCloseable {
                 release(oldDocument);
             }
             clipboard = null;
-            publish(new NBTEditorSnapshot(
-                    NBTEditorStatus.READY,
-                    target,
-                    document,
-                    document.isDirty(),
+            completePublishedOperation(
+                    () -> publish(new NBTEditorSnapshot(
+                            NBTEditorStatus.READY,
+                            target,
+                            document,
+                            document.isDirty(),
+                            null,
+                            nextRevision())),
                     null,
-                    nextRevision()));
+                    null);
             return;
         }
         release(document);
         @Nullable NBTDocument retainedDocument = previous.document();
+        if (retainedDocument != null && retainedDocument.isClosed()) {
+            retainedDocument = null;
+        }
         Path visibleFile = retainedDocument == null ? target : retainedDocument.file();
-        publish(new NBTEditorSnapshot(
-                retainedOpenFailureStatus(previous.status(), retainedDocument != null),
-                visibleFile,
-                retainedDocument,
-                retainedDocument != null && previous.dirty(),
-                failureMessage(failure),
-                nextRevision()));
+        @Nullable NBTDocument recoveryDocument = retainedDocument;
+        completePublishedOperation(
+                () -> publish(new NBTEditorSnapshot(
+                        retainedOpenFailureStatus(previous.status(), recoveryDocument != null),
+                        visibleFile,
+                        recoveryDocument,
+                        recoveryDocument != null && previous.dirty(),
+                        failureMessage(failure),
+                        nextRevision())),
+                null,
+                null);
     }
 
     /// Completes one save and preserves late dirty edits through the editor savepoint.
@@ -802,23 +852,29 @@ public final class NBTEditorController implements AutoCloseable {
         activeOperation = null;
         boolean dirty = document.isDirty();
         if (failure == null) {
-            publish(new NBTEditorSnapshot(
-                    NBTEditorStatus.READY,
-                    snapshot.file(),
-                    document,
-                    dirty,
+            completePublishedOperation(
+                    () -> publish(new NBTEditorSnapshot(
+                            NBTEditorStatus.READY,
+                            snapshot.file(),
+                            document,
+                            dirty,
+                            null,
+                            nextRevision())),
                     null,
-                    nextRevision()));
+                    null);
             return;
         }
         Throwable cause = unwrap(failure);
-        publish(new NBTEditorSnapshot(
-                classifySaveFailure(previousStatus, cause),
-                snapshot.file(),
-                document,
-                dirty,
-                failureMessage(cause),
-                nextRevision()));
+        completePublishedOperation(
+                () -> publish(new NBTEditorSnapshot(
+                        classifySaveFailure(previousStatus, cause),
+                        snapshot.file(),
+                        document,
+                        dirty,
+                        failureMessage(cause),
+                        nextRevision())),
+                null,
+                null);
     }
 
     /// Schedules one node mutation without running deep-copy or validation work on the UI thread.
@@ -937,14 +993,16 @@ public final class NBTEditorController implements AutoCloseable {
         }
         activeOperation = work;
         work.whenComplete((@Nullable NBTEditResult result, @Nullable Throwable failure) ->
-                uiDispatcher.dispatch(() -> finishEditorTask(
-                        operation,
-                        previous,
-                        document,
-                        mutates,
-                        result,
-                        failure,
-                        delivery)));
+                dispatchCompletion(
+                        () -> finishEditorTask(
+                                operation,
+                                previous,
+                                document,
+                                mutates,
+                                result,
+                                failure,
+                                delivery),
+                        null));
         return delivery;
     }
 
@@ -994,23 +1052,21 @@ public final class NBTEditorController implements AutoCloseable {
         activeOperation = null;
         if (failure != null && unwrap(failure) instanceof Error error) {
             publishFatalEditorFailure(previous, document, error, delivery);
-            throw error;
+            return;
         }
         NBTEditResult completed = failure == null && result != null
                 ? result
                 : NBTEditResult.failure(failureMessage(failure));
-        if (mutates && completed.applied()) {
-            publishEdited(document, previous.status(), previous.message());
-        } else {
-            publish(new NBTEditorSnapshot(
-                    previous.status(),
-                    previous.file(),
-                    document,
-                    document.isDirty(),
-                    previous.message(),
-                    nextRevision()));
-        }
-        delivery.complete(completed);
+        Runnable publication = mutates && completed.applied()
+                ? () -> publishEdited(document, previous.status(), previous.message())
+                : () -> publish(new NBTEditorSnapshot(
+                        previous.status(),
+                        previous.file(),
+                        document,
+                        document.isDirty(),
+                        previous.message(),
+                        nextRevision()));
+        completePublishedOperation(publication, () -> delivery.complete(completed), null);
     }
 
     /// Locks an editor document after a fatal background failure and propagates the original error.
@@ -1029,14 +1085,16 @@ public final class NBTEditorController implements AutoCloseable {
             Error failure,
             CompletableFuture<NBTEditResult> delivery) {
         activeOperation = null;
-        publish(new NBTEditorSnapshot(
-                NBTEditorStatus.EDIT_UNCERTAIN,
-                previous.file(),
-                document,
-                true,
-                failureMessage(failure),
-                nextRevision()));
-        delivery.completeExceptionally(failure);
+        completePublishedOperation(
+                () -> publish(new NBTEditorSnapshot(
+                        NBTEditorStatus.EDIT_UNCERTAIN,
+                        previous.file(),
+                        document,
+                        true,
+                        failureMessage(failure),
+                        nextRevision())),
+                () -> delivery.completeExceptionally(failure),
+                failure);
     }
 
     /// Applies one current-node editor operation and publishes only after it commits.
@@ -1197,17 +1255,131 @@ public final class NBTEditorController implements AutoCloseable {
                 || segment instanceof NBTAddress.ChunkRootSegment;
     }
 
+    /// Dispatches one asynchronous completion and fails closed if submission or delivery fails.
+    ///
+    /// A successfully opened document belongs to the callback until the controller snapshot accepts it. Submission or
+    /// callback failure therefore closes a still-undelivered session so its task resource lease cannot remain held
+    /// forever. Save and edit completions pass no document because the visible snapshot still owns their session.
+    ///
+    /// @param completion UI-thread completion action
+    /// @param undeliveredDocument newly opened document to release if delivery fails before publication, or `null`
+    private void dispatchCompletion(Runnable completion, @Nullable NBTDocument undeliveredDocument) {
+        Runnable checkedCompletion = Objects.requireNonNull(completion, "completion");
+        AtomicBoolean started = new AtomicBoolean();
+        Runnable guardedCompletion = () -> {
+            started.set(true);
+            try {
+                checkedCompletion.run();
+            } catch (RuntimeException | Error completionFailure) {
+                releaseUndeliveredDocument(undeliveredDocument, completionFailure);
+                LOG.warning("Failed to complete an NBT editor operation on the UI dispatcher", completionFailure);
+                throw completionFailure;
+            }
+        };
+        try {
+            uiDispatcher.dispatch(guardedCompletion);
+        } catch (RuntimeException | Error dispatchFailure) {
+            if (!started.get()) {
+                releaseUndeliveredDocument(undeliveredDocument, dispatchFailure);
+                LOG.warning("Failed to dispatch an NBT editor completion", dispatchFailure);
+            }
+            throw dispatchFailure;
+        }
+    }
+
+    /// Releases a successfully opened document which a failed completion did not publish.
+    ///
+    /// @param document newly opened document, or `null` for a completion without transferred ownership
+    /// @param primaryFailure failure which remains authoritative if cleanup also fails
+    private void releaseUndeliveredDocument(@Nullable NBTDocument document, Throwable primaryFailure) {
+        if (document == null || snapshot.document() == document) {
+            return;
+        }
+        try {
+            release(document);
+        } catch (RuntimeException | Error cleanupFailure) {
+            if (cleanupFailure != primaryFailure) {
+                primaryFailure.addSuppressed(cleanupFailure);
+            }
+        }
+    }
+
+    /// Publishes a terminal operation state and runs mandatory completion steps despite listener failures.
+    ///
+    /// The first failure remains authoritative; later listener, caller-future, or deferred-open failures are attached
+    /// as suppressed exceptions. A background fatal failure may be supplied as the initial cause so UI listener errors
+    /// never replace it.
+    ///
+    /// @param publication synchronous state publication
+    /// @param completion caller-visible completion action, or `null` when none exists
+    /// @param primaryFailure existing primary failure, or `null`
+    private void completePublishedOperation(
+            Runnable publication,
+            @Nullable Runnable completion,
+            @Nullable Throwable primaryFailure) {
+        @Nullable Throwable failure = runCompletionStep(primaryFailure, publication);
+        if (completion != null) {
+            failure = runCompletionStep(failure, completion);
+        }
+        failure = runCompletionStep(failure, this::startDeferredOpen);
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
+        }
+    }
+
+    /// Runs one mandatory UI completion step while retaining the first unchecked failure.
+    ///
+    /// @param first earlier failure, or `null`
+    /// @param step mandatory completion step
+    /// @return the first failure with any later failure suppressed, or `null` after success
+    private static @Nullable Throwable runCompletionStep(@Nullable Throwable first, Runnable step) {
+        try {
+            Objects.requireNonNull(step, "step").run();
+            return first;
+        } catch (RuntimeException | Error next) {
+            if (first == null) {
+                return next;
+            }
+            if (first != next) {
+                first.addSuppressed(next);
+            }
+            return first;
+        }
+    }
+
     /// Starts replacement work and invalidates the previous future.
     ///
     /// @return new operation identity
     private long beginOperation() {
-        @Nullable CompletableFuture<?> current = activeOperation;
-        activeOperation = null;
-        operationRevision++;
-        if (current != null) {
-            current.cancel(true);
+        if (!tryBeginOperation()) {
+            throw new IllegalStateException("Cannot replace an NBT operation after its commit point");
         }
         return operationRevision;
+    }
+
+    /// Attempts to start replacement work without invalidating a committed result awaiting UI reconciliation.
+    ///
+    /// @return whether a new operation identity was allocated
+    private boolean tryBeginOperation() {
+        @Nullable CompletableFuture<?> current = activeOperation;
+        if (current != null && !current.cancel(true)) {
+            return false;
+        }
+        activeOperation = null;
+        operationRevision++;
+        return true;
+    }
+
+    /// Starts the latest open request deferred behind a committed operation, if any.
+    private void startDeferredOpen() {
+        @Nullable Path target = deferredOpen;
+        deferredOpen = null;
+        if (target != null && !closed) {
+            open(target);
+        }
     }
 
     /// Returns whether a completion still owns the visible state.
@@ -1242,6 +1414,7 @@ public final class NBTEditorController implements AutoCloseable {
         }
         closed = true;
         operationRevision++;
+        deferredOpen = null;
         @Nullable CompletableFuture<?> current = activeOperation;
         activeOperation = null;
         if (current != null) {

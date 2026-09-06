@@ -19,19 +19,30 @@ package space.minecraftstl.xyml.game;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.java.JavaInfo;
 import space.minecraftstl.xyml.java.JavaManager;
 import space.minecraftstl.xyml.java.JavaRuntime;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
+import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.platform.Platform;
 import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -66,9 +77,110 @@ final class JavaRuntimeRepairTaskFactoryTest {
                     throw new AssertionError("Download factory must not be called for a compatible runtime");
                 });
 
+        assertEquals(TaskResource.Kind.ORCHESTRATION, repair.getResources().iterator().next().getKind());
         assertSame(finalSelection, repair.run());
         assertEquals(2, selections.get());
         assertEquals(0, downloads.get());
+    }
+
+    /// Runs a precisely resourced Java selection before acquiring the unrelated instance persistence resources.
+    @Test
+    void persistenceStageHandsOffSelectionAndDeclaresExactResources(@TempDir Path temporaryDirectory) {
+        JavaRuntime selected = runtime("resource-handoff");
+        Path javaDirectory = temporaryDirectory.resolve("java-runtime");
+        Path instanceDirectory = temporaryDirectory.resolve("instances").resolve("example");
+        Path settingsFile = temporaryDirectory.resolve("external-config").resolve("settings.json");
+        TaskResource javaResource = TaskResource.javaRuntime(javaDirectory);
+        Task<JavaRuntime> selection = Task.supplyAsync(() -> selected).setResources(javaResource);
+        AtomicReference<@Nullable JavaRuntime> persisted = new AtomicReference<>();
+
+        Task<@Nullable Void> persistence = JavaRuntimeRepairTaskFactory.createPersistenceTask(
+                selection,
+                instanceDirectory,
+                settingsFile,
+                persisted::set);
+
+        assertEquals(
+                List.of(TaskResource.Kind.ORCHESTRATION),
+                persistence.getResources().stream().map(TaskResource::getKind).toList());
+        assertEquals(Set.of(javaResource), selection.getResources());
+        assertTrue(persistence.test(), () -> "Persistence task failed: " + persistence.getException());
+        assertSame(selected, persisted.get());
+    }
+
+    /// Keeps a final source validator and settings persistence in one uninterrupted resource lease.
+    ///
+    /// @throws Exception when bounded task execution fails
+    @Test
+    void finalValidatorAndPersistenceAreAtomicAgainstConflictingTasks(@TempDir Path temporaryDirectory)
+            throws Exception {
+        Path instanceDirectory = temporaryDirectory.resolve("instances").resolve("atomic");
+        Path settingsFile = instanceDirectory.resolve("settings.json");
+        TaskResource instanceResource = TaskResource.gameInstance(instanceDirectory);
+        CountDownLatch validatorEntered = new CountDownLatch(1);
+        CountDownLatch releaseValidator = new CountDownLatch(1);
+        List<String> executionOrder = new CopyOnWriteArrayList<>();
+        Task<?> validator = Task.runAsync(() -> {
+            executionOrder.add("validator");
+            validatorEntered.countDown();
+            if (!releaseValidator.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out while holding the final validation lease");
+            }
+        }).setResources(instanceResource);
+        Task<@Nullable Void> persistence = JavaRuntimeRepairTaskFactory.createPersistenceTask(
+                Task.completed(runtime("atomic-selection")),
+                instanceDirectory,
+                settingsFile,
+                validator,
+                ignoredJava -> executionOrder.add("persistence"));
+        Task<@Nullable Void> contender = Task.runAsync(() -> executionOrder.add("contender"))
+                .setResources(instanceResource);
+
+        CompletableFuture<Boolean> persistenceResult = CompletableFuture.supplyAsync(persistence::test);
+        assertTrue(validatorEntered.await(5, TimeUnit.SECONDS));
+        CompletableFuture<Boolean> contenderResult = CompletableFuture.supplyAsync(contender::test);
+        try {
+            releaseValidator.countDown();
+            assertTrue(persistenceResult.get(5, TimeUnit.SECONDS));
+            assertTrue(contenderResult.get(5, TimeUnit.SECONDS));
+        } finally {
+            releaseValidator.countDown();
+        }
+
+        assertEquals(List.of("validator", "persistence", "contender"), executionOrder);
+    }
+
+    /// Keeps an external symbolic-link run directory in the final cross-module resource union.
+    ///
+    /// @throws Exception when bounded task execution or symbolic-link setup fails
+    @Test
+    void finalValidatorRetainsSymbolicLinkDescendantDeclaration(@TempDir Path temporaryDirectory) throws Exception {
+        Path instanceDirectory = Files.createDirectories(temporaryDirectory.resolve("instance"));
+        Path externalRunDirectory = Files.createDirectories(temporaryDirectory.resolve("external-run"));
+        Path linkedRunDirectory = instanceDirectory.resolve("run");
+        try {
+            Files.createSymbolicLink(linkedRunDirectory, externalRunDirectory);
+        } catch (IOException | UnsupportedOperationException | SecurityException unavailable) {
+            Assumptions.assumeTrue(false, "Symbolic links are unavailable: " + unavailable.getMessage());
+            return;
+        }
+
+        TaskResource instanceResource = TaskResource.gameInstance(instanceDirectory);
+        TaskResource runResource = TaskResource.gameDirectory(linkedRunDirectory);
+        Task<?> validator = Task.completed(null).setResources(instanceResource, runResource);
+        assertEquals(Set.of(instanceResource), validator.getResources());
+        assertEquals(Set.of(instanceResource, runResource), validator.getResourceDeclarations());
+
+        AtomicBoolean persisted = new AtomicBoolean();
+        Task<@Nullable Void> persistence = JavaRuntimeRepairTaskFactory.createPersistenceTask(
+                Task.completed(runtime("symbolic-link-selection")),
+                instanceDirectory,
+                instanceDirectory.resolve("settings.json"),
+                validator,
+                ignoredJava -> persisted.set(true));
+
+        assertTrue(persistence.test(), () -> "Symbolic-link persistence failed: " + persistence.getException());
+        assertTrue(persisted.get());
     }
 
     /// Downloads only after an empty first decision and uses the post-download decision instead of the download result.
@@ -237,6 +349,74 @@ final class JavaRuntimeRepairTaskFactoryTest {
         assertSame(previousJava, setting.detectedJavaProperty().getValue());
         assertTrue(setting.getOverrideProperties().contains(GameSettings.PROPERTY_JAVA_TYPE));
         assertFalse(setting.getOverrideProperties().contains(GameSettings.PROPERTY_DETECTED_JAVA));
+    }
+
+    /// Waits for a real FileSaver write before the persistence boundary returns.
+    ///
+    /// @throws Exception when the selection or save barrier unexpectedly fails
+    @Test
+    void persistenceBoundaryDrainsQueuedFileSaverWrites(@TempDir Path temporaryDirectory) throws Exception {
+        Path savedFile = temporaryDirectory.resolve("instance-settings.json");
+        GameSettings.Instance setting = new GameSettings.Instance();
+
+        JavaRuntimeRepairTaskFactory.persistJavaSelectionAndDrain(
+                () -> setting,
+                runtime("drained-selection"),
+                () -> FileSaver.save(savedFile, "saved"),
+                FileSaver::waitForAllSaves);
+
+        assertEquals("saved", Files.readString(savedFile));
+    }
+
+    /// Preserves an Error as the primary failure and suppresses a later save-barrier failure on it.
+    @Test
+    void saveBarrierFailureDoesNotReplacePersistenceError() {
+        GameSettings.Instance setting = new GameSettings.Instance();
+        AssertionError persistenceFailure = new AssertionError("persistence failed");
+        IOException barrierFailure = new IOException("barrier failed");
+
+        AssertionError thrown = assertThrows(AssertionError.class, () ->
+                JavaRuntimeRepairTaskFactory.persistJavaSelectionAndDrain(
+                        () -> setting,
+                        runtime("error-selection"),
+                        () -> {
+                            throw persistenceFailure;
+                        },
+                        () -> {
+                            throw barrierFailure;
+                        }));
+
+        assertSame(persistenceFailure, thrown);
+        assertEquals(1, thrown.getSuppressed().length);
+        assertSame(barrierFailure, thrown.getSuppressed()[0]);
+    }
+
+    /// Retries an interrupted save barrier to completion and restores the caller's interrupted state.
+    @Test
+    void interruptedSaveBarrierCompletesBeforeReportingInterruption() {
+        GameSettings.Instance setting = new GameSettings.Instance();
+        InterruptedException interruption = new InterruptedException("barrier interrupted");
+        AtomicInteger attempts = new AtomicInteger();
+
+        try {
+            InterruptedException thrown = assertThrows(InterruptedException.class, () ->
+                    JavaRuntimeRepairTaskFactory.persistJavaSelectionAndDrain(
+                            () -> setting,
+                            runtime("interrupted-selection"),
+                            () -> {
+                            },
+                            () -> {
+                                if (attempts.incrementAndGet() == 1) {
+                                    throw interruption;
+                                }
+                            }));
+
+            assertSame(interruption, thrown);
+            assertEquals(2, attempts.get());
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     /// Creates a manifest that explicitly requests Java 17.

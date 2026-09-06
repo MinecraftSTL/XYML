@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.modpack.server;
 
 import com.google.gson.JsonParseException;
 import kala.compress.archivers.zip.ZipArchiveReader;
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.MismatchedModpackTypeException;
@@ -26,6 +27,7 @@ import space.minecraftstl.xyml.modpack.Modpack;
 import space.minecraftstl.xyml.modpack.ModpackProvider;
 import space.minecraftstl.xyml.modpack.ModpackUpdateTask;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.CompressingUtils;
 
@@ -33,6 +35,8 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
 
+/// Provides parsing, installation, update, and deferred completion for server-format modpacks.
+@NotNullByDefault
 public final class ServerModpackProvider implements ModpackProvider {
     public static final ServerModpackProvider INSTANCE = new ServerModpackProvider();
 
@@ -41,9 +45,27 @@ public final class ServerModpackProvider implements ModpackProvider {
         return "Server";
     }
 
+    /// Creates a completion root that retains repository and instance ownership during metadata resolution.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param instanceId existing destination instance
+    /// @return deferred completion task with continuous operation and instance ownership and a short metadata phase
     @Override
     public Task<?> createCompletionTask(DefaultDependencyManager dependencyManager, GameInstanceID instanceId) {
-        return new ServerModpackCompletionTask(dependencyManager, instanceId);
+        var repository = dependencyManager.getGameRepository();
+        Task<?> resolution = Task.composeAsync(() -> new ServerModpackCompletionTask(dependencyManager, instanceId)
+                        .setResources(
+                                TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                                TaskResource.gameDirectory(repository.getRunDirectory(instanceId))))
+                .setName(ServerModpackCompletionTask.class.getName())
+                .setResources(TaskResource.repositoryMetadata(repository.getBaseDirectory()))
+                .releaseResourcesBeforeDependencies();
+        return resolution.thenApplyAsync(result -> result)
+                .setName(ServerModpackCompletionTask.class.getName()).setResources(
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(repository.getRunDirectory(instanceId)));
     }
 
     @Override

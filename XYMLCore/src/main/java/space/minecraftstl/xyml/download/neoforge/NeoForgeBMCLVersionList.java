@@ -76,7 +76,7 @@ public final class NeoForgeBMCLVersionList extends VersionList<NeoForgeRemoteVer
                     } finally {
                         lock.writeLock().unlock();
                     }
-                });
+                }).asOrchestration();
     }
 
     @Immutable

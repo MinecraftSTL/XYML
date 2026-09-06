@@ -19,6 +19,7 @@ package space.minecraftstl.xyml.game;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import space.minecraftstl.xyml.Metadata;
 import space.minecraftstl.xyml.auth.*;
 import space.minecraftstl.xyml.auth.offline.OfflineAccount;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
@@ -34,6 +35,7 @@ import space.minecraftstl.xyml.modpack.ModpackProvider;
 import space.minecraftstl.xyml.setting.GameSettings;
 import space.minecraftstl.xyml.setting.JavaVersionType;
 import space.minecraftstl.xyml.setting.LauncherVisibility;
+import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.task.*;
 import space.minecraftstl.xyml.ui.launch.LaunchInteraction;
 import space.minecraftstl.xyml.ui.launch.LaunchInteractionPrompt;
@@ -42,6 +44,7 @@ import space.minecraftstl.xyml.ui.swing.crash.SwingGameCrashWindow;
 import space.minecraftstl.xyml.ui.swing.log.SwingGameLogWindow;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountReauthentication;
 import space.minecraftstl.xyml.util.*;
+import space.minecraftstl.xyml.util.function.ExceptionalFunction;
 import space.minecraftstl.xyml.util.io.FileUtils;
 import space.minecraftstl.xyml.util.platform.*;
 import space.minecraftstl.xyml.util.platform.windows.WinReg;
@@ -91,6 +94,18 @@ public final class LauncherHelper {
 
     /// Stable instance identifier selected for this helper.
     private final GameInstanceID selectedInstanceId;
+
+    /// Normalized repository root captured with the selected instance.
+    private final Path repositoryDirectory;
+
+    /// Normalized selected-instance root used by every resource declaration.
+    private final Path instanceDirectory;
+
+    /// Normalized effective game run directory captured before task construction.
+    private final Path runDirectory;
+
+    /// Normalized shared libraries directory used by manifest maintenance and launch generation.
+    private final Path librariesDirectory;
 
     /// Effective settings captured for the selected instance.
     private final GameSettings.Effective setting;
@@ -168,6 +183,10 @@ public final class LauncherHelper {
                 accountReauthentication);
         this.openMissingModSearch = openMissingModSearch;
         this.setting = repository.getEffectiveGameSettings(selectedInstanceId);
+        this.repositoryDirectory = normalized(repository.getBaseDirectory());
+        this.instanceDirectory = normalized(repository.getInstanceRoot(selectedInstanceId));
+        this.runDirectory = normalized(repository.getRunDirectory(selectedInstanceId));
+        this.librariesDirectory = repositoryDirectory.resolve("libraries");
         this.launcherVisibility = setting.getInheritable(GameSettings::launcherVisibilityProperty);
         this.showLogs = setting.getInheritable(GameSettings::showLogsProperty);
         this.logLineLimit = GameLogSettings.getLogLines();
@@ -241,8 +260,8 @@ public final class LauncherHelper {
     /// Construction retains synchronous metadata normalization and analysis performed by
     /// [MaintainTask#maintain(GameRepository, GameInstanceManifest)] and [#checkGameState(XYMLGameRepository,
     /// GameSettings.Effective, GameInstanceManifest)]. The returned task owns the remaining preparation, process creation,
-    /// process registration, and process lifecycle monitoring. This method does not start an executor; callers must
-    /// invoke it away from the Swing event-dispatch thread.
+    /// and process-listener registration. The listener continues independently after the task returns the created
+    /// process. This method does not start an executor; callers must invoke it away from the Swing event-dispatch thread.
     ///
     /// @return not-yet-started task whose successful result is the actual managed game process
     public Task<ManagedProcess> createLaunchTask() {
@@ -263,10 +282,11 @@ public final class LauncherHelper {
         LOG.info("Creating launch script for game instance: " + selectedInstanceId);
         return applyLaunchProgressPolicy(
                 createLaunchPreparation(true).thenComposeAsync((@Nullable XYMLGameLauncher launcher) ->
-                        Task.supplyAsync(() -> {
+                        configureLaunchExecutionResources(Task.supplyAsync(() -> {
+                            requireResourceSnapshots();
                             Objects.requireNonNull(launcher, "prepared launcher").makeLaunchScript(destination);
                             return destination;
-                        })));
+                        }), destination)).asOrchestration());
     }
 
     /// Builds the production game-preparation task and decorates its process result for ownership tracking.
@@ -275,7 +295,11 @@ public final class LauncherHelper {
     private Task<ManagedProcess> createGameLaunchTask() {
         Task<ManagedProcess> processTask = createLaunchPreparation(false)
                 .thenComposeAsync((@Nullable XYMLGameLauncher launcher) ->
-                Task.supplyAsync(Objects.requireNonNull(launcher, "prepared launcher")::launch));
+                        configureLaunchExecutionResources(Task.supplyAsync(() -> {
+                            requireResourceSnapshots();
+                            return Objects.requireNonNull(launcher, "prepared launcher").launch();
+                        }), null))
+                .asOrchestration();
         return applyLaunchProgressPolicy(decorateGameLaunchTask(processTask));
     }
 
@@ -322,7 +346,7 @@ public final class LauncherHelper {
                                 } catch (IOException e) {
                                     return null;
                                 }
-                            }),
+                            }).asOrchestration(),
                             Task.composeAsync(() -> {
                                 if (OperatingSystem.CURRENT_OS != OperatingSystem.WINDOWS
                                         || !(setting.getRenderer(GameVersionNumber.asGameVersion(gameVersion)) instanceof Renderer.Driver renderer)
@@ -345,17 +369,18 @@ public final class LauncherHelper {
 
                                 if (GameLibrariesTask.shouldDownloadLibrary(repository, manifest.get(), lib, integrityCheck)) {
                                     return new LibraryDownloadTask(dependencyManager, file, lib)
-                                            .thenRunAsync(() -> javaAgents.add(agent));
+                                            .thenRunAsync(() -> javaAgents.add(agent))
+                                            .asOrchestration();
                                 } else {
                                     javaAgents.add(agent);
                                     return null;
                                 }
-                            })
+                            }).asOrchestration()
                     );
-                }).withStage("launch.state.dependencies")
+                }).asOrchestration().withStage("launch.state.dependencies")
                 .thenComposeAsync(() -> gameVersion
                         .map(value -> new GameVerificationFixTask(dependencyManager, value, manifest.get()))
-                        .orElse(null))
+                        .orElse(null)).asOrchestration()
                 .thenComposeAsync(() -> {
                     if (setting.getInheritable(GameSettings::allowAutoAgentProperty)
                             || setting.getInheritable(GameSettings::noJVMOptionsProperty)
@@ -379,21 +404,25 @@ public final class LauncherHelper {
                                             i18n("button.no"))),
                             LaunchInteractionPrompt.Action.CONTINUE,
                             LaunchInteractionPrompt.Action.CONTINUE);
-                    return presentProductionPrompt(prompt).thenApplyAsync(
+                    return presentProductionPrompt(prompt).thenComposeAsync(
                             Schedulers.ui(),
-                            (@Nullable LaunchInteractionPrompt.Action selectedAction) -> {
-                                LaunchInteractionPrompt.Action action = Objects.requireNonNull(
-                                        selectedAction,
-                                        "launch interaction action");
-                                state().getShownTips().put(LWJGL_3_4_1_TIP, true);
-                                if (action == LaunchInteractionPrompt.Action.ENABLE_RECOMMENDED_SETTING) {
-                                    enableAutoAgentForCurrentSetting();
-                                }
-                                return null;
-                            });
-                })
+                            (@Nullable LaunchInteractionPrompt.Action selectedAction) ->
+                                    configureLaunchAdviceWrite(Task.supplyAsync(Schedulers.ui(), () -> {
+                                        LaunchInteractionPrompt.Action action = Objects.requireNonNull(
+                                                selectedAction,
+                                                "launch interaction action");
+                                        state().getShownTips().put(LWJGL_3_4_1_TIP, true);
+                                        if (action == LaunchInteractionPrompt.Action.ENABLE_RECOMMENDED_SETTING) {
+                                            enableAutoAgentForCurrentSetting();
+                                        }
+                                        return null;
+                                    })))
+                            .asOrchestration();
+                }).asOrchestration()
                 .thenComposeAsync(() -> logIn(account).withStage("launch.state.logging_in"))
-                .thenComposeAsync((@Nullable AuthInfo authInfo) -> Task.supplyAsync(() -> {
+                .asOrchestration()
+                .thenComposeAsync((@Nullable AuthInfo authInfo) -> configureLauncherConstruction(Task.supplyAsync(() -> {
+                    requireResourceSnapshots();
                     JavaRuntime selectedJava = Objects.requireNonNull(
                             javaVersionRef.get(),
                             "selected Java runtime");
@@ -429,8 +458,129 @@ public final class LauncherHelper {
                                     ? null // Unnecessary to start listening to game process output when close launcher immediately after game launched.
                                     : new XYMLProcessListener(repository, manifest.get(), authInfo, launchOptions)
                     );
-                }));
+                })))
+                .asOrchestration();
         return launcherTask;
+    }
+
+    /// Applies the complete known filesystem boundary for process creation or script generation.
+    ///
+    /// The operation may generate instance options, natives and Log4j configuration, publish a bundled library,
+    /// populate the shared HTTP cache while resolving an offline skin, and optionally write an external script.
+    /// Holding these resources only for the final command-generation stage leaves earlier preparation for unrelated
+    /// isolated instances concurrent. A process launch with an arbitrary user pre-launch command keeps a global lock
+    /// for this final stage because the hook has no statically knowable write boundary.
+    ///
+    /// @param task final process-creation or script-generation task
+    /// @param exportTarget normalized script destination, or null for process creation
+    /// @param <T> operation result type
+    /// @return task with an immutable complete resource declaration
+    private <T> Task<T> configureLaunchExecutionResources(Task<T> task, @Nullable Path exportTarget) {
+        Task<T> checkedTask = Objects.requireNonNull(task, "task");
+        if (exportTarget == null
+                && StringUtils.isNotBlank(setting.getInheritable(GameSettings::preLaunchCommandProperty))) {
+            // A user-supplied hook may write anywhere. Keep only this final process-creation stage conservative.
+            return checkedTask.setResources(TaskResource.global());
+        }
+        TaskResource instanceResource = TaskResource.gameInstance(instanceDirectory);
+        TaskResource runResource = TaskResource.gameDirectory(runDirectory);
+        TaskResource librariesResource = TaskResource.gameDirectory(librariesDirectory);
+        TaskResource cacheResource = TaskResource.cache(CacheRepository.getInstance().getCacheDirectory());
+        TaskResource dependencyResource = TaskResource.cache(Metadata.DEPENDENCIES_DIRECTORY);
+        if (exportTarget == null) {
+            return checkedTask.setResources(
+                    instanceResource,
+                    runResource,
+                    librariesResource,
+                    cacheResource,
+                    dependencyResource);
+        }
+        return checkedTask.setResources(
+                instanceResource,
+                runResource,
+                librariesResource,
+                cacheResource,
+                dependencyResource,
+                TaskResource.exportTarget(exportTarget));
+    }
+
+    /// Applies resources for one short launcher-advice state and game-setting update.
+    ///
+    /// @param task task mutating the shown-tip marker and possibly automatic-agent selection
+    /// @param <T> operation result type
+    /// @return task protected by both shared and instance-specific setting destinations
+    private <T> Task<T> configureLaunchAdviceWrite(Task<T> task) {
+        return Objects.requireNonNull(task, "task").setResources(
+                TaskResource.gameInstance(instanceDirectory),
+                TaskResource.configuration(SettingsManager.gameSettingsLocation()),
+                TaskResource.configuration(SettingsManager.stateLocation()));
+    }
+
+    /// Applies resources for a short automatic-Java-selection setting update.
+    ///
+    /// @param task task changing the effective Java-selection property
+    /// @param <T> operation result type
+    /// @return task protected by shared preset and instance-setting destinations
+    private <T> Task<T> configureJavaSelectionWrite(Task<T> task) {
+        return Objects.requireNonNull(task, "task").setResources(
+                TaskResource.gameInstance(instanceDirectory),
+                TaskResource.configuration(SettingsManager.gameSettingsLocation()));
+    }
+
+    /// Applies the audited production authentication resource boundary.
+    ///
+    /// Account implementations may refresh persisted account data or extract the bundled authlib-injector artifact.
+    /// Both workspace and user account stores are included because the selected account's storage origin is not part
+    /// of the launch request. The shared dependency tree covers the bundled artifact extraction.
+    ///
+    /// @param task complete authentication and recovery task
+    /// @param <T> authentication result type
+    /// @return task protected by account storage and dependency-cache resources, handing off before an
+    ///         unclassified recovery child starts
+    private static <T> Task<T> configureAuthenticationResources(Task<T> task) {
+        return Objects.requireNonNull(task, "task").setResources(
+                TaskResource.configuration(SettingsManager.gameAccountsLocation()),
+                TaskResource.configuration(SettingsManager.userGameAccountsLocation()),
+                TaskResource.cache(Metadata.DEPENDENCIES_DIRECTORY))
+                .releaseResourcesBeforeDependencies();
+    }
+
+    /// Configures the resource boundary for the short launcher-object construction callback.
+    ///
+    /// The callback is read-only except for an optional per-executable Windows registry preference. That registry API
+    /// has no filesystem identity, so the uncommon preference write retains a brief global boundary while ordinary
+    /// launcher construction remains a pure orchestration phase.
+    ///
+    /// @param task short launcher-object construction task
+    /// @param <T> launcher-object result type
+    /// @return orchestration task, or globally protected task when registry mutation may occur
+    private <T> Task<T> configureLauncherConstruction(Task<T> task) {
+        Task<T> checkedTask = Objects.requireNonNull(task, "task");
+        if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS
+                && setting.getInheritable(GameSettings::highPerformanceProperty)) {
+            return checkedTask.setResources(TaskResource.global());
+        }
+        return checkedTask.asOrchestration();
+    }
+
+    /// Verifies that every path used by a final write still matches its declared immutable snapshot.
+    ///
+    /// @throws IllegalStateException if repository relocation or a running-directory setting change invalidated the
+    /// declaration before execution
+    private void requireResourceSnapshots() {
+        if (!repositoryDirectory.equals(normalized(repository.getBaseDirectory()))
+                || !instanceDirectory.equals(normalized(repository.getInstanceRoot(selectedInstanceId)))
+                || !runDirectory.equals(normalized(repository.getRunDirectory(selectedInstanceId)))) {
+            throw new IllegalStateException("Game launch paths changed after task resources were declared");
+        }
+    }
+
+    /// Returns an absolute lexical snapshot without filesystem I/O.
+    ///
+    /// @param path path to snapshot
+    /// @return absolute normalized path
+    private static Path normalized(Path path) {
+        return Objects.requireNonNull(path, "path").toAbsolutePath().normalize();
     }
 
     /// Writes the DirectX high-performance preference when this Java executable has no explicit preference yet.
@@ -480,7 +630,7 @@ public final class LauncherHelper {
             ManagedProcess process = Objects.requireNonNull(result, "launch task returned no managed process");
             PROCESSES.add(new WeakReference<>(process));
             return process;
-        });
+        }).asOrchestration();
     }
 
     /// Applies production launch stage metadata without waiting for presentation readiness.
@@ -541,7 +691,7 @@ public final class LauncherHelper {
         } catch (RuntimeException | Error failure) {
             completion.completeExceptionally(failure);
         }
-        return Task.fromCompletableFuture(completion);
+        return Task.fromCompletableFuture(completion).asOrchestration();
     }
 
     /// Returns the required production services.
@@ -557,8 +707,9 @@ public final class LauncherHelper {
     /// @param <T> expected task result type
     /// @return cancelled stopped task
     private static <T> Task<T> cancelledTask(String reason) {
-        return Task.fromCompletableFuture(CompletableFuture.failedFuture(
-                new CancellationException(Objects.requireNonNull(reason, "reason"))));
+        return Task.<T>fromCompletableFuture(CompletableFuture.failedFuture(
+                new CancellationException(Objects.requireNonNull(reason, "reason"))))
+                .asOrchestration();
     }
 
     /// Presents a production yes/no confirmation with cancellation as its safe default.
@@ -594,8 +745,10 @@ public final class LauncherHelper {
                 message,
                 LaunchInteractionPrompt.Severity.ERROR,
                 i18n("button.ok"));
-        return presentProductionPrompt(prompt).thenComposeAsync(
-                (@Nullable LaunchInteractionPrompt.Action ignored) -> cancelledTask(reason));
+        ExceptionalFunction<LaunchInteractionPrompt.@Nullable Action, @Nullable Task<T>, RuntimeException> cancel =
+                ignored -> cancelledTask(reason);
+        return presentProductionPrompt(prompt).thenComposeAsync(cancel)
+                .asOrchestration();
     }
 
     /// Requests explicit fallback to the launcher's Java runtime.
@@ -612,7 +765,7 @@ public final class LauncherHelper {
                         return Task.completed(JavaRuntime.getDefault());
                     }
                     return cancelledTask("No accepted Java runtime");
-                });
+                }).asOrchestration();
     }
 
     /// Requests the installed Java runtime recommended by compatibility analysis.
@@ -628,11 +781,13 @@ public final class LauncherHelper {
                 LaunchInteractionPrompt.Action.USE_RECOMMENDED_JAVA)
                 .thenComposeAsync(Schedulers.ui(), (@Nullable LaunchInteractionPrompt.Action selected) -> {
                     if (selected == LaunchInteractionPrompt.Action.USE_RECOMMENDED_JAVA) {
-                        setting.setJavaAutoSelected();
-                        return Task.completed(suggestedJava);
+                        return configureJavaSelectionWrite(Task.supplyAsync(Schedulers.ui(), () -> {
+                            setting.setJavaAutoSelected();
+                            return suggestedJava;
+                        }));
                     }
                     return cancelledTask("Recommended Java runtime was declined");
-                });
+                }).asOrchestration();
     }
 
     /// Requests permission and then executes the Java download inside the launch task graph.
@@ -659,7 +814,7 @@ public final class LauncherHelper {
                             downloadProvider,
                             SYSTEM_PLATFORM,
                             javaVersion);
-                });
+                }).asOrchestration();
     }
 
     /// Falls back to the launcher's Java runtime only after a requested download fails.
@@ -683,7 +838,7 @@ public final class LauncherHelper {
                             result.getException(),
                             "Java download failure"));
                     return chooseProductionDefaultJava();
-                });
+                }).asOrchestration();
     }
 
     /// Requests continuation with the currently selected runtime after non-blocking advice.
@@ -703,7 +858,8 @@ public final class LauncherHelper {
                 .thenComposeAsync((@Nullable LaunchInteractionPrompt.Action selected) ->
                         selected == LaunchInteractionPrompt.Action.CONTINUE
                                 ? Task.completed(java)
-                                : cancelledTask("Java compatibility advice was declined"));
+                                : cancelledTask("Java compatibility advice was declined"))
+                .asOrchestration();
     }
 
     /// Explicit production-only launch and account recovery dependencies.
@@ -742,12 +898,13 @@ public final class LauncherHelper {
             } catch (InterruptedException e) {
                 throw new CancellationException();
             }
-        });
+        }).asOrchestration();
         Task<JavaRuntime> task;
         JavaVersionType javaVersionType = setting.getInheritable(GameSettings::javaTypeProperty);
         if (setting.getInheritable(GameSettings::notCheckJVMProperty)) {
             task = getJavaTask.thenApplyAsync((@Nullable JavaRuntime java) ->
-                    Objects.requireNonNullElse(java, JavaRuntime.getDefault()));
+                    Objects.requireNonNullElse(java, JavaRuntime.getDefault()))
+                    .asOrchestration();
         } else if (javaVersionType == JavaVersionType.AUTO || javaVersionType == JavaVersionType.VERSION) {
             task = getJavaTask.thenComposeAsync(Schedulers.ui(), (@Nullable JavaRuntime java) -> {
                 if (java != null) {
@@ -797,7 +954,7 @@ public final class LauncherHelper {
                             downloadProductionJava(targetJavaVersion, repository));
                 }
                 return chooseProductionDefaultJava();
-            });
+            }).asOrchestration();
         } else {
             task = getJavaTask.thenComposeAsync((@Nullable JavaRuntime java) -> {
                 Set<JavaVersionConstraint> violatedMandatoryConstraints = EnumSet.noneOf(JavaVersionConstraint.class);
@@ -843,14 +1000,18 @@ public final class LauncherHelper {
 
                         if (gameJavaVersion != null) {
                             return downloadProductionJava(gameJavaVersion, repository)
-                                    .thenApplyAsync(
+                                    .thenComposeAsync(
                                             Schedulers.ui(),
-                                            (@Nullable JavaRuntime downloadedJava) -> {
-                                                setting.setJavaAutoSelected();
-                                                return Objects.requireNonNull(
-                                                        downloadedJava,
-                                                        "downloaded Java runtime");
-                                            });
+                                            (@Nullable JavaRuntime downloadedJava) ->
+                                                    configureJavaSelectionWrite(Task.supplyAsync(
+                                                            Schedulers.ui(),
+                                                            () -> {
+                                                                setting.setJavaAutoSelected();
+                                                                return Objects.requireNonNull(
+                                                                        downloadedJava,
+                                                                        "downloaded Java runtime");
+                                                            })))
+                                    .asOrchestration();
                         }
 
                         if (violatedMandatoryConstraints.contains(JavaVersionConstraint.VANILLA_LINUX_JAVA_8)) {
@@ -988,7 +1149,7 @@ public final class LauncherHelper {
                 }
 
                 return confirmProductionJavaAdvice(acceptedJava, message);
-            });
+            }).asOrchestration();
         }
 
         return task.withStage("launch.state.java");
@@ -999,7 +1160,7 @@ public final class LauncherHelper {
     /// @param account account to authenticate
     /// @return stopped task that produces launch authentication data
     private Task<@Nullable AuthInfo> logIn(Account account) {
-        return Task.composeAsync(() -> {
+        return configureAuthenticationResources(Task.composeAsync(() -> {
             try {
                 if (disableOfflineSkin && account instanceof OfflineAccount offlineAccount)
                     return Task.completed(offlineAccount.logInWithoutSkin());
@@ -1018,16 +1179,16 @@ public final class LauncherHelper {
                         i18n("account.login.skip"),
                         i18n("account.login.retry"),
                         i18n("button.cancel"));
-                return presentProductionPrompt(prompt).thenComposeAsync(
+                return configureAuthenticationRecoveryDispatch(presentProductionPrompt(prompt).thenComposeAsync(
                         (@Nullable LaunchInteractionPrompt.Action selected) ->
                                 resolveProductionAuthenticationRecovery(
                                         account,
                                         Objects.requireNonNull(
                                                 selected,
                                                 "authentication recovery action"),
-                                        () -> logIn(account)));
+                                        () -> logIn(account))));
             }
-        });
+        }));
     }
 
     /// Adapts stable-ID account reauthentication into the existing stopped launch task graph.
@@ -1057,7 +1218,7 @@ public final class LauncherHelper {
         } catch (RuntimeException | Error failure) {
             completion.completeExceptionally(failure);
         }
-        return Task.fromCompletableFuture(completion);
+        return configureAuthenticationRecoveryResources(Task.fromCompletableFuture(completion));
     }
 
     /// Maps one production authentication-recovery selection without exposing Swing to account operations.
@@ -1074,7 +1235,7 @@ public final class LauncherHelper {
         Objects.requireNonNull(selected, "selected");
         Objects.requireNonNull(retryTaskSupplier, "retryTaskSupplier");
         return switch (selected) {
-            case PLAY_OFFLINE -> Task.supplyAsync(account::playOffline);
+            case PLAY_OFFLINE -> configureAuthenticationRecoveryResources(Task.supplyAsync(account::playOffline));
             case RETRY_AUTHENTICATION -> Objects.requireNonNull(
                     retryTaskSupplier.get(),
                     "retryTaskSupplier returned null");
@@ -1082,6 +1243,34 @@ public final class LauncherHelper {
             default -> throw new IllegalArgumentException(
                     "Unexpected authentication recovery action: " + selected);
         };
+    }
+
+    /// Marks the prompt-result continuation as resource-free authentication dispatch.
+    ///
+    /// The continuation only selects a separately classified recovery task. In particular, it must not retain the
+    /// conservative default while the user-facing prompt is open after the authentication task handed off its lease.
+    ///
+    /// @param task prompt continuation to classify
+    /// @param <T> continuation result type
+    /// @return the same task with the orchestration resource declaration
+    static <T> Task<T> configureAuthenticationRecoveryDispatch(Task<T> task) {
+        return Objects.requireNonNull(task, "task").asOrchestration();
+    }
+
+    /// Applies the bounded account-storage resources used by authentication recovery callbacks.
+    ///
+    /// Recovery is often created after the enclosing authentication task hands off its lease. Declaring the two
+    /// possible account stores and the shared dependency cache here prevents that child from falling back to the
+    /// process-wide conservative lock while still protecting account persistence and bundled authentication data.
+    ///
+    /// @param task recovery task to classify
+    /// @param <T> task result type
+    /// @return task with the bounded authentication resource declaration
+    private static <T> Task<T> configureAuthenticationRecoveryResources(Task<T> task) {
+        return Objects.requireNonNull(task, "task").setResources(
+                TaskResource.configuration(SettingsManager.gameAccountsLocation()),
+                TaskResource.configuration(SettingsManager.userGameAccountsLocation()),
+                TaskResource.cache(Metadata.DEPENDENCIES_DIRECTORY));
     }
 
     /// Persists automatic agent enablement at the effective setting's active override level.

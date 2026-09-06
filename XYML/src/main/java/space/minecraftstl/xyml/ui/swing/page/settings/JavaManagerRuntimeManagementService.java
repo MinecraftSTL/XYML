@@ -33,6 +33,7 @@ import space.minecraftstl.xyml.setting.SettingsManager;
 import space.minecraftstl.xyml.setting.UserSettings;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import java.io.IOException;
@@ -55,6 +56,10 @@ import java.util.function.Supplier;
 /// so callers can safely create tasks for confirmation or progress presentation without changing launcher state.
 @NotNullByDefault
 public final class JavaManagerRuntimeManagementService implements JavaRuntimeManagementService {
+    /// Exact persisted settings file changed by local Java registration and disabled-path mutations.
+    private static final TaskResource USER_SETTINGS_RESOURCE =
+            TaskResource.configuration(SettingsManager.USER_SETTINGS_LOCATION);
+
     /// Access boundary for process-wide Java discovery, user settings, and registry mutation.
     private final JavaRuntimeManagementBackend backend;
 
@@ -135,8 +140,9 @@ public final class JavaManagerRuntimeManagementService implements JavaRuntimeMan
         Path candidate = Objects.requireNonNull(selectedPath, "selectedPath");
         return Task.composeAsync("Add local Java runtime", () -> {
             requireWritable();
-            return backend.addLocalRuntime(resolveExecutable(candidate));
-        });
+            Path executable = resolveExecutable(candidate);
+            return declareRegistrationResources(backend.addLocalRuntime(executable), executable);
+        }).setResources(TaskResource.javaRuntime(candidate)).releaseResourcesBeforeDependencies();
     }
 
     /// Creates a stopped task that disables one unmanaged Java runtime.
@@ -152,7 +158,7 @@ public final class JavaManagerRuntimeManagementService implements JavaRuntimeMan
                 throw new IllegalArgumentException("Managed Java runtimes must be uninstalled instead of disabled");
             }
             backend.disableLocalRuntime(target);
-        });
+        }).setResources(USER_SETTINGS_RESOURCE);
     }
 
     /// Creates a stopped task that uninstalls one launcher-managed Java runtime.
@@ -162,12 +168,13 @@ public final class JavaManagerRuntimeManagementService implements JavaRuntimeMan
     @Override
     public Task<@Nullable Void> uninstallManagedRuntime(JavaRuntime runtime) {
         JavaRuntime target = Objects.requireNonNull(runtime, "runtime");
-        return Task.composeAsync("Uninstall managed Java runtime", () -> {
+        Task<@Nullable Void> task = Task.composeAsync("Uninstall managed Java runtime", () -> {
             if (!target.isManaged()) {
                 throw new IllegalArgumentException("Only managed Java runtimes can be uninstalled");
             }
-            return backend.uninstallManagedRuntime(target);
+            return declareManagedRuntimeResources(backend.uninstallManagedRuntime(target), target);
         });
+        return target.isManaged() ? declareManagedRuntimeResources(task, target) : task.asOrchestration();
     }
 
     /// Creates a stopped background task that probes one selected disabled path.
@@ -184,7 +191,7 @@ public final class JavaManagerRuntimeManagementService implements JavaRuntimeMan
                 throw new IllegalStateException("Java runtime inspection changed the configured path");
             }
             return inspected;
-        });
+        }).setResources(USER_SETTINGS_RESOURCE);
     }
 
     /// Creates a stopped task that restores one inspected available disabled executable.
@@ -197,18 +204,22 @@ public final class JavaManagerRuntimeManagementService implements JavaRuntimeMan
     @Override
     public Task<JavaRuntime> restoreDisabledRuntime(DisabledJavaRuntimeEntry disabledRuntime) {
         DisabledJavaRuntimeEntry target = Objects.requireNonNull(disabledRuntime, "disabledRuntime");
-        return Task.composeAsync("Restore disabled Java runtime", () -> {
+        Task<JavaRuntime> task = Task.composeAsync("Restore disabled Java runtime", () -> {
             requireWritable();
             requireCurrentDisabledEntry(target);
             @Nullable Path resolvedBinary = target.resolvedBinary();
             if (target.status() != DisabledJavaRuntimeEntry.Status.AVAILABLE || resolvedBinary == null) {
                 throw new IllegalArgumentException("Disabled Java runtime must be inspected and available before restore");
             }
-            return backend.addLocalRuntime(resolvedBinary).thenApplyAsync(Schedulers.ui(), runtime -> {
+            Task<JavaRuntime> registration = declareRegistrationResources(
+                    backend.addLocalRuntime(resolvedBinary),
+                    resolvedBinary);
+            return declareRegistrationResources(registration.thenApplyAsync(Schedulers.ui(), runtime -> {
                 backend.removeDisabledRuntime(target.configuredPath());
                 return Objects.requireNonNull(runtime, "Java registration completed without a runtime");
-            });
+            }), resolvedBinary);
         });
+        return declareRegistrationResources(task, target.resolvedBinary());
     }
 
     /// Creates a stopped task that forcibly removes one exact disabled path.
@@ -224,7 +235,66 @@ public final class JavaManagerRuntimeManagementService implements JavaRuntimeMan
             if (!backend.removeDisabledRuntime(target.configuredPath())) {
                 throw new IllegalStateException("Disabled Java runtime changed before it could be removed");
             }
-        });
+        }).setResources(USER_SETTINGS_RESOURCE);
+    }
+
+    /// Declares one executable's normalized Java Home together with the user-settings mutation boundary.
+    ///
+    /// A malformed executable shape falls back to the explicit global resource instead of guessing a directory that
+    /// could omit files read by Java probing.
+    ///
+    /// @param task stopped registration task
+    /// @param executable executable candidate, or null when validation will reject the task before registration
+    /// @param <T> task result type
+    /// @return the same task with an explicit safe resource declaration
+    private static <T> Task<T> declareRegistrationResources(Task<T> task, @Nullable Path executable) {
+        if (executable == null) {
+            return task.setResources(USER_SETTINGS_RESOURCE);
+        }
+        @Nullable Path runtimeDirectory = inferRuntimeDirectory(executable);
+        if (runtimeDirectory == null) {
+            return task.setResources(TaskResource.global());
+        }
+        return task.setResources(TaskResource.javaRuntime(runtimeDirectory), USER_SETTINGS_RESOURCE);
+    }
+
+    /// Declares one managed runtime directory and its sibling manifest while allowing other runtimes to proceed.
+    ///
+    /// A malformed managed-runtime path falls back to process-wide exclusion because the backend may derive a broader
+    /// repository target from the executable path.
+    ///
+    /// @param task stopped managed-runtime operation
+    /// @param runtime managed runtime descriptor
+    /// @param <T> task result type
+    /// @return the same task with an explicit safe resource declaration
+    private static <T> Task<T> declareManagedRuntimeResources(Task<T> task, JavaRuntime runtime) {
+        @Nullable Path runtimeDirectory = inferRuntimeDirectory(runtime.getBinary());
+        if (runtimeDirectory == null) {
+            return task.setResources(TaskResource.global());
+        }
+        @Nullable Path platformRoot = runtimeDirectory.getParent();
+        @Nullable Path runtimeName = runtimeDirectory.getFileName();
+        if (platformRoot == null || runtimeName == null) {
+            return task.setResources(TaskResource.global());
+        }
+        Path manifestFile = platformRoot.resolve(runtimeName + ".json");
+        return task.setResources(
+                TaskResource.javaRuntime(runtimeDirectory),
+                TaskResource.configuration(manifestFile));
+    }
+
+    /// Infers the Java Home from the repository's normalized `Java Home/bin/java` executable layout.
+    ///
+    /// @param executable Java executable path
+    /// @return normalized Java Home, or null when two parent components are unavailable
+    private static @Nullable Path inferRuntimeDirectory(Path executable) {
+        Path normalized = executable.toAbsolutePath().normalize();
+        @Nullable Path binaryDirectory = normalized.getParent();
+        @Nullable Path binaryDirectoryName = binaryDirectory == null ? null : binaryDirectory.getFileName();
+        if (binaryDirectoryName == null || !"bin".equalsIgnoreCase(binaryDirectoryName.toString())) {
+            return null;
+        }
+        return binaryDirectory.getParent();
     }
 
     /// Fails the running lifecycle task when user settings cannot be changed.

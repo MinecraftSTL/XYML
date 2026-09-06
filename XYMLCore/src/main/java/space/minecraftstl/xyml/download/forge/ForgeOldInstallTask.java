@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.game.GameInstanceManifest;
 import space.minecraftstl.xyml.game.GameInstancePatch;
 import space.minecraftstl.xyml.game.Library;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 
 import java.io.*;
@@ -49,6 +50,13 @@ public class ForgeOldInstallTask extends Task<GameInstancePatch> {
         this.manifest = manifest;
         this.installer = installer;
         this.selfVersion = selfVersion;
+
+        setResources(
+                TaskResource.gameInstance(dependencyManager.getGameRepository().getInstanceRoot(manifest.id())),
+                TaskResource.gameDirectory(dependencyManager.getGameRepository().getLibrariesDirectory(manifest)),
+                TaskResource.gameDirectory(dependencyManager.getGameRepository().getBaseDirectory().resolve("lib")),
+                TaskResource.archive(installer));
+        releaseResourcesBeforeDependencies();
 
         setSignificance(TaskSignificance.MAJOR);
     }

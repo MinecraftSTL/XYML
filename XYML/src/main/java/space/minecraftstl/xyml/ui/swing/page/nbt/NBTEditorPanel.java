@@ -250,6 +250,14 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Guards terminal teardown from any calling thread.
     private final AtomicBoolean closed = new AtomicBoolean();
 
+    /// Latest normalized route source retained until the controller becomes idle.
+    private @Nullable Path pendingRouteOpen;
+
+    /// Whether one pending-route drain is already queued for a later EDT turn.
+    private boolean routeOpenDrainScheduled;
+    /// Monotonic route identity used to reject stale modal-confirmation returns.
+    private long routeOpenRevision;
+
     /// Document identity currently represented by the tree model.
     private @Nullable NBTDocument renderedDocument;
 
@@ -357,6 +365,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         stateSubscription = this.controller.subscribe(change -> {
             @Nullable NBTEditorSnapshot current = change.currentValue();
             if (current != null && !closed.get()) {
+                schedulePendingRouteOpen(current);
                 render(current);
             }
         });
@@ -378,10 +387,20 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// @param file route-supplied source
     public void open(Path file) {
         EdtDispatcher.requireEventDispatchThread();
-        if (closed.get() || controller.snapshot().busy() || !confirmReplacement()) {
+        Path target = Objects.requireNonNull(file, "file").toAbsolutePath().normalize();
+        long request = ++routeOpenRevision;
+        if (closed.get()) {
             return;
         }
-        controller.open(Objects.requireNonNull(file, "file").toAbsolutePath().normalize());
+        if (controller.snapshot().busy()) {
+            pendingRouteOpen = target;
+            return;
+        }
+        pendingRouteOpen = null;
+        if (!confirmReplacement() || request != routeOpenRevision || closed.get()) return;
+        pendingRouteOpen = controller.snapshot().busy() ? target : null;
+        if (pendingRouteOpen == null)
+            controller.open(target);
     }
 
     /// Routes a decoded immutable drop payload through the interaction policy.
@@ -764,6 +783,36 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         }
         @Nullable Path file = current.file();
         return file != null && interactions.confirmDiscardChanges(file);
+    }
+
+    /// Schedules the latest coalesced route source after the current state publication finishes.
+    /// @param current latest controller state
+    private void schedulePendingRouteOpen(NBTEditorSnapshot current) {
+        if (current.busy() || pendingRouteOpen == null || routeOpenDrainScheduled) {
+            return;
+        }
+        routeOpenDrainScheduled = true;
+        EdtDispatcher.executeLater(this::resumePendingRouteOpen);
+    }
+
+    /// Forwards the latest retained route source when the controller remains idle.
+    private void resumePendingRouteOpen() {
+        EdtDispatcher.requireEventDispatchThread();
+        routeOpenDrainScheduled = false;
+        if (closed.get()) {
+            pendingRouteOpen = null;
+            return;
+        }
+        if (controller.snapshot().busy()) {
+            return;
+        }
+        long request = routeOpenRevision;
+        @Nullable Path target = pendingRouteOpen;
+        pendingRouteOpen = null;
+        if (target == null || !confirmReplacement() || request != routeOpenRevision || closed.get()) return;
+        pendingRouteOpen = controller.snapshot().busy() ? target : null;
+        if (pendingRouteOpen == null)
+            controller.open(target);
     }
 
     /// Opens a constrained new-tag form for the current insertion target.
@@ -1922,6 +1971,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Performs terminal Swing teardown on the EDT.
     private void closeOnEventDispatchThread() {
         EdtDispatcher.requireEventDispatchThread();
+        pendingRouteOpen = null;
         stateSubscription.close();
         tree.removeTreeSelectionListener(treeSelectionListener);
         tree.removeTreeWillExpandListener(rootExpansionListener);

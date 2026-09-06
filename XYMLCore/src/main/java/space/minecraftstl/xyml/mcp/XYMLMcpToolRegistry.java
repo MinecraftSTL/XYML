@@ -25,6 +25,7 @@ import space.minecraftstl.xyml.library.mcp.McpToolProvider.ToolCallResult;
 import space.minecraftstl.xyml.library.mcp.McpToolProvider.ToolDefinition;
 import space.minecraftstl.xyml.task.Schedulers;
 
+import java.awt.EventQueue;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,6 +33,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 
 /// Defines the XYML-specific MCP surface without depending on an external MCP SDK.
 @NotNullByDefault
@@ -54,20 +56,22 @@ public final class XYMLMcpToolRegistry implements McpToolProvider {
         List<ToolDefinition> definitions = new ArrayList<>();
         Map<String, Operation> handlers = new LinkedHashMap<>();
         register(definitions, handlers, "list_instances", "[L1] Read-only list of installed XYML instances.",
-                schema(Map.of()), arguments -> Map.of("instances", service().listInstances()));
+                schema(Map.of()),
+                arguments -> Map.of("instances", McpTaskExecution.execute(service().listInstances())));
         register(definitions, handlers, "get_instance_settings",
                 "[L1] Read-only effective settings for one instance.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
-                arguments -> service().getInstanceSettings(requiredString(arguments, "instance_id")));
+                arguments -> McpTaskExecution.execute(
+                        service().getInstanceSettings(requiredString(arguments, "instance_id"))));
         register(definitions, handlers, "rename_instance",
                 "[L2] Renames an installed instance through XYML's repository lifecycle.",
                 schema(Map.of(
                         "source_instance_id", stringSchema("Existing instance identifier"),
                         "destination_instance_id", stringSchema("New instance identifier")),
                         List.of("source_instance_id", "destination_instance_id")),
-                arguments -> service().renameInstance(
+                arguments -> McpTaskExecution.execute(service().renameInstance(
                         requiredString(arguments, "source_instance_id"),
-                        requiredString(arguments, "destination_instance_id")));
+                        requiredString(arguments, "destination_instance_id"))));
         register(definitions, handlers, "duplicate_instance",
                 "[L2] Duplicates an installed instance; saved worlds are excluded unless requested.",
                 schema(Map.of(
@@ -75,18 +79,20 @@ public final class XYMLMcpToolRegistry implements McpToolProvider {
                         "destination_instance_id", stringSchema("New instance identifier"),
                         "copy_saves", booleanSchema("Whether saved worlds should be copied")),
                         List.of("source_instance_id", "destination_instance_id")),
-                arguments -> service().duplicateInstance(
+                arguments -> McpTaskExecution.execute(service().duplicateInstance(
                         requiredString(arguments, "source_instance_id"),
                         requiredString(arguments, "destination_instance_id"),
-                        optionalBoolean(arguments, "copy_saves", false)));
+                        optionalBoolean(arguments, "copy_saves", false))));
         register(definitions, handlers, "delete_instance",
                 "[L2] Deletes an instance after any launcher-configured manual confirmation.",
                 schema(Map.of("instance_id", stringSchema("Existing instance identifier")),
                         List.of("instance_id")),
-                arguments -> service().deleteInstance(requiredString(arguments, "instance_id")));
+                arguments -> McpTaskExecution.execute(
+                        service().deleteInstance(requiredString(arguments, "instance_id"))));
         register(definitions, handlers, "get_mods_directory", "[L1] Read-only absolute mods directory path.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
-                arguments -> Map.of("path", service().getModsDirectory(requiredString(arguments, "instance_id"))));
+                arguments -> Map.of("path", McpTaskExecution.execute(
+                        service().getModsDirectory(requiredString(arguments, "instance_id")))));
         register(definitions, handlers, "analyze_crash",
                 "[L1] Read-only combined CrashReportAnalyzer and XYAT diagnosis with structured repair solutions.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier"),
@@ -95,8 +101,8 @@ public final class XYMLMcpToolRegistry implements McpToolProvider {
                         "crash_report_path", nullableStringSchema(
                                 "Direct file name inside the instance crash-reports directory")),
                         List.of("instance_id")),
-                arguments -> service().analyzeCrash(requiredString(arguments, "instance_id"),
-                        optionalString(arguments, "log_text"), optionalString(arguments, "crash_report_path")));
+                arguments -> McpTaskExecution.execute(service().analyzeCrash(requiredString(arguments, "instance_id"),
+                        optionalString(arguments, "log_text"), optionalString(arguments, "crash_report_path"))));
         register(definitions, handlers, "plan_crash_solution",
                 "[L1] Plans one crash-analysis solution without applying launcher or system side effects.",
                 schema(Map.of(
@@ -124,16 +130,17 @@ public final class XYMLMcpToolRegistry implements McpToolProvider {
                 schema(Map.of()), arguments -> Map.of("runtimes", service().listJavaRuntimes()));
         register(definitions, handlers, "list_local_mods", "[L1] Read-only local mod files and enabled states.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
-                arguments -> Map.of("mods", service().listLocalMods(requiredString(arguments, "instance_id"))));
+                arguments -> Map.of("mods", McpTaskExecution.execute(
+                        service().listLocalMods(requiredString(arguments, "instance_id")))));
         register(definitions, handlers, "set_java_version",
                 "[L2] Low-risk instance setting write: choose Java major version or executable path.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier"),
                         "java_version", nullableStringSchema("Java major version"),
                         "java_path", nullableStringSchema("Java executable path"),
                         "inherit", booleanSchema("Restore inherited Java settings")), List.of("instance_id")),
-                arguments -> service().setJavaVersion(requiredString(arguments, "instance_id"),
+                arguments -> McpTaskExecution.execute(service().setJavaVersion(requiredString(arguments, "instance_id"),
                         optionalString(arguments, "java_version"), optionalString(arguments, "java_path"),
-                        optionalBoolean(arguments, "inherit", false)));
+                        optionalBoolean(arguments, "inherit", false))));
         register(definitions, handlers, "set_memory",
                 "[L2] Low-risk instance setting write: set heap bounds in MiB.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier"),
@@ -141,16 +148,16 @@ public final class XYMLMcpToolRegistry implements McpToolProvider {
                         "max_memory_mb", nullableIntegerSchema("Maximum heap in MiB", 1, 1_048_576),
                         "inherit", booleanSchema("Restore inherited heap settings")),
                         List.of("instance_id")),
-                arguments -> service().setMemory(requiredString(arguments, "instance_id"),
+                arguments -> McpTaskExecution.execute(service().setMemory(requiredString(arguments, "instance_id"),
                         optionalInteger(arguments, "min_memory_mb"), optionalInteger(arguments, "max_memory_mb"),
-                        optionalBoolean(arguments, "inherit", false)));
+                        optionalBoolean(arguments, "inherit", false))));
         register(definitions, handlers, "set_jvm_options",
                 "[L2] Low-risk instance setting write: replace JVM options.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier"),
                         "options", nullableStringSchema("JVM options"),
                         "inherit", booleanSchema("Restore inherited JVM options")), List.of("instance_id")),
-                arguments -> service().setJvmOptions(requiredString(arguments, "instance_id"),
-                        optionalString(arguments, "options"), optionalBoolean(arguments, "inherit", false)));
+                arguments -> McpTaskExecution.execute(service().setJvmOptions(requiredString(arguments, "instance_id"),
+                        optionalString(arguments, "options"), optionalBoolean(arguments, "inherit", false))));
         register(definitions, handlers, "set_window_options",
                 "[L2] Low-risk instance setting write: set dimensions and fullscreen mode.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier"),
@@ -158,34 +165,38 @@ public final class XYMLMcpToolRegistry implements McpToolProvider {
                         "height", nullableIntegerSchema("Window height", 0, 32_768),
                         "fullscreen", nullableBooleanSchema("Fullscreen flag"),
                         "inherit", booleanSchema("Restore inherited window settings")), List.of("instance_id")),
-                arguments -> service().setWindowOptions(requiredString(arguments, "instance_id"),
+                arguments -> McpTaskExecution.execute(service().setWindowOptions(requiredString(arguments, "instance_id"),
                         optionalInteger(arguments, "width"), optionalInteger(arguments, "height"),
-                        optionalBoolean(arguments, "fullscreen"), optionalBoolean(arguments, "inherit", false)));
+                        optionalBoolean(arguments, "fullscreen"), optionalBoolean(arguments, "inherit", false))));
         register(definitions, handlers, "enable_mod", "[L2] Enables a mod through XYML's .disabled transition.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier"),
                         "path", stringSchema("Mod path")), List.of("instance_id", "path")),
-                arguments -> Map.of("path", service().enableMod(requiredString(arguments, "instance_id"),
-                        requiredString(arguments, "path"))));
+                arguments -> Map.of("path", McpTaskExecution.execute(
+                        service().enableMod(requiredString(arguments, "instance_id"),
+                                requiredString(arguments, "path")))));
         register(definitions, handlers, "disable_mod", "[L2] Disables a mod through XYML's .disabled transition.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier"),
                         "path", stringSchema("Mod path")), List.of("instance_id", "path")),
-                arguments -> Map.of("path", service().disableMod(requiredString(arguments, "instance_id"),
-                        requiredString(arguments, "path"))));
+                arguments -> Map.of("path", McpTaskExecution.execute(
+                        service().disableMod(requiredString(arguments, "instance_id"),
+                                requiredString(arguments, "path")))));
         register(definitions, handlers, "remove_mods",
                 "[L2] Deletes selected mods after any launcher-configured manual confirmation.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier"),
                         "paths", Map.of("type", "array", "items", stringSchema("Mod path"))),
                         List.of("instance_id", "paths")),
-                arguments -> service().removeMods(requiredString(arguments, "instance_id"),
-                        requiredStrings(arguments, "paths")));
+                arguments -> McpTaskExecution.execute(service().removeMods(requiredString(arguments, "instance_id"),
+                        requiredStrings(arguments, "paths"))));
         register(definitions, handlers, "launch_game",
                 "[L3] High-impact background game launch; user confirmation is recommended before calling.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
-                arguments -> service().launchGame(requiredString(arguments, "instance_id")));
+                arguments -> McpTaskExecution.execute(
+                        service().launchGame(requiredString(arguments, "instance_id"))));
         register(definitions, handlers, "stop_game",
                 "[L3] High-impact process termination; user confirmation is recommended before calling.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
-                arguments -> service().stopGame(requiredString(arguments, "instance_id")));
+                arguments -> McpTaskExecution.execute(
+                        service().stopGame(requiredString(arguments, "instance_id"))));
         register(definitions, handlers, "get_launch_status",
                 "[L1] Reads status for a launch-test workflow.",
                 schema(Map.of("instance_id", stringSchema("Instance identifier")), List.of("instance_id")),
@@ -229,11 +240,16 @@ public final class XYMLMcpToolRegistry implements McpToolProvider {
         handlers.put(name, operation);
     }
 
-    /// Executes launcher work on the shared XYML I/O scheduler.
+    /// Executes launcher work on the shared XYML I/O scheduler and propagates caller cancellation to that work.
     private static <T> T callOnIo(Callable<T> operation) throws Exception {
+        if (EventQueue.isDispatchThread()) {
+            throw new IllegalStateException("MCP tool invocation cannot block the AWT event dispatch thread");
+        }
+        Future<T> future = Schedulers.io().submit(operation);
         try {
-            return Schedulers.io().submit(operation).get();
+            return future.get();
         } catch (InterruptedException exception) {
+            future.cancel(true);
             Thread.currentThread().interrupt();
             throw exception;
         } catch (ExecutionException exception) {

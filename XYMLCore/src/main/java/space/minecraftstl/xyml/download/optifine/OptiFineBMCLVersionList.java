@@ -95,7 +95,7 @@ public final class OptiFineBMCLVersionList extends VersionList<OptiFineRemoteVer
             } finally {
                 lock.writeLock().unlock();
             }
-        });
+        }).asOrchestration();
     }
 
     /**

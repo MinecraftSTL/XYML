@@ -20,7 +20,7 @@ package space.minecraftstl.xyml.task;
 import space.minecraftstl.xyml.util.CacheRepository;
 import space.minecraftstl.xyml.util.io.NetworkUtils;
 import space.minecraftstl.xyml.util.io.UrlResponseInfo;
-import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -34,28 +34,38 @@ import java.util.*;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
-/**
- * Download a file to cache repository.
- *
- * @author Glavo
- */
+/// Downloads one HTTP resource directly into an internally synchronized cache repository.
+///
+/// @author Glavo
+@NotNullByDefault
 public final class CacheFileTask extends FetchTask<Path> {
 
-    public CacheFileTask(@NotNull String uri) {
+    /// Creates a cache fetch from one URI string.
+    ///
+    /// @param uri HTTP source URI string
+    public CacheFileTask(String uri) {
         this(NetworkUtils.toURI(uri));
     }
 
-    public CacheFileTask(@NotNull URI uri) {
+    /// Creates a cache fetch from one HTTP URI.
+    ///
+    /// @param uri HTTP source URI
+    public CacheFileTask(URI uri) {
         super(List.of(uri));
         setName(uri.toString());
+        useCacheOperationResource();
 
         if (!NetworkUtils.isHttpUri(uri))
             throw new IllegalArgumentException(uri.toString());
     }
 
-    public CacheFileTask(@NotNull List<@NotNull URI> uris) {
+    /// Creates a cache fetch from ordered HTTP candidate URIs.
+    ///
+    /// @param uris candidate HTTP URIs
+    public CacheFileTask(List<URI> uris) {
         super(uris);
         setName(uris.get(0).toString());
+        useCacheOperationResource();
 
         if (!uris.stream().allMatch(NetworkUtils::isHttpUri))
             throw new IllegalArgumentException(uris.toString());

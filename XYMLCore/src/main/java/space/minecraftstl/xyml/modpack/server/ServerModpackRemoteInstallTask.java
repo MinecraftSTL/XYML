@@ -18,12 +18,14 @@
 package space.minecraftstl.xyml.modpack.server;
 
 import com.google.gson.JsonParseException;
+import org.jetbrains.annotations.NotNullByDefault;
 import space.minecraftstl.xyml.download.DefaultDependencyManager;
 import space.minecraftstl.xyml.download.GameBuilder;
 import space.minecraftstl.xyml.game.DefaultGameRepository;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 
 import java.io.IOException;
@@ -33,6 +35,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+/// Installs a remotely described server modpack into one game repository.
+@NotNullByDefault
 public class ServerModpackRemoteInstallTask extends Task<Void> {
 
     private final GameInstanceID instanceId;
@@ -42,11 +46,23 @@ public class ServerModpackRemoteInstallTask extends Task<Void> {
     private final List<Task<?>> dependents = new ArrayList<>(1);
     private final ServerModpackManifest manifest;
 
-    public ServerModpackRemoteInstallTask(DefaultDependencyManager dependencyManager, ServerModpackManifest manifest, GameInstanceID instanceId) {
+    /// Creates a repository-scoped remote installation task.
+    ///
+    /// @param dependencyManager repository and download services
+    /// @param manifest remote server-modpack manifest
+    /// @param instanceId destination instance
+    public ServerModpackRemoteInstallTask(
+            DefaultDependencyManager dependencyManager,
+            ServerModpackManifest manifest,
+            GameInstanceID instanceId) {
         this.instanceId = instanceId;
         this.dependency = dependencyManager;
         this.repository = dependencyManager.getGameRepository();
         this.manifest = manifest;
+        setResources(
+                TaskResource.repositoryOperation(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                TaskResource.gameDirectory(repository.getRunDirectory(instanceId)));
 
         Path json = repository.getModpackConfiguration(instanceId);
         if (repository.hasInstance(instanceId) && Files.notExists(json))

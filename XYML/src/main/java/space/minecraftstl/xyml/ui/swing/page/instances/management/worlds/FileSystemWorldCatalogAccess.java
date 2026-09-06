@@ -96,18 +96,24 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
     /// @return immutable sorted direct-child directory paths
     /// @throws IOException when the existing saves directory cannot be listed
     @Override
-    public @Unmodifiable List<Path> indexWorldDirectories(LoadCancellation cancellation) throws IOException {
+    public @Unmodifiable List<Path> indexWorldDirectories(
+            Path savesDirectory,
+            LoadCancellation cancellation) throws IOException {
         LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");
         signal.throwIfCancelled();
-        Path savesDirectory = savesDirectory();
-        if (!Files.isDirectory(savesDirectory)) {
+        Path selectedSavesDirectory = Objects.requireNonNull(savesDirectory, "savesDirectory")
+                .toAbsolutePath()
+                .normalize();
+        if (!Files.isDirectory(selectedSavesDirectory)) {
             return List.of();
         }
         List<Path> directories = new ArrayList<>();
-        try (Stream<Path> children = Files.list(savesDirectory)) {
+        try (Stream<Path> children = Files.list(selectedSavesDirectory)) {
             children.forEach(child -> {
                 signal.throwIfCancelled();
-                if (Files.isDirectory(child)) {
+                @Nullable Path fileName = child.getFileName();
+                if (Files.isDirectory(child)
+                        && (fileName == null || !WorldArchiveImporter.isReservedWorldName(fileName.toString()))) {
                     directories.add(child.toAbsolutePath().normalize());
                 }
             });
@@ -170,18 +176,21 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
     @Override
     public void install(
             WorldCatalogImport world,
+            Path savesDirectory,
             String targetName,
             LoadCancellation cancellation) throws IOException {
         WorldCatalogImport importWorld = Objects.requireNonNull(world, "world");
+        Path selectedSavesDirectory = Objects.requireNonNull(savesDirectory, "savesDirectory")
+                .toAbsolutePath()
+                .normalize();
         String normalizedTargetName = requireNonBlank(targetName, "targetName");
         LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");
         signal.throwIfCancelled();
-        Path savesDirectory = savesDirectory();
         // Revalidate the source immediately before extraction so the preview cannot authorize
         // a later replaced archive with different paths or entry data.
         new WorldArchiveImporter().importArchive(
                 importWorld.source(),
-                savesDirectory,
+                selectedSavesDirectory,
                 normalizedTargetName);
         signal.throwIfCancelled();
     }
@@ -276,7 +285,8 @@ final class FileSystemWorldCatalogAccess implements WorldCatalogAccess {
             LoadCancellation cancellation) throws IOException {
         WorldCatalogItem selectedWorld = requireReadableWorld(world);
         String normalizedTargetName = requireNonBlank(targetName, "targetName");
-        if (!FileUtils.isNameValid(normalizedTargetName)) {
+        if (!FileUtils.isNameValid(normalizedTargetName)
+                || WorldArchiveImporter.isReservedWorldName(normalizedTargetName)) {
             throw new IOException("Invalid world copy name: " + normalizedTargetName);
         }
         LoadCancellation signal = Objects.requireNonNull(cancellation, "cancellation");

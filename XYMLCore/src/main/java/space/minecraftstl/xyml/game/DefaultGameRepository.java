@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.download.MaintainTask;
 import space.minecraftstl.xyml.event.*;
 import space.minecraftstl.xyml.modpack.ModpackConfiguration;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.util.Lang;
 import space.minecraftstl.xyml.util.gson.JsonUtils;
 import space.minecraftstl.xyml.util.io.FileUtils;
@@ -39,6 +40,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.stream.Stream;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
@@ -101,7 +103,10 @@ public class DefaultGameRepository implements GameRepository {
         return status.baseDirectory;
     }
 
-    public void setBaseDirectory(Path baseDirectory) {
+    /// Replaces the repository root while excluding an asynchronous refresh that captured the previous root.
+    ///
+    /// @param baseDirectory replacement repository root
+    public synchronized void setBaseDirectory(Path baseDirectory) {
         this.status = new Status(baseDirectory);
         this.loaded = false;
         this.gameVersions.clear();
@@ -120,6 +125,26 @@ public class DefaultGameRepository implements GameRepository {
         refreshImpl();
         loaded = true;
         EventBus.EVENT_BUS.fireEvent(new RefreshedGameInstancesEvent(this));
+    }
+
+    /// Creates a refresh task scoped to the repository root captured at task construction.
+    ///
+    /// The repository monitor prevents [#setBaseDirectory(Path)] from replacing that root during the refresh. A task
+    /// that has already become stale fails before touching the replacement repository instead of using a mismatched
+    /// resource declaration.
+    ///
+    /// @return stopped refresh task occupying the complete captured game directory
+    @Override
+    public Task<Void> refreshAsync() {
+        Path expectedDirectory = getBaseDirectory().toAbsolutePath().normalize();
+        return Task.runAsync(() -> {
+            synchronized (this) {
+                if (!expectedDirectory.equals(getBaseDirectory().toAbsolutePath().normalize())) {
+                    throw new IllegalStateException("Game repository root changed before refresh execution");
+                }
+                refresh();
+            }
+        }).setResources(TaskResource.gameDirectory(expectedDirectory));
     }
 
     protected void refreshImpl() {
@@ -369,9 +394,7 @@ public class DefaultGameRepository implements GameRepository {
             renamedManifest = renamedManifest.withId(to);
             JsonUtils.writeToJsonFile(getInstanceJson(to), renamedManifest);
 
-            Map<GameInstanceID, InstanceHolder> updatedInstances = new TreeMap<>(currentStatus.instances);
-            updatedInstances.remove(from);
-            updatedInstances.put(to, new InstanceHolder(currentStatus, to, renamedManifest));
+            Map<GameInstanceID, GameInstanceManifest> updatedChildren = new TreeMap<>();
 
             for (InstanceHolder holder : currentStatus.instances.values()) {
                 GameInstanceManifest manifest = holder.manifest;
@@ -380,12 +403,14 @@ public class DefaultGameRepository implements GameRepository {
                     Path targetPath = getInstanceJson(updatedManifest.id());
                     Files.createDirectories(targetPath.getParent());
                     JsonUtils.writeToJsonFile(targetPath, updatedManifest);
-                    updatedInstances.put(updatedManifest.id(), new InstanceHolder(currentStatus, updatedManifest.id(), updatedManifest));
+                    updatedChildren.put(updatedManifest.id(), updatedManifest);
                 }
             }
 
-            currentStatus.instances.clear();
-            currentStatus.instances.putAll(updatedInstances);
+            currentStatus.instances.put(to, new InstanceHolder(currentStatus, to, renamedManifest));
+            updatedChildren.forEach((id, manifest) ->
+                    currentStatus.instances.put(id, new InstanceHolder(currentStatus, id, manifest)));
+            currentStatus.instances.remove(from);
             gameVersions.clear();
             return true;
         } catch (IOException | JsonParseException | NoSuchGameInstanceException | InvalidPathException e) {
@@ -394,7 +419,31 @@ public class DefaultGameRepository implements GameRepository {
         }
     }
 
+    /// Removes an instance from disk and schedules a repository refresh after an attempted directory deletion.
+    ///
+    /// @param id instance identifier to remove
+    /// @return whether the instance was absent or its directory was moved out of the repository
     public boolean removeInstanceFromDisk(GameInstanceID id) {
+        return removeInstanceFromDisk(id, true);
+    }
+
+    /// Removes an instance from disk without scheduling a repository refresh.
+    ///
+    /// This variant lets a caller protect the precise disk mutation separately from the broader repository refresh.
+    /// The caller is responsible for refreshing the repository after releasing any narrower instance resources.
+    ///
+    /// @param id instance identifier to remove
+    /// @return whether the instance was absent or its directory was moved out of the repository
+    public boolean removeInstanceFromDiskWithoutRefresh(GameInstanceID id) {
+        return removeInstanceFromDisk(id, false);
+    }
+
+    /// Removes one instance and optionally preserves the legacy asynchronous refresh side effect.
+    ///
+    /// @param id instance identifier to remove
+    /// @param refreshAfterDeletion whether an asynchronous refresh should follow a directory deletion attempt
+    /// @return whether the instance was absent or its directory was moved out of the repository
+    private boolean removeInstanceFromDisk(GameInstanceID id, boolean refreshAfterDeletion) {
         if (EventBus.EVENT_BUS.fireEvent(new RemoveInstanceEvent(this, id)) == Event.Result.DENY) {
             return false;
         }
@@ -435,7 +484,9 @@ public class DefaultGameRepository implements GameRepository {
             }
             return true;
         } finally {
-            refreshAsync().start();
+            if (refreshAfterDeletion) {
+                refreshAsync().start();
+            }
         }
     }
 
@@ -577,21 +628,39 @@ public class DefaultGameRepository implements GameRepository {
         return assetsDir;
     }
 
+    /// Creates a stopped task that normalizes, persists, and publishes one instance manifest.
+    ///
+    /// Repository metadata protects the mutable in-memory instance catalog, while the precise instance and library
+    /// resources cover the manifest file and compatibility libraries written during maintenance.
+    ///
+    /// @param instanceManifest manifest to persist
+    /// @return stopped task yielding the persisted manifest
     public Task<GameInstanceManifest> saveAsync(GameInstanceManifest instanceManifest) {
+        GameInstanceManifest capturedManifest = Objects.requireNonNull(instanceManifest, "instanceManifest");
+        Path expectedDirectory = getBaseDirectory().toAbsolutePath().normalize();
         return Task.supplyAsync(() -> {
-            GameInstanceManifest savedManifest = instanceManifest.isResolvedPreservingPatches()
-                    ? MaintainTask.maintainPreservingPatches(this, instanceManifest)
-                    : instanceManifest;
+            synchronized (this) {
+                if (!expectedDirectory.equals(getBaseDirectory().toAbsolutePath().normalize())) {
+                    throw new IllegalStateException("Game repository root changed before manifest save execution");
+                }
+                GameInstanceManifest savedManifest = capturedManifest.isResolvedPreservingPatches()
+                        ? MaintainTask.maintainPreservingPatches(this, capturedManifest)
+                        : capturedManifest;
 
-            Path json = getInstanceJson(savedManifest.id()).toAbsolutePath();
-            Files.createDirectories(json.getParent());
-            JsonUtils.writeToJsonFile(json, savedManifest);
+                Path json = getInstanceJson(savedManifest.id()).toAbsolutePath();
+                Files.createDirectories(json.getParent());
+                JsonUtils.writeToJsonFile(json, savedManifest);
 
-            Status currentStatus = status;
-            currentStatus.instances.put(savedManifest.id(), new InstanceHolder(currentStatus, savedManifest.id(), savedManifest));
-            gameVersions.clear();
-            return savedManifest;
-        });
+                Status currentStatus = status;
+                currentStatus.instances.put(savedManifest.id(),
+                        new InstanceHolder(currentStatus, savedManifest.id(), savedManifest));
+                gameVersions.clear();
+                return savedManifest;
+            }
+        }).setResources(
+                TaskResource.repositoryMetadata(expectedDirectory),
+                TaskResource.gameInstance(expectedDirectory.resolve("versions").resolve(capturedManifest.id().id())),
+                TaskResource.gameDirectory(expectedDirectory.resolve("libraries")));
     }
 
     public Path getModpackConfiguration(GameInstanceID instanceId) {
@@ -635,10 +704,18 @@ public class DefaultGameRepository implements GameRepository {
         return status.resolve(manifest, new HashSet<>());
     }
 
+    /// One safely published repository snapshot whose ordered catalog permits independent per-instance updates.
+    @NotNullByDefault
     protected static class Status {
+        /// Repository root represented by this snapshot.
         private final Path baseDirectory;
-        private final Map<GameInstanceID, InstanceHolder> instances = new TreeMap<>();
 
+        /// Thread-safe ordered instance catalog used by precise-resource operations on different instances.
+        private final Map<GameInstanceID, InstanceHolder> instances = new ConcurrentSkipListMap<>();
+
+        /// Creates an empty snapshot for one repository root.
+        ///
+        /// @param baseDirectory repository root
         protected Status(Path baseDirectory) {
             this.baseDirectory = baseDirectory;
         }

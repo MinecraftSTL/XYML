@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.setting.DownloadProviders;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -97,9 +98,18 @@ public final class ExistingInstanceRemoteModpackUpdateLauncher implements Remote
                 ? updateRequest.version().file().filename()
                 : updateRequest.version().name());
         download.addIntegrityCheckHandler(FileDownloadTask.ZIP_INTEGRITY_CHECK_HANDLER);
-        return download
-                .thenComposeAsync(Schedulers.io(), ignored -> createUpdateTask(archive))
-                .whenComplete(Schedulers.io(), failure -> Files.deleteIfExists(archive));
+        Task<?> preparation = Task.composeAsync(Schedulers.io(), () -> createUpdateTask(archive))
+                .setResources(
+                        TaskResource.repositoryMetadata(repository.getBaseDirectory()),
+                        TaskResource.gameInstance(repository.getInstanceRoot(instanceId)),
+                        TaskResource.archive(archive))
+                .releaseResourcesBeforeDependencies();
+        Task<?> update = download.thenComposeAsync(preparation);
+        return update.whenCompleteWithResources(
+                        Schedulers.io(),
+                        failure -> Files.deleteIfExists(archive),
+                        TaskResource.archive(archive))
+                .asOrchestration();
     }
 
     /// Reads the installed provider configuration and delegates compatibility checks to the shared helper.
@@ -108,6 +118,9 @@ public final class ExistingInstanceRemoteModpackUpdateLauncher implements Remote
     /// @return provider-specific update task
     /// @throws Exception when the archive or persisted provider configuration cannot be used
     private Task<?> createUpdateTask(Path archive) throws Exception {
+        if (!repository.hasInstance(instanceId) || !repository.isModpack(instanceId)) {
+            throw new IllegalStateException("The fixed instance is not an updateable modpack");
+        }
         ModpackConfiguration<?> configuration = ModpackHelper.readModpackConfiguration(
                 repository.getModpackConfiguration(instanceId));
         return ModpackHelper.getUpdateTask(

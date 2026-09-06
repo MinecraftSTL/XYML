@@ -29,6 +29,7 @@ import space.minecraftstl.xyml.setting.GameDirectoryManager;
 import space.minecraftstl.xyml.task.FileDownloadTask;
 import space.minecraftstl.xyml.task.Schedulers;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -84,13 +85,26 @@ public final class DefaultRemoteModpackInstallLauncher implements RemoteModpackI
                 ? installRequest.version().file().filename()
                 : installRequest.version().name());
         download.addIntegrityCheckHandler(FileDownloadTask.ZIP_INTEGRITY_CHECK_HANDLER);
-        return download
-                .thenComposeAsync(Schedulers.io(), ignored -> createInstallTask(repository, installRequest, archive))
-                .whenComplete(Schedulers.io(), failure -> cleanupTerminalState(
-                        repository,
-                        installRequest.instanceId(),
-                        archive,
-                        failure));
+        Task<?> preparation = Task.composeAsync(
+                        Schedulers.io(),
+                        () -> createInstallTask(repository, installRequest, archive))
+                .setResources(
+                        TaskResource.repositoryMetadata(repository.getBaseDirectory()),
+                        TaskResource.gameInstance(repository.getInstanceRoot(installRequest.instanceId())),
+                        TaskResource.archive(archive))
+                .releaseResourcesBeforeDependencies();
+        Task<?> installation = download.thenComposeAsync(preparation);
+        return installation.whenCompleteWithResources(
+                        Schedulers.io(),
+                        failure -> cleanupTerminalState(
+                                repository,
+                                installRequest.instanceId(),
+                                archive,
+                                failure),
+                        TaskResource.repositoryMetadata(repository.getBaseDirectory()),
+                        TaskResource.gameInstance(repository.getInstanceRoot(installRequest.instanceId())),
+                        TaskResource.archive(archive))
+                .asOrchestration();
     }
 
     /// Parses the completed archive and delegates provider-specific installation to the shared helper.
@@ -104,6 +118,9 @@ public final class DefaultRemoteModpackInstallLauncher implements RemoteModpackI
             XYMLGameRepository repository,
             RemoteModpackInstallRequest request,
             Path archive) throws Exception {
+        if (repository.instanceIdConflicts(request.instanceId())) {
+            throw new IllegalArgumentException("Remote modpack instance name already exists");
+        }
         Modpack modpack = ModpackHelper.readModpackManifest(archive, StandardCharsets.UTF_8);
         return ModpackHelper.getInstallTask(
                 repository,

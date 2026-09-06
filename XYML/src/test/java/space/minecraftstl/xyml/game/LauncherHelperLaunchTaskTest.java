@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.auth.Account;
 import space.minecraftstl.xyml.auth.AccountID;
 import space.minecraftstl.xyml.auth.AuthInfo;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskResource;
 import space.minecraftstl.xyml.ui.launch.LaunchInteractionPrompt;
 import space.minecraftstl.xyml.ui.swing.log.SwingGameLogWindow;
 import space.minecraftstl.xyml.ui.swing.page.accounts.AccountReauthentication;
@@ -199,6 +200,17 @@ final class LauncherHelperLaunchTaskTest {
                         account,
                         LaunchInteractionPrompt.Action.CONTINUE,
                         () -> Task.completed(authInfo("Retry"))));
+    }
+
+    /// Authentication prompt dispatch does not hold the conservative global fallback while awaiting user choice.
+    @Test
+    void authenticationRecoveryDispatchUsesOrchestrationResource() {
+        Task<AuthInfo> dispatch = LauncherHelper.configureAuthenticationRecoveryDispatch(
+                Task.supplyAsync(() -> authInfo("Dispatch")));
+
+        assertEquals(
+                List.of(TaskResource.Kind.ORCHESTRATION),
+                dispatch.getResources().stream().map(TaskResource::getKind).toList());
     }
 
     /// Writes the DirectX preference once and preserves an existing per-executable choice.
