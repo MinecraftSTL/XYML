@@ -91,9 +91,9 @@ class SwingGameCrashWindowTest {
         assertTrue(worker.isShutdown());
     }
 
-    /// Starts an automatic missing-dependency solver as soon as analysis completes, without a second user click.
+    /// Keeps a missing-dependency search idle until the corresponding reason row is explicitly clicked.
     @Test
-    void automaticallyRunsMissingDependencySearchAfterAnalysis() throws Exception {
+    void doesNotRunMissingDependencySearchAfterAnalysis() throws Exception {
         ControlledAnalysisService service = new ControlledAnalysisService();
         ExecutorService worker = Executors.newSingleThreadExecutor();
         AtomicInteger searchCalls = new AtomicInteger();
@@ -112,7 +112,7 @@ class SwingGameCrashWindowTest {
             worker.submit(() -> { }).get(5, java.util.concurrent.TimeUnit.SECONDS);
             EdtDispatcher.executeAndWait(() -> { });
 
-            assertEquals(1, searchCalls.get());
+            assertEquals(0, searchCalls.get());
             assertTrue(window.followUpCompletion().toCompletableFuture().isDone());
         } finally {
             window.close();

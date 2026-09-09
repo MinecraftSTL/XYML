@@ -115,7 +115,12 @@ public final class XYMLMcpServiceResourceTest {
                 service.listInstances().getResources());
 
         Task<?> renameResolution = service.renameInstance(source.id(), destination.id());
-        assertEquals(Set.of(TaskResource.repositoryMetadata(repository.getBaseDirectory())),
+        assertEquals(Set.of(
+                TaskResource.repositoryMetadata(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(source)),
+                TaskResource.gameInstance(repository.getInstanceRoot(destination)),
+                TaskResource.configuration(SettingsManager.gameSettingsLocation()),
+                TaskResource.configuration(SettingsManager.settingsLocation())),
                 renameResolution.getResources());
         renameResolution.execute();
         Set<TaskResource> renameMutationResources = Set.of(
@@ -127,8 +132,8 @@ public final class XYMLMcpServiceResourceTest {
 
         Task<?> duplicateResolution = service.duplicateInstance(source.id(), destination.id(), false);
         assertEquals(Set.of(
-                TaskResource.configuration(repository.getInstanceConfigDirectory(source)
-                        .resolve("instance-game-settings.json")),
+                TaskResource.gameInstance(repository.getInstanceRoot(source)),
+                TaskResource.gameInstance(repository.getInstanceRoot(destination)),
                 TaskResource.configuration(SettingsManager.gameSettingsLocation()),
                 TaskResource.configuration(SettingsManager.settingsLocation())),
                 duplicateResolution.getResources());
@@ -142,7 +147,13 @@ public final class XYMLMcpServiceResourceTest {
                 taskWithResources(duplicateResolution, duplicateMutationResources).getResources());
 
         Task<?> deleteResolution = service.deleteInstance(source.id());
-        assertEquals(Set.of(TaskResource.repositoryMetadata(repository.getBaseDirectory())),
+        assertEquals(Set.of(
+                TaskResource.repositoryMetadata(repository.getBaseDirectory()),
+                TaskResource.gameInstance(repository.getInstanceRoot(source)),
+                TaskResource.gameDirectory(repository.getInstanceRoot(source)
+                        .resolveSibling(source.id() + "_removed")),
+                TaskResource.configuration(SettingsManager.gameSettingsLocation()),
+                TaskResource.configuration(SettingsManager.settingsLocation())),
                 deleteResolution.getResources());
         deleteResolution.execute();
         Path sourceDirectory = repository.getInstanceRoot(source);
@@ -154,8 +165,7 @@ public final class XYMLMcpServiceResourceTest {
                 taskWithResources(deleteResolution, deleteMutationResources).getResources());
 
         assertEquals(Set.of(
-                TaskResource.configuration(repository.getInstanceConfigDirectory(source)
-                        .resolve("instance-game-settings.json")),
+                TaskResource.gameInstance(sourceDirectory),
                 TaskResource.configuration(SettingsManager.gameSettingsLocation()),
                 TaskResource.configuration(SettingsManager.settingsLocation())),
                 service.setJvmOptions(source.id(), "-Xmx4G", false).getResources());

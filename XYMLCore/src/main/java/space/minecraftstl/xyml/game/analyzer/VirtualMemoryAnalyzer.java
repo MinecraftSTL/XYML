@@ -18,31 +18,28 @@
 package space.minecraftstl.xyml.game.analyzer;
 
 import org.jetbrains.annotations.NotNullByDefault;
-import org.jetbrains.annotations.Nullable;
-import space.minecraftstl.xyml.game.CrashReportAnalyzer;
 
 import java.util.List;
+import java.util.regex.Pattern;
 
 /// Identifies operating-system commit failures without treating Java heap exhaustion as virtual-memory failure.
 @NotNullByDefault
 public final class VirtualMemoryAnalyzer implements Analyzer<LogAnalyzable> {
-    /// Exact physical-or-swap evidence accepted from the broader legacy out-of-memory rule.
-    private static final String OUT_OF_PHYSICAL_OR_SWAP = "The system is out of physical RAM or swap space";
+    /// JVM-native allocation diagnostics that explicitly identify a failed map, commit, or reservation.
+    ///
+    /// The line boundary is intentional: a generic memory sentence elsewhere in the log must not become evidence.
+    private static final Pattern JVM_NATIVE_MEMORY_FAILURE = Pattern.compile(
+            "(?im)(?:\\bNative memory allocation\\s*\\(\\s*mmap\\s*\\)\\s+failed\\s+to\\s+(?:commit|map|reserve)\\b|"
+                    + "\\bos::commit_memory\\s*\\([^\\r\\n]*\\)\\s+failed\\b)");
 
-    /// Reuses established memory rules while excluding ordinary `OutOfMemoryError` evidence.
+    /// Accepts only JVM-native allocation evidence with an explicit commit, map, or reservation failure.
     ///
     /// @param input immutable launch and log snapshot
     /// @param results mutable diagnosis accumulator
     /// @return `BREAK_OTHER` after a verified match, otherwise `CONTINUE`
     @Override
     public ControlFlow analyze(LogAnalyzable input, List<AnalyzeResult<LogAnalyzable>> results) {
-        String log = input.logText();
-        @Nullable CrashReportAnalyzer.Result evidence = CrashReportRuleEvidence.find(
-                log,
-                CrashReportAnalyzer.Rule.MEMORY_EXCEEDED,
-                CrashReportAnalyzer.Rule.OUT_OF_MEMORY);
-        if (evidence == null || evidence.rule() == CrashReportAnalyzer.Rule.OUT_OF_MEMORY
-                && !OUT_OF_PHYSICAL_OR_SWAP.equals(evidence.matcher().group())) {
+        if (!JVM_NATIVE_MEMORY_FAILURE.matcher(input.logText()).find()) {
             return ControlFlow.CONTINUE;
         }
 

@@ -87,7 +87,7 @@ final class XYMLMcpServerIntegrationTest {
             JsonArray tools = result(post(client, endpoint,
                     "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}", sessionId))
                     .getAsJsonArray("tools");
-            assertEquals(23, tools.size());
+            assertEquals(24, tools.size());
             assertTrue(tools.asList().stream()
                     .anyMatch(tool -> "analyze_crash".equals(tool.getAsJsonObject().get("name").getAsString())));
             assertTrue(tools.asList().stream()

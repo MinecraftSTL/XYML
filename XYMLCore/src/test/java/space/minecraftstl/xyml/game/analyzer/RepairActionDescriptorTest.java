@@ -61,7 +61,7 @@ class RepairActionDescriptorTest {
         assertEquals(List.of("cloth-config"), descriptor.dependencyIds());
     }
 
-    /// Marks Java selection as a persistent but non-destructive operation that needs no per-use confirmation.
+    /// Marks Java selection as a persistent configuration operation that needs per-use confirmation.
     @Test
     void describesJavaRuntimeReplacementPolicy() {
         RepairActionDescriptor descriptor = RepairActionDescriptor.replaceJavaRuntime(true);
@@ -69,7 +69,7 @@ class RepairActionDescriptorTest {
         assertEquals(RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME, descriptor.actionType());
         assertEquals(RepairActionDescriptor.RiskLevel.SYSTEM_CONFIGURATION_CHANGE, descriptor.riskLevel());
         assertEquals(
-                RepairActionDescriptor.ConfirmationRequirement.NOT_REQUIRED,
+                RepairActionDescriptor.ConfirmationRequirement.REQUIRED,
                 descriptor.confirmationRequirement());
         assertTrue(descriptor.executable());
         assertTrue(descriptor.dependencyIds().isEmpty());
@@ -89,7 +89,7 @@ class RepairActionDescriptorTest {
                 () -> RepairActionDescriptor.openModSearch(List.of("fabric-api", "fabric-api"), true));
     }
 
-    /// Rejects dependency parameters and fixed policy values owned by another action category.
+    /// Rejects dependency parameters while allowing a Java action to obtain its candidate later.
     @Test
     void rejectsInconsistentActionPolicy() {
         assertThrows(
@@ -98,15 +98,14 @@ class RepairActionDescriptorTest {
                         RepairActionDescriptor.ActionType.MANUAL_GUIDANCE,
                         RepairActionDescriptor.Availability.INFORMATION_ONLY,
                         RepairActionDescriptor.RiskLevel.NONE,
-                        RepairActionDescriptor.ConfirmationRequirement.NOT_REQUIRED,
+                RepairActionDescriptor.ConfirmationRequirement.REQUIRED,
                         List.of("fabric-api")));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> new RepairActionDescriptor(
-                        RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME,
-                        RepairActionDescriptor.Availability.EXECUTABLE,
-                        RepairActionDescriptor.RiskLevel.SYSTEM_CONFIGURATION_CHANGE,
-                        RepairActionDescriptor.ConfirmationRequirement.REQUIRED,
-                        List.of()));
+        RepairActionDescriptor javaAction = new RepairActionDescriptor(
+                RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME,
+                RepairActionDescriptor.Availability.EXECUTABLE,
+                RepairActionDescriptor.RiskLevel.SYSTEM_CONFIGURATION_CHANGE,
+                RepairActionDescriptor.ConfirmationRequirement.REQUIRED,
+                List.of());
+        assertTrue(javaAction.executable());
     }
 }

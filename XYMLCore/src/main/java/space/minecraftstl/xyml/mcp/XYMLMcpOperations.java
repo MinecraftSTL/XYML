@@ -100,14 +100,53 @@ public interface XYMLMcpOperations {
     /// @return immutable repair plan or non-executable explanation
     @Unmodifiable Map<String, Object> planCrashSolution(String analysisId, String solutionId);
 
+    /// Plans one repair solution and optionally records a selected Java-runtime candidate.
+    ///
+    /// The default implementation preserves compatibility with operation providers that only implement the
+    /// original two-argument planning method.
+    ///
+    /// @param analysisId server-issued crash-analysis identifier
+    /// @param solutionId solution identifier from that analysis
+    /// @param candidateId selected Java candidate, or null to defer selection
+    /// @return immutable repair plan or non-executable explanation
+    default @Unmodifiable Map<String, Object> planCrashSolution(
+            String analysisId,
+            String solutionId,
+            @Nullable String candidateId) {
+        if (candidateId != null) {
+            throw new IllegalArgumentException("This MCP operation provider does not support candidate selection");
+        }
+        return planCrashSolution(analysisId, solutionId);
+    }
+
     /// Executes one server-issued crash-repair plan.
     ///
-    /// The application implementation remains responsible for freshness checks, one-time plan
-    /// consumption, and any launcher-owned confirmation required by the selected repair.
+    /// The application implementation remains responsible for freshness checks, retryable plan
+    /// state, and any launcher-owned confirmation required by the selected repair.
     ///
     /// @param planId server-issued repair-plan identifier
     /// @return immutable repair-operation status
     @Unmodifiable Map<String, Object> executeCrashSolution(String planId);
+
+    /// Executes one repair plan with an optional selected Java-runtime candidate.
+    ///
+    /// @param planId server-issued repair-plan identifier
+    /// @param candidateId selected Java candidate, or null to use the planned/default candidate
+    /// @return immutable repair-operation status
+    default @Unmodifiable Map<String, Object> executeCrashSolution(
+            String planId,
+            @Nullable String candidateId) {
+        if (candidateId != null) {
+            throw new IllegalArgumentException("This MCP operation provider does not support candidate selection");
+        }
+        return executeCrashSolution(planId);
+    }
+
+    /// Retries a failed or cancelled crash-repair plan with a fresh task instance.
+    ///
+    /// @param planId retryable server-issued repair-plan identifier
+    /// @return immutable new repair-operation status
+    @Unmodifiable Map<String, Object> retryCrashSolution(String planId);
 
     /// Returns the current status of a crash-repair operation.
     ///

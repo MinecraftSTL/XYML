@@ -366,6 +366,9 @@ public class CrashReportAnalyzerTest {
         CrashReportAnalyzer.Result result = findResultByRule(
                 CrashReportAnalyzer.analyze(loadLog("/logs/out_of_memory.txt")),
                 CrashReportAnalyzer.Rule.OUT_OF_MEMORY);
+        findResultByRule(
+                CrashReportAnalyzer.analyze(loadLog("/logs/out_of_memory.txt")),
+                CrashReportAnalyzer.Rule.MEMORY_EXCEEDED);
     }
 
     @Test

@@ -167,10 +167,14 @@ final class GameCrashWindowModel {
         if (openMissingModSearch != null) {
             Consumer<String> searchAction = openMissingModSearch;
             logAnalyzable = logAnalyzable.withMissingDependencySearch(dependencyIds -> Task.runAsync(
-                    () -> searchAction.accept(dependencyIds.get(0))).asOrchestration());
+                    () -> {
+                        for (String dependencyId : dependencyIds) {
+                            searchAction.accept(dependencyId);
+                        }
+                    }).asOrchestration());
         }
         if (repository instanceof XYMLGameRepository xymlRepository) {
-            logAnalyzable = logAnalyzable.withJavaRuntimeRepair(() -> JavaRuntimeRepairTaskFactory.create(
+            logAnalyzable = logAnalyzable.withJavaRuntimeRepair(JavaRuntimeRepairTaskFactory.createRepair(
                     xymlRepository,
                     manifest));
         }

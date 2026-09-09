@@ -134,15 +134,44 @@ final class XYMLMcpServiceCrashAnalysisTest {
                     ignoredIds -> Task.runAsync(Runnable::run, searchTaskCreations::incrementAndGet))) {
                 Path latestLog = repository.getRunDirectory(validId).resolve("logs").resolve("latest.log");
                 Files.createDirectories(latestLog.getParent());
-                Files.writeString(latestLog, FABRIC_MISSING_DEPENDENCY_LOG, StandardCharsets.UTF_8);
+                Files.writeString(latestLog, "persisted baseline without a crash rule", StandardCharsets.UTF_8);
                 boolean javaDiscoveryReady = JavaManager.isInitialized();
+
+                // Simulate output that was captured by the launch listener but has not yet been flushed to latest.log.
+                Field launchStatesField = XYMLMcpService.class.getDeclaredField("launchStates");
+                launchStatesField.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                Map<Object, Object> launchStates = (Map<Object, Object>) launchStatesField.get(service);
+                Class<?> launchKeyClass = Class.forName(
+                        "space.minecraftstl.xyml.mcp.XYMLMcpService$LaunchKey");
+                var launchKeyConstructor = launchKeyClass.getDeclaredConstructor(Path.class, GameInstanceID.class);
+                launchKeyConstructor.setAccessible(true);
+                var repositoryDirectoryMethod = XYMLMcpService.class.getDeclaredMethod("repositoryDirectory");
+                repositoryDirectoryMethod.setAccessible(true);
+                Object launchKey = launchKeyConstructor.newInstance(
+                        repositoryDirectoryMethod.invoke(service),
+                        validId);
+                Class<?> launchStateClass = Class.forName(
+                        "space.minecraftstl.xyml.mcp.XYMLMcpService$LaunchState");
+                var launchStateConstructor = launchStateClass.getDeclaredConstructor();
+                launchStateConstructor.setAccessible(true);
+                Object launchState = launchStateConstructor.newInstance();
+                var onLog = launchStateClass.getDeclaredMethod("onLog", String.class, boolean.class);
+                onLog.setAccessible(true);
+                onLog.invoke(launchState, "captured-only diagnostic: " + FABRIC_MISSING_DEPENDENCY_LOG, false);
+                launchStates.put(launchKey, launchState);
+                assertTrue(launchStates.containsKey(launchKey), launchStates.keySet()::toString);
 
                 Map<String, Object> launcherAnalysis = assertTimeoutPreemptively(
                         Duration.ofSeconds(3),
                         () -> McpTaskExecution.execute(service.analyzeCrash(validId.id(), null, null)));
                 Map<String, Object> launcherSolution = firstSolution(launcherAnalysis);
                 assertEquals("launcher_latest_log", launcherAnalysis.get("input_source"));
-                assertEquals(true, launcherSolution.get("mcp_executable"));
+                // The persisted file intentionally contains no matching rule; this diagnosis can therefore only
+                // have come from the complete process-capture snapshot merged into the analysis input.
+                assertEquals("FABRIC_MISSING_DEPENDENCY", firstDiagnosis(launcherAnalysis).get("result_id"),
+                        launcherAnalysis::toString);
+                assertEquals(true, launcherSolution.get("mcp_executable"), launcherAnalysis::toString);
                 if (!javaDiscoveryReady) {
                     assertTrue(warnings(launcherAnalysis).stream()
                             .anyMatch(warning -> warning.contains("Java runtime discovery is still pending")));
@@ -187,6 +216,21 @@ final class XYMLMcpServiceCrashAnalysisTest {
                         validId.id(), FABRIC_MISSING_DEPENDENCY_LOG, null));
                 assertEquals("provided_log", externalAnalysis.get("input_source"));
                 assertEquals(false, firstSolution(externalAnalysis).get("mcp_executable"));
+
+                String nativeMemoryLog = "Native memory allocation (mmap) failed to commit 1048576 bytes\n"
+                        + "java.lang.OutOfMemoryError: Java heap space";
+                Map<String, Object> memoryAnalysis = McpTaskExecution.execute(
+                        service.analyzeCrash(validId.id(), nativeMemoryLog, null));
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> suppressedMatches =
+                        (List<Map<String, Object>>) memoryAnalysis.get("suppressed_matches");
+                Map<String, Object> outOfMemory = suppressedMatches.stream()
+                        .filter(match -> "OUT_OF_MEMORY".equals(match.get("rule")))
+                        .findFirst()
+                        .orElseThrow();
+                assertEquals("VIRTUAL_MEMORY", outOfMemory.get("suppressed_by"));
+                assertThrows(UnsupportedOperationException.class,
+                        () -> outOfMemory.put("suppressed_by", "unexpected"));
 
                 removeLoadedInstance(repository, parentId);
                 Map<String, Object> degradedAnalysis = McpTaskExecution.execute(service.analyzeCrash(

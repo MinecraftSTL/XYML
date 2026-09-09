@@ -51,6 +51,36 @@ public interface Analyzer<T> {
     static <T> @Unmodifiable List<AnalyzeResult<T>> analyze(
             List<? extends Analyzer<T>> analyzers,
             T input) {
+        return run(analyzers, input, true);
+    }
+
+    /// Runs every analyzer in registration order, retaining independent diagnoses after an exclusive match.
+    ///
+    /// This entry point is used by surfaces that need to present all independently established causes. The
+    /// analyzer's control-flow value is still collected for compatibility and logging, but `BREAK_OTHER` does not
+    /// stop this run.
+    ///
+    /// @param analyzers ordered analyzers to invoke
+    /// @param input immutable analysis input
+    /// @param <T> analyzable input type
+    /// @return immutable ordered results accumulated from every analyzer
+    static <T> @Unmodifiable List<AnalyzeResult<T>> analyzeAll(
+            List<? extends Analyzer<T>> analyzers,
+            T input) {
+        return run(analyzers, input, false);
+    }
+
+    /// Executes one analyzer snapshot with an optional exclusive-stop policy.
+    ///
+    /// @param analyzers ordered analyzers to invoke
+    /// @param input immutable analysis input
+    /// @param stopOnBreak whether `BREAK_OTHER` should stop the run
+    /// @param <T> analyzable input type
+    /// @return immutable ordered results
+    private static <T> @Unmodifiable List<AnalyzeResult<T>> run(
+            List<? extends Analyzer<T>> analyzers,
+            T input,
+            boolean stopOnBreak) {
         @Unmodifiable List<? extends Analyzer<T>> analyzerSnapshot =
                 List.copyOf(Objects.requireNonNull(analyzers, "analyzers"));
         T checkedInput = Objects.requireNonNull(input, "input");
@@ -68,7 +98,7 @@ public interface Analyzer<T> {
                         exception);
                 continue;
             }
-            if (controlFlow == ControlFlow.BREAK_OTHER) {
+            if (stopOnBreak && controlFlow == ControlFlow.BREAK_OTHER) {
                 break;
             }
         }

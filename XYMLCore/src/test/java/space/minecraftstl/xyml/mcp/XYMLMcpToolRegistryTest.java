@@ -170,13 +170,13 @@ public final class XYMLMcpToolRegistryTest {
         List<ToolDefinition> definitions = registry.toolDefinitions();
         Set<String> names = definitions.stream().map(ToolDefinition::name)
                 .collect(Collectors.toSet());
-        assertEquals(23, definitions.size());
-        assertEquals(23, names.size());
+        assertEquals(24, definitions.size());
+        assertEquals(24, names.size());
         assertEquals(Set.of("list_instances", "get_instance_settings", "rename_instance", "duplicate_instance",
                 "delete_instance", "get_mods_directory", "analyze_crash", "list_java_runtimes", "list_local_mods",
                 "set_java_version", "set_memory", "set_jvm_options", "set_window_options", "enable_mod",
                 "disable_mod", "remove_mods", "launch_game", "stop_game", "get_launch_status",
-                "plan_crash_solution", "execute_crash_solution", "get_crash_repair_status",
+                 "plan_crash_solution", "execute_crash_solution", "retry_crash_solution", "get_crash_repair_status",
                 "cancel_crash_repair"), names);
         assertFalse(names.contains("get_logs"));
         assertFalse(names.contains("search_addons"));
@@ -203,8 +203,9 @@ public final class XYMLMcpToolRegistryTest {
     public void restrictsCrashRepairToolSchemas() {
         XYMLMcpToolRegistry registry = new XYMLMcpToolRegistry(null);
         Map<String, Set<String>> expectedProperties = Map.of(
-                "plan_crash_solution", Set.of("analysis_id", "solution_id"),
-                "execute_crash_solution", Set.of("plan_id"),
+                "plan_crash_solution", Set.of("analysis_id", "solution_id", "candidate_id"),
+                "execute_crash_solution", Set.of("plan_id", "candidate_id"),
+                "retry_crash_solution", Set.of("plan_id"),
                 "get_crash_repair_status", Set.of("operation_id"),
                 "cancel_crash_repair", Set.of("operation_id"));
 
@@ -219,7 +220,12 @@ public final class XYMLMcpToolRegistryTest {
             @SuppressWarnings("unchecked")
             List<String> required = (List<String>) schema.get("required");
             assertEquals(expected.getValue(), properties.keySet(), expected.getKey());
-            assertEquals(expected.getValue(), Set.copyOf(required), expected.getKey());
+            Set<String> expectedRequired = switch (expected.getKey()) {
+                case "plan_crash_solution" -> Set.of("analysis_id", "solution_id");
+                case "execute_crash_solution" -> Set.of("plan_id");
+                default -> expected.getValue();
+            };
+            assertEquals(expectedRequired, Set.copyOf(required), expected.getKey());
             assertEquals(false, schema.get("additionalProperties"), expected.getKey());
         }
     }
@@ -261,10 +267,13 @@ public final class XYMLMcpToolRegistryTest {
 
         assertFalse(registry.call("plan_crash_solution", Map.of(
                 "analysis_id", "analysis-1", "solution_id", "solution-2")).error());
-        assertEquals(List.of("analysis-1", "solution-2"), calls.get("planCrashSolution"));
+        assertEquals(java.util.Arrays.asList("analysis-1", "solution-2", null), calls.get("planCrashSolution"));
 
         assertFalse(registry.call("execute_crash_solution", Map.of("plan_id", "plan-3")).error());
-        assertEquals(List.of("plan-3"), calls.get("executeCrashSolution"));
+        assertEquals(java.util.Arrays.asList("plan-3", null), calls.get("executeCrashSolution"));
+
+        assertFalse(registry.call("retry_crash_solution", Map.of("plan_id", "plan-3")).error());
+        assertEquals(List.of("plan-3"), calls.get("retryCrashSolution"));
 
         assertFalse(registry.call("get_crash_repair_status", Map.of("operation_id", "operation-4")).error());
         assertEquals(List.of("operation-4"), calls.get("getCrashRepairStatus"));
@@ -346,7 +355,7 @@ public final class XYMLMcpToolRegistryTest {
                                 "setMemory", "setJvmOptions", "setWindowOptions", "stopGame", "launchGame" ->
                                 Task.completed(Map.of("operation", method.getName()));
                         case "getLaunchStatus",
-                                "planCrashSolution", "executeCrashSolution", "getCrashRepairStatus",
+                                "planCrashSolution", "executeCrashSolution", "retryCrashSolution", "getCrashRepairStatus",
                                 "cancelCrashRepair" -> Map.of("operation", method.getName());
                         default -> throw new UnsupportedOperationException(method.getName());
                     };

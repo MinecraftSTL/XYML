@@ -272,6 +272,30 @@ public record LogAnalyzable(
         ///
         /// @return task that selects a compatible Java runtime, downloading one only when necessary
         Task<?> createTask();
+
+        /// Returns the immutable runtime choices currently known to the application.
+        ///
+        /// Implementations should perform discovery as a read-only operation. An empty list means that the
+        /// application will use its normal automatic acquisition path when [#createTask()] is requested.
+        ///
+        /// @return immutable candidate snapshot in stable display order
+        default @Unmodifiable List<JavaRuntimeCandidate> candidates() {
+            return List.of();
+        }
+
+        /// Creates a fresh task for one explicitly selected runtime candidate.
+        ///
+        /// The default implementation retains compatibility with older boundaries that do not expose candidates;
+        /// passing null selects the boundary's ordinary automatic path, while a non-null identifier is rejected.
+        ///
+        /// @param candidateId stable candidate identifier, or null for the ordinary automatic path
+        /// @return stopped repair task
+        default Task<?> createTask(@Nullable String candidateId) {
+            if (candidateId != null) {
+                throw new IllegalArgumentException("Java runtime candidate selection is unavailable");
+            }
+            return createTask();
+        }
     }
 
     /// Creates a stopped task that searches for one or more validated missing mod identifiers.
@@ -286,6 +310,56 @@ public record LogAnalyzable(
         /// @param dependencyIds validated missing mod identifiers
         /// @return task that opens or prepares the corresponding search
         Task<?> createTask(@Unmodifiable List<String> dependencyIds);
+
+        /// Starts an optional read-only lookup for the supplied dependency identifiers.
+        ///
+        /// Implementations may schedule provider discovery and cache immutable candidates before the user invokes
+        /// [#createTask(List)]. This hook must not install, replace, or otherwise mutate launcher or game files. The
+        /// default is deliberately empty so existing command-line and test boundaries remain source-compatible.
+        ///
+        /// @param dependencyIds validated missing mod identifiers in diagnosis order
+        /// @param gameVersion detected Minecraft version, or null when unavailable
+        default void prefetch(
+                @Unmodifiable List<String> dependencyIds,
+                @Nullable String gameVersion) {
+            Objects.requireNonNull(dependencyIds, "dependencyIds");
+        }
+    }
+
+    /// Immutable display and selection metadata for one Java runtime repair choice.
+    ///
+    /// The identifier is intentionally opaque to Core callers. Application layers may use it to bind a choice to a
+    /// runtime discovered during a read-only snapshot, but must revalidate that binding before persistent mutation.
+    ///
+    /// @param id stable opaque identifier used when creating the selected task
+    /// @param displayName concise human-readable runtime description
+    /// @param recommended whether this is the best candidate for the current launch
+    @NotNullByDefault
+    public record JavaRuntimeCandidate(String id, String displayName, boolean recommended) {
+        /// Validates immutable candidate metadata.
+        public JavaRuntimeCandidate {
+            id = requireNonBlank(id, "id");
+            displayName = requireNonBlank(displayName, "displayName");
+        }
+
+        /// Uses the display name in standard Swing and command-line choice controls.
+        @Override
+        public String toString() {
+            return displayName;
+        }
+
+        /// Rejects an empty or whitespace-only candidate field.
+        ///
+        /// @param value candidate field
+        /// @param name field name used in the exception
+        /// @return unchanged validated value
+        private static String requireNonBlank(String value, String name) {
+            String checked = Objects.requireNonNull(value, name);
+            if (checked.isBlank()) {
+                throw new IllegalArgumentException(name + " must not be blank");
+            }
+            return checked;
+        }
     }
 
     /// Immutable selected-runtime metadata and optional application repair boundary.

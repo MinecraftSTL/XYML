@@ -54,8 +54,9 @@ public final class CrashReportAnalyzer {
         MACOS_FAILED_TO_FIND_SERVICE_PORT_FOR_DISPLAY("java\\.lang\\.IllegalStateException: GLFW error before init: \\[0x10008\\]Cocoa: Failed to find service port for display"),
         // Out of memory
         OUT_OF_MEMORY("(java\\.lang\\.OutOfMemoryError|The system is out of physical RAM or swap space|Out of Memory Error|Error occurred during initialization of VM\\RToo small maximum heap)"),
-        // Memory exceeded
-        MEMORY_EXCEEDED("There is insufficient memory for the Java Runtime Environment to continue"),
+        // Memory exceeded: only an explicit JVM-native commit/map/reservation failure is specific
+        // enough to outrank the broad OUT_OF_MEMORY fallback rule.
+        MEMORY_EXCEEDED("(?im)(?:\\bNative memory allocation\\b[^\\r\\n]*\\bfailed\\b[^\\r\\n]*\\b(?:commit|map|reserv)\\w*\\b|\\bos::commit_memory\\s*\\([^\\r\\n]*\\)\\s+failed\\b)"),
         // Too high resolution
         RESOLUTION_TOO_HIGH("Maybe try a (lower resolution|lowerresolution) (resourcepack|texturepack)\\?"),
         // game can only run on Java 8. Version of uesr's JVM is too high.
@@ -174,7 +175,7 @@ public final class CrashReportAnalyzer {
     }
 
     public static Set<Result> analyze(String log) {
-        Set<Result> results = new HashSet<>();
+        Set<Result> results = new LinkedHashSet<>();
         for (Rule rule : Rule.values()) {
             Matcher matcher = rule.pattern.matcher(log);
             if (matcher.find()) {

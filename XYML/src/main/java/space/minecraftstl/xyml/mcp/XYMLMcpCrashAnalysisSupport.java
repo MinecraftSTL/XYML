@@ -144,6 +144,43 @@ final class XYMLMcpCrashAnalysisSupport {
             @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
             @Nullable LogAnalyzable.JavaRuntimeRepair javaRuntimeRepair,
             @Nullable XYMLMcpCrashRepairCoordinator.SourceValidator sourceValidator) {
+        return analyze(
+                context,
+                rawLog,
+                resolution,
+                contextWarnings,
+                launcherOwnedLog,
+                null,
+                coordinator,
+                missingDependencySearch,
+                javaRuntimeRepair,
+                sourceValidator);
+    }
+
+    /// Combines analysis while allowing the executable source fingerprint to differ from merged evidence text.
+    ///
+    /// @param context immutable settings and repository snapshot
+    /// @param rawLog complete evidence text
+    /// @param resolution resolved crash-report input
+    /// @param contextWarnings warnings collected while resolving optional context
+    /// @param launcherOwnedLog whether repair may be attached to this analysis
+    /// @param sourceFingerprint fingerprint of the source revalidation task, or null to fingerprint rawLog
+    /// @param coordinator bounded XYAT analysis and repair coordinator
+    /// @param missingDependencySearch optional application missing-dependency boundary
+    /// @param javaRuntimeRepair optional application Java-repair boundary
+    /// @param sourceValidator launcher-owned source validator, or null for supplied text
+    /// @return immutable combined analysis response
+    static @Unmodifiable Map<String, Object> analyze(
+            Context context,
+            String rawLog,
+            XYMLMcpCrashReportResolver.Resolution resolution,
+            @Unmodifiable List<String> contextWarnings,
+            boolean launcherOwnedLog,
+            @Nullable String sourceFingerprint,
+            XYMLMcpCrashRepairCoordinator coordinator,
+            @Nullable LogAnalyzable.MissingDependencySearch missingDependencySearch,
+            @Nullable LogAnalyzable.JavaRuntimeRepair javaRuntimeRepair,
+            @Nullable XYMLMcpCrashRepairCoordinator.SourceValidator sourceValidator) {
         @Unmodifiable Map<String, Object> analysis = XYMLMcpCrashAnalyzer.analyze(rawLog, resolution.report());
         Map<String, Object> result = new LinkedHashMap<>(analysis);
         result.put("instance_id", context.instanceId().id());
@@ -151,7 +188,7 @@ final class XYMLMcpCrashAnalysisSupport {
         List<String> warnings = new ArrayList<>(contextWarnings);
         warnings.addAll(resolution.warnings());
         result.put("warnings", List.copyOf(warnings));
-        String fingerprint = fingerprint(rawLog);
+        String fingerprint = sourceFingerprint == null ? fingerprint(rawLog) : sourceFingerprint;
         result.putAll(coordinator.analyze(
                 context.instanceId().id(),
                 launcherOwnedLog
@@ -160,7 +197,113 @@ final class XYMLMcpCrashAnalysisSupport {
                 fingerprint,
                 analyzerInput(context, rawLog, launcherOwnedLog, missingDependencySearch, javaRuntimeRepair),
                 sourceValidator));
-        return Map.copyOf(result);
+        applyLogSupersession(result);
+        return java.util.Collections.unmodifiableMap(new LinkedHashMap<>(result));
+    }
+
+    /// Applies contextual log-diagnosis supersession to the legacy rule list in the combined response.
+    ///
+    /// The raw rule adapter cannot infer Java or loader context. Once XYAT diagnoses are present, broad legacy
+    /// matches are removed from `matches` and retained in `suppressed_matches` with their evidence intact.
+    ///
+    /// @param result mutable combined response
+    private static void applyLogSupersession(Map<String, Object> result) {
+        @Nullable Object rawMatches = result.get("matches");
+        @Nullable Object rawDiagnoses = result.get("diagnoses");
+        if (!(rawMatches instanceof List<?> matches) || !(rawDiagnoses instanceof List<?> diagnoses)) {
+            return;
+        }
+        Map<String, String> supersededBy = new LinkedHashMap<>();
+        for (Object rawDiagnosis : diagnoses) {
+            if (!(rawDiagnosis instanceof Map<?, ?> diagnosis)) {
+                continue;
+            }
+            @Nullable Object rawResultId = diagnosis.get("result_id");
+            if (!(rawResultId instanceof String resultId)) {
+                continue;
+            }
+            switch (resultId) {
+                case "CODE_PAGE" -> supersededBy.put("UNSATISFIED_LINK_ERROR", resultId);
+                case "JRE_32BIT" -> supersededBy.put("JVM_32BIT", resultId);
+                case "JRE_VERSION" -> {
+                    supersededBy.put("NEED_JDK11", resultId);
+                    supersededBy.put("TOO_OLD_JAVA", resultId);
+                    supersededBy.put("JDK_9", resultId);
+                    supersededBy.put("JAVA_VERSION_IS_TOO_HIGH", resultId);
+                }
+                case "VIRTUAL_MEMORY" -> {
+                    supersededBy.put("MEMORY_EXCEEDED", resultId);
+                    supersededBy.put("OUT_OF_MEMORY", resultId);
+                }
+                case "FORGE_MISSING_DEPENDENCY" -> supersededBy.put("FORGEMOD_RESOLUTION", resultId);
+                case "FABRIC_MISSING_DEPENDENCY" -> {
+                    supersededBy.put("MOD_RESOLUTION", resultId);
+                    supersededBy.put("MOD_RESOLUTION_MISSING", resultId);
+                    supersededBy.put("FABRIC_WARNINGS", resultId);
+                }
+                default -> {
+                    // This diagnosis has no legacy rule that it supersedes.
+                }
+            }
+        }
+        if (supersededBy.isEmpty()) {
+            return;
+        }
+
+        List<@Unmodifiable Map<String, Object>> displayed = new ArrayList<>();
+        List<@Unmodifiable Map<String, Object>> suppressed = new ArrayList<>();
+        @Nullable Object rawSuppressed = result.get("suppressed_matches");
+        if (rawSuppressed instanceof List<?> existing) {
+            for (Object entry : existing) {
+                if (entry instanceof Map<?, ?> map) {
+                    Map<String, Object> hidden = copyMatch(map);
+                    @Nullable Object rawRule = hidden.get("rule");
+                    if (rawRule instanceof String rule && supersededBy.containsKey(rule)) {
+                        hidden.put("suppressed_by", supersededBy.get(rule));
+                    }
+                    suppressed.add(immutableMatch(hidden));
+                }
+            }
+        }
+        for (Object rawMatch : matches) {
+            if (!(rawMatch instanceof Map<?, ?> map)) {
+                continue;
+            }
+            @Nullable Object rawRule = map.get("rule");
+            if (rawRule instanceof String rule && supersededBy.containsKey(rule)) {
+                Map<String, Object> hidden = copyMatch(map);
+                hidden.put("suppressed_by", supersededBy.get(rule));
+                if (!suppressed.contains(hidden)) {
+                    suppressed.add(immutableMatch(hidden));
+                }
+            } else {
+                displayed.add(immutableMatch(copyMatch(map)));
+            }
+        }
+        result.put("matches", List.copyOf(displayed));
+        result.put("suppressed_matches", List.copyOf(suppressed));
+    }
+
+    /// Copies one raw rule match while retaining its field order.
+    ///
+    /// @param source raw match map
+    /// @return mutable ordered copy
+    private static Map<String, Object> copyMatch(Map<?, ?> source) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : source.entrySet()) {
+            if (entry.getKey() instanceof String key) {
+                copy.put(key, entry.getValue());
+            }
+        }
+        return copy;
+    }
+
+    /// Freezes one ordered match snapshot before it crosses the MCP response boundary.
+    ///
+    /// @param source mutable ordered match copy
+    /// @return immutable ordered match snapshot
+    private static @Unmodifiable Map<String, Object> immutableMatch(Map<String, Object> source) {
+        return java.util.Collections.unmodifiableMap(new LinkedHashMap<>(Objects.requireNonNull(source, "source")));
     }
 
     /// Computes a stable SHA-256 fingerprint without retaining or exposing log contents.
@@ -203,7 +346,7 @@ final class XYMLMcpCrashAnalysisSupport {
                 context.currentJavaVersion(),
                 context.javaBits(),
                 context.maxMemoryMiB(),
-                rawLog.lines().toList());
+                List.of(rawLog));
         if (!launcherOwnedLog) {
             return input;
         }

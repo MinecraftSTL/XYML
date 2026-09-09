@@ -37,9 +37,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /// Verifies delayed and fail-closed missing-dependency search task creation for MCP repair actions.
 @NotNullByDefault
 final class SwingMcpMissingDependencySearchTest {
-    /// Resolves the runtime only during execution and opens one search using the first dependency identifier.
+    /// Resolves the runtime only during execution and opens one read-only search for every dependency identifier.
     @Test
-    void resolvesAtExecutionAndSearchesForOnlyTheFirstDependency() throws Exception {
+    void resolvesAtExecutionAndSearchesForEveryDependency() throws Exception {
         AtomicInteger resolutions = new AtomicInteger();
         RecordingSearchRuntime runtime = new RecordingSearchRuntime(false);
         SwingMcpMissingDependencySearch search = SwingMcpMissingDependencySearch.forRuntimeResolver(
@@ -63,7 +63,7 @@ final class SwingMcpMissingDependencySearchTest {
         firstTask.execute();
 
         assertEquals(1, resolutions.get());
-        assertEquals(List.of("fabric-api"), runtime.searches());
+        assertEquals(List.of("fabric-api", "cloth-config"), runtime.searches());
     }
 
     /// Fails the task explicitly when no Swing runtime exists at execution time.
@@ -99,9 +99,9 @@ final class SwingMcpMissingDependencySearchTest {
         assertEquals(List.of(), runtime.searches());
     }
 
-    /// Rejects pending or declined startup policy before resolving a runtime or opening a network-backed search.
+    /// Allows a read-only search before repair-write consent is granted.
     @Test
-    void requiresAcceptedStartupAgreement() throws Exception {
+    void allowsReadOnlySearchBeforeRepairAgreement() throws Exception {
         AtomicBoolean executionAllowed = new AtomicBoolean();
         AtomicInteger resolutions = new AtomicInteger();
         RecordingSearchRuntime runtime = new RecordingSearchRuntime(false);
@@ -112,16 +112,7 @@ final class SwingMcpMissingDependencySearchTest {
                 },
                 executionAllowed::get);
 
-        Task<?> blockedTask = search.createTask(List.of("fabric-api"));
-        IllegalStateException blocked = assertThrows(IllegalStateException.class, blockedTask::execute);
-
-        assertEquals(
-                "Crash repair actions are unavailable before startup agreements are accepted",
-                blocked.getMessage());
-        assertEquals(0, resolutions.get());
-        assertEquals(List.of(), runtime.searches());
-
-        executionAllowed.set(true);
+        executionAllowed.set(false);
         search.createTask(List.of("fabric-api")).execute();
 
         assertEquals(1, resolutions.get());
@@ -142,7 +133,7 @@ final class SwingMcpMissingDependencySearchTest {
                 () -> search.createTask(List.of("   ")));
 
         assertEquals("dependencyIds must not be empty", empty.getMessage());
-        assertEquals("dependencyIds must start with a non-blank identifier", blank.getMessage());
+        assertEquals("dependencyIds must not contain blank identifiers", blank.getMessage());
     }
 
     /// Records searches while exposing an explicit closed state.

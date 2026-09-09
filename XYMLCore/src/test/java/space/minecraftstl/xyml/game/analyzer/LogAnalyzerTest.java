@@ -541,7 +541,7 @@ class LogAnalyzerTest {
                 result.solver().repairAction().actionType());
         assertFalse(result.solver().repairAction().executable());
         assertEquals(
-                RepairActionDescriptor.ConfirmationRequirement.NOT_REQUIRED,
+                RepairActionDescriptor.ConfirmationRequirement.REQUIRED,
                 result.solver().repairAction().confirmationRequirement());
     }
 
@@ -639,7 +639,7 @@ class LogAnalyzerTest {
                 RepairActionDescriptor.ActionType.REPLACE_JAVA_RUNTIME,
                 result.solver().repairAction().actionType());
         assertEquals(
-                RepairActionDescriptor.ConfirmationRequirement.NOT_REQUIRED,
+                RepairActionDescriptor.ConfirmationRequirement.REQUIRED,
                 result.solver().repairAction().confirmationRequirement());
         assertTrue(result.solver().repairAction().executable());
         Task<?> firstTask = result.solver().createTask();
@@ -718,6 +718,87 @@ class LogAnalyzerTest {
                 ProcessListener.ExitType.APPLICATION_ERROR);
 
         assertOnlyResult(input, ResultID.VIRTUAL_MEMORY, VirtualMemoryAnalyzer.class);
+    }
+
+    /// Detects the JVM's explicit `os::commit_memory` failure even without the longer native-allocation footer.
+    @Test
+    void detectsOsCommitMemoryFailure() {
+        LogAnalyzable input = input(
+                List.of("Java HotSpot(TM) 64-Bit Server VM: os::commit_memory(0x10000000, 65536, 0) failed;"),
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                8,
+                8,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        assertOnlyResult(input, ResultID.VIRTUAL_MEMORY, VirtualMemoryAnalyzer.class);
+    }
+
+    /// Rejects generic JVM memory wording when it contains no native allocation failure evidence.
+    @Test
+    void rejectsGenericInsufficientMemoryWording() {
+        LogAnalyzable input = input(
+                List.of("There is insufficient memory for the Java Runtime Environment to continue."),
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                8,
+                8,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        assertTrue(LogAnalyzer.analyze(input).isEmpty());
+    }
+
+    /// Rejects a physical-RAM or swap hint when the JVM did not report a native commit or reservation failure.
+    @Test
+    void rejectsPhysicalOrSwapHintWithoutNativeFailure() {
+        LogAnalyzable input = input(
+                List.of("The system is out of physical RAM or swap space"),
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                8,
+                8,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        assertTrue(LogAnalyzer.analyze(input).isEmpty());
+    }
+
+    /// Rejects a native-allocation line that does not identify a failed map, commit, or reservation.
+    @Test
+    void rejectsUnqualifiedNativeAllocationText() {
+        LogAnalyzable input = input(
+                List.of("Native memory allocation (malloc) failed to allocate 1024 bytes"),
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                8,
+                8,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        assertTrue(LogAnalyzer.analyze(input).isEmpty());
+    }
+
+    /// Rejects a malloc failure whose later bookkeeping text happens to mention an unrelated commit.
+    @Test
+    void rejectsNativeMallocFailureWithUnrelatedCommitText() {
+        LogAnalyzable input = input(
+                List.of("Native memory allocation (malloc) failed to allocate 1024 bytes; allocator failed to "
+                        + "commit bookkeeping metadata"),
+                OperatingSystem.WINDOWS,
+                936,
+                ASCII_GAME_DIRECTORY,
+                Bits.BIT_64,
+                8,
+                8,
+                ProcessListener.ExitType.APPLICATION_ERROR);
+
+        assertTrue(LogAnalyzer.analyze(input).isEmpty());
     }
 
     /// Rejects ordinary Java heap exhaustion so it remains owned by `CrashReportAnalyzer.OUT_OF_MEMORY`.

@@ -48,13 +48,11 @@ import space.minecraftstl.xyml.util.FileSaver;
 import space.minecraftstl.xyml.util.StringUtils;
 
 import java.io.IOException;
-import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,20 +66,14 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 
 /// Bridges the existing XYMLCore launcher services to MCP-safe structured operations.
-///
 /// This class deliberately contains no new game or mod-management algorithms. It delegates to the
 /// repository, mod manager, Java manager, and launch monitor already used by XYML.
 @NotNullByDefault
 public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
-
-    /// Maximum number of lines retained from one launch process.
-    private static final int MAX_LOG_LINES = 20_000;
 
     /// Warning returned when optional manifest or settings context cannot be collected for XYAT.
     private static final String XYAT_CONTEXT_UNAVAILABLE_WARNING =
@@ -138,7 +130,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     private final Map<LaunchKey, LaunchState> launchStates = new ConcurrentHashMap<>();
 
     /// Creates a service for one initialized XYML game repository.
-    ///
     /// @param repository repository whose instances and settings are exposed
     /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
     public XYMLMcpService(
@@ -148,7 +139,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Creates a service with an optional application search boundary for XYAT repairs.
-    ///
     /// @param repository repository whose instances and settings are exposed
     /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
     /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
@@ -160,10 +150,8 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Creates a service with application repair boundaries and the launcher's startup-policy gate.
-    ///
     /// This gate is independent of per-operation confirmation. It prevents any repair side effect before mandatory
     /// startup agreements have enabled application interaction.
-    ///
     /// @param repository repository whose instances and settings are exposed
     /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
     /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
@@ -182,7 +170,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Creates a service with an explicit crash-repair coordinator for deterministic integration tests.
-    ///
     /// @param repository repository whose instances and settings are exposed
     /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
     /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
@@ -196,7 +183,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Creates a service with explicit startup and coordinator boundaries for deterministic integration tests.
-    ///
     /// @param repository repository whose instances and settings are exposed
     /// @param deletionConfirmation launcher-owned confirmation policy for destructive operations
     /// @param missingDependencySearch late-bound missing-dependency search action, or null for analysis-only use
@@ -217,7 +203,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Returns all installed instances and their root directories.
-    ///
     /// @return unstarted task producing immutable instance summaries
     @Override
     public Task<@Unmodifiable List<@Unmodifiable Map<String, Object>>> listInstances() {
@@ -242,7 +227,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Returns the effective settings needed to diagnose or adjust one instance.
-    ///
     /// @param instanceId instance identifier
     /// @return unstarted task producing an immutable effective-settings map
     @Override
@@ -255,13 +239,13 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
             requireInstance(id);
             return instanceSettings(id);
         },
+                TaskResource.gameInstance(instanceDirectory),
                 TaskResource.configuration(instanceSettingsFile(repositoryDirectory, id)),
                 TaskResource.configuration(SettingsManager.gameSettingsLocation()),
                 TaskResource.configuration(SettingsManager.settingsLocation()));
     }
 
     /// Returns one immutable effective-settings snapshot while the caller owns its declared configuration resources.
-    ///
     /// @param id instance identifier
     /// @return immutable effective-settings map
     /// @throws InterruptedException if a lazily repaired default setting cannot finish saving
@@ -272,7 +256,9 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                 "java_type", effective.getInheritable(GameSettings::javaTypeProperty).name(),
                 "java_version", effective.getInheritable(GameSettings::customJavaVersionProperty),
                 "java_path", effective.getInheritable(GameSettings::customJavaPathProperty),
-                "min_memory_mb", nullableNumber(effective.getInheritable(GameSettings::minMemoryProperty)),
+                "min_memory_mb", effective.getInheritable(GameSettings::minMemoryProperty) == null
+                        ? ""
+                        : effective.getInheritable(GameSettings::minMemoryProperty),
                 "max_memory_mb", effective.getMaxMemory(),
                 "jvm_options", effective.getInheritable(GameSettings::jvmOptionsProperty),
                 "width", effective.getWidth(),
@@ -281,9 +267,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Resolves effective settings and drains any default-preset repair scheduled by the legacy accessor.
-    ///
     /// Callers must own both launcher-settings resources while invoking this method.
-    ///
     /// @param id instance identifier
     /// @return effective settings snapshot
     /// @throws InterruptedException if a scheduled settings save cannot finish
@@ -292,9 +276,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Resolves a normalized running directory and drains any default-preset repair it schedules.
-    ///
     /// Callers must own the instance, preset, and launcher-settings configuration resources.
-    ///
     /// @param id instance identifier
     /// @return normalized absolute running directory
     /// @throws InterruptedException if a scheduled settings save cannot finish
@@ -303,9 +285,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Resolves a normalized mods directory and drains any default-preset repair it schedules.
-    ///
     /// Callers must own the instance, preset, and launcher-settings configuration resources.
-    ///
     /// @param id instance identifier
     /// @return normalized absolute mods directory
     /// @throws InterruptedException if a scheduled settings save cannot finish
@@ -314,7 +294,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Renames one installed instance and selects the renamed destination.
-    ///
     /// @param sourceInstanceId existing instance identifier
     /// @param destinationInstanceId new instance identifier
     /// @return unstarted task producing an immutable rename outcome
@@ -363,12 +342,17 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
             }, resources.get(0), additional);
             return lifecycleResult(mutation, repositoryDirectory, destination, committed, result);
         }).setExecutor(Schedulers.io())
-                .setResources(TaskResource.repositoryMetadata(repositoryDirectory))
+                .setResources(
+                        TaskResource.repositoryMetadata(repositoryDirectory),
+                        TaskResource.gameInstance(sourceDirectory),
+                        TaskResource.gameInstance(destinationDirectory),
+                        TaskResource.configuration(instanceSettingsFile(repositoryDirectory, source)),
+                        TaskResource.configuration(SettingsManager.gameSettingsLocation()),
+                        TaskResource.configuration(SettingsManager.settingsLocation()))
                 .releaseResourcesBeforeDependencies();
     }
 
     /// Duplicates one installed instance and selects the new destination.
-    ///
     /// @param sourceInstanceId existing instance identifier
     /// @param destinationInstanceId new instance identifier
     /// @param copySaves whether saved worlds should be copied
@@ -413,6 +397,8 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                     TaskResource.gameDirectory(sourceRunDirectory));
             return lifecycleResult(mutation, repositoryDirectory, destination, committed, result);
         }).setExecutor(Schedulers.io()).setResources(
+                TaskResource.gameInstance(sourceDirectory),
+                TaskResource.gameInstance(destinationDirectory),
                 TaskResource.configuration(instanceSettingsFile(repositoryDirectory, source)),
                 TaskResource.configuration(SettingsManager.gameSettingsLocation()),
                 TaskResource.configuration(SettingsManager.settingsLocation()))
@@ -420,7 +406,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Deletes one installed instance only after the configured launcher confirmation succeeds.
-    ///
     /// @param instanceId existing instance identifier
     /// @return unstarted task producing an immutable approval and deletion outcome
     @Override
@@ -475,12 +460,17 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                             "instance_id", target.id())).asOrchestration();
                 }))
                 .setExecutor(Schedulers.io())
-                .setResources(TaskResource.repositoryMetadata(repositoryDirectory))
+                .setResources(
+                        TaskResource.repositoryMetadata(repositoryDirectory),
+                        TaskResource.gameInstance(instanceDirectory),
+                        TaskResource.gameDirectory(removedDirectory),
+                        TaskResource.configuration(instanceSettingsFile(repositoryDirectory, target)),
+                        TaskResource.configuration(SettingsManager.gameSettingsLocation()),
+                        TaskResource.configuration(SettingsManager.settingsLocation()))
                 .releaseResourcesBeforeDependencies();
     }
 
     /// Returns the absolute mods directory for an instance.
-    ///
     /// @param instanceId instance identifier
     /// @return unstarted task producing the absolute mods directory
     @Override
@@ -493,13 +483,13 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
             requireInstance(id);
             return resolvedModsDirectory(id).toString();
         },
+                TaskResource.gameInstance(instanceDirectory),
                 TaskResource.configuration(instanceSettingsFile(repositoryDirectory, id)),
                 TaskResource.configuration(SettingsManager.gameSettingsLocation()),
                 TaskResource.configuration(SettingsManager.settingsLocation()));
     }
 
     /// Analyzes a supplied log or the latest instance log with CrashReportAnalyzer and XYAT.
-    ///
     /// @param instanceId instance identifier
     /// @param logText optional raw log text
     /// @param crashReportPath optional crash-report file path
@@ -558,14 +548,20 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                                                 null,
                                                 false),
                                         contextWarnings,
-                                        false))
+                                        false,
+                                        null))
                                 .asOrchestration();
                     }
                     Path crashDirectory = runDirectory.resolve("crash-reports");
                     return repositoryTask("Analyze MCP game crash", repositoryDirectory, () -> {
                         requireInstanceDirectory(id, instanceDirectory);
                         requireInstance(id);
-                        String rawLog = logText != null ? logText : readLog(runDirectory);
+                        String persistedLog = logText != null
+                                ? logText
+                                : XYMLMcpResourceReader.readLog(runDirectory);
+                        String rawLog = logText != null
+                                ? persistedLog
+                                : mergeCapturedAndLatestLogs(launchState, persistedLog);
                         XYMLMcpCrashReportResolver.Resolution resolution = XYMLMcpCrashReportResolver.resolve(
                                 crashDirectory,
                                 rawLog,
@@ -576,7 +572,10 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                                 rawLog,
                                 resolution,
                                 contextWarnings,
-                                logText == null);
+                                logText == null,
+                                logText == null
+                                        ? XYMLMcpCrashAnalysisSupport.fingerprint(persistedLog)
+                                        : null);
                     },
                             TaskResource.repositoryOperation(repositoryDirectory),
                             TaskResource.gameInstance(instanceDirectory),
@@ -589,8 +588,32 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                 .releaseResourcesBeforeDependencies();
     }
 
+    /// Combines the complete process-capture snapshot with the persisted latest log for launcher-owned analysis.
+    /// The persisted file remains the authoritative source when it is the only available input. When a launch state
+    /// exists, captured lines are prepended with explicit source markers so analysis can see diagnostics which were
+    /// never flushed to disk without changing the source fingerprint contract used for later revalidation.
+    /// @param launchState tracked launch state, or null when no process capture exists
+    /// @param latestLog persisted latest-log text
+    /// @return combined immutable analysis text
+    private static String mergeCapturedAndLatestLogs(@Nullable LaunchState launchState, String latestLog) {
+        String persisted = Objects.requireNonNull(latestLog, "latestLog");
+        if (launchState == null) {
+            return persisted;
+        }
+        List<String> captured = launchState.logsSnapshot();
+        if (captured.isEmpty()) {
+            return persisted;
+        }
+        StringBuilder merged = new StringBuilder(persisted.length() + captured.size() * 80 + 64);
+        merged.append("[XYML captured process output]\n");
+        for (String line : captured) {
+            merged.append(line).append('\n');
+        }
+        merged.append("[XYML persisted latest.log]\n").append(persisted);
+        return merged.toString();
+    }
+
     /// Plans one structured XYAT repair solution without executing its task.
-    ///
     /// @param analysisId server-issued crash-analysis identifier
     /// @param solutionId solution identifier returned by that analysis
     /// @return immutable plan or non-executable explanation
@@ -599,8 +622,20 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
         return crashRepairCoordinator.plan(analysisId, solutionId);
     }
 
-    /// Executes one fresh repair task from a one-time, revalidated plan.
-    ///
+    /// Plans one structured repair solution with an optional Java-runtime candidate selection.
+    /// @param analysisId server-issued crash-analysis identifier
+    /// @param solutionId solution identifier returned by that analysis
+    /// @param candidateId selected Java candidate, or null to defer selection
+    /// @return immutable plan or non-executable explanation
+    @Override
+    public @Unmodifiable Map<String, Object> planCrashSolution(
+            String analysisId,
+            String solutionId,
+            @Nullable String candidateId) {
+        return crashRepairCoordinator.plan(analysisId, solutionId, candidateId);
+    }
+
+    /// Executes one fresh repair task from a revalidated plan.
     /// @param planId server-issued repair-plan identifier
     /// @return immutable asynchronous operation status
     @Override
@@ -608,8 +643,26 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
         return crashRepairCoordinator.execute(planId);
     }
 
+    /// Executes one fresh repair task with an optional selected Java-runtime candidate.
+    /// @param planId server-issued repair-plan identifier
+    /// @param candidateId selected Java candidate, or null to use the planned/default candidate
+    /// @return immutable asynchronous operation status
+    @Override
+    public @Unmodifiable Map<String, Object> executeCrashSolution(
+            String planId,
+            @Nullable String candidateId) {
+        return crashRepairCoordinator.execute(planId, candidateId);
+    }
+
+    /// Retries one failed crash-repair plan with a fresh validator and task chain.
+    /// @param planId server-issued retryable repair-plan identifier
+    /// @return immutable asynchronous operation status
+    @Override
+    public @Unmodifiable Map<String, Object> retryCrashSolution(String planId) {
+        return crashRepairCoordinator.retry(planId);
+    }
+
     /// Returns the current state of one crash-repair operation.
-    ///
     /// @param operationId server-issued repair-operation identifier
     /// @return immutable operation state
     @Override
@@ -618,7 +671,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Requests cooperative cancellation of one crash-repair operation.
-    ///
     /// @param operationId server-issued repair-operation identifier
     /// @return immutable operation state and cancellation acceptance
     @Override
@@ -627,10 +679,8 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Analyzes log text without requiring an initialized game repository.
-    ///
     /// This overload is useful for offline diagnostics and tests that only need the existing
     /// CrashReportAnalyzer rules.
-    ///
     /// @param logText raw log text
     /// @return structured rule matches and extracted crash report
     public static @Unmodifiable Map<String, Object> analyzeCrashText(String logText) {
@@ -641,41 +691,39 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                 ? XYMLMcpCrashReportResolver.SOURCE_NONE
                 : XYMLMcpCrashReportResolver.SOURCE_EMBEDDED);
         result.put("warnings", List.of());
-        return Map.copyOf(result);
+        return Collections.unmodifiableMap(new LinkedHashMap<>(result));
     }
 
     /// Reads a supported `xyml://` resource URI.
-    ///
     /// @param uri resource URI
     /// @return unstarted task producing an immutable resource URI, MIME type, and text
     @Override
     public Task<@Unmodifiable Map<String, String>> readResource(String uri) {
         Matcher logMatcher = LOG_RESOURCE.matcher(uri);
         if (logMatcher.matches()) {
-            GameInstanceID id = instanceIdFromUri(logMatcher.group(1));
+            GameInstanceID id = XYMLMcpResourceReader.instanceIdFromUri(logMatcher.group(1));
             return resourceReadTask(uri, id, ResourceKind.LOG, null);
         }
 
         Matcher directoryMatcher = CRASH_DIRECTORY_RESOURCE.matcher(uri);
         if (directoryMatcher.matches()) {
-            GameInstanceID id = instanceIdFromUri(directoryMatcher.group(1));
+            GameInstanceID id = XYMLMcpResourceReader.instanceIdFromUri(directoryMatcher.group(1));
             return resourceReadTask(uri, id, ResourceKind.CRASH_DIRECTORY, null);
         }
 
         Matcher reportMatcher = CRASH_REPORT_RESOURCE.matcher(uri);
         if (reportMatcher.matches()) {
-            GameInstanceID id = instanceIdFromUri(reportMatcher.group(1));
+            GameInstanceID id = XYMLMcpResourceReader.instanceIdFromUri(reportMatcher.group(1));
             return resourceReadTask(
                     uri,
                     id,
                     ResourceKind.CRASH_REPORT,
-                    decodePathSegment(reportMatcher.group(2)));
+                    XYMLMcpResourceReader.decodePathSegment(reportMatcher.group(2)));
         }
         throw new IllegalArgumentException("Unsupported XYML resource URI: " + uri);
     }
 
     /// Lists Java runtimes already discovered by JavaManager.
-    ///
     /// @return immutable runtime summaries
     @Override
     public @Unmodifiable List<@Unmodifiable Map<String, Object>> listJavaRuntimes() throws InterruptedException {
@@ -693,7 +741,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Lists locally installed mods and their enabled state.
-    ///
     /// @param instanceId instance identifier
     /// @return unstarted task producing immutable mod summaries
     @Override
@@ -726,6 +773,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                     TaskResource.gameInstance(instanceDirectory),
                     TaskResource.gameDirectory(modsDirectory));
         })).setExecutor(Schedulers.io()).setResources(
+                TaskResource.gameInstance(instanceDirectory),
                 TaskResource.configuration(instanceSettingsFile(repositoryDirectory, id)),
                 TaskResource.configuration(SettingsManager.gameSettingsLocation()),
                 TaskResource.configuration(SettingsManager.settingsLocation()))
@@ -733,7 +781,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Changes the Java selection to a numeric version or executable path.
-    ///
     /// @param instanceId instance identifier
     /// @param javaVersion numeric Java version, or blank when `javaPath` is used
     /// @param javaPath executable path, or blank when `javaVersion` is used
@@ -786,7 +833,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Changes minimum and maximum heap memory in MiB.
-    ///
     /// @param instanceId instance identifier
     /// @param minMemory minimum heap, or null to leave unchanged
     /// @param maxMemory maximum heap, or null to leave unchanged
@@ -829,7 +875,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Validates a partial heap update against the effective values it leaves unchanged.
-    ///
     /// @param minMemory requested minimum heap, or null to retain the effective minimum
     /// @param maxMemory requested maximum heap, or null to retain the effective maximum
     /// @param currentMinMemory current effective minimum heap, or null for the launcher default
@@ -851,10 +896,8 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Applies one heap setting value while preserving the instance inheritance contract.
-    ///
     /// A null value removes the instance override; it does not create an override whose value is
     /// null, because effective settings resolve null direct values to their property defaults.
-    ///
     /// @param setting instance settings to update
     /// @param propertyName serialized override-property name
     /// @param property property receiving a non-null override value
@@ -873,7 +916,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Changes the raw JVM options string.
-    ///
     /// @param instanceId instance identifier
     /// @param options JVM options string, or null when inheritance is requested
     /// @param inherit whether the JVM-options override should be removed
@@ -899,7 +941,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Changes window dimensions and fullscreen state.
-    ///
     /// @param instanceId instance identifier
     /// @param width optional width
     /// @param height optional height
@@ -947,7 +988,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Enables one mod file through ModManager's `.disabled` transition.
-    ///
     /// @param instanceId target instance
     /// @param path mod file path
     /// @return unstarted task producing the resulting file path
@@ -957,7 +997,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Disables one mod file through ModManager's `.disabled` transition.
-    ///
     /// @param instanceId target instance
     /// @param path mod file path
     /// @return unstarted task producing the resulting file path
@@ -967,7 +1006,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Creates one precisely resourced mod enablement or disablement task.
-    ///
     /// @param name task name
     /// @param id target instance identifier
     /// @param rawPath requested managed mod path
@@ -993,6 +1031,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                     TaskResource.gameInstance(instanceDirectory),
                     TaskResource.gameDirectory(modsDirectory));
         })).setExecutor(Schedulers.io()).setResources(
+                TaskResource.gameInstance(instanceDirectory),
                 TaskResource.configuration(instanceSettingsFile(repositoryDirectory, id)),
                 TaskResource.configuration(SettingsManager.gameSettingsLocation()),
                 TaskResource.configuration(SettingsManager.settingsLocation()))
@@ -1000,7 +1039,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Removes selected local mod files after applying the launcher-owned confirmation policy.
-    ///
     /// @param instanceId target instance
     /// @param paths files to remove
     /// @return unstarted task producing immutable approval state and removed paths
@@ -1057,6 +1095,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                             TaskResource.gameInstance(instanceDirectory),
                             TaskResource.gameDirectory(modsDirectory));
                 })).setExecutor(Schedulers.io()).setResources(
+                TaskResource.gameInstance(instanceDirectory),
                 TaskResource.configuration(instanceSettingsFile(repositoryDirectory, id)),
                 TaskResource.configuration(SettingsManager.gameSettingsLocation()),
                 TaskResource.configuration(SettingsManager.settingsLocation()))
@@ -1064,7 +1103,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Starts an instance with the launcher-generated options and captures monitor state.
-    ///
     /// @param instanceId target instance
     /// @return unstarted task producing launch acceptance and process metadata
     @Override
@@ -1148,7 +1186,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Stops a running instance process if one is tracked.
-    ///
     /// @param instanceId target instance
     /// @return unstarted task producing whether a process was stopped
     @Override
@@ -1168,7 +1205,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Returns current process state, exit code, and ExitType classification.
-    ///
     /// @param instanceId target instance
     /// @return immutable launch state
     @Override
@@ -1177,19 +1213,18 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
         LaunchState state = launchStates.get(new LaunchKey(repositoryDirectory(), id));
         if (state == null) {
             return Map.of("instance_id", id.id(), "started", false, "running", false,
-                    "exit_code", nullValue(), "exit_type", nullValue(), "logs", List.of());
+                    "exit_code", "", "exit_type", "", "logs", List.of());
         }
         @Nullable Integer exitCode = state.exitCode;
         @Nullable ProcessListener.ExitType exitType = state.exitType;
         return Map.of("instance_id", id.id(), "started", true,
                 "running", state.process != null && state.process.isRunning(),
-                "exit_code", exitCode == null ? nullValue() : exitCode,
-                "exit_type", exitType == null ? nullValue() : exitType.name(),
+                "exit_code", exitCode == null ? "" : exitCode,
+                "exit_type", exitType == null ? "" : exitType.name(),
                 "logs", state.logsSnapshot());
     }
 
     /// Completes a staged instance lifecycle mutation with a short repository refresh and selection update.
-    ///
     /// @param mutation precise disk-mutation stage
     /// @param repositoryDirectory captured repository root
     /// @param preferredSelection preferred post-refresh instance, or `null` after deletion
@@ -1212,10 +1247,8 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Drains every settings save queued before a barrier while preserving interruption semantics.
-    ///
     /// An interrupt is remembered, cleared long enough to reach the FileSaver barrier, then restored and rethrown.
     /// This keeps asynchronous configuration writes inside the current task resource lease without hiding cancellation.
-    ///
     /// @throws InterruptedException after the save barrier when the waiting thread was interrupted
     private static void waitForSettingsSaves() throws InterruptedException {
         @Nullable InterruptedException interruption = null;
@@ -1239,7 +1272,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Drains queued settings saves after a primary failure without replacing that failure.
-    ///
     /// @param primaryFailure failure that must remain primary
     private static void waitForSettingsSaves(Throwable primaryFailure) {
         try {
@@ -1250,7 +1282,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Runs a setting-derived operation and retains its save barrier through every terminal path.
-    ///
     /// @param operation operation that cannot throw a checked exception
     /// @param <T> result type
     /// @return operation result
@@ -1272,7 +1303,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Runs a checked setting-derived operation and retains its save barrier through every terminal path.
-    ///
     /// @param operation operation that may throw a checked exception
     /// @param <T> result type
     /// @return operation result
@@ -1297,7 +1327,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Creates one instance-setting mutation whose delayed FileSaver write remains inside the task resource lifetime.
-    ///
     /// @param name task name
     /// @param id target instance identifier
     /// @param mutation validated in-memory settings mutation
@@ -1317,13 +1346,13 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                     repository.saveGameSettings(id);
                     return instanceSettings(id);
                 }),
+                TaskResource.gameInstance(instanceDirectory),
                 TaskResource.configuration(instanceSettingsFile(repositoryDirectory, id)),
                 TaskResource.configuration(SettingsManager.gameSettingsLocation()),
                 TaskResource.configuration(SettingsManager.settingsLocation()));
     }
 
     /// Creates a protected read of one instance-owned log or crash-report resource.
-    ///
     /// @param uri requested resource URI
     /// @param id target instance identifier
     /// @param kind supported resource shape
@@ -1347,18 +1376,19 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                 requireInstanceDirectory(id, instanceDirectory);
                 requireInstance(id);
                 String text = switch (kind) {
-                    case LOG -> readLog(runDirectory);
-                    case CRASH_DIRECTORY -> listCrashReports(contentDirectory);
-                    case CRASH_REPORT -> readCrashReport(
+                    case LOG -> XYMLMcpResourceReader.readLog(runDirectory);
+                    case CRASH_DIRECTORY -> XYMLMcpResourceReader.listCrashReports(contentDirectory);
+                    case CRASH_REPORT -> XYMLMcpResourceReader.readCrashReport(
                             contentDirectory,
                             Objects.requireNonNull(reportName, "reportName"));
                 };
-                return textResource(uri, text);
+                return XYMLMcpResourceReader.textResource(uri, text);
                     },
                             TaskResource.repositoryOperation(repositoryDirectory),
                             TaskResource.gameInstance(instanceDirectory),
                             TaskResource.gameDirectory(kind == ResourceKind.LOG ? runDirectory : contentDirectory));
         })).setExecutor(Schedulers.io()).setResources(
+                TaskResource.gameInstance(instanceDirectory),
                 TaskResource.configuration(instanceSettingsFile(repositoryDirectory, id)),
                 TaskResource.configuration(SettingsManager.gameSettingsLocation()),
                 TaskResource.configuration(SettingsManager.settingsLocation()))
@@ -1366,7 +1396,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Returns the complete resource set occupied until an MCP launch creates its process.
-    ///
     /// @param repositoryDirectory captured repository directory
     /// @param instanceDirectory captured instance directory
     /// @param jarInstanceDirectory captured instance containing the effective inherited game JAR
@@ -1397,7 +1426,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Rejects arbitrary command hooks whose descendants could outlive the MCP launch Task resource lease.
-    ///
     /// @param wrapper captured configured process wrapper
     /// @param preLaunchCommand captured configured pre-launch command
     /// @param postExitCommand captured configured post-exit command
@@ -1421,7 +1449,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Resolves the exact natives directory used by DefaultLauncher.
-    ///
     /// @param repository repository providing the default instance-native directory
     /// @param id target instance identifier
     /// @param java selected Java runtime and platform
@@ -1440,10 +1467,8 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Resolves the Java installation tree containing one executable.
-    ///
     /// A conventional `bin/java` executable maps to its installation parent. Non-standard layouts fall back to the
     /// executable's immediate directory, while a root-only path remains its own conservative directory key.
-    ///
     /// @param java selected Java runtime
     /// @return normalized absolute runtime directory
     private static Path javaRuntimeDirectory(JavaRuntime java) {
@@ -1462,7 +1487,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Creates a named I/O task with an immutable resource declaration.
-    ///
     /// @param name task name
     /// @param operation task operation
     /// @param first first occupied resource
@@ -1478,7 +1502,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Creates a named I/O task that cannot be redirected by a concurrent repository-root switch.
-    ///
     /// @param name task name
     /// @param repositoryDirectory repository root captured with the resource declaration
     /// @param operation task operation using that repository root
@@ -1499,7 +1522,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Creates a captured-root I/O task from a runtime-sized resource collection.
-    ///
     /// @param name task name
     /// @param repositoryDirectory repository root captured with the resource declaration
     /// @param operation task operation using that repository root
@@ -1517,7 +1539,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Creates a named I/O task from a runtime-sized resource collection.
-    ///
     /// @param name task name
     /// @param operation task operation
     /// @param resources occupied resources
@@ -1536,7 +1557,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Creates a named result-less I/O task with an immutable resource declaration.
-    ///
     /// @param name task name
     /// @param operation task operation
     /// @param first first occupied resource
@@ -1551,14 +1571,12 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Returns the normalized repository directory captured for a task declaration.
-    ///
     /// @return normalized absolute repository directory
     private Path repositoryDirectory() {
         return repository.getBaseDirectory().toAbsolutePath().normalize();
     }
 
     /// Returns the normalized instance directory captured for a task declaration.
-    ///
     /// @param id instance identifier
     /// @return normalized absolute instance directory
     private Path instanceDirectory(GameInstanceID id) {
@@ -1566,7 +1584,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Derives an instance directory from one already captured repository root.
-    ///
     /// @param repositoryDirectory normalized repository root
     /// @param id instance identifier
     /// @return normalized absolute instance directory under the captured root
@@ -1575,7 +1592,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Derives the instance-setting path from one already captured repository root.
-    ///
     /// @param repositoryDirectory normalized repository root
     /// @param id instance identifier
     /// @return normalized absolute instance-setting path
@@ -1589,14 +1605,12 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Rejects a task when its repository moved after the resource declaration was captured.
-    ///
     /// @param expected captured normalized repository directory
     private void requireRepositoryDirectory(Path expected) {
         requirePath(expected, repository.getBaseDirectory(), "repository directory");
     }
 
     /// Rejects a task when its instance path moved after the resource declaration was captured.
-    ///
     /// @param id instance identifier
     /// @param expected captured normalized instance directory
     private void requireInstanceDirectory(GameInstanceID id, Path expected) {
@@ -1604,7 +1618,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Rejects a stale filesystem snapshot before a task performs I/O under an obsolete resource key.
-    ///
     /// @param expected captured normalized path
     /// @param actual current path
     /// @param description path description for diagnostics
@@ -1621,7 +1634,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Resolves a filesystem-safe destination instance identifier.
-    ///
     /// @param raw raw destination identifier
     /// @return validated destination identifier
     private GameInstanceID destinationId(String raw) {
@@ -1640,7 +1652,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Rejects lifecycle mutations while their source has a running MCP-tracked process.
-    ///
     /// @param repositoryDirectory captured repository root
     /// @param id source instance identifier
     /// @param operation requested lifecycle operation
@@ -1665,7 +1676,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Combines the legacy crash-report analysis with one retained XYAT analysis session.
-    ///
     /// @param context immutable settings and repository snapshot
     /// @param rawLog immutable analyzed log text
     /// @param resolution resolved crash-report input
@@ -1677,23 +1687,24 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
             String rawLog,
             XYMLMcpCrashReportResolver.Resolution resolution,
             List<String> contextWarnings,
-            boolean launcherOwnedLog) {
-        String fingerprint = XYMLMcpCrashAnalysisSupport.fingerprint(rawLog);
+            boolean launcherOwnedLog,
+            @Nullable String sourceFingerprint) {
+        String fingerprint = sourceFingerprint == null
+                ? XYMLMcpCrashAnalysisSupport.fingerprint(rawLog)
+                : sourceFingerprint;
         GameInstanceManifest manifest = context.manifest();
         XYMLMcpCrashRepairCoordinator.@Nullable SourceValidator sourceValidator = launcherOwnedLog
                 ? () -> createLatestLogValidationTask(context, fingerprint)
                 : null;
-        @Nullable LogAnalyzable.JavaRuntimeRepair javaRepair = manifest == null ? null : () -> guardRepairTask(
-                repairActionsAllowed,
-                () -> sourceValidator == null
-                        ? JavaRuntimeRepairTaskFactory.create(repository, manifest)
-                        : JavaRuntimeRepairTaskFactory.create(repository, manifest, sourceValidator.createTask()));
+        @Nullable LogAnalyzable.JavaRuntimeRepair javaRepair = manifest == null ? null
+                : guardedJavaRuntimeRepair(manifest, sourceValidator, repairActionsAllowed);
         return XYMLMcpCrashAnalysisSupport.analyze(
                 context,
                 rawLog,
                 resolution,
                 List.copyOf(contextWarnings),
                 launcherOwnedLog,
+                sourceFingerprint,
                 crashRepairCoordinator,
                 missingDependencySearch,
                 javaRepair,
@@ -1701,7 +1712,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Delays a repair task factory until execution and checks startup policy before creating the task.
-    ///
     /// @param executionAllowed reports whether repair side effects are currently permitted
     /// @param taskFactory creates the underlying stopped repair task after policy acceptance
     /// @return stopped task that fails before task creation while startup policy blocks repairs
@@ -1716,8 +1726,49 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
         }).asOrchestration();
     }
 
+    /// Wraps the application Java-repair boundary with a policy check that runs before candidate acquisition.
+    /// The source validator remains a concrete-resource task inside the Java factory so its final validation and
+    /// persistence lease stay intact. The policy guard is deliberately outside that factory: placing an orchestration
+    /// wrapper in the factory's validator slot would discard concrete resource declarations and would allow a download
+    /// stage to run before the policy check.
+    /// @param manifest launch manifest captured during crash analysis
+    /// @param sourceValidator fresh source validator, or null when no launcher source must be revalidated
+    /// @param executionAllowed reports whether repair side effects are currently permitted
+    /// @return lazily guarded Java-runtime repair boundary
+    private LogAnalyzable.JavaRuntimeRepair guardedJavaRuntimeRepair(
+            GameInstanceManifest manifest,
+            @Nullable XYMLMcpCrashRepairCoordinator.SourceValidator sourceValidator,
+            BooleanSupplier executionAllowed) {
+        GameInstanceManifest checkedManifest = Objects.requireNonNull(manifest, "manifest");
+        BooleanSupplier checkedExecutionAllowed = Objects.requireNonNull(executionAllowed, "executionAllowed");
+        LogAnalyzable.JavaRuntimeRepair delegate = JavaRuntimeRepairTaskFactory.createRepair(
+                repository,
+                checkedManifest,
+                () -> sourceValidator == null ? null : sourceValidator.createTask());
+        return new LogAnalyzable.JavaRuntimeRepair() {
+            /// {@inheritDoc}
+            @Override
+            public Task<?> createTask() {
+                return guardRepairTask(checkedExecutionAllowed, delegate::createTask);
+            }
+
+            /// {@inheritDoc}
+            @Override
+            public @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates() {
+                return delegate.candidates();
+            }
+
+            /// {@inheritDoc}
+            @Override
+            public Task<?> createTask(@Nullable String candidateId) {
+                return guardRepairTask(
+                        checkedExecutionAllowed,
+                        () -> delegate.createTask(candidateId));
+            }
+        };
+    }
+
     /// Creates a precise task that revalidates the instance and latest log used for a repair plan.
-    ///
     /// @param context immutable source context captured during analysis
     /// @param expectedFingerprint expected SHA-256 fingerprint
     /// @return fresh stopped source-validation task
@@ -1733,98 +1784,10 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                 instanceSettingsFile(context.repositoryDirectory(), context.instanceId()));
     }
 
-    /// Creates a text resource result.
-    ///
-    /// @param uri resource URI
-    /// @param text resource text
-    /// @return immutable resource map
-    private static @Unmodifiable Map<String, String> textResource(String uri, String text) {
-        return Map.of("uri", uri, "mime_type", "text/plain", "text", text);
-    }
-
-    /// Lists direct regular files in one instance's crash-report directory.
-    ///
-    /// @param root captured crash-report directory
-    /// @return one file name per line, or an empty string when the directory is absent
-    /// @throws IOException if the directory cannot be listed
-    private static String listCrashReports(Path root) throws IOException {
-        if (!Files.isDirectory(root)) {
-            return "";
-        }
-        try (Stream<Path> paths = Files.list(root)) {
-            return paths.filter(Files::isRegularFile)
-                    .map(path -> path.getFileName().toString())
-                    .sorted(Comparator.naturalOrder())
-                    .collect(Collectors.joining("\n"));
-        }
-    }
-
-    /// Decodes and validates one URI path segment.
-    ///
-    /// @param raw encoded path segment
-    /// @return decoded safe path segment
-    private static String decodePathSegment(String raw) {
-        final String decoded;
-        try {
-            decoded = URLDecoder.decode(raw.replace("+", "%2B"), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException exception) {
-            throw new IllegalArgumentException("Invalid XYML resource URI", exception);
-        }
-        if (decoded.isBlank() || decoded.contains("/") || decoded.contains("\\")
-                || ".".equals(decoded) || "..".equals(decoded)) {
-            throw new IllegalArgumentException("Invalid XYML resource path segment");
-        }
-        return decoded;
-    }
-
-    /// Decodes an instance identifier embedded in a resource URI.
-    ///
-    /// @param raw encoded instance identifier
-    /// @return validated instance identifier
-    private static GameInstanceID instanceIdFromUri(String raw) {
-        return new GameInstanceID(decodePathSegment(raw));
-    }
-
-    /// Reads one crash report after proving it belongs to the selected instance.
-    ///
-    /// @param root captured crash-report directory
-    /// @param rawPath report file name or absolute path
-    /// @return UTF-8 report text
-    /// @throws IOException if the path escapes the instance or cannot be read
-    private static String readCrashReport(Path root, String rawPath) throws IOException {
-        return XYMLMcpCrashReportResolver.readReport(root, rawPath);
-    }
-
-    /// Reads an instance log from one captured run directory, returning an empty string when it does not exist.
-    ///
-    /// @param runDirectory captured run directory
-    /// @return UTF-8 log text, or an empty string when neither log path exists
-    /// @throws IOException if the selected log cannot be read
-    private static String readLog(Path runDirectory) throws IOException {
-        Path latest = runDirectory.resolve("logs/latest.log");
-        Path path = Files.exists(latest) ? latest : runDirectory.resolve("latest.log");
-        return readIfPresent(path);
-    }
-
-    /// Reads a file as UTF-8 when it is a regular file.
-    private static String readIfPresent(Path path) throws IOException {
-        return Files.isRegularFile(path) ? Files.readString(path, StandardCharsets.UTF_8) : "";
-    }
-
     /// Releases retained analysis plans and requests cancellation of active repair tasks.
     @Override
     public void close() {
         crashRepairCoordinator.close();
-    }
-
-    /// Converts a nullable number to a JSON-safe value.
-    private static Object nullableNumber(@Nullable Integer value) {
-        return value == null ? nullValue() : value;
-    }
-
-    /// Returns a JSON-safe null sentinel accepted by MCP structured content.
-    private static Object nullValue() {
-        return "";
     }
 
     /// Parses a positive integer argument.
@@ -1841,7 +1804,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Resolves a mod path and applies an enable/disable transition within a captured manager directory.
-    ///
     /// @param manager manager bound to the locked mods directory
     /// @param path normalized candidate path inside that directory
     /// @param enable whether to remove the disabled suffix
@@ -1861,7 +1823,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Normalizes one client-supplied mod path without consulting mutable repository settings.
-    ///
     /// @param rawPath client-supplied mod path
     /// @return normalized absolute candidate path
     private static Path normalizedModCandidate(String rawPath) {
@@ -1869,7 +1830,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Rejects a normalized path that is not a child of the captured mods directory.
-    ///
     /// @param modsDirectory captured normalized mods directory
     /// @param path normalized client-supplied path
     /// @return the validated path
@@ -1881,7 +1841,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Resolves requested candidates to the current managed mod objects under one captured directory.
-    ///
     /// @param manager manager bound to the captured mods directory
     /// @param modsDirectory captured normalized mods directory
     /// @param candidates normalized client-supplied candidates
@@ -1905,7 +1864,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Indexes only regular managed mod files whose real paths remain under the instance mods directory.
-    ///
     /// @param manager instance mod manager
     /// @return immutable normalized-path index
     /// @throws IOException if managed mod files cannot be loaded or resolved
@@ -1927,7 +1885,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
                 result.put(path, mod);
             }
         }
-        return Map.copyOf(result);
+        return Collections.unmodifiableMap(new LinkedHashMap<>(result));
     }
 
     /// Creates an offline account for a deterministic launch test.
@@ -1937,7 +1895,6 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
     }
 
     /// Identifies one launch state without conflating equal instance IDs from different repository roots.
-    ///
     /// @param repositoryDirectory normalized repository root captured for the launch
     /// @param instanceId instance identifier within that repository
     @NotNullByDefault
@@ -1951,7 +1908,7 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
         }
     }
 
-    /// Captures output and terminal state for one managed launch process.
+    /// Captures the complete output and terminal state for one managed launch process.
     @NotNullByDefault
     private static final class LaunchState implements ProcessListener {
         /// Process created by DefaultLauncher, or null before launch returns.
@@ -1966,18 +1923,15 @@ public final class XYMLMcpService implements XYMLMcpOperations, AutoCloseable {
         /// Last classified exit type.
         private volatile @Nullable ProcessListener.ExitType exitType;
 
-        /// Captures a decoded stdout or stderr line.
+        /// Captures every decoded stdout or stderr line so later analysis never loses input after an arbitrary line cap.
         @Override
         public void onLog(String log, boolean isErrorStream) {
             synchronized (logs) {
-                if (logs.size() < MAX_LOG_LINES) {
-                    logs.add((isErrorStream ? "[stderr] " : "") + log);
-                }
+                logs.add((isErrorStream ? "[stderr] " : "") + log);
             }
         }
 
         /// Returns an immutable snapshot of captured process output.
-        ///
         /// @return immutable log snapshot
         private @Unmodifiable List<String> logsSnapshot() {
             synchronized (logs) {

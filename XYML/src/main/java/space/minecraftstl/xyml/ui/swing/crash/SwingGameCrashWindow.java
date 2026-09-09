@@ -27,10 +27,12 @@ import space.minecraftstl.xyml.game.LaunchOptions;
 import space.minecraftstl.xyml.game.Log;
 import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
-import space.minecraftstl.xyml.game.analyzer.ResultID;
+import space.minecraftstl.xyml.game.analyzer.RepairActionDescriptor;
 import space.minecraftstl.xyml.game.analyzer.Solver;
 import space.minecraftstl.xyml.launch.ProcessListener;
 import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.util.StringUtils;
 import space.minecraftstl.xyml.util.platform.ManagedProcess;
@@ -63,7 +65,10 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -114,7 +119,7 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// Prevents frame recreation and all late asynchronous UI updates after close.
     private final AtomicBoolean closed = new AtomicBoolean();
 
-    /// Completes once no missing-dependency follow-up action remains available in this window.
+    /// Completes once crash analysis has been rendered; optional searches must not hold the launch lifecycle open.
     private final CompletableFuture<@Nullable Void> followUpCompletion = new CompletableFuture<>();
 
     /// Ensures analysis starts only once even when repeated calls raise the same window.
@@ -129,6 +134,12 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// Selectable HTML diagnosis view, accessed only on the EDT.
     private @Nullable JEditorPane reasonPane;
 
+    /// Ordered independent diagnosis rows, accessed only on the EDT.
+    private @Nullable JPanel diagnosisRowsPanel;
+
+    /// Mutable row state indexed by stable diagnosis identifier, accessed only on the EDT.
+    private final Map<String, RepairRow> repairRows = new LinkedHashMap<>();
+
     /// Analysis progress indicator, accessed only on the EDT.
     private @Nullable JProgressBar analysisProgress;
 
@@ -141,23 +152,11 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// Export action disabled while a bundle is being produced, accessed only on the EDT.
     private @Nullable JButton exportButton;
 
-    /// Automatic missing-dependency search action, available after a matching diagnosis completes.
-    private @Nullable JButton searchMissingDependencyButton;
-
-    /// Search solver retained for the one currently displayed analysis.
-    private @Nullable Solver missingDependencySolver;
-
-    /// Stopped search task retained for the selected solver so task factories are evaluated only once.
-    private @Nullable Task<?> missingDependencyTask;
-
     /// Current analysis stage retained for best-effort cancellation.
     private @Nullable CompletableFuture<GameCrashAnalysis> analysisFuture;
 
     /// Current export stage retained for best-effort cancellation.
     private @Nullable CompletableFuture<Path> exportFuture;
-
-    /// Current missing-dependency search stage retained for best-effort cancellation.
-    private @Nullable CompletableFuture<Boolean> searchMissingDependencyFuture;
 
     /// Last reason assigned on the EDT, retained independently of native components for headless tests.
     private String displayedReason = i18n("game.crash.reason.analyzing");
@@ -277,19 +276,14 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         if (currentExport != null) {
             currentExport.cancel(true);
         }
-        @Nullable CompletableFuture<Boolean> currentSearch = searchMissingDependencyFuture;
-        if (currentSearch != null) {
-            currentSearch.cancel(true);
-        }
         worker.shutdownNow();
         EdtDispatcher.execute(this::disposeOnEdt);
     }
 
-    /// Returns a stage completed when this window no longer needs the launcher runtime for a follow-up action.
+    /// Returns a stage completed when crash analysis has been rendered.
     ///
-    /// A window with no executable Forge/Fabric missing-dependency solver completes this stage after analysis. A
-    /// window with such a solver completes it after a successful search or when the user closes the window, preserving
-    /// the launcher runtime while the search command is available.
+    /// Missing-dependency searches are explicit, optional row actions. They must not keep a hidden launcher process
+    /// lifecycle alive indefinitely while the user decides whether to search.
     ///
     /// @return follow-up completion stage
     public CompletionStage<@Nullable Void> followUpCompletion() {
@@ -450,7 +444,17 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         reason.setCaretPosition(0);
         reasonPane = reason;
 
-        JScrollPane scroll = new JScrollPane(reason);
+        JPanel diagnosisContent = new JPanel();
+        diagnosisContent.setLayout(new BoxLayout(diagnosisContent, BoxLayout.Y_AXIS));
+        diagnosisContent.add(reason);
+        diagnosisContent.add(Box.createVerticalStrut(8));
+        JPanel rows = new JPanel();
+        rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
+        rows.setOpaque(false);
+        diagnosisRowsPanel = rows;
+        diagnosisContent.add(rows);
+
+        JScrollPane scroll = new JScrollPane(diagnosisContent);
         scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.setBorder(BorderFactory.createEmptyBorder());
 
@@ -473,12 +477,6 @@ public final class SwingGameCrashWindow implements AutoCloseable {
     /// @return action toolbar
     private Component createActionsOnEdt() {
         EdtDispatcher.requireEventDispatchThread();
-        JButton searchMissingDependency = new JButton(i18n("game.crash.search_missing_dependency"));
-        searchMissingDependency.setName("gameCrashSearchMissingDependency");
-        searchMissingDependency.setEnabled(false);
-        searchMissingDependency.addActionListener(event -> searchMissingDependencyOnEdt());
-        searchMissingDependencyButton = searchMissingDependency;
-
         JButton export = new JButton(i18n("logwindow.export_game_crash_logs"));
         export.addActionListener(event -> exportCrashLogsOnEdt());
         exportButton = export;
@@ -494,7 +492,6 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         operationStatus = status;
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.TRAILING, 8, 0));
-        buttons.add(searchMissingDependency);
         buttons.add(export);
         buttons.add(logs);
         buttons.add(help);
@@ -544,110 +541,534 @@ public final class SwingGameCrashWindow implements AutoCloseable {
             progress.setVisible(false);
         }
 
-        boolean followUpAvailable = false;
         if (failure != null || result == null) {
             LOG.warning("Failed to analyze crash report", unwrapFailure(failure));
             displayedReason = reasonFormatter.format(new GameCrashAnalysis(List.of(), Set.of()));
-            missingDependencySolver = null;
-            missingDependencyTask = null;
+            renderDiagnosisRowsOnEdt(null);
         } else {
             displayedReason = reasonFormatter.format(result);
-            try {
-                @Nullable MissingDependencyAction action = findMissingDependencyAction(result);
-                missingDependencySolver = action == null ? null : action.solver();
-                missingDependencyTask = action == null ? null : action.task();
-                followUpAvailable = action != null;
-            } catch (RuntimeException solverFailure) {
-                LOG.warning("Failed to prepare missing-dependency search", solverFailure);
-                missingDependencySolver = null;
-                missingDependencyTask = null;
-            }
+            renderDiagnosisRowsOnEdt(result);
         }
-        if (!followUpAvailable) {
-            followUpCompletion.complete(null);
-        }
-        @Nullable JButton searchButton = searchMissingDependencyButton;
-        if (searchButton != null) {
-            searchButton.setEnabled(missingDependencySolver != null);
-        }
+        followUpCompletion.complete(null);
         @Nullable JEditorPane reason = reasonPane;
         if (reason != null) {
             reason.setText(htmlDocument(displayedReason));
             reason.setCaretPosition(0);
         }
-        if (followUpAvailable) {
-            searchMissingDependencyOnEdt();
-        }
     }
 
-    /// Starts the selected automatic missing-dependency search away from the Swing EDT.
-    private void searchMissingDependencyOnEdt() {
-        EdtDispatcher.requireEventDispatchThread();
-        if (closed.get()) {
-            return;
-        }
-        Solver solver = missingDependencySolver;
-        @Nullable Task<?> task = missingDependencyTask;
-        if (solver == null || task == null) {
-            return;
-        }
-        @Nullable JButton searchButton = searchMissingDependencyButton;
-        if (searchButton != null) {
-            searchButton.setEnabled(false);
-        }
-        setOperationStatusOnEdt(i18n("game.crash.search_missing_dependency") + "...");
-        CompletableFuture<Boolean> future;
-        try {
-            future = CompletableFuture.supplyAsync(task::test, worker);
-        } catch (RuntimeException schedulingFailure) {
-            finishMissingDependencySearchOnEdt(false, schedulingFailure);
-            return;
-        }
-        searchMissingDependencyFuture = future;
-        future.whenComplete((@Nullable Boolean success, @Nullable Throwable failure) ->
-                EdtDispatcher.execute(() -> finishMissingDependencySearchOnEdt(
-                        Boolean.TRUE.equals(success),
-                        failure)));
-    }
-
-    /// Publishes the terminal state of the automatic missing-dependency search.
+    /// Rebuilds the ordered independent-cause list without starting any repair task.
     ///
-    /// @param success whether the task completed successfully
-    /// @param failure task or scheduling failure, or null after a normal terminal state
-    private void finishMissingDependencySearchOnEdt(boolean success, @Nullable Throwable failure) {
+    /// @param analysis merged diagnosis, or null after an analysis failure
+    private void renderDiagnosisRowsOnEdt(@Nullable GameCrashAnalysis analysis) {
         EdtDispatcher.requireEventDispatchThread();
-        if (closed.get()) {
+        @Nullable JPanel rows = diagnosisRowsPanel;
+        if (rows == null) {
             return;
         }
-        if (success && failure == null) {
-            setOperationStatusOnEdt(i18n("game.crash.search_missing_dependency.done"));
-            followUpCompletion.complete(null);
+        rows.removeAll();
+        repairRows.clear();
+        if (analysis == null || analysis.resultCount() == 0) {
+            rows.revalidate();
+            rows.repaint();
             return;
         }
-        LOG.warning("Failed to open missing-dependency search", unwrapFailure(failure));
-        setOperationStatusOnEdt(i18n("game.crash.search_missing_dependency.failed"));
-        @Nullable JButton searchButton = searchMissingDependencyButton;
-        if (searchButton != null) {
-            searchButton.setEnabled(missingDependencySolver != null);
-        }
-    }
 
-    /// Selects the first executable Forge/Fabric missing-dependency action from one analysis.
-    ///
-    /// @param analysis merged diagnosis
-    /// @return executable missing-dependency action, or null when no search task is available
-    private static @Nullable MissingDependencyAction findMissingDependencyAction(GameCrashAnalysis analysis) {
-        for (AnalyzeResult<LogAnalyzable> result : analysis.logResults()) {
-            if (result.resultId() != ResultID.FORGE_MISSING_DEPENDENCY
-                    && result.resultId() != ResultID.FABRIC_MISSING_DEPENDENCY) {
+        Set<String> renderedCauseIds = new LinkedHashSet<>();
+        for (AnalyzeResult<LogAnalyzable> diagnosis : analysis.logResults()) {
+            String resultId = diagnosis.resultId().name();
+            if (!renderedCauseIds.add(resultId)) {
                 continue;
             }
-            @Nullable Task<?> task = result.solver().createTask();
-            if (task != null) {
-                return new MissingDependencyAction(result.solver(), task);
+            String reason = i18n(
+                    diagnosis.solver().messageKey(),
+                    diagnosis.solver().messageArguments().stream()
+                            .map(GameCrashReasonFormatter::escapeHtmlArgument)
+                            .toArray());
+            rows.add(createRepairRowOnEdt(
+                    resultId,
+                    reason,
+                    i18n("game.crash.repair.log_evidence"),
+                    diagnosis.solver(),
+                    analysis.runtimeCandidates(diagnosis.resultId())));
+            rows.add(Box.createVerticalStrut(6));
+        }
+        for (space.minecraftstl.xyml.game.CrashReportAnalyzer.Result diagnosis : analysis.results()) {
+            String resultId = diagnosis.rule().name();
+            if (!renderedCauseIds.add(resultId)) {
+                continue;
+            }
+            String reason = reasonFormatter.format(new GameCrashAnalysis(List.of(diagnosis), Set.of()));
+            String evidence = boundedEvidence(diagnosis.matcher().group());
+            rows.add(createRepairRowOnEdt(
+                    resultId,
+                    reason,
+                    i18n("game.crash.repair.evidence", evidence),
+                    null,
+                    List.of()));
+            rows.add(Box.createVerticalStrut(6));
+        }
+        rows.revalidate();
+        rows.repaint();
+    }
+
+    /// Creates one compact reason row with an independent repair action when a safe solver exists.
+    ///
+    /// @param resultId stable cause identifier
+    /// @param reason localized explanation
+    /// @param evidence bounded evidence summary
+    /// @param solver optional repair solver
+    /// @param candidates immutable runtime candidates captured during background analysis
+    /// @return composed row component
+    private JPanel createRepairRowOnEdt(
+            String resultId,
+            String reason,
+            String evidence,
+            @Nullable Solver solver,
+            @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates) {
+        EdtDispatcher.requireEventDispatchThread();
+        JPanel row = new JPanel(new BorderLayout(8, 4));
+        row.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(dividerColor()),
+                BorderFactory.createEmptyBorder(6, 8, 6, 8)));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel details = new JPanel();
+        details.setLayout(new BoxLayout(details, BoxLayout.Y_AXIS));
+        details.setOpaque(false);
+        JEditorPane text = new JEditorPane("text/html", htmlDocument(reason));
+        text.setEditable(false);
+        text.setOpaque(false);
+        text.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, true);
+        text.setBorder(BorderFactory.createEmptyBorder());
+        details.add(text);
+        JLabel evidenceLabel = new JLabel(evidence);
+        evidenceLabel.setFont(evidenceLabel.getFont().deriveFont(Font.PLAIN, evidenceLabel.getFont().getSize2D() - 1.0F));
+        details.add(evidenceLabel);
+        row.add(details, BorderLayout.CENTER);
+
+        JLabel status = new JLabel(solver == null
+                ? i18n("game.crash.repair.manual")
+                : i18n("game.crash.repair.available"));
+        @Nullable JButton action = null;
+        if (solver != null && solver.repairAction().executable()) {
+            action = new JButton(actionLabel(solver));
+            action.setName("gameCrashRepair-" + resultId);
+        }
+        if (action != null) {
+            RepairRow repairRow = new RepairRow(resultId, solver, candidates, action, status);
+            repairRows.put(resultId, repairRow);
+            action.addActionListener(event -> executeRepairRowOnEdt(repairRow));
+            JPanel controls = new JPanel(new BorderLayout(4, 4));
+            controls.setOpaque(false);
+            controls.add(status, BorderLayout.NORTH);
+            controls.add(action, BorderLayout.SOUTH);
+            row.add(controls, BorderLayout.EAST);
+        } else {
+            row.add(status, BorderLayout.EAST);
+        }
+        return row;
+    }
+
+    /// Bounds and escapes evidence before it enters a Swing label.
+    ///
+    /// @param evidence matched log fragment
+    /// @return bounded plain-text evidence label
+    private static String boundedEvidence(String evidence) {
+        String normalized = Objects.requireNonNull(evidence, "evidence")
+                .replaceAll("[\\r\\n\\t]+", " ")
+                .strip();
+        String bounded = normalized.length() <= 240 ? normalized : normalized.substring(0, 240) + "...";
+        return "<html>" + bounded
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;") + "</html>";
+    }
+
+    /// Claims one row and schedules creation and execution of a fresh solver task off the EDT.
+    ///
+    /// @param row mutable row state
+    private void executeRepairRowOnEdt(RepairRow row) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get() || row.state == RepairState.RUNNING || row.state == RepairState.SUCCEEDED) {
+            return;
+        }
+        if (row.state == RepairState.BLOCKED_RESIDUAL) {
+            @Nullable TaskExecutor residualExecutor = row.executor;
+            if (residualExecutor != null) {
+                row.state = RepairState.PREPARING;
+                row.button.setEnabled(false);
+                row.status.setText(i18n("game.crash.repair.preparing"));
+                scheduleResidualCleanupOnWorker(row, residualExecutor);
+                return;
+            }
+            row.state = RepairState.AVAILABLE;
+        }
+        if (row.solver.repairAction().confirmationRequirement()
+                == RepairActionDescriptor.ConfirmationRequirement.REQUIRED
+                && !confirmRepairOnEdt(row)) {
+            row.state = RepairState.AVAILABLE;
+            row.status.setText(i18n("game.crash.repair.available"));
+            row.button.setEnabled(true);
+            return;
+        }
+        CandidateChoice candidateChoice;
+        try {
+            candidateChoice = chooseCandidateOnEdt(row);
+        } catch (RuntimeException candidateFailure) {
+            failCandidateSelectionOnEdt(row, candidateFailure);
+            return;
+        }
+        if (candidateChoice.cancelled()) {
+            row.state = RepairState.AVAILABLE;
+            row.status.setText(i18n("game.crash.repair.available"));
+            row.button.setEnabled(true);
+            return;
+        }
+        row.state = RepairState.PREPARING;
+        row.button.setEnabled(false);
+        row.button.setText(actionLabel(row.solver));
+        row.status.setText(i18n("game.crash.repair.preparing"));
+        scheduleRepairPreparationOnWorker(row, candidateChoice.candidateId());
+    }
+
+    /// Schedules bounded residual-resource cleanup away from the Swing event thread.
+    ///
+    /// @param row mutable repair row
+    /// @param executor task executor retaining the residual resources
+    private void scheduleResidualCleanupOnWorker(RepairRow row, TaskExecutor executor) {
+        Objects.requireNonNull(row, "row");
+        Objects.requireNonNull(executor, "executor");
+        try {
+            worker.execute(() -> retryResidualCleanupOnWorker(row, executor));
+        } catch (RuntimeException | Error schedulingFailure) {
+            finishResidualCleanupOnEdt(row, executor, false, List.of(schedulingFailure.getClass().getSimpleName()),
+                    schedulingFailure);
+        }
+    }
+
+    /// Performs residual cleanup and publishes the result back to the EDT.
+    ///
+    /// @param row mutable repair row retained for the EDT callback
+    /// @param executor executor whose task-owned cleanup is being retried
+    private void retryResidualCleanupOnWorker(RepairRow row, TaskExecutor executor) {
+        boolean cleanupSucceeded = false;
+        @Unmodifiable List<String> residual = List.of();
+        @Nullable Throwable failure = null;
+        try {
+            cleanupSucceeded = executor.retryResourceCleanup();
+            residual = List.copyOf(executor.getResidualResources());
+            cleanupSucceeded = cleanupSucceeded && residual.isEmpty();
+            if (!cleanupSucceeded && residual.isEmpty()) {
+                residual = List.of("cleanup incomplete");
+            }
+        } catch (RuntimeException | Error cleanupFailure) {
+            failure = cleanupFailure;
+            residual = List.of(cleanupFailure.getClass().getSimpleName());
+        }
+        boolean completedCleanup = cleanupSucceeded;
+        @Unmodifiable List<String> completedResidual = residual;
+        @Nullable Throwable completedFailure = failure;
+        EdtDispatcher.execute(() -> finishResidualCleanupOnEdt(
+                row,
+                executor,
+                completedCleanup,
+                completedResidual,
+                completedFailure));
+    }
+
+    /// Publishes residual cleanup and resumes the normal confirmation/selection path after success.
+    ///
+    /// @param row mutable repair row
+    /// @param executor executor whose cleanup was retried
+    /// @param cleanupSucceeded whether no residual resource remains
+    /// @param residual residual descriptions, or a bounded failure description
+    /// @param failure cleanup exception, if any
+    private void finishResidualCleanupOnEdt(
+            RepairRow row,
+            TaskExecutor executor,
+            boolean cleanupSucceeded,
+            @Unmodifiable List<String> residual,
+            @Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get() || row.state != RepairState.PREPARING || row.executor != executor) {
+            return;
+        }
+        if (!cleanupSucceeded) {
+            markBlockedResidualOnEdt(row, residual);
+            if (failure != null) {
+                LOG.warning("Failed to retry crash-repair resource cleanup for " + row.resultId, failure);
+            }
+            return;
+        }
+        row.executor = null;
+        if (row.residualOriginalSuccess) {
+            row.residualOriginalSuccess = false;
+            row.state = RepairState.SUCCEEDED;
+            row.status.setText(i18n("game.crash.repair.succeeded"));
+            row.button.setEnabled(false);
+            if (isMissingDependencyResult(row.resultId)) {
+                setOperationStatusOnEdt(i18n("game.crash.search_missing_dependency.done"));
+            }
+            return;
+        }
+        row.residualOriginalSuccess = false;
+        row.state = RepairState.AVAILABLE;
+        row.status.setText(i18n("game.crash.repair.available"));
+        row.button.setText(actionLabel(row.solver));
+        row.button.setEnabled(true);
+        executeRepairRowOnEdt(row);
+    }
+
+    /// Creates and starts one solver task on the window worker, never on the Swing event thread.
+    ///
+    /// The worker checks the close flag before each lifecycle boundary. A task which has already started still owns
+    /// its normal executor cleanup; the completion callback carries that executor so a residual lease remains
+    /// available to the row's retry action instead of being discarded by a late window close.
+    ///
+    /// @param row mutable row state, accessed only by callbacks on the EDT
+    /// @param candidateId selected candidate identifier, or null for the solver's ordinary automatic path
+    private void scheduleRepairPreparationOnWorker(RepairRow row, @Nullable String candidateId) {
+        Objects.requireNonNull(row, "row");
+        try {
+            worker.execute(() -> prepareAndStartRepairOnWorker(row, candidateId));
+        } catch (RuntimeException | Error schedulingFailure) {
+            finishRepairRowOnEdt(row, false, null, schedulingFailure);
+        }
+    }
+
+    /// Creates a solver task, attaches its listener, and starts it on the worker thread.
+    ///
+    /// @param row mutable row state retained for the EDT callbacks
+    /// @param candidateId selected candidate identifier, or null for the solver's ordinary automatic path
+    private void prepareAndStartRepairOnWorker(RepairRow row, @Nullable String candidateId) {
+        if (closed.get()) {
+            return;
+        }
+        @Nullable TaskExecutor executor = null;
+        @Nullable Throwable failure = null;
+        try {
+            Task<?> task = Objects.requireNonNull(
+                    row.solver.createTask(candidateId),
+                    "repair solver returned no task");
+            executor = task.executor(new TaskListener() {
+                /// {@inheritDoc}
+                @Override
+                public void onStop(boolean success, TaskExecutor stoppedExecutor) {
+                    EdtDispatcher.execute(() -> finishRepairRowOnEdt(row, success, stoppedExecutor, null));
+                }
+            });
+            if (closed.get()) {
+                executor.cancel();
+                return;
+            }
+            executor.start();
+        } catch (RuntimeException | Error lifecycleFailure) {
+            failure = lifecycleFailure;
+        }
+        @Nullable TaskExecutor startedExecutor = executor;
+        @Nullable Throwable lifecycleFailure = failure;
+        EdtDispatcher.execute(() -> finishRepairPreparationOnEdt(row, startedExecutor, lifecycleFailure));
+    }
+
+    /// Publishes the worker preparation result without overwriting an already terminal row state.
+    ///
+    /// @param row mutable row state
+    /// @param executor created executor, or null when creation failed
+    /// @param failure creation/start failure, or null after a successful start
+    private void finishRepairPreparationOnEdt(
+            RepairRow row,
+            @Nullable TaskExecutor executor,
+            @Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) {
+            if (executor != null && !executor.isCancelled()) {
+                try {
+                    executor.cancel();
+                } catch (RuntimeException | Error cancellationFailure) {
+                    LOG.warning("Failed to cancel a crash repair after window close", cancellationFailure);
+                }
+            }
+            return;
+        }
+        if (failure != null) {
+            finishRepairRowOnEdt(row, false, executor, failure);
+            return;
+        }
+        if (executor == null) {
+            finishRepairRowOnEdt(row, false, null,
+                    new IllegalStateException("repair task executor was not created"));
+            return;
+        }
+        if (row.state == RepairState.PREPARING) {
+            row.executor = executor;
+            row.state = RepairState.RUNNING;
+            row.status.setText(i18n("game.crash.repair.running"));
+        } else if (row.state != RepairState.RUNNING && row.state != RepairState.BLOCKED_RESIDUAL) {
+            // A synchronous onStop callback may have completed the row before this publication arrived.
+            if (!executor.isCancelled()) {
+                try {
+                    executor.cancel();
+                } catch (RuntimeException | Error cancellationFailure) {
+                    LOG.warning("Failed to cancel a completed crash repair", cancellationFailure);
+                }
+            }
+        } else if (row.executor == null) {
+            row.executor = executor;
+        }
+    }
+
+    /// Publishes a candidate-enumeration failure while the row is still awaiting the internal selection step.
+    ///
+    /// @param row mutable repair row
+    /// @param failure candidate discovery or dialog failure
+    private void failCandidateSelectionOnEdt(RepairRow row, RuntimeException failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        row.state = RepairState.FAILED_RETRYABLE;
+        row.status.setText(i18n("game.crash.repair.failed"));
+        row.button.setText(i18n("game.crash.repair.retry"));
+        row.button.setEnabled(true);
+        LOG.warning("Failed to select Java runtime candidate for " + row.resultId, failure);
+    }
+
+    /// Publishes a row's terminal state and enables retry after failure.
+    ///
+    /// @param row mutable row state
+    /// @param success whether the fresh task completed successfully
+    /// @param stoppedExecutor completed executor, or null when task creation failed
+    /// @param failure task or scheduling failure
+    private void finishRepairRowOnEdt(
+            RepairRow row,
+            boolean success,
+            @Nullable TaskExecutor stoppedExecutor,
+            @Nullable Throwable failure) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get() || (row.state != RepairState.PREPARING && row.state != RepairState.RUNNING)) {
+            return;
+        }
+        @Nullable TaskExecutor completedExecutor = stoppedExecutor == null ? row.executor : stoppedExecutor;
+        if (completedExecutor != null && row.executor == null) {
+            row.executor = completedExecutor;
+        }
+        if (completedExecutor != null) {
+            try {
+                @Unmodifiable List<String> residual = completedExecutor.getResidualResources();
+                if (!residual.isEmpty()) {
+                    row.residualOriginalSuccess = success;
+                    markBlockedResidualOnEdt(row, residual);
+                    return;
+                }
+            } catch (RuntimeException residualFailure) {
+                row.residualOriginalSuccess = false;
+                markBlockedResidualOnEdt(row, List.of(residualFailure.getClass().getSimpleName()));
+                LOG.warning("Unable to inspect crash-repair resource cleanup for " + row.resultId, residualFailure);
+                return;
             }
         }
-        return null;
+        row.executor = null;
+        if (success) {
+            row.state = RepairState.SUCCEEDED;
+            row.status.setText(i18n("game.crash.repair.succeeded"));
+            row.button.setEnabled(false);
+            if (isMissingDependencyResult(row.resultId)) {
+                setOperationStatusOnEdt(i18n("game.crash.search_missing_dependency.done"));
+            }
+            return;
+        }
+        row.state = RepairState.FAILED_RETRYABLE;
+        row.status.setText(i18n("game.crash.repair.failed"));
+        row.button.setText(i18n("game.crash.repair.retry"));
+        row.button.setEnabled(true);
+        LOG.warning("Automatic crash repair failed for " + row.resultId, unwrapFailure(failure));
+    }
+
+    /// Keeps a repair row retryable while task-owned resource cleanup remains blocked.
+    ///
+    /// @param row mutable repair row
+    /// @param residual resource descriptions, used only for diagnostics
+    private void markBlockedResidualOnEdt(RepairRow row, @Unmodifiable List<String> residual) {
+        EdtDispatcher.requireEventDispatchThread();
+        row.state = RepairState.BLOCKED_RESIDUAL;
+        row.status.setText(i18n("game.crash.repair.failed"));
+        row.button.setText(i18n("game.crash.repair.retry"));
+        row.button.setEnabled(true);
+        LOG.warning("Crash repair retains task resources for " + row.resultId + ": " + residual);
+    }
+
+    /// Confirms a repair that can modify persistent launcher or runtime state.
+    ///
+    /// A headless invocation is already an explicit programmatic button action, so it proceeds without a native
+    /// dialog. This keeps command-line and test callers usable while ensuring the Swing path never writes before the
+    /// user confirms.
+    private boolean confirmRepairOnEdt(RepairRow row) {
+        EdtDispatcher.requireEventDispatchThread();
+        row.state = RepairState.AWAITING_SELECTION;
+        if (GraphicsEnvironment.isHeadless()) {
+            return true;
+        }
+        int option = JOptionPane.showConfirmDialog(
+                content,
+                i18n("game.crash.solver.automatic"),
+                i18n("message.warning"),
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+        return option == JOptionPane.YES_OPTION;
+    }
+
+    /// Presents the internal Java-runtime choice after repair confirmation.
+    ///
+    /// A single candidate does not require an additional prompt. In headless mode the recommended candidate is
+    /// selected deterministically. Returning a cancelled choice never creates a task and therefore cannot mutate
+    /// launcher settings.
+    ///
+    /// @param row repair row whose solver owns the candidate boundary
+    /// @return selected or cancelled candidate choice
+    private CandidateChoice chooseCandidateOnEdt(RepairRow row) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates = row.candidates;
+        if (candidates.isEmpty()) {
+            return CandidateChoice.automatic();
+        }
+        LogAnalyzable.JavaRuntimeCandidate recommended = candidates.stream()
+                .filter(LogAnalyzable.JavaRuntimeCandidate::recommended)
+                .findFirst()
+                .orElse(candidates.get(0));
+        if (candidates.size() == 1 || GraphicsEnvironment.isHeadless()) {
+            return CandidateChoice.selected(recommended.id());
+        }
+        Object selected = JOptionPane.showInputDialog(
+                content,
+                i18n("game.crash.solver.replace_java"),
+                i18n("message.warning"),
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                candidates.toArray(),
+                recommended);
+        if (!(selected instanceof LogAnalyzable.JavaRuntimeCandidate candidate)) {
+            return CandidateChoice.cancelledChoice();
+        }
+        return CandidateChoice.selected(candidate.id());
+    }
+
+    /// Returns the command label for one structured solver action.
+    ///
+    /// Missing-dependency search is deliberately presented as a read-only search command; all other executable
+    /// actions are persistent automatic repairs and use the repair command wording.
+    ///
+    /// @param solver structured solver whose action is being rendered
+    /// @return localized command label
+    private static String actionLabel(Solver solver) {
+        return solver.repairAction().actionType() == RepairActionDescriptor.ActionType.OPEN_MOD_SEARCH
+                ? i18n("game.crash.search_missing_dependency")
+                : i18n("game.crash.repair.execute");
+    }
+
+    /// Recognizes the two dependency-search result identifiers without exposing a second priority system.
+    private static boolean isMissingDependencyResult(String resultId) {
+        return "FORGE_MISSING_DEPENDENCY".equals(resultId)
+                || "FABRIC_MISSING_DEPENDENCY".equals(resultId);
     }
 
     /// Starts one asynchronous crash-bundle export and disables duplicate requests until completion.
@@ -794,26 +1215,121 @@ public final class SwingGameCrashWindow implements AutoCloseable {
         }
         content = null;
         reasonPane = null;
+        diagnosisRowsPanel = null;
         analysisProgress = null;
         reportQrCodeMarker = null;
         operationStatus = null;
         exportButton = null;
-        searchMissingDependencyButton = null;
-        missingDependencySolver = null;
-        missingDependencyTask = null;
+        for (RepairRow row : repairRows.values()) {
+            row.cancelOnClose();
+        }
+        repairRows.clear();
         followUpCompletion.complete(null);
     }
 
-    /// Pairs one missing-dependency solver with its stopped task.
-    ///
-    /// @param solver executable solver metadata
-    /// @param task stopped task created by the solver
+    /// Mutable state for one independent repair row.
     @NotNullByDefault
-    private record MissingDependencyAction(Solver solver, Task<?> task) {
-        /// Validates the paired automatic action.
-        private MissingDependencyAction {
-            Objects.requireNonNull(solver, "solver");
-            Objects.requireNonNull(task, "task");
+    private static final class RepairRow {
+        /// Stable cause identifier shown only as an internal component suffix.
+        private final String resultId;
+
+        /// Solver that creates a fresh task for every attempt.
+        private final Solver solver;
+
+        /// Immutable runtime candidates discovered before the row reached the EDT.
+        private final @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates;
+
+        /// Row action button.
+        private final JButton button;
+
+        /// Row status label.
+        private final JLabel status;
+
+        /// Current row state.
+        private RepairState state = RepairState.AVAILABLE;
+
+        /// Real task executor for the current attempt, or null before a click.
+        private @Nullable TaskExecutor executor;
+
+        /// Whether the task had already succeeded before residual cleanup became blocked.
+        private boolean residualOriginalSuccess;
+
+        /// Creates one executable repair row.
+        private RepairRow(
+                String resultId,
+                Solver solver,
+                @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates,
+                JButton button,
+                JLabel status) {
+            this.resultId = Objects.requireNonNull(resultId, "resultId");
+            this.solver = Objects.requireNonNull(solver, "solver");
+            this.candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates"));
+            this.button = Objects.requireNonNull(button, "button");
+            this.status = Objects.requireNonNull(status, "status");
+        }
+
+        /// Requests cancellation of the currently running task during window disposal.
+        private void cancelOnClose() {
+            @Nullable TaskExecutor currentExecutor = executor;
+            if (currentExecutor == null) {
+                return;
+            }
+            try {
+                currentExecutor.cancel();
+            } catch (RuntimeException | Error cancellationFailure) {
+                LOG.warning("Failed to cancel crash repair " + resultId, cancellationFailure);
+            }
+        }
+    }
+
+    /// Independent repair-row lifecycle states.
+    @NotNullByDefault
+    private enum RepairState {
+        /// Action is available but has not been claimed.
+        AVAILABLE,
+
+        /// Solver task is being created and preflighted.
+        PREPARING,
+
+        /// User selection is required before task execution.
+        AWAITING_SELECTION,
+
+        /// Fresh task is running.
+        RUNNING,
+
+        /// Repair completed successfully.
+        SUCCEEDED,
+
+        /// Repair failed and the same row can be retried with a fresh task.
+        FAILED_RETRYABLE,
+
+        /// Repair completed with unresolved cleanup or resource residue.
+        BLOCKED_RESIDUAL
+    }
+
+    /// Immutable result of the optional candidate selection dialog.
+    @NotNullByDefault
+    private record CandidateChoice(boolean cancelled, @Nullable String candidateId) {
+        /// Creates the ordinary automatic-path choice.
+        ///
+        /// @return choice that delegates to the solver's ordinary task factory
+        private static CandidateChoice automatic() {
+            return new CandidateChoice(false, null);
+        }
+
+        /// Creates a selected candidate choice.
+        ///
+        /// @param candidateId selected identifier
+        /// @return selected choice
+        private static CandidateChoice selected(String candidateId) {
+            return new CandidateChoice(false, Objects.requireNonNull(candidateId, "candidateId"));
+        }
+
+        /// Creates a cancelled choice that cannot execute a task.
+        ///
+        /// @return cancelled choice
+        private static CandidateChoice cancelledChoice() {
+            return new CandidateChoice(true, null);
         }
     }
 

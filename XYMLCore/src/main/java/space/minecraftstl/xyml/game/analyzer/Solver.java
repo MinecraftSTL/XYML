@@ -25,6 +25,8 @@ import space.minecraftstl.xyml.task.Task;
 import java.util.List;
 import java.util.Objects;
 
+import static space.minecraftstl.xyml.util.logging.Logger.LOG;
+
 /// Describes an actionable repair through a presentation-toolkit-neutral wizard contract.
 @NotNullByDefault
 public interface Solver {
@@ -73,6 +75,30 @@ public interface Solver {
     /// @return executable repair task, or null when the repair requires user action
     default @Nullable Task<?> createTask() {
         return null;
+    }
+
+    /// Returns the immutable candidate choices for this repair, when the repair has an internal selection step.
+    ///
+    /// Most repairs have exactly one implementation and therefore return an empty list. A Java-runtime repair may
+    /// expose several discovered runtimes here without turning them into separate diagnosis reasons.
+    ///
+    /// @return immutable candidate snapshot in stable order
+    default @Unmodifiable List<LogAnalyzable.JavaRuntimeCandidate> candidates() {
+        return List.of();
+    }
+
+    /// Creates a fresh task for one selected candidate.
+    ///
+    /// Passing null preserves the legacy automatic-task contract. Implementations exposing candidates must reject
+    /// unknown identifiers before any persistent side effect is started.
+    ///
+    /// @param candidateId selected candidate identifier, or null to use the default automatic path
+    /// @return executable repair task, or null when the repair requires user action
+    default @Nullable Task<?> createTask(@Nullable String candidateId) {
+        if (candidateId != null) {
+            throw new IllegalArgumentException("Repair candidate selection is unavailable");
+        }
+        return createTask();
     }
 
     /// Creates an automatic solver around a fresh-task factory.
@@ -141,6 +167,13 @@ public interface Solver {
                     checkedFallbackMessage,
                     repairAction);
         }
+        try {
+            search.prefetch(checkedDependencyIds, checkedInput.gameVersion());
+        } catch (RuntimeException prefetchFailure) {
+            // Prefetch is an opportunistic read-only optimization. A provider or scheduler failure must not hide a
+            // valid diagnosis; the explicit search task remains available for a later retry.
+            LOG.warning("Unable to prefetch missing-dependency catalog candidates", prefetchFailure);
+        }
         return new TaskSolver(
                 checkedMessageKey,
                 checkedMessageArguments,
@@ -184,11 +217,12 @@ public interface Solver {
         if (repair == null) {
             throw new IllegalArgumentException("input does not provide a Java runtime repair");
         }
-        return new TaskSolver(
+        return new JavaRuntimeTaskSolver(
                 Objects.requireNonNull(messageKey, "messageKey"),
                 List.copyOf(Objects.requireNonNull(messageArguments, "messageArguments")),
                 Objects.requireNonNull(fallbackMessage, "fallbackMessage"),
                 RepairActionDescriptor.replaceJavaRuntime(true),
-                repair::createTask);
+                repair,
+                List.copyOf(repair.candidates()));
     }
 }

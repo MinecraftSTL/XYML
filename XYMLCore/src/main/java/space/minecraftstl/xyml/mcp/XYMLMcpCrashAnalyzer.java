@@ -22,7 +22,8 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.game.CrashReportAnalyzer;
 
-import java.util.EnumMap;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,22 +46,53 @@ public final class XYMLMcpCrashAnalyzer {
     public static @Unmodifiable Map<String, Object> analyze(
             String logText, @Nullable String crashReport) {
         String checkedLog = Objects.requireNonNull(logText, "logText");
-        EnumMap<CrashReportAnalyzer.Rule, @Unmodifiable Map<String, Object>> matches =
-                new EnumMap<>(CrashReportAnalyzer.Rule.class);
+        LinkedHashMap<CrashReportAnalyzer.Rule, @Unmodifiable Map<String, Object>> matches = new LinkedHashMap<>();
         addMatches(matches, checkedLog, "log");
         if (crashReport != null) {
             addMatches(matches, crashReport, "crash_report");
         }
+
+        List<@Unmodifiable Map<String, Object>> suppressedMatches = new ArrayList<>();
+        applySupersession(matches, suppressedMatches);
 
         @Unmodifiable List<String> keywords = CrashReportAnalyzer.findKeywordsFromCrashReport(
                         crashReport == null ? "" : crashReport)
                 .stream()
                 .sorted()
                 .toList();
-        return Map.of(
-                "matches", List.copyOf(matches.values()),
-                "crash_report", crashReport == null ? "" : crashReport,
-                "keywords", keywords);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("matches", List.copyOf(matches.values()));
+        response.put("suppressed_matches", List.copyOf(suppressedMatches));
+        response.put("crash_report", crashReport == null ? "" : crashReport);
+        response.put("keywords", keywords);
+        return Collections.unmodifiableMap(new LinkedHashMap<>(response));
+    }
+
+    /// Applies one explicit supersession relation while retaining the hidden evidence for inspection.
+    ///
+    /// The narrower native-memory reservation diagnosis is authoritative whenever it is present. The broader
+    /// `OUT_OF_MEMORY` rule remains useful as a fallback, but exposing both would present two repair causes for one
+    /// failure and would make remote callers choose an arbitrary order.
+    ///
+    /// @param matches mutable displayed matches
+    /// @param suppressedMatches mutable hidden evidence list
+    /// @param supersedingRule rule that owns the diagnosis
+    /// @param supersededRule broader rule to hide
+    private static void suppress(
+            Map<CrashReportAnalyzer.Rule, @Unmodifiable Map<String, Object>> matches,
+            List<@Unmodifiable Map<String, Object>> suppressedMatches,
+            CrashReportAnalyzer.Rule supersedingRule,
+            CrashReportAnalyzer.Rule supersededRule) {
+        if (!matches.containsKey(supersedingRule)) {
+            return;
+        }
+        @Nullable Map<String, Object> suppressed = matches.remove(supersededRule);
+        if (suppressed == null) {
+            return;
+        }
+        Map<String, Object> evidence = new LinkedHashMap<>(suppressed);
+        evidence.put("suppressed_by", supersedingRule.name());
+        suppressedMatches.add(Collections.unmodifiableMap(new LinkedHashMap<>(evidence)));
     }
 
     /// Merges rule matches from one source, retaining later evidence while recording every matching source.
@@ -69,7 +101,7 @@ public final class XYMLMcpCrashAnalyzer {
     /// @param text source text to analyze
     /// @param source stable source identifier
     private static void addMatches(
-            EnumMap<CrashReportAnalyzer.Rule, @Unmodifiable Map<String, Object>> matches,
+            Map<CrashReportAnalyzer.Rule, @Unmodifiable Map<String, Object>> matches,
             String text,
             String source) {
         for (CrashReportAnalyzer.Result result : CrashReportAnalyzer.analyze(text)) {
@@ -89,8 +121,24 @@ public final class XYMLMcpCrashAnalyzer {
             for (String group : result.rule().getGroupNames()) {
                 match.put(group, groupValue(matcher, group));
             }
-            matches.put(result.rule(), Map.copyOf(match));
+            matches.put(result.rule(), Collections.unmodifiableMap(new LinkedHashMap<>(match)));
         }
+    }
+
+    /// Applies the same specific-over-broad policy used by the desktop crash analysis.
+    ///
+    /// The order is deliberate: a later relation may only remove evidence that is still present, while every
+    /// removed match remains available in the suppressed evidence list for diagnostics.
+    private static void applySupersession(
+            Map<CrashReportAnalyzer.Rule, @Unmodifiable Map<String, Object>> matches,
+            List<@Unmodifiable Map<String, Object>> suppressedMatches) {
+        // The raw crash-report registry has no VIRTUAL_MEMORY result ID. MEMORY_EXCEEDED is the more specific
+        // native-memory rule available at this layer, so it suppresses the broad OUT_OF_MEMORY fallback.
+        suppress(matches, suppressedMatches, CrashReportAnalyzer.Rule.MEMORY_EXCEEDED,
+                CrashReportAnalyzer.Rule.OUT_OF_MEMORY);
+        // Forge/Fabric loader-specific supersession is applied by the combined LogAnalyzer result, where the
+        // dedicated FORGE_MISSING_DEPENDENCY and FABRIC_MISSING_DEPENDENCY IDs are available. This adapter only
+        // receives raw crash-report rules and therefore must not guess which loader owns a generic resolution line.
     }
 
     /// Appends a source identifier unless it was already recorded for the same rule.

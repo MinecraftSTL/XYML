@@ -64,7 +64,8 @@ public final class XYMLMcpPromptRegistry implements McpPromptProvider {
                 + "如目录中存在报告，请将直接文件名作为 crash_report_path 调用 analyze_crash；"
                 + "先总结崩溃原因，再对用户选择的 solution_id 调用 plan_crash_solution。"
                 + "只有计划明确返回 executable=true 时，才可调用 execute_crash_solution；"
-                + "执行后使用 get_crash_repair_status 轮询至终态。"
+                + "执行后使用 get_crash_repair_status 轮询至终态；若状态为 retryable=true，"
+                + "应由用户决定是否调用 retry_crash_solution 重试。"
                 + "通过 log_text 提供的外部日志只能用于分析，不得据此规划或执行修复。";
         return Map.of(
                 "description", "实例崩溃诊断",
