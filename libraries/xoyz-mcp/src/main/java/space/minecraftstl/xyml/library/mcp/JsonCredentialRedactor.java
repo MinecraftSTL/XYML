@@ -27,7 +27,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Map;
 import java.util.Objects;
 
-/// Redacts a configured transport credential from JSON string values without changing JSON structure.
+/// Redacts a configured transport credential from JSON strings and object property names without changing JSON shape.
 @NotNullByDefault
 final class JsonCredentialRedactor {
     /// Prevents construction of this stateless helper.
@@ -36,9 +36,9 @@ final class JsonCredentialRedactor {
 
     /// Returns a detached JSON tree with credential-bearing string values sanitized.
     ///
-    /// Property names, number values, and JSON punctuation are never rewritten, even when a token is a short substring
-    /// such as `i` or `{`. This keeps the transport response valid while preventing provider values and exception text
-    /// from echoing the configured credential.
+    /// Number values and JSON punctuation are never rewritten, even when a token is a short substring such as `i` or
+    /// `{`. A property name equal to the configured credential is replaced with a collision-free redacted name. JSON
+    /// protocol member names remain unchanged, which is important for short opaque credentials such as `i`.
     ///
     /// @param source response tree to sanitize
     /// @param token configured credential, or null when authentication is disabled
@@ -51,7 +51,16 @@ final class JsonCredentialRedactor {
         if (checked.isJsonObject()) {
             JsonObject redacted = new JsonObject();
             for (Map.Entry<String, JsonElement> entry : checked.getAsJsonObject().entrySet()) {
-                redacted.add(entry.getKey(), redact(entry.getValue(), token));
+                String key = entry.getKey().equals(token) ? "[REDACTED]" : entry.getKey();
+                if (redacted.has(key)) {
+                    int suffix = 1;
+                    String candidate;
+                    do {
+                        candidate = key + "#" + suffix++;
+                    } while (redacted.has(candidate));
+                    key = candidate;
+                }
+                redacted.add(key, redact(entry.getValue(), token));
             }
             return redacted;
         }

@@ -1008,6 +1008,20 @@ public final class McpServerHttpTest {
         }
     }
 
+    /// Ensures a provider cannot expose the credential through a JSON object property name.
+    @Test
+    public void redactsBearerTokenFromStructuredPropertyNames() {
+        JsonObject source = new JsonObject();
+        source.add(AUTH_TOKEN, new JsonObject());
+        source.add("[REDACTED]", new JsonObject());
+
+        String redacted = JsonCredentialRedactor.redact(source, AUTH_TOKEN).toString();
+
+        assertFalse(redacted.contains(AUTH_TOKEN));
+        assertTrue(redacted.contains("[REDACTED]"));
+        assertTrue(redacted.contains("[REDACTED]#1"));
+    }
+
     /// Redacts a one-character credential from values without corrupting JSON-RPC property names.
     @Test
     public void shortBearerTokenDoesNotCorruptStructuredResponses() throws Exception {

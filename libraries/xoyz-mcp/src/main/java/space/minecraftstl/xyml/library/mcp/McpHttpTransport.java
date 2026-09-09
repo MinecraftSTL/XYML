@@ -997,15 +997,20 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
             @Unmodifiable Map<String, String> headers,
             @Nullable RawRequestContext rawContext) {
         @Nullable byte[] expectedDigest = bearerTokenDigest;
-        if (expectedDigest == null) {
-            return;
-        }
         if (rawContext != null && (rawContext.authorizationMalformed() || rawContext.headersMalformed())) {
             throw unauthorized();
         }
         @Nullable String rawAuthorization = singleHeaderValue(headers, AUTHORIZATION_HEADER);
         if (rawContext != null && rawContext.headerParsed() && rawContext.rawAuthorization() != null) {
             rawAuthorization = rawContext.rawAuthorization();
+        }
+        if (expectedDigest == null) {
+            // An empty configured token disables credential comparison, but an explicitly supplied Authorization
+            // field still has to obey the transport grammar so malformed proxy input cannot pass silently.
+            if (rawAuthorization != null) {
+                parseBearerCredential(rawAuthorization);
+            }
+            return;
         }
         @Nullable String suppliedToken = rawAuthorization == null ? null : parseBearerCredential(rawAuthorization);
         byte[] suppliedDigest = sha256(suppliedToken == null ? "" : suppliedToken);
