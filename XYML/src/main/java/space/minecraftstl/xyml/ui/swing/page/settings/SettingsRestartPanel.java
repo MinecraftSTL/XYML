@@ -68,6 +68,9 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
     /// MCP listener port active when this settings surface first observed process state.
     private @Nullable Integer baselineMcpPort;
 
+    /// MCP bearer token active when this settings surface first observed process state.
+    private @Nullable String baselineMcpBearerToken;
+
     /// Latest launcher language supplied to the general restart tracker.
     private @Nullable SupportedLocale currentLanguage;
 
@@ -85,6 +88,9 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
 
     /// Latest MCP listener port supplied to the restart tracker.
     private @Nullable Integer currentMcpPort;
+
+    /// Latest MCP bearer token supplied to the restart tracker.
+    private @Nullable String currentMcpBearerToken;
 
     /// Whether settings persistence currently permits restart-sensitive edits.
     private boolean available = true;
@@ -170,16 +176,34 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
     /// @param enabled whether the local MCP server is enabled
     /// @param port local MCP listener port
     void updateMcpSettings(boolean enabled, int port) {
+        String bearerToken = currentMcpBearerToken != null
+                ? currentMcpBearerToken
+                : baselineMcpBearerToken == null ? "" : baselineMcpBearerToken;
+        updateMcpSettings(enabled, port, bearerToken);
+    }
+
+    /// Tracks MCP enablement, listener port, and bearer token against the active process baseline.
+    ///
+    /// The token is consumed while the listener starts, so changing it requires the same restart as changing the
+    /// enablement or port. The two-argument overload remains for callers that do not expose authentication yet.
+    ///
+    /// @param enabled whether the local MCP server is enabled
+    /// @param port local MCP listener port
+    /// @param bearerToken configured bearer token, or an empty string when authentication is disabled
+    void updateMcpSettings(boolean enabled, int port, String bearerToken) {
         EdtDispatcher.requireEventDispatchThread();
         if (port < 1 || port > 0xFFFF) {
             throw new IllegalArgumentException("MCP port must be in range 1..65535");
         }
-        if (baselineMcpEnabled == null || baselineMcpPort == null) {
+        String checkedBearerToken = Objects.requireNonNull(bearerToken, "bearerToken");
+        if (baselineMcpEnabled == null || baselineMcpPort == null || baselineMcpBearerToken == null) {
             baselineMcpEnabled = enabled;
             baselineMcpPort = port;
+            baselineMcpBearerToken = checkedBearerToken;
         }
         currentMcpEnabled = enabled;
         currentMcpPort = port;
+        currentMcpBearerToken = checkedBearerToken;
         updateRestartRequired();
     }
 
@@ -281,8 +305,11 @@ final class SettingsRestartPanel extends JPanel implements AutoCloseable {
                 && baselineMcpEnabled != null
                 && currentMcpPort != null
                 && baselineMcpPort != null
+                && currentMcpBearerToken != null
+                && baselineMcpBearerToken != null
                 && (!Objects.equals(currentMcpEnabled, baselineMcpEnabled)
-                || !Objects.equals(currentMcpPort, baselineMcpPort));
+                || !Objects.equals(currentMcpPort, baselineMcpPort)
+                || !Objects.equals(currentMcpBearerToken, baselineMcpBearerToken));
         restartRequired = generalChanged || radiusChanged || fontAntialiasingChanged || mcpChanged;
         updatePresentation();
     }

@@ -112,6 +112,15 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
     /// Default loopback port used by the local MCP server.
     public static final int DEFAULT_MCP_PORT = 23968;
 
+    /// Default enablement for the local MCP server in a newly created settings file.
+    public static final boolean DEFAULT_MCP_ENABLED = false;
+
+    /// Default bearer token for the local MCP server. An empty token keeps authentication disabled.
+    public static final String DEFAULT_MCP_BEARER_TOKEN = "";
+
+    /// Default state for the warning shown before enabling the local MCP server.
+    public static final boolean DEFAULT_MCP_ENABLEMENT_WARNING = true;
+
     /// Gson instance used for launcher settings and related toolkit-neutral settings objects.
     public static final Gson SETTINGS_GSON = new GsonBuilder()
             .registerTypeAdapter(Path.class, PathTypeAdapter.INSTANCE)
@@ -134,6 +143,20 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
         boolean hasInstanceDeletionConfirmation = normalized.has("mcpConfirmInstanceDeletion");
         boolean hasModDeletionConfirmation = normalized.has("mcpConfirmModDeletion");
         @Nullable JsonElement legacyDeletionConfirmation = normalized.remove("mcpConfirmDeletion");
+        @Nullable JsonElement enabledValue = normalized.get("mcpEnabled");
+        if (enabledValue != null
+                && (!enabledValue.isJsonPrimitive() || !enabledValue.getAsJsonPrimitive().isBoolean())) {
+            normalized.remove("mcpEnabled");
+        }
+        @Nullable JsonElement tokenValue = normalized.get("mcpBearerToken");
+        if (tokenValue != null && (!tokenValue.isJsonPrimitive() || !tokenValue.getAsJsonPrimitive().isString())) {
+            normalized.remove("mcpBearerToken");
+        }
+        @Nullable JsonElement warningValue = normalized.get("showMcpEnablementWarning");
+        if (warningValue != null
+                && (!warningValue.isJsonPrimitive() || !warningValue.getAsJsonPrimitive().isBoolean())) {
+            normalized.remove("showMcpEnablementWarning");
+        }
         LauncherSettings settings = SETTINGS_GSON.fromJson(normalized, LauncherSettings.class);
         if (legacyDeletionConfirmation != null
                 && legacyDeletionConfirmation.isJsonPrimitive()
@@ -619,11 +642,30 @@ public final class LauncherSettings extends ObservableSetting implements JsonSch
 
     /// Whether the local MCP server is enabled at launcher startup.
     @SerializedName("mcpEnabled")
-    private final BooleanProperty mcpEnabled = new SimpleBooleanProperty(false);
+    private final BooleanProperty mcpEnabled = new SimpleBooleanProperty(DEFAULT_MCP_ENABLED);
 
     /// Returns the local MCP server enablement property.
     public BooleanProperty mcpEnabledProperty() {
         return mcpEnabled;
+    }
+
+    /// Bearer token required by the local MCP HTTP listener, or an empty string to disable transport authentication.
+    @SerializedName("mcpBearerToken")
+    private final StringProperty mcpBearerToken = new SimpleStringProperty(DEFAULT_MCP_BEARER_TOKEN);
+
+    /// Returns the local MCP bearer-token property.
+    public StringProperty mcpBearerTokenProperty() {
+        return mcpBearerToken;
+    }
+
+    /// Whether the Swing settings page warns before enabling the local MCP server.
+    @SerializedName("showMcpEnablementWarning")
+    private final BooleanProperty showMcpEnablementWarning =
+            new SimpleBooleanProperty(DEFAULT_MCP_ENABLEMENT_WARNING);
+
+    /// Returns the local MCP enablement-warning preference.
+    public BooleanProperty showMcpEnablementWarningProperty() {
+        return showMcpEnablementWarning;
     }
 
     /// Loopback port used by the local MCP server.

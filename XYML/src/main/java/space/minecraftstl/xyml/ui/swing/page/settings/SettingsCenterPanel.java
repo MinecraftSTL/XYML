@@ -58,10 +58,14 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTextField;
 import javax.swing.ListCellRenderer;
 import javax.swing.ScrollPaneConstants;
+import java.awt.AWTError;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Desktop;
 import java.awt.Font;
+import java.awt.GraphicsEnvironment;
+import java.awt.HeadlessException;
+import java.awt.IllegalComponentStateException;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.io.File;
@@ -205,6 +209,21 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
     /// Enables or disables the local MCP HTTP server.
     private final JCheckBox mcpEnabledBox = new JCheckBox(i18n("settings.mcp.enabled"));
 
+    /// Confirms the risk acknowledgement required before enabling the local MCP server.
+    private final McpEnablementDecision mcpEnablementConfirmation;
+
+    /// Whether the enablement warning should be shown before the next MCP activation.
+    private final JCheckBox mcpEnablementWarningBox = new JCheckBox(i18n("settings.mcp.enable_warning"));
+
+    /// Optional bearer token used to authenticate the local MCP HTTP listener.
+    private final JPasswordField mcpBearerTokenField = new JPasswordField();
+
+    /// Temporarily reveals the MCP bearer token while selected.
+    private final JCheckBox mcpBearerTokenVisibilityBox = new JCheckBox(i18n("settings.mcp.bearer_token.show"));
+
+    /// Look-and-feel echo character restored when token visibility is disabled.
+    private final char mcpBearerTokenEchoChar = mcpBearerTokenField.getEchoChar();
+
     /// Local MCP HTTP listener port input.
     private final JTextField mcpPortField = new JTextField();
 
@@ -266,7 +285,8 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                     LauncherSettingsRestartCommand.create(),
                     null,
                     fontStore,
-                    Objects.requireNonNull(fontRuntime, "fontRuntime"));
+                    Objects.requireNonNull(fontRuntime, "fontRuntime"),
+                    null);
         } catch (RuntimeException | Error failure) {
             fontStore.close();
             settingsStore.close();
@@ -305,7 +325,30 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             AppearanceSettingsPanel appearancePanel,
             SettingsRestartCommand restartCommand,
             @Nullable SettingsMaintenanceActions maintenanceActions) {
-        this(store, appearancePanel, restartCommand, maintenanceActions, null, null);
+        this(store, appearancePanel, restartCommand, maintenanceActions, null, null, null);
+    }
+
+    /// Creates an embeddable settings center with an injectable MCP enablement decision.
+    ///
+    /// @param store toolkit-neutral general and network settings store
+    /// @param appearancePanel appearance page to embed and own
+    /// @param restartCommand launcher restart lifecycle command
+    /// @param maintenanceActions asynchronous maintenance actions, or `null` to create production actions
+    /// @param mcpEnablementDecision decision boundary invoked before enabling MCP
+    SettingsCenterPanel(
+            SettingsCenterStore store,
+            AppearanceSettingsPanel appearancePanel,
+            SettingsRestartCommand restartCommand,
+            @Nullable SettingsMaintenanceActions maintenanceActions,
+            McpEnablementDecision mcpEnablementDecision) {
+        this(
+                store,
+                appearancePanel,
+                restartCommand,
+                maintenanceActions,
+                null,
+                null,
+                Objects.requireNonNull(mcpEnablementDecision, "mcpEnablementDecision"));
     }
 
     /// Creates an embeddable settings center with optional production font settings.
@@ -322,11 +365,15 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             SettingsRestartCommand restartCommand,
             @Nullable SettingsMaintenanceActions maintenanceActions,
             @Nullable FontSettingsStore fontStore,
-            @Nullable FontSettingsRuntime fontRuntime) {
+            @Nullable FontSettingsRuntime fontRuntime,
+            @Nullable McpEnablementDecision mcpEnablementConfirmation) {
         super(new BorderLayout());
         EdtDispatcher.requireEventDispatchThread();
         this.store = Objects.requireNonNull(store, "store");
         this.appearancePanel = Objects.requireNonNull(appearancePanel, "appearancePanel");
+        this.mcpEnablementConfirmation = mcpEnablementConfirmation == null
+                ? this::showMcpEnablementWarning
+                : mcpEnablementConfirmation;
         restartPanel = new SettingsRestartPanel(
                 localizedRestartStrings(),
                 restartCommand,
@@ -400,6 +447,8 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         SwingUiDispatcher.INSTANCE.dispatchOrRun(() -> {
             if (!closed) {
                 closed = true;
+                mcpBearerTokenVisibilityBox.setSelected(false);
+                updateMcpBearerTokenVisibility();
                 storeSubscription.unsubscribe();
                 store.close();
                 appearancePanel.close();
@@ -557,9 +606,26 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         mcpEnabledBox.setName("settingsMcpEnabled");
         mcpEnabledBox.addActionListener(event -> {
             if (!applyingSnapshot) {
-                store.setMcpEnabled(mcpEnabledBox.isSelected());
+                persistMcpEnablement();
             }
         });
+        mcpEnablementWarningBox.setName("settingsMcpEnablementWarning");
+        mcpEnablementWarningBox.addActionListener(event -> {
+            if (!applyingSnapshot) {
+                store.setShowMcpEnablementWarning(mcpEnablementWarningBox.isSelected());
+            }
+        });
+        mcpBearerTokenField.setName("settingsMcpBearerToken");
+        mcpBearerTokenField.addActionListener(event -> persistMcpBearerToken());
+        mcpBearerTokenField.addFocusListener(new FocusAdapter() {
+            /// {@inheritDoc}
+            @Override
+            public void focusLost(FocusEvent event) {
+                persistMcpBearerToken();
+            }
+        });
+        mcpBearerTokenVisibilityBox.setName("settingsMcpBearerTokenVisibility");
+        mcpBearerTokenVisibilityBox.addActionListener(event -> updateMcpBearerTokenVisibility());
         mcpConfirmInstanceDeletionBox.setName("settingsMcpConfirmInstanceDeletion");
         mcpConfirmInstanceDeletionBox.addActionListener(event -> {
             if (!applyingSnapshot) {
@@ -639,6 +705,8 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         JPanel page = createPage();
         page.add(createHeading(i18n("settings.mcp.title")), "growx");
         page.add(mcpEnabledBox, "growx");
+        page.add(mcpEnablementWarningBox, "growx");
+        page.add(createMcpBearerTokenRow(), "growx");
         page.add(createFieldRow(i18n("settings.mcp.port"), mcpPortField), "growx");
         page.add(mcpConfirmInstanceDeletionBox, "growx");
         page.add(mcpConfirmModDeletionBox, "growx");
@@ -776,6 +844,17 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         row.add(new JLabel(Objects.requireNonNull(labelText, "labelText")), "aligny center");
         row.add(Objects.requireNonNull(control, "control"), "growx");
         return row;
+    }
+
+    /// Creates the bearer-token row with a local visibility toggle.
+    ///
+    /// @return configured token input row
+    private JPanel createMcpBearerTokenRow() {
+        JPanel controls = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]8[]", "[]"));
+        controls.setOpaque(false);
+        controls.add(mcpBearerTokenField, "growx");
+        controls.add(mcpBearerTokenVisibilityBox);
+        return createFieldRow(i18n("settings.mcp.bearer_token"), controls);
     }
 
     /// Creates a localized renderer for supported locales.
@@ -1101,7 +1180,7 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         }
         try {
             int parsed = Integer.parseInt(normalized);
-            return parsed >= 0 && parsed <= 0xFFFF ? parsed : null;
+            return parsed >= 1 && parsed <= 0xFFFF ? parsed : null;
         } catch (NumberFormatException exception) {
             return null;
         }
@@ -1120,6 +1199,127 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         }
         mcpValidationLabel.setText("");
         store.setMcpPort(port);
+    }
+
+    /// Persists the MCP bearer token without exposing it in logs.
+    private void persistMcpBearerToken() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || applyingSnapshot) {
+            return;
+        }
+        char[] token = mcpBearerTokenField.getPassword();
+        try {
+            String value = new String(token);
+            mcpValidationLabel.setText("");
+            store.setMcpBearerToken(value);
+        } finally {
+            Arrays.fill(token, '\0');
+        }
+    }
+
+    /// Applies the transient bearer-token visibility choice without changing the persisted token.
+    private void updateMcpBearerTokenVisibility() {
+        EdtDispatcher.requireEventDispatchThread();
+        mcpBearerTokenField.setEchoChar(
+                mcpBearerTokenVisibilityBox.isSelected() ? (char) 0 : mcpBearerTokenEchoChar);
+    }
+
+    /// Applies the enablement warning before changing the persisted MCP switch.
+    private void persistMcpEnablement() {
+        EdtDispatcher.requireEventDispatchThread();
+        boolean enabled = mcpEnabledBox.isSelected();
+        if (!enabled) {
+            store.setMcpEnabled(false);
+            return;
+        }
+        // Swing has already selected the box when this listener runs. Keep the visible state disabled until the
+        // acknowledgement is complete so persisted state and the control never claim enablement prematurely.
+        applyingSnapshot = true;
+        try {
+            mcpEnabledBox.setSelected(false);
+        } finally {
+            applyingSnapshot = false;
+        }
+        if (!mcpEnablementWarningBox.isSelected()) {
+            enableMcpAfterConfirmation();
+            return;
+        }
+
+        final boolean confirmed;
+        try {
+            confirmed = mcpEnablementConfirmation.confirm();
+        } catch (AWTError | RuntimeException failure) {
+            // A broken or unavailable dialog must not strand advanced/headless users with a half-selected control.
+            LOG.warning("MCP enablement warning could not be shown; proceeding without changing warning preference",
+                    failure);
+            enableMcpAfterConfirmation();
+            return;
+        }
+        if (!confirmed) {
+            return;
+        }
+        enableMcpAfterConfirmation();
+    }
+
+    /// Commits MCP enablement only after the warning decision has been made.
+    private void enableMcpAfterConfirmation() {
+        store.setMcpEnabled(true);
+        applyingSnapshot = true;
+        try {
+            mcpEnabledBox.setSelected(true);
+        } finally {
+            applyingSnapshot = false;
+        }
+    }
+
+    /// Presents the MCP risk warning and maps the native selection to a persistence decision.
+    ///
+    /// A headless runtime has no user-facing warning surface. In that environment the caller is treated as an
+    /// advanced user and enablement proceeds without changing the warning preference.
+    ///
+    /// @return selected enablement decision
+    private boolean showMcpEnablementWarning() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (GraphicsEnvironment.isHeadless()) {
+            return true;
+        }
+        try {
+            JCheckBox skipWarningBox = new JCheckBox(i18n("settings.mcp.enable_warning.skip"));
+            skipWarningBox.setOpaque(false);
+            skipWarningBox.addActionListener(event -> {
+                boolean showWarning = !skipWarningBox.isSelected();
+                applyingSnapshot = true;
+                try {
+                    mcpEnablementWarningBox.setSelected(showWarning);
+                } finally {
+                    applyingSnapshot = false;
+                }
+                store.setShowMcpEnablementWarning(showWarning);
+            });
+            JPanel message = new JPanel(new BorderLayout(0, 8));
+            message.setOpaque(false);
+            message.add(new JLabel(i18n("settings.mcp.enable_warning.message")), BorderLayout.CENTER);
+            message.add(skipWarningBox, BorderLayout.SOUTH);
+            Object[] options = {
+                    i18n("settings.mcp.enable_warning.enable"),
+                    i18n("settings.mcp.enable_warning.cancel")
+            };
+            int selection = JOptionPane.showOptionDialog(
+                    this,
+                    message,
+                    i18n("settings.mcp.enable_warning.title"),
+                    JOptionPane.DEFAULT_OPTION,
+                    JOptionPane.WARNING_MESSAGE,
+                    null,
+                    options,
+                    options[1]);
+            return selection == 0;
+        } catch (AWTError | HeadlessException | IllegalComponentStateException | SecurityException exception) {
+            return true;
+        } catch (RuntimeException exception) {
+            LOG.warning("MCP enablement warning failed; proceeding without changing warning preference", exception);
+            return true;
+        }
     }
 
     /// Parses a legal local MCP listener port.
@@ -1207,11 +1407,16 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
             proxyPasswordField.setText(snapshot.proxyPassword());
             networkValidationLabel.setText("");
             mcpEnabledBox.setSelected(snapshot.mcpEnabled());
+            mcpEnablementWarningBox.setSelected(snapshot.showMcpEnablementWarning());
+            mcpBearerTokenField.setText(snapshot.mcpBearerToken());
             mcpPortField.setText(Integer.toString(snapshot.mcpPort()));
             mcpConfirmInstanceDeletionBox.setSelected(snapshot.mcpConfirmInstanceDeletion());
             mcpConfirmModDeletionBox.setSelected(snapshot.mcpConfirmModDeletion());
             mcpValidationLabel.setText("");
-            mcpRestartPanel.updateMcpSettings(snapshot.mcpEnabled(), snapshot.mcpPort());
+            mcpRestartPanel.updateMcpSettings(
+                    snapshot.mcpEnabled(),
+                    snapshot.mcpPort(),
+                    snapshot.mcpBearerToken());
 
             setInteractiveControlsEnabled(snapshot.writable());
             updateDownloadControlAvailability();
@@ -1248,6 +1453,9 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
         confirmNetworkButton.setEnabled(interactive);
         networkValidationLabel.setEnabled(interactive);
         mcpEnabledBox.setEnabled(interactive);
+        mcpEnablementWarningBox.setEnabled(interactive);
+        mcpBearerTokenField.setEnabled(interactive);
+        mcpBearerTokenVisibilityBox.setEnabled(interactive);
         mcpPortField.setEnabled(interactive);
         mcpConfirmInstanceDeletionBox.setEnabled(interactive);
         mcpConfirmModDeletionBox.setEnabled(interactive);
@@ -1331,4 +1539,5 @@ public final class SettingsCenterPanel extends JPanel implements AutoCloseable {
                 i18n("settings.restart.in_progress"),
                 i18n("settings.restart.failed"));
     }
+
 }

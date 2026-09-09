@@ -153,6 +153,14 @@ public final class SettingsRestartPanelTest {
             assertFalse(panel.isRestartRequired());
             assertFalse(restart.isEnabled());
 
+            panel.updateMcpSettings(false, 23968, "configured-token");
+            assertTrue(panel.isRestartRequired());
+            assertTrue(restart.isEnabled());
+
+            panel.updateMcpSettings(false, 23968, "");
+            assertFalse(panel.isRestartRequired());
+            assertFalse(restart.isEnabled());
+
             panel.updateMcpSettings(true, 23968);
             assertTrue(panel.isRestartRequired());
             assertTrue(restart.isEnabled());

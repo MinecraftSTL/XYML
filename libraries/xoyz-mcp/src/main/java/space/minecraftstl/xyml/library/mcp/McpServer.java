@@ -42,7 +42,20 @@ public final class McpServer implements AutoCloseable {
     /// @param serverInfo identity advertised during initialization
     /// @param features optional MCP feature providers
     public McpServer(int port, McpServerInfo serverInfo, McpFeatureSet features) {
-        this(port, serverInfo, features, Duration.ofHours(1), 256, System::currentTimeMillis);
+        this(port, serverInfo, features, "", Duration.ofHours(1), 256, System::currentTimeMillis);
+    }
+
+    /// Creates an MCP server with an optional bearer token for transport authentication.
+    ///
+    /// An empty token disables authentication for compatibility with existing loopback integrations. A non-empty
+    /// token is required on every request to the `/mcp` endpoint.
+    ///
+    /// @param port loopback TCP port, or zero to select an available port
+    /// @param serverInfo identity advertised during initialization
+    /// @param features optional MCP feature providers
+    /// @param bearerToken bearer token, or an empty string to disable authentication
+    public McpServer(int port, McpServerInfo serverInfo, McpFeatureSet features, String bearerToken) {
+        this(port, serverInfo, features, bearerToken, Duration.ofHours(1), 256, System::currentTimeMillis);
     }
 
     /// Creates a server with explicit session settings for deterministic package tests.
@@ -60,10 +73,31 @@ public final class McpServer implements AutoCloseable {
             Duration sessionTtl,
             int maxSessions,
             LongSupplier currentTimeMillis) {
+        this(port, serverInfo, features, "", sessionTtl, maxSessions, currentTimeMillis);
+    }
+
+    /// Creates an MCP server with explicit session and authentication settings for package tests.
+    ///
+    /// @param port loopback TCP port, or zero to select an available port
+    /// @param serverInfo identity advertised during initialization
+    /// @param features optional MCP feature providers
+    /// @param bearerToken bearer token, or an empty string to disable authentication
+    /// @param sessionTtl inactivity period before a session expires
+    /// @param maxSessions maximum number of retained sessions
+    /// @param currentTimeMillis time source returning epoch milliseconds
+    McpServer(
+            int port,
+            McpServerInfo serverInfo,
+            McpFeatureSet features,
+            String bearerToken,
+            Duration sessionTtl,
+            int maxSessions,
+            LongSupplier currentTimeMillis) {
         transport = new McpHttpTransport(
                 port,
                 Objects.requireNonNull(serverInfo, "serverInfo"),
                 Objects.requireNonNull(features, "features"),
+                Objects.requireNonNull(bearerToken, "bearerToken"),
                 Objects.requireNonNull(sessionTtl, "sessionTtl"),
                 maxSessions,
                 Objects.requireNonNull(currentTimeMillis, "currentTimeMillis"));

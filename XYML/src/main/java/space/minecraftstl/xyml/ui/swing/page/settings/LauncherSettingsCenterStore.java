@@ -266,6 +266,15 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         write(() -> settings.mcpEnabledProperty().set(enabled));
     }
 
+    /// Queues a bearer-token write for the local MCP HTTP listener.
+    ///
+    /// @param token bearer token, which may be empty
+    @Override
+    public void setMcpBearerToken(String token) {
+        String checkedToken = Objects.requireNonNull(token, "token");
+        write(() -> settings.mcpBearerTokenProperty().set(checkedToken));
+    }
+
     /// Queues the local MCP server port write.
     ///
     /// @param port loopback TCP port in the range 1..65535
@@ -291,6 +300,14 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
     @Override
     public void setMcpConfirmModDeletion(boolean required) {
         write(() -> settings.mcpConfirmModDeletionProperty().set(required));
+    }
+
+    /// Queues the MCP enablement-warning preference write.
+    ///
+    /// @param show whether the warning should be shown before enabling MCP
+    @Override
+    public void setShowMcpEnablementWarning(boolean show) {
+        write(() -> settings.showMcpEnablementWarningProperty().set(show));
     }
 
     /// Releases subscriptions and blocks later writes.
@@ -325,10 +342,13 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
         propertySubscriptions.add(settings.proxyUserProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.proxyPasswordProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.mcpEnabledProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(settings.mcpBearerTokenProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.mcpPortProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(
                 settings.mcpConfirmInstanceDeletionProperty().subscribe(change -> scheduleRefreshSnapshot()));
         propertySubscriptions.add(settings.mcpConfirmModDeletionProperty().subscribe(change -> scheduleRefreshSnapshot()));
+        propertySubscriptions.add(
+                settings.showMcpEnablementWarningProperty().subscribe(change -> scheduleRefreshSnapshot()));
     }
 
     /// Queues a launcher-state snapshot refresh after one property change.
@@ -384,9 +404,11 @@ public final class LauncherSettingsCenterStore implements SettingsCenterStore {
                 Objects.requireNonNullElse(configuredProxyUsername, ""),
                 Objects.requireNonNullElse(configuredProxyPassword, ""),
                 settings.mcpEnabledProperty().get(),
+                Objects.requireNonNullElse(settings.mcpBearerTokenProperty().get(), ""),
                 settings.mcpPortProperty().get(),
                 settings.mcpConfirmInstanceDeletionProperty().get(),
                 settings.mcpConfirmModDeletionProperty().get(),
+                settings.showMcpEnablementWarningProperty().get(),
                 writableSupplier.getAsBoolean());
     }
 

@@ -445,7 +445,8 @@ public final class Launcher {
                             new SwingMcpMissingDependencySearch(
                                     ACTIVE_SWING_RUNTIME::get,
                                     mcpRepairActionsAllowed::get),
-                            mcpRepairActionsAllowed::get));
+                            mcpRepairActionsAllowed::get),
+                    Objects.requireNonNullElse(settings().mcpBearerTokenProperty().get(), ""));
             server.startListener();
             mcpServer = server;
             LOG.info("MCP server listening on http://127.0.0.1:" + server.getListeningPort() + "/mcp");

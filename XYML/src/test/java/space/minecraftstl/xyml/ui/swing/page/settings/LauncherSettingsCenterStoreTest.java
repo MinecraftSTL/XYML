@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import space.minecraftstl.xyml.setting.LauncherSettings;
 import space.minecraftstl.xyml.ui.swing.runtime.LauncherStateDispatcher;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -38,6 +39,18 @@ public final class LauncherSettingsCenterStoreTest {
             try {
                 assertTrue(store.snapshot().mcpConfirmInstanceDeletion());
                 assertTrue(store.snapshot().mcpConfirmModDeletion());
+                assertEquals("", store.snapshot().mcpBearerToken());
+                assertTrue(store.snapshot().showMcpEnablementWarning());
+
+                store.setMcpBearerToken("configured-token");
+                store.setShowMcpEnablementWarning(false);
+
+                assertEquals("configured-token", settings.mcpBearerTokenProperty().get());
+                assertFalse(settings.showMcpEnablementWarningProperty().get());
+                assertEquals("configured-token", store.snapshot().mcpBearerToken());
+                assertFalse(store.snapshot().showMcpEnablementWarning());
+                store.setMcpBearerToken("token with spaces");
+                assertEquals("token with spaces", settings.mcpBearerTokenProperty().get());
 
                 store.setMcpConfirmInstanceDeletion(false);
 

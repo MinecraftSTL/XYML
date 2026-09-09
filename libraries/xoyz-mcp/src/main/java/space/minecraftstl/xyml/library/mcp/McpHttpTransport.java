@@ -28,9 +28,16 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -72,6 +79,12 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
     /// Header required for JSON-RPC POST bodies.
     private static final String CONTENT_TYPE_HEADER = "Content-Type";
 
+    /// Header carrying the optional HTTP Bearer credential.
+    private static final String AUTHORIZATION_HEADER = "Authorization";
+
+    /// Challenge sent when a request lacks a valid Bearer credential.
+    private static final String BEARER_CHALLENGE = "Bearer";
+
     /// Current protocol version used when a client requests an unsupported version.
     private static final String CURRENT_PROTOCOL_VERSION = "2025-11-25";
 
@@ -89,6 +102,9 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
 
     /// Default maximum number of simultaneously retained sessions.
     private static final int DEFAULT_MAX_SESSIONS = 256;
+
+    /// Maximum raw request-header bytes retained by the duplicate-header guard.
+    private static final int RAW_HEADER_LIMIT = 16 * 1024;
 
     /// Streamable HTTP protocol versions whose message surface is compatible with this server.
     /// The legacy 2024-11-05 HTTP/SSE transport is intentionally not advertised.
@@ -133,13 +149,39 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
     /// Time source used for session expiration and activity renewal.
     private final LongSupplier currentTimeMillis;
 
+    /// SHA-256 digest of the configured bearer token, or null when transport authentication is disabled.
+    private final byte @Nullable [] bearerTokenDigest;
+
+    /// Private token copy used only to redact accidental echoes in provider results and error text.
+    private final @Nullable String bearerTokenForRedaction;
+
+    /// Raw request-header state bound to the NanoHTTPD client thread.
+    private final ThreadLocal<RawRequestContext> rawRequestContext = new ThreadLocal<>();
+
     /// Creates a loopback MCP server without starting its listener.
-    ///
     /// @param port loopback TCP port, or zero to select an available port
     /// @param serverInfo identity advertised during initialization
     /// @param features optional MCP feature providers
     McpHttpTransport(int port, McpServerInfo serverInfo, McpFeatureSet features) {
-        this(port, serverInfo, features, DEFAULT_SESSION_TTL, DEFAULT_MAX_SESSIONS, System::currentTimeMillis);
+        this(port, serverInfo, features, "", DEFAULT_SESSION_TTL, DEFAULT_MAX_SESSIONS, System::currentTimeMillis);
+    }
+
+    /// Creates a loopback MCP server with an optional bearer token.
+    /// An empty token disables transport authentication. A non-empty token is checked before any method-specific
+    /// negotiation or session lookup.
+    /// @param port loopback TCP port, or zero to select an available port
+    /// @param serverInfo identity advertised during initialization
+    /// @param features optional MCP feature providers
+    /// @param bearerToken bearer token, or an empty string to disable authentication
+    McpHttpTransport(int port, McpServerInfo serverInfo, McpFeatureSet features, String bearerToken) {
+        this(
+                port,
+                serverInfo,
+                features,
+                bearerToken,
+                DEFAULT_SESSION_TTL,
+                DEFAULT_MAX_SESSIONS,
+                System::currentTimeMillis);
     }
 
     /// Creates a loopback MCP server with explicit session lifecycle settings.
@@ -159,6 +201,26 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
             Duration sessionTtl,
             int maxSessions,
             LongSupplier currentTimeMillis) {
+        this(port, serverInfo, features, "", sessionTtl, maxSessions, currentTimeMillis);
+    }
+
+    /// Creates a loopback MCP server with explicit session and authentication settings.
+    ///
+    /// @param port loopback TCP port, or zero to select an available port
+    /// @param serverInfo identity advertised during initialization
+    /// @param features optional MCP feature providers
+    /// @param bearerToken bearer token, or an empty string to disable authentication
+    /// @param sessionTtl inactivity period before a session expires
+    /// @param maxSessions maximum number of retained sessions
+    /// @param currentTimeMillis time source returning epoch milliseconds
+    McpHttpTransport(
+            int port,
+            McpServerInfo serverInfo,
+            McpFeatureSet features,
+            String bearerToken,
+            Duration sessionTtl,
+            int maxSessions,
+            LongSupplier currentTimeMillis) {
         super("127.0.0.1", validatePort(port));
         this.serverInfo = Objects.requireNonNull(serverInfo, "serverInfo");
         McpFeatureSet configuredFeatures = Objects.requireNonNull(features, "features");
@@ -168,6 +230,17 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
         sessionTtlMillis = validateSessionTtl(sessionTtl);
         this.maxSessions = validateMaxSessions(maxSessions);
         this.currentTimeMillis = Objects.requireNonNull(currentTimeMillis, "currentTimeMillis");
+        String checkedBearerToken = Objects.requireNonNull(bearerToken, "bearerToken");
+        bearerTokenDigest = digestBearerToken(checkedBearerToken);
+        bearerTokenForRedaction = checkedBearerToken.isEmpty() ? null : checkedBearerToken;
+    }
+
+    /// Wraps each NanoHTTPD client stream so duplicate or ambiguously padded Authorization headers remain visible
+    /// to the transport guard before NanoHTTPD normalizes them into a map.
+    @Override
+    protected ClientHandler createClientHandler(Socket socket, InputStream inputStream) {
+        RawRequestContext context = new RawRequestContext();
+        return new RawCheckingClientHandler(socket, inputStream, context);
     }
 
     /// Starts the loopback HTTP listener using NanoHTTPD's daemon mode.
@@ -188,22 +261,52 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
     @Override
     public Response serve(IHTTPSession session) {
         Objects.requireNonNull(session, "session");
-        if (!MCP_PATH.equals(session.getUri())) {
-            Response response = newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found");
-            response.closeConnection(true);
-            return response;
-        }
-        @Unmodifiable Map<String, String> headers = Map.copyOf(session.getHeaders());
+        @Nullable RawRequestContext rawContext = rawRequestContext.get();
         try {
-            validateOrigin(headers);
-            return switch (session.getMethod()) {
-                case POST -> servePost(session, headers);
-                case GET -> serveGet(headers);
-                case DELETE -> serveDelete(headers);
-                default -> methodNotAllowed();
-            };
-        } catch (TransportException exception) {
-            return transportError(exception, headers);
+            if (!MCP_PATH.equals(session.getUri())) {
+                Response response = newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found");
+                response.closeConnection(true);
+                return response;
+            }
+            final @Unmodifiable Map<String, String> headers;
+            try {
+                headers = Map.copyOf(session.getHeaders());
+            } catch (RuntimeException malformedHeaders) {
+                Response response = transportError(
+                        new TransportException(
+                                Response.Status.BAD_REQUEST,
+                                TRANSPORT_ERROR_CODE,
+                                "Malformed request headers",
+                                false),
+                        Map.of());
+                response.closeConnection(true);
+                return response;
+            }
+            try {
+                if (rawContext != null && rawContext.originMalformed()) {
+                    throw forbiddenOrigin("Duplicate or malformed Origin header");
+                }
+                validateOrigin(headers);
+                authenticate(headers, rawContext);
+                Response response = switch (session.getMethod()) {
+                    case POST -> servePost(session, headers);
+                    case GET -> serveGet(headers);
+                    case DELETE -> serveDelete(headers);
+                    default -> methodNotAllowed();
+                };
+                // NanoHTTPD may prefetch bytes from a pipelined connection. Closing every
+                // response keeps the raw-header duplicate check scoped to exactly one request.
+                response.closeConnection(true);
+                return response;
+            } catch (TransportException exception) {
+                Response response = transportError(exception, headers);
+                response.closeConnection(true);
+                return response;
+            }
+        } finally {
+            if (rawContext != null) {
+                rawContext.resetForNextRequest();
+            }
         }
     }
 
@@ -682,7 +785,10 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
     /// @return JSON HTTP response
     private Response jsonResponse(Response.Status status, JsonObject response) {
         return newFixedLengthResponse(
-                status, JSON_MEDIA_TYPE, gson.toJson(Objects.requireNonNull(response, "response")));
+                status,
+                JSON_MEDIA_TYPE,
+                gson.toJson(JsonCredentialRedactor.redact(
+                        Objects.requireNonNull(response, "response"), bearerTokenForRedaction)));
     }
 
     /// Serializes one JSON-RPC response as an SSE event when the client requires that representation.
@@ -692,7 +798,8 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
     /// @return SSE HTTP response
     private Response sseResponse(Response.Status status, JsonObject response) {
         String event = "event: message\ndata: "
-                + gson.toJson(Objects.requireNonNull(response, "response")) + "\n\n";
+                + gson.toJson(JsonCredentialRedactor.redact(
+                        Objects.requireNonNull(response, "response"), bearerTokenForRedaction)) + "\n\n";
         Response result = newFixedLengthResponse(status, SSE_MEDIA_TYPE, event);
         result.addHeader("Cache-Control", "no-cache, no-transform");
         return result;
@@ -711,12 +818,17 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
                 Objects.requireNonNull(exception.getMessage(), "transport error message"));
         Response response = jsonResponse(exception.status(), body);
         response.closeConnection(true);
-        @Nullable String suppliedSessionId = normalizedSessionId(headerValue(headers, SESSION_HEADER));
-        if (suppliedSessionId != null) {
-            @Nullable SessionState state = sessions.get(suppliedSessionId);
-            if (state != null) {
-                addSessionHeaders(response, suppliedSessionId, state.protocolVersion());
+        if (exception.exposeSessionContext()) {
+            @Nullable String suppliedSessionId = normalizedSessionId(headerValue(headers, SESSION_HEADER));
+            if (suppliedSessionId != null) {
+                @Nullable SessionState state = sessions.get(suppliedSessionId);
+                if (state != null) {
+                    addSessionHeaders(response, suppliedSessionId, state.protocolVersion());
+                }
             }
+        }
+        if (exception.status() == Response.Status.UNAUTHORIZED) {
+            response.addHeader("WWW-Authenticate", BEARER_CHALLENGE);
         }
         return response;
     }
@@ -874,11 +986,143 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
         return "application/json".equals(mediaType);
     }
 
+    /// Authenticates a request before any protocol or provider operation is evaluated.
+    ///
+    /// The configured digest is absent when authentication is intentionally disabled by an empty token. When a token
+    /// is configured, the Authorization value is parsed strictly and duplicate names are rejected, so callers cannot
+    /// rely on ambiguous proxy merging or malformed credentials.
+    ///
+    /// @param headers immutable request headers
+    private void authenticate(
+            @Unmodifiable Map<String, String> headers,
+            @Nullable RawRequestContext rawContext) {
+        @Nullable byte[] expectedDigest = bearerTokenDigest;
+        if (expectedDigest == null) {
+            return;
+        }
+        if (rawContext != null && (rawContext.authorizationMalformed() || rawContext.headersMalformed())) {
+            throw unauthorized();
+        }
+        @Nullable String rawAuthorization = singleHeaderValue(headers, AUTHORIZATION_HEADER);
+        if (rawContext != null && rawContext.headerParsed() && rawContext.rawAuthorization() != null) {
+            rawAuthorization = rawContext.rawAuthorization();
+        }
+        @Nullable String suppliedToken = rawAuthorization == null ? null : parseBearerCredential(rawAuthorization);
+        byte[] suppliedDigest = sha256(suppliedToken == null ? "" : suppliedToken);
+        try {
+            if (!MessageDigest.isEqual(expectedDigest, suppliedDigest)) {
+                throw unauthorized();
+            }
+        } finally {
+            Arrays.fill(suppliedDigest, (byte) 0);
+        }
+    }
+
+    /// Parses one Authorization header without exposing credential contents in errors.
+    ///
+    /// The parser accepts exactly one ASCII space between the case-insensitive scheme and credential, but does not
+    /// trim the field value. Consequently, leading/trailing spaces, tabs, and control characters are rejected instead
+    /// of being silently normalized into a different credential.
+    ///
+    /// @param rawAuthorization raw Authorization value
+    /// @return supplied bearer token
+    private static String parseBearerCredential(String rawAuthorization) {
+        String raw = Objects.requireNonNull(rawAuthorization, "rawAuthorization");
+        int separator = raw.indexOf(' ');
+        if (separator <= 0
+                || !BEARER_CHALLENGE.equalsIgnoreCase(raw.substring(0, separator))) {
+            throw unauthorized();
+        }
+        if (separator + 1 >= raw.length() || raw.indexOf(' ', separator + 1) >= 0) {
+            throw unauthorized();
+        }
+        String token = raw.substring(separator + 1);
+        if (!isValidBearerToken(token)) {
+            throw unauthorized();
+        }
+        return token;
+    }
+
+    /// Returns one case-insensitive header value and rejects duplicate names.
+    ///
+    /// @param headers immutable request headers
+    /// @param name header name
+    /// @return header value, or null when absent
+    private static @Nullable String singleHeaderValue(
+            @Unmodifiable Map<String, String> headers,
+            String name) {
+        @Nullable String value = null;
+        int matches = 0;
+        for (Map.Entry<String, String> entry : headers.entrySet()) {
+            if (name.equalsIgnoreCase(entry.getKey())) {
+                matches++;
+                value = entry.getValue();
+            }
+        }
+        if (matches > 1) {
+            throw unauthorized();
+        }
+        if (matches == 1 && AUTHORIZATION_HEADER.equalsIgnoreCase(name)
+                && value != null && value.indexOf(',') >= 0) {
+            throw unauthorized();
+        }
+        return value;
+    }
+
+    /// Creates a generic unauthorized transport failure.
+    ///
+    /// @return unauthorized exception without session or credential context
+    private static TransportException unauthorized() {
+        return new TransportException(Response.Status.UNAUTHORIZED, TRANSPORT_ERROR_CODE,
+                "Unauthorized", false);
+    }
+
+    /// Hashes one credential with a fixed algorithm for constant-time digest comparison.
+    ///
+    /// @param token token text
+    /// @return SHA-256 digest
+    private static byte[] sha256(String token) {
+        try {
+            return MessageDigest.getInstance("SHA-256")
+                    .digest(Objects.requireNonNull(token, "token").getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    /// Validates and digests the configured bearer token.
+    ///
+    /// @param token configured token, or an empty value to disable authentication
+    /// @return token digest, or null when authentication is disabled
+    private static byte @Nullable [] digestBearerToken(String token) {
+        String checkedToken = Objects.requireNonNull(token, "token");
+        if (checkedToken.isEmpty()) {
+            return null;
+        }
+        // Configuration is persisted verbatim. Wire-level syntax is validated only for the
+        // incoming Authorization field; an unsupported configured value simply cannot match it.
+        return sha256(checkedToken);
+    }
+
+    /// Checks the opaque token subset that can be carried unambiguously in an Authorization header.
+    ///
+    /// @param token token text
+    /// @return whether the token contains only printable non-whitespace, non-comma ASCII characters
+    private static boolean isValidBearerToken(String token) {
+        for (int index = 0; index < token.length(); index++) {
+            char character = token.charAt(index);
+            if (character < 0x21 || character > 0x7E || character == ',') {
+                return false;
+            }
+        }
+        return !token.isEmpty();
+    }
+
     /// Validates an optional Origin header against the loopback listener.
     ///
     /// @param headers immutable request headers
     private static void validateOrigin(@Unmodifiable Map<String, String> headers) {
-        @Nullable String origin = normalizedHeaderValue(headerValue(headers, "Origin"));
+        @Nullable String origin = normalizedHeaderValue(singleNonAuthorizationHeaderValue(headers, "Origin"));
         if (origin == null) {
             return;
         }
@@ -886,7 +1130,7 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
         try {
             parsed = URI.create(origin);
         } catch (IllegalArgumentException exception) {
-            throw new TransportException(Response.Status.FORBIDDEN, "Invalid Origin header");
+            throw forbiddenOrigin("Invalid Origin header");
         }
         @Nullable String host = parsed.getHost();
         if (host != null && host.startsWith("[") && host.endsWith("]")) {
@@ -901,8 +1145,17 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
                 || !path.isEmpty()
                 || parsed.getQuery() != null
                 || parsed.getFragment() != null) {
-            throw new TransportException(Response.Status.FORBIDDEN, "Origin is not allowed");
+            throw forbiddenOrigin("Origin is not allowed");
         }
+    }
+
+    /// Creates an Origin rejection that never echoes caller-supplied session metadata.
+    ///
+    /// @param message stable Origin rejection message
+    /// @return non-contextual forbidden transport failure
+    private static TransportException forbiddenOrigin(String message) {
+        return new TransportException(Response.Status.FORBIDDEN, TRANSPORT_ERROR_CODE,
+                Objects.requireNonNull(message, "message"), false);
     }
 
     /// Looks up a request header without depending on NanoHTTPD's key casing.
@@ -919,6 +1172,28 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
             }
         }
         return null;
+    }
+
+    /// Returns one case-insensitive non-Authorization header value and rejects ambiguous duplicates.
+    ///
+    /// @param headers immutable request headers
+    /// @param name header name
+    /// @return header value, or null when absent
+    private static @Nullable String singleNonAuthorizationHeaderValue(
+            @Unmodifiable Map<String, String> headers,
+            String name) {
+        @Nullable String value = null;
+        int matches = 0;
+        for (Map.Entry<String, String> entry : headers.entrySet()) {
+            if (name.equalsIgnoreCase(entry.getKey())) {
+                matches++;
+                value = entry.getValue();
+            }
+        }
+        if (matches > 1) {
+            throw forbiddenOrigin("Duplicate Origin header");
+        }
+        return value;
     }
 
     /// Normalizes a header value while treating blank values as absent.
@@ -1216,6 +1491,355 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
         return maxSessions;
     }
 
+    /// Client handler that keeps raw header occurrences visible to the transport authentication boundary.
+    @NotNullByDefault
+    private final class RawCheckingClientHandler extends ClientHandler {
+        /// Header state shared with the stream wrapper and the request dispatcher.
+        private final RawRequestContext context;
+
+        /// Creates a handler around one accepted socket and its raw input stream.
+        ///
+        /// @param socket accepted client socket
+        /// @param inputStream raw socket input
+        /// @param context per-connection header state
+        private RawCheckingClientHandler(Socket socket, InputStream inputStream, RawRequestContext context) {
+            super(new RawHeaderInputStream(inputStream, context), socket);
+            this.context = Objects.requireNonNull(context, "context");
+        }
+
+        /// Binds the raw-header state to the NanoHTTPD request thread for the whole keep-alive connection.
+        @Override
+        public void run() {
+            rawRequestContext.set(context);
+            try {
+                super.run();
+            } finally {
+                rawRequestContext.remove();
+            }
+        }
+    }
+
+    /// Input wrapper that parses only the first header block of each keep-alive request.
+    @NotNullByDefault
+    private static final class RawHeaderInputStream extends InputStream {
+        /// Underlying NanoHTTPD socket stream.
+        private final InputStream delegate;
+
+        /// Per-connection raw-header state.
+        private final RawRequestContext context;
+
+        /// Header bytes retained until the first empty line.
+        private final ByteArrayOutputStream header = new ByteArrayOutputStream();
+
+        /// Context generation represented by the local parser state.
+        private long observedGeneration = -1L;
+
+        /// Whether this request's header block has already been parsed.
+        private boolean complete;
+
+        /// Last four bytes used to detect a header terminator without copying the whole buffer.
+        private final int[] tail = new int[4];
+
+        /// Number of valid bytes currently held in [#tail].
+        private int tailLength;
+
+        /// Creates a raw-header stream wrapper.
+        ///
+        /// @param delegate underlying socket stream
+        /// @param context per-connection parser state
+        private RawHeaderInputStream(InputStream delegate, RawRequestContext context) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+            this.context = Objects.requireNonNull(context, "context");
+        }
+
+        /// Reads and observes one byte.
+        @Override
+        public int read() throws IOException {
+            int value = delegate.read();
+            if (value >= 0) {
+                observe(value);
+            }
+            return value;
+        }
+
+        /// Reads and observes a byte range without retaining request bodies.
+        @Override
+        public int read(byte[] bytes, int offset, int length) throws IOException {
+            Objects.checkFromIndexSize(offset, length, bytes.length);
+            if (length == 0) {
+                return 0;
+            }
+            resetForNewGeneration();
+            if (complete) {
+                return delegate.read(bytes, offset, length);
+            }
+
+            // Stop the underlying read at the first header terminator. Otherwise BufferedInputStream could consume
+            // the body or the next keep-alive request before this guard gets a chance to inspect its headers.
+            int first = read();
+            if (first < 0) {
+                return -1;
+            }
+            bytes[offset] = (byte) first;
+            int count = 1;
+            while (count < length && !complete) {
+                int value = delegate.read();
+                if (value < 0) {
+                    break;
+                }
+                bytes[offset + count] = (byte) value;
+                observe(value);
+                count++;
+            }
+            return count;
+        }
+
+        /// Closes the wrapped socket stream.
+        @Override
+        public void close() throws IOException {
+            delegate.close();
+        }
+
+        /// Observes one header byte and parses the block once its terminator arrives.
+        private void observe(int value) {
+            resetForNewGeneration();
+            if (complete) {
+                return;
+            }
+            if (header.size() >= RAW_HEADER_LIMIT) {
+                context.markMalformed();
+                complete = true;
+                return;
+            }
+            header.write(value);
+            if (tailLength < tail.length) {
+                tail[tailLength++] = value;
+            } else {
+                tail[0] = tail[1];
+                tail[1] = tail[2];
+                tail[2] = tail[3];
+                tail[3] = value;
+            }
+            if ((tailLength >= 4
+                    && tail[tailLength - 4] == '\r'
+                    && tail[tailLength - 3] == '\n'
+                    && tail[tailLength - 2] == '\r'
+                    && tail[tailLength - 1] == '\n')
+                    || (tailLength >= 2
+                    && tail[tailLength - 2] == '\n'
+                    && tail[tailLength - 1] == '\n')) {
+                complete = true;
+                context.parse(header.toByteArray());
+            }
+        }
+
+        /// Resets local parsing state when the dispatcher starts the next keep-alive request.
+        private void resetForNewGeneration() {
+            long generation = context.generation();
+            if (observedGeneration == generation) {
+                return;
+            }
+            observedGeneration = generation;
+            header.reset();
+            complete = false;
+            tailLength = 0;
+        }
+    }
+
+    /// Per-connection raw Authorization result consumed by the request dispatcher.
+    @NotNullByDefault
+    private static final class RawRequestContext {
+        /// Whether the current header block has been parsed.
+        private boolean headerParsed;
+
+        /// Whether the current block has duplicate or malformed Authorization syntax.
+        private boolean authorizationMalformed;
+
+        /// Whether the current block contains duplicate or ambiguously padded Origin syntax.
+        private boolean originMalformed;
+
+        /// Whether the current block contains any malformed field line that NanoHTTPD could silently ignore.
+        private boolean headersMalformed;
+
+        /// Exact Authorization field value after one legal header delimiter space.
+        private @Nullable String rawAuthorization;
+
+        /// Generation incremented after each dispatched request on a keep-alive connection.
+        private long generation;
+
+        /// Parses one raw ISO-8859-1 header block without retaining credentials after dispatch.
+        ///
+        /// @param bytes complete raw header block
+        private void parse(byte[] bytes) {
+            headerParsed = true;
+            authorizationMalformed = false;
+            originMalformed = false;
+            headersMalformed = false;
+            rawAuthorization = null;
+            try {
+                String text = new String(bytes, StandardCharsets.ISO_8859_1);
+                String[] lines = text.split("\\r\\n|\\n", -1);
+                int authorizationCount = 0;
+                int originCount = 0;
+                boolean previousAuthorization = false;
+                boolean previousOrigin = false;
+                for (int index = 1; index < lines.length; index++) {
+                    String line = lines[index];
+                    if (line.isEmpty()) {
+                        break;
+                    }
+                    if (line.startsWith(" ") || line.startsWith("\t")) {
+                        headersMalformed = true;
+                        if (previousAuthorization) {
+                            authorizationMalformed = true;
+                        }
+                        if (previousOrigin) {
+                            originMalformed = true;
+                        }
+                        continue;
+                    }
+                    int separator = line.indexOf(':');
+                    if (separator <= 0) {
+                        headersMalformed = true;
+                        previousAuthorization = false;
+                        previousOrigin = false;
+                        continue;
+                    }
+                    String name = line.substring(0, separator);
+                    String normalizedName = name.strip();
+                    if (!isValidHeaderName(name) || !name.equals(normalizedName)
+                            || containsControl(line)) {
+                        headersMalformed = true;
+                    }
+                    previousAuthorization = AUTHORIZATION_HEADER.equalsIgnoreCase(normalizedName);
+                    previousOrigin = "Origin".equalsIgnoreCase(normalizedName);
+                    if (previousAuthorization && !AUTHORIZATION_HEADER.equalsIgnoreCase(name)) {
+                        // Some HTTP parsers trim field names before exposing them to the application. Reject a
+                        // padded Authorization name here so it cannot evade the raw duplicate-header guard.
+                        authorizationMalformed = true;
+                    }
+                    if (previousOrigin && !"Origin".equalsIgnoreCase(name)) {
+                        // Reject padded Origin names because NanoHTTPD trims names before exposing them in its map.
+                        originMalformed = true;
+                    }
+                    if (!previousAuthorization) {
+                        if (!previousOrigin) {
+                            continue;
+                        }
+                    }
+                    String value = line.substring(separator + 1);
+                    if (previousAuthorization) {
+                        authorizationCount++;
+                        if (authorizationCount > 1) {
+                            authorizationMalformed = true;
+                        }
+                        if (value.startsWith(" ")) {
+                            value = value.substring(1);
+                        } else if (value.startsWith("\t")) {
+                            authorizationMalformed = true;
+                        }
+                        if (value.startsWith(" ") || value.startsWith("\t")
+                                || value.endsWith(" ") || value.endsWith("\t")
+                                || containsControl(value) || value.indexOf(',') >= 0) {
+                            authorizationMalformed = true;
+                        }
+                        rawAuthorization = value;
+                    }
+                    if (previousOrigin) {
+                        originCount++;
+                        if (originCount > 1 || containsControl(value)) {
+                            originMalformed = true;
+                        }
+                    }
+                }
+            } catch (RuntimeException failure) {
+                authorizationMalformed = true;
+                headersMalformed = true;
+                rawAuthorization = null;
+            }
+        }
+
+        /// Marks the current request malformed when the raw header block exceeds the bounded parser size.
+        private void markMalformed() {
+            headerParsed = true;
+            authorizationMalformed = true;
+            originMalformed = true;
+            headersMalformed = true;
+            rawAuthorization = null;
+        }
+
+        /// Returns whether the current header block has been parsed.
+        private boolean headerParsed() {
+            return headerParsed;
+        }
+
+        /// Returns whether Authorization syntax was ambiguous or malformed.
+        private boolean authorizationMalformed() {
+            return authorizationMalformed;
+        }
+
+        /// Returns whether the current header block has duplicate or malformed Origin syntax.
+        private boolean originMalformed() {
+            return originMalformed;
+        }
+
+        /// Returns whether any header line is malformed, including syntax NanoHTTPD would otherwise ignore.
+        private boolean headersMalformed() {
+            return headersMalformed;
+        }
+
+        /// Returns the exact parsed Authorization value, or null when absent.
+        private @Nullable String rawAuthorization() {
+            return rawAuthorization;
+        }
+
+        /// Returns the current parser generation.
+        private long generation() {
+            return generation;
+        }
+
+        /// Clears credential state before the next request on a keep-alive connection.
+        private void resetForNextRequest() {
+            headerParsed = false;
+            authorizationMalformed = false;
+            originMalformed = false;
+            headersMalformed = false;
+            rawAuthorization = null;
+            generation++;
+        }
+
+        /// Validates an HTTP field name using the RFC token character set.
+        ///
+        /// @param name raw field name before parser normalization
+        /// @return whether the field name is syntactically valid
+        private static boolean isValidHeaderName(String name) {
+            if (name.isEmpty()) {
+                return false;
+            }
+            for (int index = 0; index < name.length(); index++) {
+                char character = name.charAt(index);
+                if (!(character >= 'a' && character <= 'z')
+                        && !(character >= 'A' && character <= 'Z')
+                        && !(character >= '0' && character <= '9')
+                        && "!#$%&'*+-.^_`|~".indexOf(character) < 0) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// Tests for header control characters that must never enter credential parsing.
+        private static boolean containsControl(String value) {
+            for (int index = 0; index < value.length(); index++) {
+                char character = value.charAt(index);
+                if (character < 0x20 || character == 0x7F) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
     /// Response representations supported by the Streamable HTTP negotiation.
     @NotNullByDefault
     private enum ResponseFormat {
@@ -1296,6 +1920,9 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
         /// HTTP status associated with the transport failure.
         private final Response.Status status;
 
+        /// Whether a supplied session identifier may be echoed in the error response.
+        private final boolean exposeSessionContext;
+
         /// Creates one transport failure.
         ///
         /// @param status HTTP status to return
@@ -1310,9 +1937,24 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
         /// @param code JSON-RPC error code
         /// @param message stable transport error description
         private TransportException(Response.Status status, int code, String message) {
+            this(status, code, message, true);
+        }
+
+        /// Creates a transport failure with explicit response-context visibility.
+        ///
+        /// @param status HTTP status to return
+        /// @param code JSON-RPC error code
+        /// @param message stable transport error description
+        /// @param exposeSessionContext whether a supplied session may be echoed
+        private TransportException(
+                Response.Status status,
+                int code,
+                String message,
+                boolean exposeSessionContext) {
             super(Objects.requireNonNull(message, "message"));
             this.code = code;
             this.status = Objects.requireNonNull(status, "status");
+            this.exposeSessionContext = exposeSessionContext;
         }
 
         /// Returns the JSON-RPC code associated with this failure.
@@ -1328,28 +1970,13 @@ final class McpHttpTransport extends NanoHTTPD implements AutoCloseable {
         private Response.Status status() {
             return status;
         }
-    }
 
-    /// Internal JSON-RPC error with an explicit protocol code.
-    @NotNullByDefault
-    private static final class ProtocolException extends RuntimeException {
-        /// JSON-RPC error code.
-        private final int code;
-
-        /// Creates one protocol error.
+        /// Returns whether response metadata may include a supplied session context.
         ///
-        /// @param code JSON-RPC error code
-        /// @param message stable error description
-        private ProtocolException(int code, String message) {
-            super(Objects.requireNonNull(message, "message"));
-            this.code = code;
-        }
-
-        /// Returns the JSON-RPC error code.
-        ///
-        /// @return error code
-        private int code() {
-            return code;
+        /// @return whether session metadata is safe to echo
+        private boolean exposeSessionContext() {
+            return exposeSessionContext;
         }
     }
+
 }

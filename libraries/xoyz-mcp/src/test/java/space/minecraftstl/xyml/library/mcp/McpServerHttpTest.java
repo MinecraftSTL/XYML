@@ -25,16 +25,19 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -64,6 +67,9 @@ public final class McpServerHttpTest {
     /// Complete feature set used by protocol tests.
     private static final McpFeatureSet FEATURES = new McpFeatureSet(
             new TestToolProvider(), new TestResourceProvider(), new TestPromptProvider());
+
+    /// Credential used by authentication coverage.
+    private static final String AUTH_TOKEN = "test-bearer-token";
 
     /// Performs the Streamable HTTP handshake and then uses the issued session for JSON requests.
     @Test
@@ -848,6 +854,292 @@ public final class McpServerHttpTest {
         }
     }
 
+    /// Rejects duplicate Origin fields before NanoHTTPD collapses them into one map entry.
+    @Test
+    public void rejectsDuplicateOriginHeaders() throws Exception {
+        try (McpServer server = createServer()) {
+            server.startListener();
+            try (Socket socket = new Socket("127.0.0.1", server.getListeningPort())) {
+                String body = initializeBody(2);
+                String request = "POST /mcp HTTP/1.1\r\n"
+                        + "Host: 127.0.0.1\r\n"
+                        + "Origin: http://localhost\r\n"
+                        + "Origin: https://localhost\r\n"
+                        + "Accept: " + ACCEPT_BOTH + "\r\n"
+                        + "Content-Type: application/json\r\n"
+                        + "Content-Length: " + body.getBytes(StandardCharsets.UTF_8).length + "\r\n"
+                        + "Connection: close\r\n\r\n"
+                        + body;
+                socket.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
+                socket.getOutputStream().flush();
+                String response = new String(socket.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                assertTrue(response.startsWith("HTTP/1.1 403"), response);
+            }
+        }
+    }
+
+    /// Requires the configured Bearer credential before initialization and every later HTTP method.
+    @Test
+    public void enforcesBearerAuthenticationAcrossMethods() throws Exception {
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, AUTH_TOKEN)) {
+            server.startListener();
+            URI endpoint = endpoint(server);
+            HttpClient client = HttpClient.newHttpClient();
+
+            HttpResponse<String> missing = post(
+                    client,
+                    endpoint,
+                    initializeBody(1),
+                    ACCEPT_BOTH,
+                    null,
+                    null);
+            assertEquals(401, missing.statusCode());
+            assertEquals("Bearer", requireHeader(missing, "WWW-Authenticate"));
+            assertFalse(missing.body().contains(AUTH_TOKEN));
+
+            HttpResponse<String> wrong = postWithAuthorization(
+                    client, endpoint, initializeBody(2), "Bearer wrong-token", null, null);
+            assertEquals(401, wrong.statusCode());
+            assertTrue(wrong.headers().firstValue("Mcp-Session-Id").isEmpty());
+
+            HttpResponse<String> initialized = postWithAuthorization(
+                    client, endpoint, initializeBody(3), "bearer " + AUTH_TOKEN, null, null);
+            assertEquals(200, initialized.statusCode());
+            String sessionId = requireHeader(initialized, "Mcp-Session-Id");
+
+            HttpResponse<String> missingPost = post(
+                    client,
+                    endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/list\"}",
+                    ACCEPT_BOTH,
+                    sessionId,
+                    PROTOCOL_VERSION);
+            assertEquals(401, missingPost.statusCode());
+            assertTrue(missingPost.headers().firstValue("Mcp-Session-Id").isEmpty());
+            assertFalse(missingPost.body().contains(sessionId));
+
+            HttpRequest missingGetRequest = HttpRequest.newBuilder(endpoint)
+                    .header("Accept", "text/event-stream")
+                    .header("Mcp-Session-Id", sessionId)
+                    .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+                    .GET()
+                    .build();
+            HttpResponse<String> missingGet = client.send(missingGetRequest, HttpResponse.BodyHandlers.ofString());
+            assertEquals(401, missingGet.statusCode());
+            assertTrue(missingGet.headers().firstValue("Mcp-Session-Id").isEmpty());
+
+            HttpRequest missingDeleteRequest = HttpRequest.newBuilder(endpoint)
+                    .header("Mcp-Session-Id", sessionId)
+                    .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+                    .DELETE()
+                    .build();
+            HttpResponse<String> missingDelete = client.send(
+                    missingDeleteRequest, HttpResponse.BodyHandlers.ofString());
+            assertEquals(401, missingDelete.statusCode());
+            assertTrue(missingDelete.headers().firstValue("Mcp-Session-Id").isEmpty());
+
+            HttpResponse<String> validPost = postWithAuthorization(
+                    client,
+                    endpoint,
+                    "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/list\"}",
+                    "Bearer " + AUTH_TOKEN,
+                    sessionId,
+                    PROTOCOL_VERSION);
+            assertEquals(200, validPost.statusCode());
+
+            HttpRequest validDeleteRequest = HttpRequest.newBuilder(endpoint)
+                    .header("Authorization", "Bearer " + AUTH_TOKEN)
+                    .header("Mcp-Session-Id", sessionId)
+                    .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+                    .DELETE()
+                    .build();
+            assertEquals(200, client.send(validDeleteRequest, HttpResponse.BodyHandlers.ofString()).statusCode());
+        }
+    }
+
+    /// Applies the Bearer gate before dispatching every supported NanoHTTPD method, including 405 responses.
+    @Test
+    public void authenticatesUnsupportedMethodsBeforeReturning405() throws Exception {
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, AUTH_TOKEN)) {
+            server.startListener();
+            URI endpoint = endpoint(server);
+            HttpClient client = HttpClient.newHttpClient();
+            for (String method : List.of("PUT", "HEAD", "OPTIONS", "TRACE", "PATCH")) {
+                HttpRequest missingAuthorization = HttpRequest.newBuilder(endpoint)
+                        .header("Accept", ACCEPT_BOTH)
+                        .method(method, HttpRequest.BodyPublishers.noBody())
+                        .build();
+                HttpResponse<String> missing = client.send(
+                        missingAuthorization, HttpResponse.BodyHandlers.ofString());
+                assertEquals(401, missing.statusCode(), method);
+                assertEquals("Bearer", requireHeader(missing, "WWW-Authenticate"), method);
+
+                HttpRequest validAuthorization = HttpRequest.newBuilder(endpoint)
+                        .header("Authorization", "Bearer " + AUTH_TOKEN)
+                        .header("Accept", ACCEPT_BOTH)
+                        .method(method, HttpRequest.BodyPublishers.noBody())
+                        .build();
+                HttpResponse<String> valid = client.send(
+                        validAuthorization, HttpResponse.BodyHandlers.ofString());
+                assertEquals(405, valid.statusCode(), method);
+                assertEquals("POST, DELETE", requireHeader(valid, "Allow"), method);
+            }
+        }
+    }
+
+    /// Ensures provider-returned values cannot accidentally expose the transport credential.
+    @Test
+    public void redactsBearerTokenFromStructuredProviderResponses() throws Exception {
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, AUTH_TOKEN)) {
+            server.startListener();
+            URI endpoint = endpoint(server);
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> initialized = postWithAuthorization(
+                    client, endpoint, initializeBody(50), "Bearer " + AUTH_TOKEN, null, null);
+            String sessionId = requireHeader(initialized, "Mcp-Session-Id");
+            String body = "{\"jsonrpc\":\"2.0\",\"id\":51,\"method\":\"tools/call\","
+                    + "\"params\":{\"name\":\"echo\",\"arguments\":{\"secret\":\""
+                    + AUTH_TOKEN + "\"}}}";
+            HttpResponse<String> response = postWithAuthorization(
+                    client, endpoint, body, "Bearer " + AUTH_TOKEN, sessionId, PROTOCOL_VERSION);
+            assertEquals(200, response.statusCode());
+            assertFalse(response.body().contains(AUTH_TOKEN));
+            assertTrue(response.body().contains("[REDACTED]"));
+        }
+    }
+
+    /// Redacts a one-character credential from values without corrupting JSON-RPC property names.
+    @Test
+    public void shortBearerTokenDoesNotCorruptStructuredResponses() throws Exception {
+        String shortToken = "i";
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, shortToken)) {
+            server.startListener();
+            URI endpoint = endpoint(server);
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> initialized = postWithAuthorization(
+                    client, endpoint, initializeBody(52), "Bearer " + shortToken, null, null);
+            assertEquals(200, initialized.statusCode());
+            assertEquals(52, jsonBody(initialized).get("id").getAsInt());
+            String sessionId = requireHeader(initialized, "Mcp-Session-Id");
+
+            String body = "{\"jsonrpc\":\"2.0\",\"id\":53,\"method\":\"tools/call\","
+                    + "\"params\":{\"name\":\"echo\",\"arguments\":{\"secret\":\"i\"}}}";
+            HttpResponse<String> response = postWithAuthorization(
+                    client, endpoint, body, "Bearer " + shortToken, sessionId, PROTOCOL_VERSION);
+            assertEquals(200, response.statusCode());
+            JsonObject parsed = jsonBody(response);
+            assertEquals("2.0", parsed.get("jsonrpc").getAsString());
+            assertEquals(53, parsed.get("id").getAsInt());
+            assertTrue(response.body().contains("[REDACTED]"));
+        }
+    }
+
+    /// Rejects two physical Authorization fields before NanoHTTPD can collapse them into one map entry.
+    @Test
+    public void rejectsDuplicateAuthorizationHeaders() throws Exception {
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, AUTH_TOKEN)) {
+            server.startListener();
+            String body = initializeBody(1);
+            String request = "POST /mcp HTTP/1.1\r\n"
+                    + "Host: 127.0.0.1\r\n"
+                    + "Authorization: Bearer " + AUTH_TOKEN + "\r\n"
+                    + "authorization: Bearer " + AUTH_TOKEN + "\r\n"
+                    + "Accept: " + ACCEPT_BOTH + "\r\n"
+                    + "Content-Type: application/json\r\n"
+                    + "Content-Length: " + body.getBytes(StandardCharsets.UTF_8).length + "\r\n"
+                    + "Connection: close\r\n\r\n"
+                    + body;
+            try (Socket socket = new Socket("127.0.0.1", server.getListeningPort())) {
+                socket.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
+                socket.getOutputStream().flush();
+                String response = new String(socket.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                assertRawUnauthorizedResponse(response);
+            }
+        }
+    }
+
+    /// Rejects an Authorization value containing a control character before credential comparison.
+    @Test
+    public void rejectsControlCharacterInAuthorizationHeader() throws Exception {
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, AUTH_TOKEN)) {
+            server.startListener();
+            String body = initializeBody(2);
+            String request = "POST /mcp HTTP/1.1\r\n"
+                    + "Host: 127.0.0.1\r\n"
+                    + "Authorization: Bearer " + AUTH_TOKEN + '\u0001' + "\r\n"
+                    + "Accept: " + ACCEPT_BOTH + "\r\n"
+                    + "Content-Type: application/json\r\n"
+                    + "Content-Length: " + body.getBytes(StandardCharsets.UTF_8).length + "\r\n"
+                    + "Connection: close\r\n\r\n"
+                    + body;
+            try (Socket socket = new Socket("127.0.0.1", server.getListeningPort())) {
+                socket.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
+                socket.getOutputStream().flush();
+                String response = new String(socket.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                assertRawUnauthorizedResponse(response);
+            }
+        }
+    }
+
+    /// Rejects malformed non-credential header lines when the bearer gate is enabled.
+    @Test
+    public void rejectsMalformedHeaderLinesWithBearerAuthentication() throws Exception {
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, AUTH_TOKEN)) {
+            server.startListener();
+            for (String malformedHeader : List.of(
+                    "Broken-Header\r\n",
+                    " X-Folded: value\r\n",
+                    "Bad Header: value\r\n",
+                    ": empty-name\r\n")) {
+                String body = initializeBody(30);
+                String request = "POST /mcp HTTP/1.1\r\n"
+                        + "Host: 127.0.0.1\r\n"
+                        + "Authorization: Bearer " + AUTH_TOKEN + "\r\n"
+                        + "Accept: " + ACCEPT_BOTH + "\r\n"
+                        + malformedHeader
+                        + "Content-Type: application/json\r\n"
+                        + "Content-Length: " + body.getBytes(StandardCharsets.UTF_8).length + "\r\n"
+                        + "Connection: close\r\n\r\n"
+                        + body;
+                try (Socket socket = new Socket("127.0.0.1", server.getListeningPort())) {
+                    socket.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
+                    socket.getOutputStream().flush();
+                    String response = new String(
+                            socket.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                    assertTrue(response.startsWith("HTTP/1.1 401"), response);
+                    assertFalse(response.contains(AUTH_TOKEN), response);
+                }
+            }
+        }
+    }
+
+    /// Persists any non-empty configured token verbatim; malformed wire credentials still fail closed.
+    @Test
+    public void acceptsOpaqueConfiguredBearerTokens() {
+        assertDoesNotThrow(() -> new McpServer(0, SERVER_INFO, FEATURES, "token with spaces"));
+        assertDoesNotThrow(() -> new McpServer(0, SERVER_INFO, FEATURES, "token\nwith-control"));
+    }
+
+    /// Rejects malformed request credentials without reflecting their contents.
+    @Test
+    public void rejectsMalformedBearerCredentials() throws Exception {
+        try (McpServer server = new McpServer(0, SERVER_INFO, FEATURES, AUTH_TOKEN)) {
+            server.startListener();
+            URI endpoint = endpoint(server);
+            HttpClient client = HttpClient.newHttpClient();
+            for (String authorization : List.of(
+                    "Basic " + AUTH_TOKEN,
+                    "Bearer",
+                    "Bearer " + AUTH_TOKEN + " extra",
+                    "Bearer " + AUTH_TOKEN + ",other")) {
+                HttpResponse<String> response = postWithAuthorization(
+                        client, endpoint, initializeBody(40), authorization, null, null);
+                assertEquals(401, response.statusCode());
+                assertFalse(response.body().contains(AUTH_TOKEN));
+            }
+        }
+    }
+
     /// Creates a server exposing deterministic test providers.
     ///
     /// @return unstarted test server
@@ -947,6 +1239,36 @@ public final class McpServerHttpTest {
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
+    /// Sends one JSON POST with an explicit Authorization header.
+    ///
+    /// @param client HTTP client
+    /// @param endpoint MCP endpoint
+    /// @param body request body
+    /// @param authorization Authorization header value
+    /// @param sessionId session identifier, or null before initialization
+    /// @param protocolVersion protocol version, or null before initialization
+    /// @return HTTP response
+    private static HttpResponse<String> postWithAuthorization(
+            HttpClient client,
+            URI endpoint,
+            String body,
+            String authorization,
+            @Nullable String sessionId,
+            @Nullable String protocolVersion) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(endpoint)
+                .header("Authorization", authorization)
+                .header("Content-Type", "application/json")
+                .header("Accept", ACCEPT_BOTH);
+        if (sessionId != null) {
+            builder.header("Mcp-Session-Id", sessionId);
+        }
+        if (protocolVersion != null) {
+            builder.header("MCP-Protocol-Version", protocolVersion);
+        }
+        HttpRequest request = builder.POST(HttpRequest.BodyPublishers.ofString(body)).build();
+        return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
     /// Parses a JSON response body.
     ///
     /// @param response HTTP response
@@ -973,6 +1295,17 @@ public final class McpServerHttpTest {
     private static String requireHeader(HttpResponse<String> response, String name) {
         return Objects.requireNonNull(response.headers().firstValue(name).orElse(null),
                 "Missing response header: " + name);
+    }
+
+    /// Verifies the security properties shared by raw unauthorized responses.
+    ///
+    /// @param response complete raw HTTP response
+    private static void assertRawUnauthorizedResponse(String response) {
+        assertTrue(response.startsWith("HTTP/1.1 401"), response);
+        assertTrue(response.lines().anyMatch(line -> "WWW-Authenticate: Bearer".equalsIgnoreCase(line)), response);
+        assertTrue(response.lines().noneMatch(line -> line.regionMatches(
+                true, 0, "Mcp-Session-Id:", 0, "Mcp-Session-Id:".length())), response);
+        assertFalse(response.contains(AUTH_TOKEN), response);
     }
 
     /// Supplies one deterministic tool for transport tests.
