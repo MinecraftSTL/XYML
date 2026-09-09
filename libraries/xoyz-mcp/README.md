@@ -3,11 +3,20 @@
 XoyzMCP is a compact Java 17 library for exposing application-provided tools, resources, and prompts through an MCP
 Streamable HTTP server. It implements JSON-RPC request handling, protocol-version negotiation, loopback HTTP safety,
 session identifiers, JSON responses, and optional SSE-formatted responses without imposing application-specific
-operations.
+operations. Applications can optionally configure a Bearer token; when configured, every request to `/mcp` must
+carry the matching `Authorization: Bearer <token>` header.
 
 The API accepts independent providers for the three MCP capability families. A capability is advertised only when its
 provider is present. Applications retain ownership of scheduling, authorization, filesystem access, and business
-operations.
+operations. An empty bearer token preserves the unauthenticated loopback mode; applications that expose the listener
+beyond a tightly controlled process should configure a non-empty token and still retain their own authorization policy.
+
+## Authentication
+
+The four transport entry points (`POST` initialization and messages, `GET`, `DELETE`, and transport errors) share one
+Bearer credential gate before session or provider dispatch. The token is never included in protocol responses or
+diagnostic text. Authorization header names are case-insensitive, but duplicate `Authorization` names are rejected as
+an invalid request. The server compares SHA-256 digests with a constant-time comparison; it does not log credentials.
 
 ## Coordinates
 
