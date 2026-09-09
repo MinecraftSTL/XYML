@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -40,6 +41,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /// The manager never blocks a caller while a resource is occupied. All state transitions happen under a short monitor,
 /// while future completion occurs after leaving that monitor. Owners use explicit ancestry rather than thread identity,
 /// allowing reentrant task chains to cross executors without making sibling tasks mutually reentrant.
+/// This is a process-internal coordination mechanism only: it does not provide inter-process exclusion, hard-link
+/// identity protection, or durability guarantees for a filesystem operation.
 @NotNullByDefault
 final class TaskResourceLockManager {
     /// Process-wide manager used by production task executors.
@@ -50,6 +53,16 @@ final class TaskResourceLockManager {
 
     /// Ordered pending acquisition requests.
     private final List<Waiter> waiters = new ArrayList<>();
+
+    /// Leases whose release failed and can still be retried within this process.
+    private final Set<Lease> residualLeases = Collections.newSetFromMap(new IdentityHashMap<>());
+
+    /// Resource ranges blocked while one or more residual leases await cleanup.
+    ///
+    /// This marker is kept separately from [#resourceStates] because a corrupted or externally repaired state can be
+    /// absent by the time the failed release is observed. New writes remain blocked until the owning lease completes a
+    /// retry; reads are outside this arbiter and remain unaffected.
+    private final Set<TaskResource> residualResources = new HashSet<>();
 
     /// Creates one isolated manager.
     TaskResourceLockManager() {
@@ -418,28 +431,109 @@ final class TaskResourceLockManager {
         }
     }
 
+    /// Returns immutable descriptions of residual leases owned by the supplied execution domains.
+    ///
+    /// @param executions execution domains whose residual leases are requested
+    /// @return stable residual resource descriptions
+    @Unmodifiable List<String> residualResourceDescriptions(Set<Execution> executions) {
+        Objects.requireNonNull(executions, "executions");
+        synchronized (this) {
+            return residualLeases.stream()
+                    .filter(lease -> executions.contains(lease.owner.execution))
+                    .flatMap(lease -> lease.resources.stream()
+                            .filter(resource -> !lease.releasedResources.contains(resource)))
+                    .map(TaskResource::toString)
+                    .distinct()
+                    .sorted()
+                    .toList();
+        }
+    }
+
+    /// Retries residual lease release a bounded number of times for the supplied execution domains.
+    ///
+    /// A failed lease remains in [#residualLeases] and is reported again. Successful leases remove themselves from
+    /// that set through [Lease#close()].
+    ///
+    /// @param executions execution domains whose residual leases should be retried
+    /// @return residual resource descriptions after the retry
+    @Unmodifiable List<String> retryResidualCleanup(Set<Execution> executions) {
+        Objects.requireNonNull(executions, "executions");
+        @Unmodifiable List<Lease> candidates;
+        synchronized (this) {
+            candidates = residualLeases.stream()
+                    .filter(lease -> executions.contains(lease.owner.execution))
+                    .toList();
+        }
+        for (Lease lease : candidates) {
+            try {
+                lease.close();
+            } catch (RuntimeException | Error ignored) {
+                // The lease remains retained and is reported to the caller for a later bounded retry.
+            }
+        }
+        return residualResourceDescriptions(executions);
+    }
+
     /// Releases one lease in reverse resource order and grants newly unblocked waiters.
     private void release(Lease lease) {
         ArrayList<Completion> completions;
+        ArrayList<String> residual = new ArrayList<>();
         synchronized (this) {
             List<TaskResource> resources = lease.resources;
+            boolean retryAttempt = residualLeases.contains(lease);
             for (int index = resources.size() - 1; index >= 0; index--) {
                 TaskResource resource = resources.get(index);
-                ResourceState state = Objects.requireNonNull(resourceStates.get(resource), "resource state");
+                if (lease.releasedResources.contains(resource)) {
+                    continue;
+                }
+                @Nullable ResourceState state = resourceStates.get(resource);
+                if (state == null) {
+                    if (retryAttempt) {
+                        // A failed cleanup may have been completed by an external lifecycle callback. Once the
+                        // bounded retry confirms that no holder remains, the process-local marker can converge.
+                        lease.releasedResources.add(resource);
+                    } else {
+                        residual.add(resource.toString());
+                        residualResources.add(resource);
+                    }
+                    continue;
+                }
                 @Nullable Integer count = state.holders.get(lease.owner);
                 if (count == null || count <= 0) {
-                    throw new IllegalStateException("Task resource was released without ownership: " + resource);
+                    if (retryAttempt) {
+                        lease.releasedResources.add(resource);
+                    } else {
+                        residual.add(resource.toString());
+                        residualResources.add(resource);
+                    }
+                    continue;
                 }
                 if (count == 1) {
                     state.holders.remove(lease.owner);
                 } else {
                     state.holders.put(lease.owner, count - 1);
                 }
+                lease.releasedResources.add(resource);
             }
             if (lease.owner.allowsDetachedChildren && !hasActiveHolder(lease.owner)) {
                 lease.owner.detached = true;
             }
             removeUnusedStates();
+            completions = new ArrayList<>(processWaiters());
+            removeUnusedStates();
+        }
+        complete(completions);
+        if (!residual.isEmpty()) {
+            throw new TaskResourceCleanupException(List.copyOf(residual));
+        }
+    }
+
+    /// Removes one successfully closed residual lease and wakes requests that were blocked by its marker.
+    private void completeLeaseClose(Lease lease) {
+        ArrayList<Completion> completions;
+        synchronized (this) {
+            residualLeases.remove(lease);
+            pruneResidualResources();
             completions = new ArrayList<>(processWaiters());
             removeUnusedStates();
         }
@@ -555,6 +649,9 @@ final class TaskResourceLockManager {
     /// Returns whether every conflicting holder belongs to the requester or one of its ancestors.
     private boolean canAcquire(Owner owner) {
         for (TaskResource requested : owner.requestedResources) {
+            if (residualResources.stream().anyMatch(requested::conflictsWith)) {
+                return false;
+            }
             for (Map.Entry<TaskResource, ResourceState> entry : resourceStates.entrySet()) {
                 if (!entry.getValue().holders.isEmpty() && requested.conflictsWith(entry.getKey())) {
                     for (Owner holder : entry.getValue().holders.keySet()) {
@@ -707,17 +804,37 @@ final class TaskResourceLockManager {
     }
 
     /// Completes grant and cancellation futures outside the state monitor.
+    ///
+    /// A caller may cancel a public future after a grant has been recorded but before this method publishes it.  The
+    /// unclaimed lease must then be closed; a cleanup failure is retained as a residual marker, but must not prevent
+    /// later grants in the same batch from being completed.  Every unclaimed lease is therefore attempted and failures
+    /// are aggregated after the batch has been drained.
     private static void complete(Collection<Completion> completions) {
+        @Nullable Throwable firstFailure = null;
         for (Completion completion : completions) {
             if (completion.lease != null) {
                 if (!completion.waiter.future.complete(completion.lease)) {
                     // A caller may cancel the public future after the grant was recorded but before this
                     // out-of-monitor completion runs. Reclaim the holder in that narrow race.
-                    completion.lease.close();
+                    try {
+                        completion.lease.close();
+                    } catch (RuntimeException | Error failure) {
+                        if (firstFailure == null) {
+                            firstFailure = failure;
+                        } else if (firstFailure != failure) {
+                            firstFailure.addSuppressed(failure);
+                        }
+                    }
                 }
             } else {
                 completion.waiter.future.cancel(false);
             }
+        }
+        if (firstFailure instanceof RuntimeException failure) {
+            throw failure;
+        }
+        if (firstFailure instanceof Error failure) {
+            throw failure;
         }
     }
 
@@ -882,6 +999,9 @@ final class TaskResourceLockManager {
         /// Whether release has already occurred.
         private final AtomicBoolean closed = new AtomicBoolean();
 
+        /// Resources already released by a partially successful cleanup attempt.
+        private final Set<TaskResource> releasedResources = new HashSet<>();
+
         /// Creates one granted lease with the exact canonical resources recorded at grant time.
         private Lease(
                 TaskResourceLockManager manager,
@@ -896,9 +1016,25 @@ final class TaskResourceLockManager {
         @Override
         public void close() {
             if (closed.compareAndSet(false, true)) {
-                manager.release(this);
+                try {
+                    manager.release(this);
+                    manager.completeLeaseClose(this);
+                } catch (RuntimeException | Error failure) {
+                    closed.set(false);
+                    synchronized (manager) {
+                        manager.residualLeases.add(this);
+                        manager.pruneResidualResources();
+                    }
+                    throw failure;
+                }
             }
         }
+    }
+
+    /// Removes residual markers no longer backed by an unreleased lease.
+    private void pruneResidualResources() {
+        residualResources.removeIf(resource -> residualLeases.stream()
+                .noneMatch(lease -> lease.resources.contains(resource) && !lease.releasedResources.contains(resource)));
     }
 
     /// Mutable state retained for one exact declared resource key.

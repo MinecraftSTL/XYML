@@ -25,6 +25,7 @@ import org.junit.jupiter.api.io.TempDir;
 import space.minecraftstl.xyml.util.function.ExceptionalRunnable;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -1140,6 +1141,77 @@ public final class AsyncTaskExecutorResourceTest {
                 TaskResource.downloadTarget(instance.resolve(".xyml-installers/temporary.jar")));
 
         assertTrue(completion.releasesResourcesBeforeDependencies());
+    }
+
+    /// Verifies a failed early handoff does not deadlock terminal reacquisition on its own residual marker.
+    @Test
+    public void handoffCleanupFailureDoesNotDeadlockTerminalReacquisition() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource resource = target("handoff-residual.jar");
+        CountDownLatch taskStarted = new CountDownLatch(1);
+        CountDownLatch releaseTask = new CountDownLatch(1);
+        Task<?> task = Task.runAsync(() -> {
+            taskStarted.countDown();
+            await(releaseTask);
+        }).setResources(resource).releaseResourcesBeforeDependencies();
+        AsyncTaskExecutor executor = new AsyncTaskExecutor(task, manager);
+
+        CompletableFuture<Boolean> result = CompletableFuture.supplyAsync(executor::test);
+        assertTrue(taskStarted.await(5, TimeUnit.SECONDS));
+
+        Field statesField = TaskResourceLockManager.class.getDeclaredField("resourceStates");
+        statesField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.Map<TaskResource, ?> states = (java.util.Map<TaskResource, ?>) statesField.get(manager);
+        synchronized (manager) {
+            states.remove(resource);
+        }
+
+        releaseTask.countDown();
+        assertFalse(assertTimeoutPreemptively(TIMEOUT, result::join));
+        assertTrue(executor.getException() instanceof TaskResourceCleanupException);
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+        assertTrue(executor.getResidualResources().isEmpty());
+    }
+
+    /// Verifies cancellation after a terminal cleanup waiter is queued does not discard that committed cleanup.
+    @Test
+    public void terminalCleanupWaiterSurvivesCancellationAfterEnqueue() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource holderResource = target("terminal-cancel-holder.jar");
+        TaskResource prerequisiteResource = target("terminal-cancel-prerequisite.jar");
+        CountDownLatch holderStarted = new CountDownLatch(1);
+        CountDownLatch releaseHolder = new CountDownLatch(1);
+        CountDownLatch cleanupRan = new CountDownLatch(1);
+        Task<?> holder = task(holderResource, () -> {
+            holderStarted.countDown();
+            await(releaseHolder);
+        });
+        Task<?> prerequisite = Task.runAsync(() -> {
+        }).setResources(prerequisiteResource);
+        Task<?> completion = prerequisite.whenCompleteWithResources(
+                Runnable::run,
+                ignoredFailure -> cleanupRan.countDown(),
+                holderResource);
+        AsyncTaskExecutor holderExecutor = new AsyncTaskExecutor(holder, manager);
+        CompletableFuture<Boolean> holderResult = CompletableFuture.supplyAsync(holderExecutor::test);
+        assertTrue(holderStarted.await(5, TimeUnit.SECONDS));
+
+        AsyncTaskExecutor completionExecutor = new AsyncTaskExecutor(completion, manager);
+        CompletableFuture<Boolean> completionResult = CompletableFuture.supplyAsync(completionExecutor::test);
+        awaitCondition(() -> prerequisite.getState() == Task.TaskState.SUCCEEDED
+                && manager.pendingWaiterCount() == 1);
+
+        completionExecutor.cancel();
+        assertFalse(cleanupRan.await(200, TimeUnit.MILLISECONDS));
+        releaseHolder.countDown();
+
+        assertTrue(holderResult.get(5, TimeUnit.SECONDS));
+        assertTrue(cleanupRan.await(5, TimeUnit.SECONDS));
+        assertFalse(assertTimeoutPreemptively(TIMEOUT, completionResult::join));
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
     }
 
     /// Verifies cancellation after finalizer startup still runs its independently resourced terminal cleanup.

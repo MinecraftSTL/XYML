@@ -256,7 +256,7 @@ public final class TaskResource {
     /// Creates a resource covering one NBT publication directory tree.
     ///
     /// Region sessions use this boundary because copy-on-write publication can create external chunk companions and
-    /// temporary identity links whose exact names are not known before the region header is read. Distinct region
+    /// temporary publication siblings whose exact names are not known before the region header is read. Distinct region
     /// directories remain independent, and diagnostics retain the NBT-specific category.
     ///
     /// @param directory NBT publication directory
@@ -430,7 +430,9 @@ public final class TaskResource {
         Path thisPath = Objects.requireNonNull(comparisonPath, "comparisonPath");
         Path otherPath = Objects.requireNonNull(other.comparisonPath, "other comparisonPath");
         if (scope == Scope.DIRECTORY) {
-            return otherPath.startsWith(thisPath);
+            // Coverage is directional: only the declaring directory may cover a descendant file or directory.
+            return (other.scope == Scope.DIRECTORY || other.scope == Scope.FILE)
+                    && otherPath.startsWith(thisPath);
         }
         return other.scope == Scope.FILE && thisPath.equals(otherPath);
     }

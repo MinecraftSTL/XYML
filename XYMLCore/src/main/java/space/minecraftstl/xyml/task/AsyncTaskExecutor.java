@@ -51,6 +51,14 @@ public final class AsyncTaskExecutor extends TaskExecutor {
     /// Live cancellation domains belonging to repeated starts of this executor.
     private final Set<TaskResourceLockManager.Execution> resourceExecutions = ConcurrentHashMap.newKeySet();
 
+    /// Terminal-cleanup domains whose pending acquisition must survive executor cancellation.
+    ///
+    /// Terminal domains are kept separate from the ordinary execution set because the latter is also the source for
+    /// cancellation propagation. Registration adds this marker before publishing the domain to
+    /// [#resourceExecutions], so a concurrent cancellation can never observe an unclassified terminal domain.
+    private final Set<TaskResourceLockManager.Execution> terminalResourceExecutions =
+            ConcurrentHashMap.newKeySet();
+
     /// Creates an asynchronous executor rooted at the supplied task.
     public AsyncTaskExecutor(Task<?> task) {
         this(task, TaskResourceLockManager.SHARED);
@@ -82,7 +90,6 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             notifyTaskListeners(TaskListener::onStart);
         } catch (RuntimeException | Error startFailure) {
             failure = startFailure;
-            resourceExecutions.remove(resourceExecution);
             try {
                 notifyStopOnce(stopNotificationAttempted, false);
             } catch (RuntimeException | Error stopFailure) {
@@ -90,6 +97,7 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     startFailure.addSuppressed(stopFailure);
                 }
             }
+            removeExecutionWhenClean(resourceExecution);
             throw startFailure;
         }
         future = executeTasks(null, null, resourceExecution, Collections.singleton(firstTask))
@@ -143,8 +151,46 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                     return false;
                 })
                 .whenComplete((@Nullable Boolean success, @Nullable Throwable throwable) ->
-                        resourceExecutions.remove(resourceExecution));
+                        removeExecutionWhenClean(resourceExecution));
         return this;
+    }
+
+    /// Returns residual resource descriptions retained by this executor's execution domains.
+    @Override
+    public @Unmodifiable List<String> getResidualResources() {
+        return resourceLockManager.residualResourceDescriptions(resourceExecutions);
+    }
+
+    /// Retries residual lease release before a coordinator starts a new task attempt.
+    @Override
+    public boolean retryResourceCleanup() {
+        @Unmodifiable List<String> residual = resourceLockManager.retryResidualCleanup(resourceExecutions);
+        removeCleanExecutions();
+        return residual.isEmpty();
+    }
+
+    /// Removes clean execution domains from both residual tracking and cancellation classification.
+    private void removeCleanExecutions() {
+        resourceExecutions.removeIf(execution -> {
+            if (!isExecutionClean(execution)) {
+                return false;
+            }
+            terminalResourceExecutions.remove(execution);
+            return true;
+        });
+    }
+
+    /// Removes an execution domain once its resource manager no longer retains residual leases.
+    private void removeExecutionWhenClean(TaskResourceLockManager.Execution execution) {
+        if (isExecutionClean(execution)) {
+            resourceExecutions.remove(execution);
+            terminalResourceExecutions.remove(execution);
+        }
+    }
+
+    /// Returns whether one execution domain has no residual lease.
+    private boolean isExecutionClean(TaskResourceLockManager.Execution execution) {
+        return resourceLockManager.residualResourceDescriptions(Set.of(execution)).isEmpty();
     }
 
     /// Attempts the single terminal listener notification promised for one execution chain.
@@ -186,8 +232,29 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         }
 
         cancelled = true;
+        @Nullable Throwable firstFailure = null;
         for (TaskResourceLockManager.Execution resourceExecution : resourceExecutions) {
-            resourceLockManager.cancel(resourceExecution);
+            if (terminalResourceExecutions.contains(resourceExecution)) {
+                // A terminal cleanup domain is already committed and must retain pending acquisition after cancel.
+                continue;
+            }
+            try {
+                resourceLockManager.cancel(resourceExecution);
+            } catch (RuntimeException | Error cancellationFailure) {
+                // A cleanup race in one execution domain must not leave later domains running. Preserve the first
+                // failure for the caller after every domain has received the cancellation request.
+                if (firstFailure == null) {
+                    firstFailure = cancellationFailure;
+                } else if (firstFailure != cancellationFailure) {
+                    firstFailure.addSuppressed(cancellationFailure);
+                }
+            }
+        }
+        if (firstFailure instanceof RuntimeException cancellationFailure) {
+            throw cancellationFailure;
+        }
+        if (firstFailure instanceof Error cancellationFailure) {
+            throw cancellationFailure;
         }
     }
 
@@ -210,15 +277,28 @@ public final class AsyncTaskExecutor extends TaskExecutor {
 
                     return CompletableFuture.allOf(tasks.stream()
                             .map(task -> {
-                                TaskResourceLockManager.Execution taskExecution = task.isTerminalCleanup()
+                                boolean terminalCleanup = task.isTerminalCleanup();
+                                TaskResourceLockManager.Execution taskExecution = terminalCleanup
                                         ? resourceLockManager.createExecution()
                                         : resourceExecution;
-                                return CompletableFuture.<@Nullable Void>completedFuture(null)
-                                        .thenComposeAsync((@Nullable Void unused2) -> executeTask(
-                                                parentTask,
-                                                parentOwner,
-                                                taskExecution,
-                                                task));
+                                if (terminalCleanup) {
+                                    // Terminal cleanup deliberately has an independent cancellation domain, but its
+                                    // lease must remain visible to the owning executor when release leaves a residual
+                                    // process-local write block.
+                                    terminalResourceExecutions.add(taskExecution);
+                                    resourceExecutions.add(taskExecution);
+                                }
+                                CompletableFuture<?> taskFuture =
+                                        CompletableFuture.<@Nullable Void>completedFuture(null)
+                                                .thenComposeAsync((@Nullable Void unused2) -> executeTask(
+                                                        parentTask,
+                                                        parentOwner,
+                                                        taskExecution,
+                                                        task));
+                                return terminalCleanup
+                                        ? taskFuture.whenComplete((@Nullable Object ignored, @Nullable Throwable failure) ->
+                                                removeExecutionWhenClean(taskExecution))
+                                        : taskFuture;
                             })
                             .toArray(CompletableFuture<?>[]::new));
                 });
@@ -783,6 +863,13 @@ public final class AsyncTaskExecutor extends TaskExecutor {
         /// Whether an early handoff has released a previously granted lease.
         private boolean handedOff;
 
+        /// Whether the early handoff release retained a residual lease after a cleanup failure.
+        ///
+        /// A residual marker deliberately blocks a new acquisition.  Reacquiring the same owner before terminal
+        /// callbacks would therefore wait on the marker it is responsible for clearing, leaving the task permanently
+        /// RUNNING.  The terminal release path retries the retained lease instead.
+        private boolean handoffCleanupFailed;
+
         /// Whether the task's complete lease lifecycle has reached its terminal release point.
         private boolean released;
 
@@ -842,16 +929,25 @@ public final class AsyncTaskExecutor extends TaskExecutor {
                 }
                 handedOff = true;
                 leasesToClose = List.copyOf(leases);
-                leases.clear();
             }
-            for (TaskResourceLockManager.Lease lease : leasesToClose) {
-                lease.close();
+            try {
+                closeLeases(leasesToClose);
+                synchronized (this) {
+                    if (!released) {
+                        leases.removeAll(leasesToClose);
+                    }
+                }
+            } catch (RuntimeException | Error failure) {
+                synchronized (this) {
+                    handoffCleanupFailed = true;
+                }
+                throw failure;
             }
         }
 
         /// Returns whether this invocation released a lease that must be reacquired for terminal callbacks.
         private synchronized boolean needsTerminalReacquisition() {
-            return handedOff && !released;
+            return handedOff && !handoffCleanupFailed && !released;
         }
 
         /// Asynchronously reacquires the same owner resources once after an early handoff.
@@ -928,8 +1024,35 @@ public final class AsyncTaskExecutor extends TaskExecutor {
             if (terminalToCancel != null && !terminalToCancel.isDone()) {
                 terminalToCancel.cancel(false);
             }
-            for (TaskResourceLockManager.Lease lease : leasesToClose) {
-                lease.close();
+            closeLeases(leasesToClose);
+        }
+
+        /// Attempts every lease release and preserves all failures for the task's terminal path.
+        ///
+        /// A lease can retain a process-local residual marker when its manager cleanup fails.  Stopping at the first
+        /// exception would lose the remaining leases after this reference has cleared its ownership list, making those
+        /// leases impossible to release or report through the executor retry boundary.  Every lease is therefore
+        /// attempted and subsequent failures are attached to the first one.
+        ///
+        /// @param leases leases captured outside the reference monitor
+        private static void closeLeases(@Unmodifiable List<TaskResourceLockManager.Lease> leases) {
+            @Nullable Throwable firstFailure = null;
+            for (TaskResourceLockManager.Lease lease : leases) {
+                try {
+                    lease.close();
+                } catch (RuntimeException | Error failure) {
+                    if (firstFailure == null) {
+                        firstFailure = failure;
+                    } else if (firstFailure != failure) {
+                        firstFailure.addSuppressed(failure);
+                    }
+                }
+            }
+            if (firstFailure instanceof RuntimeException failure) {
+                throw failure;
+            }
+            if (firstFailure instanceof Error failure) {
+                throw failure;
             }
         }
     }

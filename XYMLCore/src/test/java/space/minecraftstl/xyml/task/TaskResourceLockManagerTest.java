@@ -25,11 +25,13 @@ import space.minecraftstl.xyml.util.CacheRepository;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -1297,6 +1299,36 @@ public final class TaskResourceLockManagerTest {
         assertThrows(CancellationException.class, () -> waitingFuture.get(5, TimeUnit.SECONDS));
         assertEquals(0, manager.pendingWaiterCount());
         holderLease.close();
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
+    /// Verifies a failed lease release blocks a conflicting writer until bounded residual cleanup succeeds.
+    @Test
+    public void failedReleaseRetainsWriteBlockUntilRetry() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource resource = TaskResource.downloadTarget(temporaryDirectory.resolve("residual.jar"));
+        TaskResourceLockManager.Execution execution = manager.createExecution();
+        TaskResourceLockManager.Owner owner = manager.createOwner(execution, null, Set.of(resource));
+        TaskResourceLockManager.Lease lease = manager.acquire(owner).get(5, TimeUnit.SECONDS);
+
+        Field statesField = TaskResourceLockManager.class.getDeclaredField("resourceStates");
+        statesField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<TaskResource, ?> states = (Map<TaskResource, ?>) statesField.get(manager);
+        synchronized (manager) {
+            states.remove(resource);
+        }
+
+        assertThrows(TaskResourceCleanupException.class, lease::close);
+        assertEquals(List.of(resource.toString()), manager.residualResourceDescriptions(Set.of(execution)));
+
+        CompletableFuture<TaskResourceLockManager.Lease> successor = manager.acquire(rootOwner(manager, resource));
+        awaitCondition(() -> manager.pendingWaiterCount() == 1);
+        assertFalse(successor.isDone());
+
+        assertTrue(manager.retryResidualCleanup(Set.of(execution)).isEmpty());
+        successor.get(5, TimeUnit.SECONDS).close();
+        assertEquals(0, manager.pendingWaiterCount());
         assertEquals(0, manager.trackedResourceCount());
     }
 
