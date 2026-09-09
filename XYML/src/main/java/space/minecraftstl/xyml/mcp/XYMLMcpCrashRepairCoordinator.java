@@ -154,7 +154,9 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                 }
             }
         } catch (IllegalArgumentException ignored) {
-            // The callback races bounded registry pruning; a later status call may still observe the retained plan.
+            synchronized (stateLock) {
+                markExpiredOperationLocked(planId, operationId);
+            }
         } catch (RuntimeException | Error callbackFailure) {
             // Completion publication is advisory. The registry has already committed its terminal state, so a
             // coordinator callback failure must never turn that task outcome into an uncaught task-listener failure.
@@ -676,13 +678,30 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             // A missing operation can no longer prove success or failure. Do not leave the plan permanently RUNNING:
             // make the uncertainty explicitly retryable and remove the stale owner link so a later retry can publish a
             // fresh operation without waiting for a callback that can never arrive.
-            if (plan.state == PlanState.RUNNING && !plan.retryInProgress) {
-                plan.state = PlanState.FAILED_RETRYABLE;
-                plan.failureType = IllegalStateException.class.getName();
-                plan.failureMessage = "Crash repair operation expired before terminal state was observed";
-                operationPlans.remove(operationId, plan.id);
-            }
+            markExpiredOperationLocked(plan.id, operationId);
         }
+    }
+
+    /// Converts a missing linked operation into an explicitly retryable plan state.
+    ///
+    /// The operation may have expired between callback dispatch and status lookup. A plan that remains RUNNING in
+    /// that situation can never receive another terminal callback, so the uncertainty must be surfaced as a retryable
+    /// failure while retaining the source-bound plan metadata.
+    ///
+    /// @param planId owning plan identifier
+    /// @param operationId missing operation identifier
+    private void markExpiredOperationLocked(String planId, String operationId) {
+        @Nullable RepairPlan plan = plans.get(planId);
+        if (plan == null
+                || plan.state != PlanState.RUNNING
+                || plan.retryInProgress
+                || !operationId.equals(plan.lastOperationId)) {
+            return;
+        }
+        plan.state = PlanState.FAILED_RETRYABLE;
+        plan.failureType = IllegalStateException.class.getName();
+        plan.failureMessage = "Crash repair operation expired before terminal state was observed";
+        operationPlans.remove(operationId, plan.id);
     }
 
     /// Marks a task-creation or startup failure as retryable without consuming the plan permanently.
