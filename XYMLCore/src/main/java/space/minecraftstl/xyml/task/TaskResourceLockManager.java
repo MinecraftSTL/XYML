@@ -246,9 +246,15 @@ final class TaskResourceLockManager {
                 removeUnusedStates();
             }
         }
-        complete(completions);
-        if (terminalFailure != null) {
-            completeFailure(waiter.future, terminalFailure);
+        try {
+            complete(completions);
+        } finally {
+            // A different unclaimed lease in this completion batch may fail its cleanup.  The terminal waiter has
+            // already been removed from the manager, so publish its own failure even when that unrelated cleanup
+            // exception escapes from complete().
+            if (terminalFailure != null) {
+                completeFailure(waiter.future, terminalFailure);
+            }
         }
         return waiter.future;
     }
@@ -362,9 +368,14 @@ final class TaskResourceLockManager {
             completions.addAll(processWaiters());
             removeUnusedStates();
         }
-        complete(completions);
-        if (terminalFailure != null) {
-            completeFailure(waiter.future, terminalFailure);
+        try {
+            complete(completions);
+        } finally {
+            // Preserve the resolution failure for the caller even if publishing another completion encounters a
+            // residual-cleanup exception.
+            if (terminalFailure != null) {
+                completeFailure(waiter.future, terminalFailure);
+            }
         }
     }
 
@@ -1020,9 +1031,17 @@ final class TaskResourceLockManager {
                     manager.release(this);
                     manager.completeLeaseClose(this);
                 } catch (RuntimeException | Error failure) {
-                    closed.set(false);
                     synchronized (manager) {
-                        manager.residualLeases.add(this);
+                        boolean hasUnreleasedResources = resources.stream()
+                                .anyMatch(resource -> !releasedResources.contains(resource));
+                        // The exception may have come from another lease in the same completion batch.  Do not retain
+                        // an empty residual lease after this lease's own resources were already released.
+                        closed.set(!hasUnreleasedResources);
+                        if (hasUnreleasedResources) {
+                            manager.residualLeases.add(this);
+                        } else {
+                            manager.residualLeases.remove(this);
+                        }
                         manager.pruneResidualResources();
                     }
                     throw failure;
