@@ -23,7 +23,9 @@ import space.minecraftstl.xyml.library.nbt.edit.NBTEditException;
 import space.minecraftstl.xyml.library.nbt.edit.NBTEditor;
 import space.minecraftstl.xyml.library.nbt.io.NBTFile;
 import space.minecraftstl.xyml.library.nbt.io.NBTFileEncoding;
+import space.minecraftstl.xyml.library.nbt.io.NBTReadReport;
 import space.minecraftstl.xyml.library.nbt.io.NBTSaveOptions;
+import space.minecraftstl.xyml.library.nbt.io.StorageProfile;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -42,13 +44,14 @@ public final class NBTDocument implements AutoCloseable {
     /// Filename-derived container family used by launcher presentation code.
     private final NBTFileType fileType;
 
-    /// Safe XoyzNBT session which owns the editor, source fingerprint, and region channel.
+    /// Safe XoyzNBT session which owns the editor, read report, and region channel.
     private final NBTFile<? extends NBTElement> fileSession;
 
     /// Whether this launcher document has released its file session.
     private boolean closed;
 
-    /// Package-owned callback notified exactly once after the physical file session closes, or null when unmanaged.
+    /// Package-owned callback notified exactly once after the physical file session closes successfully, or null when
+    /// unmanaged. A failed close leaves this callback installed so the owning service can retry the same session.
     private @Nullable Consumer<@Nullable Throwable> closedListener;
 
     /// Creates a launcher document around one successfully opened XoyzNBT session.
@@ -84,11 +87,39 @@ public final class NBTDocument implements AutoCloseable {
     /// Returns the legacy launcher encoding view of [#encoding()].
     ///
     /// This compatibility method performs no detection of its own; the value is mapped directly
-    /// from the encoding established by [NBTFile] during strict open.
+    /// from the encoding established by [NBTFile] during open.
     ///
     /// @return detected storage encoding
     public NBTStorageEncoding storageEncoding() {
         return NBTStorageEncoding.fromFileEncoding(encoding());
+    }
+
+    /// Returns immutable diagnostics captured while opening this document.
+    ///
+    /// A clean report is returned for a source accepted by the strict reader. A recovered or partial report remains
+    /// attached to the document for its whole lifetime so the UI can require an explicit repair-save confirmation
+    /// instead of silently rewriting a damaged source.
+    ///
+    /// @return immutable tolerant-read report
+    public NBTReadReport readReport() {
+        return fileSession.readReport();
+    }
+
+    /// Returns the immutable compression and region-marker profile captured by this session.
+    ///
+    /// Region profiles retain all 1024 slot markers, external flags, and occupancy bits so the
+    /// editor can explain a damaged slot without re-reading or guessing its on-disk envelope.
+    ///
+    /// @return standalone encoding or complete region storage profile
+    public StorageProfile storageProfile() {
+        return fileSession.storageProfile();
+    }
+
+    /// Returns whether the source needs an explicit strict repair save.
+    ///
+    /// @return whether the open report contains a recovery or data-loss diagnostic
+    public boolean requiresRepair() {
+        return readReport().requiresRepair();
     }
 
     /// Returns the revision-aware editor owned by this document.
@@ -167,7 +198,7 @@ public final class NBTDocument implements AutoCloseable {
     /// Saves through the underlying safe XoyzNBT session.
     ///
     /// @param options backup and publication options selected by the launcher
-    /// @throws IOException if validation, conflict detection, or publication fails
+    /// @throws IOException if strict serialization or publication fails
     private synchronized void save(NBTSaveOptions options) throws IOException {
         ensureOpen();
         fileSession.save(Objects.requireNonNull(options, "options"));
@@ -183,9 +214,9 @@ public final class NBTDocument implements AutoCloseable {
 
     /// Installs the asynchronous service callback which releases this document's task resource lease.
     ///
-    /// The listener is cleared before invocation and is therefore notified at most once, including when callers use
-    /// this document directly in a try-with-resources statement. It receives the physical close failure, or null when
-    /// every library handle and identity link closed successfully.
+    /// The listener is cleared before invocation and is therefore notified at most once after successful closure,
+    /// including when callers use this document directly in a try-with-resources statement. A failed close does not
+    /// clear it, because the underlying file session remains open and can be retried.
     ///
     /// @param listener package-owned close listener
     /// @throws IllegalStateException if this document is closed or already managed
@@ -208,19 +239,14 @@ public final class NBTDocument implements AutoCloseable {
         if (closed) {
             return;
         }
-        @Nullable Throwable failure = null;
-        try {
-            fileSession.close();
-        } catch (IOException | RuntimeException | Error closeFailure) {
-            failure = closeFailure;
-            throw closeFailure;
-        } finally {
-            closed = true;
-            @Nullable Consumer<@Nullable Throwable> listener = closedListener;
-            closedListener = null;
-            if (listener != null) {
-                listener.accept(failure);
-            }
+        // Do not release the service lease on a failed physical close. The same document can be
+        // retried after the underlying channel or sidecar cleanup becomes available.
+        fileSession.close();
+        closed = true;
+        @Nullable Consumer<@Nullable Throwable> listener = closedListener;
+        closedListener = null;
+        if (listener != null) {
+            listener.accept(null);
         }
     }
 

@@ -16,8 +16,6 @@
 // Added by MinecraftSTL in 2026 for copy-on-write XoyzNBT region editing.
 package space.minecraftstl.xyml.library.nbt.io;
 
-import net.jpountz.lz4.LZ4BlockInputStream;
-import net.jpountz.lz4.LZ4BlockOutputStream;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -35,71 +33,60 @@ import space.minecraftstl.xyml.library.nbt.tag.Tag;
 import space.minecraftstl.xyml.library.nbt.validation.NBTStructureValidator;
 import space.minecraftstl.xyml.library.nbt.validation.NBTValidationException;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
-import java.util.zip.DeflaterOutputStream;
-import java.util.zip.GZIPOutputStream;
-import java.util.zip.Inflater;
+
+import static space.minecraftstl.xyml.library.nbt.io.NBTRegionFileIO.asIOException;
+import static space.minecraftstl.xyml.library.nbt.io.NBTRegionFileIO.checkIndex;
+import static space.minecraftstl.xyml.library.nbt.io.NBTRegionFileIO.readIssue;
+import static space.minecraftstl.xyml.library.nbt.io.NBTRegionFileIO.slotPath;
+import static space.minecraftstl.xyml.library.nbt.io.NBTRegionFileIO.withSlotPath;
 
 /// A safe, copy-on-write editor for one Java Anvil region file.
-///
-/// The class keeps the original header and sectors untouched until a pending chunk is flushed.
-/// Every changed chunk is serialized and compressed before unreferenced sectors are written and
-/// forced. Only then is its location published in the header. A failed flush therefore leaves the
-/// old header readable; chunks already published remain committed and the rest stay dirty.
-///
-/// Region files always expose 1024 fixed local slots. Chunk values passed to and returned from
-/// this class are deep copies, so callers cannot mutate the session without an explicit write.
+/// Changed chunks are serialized into unreferenced sectors before their locations are published.
+/// Failed flushes retain readable old headers; already published chunks remain committed.
+/// Region files expose 1024 slots and pass chunk values by deep copy.
 @NotNullByDefault
 public final class NBTRegionFile implements AutoCloseable {
-    /// Commit milestones exposed only to deterministic package-local tests.
+    /// Commit milestones exposed to deterministic package-local tests.
     @NotNullByDefault
     enum CommitStage {
-        /// Newly reserved sectors have been initialized without changing the header.
+        /// Newly reserved sectors initialized without changing the header.
         ALLOCATION_WRITTEN,
-        /// New inline or external-marker bytes have been written.
+        /// New inline or external-marker bytes written.
         PAYLOAD_WRITTEN,
-        /// New payload bytes have been forced before header publication.
+        /// Legacy post-payload boundary retained for package-test compatibility.
         PAYLOAD_FORCED,
-        /// A new external companion has replaced its temporary file.
+        /// New external companion replaced its temporary file.
         COMPANION_PUBLISHED,
-        /// The replacement header bytes have been written.
+        /// Existing companion backup is about to become the reversible published backup.
+        COMPANION_BACKUP_PUBLISH,
+        /// Replacement header bytes written.
         HEADER_WRITTEN,
-        /// The replacement header has been forced and is committed.
+        /// Legacy post-header boundary retained for package-test compatibility.
         HEADER_FORCED,
-        /// The old storage is about to be cleaned up after commit.
+        /// Old storage is about to be cleaned up after commit.
         CLEANUP,
-        /// A failed header publication is about to restore the old header.
+        /// Failed header publication is about to restore the old header.
         HEADER_ROLLBACK,
-        /// A failed external publication is about to restore the old companion.
+        /// Failed external publication is about to restore the old companion.
         COMPANION_ROLLBACK,
-        /// A complete source fingerprint is about to be captured.
+        /// Legacy boundary retained for package-test compatibility; no fingerprint is captured.
         FINGERPRINT_CAPTURE
     }
 
@@ -108,7 +95,6 @@ public final class NBTRegionFile implements AutoCloseable {
     @NotNullByDefault
     interface CommitHook {
         /// Observes one commit stage and may inject an I/O failure.
-        ///
         /// @param stage reached stage
         /// @param localIndex affected chunk slot
         /// @throws IOException to simulate a failure at this boundary
@@ -125,17 +111,17 @@ public final class NBTRegionFile implements AutoCloseable {
     private static final int MAX_SECTOR_COUNT = 0xFF;
     /// Largest complete chunk frame which can be stored inside the region file.
     private static final int MAX_INLINE_BYTES = MAX_SECTOR_COUNT * ChunkUtils.SECTOR_BYTES;
-    /// Defensive limit for one decompressed chunk payload.
-    private static final int MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024;
-    /// Defensive limit for one external compressed payload, including compression overhead.
-    private static final int MAX_COMPRESSED_BYTES = MAX_DECOMPRESSED_BYTES + 1024 * 1024;
+    /// Shared default limit for one decompressed chunk payload.
+    private static final int MAX_DECOMPRESSED_BYTES = Math.toIntExact(
+            NBTReadLimits.defaults().maxDecompressedBytes());
+    /// Shared default limit for one encoded chunk payload, including external companions.
+    private static final int MAX_COMPRESSED_BYTES = Math.toIntExact(
+            NBTReadLimits.defaults().maxEncodedBytes());
 
     /// Normalized path of the open region file.
     private final Path path;
     /// Channel owning all reads, copy-on-write payload writes, and header publication.
     private final FileChannel channel;
-    /// Session-owned hard link which binds [#channel] to a verifiable filesystem identity.
-    private final Path identityLink;
     /// Accessor used to locate or read external chunk companions.
     private final ExternalChunkAccessor accessor;
     /// Commit-stage observer used by tests and inert in production.
@@ -150,16 +136,23 @@ public final class NBTRegionFile implements AutoCloseable {
     private final byte[] compressionTypes;
     /// Whether each occupied local chunk slot resolves its payload from a companion file.
     private final boolean[] external;
+    /// Slots whose header geometry cannot be safely associated with a payload.
+    private final boolean[] isolatedSlots;
+    /// Diagnostics observed while opening or recovering slots.
+    private final List<NBTReadIssue> readIssues;
+    /// Whether a tolerant open ignored bytes after the last complete sector.
+    private boolean trailingTailNeedsRepair;
     /// Allocation bitmap including both header sectors and every currently reserved payload sector.
     private final BitSet usedSectors;
     /// Detached edits waiting to be published, keyed by local chunk index.
     private final Map<Integer, PendingChunk> pending = new HashMap<>();
-    /// Fingerprint captured after the most recent known-good disk state.
-    private @Nullable RegionFingerprint fingerprint;
-    /// Whether a failed header rollback made the visible disk state unknowable.
-    private boolean commitStateUncertain;
+    /// Owned publication sidecars which could not be removed after a committed write.
+    private final NBTRegionFileIO.PendingCleanup pendingCleanup =
+            new NBTRegionFileIO.PendingCleanup("Owned region sidecar");
     /// Whether this session has released its file channel.
     private boolean closed;
+    /// Whether a publication outcome is uncertain and the session must not serve further reads or writes.
+    private boolean commitLocked;
 
     /// Compression methods understood by the Anvil chunk format.
     @NotNullByDefault
@@ -177,7 +170,6 @@ public final class NBTRegionFile implements AutoCloseable {
         private final int id;
 
         /// Creates a compression type with its region-format identifier.
-        ///
         /// @param id region-format compression identifier
         CompressionType(int id) {
             this.id = id;
@@ -189,7 +181,6 @@ public final class NBTRegionFile implements AutoCloseable {
         }
 
         /// Resolves a supported region-format compression identifier.
-        ///
         /// @param id unsigned compression identifier
         /// @return matching compression type
         /// @throws IOException if the identifier is unsupported
@@ -204,18 +195,19 @@ public final class NBTRegionFile implements AutoCloseable {
     }
 
     /// Detached pending chunk together with the compression selected for its next publication.
-    ///
     /// @param chunk detached chunk, or `null` for an explicit clear operation
     /// @param compression compression to use when a root payload is present
+    /// @param explicitReplacement whether the caller explicitly replaced or cleared this slot
     @NotNullByDefault
-    private record PendingChunk(@Nullable Chunk chunk, CompressionType compression) {
+    private record PendingChunk(
+            @Nullable Chunk chunk,
+            CompressionType compression,
+            boolean explicitReplacement) {
     }
 
     /// Creates an initialized session around an already validated open channel.
-    ///
     /// @param path normalized region path
     /// @param channel owned read-write file channel
-    /// @param identityLink session-owned hard link used to verify the visible path identity
     /// @param accessor external companion accessor
     /// @param commitHook commit-stage observer
     /// @param sectorOffsets validated location offsets
@@ -224,13 +216,14 @@ public final class NBTRegionFile implements AutoCloseable {
     /// @param compressionTypes decoded compression identifiers
     /// @param external decoded external-payload flags
     /// @param usedSectors initial sector allocation bitmap
-    private NBTRegionFile(Path path, FileChannel channel, Path identityLink,
+    private NBTRegionFile(Path path, FileChannel channel,
                           ExternalChunkAccessor accessor, CommitHook commitHook,
                           int[] sectorOffsets, int[] sectorLengths, int[] timestamps,
-                          byte[] compressionTypes, boolean[] external, BitSet usedSectors) {
+                          byte[] compressionTypes, boolean[] external, boolean[] isolatedSlots,
+                          BitSet usedSectors, boolean trailingTailNeedsRepair,
+                          List<NBTReadIssue> openingIssues) {
         this.path = path;
         this.channel = channel;
-        this.identityLink = identityLink;
         this.accessor = accessor;
         this.commitHook = commitHook;
         this.sectorOffsets = sectorOffsets;
@@ -238,14 +231,15 @@ public final class NBTRegionFile implements AutoCloseable {
         this.timestamps = timestamps;
         this.compressionTypes = compressionTypes;
         this.external = external;
+        this.isolatedSlots = isolatedSlots;
         this.usedSectors = usedSectors;
+        this.trailingTailNeedsRepair = trailingTailNeedsRepair;
+        this.readIssues = new ArrayList<>(Objects.requireNonNull(openingIssues, "openingIssues"));
     }
 
     /// Opens or creates a region file and validates its complete header and sector framing.
-    ///
     /// A new file is initialized with two zero-filled header sectors. Existing files must have a
     /// sector-aligned length, non-overlapping chunk sectors, and valid chunk framing.
-    ///
     /// @param path region file path
     /// @return an open region session
     /// @throws IOException if the file cannot be opened or fails structural validation
@@ -256,11 +250,9 @@ public final class NBTRegionFile implements AutoCloseable {
     }
 
     /// Opens or creates a region file with an explicit external-chunk accessor.
-    ///
     /// The accessor is used for both validating existing external chunks and reading them. A
     /// copy-on-write write of an oversized chunk requires the accessor to identify a filesystem
     /// companion path (the standard [ExternalChunkAccessor#of(Path)] accessor does so).
-    ///
     /// @param path region file path
     /// @param accessor external chunk locator
     /// @return an open region session
@@ -270,40 +262,70 @@ public final class NBTRegionFile implements AutoCloseable {
         return open(path, accessor, NO_COMMIT_HOOK);
     }
 
+    /// Opens a region while isolating payload and slot errors for later tolerant reads.
+    /// Header bytes remain structurally bounded. Invalid payloads are reported by
+    /// [#readChunkTolerant(int, NBTReadLimits)] instead of preventing the other slots from opening.
+    /// @param path region file path
+    /// @return an open tolerant region session
+    /// @throws IOException if the file cannot be opened or its length/header envelope is unusable
+    @Contract("_ -> new")
+    public static NBTRegionFile openTolerant(Path path) throws IOException {
+        Objects.requireNonNull(path, "path");
+        return openTolerant(path, ExternalChunkAccessor.of(path));
+    }
+
+    /// Opens a region with an explicit external-chunk accessor in tolerant mode.
+    /// @param path region file path
+    /// @param accessor external chunk locator
+    /// @return an open tolerant region session
+    /// @throws IOException if the file cannot be opened or its length/header envelope is unusable
+    @Contract("_, _ -> new")
+    public static NBTRegionFile openTolerant(Path path, ExternalChunkAccessor accessor) throws IOException {
+        return open(path, accessor, NO_COMMIT_HOOK, true);
+    }
+
     /// Opens a region session with a deterministic package-local commit hook.
-    ///
     /// @param path region file path
     /// @param accessor external chunk locator
     /// @param commitHook commit-stage observer
     /// @return an open region session
     /// @throws IOException if the region cannot be opened and validated
     static NBTRegionFile open(Path path, ExternalChunkAccessor accessor, CommitHook commitHook) throws IOException {
+        return open(path, accessor, commitHook, false);
+    }
+
+    /// Opens a region with an optional tolerant payload policy for package-local file sessions.
+    private static NBTRegionFile open(Path path, ExternalChunkAccessor accessor, CommitHook commitHook,
+                                      boolean tolerant) throws IOException {
         Objects.requireNonNull(path, "path");
         Objects.requireNonNull(accessor, "accessor");
         Objects.requireNonNull(commitHook, "commitHook");
         Path absolute = path.toAbsolutePath().normalize();
+        if (NBTRegionFileIO.isStagingPath(absolute)) {
+            throw new IOException("NBT staging files are not valid region edit targets: " + absolute);
+        }
         @Nullable Path parent = absolute.getParent();
         if (parent != null) {
-            Files.createDirectories(parent);
+            NBTRegionFileIO.createDirectoriesNoFollow(parent);
         }
 
-        ensureRegionFileExists(absolute);
-        Path identityLink = createIdentityLink(absolute);
+        NBTRegionFileIO.ensureRegionFileExists(absolute);
         @Nullable FileChannel channel = null;
         boolean success = false;
         try {
-            channel = FileChannel.open(identityLink, StandardOpenOption.READ,
+            channel = FileChannel.open(absolute, StandardOpenOption.READ,
                     StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
             if (channel.size() == 0L) {
-                writeZeros(channel, 0L, HEADER_BYTES);
-                channel.force(true);
+                NBTRegionFileIO.writeZeros(channel, 0L, HEADER_BYTES);
             }
-            HeaderData header = readAndValidateHeader(absolute, channel, accessor);
-            NBTRegionFile result = new NBTRegionFile(absolute, channel, identityLink, accessor, commitHook,
+            HeaderData header = readAndValidateHeader(absolute, channel, accessor, tolerant);
+            NBTRegionFile result = new NBTRegionFile(absolute, channel, accessor, commitHook,
                     header.offsets, header.lengths,
-                    header.timestamps, header.compressionTypes, header.external, header.usedSectors);
-            result.validateExistingPayloads();
-            result.fingerprint = result.computeFingerprint();
+                    header.timestamps, header.compressionTypes, header.external, header.isolatedSlots,
+                    header.usedSectors, header.trailingBytes > 0L, header.issues);
+            if (!tolerant) {
+                result.validateExistingPayloads();
+            }
             success = true;
             return result;
         } finally {
@@ -311,27 +333,44 @@ public final class NBTRegionFile implements AutoCloseable {
                 if (channel != null) {
                     channel.close();
                 }
-                Files.deleteIfExists(identityLink);
             }
         }
     }
 
     /// Returns the path opened by this session.
-    ///
     /// @return normalized region path
     public Path path() {
         return path;
     }
 
+    /// Returns an immutable snapshot of the current per-slot storage markers.
+    /// The snapshot includes empty slots, the low-seven-bit compression marker, the external
+    /// companion flag, and the current occupancy bit. Pending writes are intentionally excluded
+    /// until [#flush()] publishes their headers.
+    /// @return immutable 1024-slot region storage profile
+    public synchronized StorageProfile storageProfile() {
+        byte[] markers = compressionTypes.clone();
+        boolean[] externalFlags = external.clone();
+        boolean[] occupied = new boolean[ChunkUtils.CHUNKS_PRE_REGION];
+        for (int localIndex = 0; localIndex < occupied.length; localIndex++) {
+            occupied[localIndex] = sectorLengths[localIndex] != 0;
+        }
+        return StorageProfile.region(markers, externalFlags, occupied);
+    }
+
+    /// Bean-style alias for [#storageProfile()].
+    /// @return immutable 1024-slot region storage profile
+    public synchronized StorageProfile getStorageProfile() {
+        return storageProfile();
+    }
+
     /// Returns whether this session has pending chunk changes.
-    ///
     /// @return `true` when at least one chunk is pending
     public boolean isDirty() {
         return !pending.isEmpty();
     }
 
     /// Returns a stable snapshot of pending local indexes in ascending order.
-    ///
     /// @return immutable ascending local-index snapshot
     public @Unmodifiable List<Integer> dirtyChunkIndexes() {
         List<Integer> indexes = new ArrayList<>(pending.keySet());
@@ -340,12 +379,10 @@ public final class NBTRegionFile implements AutoCloseable {
     }
 
     /// Replaces every pending slot with the differences between a snapshot and its committed baseline.
-    ///
     /// The complete replacement map is built before the current pending state changes. This lets an
     /// owning [NBTFile] cancel a failed pending write when a later editor snapshot returns that slot
     /// to its committed value, while preserving the existing or previously selected compression for
     /// slots which still differ.
-    ///
     /// @param snapshot complete detached editor snapshot
     /// @param committedBaseline complete detached state known to be visible on disk
     void synchronizePendingChanges(ChunkRegion snapshot, ChunkRegion committedBaseline) {
@@ -355,9 +392,14 @@ public final class NBTRegionFile implements AutoCloseable {
         Map<Integer, PendingChunk> replacement = new HashMap<>();
         for (int localIndex = 0; localIndex < snapshot.size(); localIndex++) {
             Chunk changed = snapshot.getChunk(localIndex);
-            if (!changed.equals(committedBaseline.getChunk(localIndex))) {
+            if (!changed.equals(committedBaseline.getChunk(localIndex)) || slotNeedsRepair(localIndex)) {
+                // A tolerant read may materialize a damaged known-format slot as an unchanged empty chunk. Treat its
+                // confirmed repair publication as an explicit replacement. Unknown compression markers are excluded
+                // by slotNeedsRepair and still require the caller to explicitly replace or clear that slot.
+                boolean explicitReplacement = !changed.equals(committedBaseline.getChunk(localIndex))
+                        || slotNeedsRepair(localIndex);
                 replacement.put(localIndex,
-                        new PendingChunk(changed.clone(), preferredCompression(localIndex)));
+                        new PendingChunk(changed.clone(), preferredCompression(localIndex), explicitReplacement));
             }
         }
         pending.clear();
@@ -365,51 +407,195 @@ public final class NBTRegionFile implements AutoCloseable {
     }
 
     /// Reads a chunk as a detached deep copy.
-    ///
     /// An empty slot is represented by a `Chunk` with a `null` root tag. A pending clear is
     /// visible immediately and returns a fresh empty chunk.
-    ///
     /// @param localIndex local slot from 0 through 1023
     /// @return detached chunk copy
     /// @throws IOException if the chunk payload is malformed or cannot be decoded
     public Chunk readChunk(int localIndex) throws IOException {
+        return readChunk(localIndex, NBTReadLimits.defaults().newDocumentBudget());
+    }
+
+    /// Reads a chunk while charging decompressed bytes to a caller-owned region budget.
+    /// The package-local overload is used by strict region opens so all occupied slots share one
+    /// cumulative limit. Public callers retain the historical per-call limit through
+    /// [#readChunk(int)].
+    /// @param localIndex local slot from 0 through 1023
+    /// @param budget cumulative decompressed-byte budget for the containing read
+    /// @return detached chunk copy
+    /// @throws IOException if the chunk payload is malformed, cannot be decoded, or exceeds the budget
+    Chunk readChunk(int localIndex, NBTReadLimits.Budget budget) throws IOException {
         checkIndex(localIndex);
         ensureOpen();
-        ensurePathIdentity();
+        NBTRegionFileIO.requireRegularFile(path);
+        NBTReadLimits.Budget selectedBudget = Objects.requireNonNull(budget, "budget");
         @Nullable PendingChunk changed = pending.get(localIndex);
         if (changed != null) {
-            return changed.chunk == null ? new Chunk() : changed.chunk.clone();
+            return changed.chunk == null
+                    ? new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex))
+                    : changed.chunk.clone();
         }
 
         int offset = sectorOffsets[localIndex];
         int length = sectorLengths[localIndex];
         if (offset == 0 && length == 0) {
-            return new Chunk(timestamp(localIndex));
+            return new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex));
         }
 
-        byte[] sector = readBytes((long) offset * ChunkUtils.SECTOR_BYTES,
+        byte[] sector = NBTRegionFileIO.readBytes(channel, (long) offset * ChunkUtils.SECTOR_BYTES,
                 (long) length * ChunkUtils.SECTOR_BYTES);
         ChunkPayload payload = readPayload(localIndex, sector, length);
-        CompoundTag root = parseCompound(decompress(payload.compression, payload.compressed), localIndex);
-        return new Chunk(timestamp(localIndex), root);
+        int remainingLimit = Math.toIntExact(Math.min(
+                (long) MAX_DECOMPRESSED_BYTES, selectedBudget.remaining()));
+        byte[] decompressed = decompress(payload.compression, payload.compressed, remainingLimit);
+        selectedBudget.consume(decompressed.length);
+        CompoundTag root = parseCompound(decompressed, localIndex);
+        if (payload.compression == CompressionType.LZ4) {
+            rememberIssues(List.of(readIssue(NBTReadIssue.Severity.INFORMATIONAL,
+                    "REGION_LZ4_EXTENSION", slotPath(localIndex),
+                    "检测到扩展 LZ4 槽位标记，保存时将原样保留")));
+        }
+        return new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex), root);
     }
 
     /// Reads a chunk by local X/Z coordinates as a detached deep copy.
-    ///
     /// @param localX local X coordinate from 0 through 31
     /// @param localZ local Z coordinate from 0 through 31
     /// @return detached chunk copy
     /// @throws IOException if the chunk payload is malformed or cannot be decoded
     public Chunk readChunk(int localX, int localZ) throws IOException {
         return readChunk(ChunkUtils.toLocalIndex(
-                checkedCoordinate(localX), checkedCoordinate(localZ)));
+                NBTRegionFileIO.checkedCoordinate(localX), NBTRegionFileIO.checkedCoordinate(localZ)));
+    }
+
+    /// Reads one chunk while isolating malformed payloads from the other region slots.
+    /// A damaged or missing slot returns an empty chunk carrying its header timestamp and a
+    /// report with `PARTIAL_DATA_LOSS`; callers can still inspect and edit every other slot. The
+    /// original allocation remains reserved until that slot is explicitly replaced or cleared.
+    /// @param localIndex local slot from 0 through 1023
+    /// @return detached chunk and slot diagnostics
+    /// @throws IOException if the session itself is closed or the read policy is invalid
+    public NBTReadResult<Chunk> readChunkTolerant(int localIndex) throws IOException {
+        return readChunkTolerant(localIndex, NBTReadLimits.defaults());
+    }
+
+    /// Reads one chunk with an explicit bounded tolerant-read policy.
+    /// @param localIndex local slot from 0 through 1023
+    /// @param limits defensive decompression and parser limits
+    /// @return detached chunk and slot diagnostics
+    /// @throws IOException if the session itself is closed or the read policy is invalid
+    public NBTReadResult<Chunk> readChunkTolerant(int localIndex, NBTReadLimits limits) throws IOException {
+        NBTReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
+        return readChunkTolerant(localIndex, selectedLimits, selectedLimits.newDocumentBudget());
+    }
+
+    /// Reads one chunk with a caller-owned cumulative document budget.
+    /// This package-local overload lets an entire 1024-slot region share its cumulative output
+    /// limit while retaining the public per-slot convenience method.
+    /// @param localIndex local slot from 0 through 1023
+    /// @param limits defensive decompression and parser limits
+    /// @param budget cumulative document budget
+    /// @return detached chunk and slot diagnostics
+    /// @throws IOException if the session is closed or the policy is invalid
+    NBTReadResult<Chunk> readChunkTolerant(int localIndex, NBTReadLimits limits,
+                                           NBTReadLimits.Budget budget) throws IOException {
+        checkIndex(localIndex);
+        ensureOpen();
+        NBTReadLimits selectedLimits = Objects.requireNonNull(limits, "limits");
+        NBTReadLimits.Budget selectedBudget = Objects.requireNonNull(budget, "budget");
+        @Nullable PendingChunk changed = pending.get(localIndex);
+        if (changed != null) {
+            Chunk result = changed.chunk == null
+                    ? new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex)) : changed.chunk.clone();
+            NBTReadReport report = slotReport(localIndex, List.of());
+            rememberIssues(report.issues());
+            return new NBTReadResult<>(result, report);
+        }
+
+        int offset = sectorOffsets[localIndex];
+        int length = sectorLengths[localIndex];
+        if (offset == 0 && length == 0) {
+            NBTReadReport report = slotReport(localIndex, List.of());
+            rememberIssues(report.issues());
+            return new NBTReadResult<>(new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex)), report);
+        }
+
+        // A malformed location can overlap another slot or point outside the file. Keep its
+        // original allocation reserved where possible, but never interpret those bytes as a
+        // trustworthy payload during tolerant materialization.
+        if (isolatedSlots[localIndex]) {
+            List<NBTReadIssue> isolatedIssue = List.of(readIssue(
+                    NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                    "REGION_SLOT_ISOLATED", slotPath(localIndex),
+                    "槽位头部范围不安全，已隔离；请替换或清除该槽位后再保存"));
+            NBTReadReport report = slotReport(localIndex, isolatedIssue);
+            rememberIssues(report.issues());
+            return new NBTReadResult<>(new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex)), report);
+        }
+
+        List<NBTReadIssue> issues = new ArrayList<>();
+        try {
+            byte[] sector = NBTRegionFileIO.readBytes(channel, (long) offset * ChunkUtils.SECTOR_BYTES,
+                    (long) length * ChunkUtils.SECTOR_BYTES);
+            @Nullable ChunkPayload payload = readPayloadTolerant(localIndex, sector, length, selectedLimits, issues);
+            if (payload != null) {
+                try {
+                    NBTReadResult<CompoundTag> recovered = NBTRepairReader.readRegionPayload(
+                            payload.compressed, payload.compression, selectedLimits, selectedBudget);
+                    if (payload.compression == CompressionType.LZ4) {
+                        issues.add(readIssue(NBTReadIssue.Severity.INFORMATIONAL,
+                                "REGION_LZ4_EXTENSION", slotPath(localIndex),
+                                "检测到扩展 LZ4 槽位标记，保存时将原样保留"));
+                    }
+                    for (NBTReadIssue issue : recovered.report().issues()) {
+                        issues.add(withSlotPath(localIndex, issue));
+                    }
+                    Chunk result = new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex), recovered.root());
+                    NBTReadReport report = slotReport(localIndex, issues);
+                    rememberIssues(report.issues());
+                    return new NBTReadResult<>(result, report);
+                } catch (IOException | RuntimeException recoveryFailure) {
+                    issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                            "REGION_SLOT_RECOVERY_FAILED", slotPath(localIndex),
+                            "槽位内容无法可靠恢复：" + NBTRegionFileIO.failureMessage(recoveryFailure)));
+                }
+            }
+        } catch (IOException | RuntimeException readFailure) {
+            issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                    "REGION_SLOT_READ_FAILED", slotPath(localIndex),
+                    "槽位扇区无法读取：" + NBTRegionFileIO.failureMessage(readFailure)));
+        }
+
+        Chunk empty = new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex));
+        NBTReadReport report = slotReport(localIndex, issues);
+        rememberIssues(report.issues());
+        return new NBTReadResult<>(empty, report);
+    }
+
+    /// Reads one chunk by local coordinates using bounded tolerant recovery.
+    /// @param localX local X coordinate from 0 through 31
+    /// @param localZ local Z coordinate from 0 through 31
+    /// @param limits defensive decompression and parser limits
+    /// @return detached chunk and slot diagnostics
+    /// @throws IOException if the session itself is closed or the read policy is invalid
+    public NBTReadResult<Chunk> readChunkTolerant(int localX, int localZ, NBTReadLimits limits)
+            throws IOException {
+        return readChunkTolerant(ChunkUtils.toLocalIndex(
+                NBTRegionFileIO.checkedCoordinate(localX), NBTRegionFileIO.checkedCoordinate(localZ)), limits);
+    }
+
+    /// Returns diagnostics collected by this region session.
+    /// @return immutable aggregate report
+    public synchronized NBTReadReport readReport() {
+        if (readIssues.isEmpty()) {
+            return NBTReadReport.clean(NBTFileEncoding.REGION);
+        }
+        return new NBTReadReport(NBTFileEncoding.REGION, false, readIssues);
     }
 
     /// Schedules a deep copy of a chunk for the next [#flush()] call.
-    ///
     /// Newly written chunks use ZLIB compression. The existing chunk's sectors and compression
     /// method are never rewritten unless this method is called.
-    ///
     /// @param localIndex local slot from 0 through 1023
     /// @param chunk chunk to copy; a `null` root means an empty slot with its timestamp retained
     public void writeChunk(int localIndex, Chunk chunk) {
@@ -419,7 +605,6 @@ public final class NBTRegionFile implements AutoCloseable {
     }
 
     /// Schedules a deep copy of a chunk using the selected compression method.
-    ///
     /// @param localIndex local slot from 0 through 1023
     /// @param chunk chunk to copy
     /// @param compression compression method for the new payload
@@ -428,11 +613,10 @@ public final class NBTRegionFile implements AutoCloseable {
         ensureOpenUnchecked();
         Objects.requireNonNull(chunk, "chunk");
         Objects.requireNonNull(compression, "compression");
-        pending.put(localIndex, new PendingChunk(chunk.clone(), compression));
+        pending.put(localIndex, new PendingChunk(chunk.clone(), compression, true));
     }
 
     /// Schedules a compound root for writing using the default ZLIB compression.
-    ///
     /// @param localIndex local slot from 0 through 1023
     /// @param root compound root, or `null` to clear the slot
     public void writeChunk(int localIndex, @Nullable CompoundTag root) {
@@ -440,77 +624,83 @@ public final class NBTRegionFile implements AutoCloseable {
         ensureOpenUnchecked();
         CompressionType compression = preferredCompression(localIndex);
         pending.put(localIndex, root == null
-                ? new PendingChunk(new Chunk(), compression)
-                : new PendingChunk(new Chunk(root.clone()), compression));
+                ? new PendingChunk(new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex)), compression, true)
+                : new PendingChunk(new Chunk(root.clone()), compression, true));
     }
 
     /// Schedules a detached chunk by local X/Z coordinates.
-    ///
     /// @param localX local X coordinate from 0 through 31
     /// @param localZ local Z coordinate from 0 through 31
     /// @param chunk chunk to copy
     public void writeChunk(int localX, int localZ, Chunk chunk) {
-        writeChunk(ChunkUtils.toLocalIndex(checkedCoordinate(localX), checkedCoordinate(localZ)), chunk);
+        writeChunk(ChunkUtils.toLocalIndex(NBTRegionFileIO.checkedCoordinate(localX),
+                NBTRegionFileIO.checkedCoordinate(localZ)), chunk);
     }
 
     /// Schedules a detached chunk by local X/Z coordinates using the selected compression.
-    ///
     /// @param localX local X coordinate from 0 through 31
     /// @param localZ local Z coordinate from 0 through 31
     /// @param chunk chunk to copy
     /// @param compression compression method for the new payload
     public void writeChunk(int localX, int localZ, Chunk chunk, CompressionType compression) {
-        writeChunk(ChunkUtils.toLocalIndex(checkedCoordinate(localX), checkedCoordinate(localZ)),
+        writeChunk(ChunkUtils.toLocalIndex(NBTRegionFileIO.checkedCoordinate(localX),
+                NBTRegionFileIO.checkedCoordinate(localZ)),
                 chunk, compression);
     }
 
     /// Schedules a compound root by local X/Z coordinates.
-    ///
     /// @param localX local X coordinate from 0 through 31
     /// @param localZ local Z coordinate from 0 through 31
     /// @param root compound root, or `null` to clear the slot
     public void writeChunk(int localX, int localZ, @Nullable CompoundTag root) {
-        writeChunk(ChunkUtils.toLocalIndex(checkedCoordinate(localX), checkedCoordinate(localZ)), root);
+        writeChunk(ChunkUtils.toLocalIndex(NBTRegionFileIO.checkedCoordinate(localX),
+                NBTRegionFileIO.checkedCoordinate(localZ)), root);
     }
 
-    /// Schedules a slot clear. The old sectors are released only after the new header entry is forced.
-    ///
+    /// Schedules a slot clear. The old sectors are released only after the new header entry is published.
     /// @param localIndex local slot from 0 through 1023
     public void clearChunk(int localIndex) {
         checkIndex(localIndex);
         ensureOpenUnchecked();
-        pending.put(localIndex, new PendingChunk(null, CompressionType.ZLIB));
+        pending.put(localIndex, new PendingChunk(
+                new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex)),
+                preferredCompression(localIndex), true));
     }
 
     /// Schedules a slot clear by local X/Z coordinates.
-    ///
     /// @param localX local X coordinate from 0 through 31
     /// @param localZ local Z coordinate from 0 through 31
     public void clearChunk(int localX, int localZ) {
-        clearChunk(ChunkUtils.toLocalIndex(checkedCoordinate(localX), checkedCoordinate(localZ)));
+        clearChunk(ChunkUtils.toLocalIndex(NBTRegionFileIO.checkedCoordinate(localX),
+                NBTRegionFileIO.checkedCoordinate(localZ)));
     }
 
     /// Flushes pending chunks in ascending local-index order using copy-on-write publication.
-    ///
     /// If a later chunk fails, earlier chunks remain committed and an
     /// [NBTPartialSaveException] identifies the committed indexes. Failed and later chunks remain
     /// dirty in memory.
-    ///
     /// @throws IOException if a chunk cannot be encoded, written, or published
     public void flush() throws IOException {
         ensureOpen();
-        checkFingerprint();
+        pendingCleanup.retry();
+        boolean hadTrailingTail = trailingTailNeedsRepair;
+        // Reject opaque extension markers before touching a repairable tail. A failed save must
+        // leave the source bytes unchanged when no explicit replacement authorizes the marker.
+        rejectUnknownCompressionMarkers();
+        if (hadTrailingTail) {
+            normalizeTrailingTail();
+        }
         if (pending.isEmpty()) {
-            channel.force(true);
+            if (hadTrailingTail) {
+                clearTrailingTailIssue();
+            }
             return;
         }
-
         List<Integer> indexes = new ArrayList<>(pending.keySet());
         Collections.sort(indexes);
         List<Integer> committed = new ArrayList<>();
         for (int localIndex : indexes) {
             try {
-                checkFingerprint();
                 @Nullable PendingChunk change = pending.get(localIndex);
                 if (change == null) {
                     continue;
@@ -521,19 +711,11 @@ public final class NBTRegionFile implements AutoCloseable {
             } catch (ChunkCommittedException exception) {
                 pending.remove(localIndex);
                 committed.add(localIndex);
-                try {
-                    fingerprint = computeFingerprint();
-                } catch (IOException | RuntimeException fingerprintFailure) {
-                    commitStateUncertain = true;
-                    IOException wrapped = asIOException(
-                            "Failed to fingerprint committed region chunk " + localIndex,
-                            fingerprintFailure);
-                    NBTCommitUncertainException uncertain = new NBTCommitUncertainException(
-                            path, localIndex, wrapped);
-                    uncertain.addSuppressed(exception);
-                    throw new NBTPartialSaveException(committed, -1, uncertain);
-                }
+                clearRepairIssues(localIndex);
                 throw new NBTPartialSaveException(committed, -1, exception);
+            } catch (NBTCommitUncertainException exception) {
+                lockAfterUncertainCommit(exception);
+                throw exception;
             } catch (IOException exception) {
                 if (!committed.isEmpty()) {
                     throw new NBTPartialSaveException(committed, localIndex, exception);
@@ -546,59 +728,49 @@ public final class NBTRegionFile implements AutoCloseable {
                 }
                 throw wrapped;
             }
-            try {
-                fingerprint = computeFingerprint();
-            } catch (IOException | RuntimeException exception) {
-                commitStateUncertain = true;
-                IOException wrapped = asIOException(
-                        "Failed to fingerprint committed region chunk " + localIndex,
-                        exception);
-                throw new NBTPartialSaveException(
-                        committed,
-                        -1,
-                        new NBTCommitUncertainException(path, localIndex, wrapped));
-            }
+            clearRepairIssues(localIndex);
+        }
+        if (hadTrailingTail) {
+            clearTrailingTailIssue();
         }
     }
 
     /// Closes the underlying channel without implicitly publishing pending changes.
-    ///
     /// Call [#flush()] explicitly to publish edits. This fail-closed behavior prevents a close
     /// during error recovery from retrying a partial save behind the caller's back. Pending
     /// snapshots remain observable through [#isDirty()] and [#dirtyChunkIndexes()] after close,
     /// but the closed session cannot publish them.
-    ///
     /// @throws IOException if the channel cannot be closed
     @Override
-    public void close() throws IOException {
+    public synchronized void close() throws IOException {
         if (closed) {
-            Files.deleteIfExists(identityLink);
             return;
         }
-        @Nullable IOException failure = null;
+        pendingCleanup.retry();
+        // Keep the session retryable when the operating system refuses to close the channel. The
+        // owning document lease must not be released while this physical handle is unresolved.
+        channel.close();
+        closed = true;
+    }
+
+    /// Closes this session after a publication and rollback both failed.
+    /// The visible header and companion state must be rediscovered by a fresh open. Keeping this
+    /// channel usable would allow reads to observe a mixture of the old and new publication.
+    /// @param uncertain failure which caused the session lock
+    private void lockAfterUncertainCommit(NBTCommitUncertainException uncertain) {
+        commitLocked = true;
+        if (closed) {
+            return;
+        }
         try {
             channel.close();
-        } catch (IOException closeFailure) {
-            failure = closeFailure;
-        }
-        try {
-            Files.deleteIfExists(identityLink);
-        } catch (IOException cleanupFailure) {
-            if (failure == null) {
-                failure = cleanupFailure;
-            } else {
-                failure.addSuppressed(cleanupFailure);
-            }
-        } finally {
             closed = true;
-        }
-        if (failure != null) {
-            throw failure;
+        } catch (IOException closeFailure) {
+            uncertain.addSuppressed(closeFailure);
         }
     }
 
     /// Serializes and publishes one pending chunk while retaining the previous visible storage.
-    ///
     /// @param localIndex local chunk slot being updated
     /// @param change detached pending value and compression
     /// @throws IOException if validation, payload publication, or header publication fails
@@ -610,12 +782,12 @@ public final class NBTRegionFile implements AutoCloseable {
         @Nullable Path previousCompanion = external[localIndex] ? companionPath(localIndex) : null;
         if (chunk == null) {
             try {
-                publishClear(localIndex, previousCompanion);
+                publishClear(localIndex, previousCompanion,
+                        NBTRegionFileIO.epochSeconds(NBTRegionFileIO.timestamp(timestamps, localIndex)));
             } catch (ChunkCommittedException exception) {
                 releaseSectors(oldOffset, oldLength);
                 throw exception;
             } catch (NBTCommitUncertainException exception) {
-                commitStateUncertain = true;
                 throw exception;
             }
             releaseSectors(oldOffset, oldLength);
@@ -625,12 +797,11 @@ public final class NBTRegionFile implements AutoCloseable {
         @Nullable CompoundTag root = chunk.getRootTag();
         if (root == null) {
             try {
-                publishHeader(localIndex, 0, 0, epochSeconds(chunk.getTimestamp()), false, (byte) 0);
+                publishHeader(localIndex, 0, 0, NBTRegionFileIO.epochSeconds(chunk.getTimestamp()), false, (byte) 0);
             } catch (ChunkCommittedException exception) {
                 releaseSectors(oldOffset, oldLength);
                 throw exception;
             } catch (NBTCommitUncertainException exception) {
-                commitStateUncertain = true;
                 throw exception;
             }
             releaseSectors(oldOffset, oldLength);
@@ -643,48 +814,49 @@ public final class NBTRegionFile implements AutoCloseable {
         } catch (NBTValidationException exception) {
             throw new IOException("Invalid NBT tree for region chunk " + localIndex, exception);
         }
+        CompressionType compression = compressionForPublication(localIndex, change.compression);
         byte[] nbt = NBTCodec.of().writeTagToByteArray(root.clone());
-        byte[] compressed = compress(change.compression, nbt);
+        byte[] compressed = compress(compression, nbt);
+        if (compressed.length > MAX_COMPRESSED_BYTES) {
+            throw new IOException("Compressed region chunk exceeds the encoded read limit: "
+                    + compressed.length);
+        }
         long framedBytes = compressed.length + 5L;
-        if (framedBytes <= MAX_INLINE_BYTES) {
+        // An existing external slot keeps its representation even when the replacement would fit
+        // inline. This preserves the source marker/companion contract and avoids silently
+        // deleting a companion merely because the payload became smaller.
+        boolean keepExternal = oldExternal || framedBytes > MAX_INLINE_BYTES;
+        if (!keepExternal) {
             int sectors = Math.toIntExact((framedBytes + ChunkUtils.SECTOR_BYTES - 1) / ChunkUtils.SECTOR_BYTES);
             Allocation allocation = allocateSectors(sectors, localIndex);
             try {
-                writeInlineChunk(allocation.byteOffset(), sectors, change.compression, compressed);
+                writeInlineChunk(allocation.byteOffset(), sectors, compression, compressed);
                 reach(CommitStage.PAYLOAD_WRITTEN, localIndex);
-                channel.force(true);
                 reach(CommitStage.PAYLOAD_FORCED, localIndex);
                 publishHeader(localIndex, allocation.sectorOffset, sectors,
-                        epochSeconds(chunk.getTimestamp()), false, (byte) change.compression.id());
+                        NBTRegionFileIO.epochSeconds(chunk.getTimestamp()), false, (byte) compression.id());
             } catch (ChunkCommittedException exception) {
                 releaseSectors(oldOffset, oldLength);
                 throw exception;
             } catch (NBTCommitUncertainException exception) {
-                commitStateUncertain = true;
                 throw exception;
             } catch (IOException | RuntimeException exception) {
                 releaseSectors(allocation.sectorOffset, allocation.sectorCount);
-                refreshFingerprintAfterFailedWrite(localIndex, exception);
                 throw exception;
             }
             releaseSectors(oldOffset, oldLength);
             deleteCompanionAfterPublish(localIndex, previousCompanion);
         } else {
-            if (oldExternal && Byte.toUnsignedInt(compressionTypes[localIndex]) != change.compression.id()) {
-                throw new IOException("Changing compression for an already external chunk cannot be published "
-                        + "atomically with the standard companion-file format");
-            }
             Allocation allocation = allocateSectors(1, localIndex);
             @Nullable CompanionSwap companion = null;
             try {
                 companion = writeCompanion(localIndex, compressed, oldExternal);
                 reach(CommitStage.COMPANION_PUBLISHED, localIndex);
-                writeExternalMarker(allocation.byteOffset(), change.compression);
+                writeExternalMarker(allocation.byteOffset(), compression);
                 reach(CommitStage.PAYLOAD_WRITTEN, localIndex);
-                channel.force(true);
                 reach(CommitStage.PAYLOAD_FORCED, localIndex);
                 publishHeader(localIndex, allocation.sectorOffset, 1,
-                        epochSeconds(chunk.getTimestamp()), true, (byte) change.compression.id());
+                        NBTRegionFileIO.epochSeconds(chunk.getTimestamp()), true, (byte) compression.id());
             } catch (ChunkCommittedException exception) {
                 releaseSectors(oldOffset, oldLength);
                 if (companion != null) {
@@ -696,7 +868,6 @@ public final class NBTRegionFile implements AutoCloseable {
                 }
                 throw exception;
             } catch (NBTCommitUncertainException exception) {
-                commitStateUncertain = true;
                 throw exception;
             } catch (IOException | RuntimeException exception) {
                 if (companion != null) {
@@ -704,7 +875,6 @@ public final class NBTRegionFile implements AutoCloseable {
                         companion.restore(localIndex);
                     } catch (IOException | RuntimeException restoreFailure) {
                         releaseSectors(allocation.sectorOffset, allocation.sectorCount);
-                        commitStateUncertain = true;
                         IOException publicationFailure = asIOException(
                                 "External chunk publication failed",
                                 exception);
@@ -716,7 +886,6 @@ public final class NBTRegionFile implements AutoCloseable {
                     }
                 }
                 releaseSectors(allocation.sectorOffset, allocation.sectorCount);
-                refreshFingerprintAfterFailedWrite(localIndex, exception);
                 throw exception;
             }
             releaseSectors(oldOffset, oldLength);
@@ -725,17 +894,16 @@ public final class NBTRegionFile implements AutoCloseable {
     }
 
     /// Publishes an empty location and then removes the previously referenced companion.
-    ///
     /// @param localIndex local chunk slot being cleared
     /// @param previousCompanion owned companion to remove after publication, if present
+    /// @param timestamp raw timestamp bits retained for the empty slot
     /// @throws IOException if header publication or post-commit cleanup fails
-    private void publishClear(int localIndex, @Nullable Path previousCompanion) throws IOException {
-        publishHeader(localIndex, 0, 0, 0, false, (byte) 0);
+    private void publishClear(int localIndex, @Nullable Path previousCompanion, int timestamp) throws IOException {
+        publishHeader(localIndex, 0, 0, timestamp, false, (byte) 0);
         deleteCompanionAfterPublish(localIndex, previousCompanion);
     }
 
-    /// Publishes one timestamp and location entry, restoring their prior values on pre-force failure.
-    ///
+    /// Publishes one timestamp and location entry, restoring their prior values on pre-publication failure.
     /// @param localIndex local chunk slot being published
     /// @param offset replacement sector offset, or zero for an empty slot
     /// @param length replacement sector count, or zero for an empty slot
@@ -751,49 +919,40 @@ public final class NBTRegionFile implements AutoCloseable {
         ByteBuffer newTimestamp = ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.BIG_ENDIAN)
                 .putInt(timestamp);
         newTimestamp.flip();
-        ByteBuffer newLocation = encodeLocation(offset, length);
-        boolean headerForced = false;
+        ByteBuffer newLocation = NBTRegionFileIO.encodeLocation(offset, length);
+        boolean headerWritten = false;
         try {
-            ensurePathIdentity();
+            NBTRegionFileIO.requireRegularFile(path);
             // Publishing the timestamp first keeps the old location structurally readable until
             // the final four-byte location switch reaches disk.
-            writeFully(channel, newTimestamp,
+            NBTRegionFileIO.writeFully(channel, newTimestamp,
                     ChunkUtils.SECTOR_BYTES + (long) localIndex * Integer.BYTES);
-            channel.force(true);
-            writeFully(channel, newLocation, (long) localIndex * Integer.BYTES);
+            NBTRegionFileIO.writeFully(channel, newLocation, (long) localIndex * Integer.BYTES);
             reach(CommitStage.HEADER_WRITTEN, localIndex);
-            channel.force(true);
-            headerForced = true;
-            ensurePathIdentity();
+            headerWritten = true;
+            NBTRegionFileIO.requireRegularFile(path);
             reach(CommitStage.HEADER_FORCED, localIndex);
-        } catch (RegionPathChangedException exception) {
-            commitStateUncertain = true;
-            if (headerForced) {
-                throw new NBTCommitUncertainException(path, localIndex, exception);
-            }
-            throw exception;
         } catch (IOException | RuntimeException failure) {
             IOException exception = asIOException("Region header publication failed", failure);
-            if (headerForced) {
+            if (headerWritten) {
                 sectorOffsets[localIndex] = offset;
                 sectorLengths[localIndex] = length;
                 timestamps[localIndex] = timestamp;
                 external[localIndex] = isExternal;
                 compressionTypes[localIndex] = compression;
+                isolatedSlots[localIndex] = false;
                 throw new ChunkCommittedException(localIndex, exception);
             }
             try {
                 reach(CommitStage.HEADER_ROLLBACK, localIndex);
-                writeFully(channel, encodeLocation(oldOffset, oldLength),
+                NBTRegionFileIO.writeFully(channel, NBTRegionFileIO.encodeLocation(oldOffset, oldLength),
                         (long) localIndex * Integer.BYTES);
                 ByteBuffer rollbackTimestamp = ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.BIG_ENDIAN)
                         .putInt(oldTimestamp);
                 rollbackTimestamp.flip();
-                writeFully(channel, rollbackTimestamp,
+                NBTRegionFileIO.writeFully(channel, rollbackTimestamp,
                         ChunkUtils.SECTOR_BYTES + (long) localIndex * Integer.BYTES);
-                channel.force(true);
             } catch (IOException | RuntimeException rollbackFailure) {
-                commitStateUncertain = true;
                 throw new NBTCommitUncertainException(
                         path,
                         localIndex,
@@ -807,10 +966,10 @@ public final class NBTRegionFile implements AutoCloseable {
         timestamps[localIndex] = timestamp;
         external[localIndex] = isExternal;
         compressionTypes[localIndex] = compression;
+        isolatedSlots[localIndex] = false;
     }
 
     /// Reserves and zero-fills a contiguous free sector range without changing the header.
-    ///
     /// @param count number of sectors to reserve
     /// @param localIndex local chunk slot receiving the allocation
     /// @return reserved sector range
@@ -819,23 +978,28 @@ public final class NBTRegionFile implements AutoCloseable {
         if (count < 1 || count > MAX_SECTOR_COUNT) {
             throw new IOException("Invalid sector allocation count: " + count);
         }
-        ensurePathIdentity();
+        NBTRegionFileIO.requireRegularFile(path);
         long size = channel.size();
         if ((size & (ChunkUtils.SECTOR_BYTES - 1L)) != 0L) {
             throw new IOException("Region file length is not sector-aligned");
         }
-        int fileSectors = Math.toIntExact(size / ChunkUtils.SECTOR_BYTES);
+        long fileSectorsLong = size / ChunkUtils.SECTOR_BYTES;
+        if (fileSectorsLong > 0x1_000000L) {
+            throw new IOException("Region file exceeds the 24-bit sector address space");
+        }
+        int fileSectors = Math.toIntExact(fileSectorsLong);
         int sectorOffset = 2;
         while (true) {
             sectorOffset = usedSectors.nextClearBit(sectorOffset);
             int nextUsed = usedSectors.nextSetBit(sectorOffset);
             int freeEnd = nextUsed < 0 ? fileSectors : nextUsed;
-            if (sectorOffset + count <= freeEnd || nextUsed < 0) {
+            if ((long) sectorOffset + count <= freeEnd || nextUsed < 0) {
                 break;
             }
             sectorOffset = nextUsed + 1;
         }
-        if (sectorOffset > 0xFF_FFFF || sectorOffset + count > 0x1_000000) {
+        long sectorEnd = (long) sectorOffset + count;
+        if (sectorOffset > 0xFF_FFFF || sectorEnd > 0x1_000000L) {
             throw new IOException("Region sector offset exceeds the header limit");
         }
         long offset = (long) sectorOffset * ChunkUtils.SECTOR_BYTES;
@@ -845,61 +1009,54 @@ public final class NBTRegionFile implements AutoCloseable {
         } catch (ArithmeticException exception) {
             throw new IOException("Region file is too large", exception);
         }
-        usedSectors.set(sectorOffset, sectorOffset + count);
+        usedSectors.set(sectorOffset, Math.toIntExact(sectorEnd));
         try {
-            writeZeros(channel, offset, end - offset);
+            NBTRegionFileIO.writeZeros(channel, offset, end - offset);
             reach(CommitStage.ALLOCATION_WRITTEN, localIndex);
             return new Allocation(sectorOffset, count);
         } catch (IOException | RuntimeException exception) {
-            usedSectors.clear(sectorOffset, sectorOffset + count);
-            refreshFingerprintAfterFailedWrite(localIndex, exception);
+            usedSectors.clear(sectorOffset, Math.toIntExact(sectorEnd));
             throw exception;
         }
     }
 
     /// Marks a previously owned payload range available for later allocations.
-    ///
     /// @param offset first sector in the range
     /// @param length number of sectors in the range
     private void releaseSectors(int offset, int length) {
-        if (offset >= 2 && length > 0) {
-            usedSectors.clear(offset, offset + length);
+        if (offset < 2 || length <= 0) {
+            return;
+        }
+        long end = (long) offset + length;
+        if (end > Integer.MAX_VALUE) {
+            end = Integer.MAX_VALUE;
+        }
+        for (long sector = offset; sector < end; sector++) {
+            int sectorIndex = (int) sector;
+            if (!isSectorReferencedByAnotherSlot(sectorIndex)) {
+                usedSectors.clear(sectorIndex);
+            }
         }
     }
 
-    /// Refreshes the known fingerprint after an unpublished write extended or changed free space.
-    ///
-    /// @param localIndex local chunk slot whose unpublished payload write failed
-    /// @param failure original unpublished-write failure retained as suppressed context
-    /// @throws NBTCommitUncertainException if the current source fingerprint cannot be established
-    private void refreshFingerprintAfterFailedWrite(int localIndex, Throwable failure)
-            throws NBTCommitUncertainException {
-        try {
-            fingerprint = computeFingerprint();
-        } catch (IOException | RuntimeException fingerprintFailure) {
-            commitStateUncertain = true;
-            IOException wrapped = asIOException(
-                    "Failed to refresh region fingerprint after a failed chunk write",
-                    fingerprintFailure);
-            NBTCommitUncertainException uncertain = new NBTCommitUncertainException(path, localIndex, wrapped);
-            uncertain.addSuppressed(failure);
-            throw uncertain;
+    /// Returns whether a still-published slot owns one sector.
+    /// Tolerant region opening can retain overlapping or truncated header ranges as isolated
+    /// reservations. A repaired slot must not release a sector while another slot still points
+    /// at it, otherwise a later allocation could overwrite the other slot's only recoverable bytes.
+    /// @param sector sector index
+    /// @return whether any current slot references the sector
+    private boolean isSectorReferencedByAnotherSlot(int sector) {
+        for (int localIndex = 0; localIndex < sectorOffsets.length; localIndex++) {
+            int start = sectorOffsets[localIndex];
+            int count = sectorLengths[localIndex];
+            if (count > 0 && sector >= start && (long) sector < (long) start + count) {
+                return true;
+            }
         }
-    }
-
-    /// Preserves checked I/O failures and gives unchecked filesystem failures checked context.
-    ///
-    /// @param message context for an unchecked failure
-    /// @param failure original checked or unchecked failure
-    /// @return original I/O failure or a checked wrapper
-    private static IOException asIOException(String message, Throwable failure) {
-        return failure instanceof IOException ioException
-                ? ioException
-                : new IOException(Objects.requireNonNull(message, "message"), failure);
+        return false;
     }
 
     /// Writes a complete inline frame into an unreferenced sector range.
-    ///
     /// @param offset byte offset of the reserved range
     /// @param sectors number of reserved sectors
     /// @param compression compression marker for the payload
@@ -912,11 +1069,10 @@ public final class NBTRegionFile implements AutoCloseable {
         frame.put((byte) compression.id());
         frame.put(compressed);
         frame.flip();
-        writeFully(channel, frame, offset);
+        NBTRegionFileIO.writeFully(channel, frame, offset);
     }
 
     /// Writes an external-payload marker into one unreferenced sector.
-    ///
     /// @param offset byte offset of the reserved sector
     /// @param compression compression marker for the companion payload
     /// @throws IOException if the marker cannot be written completely
@@ -925,11 +1081,10 @@ public final class NBTRegionFile implements AutoCloseable {
         frame.putInt(1);
         frame.put((byte) (compression.id() | 0x80));
         frame.flip();
-        writeFully(channel, frame, offset);
+        NBTRegionFileIO.writeFully(channel, frame, offset);
     }
 
     /// Atomically publishes a compressed companion payload while retaining a restorable backup.
-    ///
     /// @param localIndex local chunk slot whose companion is being published
     /// @param compressed compressed NBT payload without a region frame prefix
     /// @param replaceOwned whether an existing target is known to belong to this chunk
@@ -943,39 +1098,71 @@ public final class NBTRegionFile implements AutoCloseable {
         }
         @Nullable Path parent = target.getParent();
         if (parent != null) {
-            Files.createDirectories(parent);
+            NBTRegionFileIO.createDirectoriesNoFollow(parent);
         }
-        Path temporary = Files.createTempFile(parent == null ? path.toAbsolutePath().getParent() : parent,
-                target.getFileName().toString(), ".tmp");
-        @Nullable Path backup = null;
+        Path temporary = NBTRegionFileIO.deterministicSibling(target, ".xyml_new");
+        Path backupStage = NBTRegionFileIO.deterministicSibling(target, ".xyml_old.xyml_new");
+        Path backup = NBTRegionFileIO.deterministicSibling(target, ".xyml_old");
+        boolean targetReplaced = false;
+        boolean backupPublished = false;
         try {
-            try (FileChannel output = FileChannel.open(temporary, StandardOpenOption.WRITE,
-                    StandardOpenOption.TRUNCATE_EXISTING)) {
-                writeFully(output, ByteBuffer.wrap(compressed), 0L);
-                output.force(true);
+            NBTRegionFileIO.writeStage(temporary, compressed);
+            boolean targetExists = Files.exists(target, LinkOption.NOFOLLOW_LINKS);
+            if (Files.isSymbolicLink(target)) {
+                throw new IOException("Refusing to replace a symbolic external chunk companion: " + target);
             }
-            if (Files.exists(target)) {
+            if (targetExists) {
                 if (!replaceOwned) {
                     throw new IOException("Refusing to replace an unreferenced external chunk companion: " + target);
                 }
-                backup = Files.createTempFile(parent == null ? path.toAbsolutePath().getParent() : parent,
-                        target.getFileName().toString(), ".old");
-                Files.copy(target, backup, StandardCopyOption.REPLACE_EXISTING);
-                forceFile(backup);
+                NBTRegionFileIO.requireRegularFile(target);
+                NBTRegionFileIO.copyFileBounded(target, backupStage, MAX_COMPRESSED_BYTES);
             }
-            moveAtomically(temporary, target);
-            return new CompanionSwap(temporary, target, backup);
+            NBTRegionFileIO.moveAtomically(temporary, target);
+            targetReplaced = true;
+            if (targetExists) {
+                reach(CommitStage.COMPANION_BACKUP_PUBLISH, localIndex);
+                NBTRegionFileIO.moveAtomically(backupStage, backup);
+                backupPublished = true;
+                return new CompanionSwap(temporary, target, backup);
+            }
+            return new CompanionSwap(temporary, target, null);
         } catch (IOException | RuntimeException exception) {
-            Files.deleteIfExists(temporary);
-            if (backup != null) {
-                Files.deleteIfExists(backup);
+            if (targetReplaced) {
+                try {
+                    reach(CommitStage.COMPANION_ROLLBACK, localIndex);
+                    if (backupPublished) {
+                        NBTRegionFileIO.moveAtomically(backup, target);
+                    } else if (Files.exists(backupStage, LinkOption.NOFOLLOW_LINKS)) {
+                        NBTRegionFileIO.moveAtomically(backupStage, target);
+                    } else {
+                        Files.deleteIfExists(target);
+                    }
+                } catch (IOException | RuntimeException restoreFailure) {
+                    throw new NBTCommitUncertainException(
+                            path,
+                            localIndex,
+                            asIOException("External companion publication failed", exception),
+                            asIOException("External companion rollback failed", restoreFailure));
+                }
+            }
+            try {
+                Files.deleteIfExists(temporary);
+            } catch (IOException | RuntimeException cleanupFailure) {
+                pendingCleanup.remember(temporary);
+                exception.addSuppressed(cleanupFailure);
+            }
+            try {
+                Files.deleteIfExists(backupStage);
+            } catch (IOException | RuntimeException cleanupFailure) {
+                pendingCleanup.remember(backupStage);
+                exception.addSuppressed(cleanupFailure);
             }
             throw exception;
         }
     }
 
     /// Removes an owned companion only after its header entry no longer references it.
-    ///
     /// @param localIndex committed local chunk slot
     /// @param oldPath previously referenced companion, if present
     /// @throws IOException if post-commit cleanup fails
@@ -986,6 +1173,9 @@ public final class NBTRegionFile implements AutoCloseable {
                 Files.deleteIfExists(oldPath);
             }
         } catch (IOException | RuntimeException exception) {
+            if (oldPath != null) {
+                pendingCleanup.remember(oldPath);
+            }
             throw new ChunkCommittedException(
                     localIndex,
                     asIOException("Committed companion cleanup failed", exception));
@@ -999,13 +1189,12 @@ public final class NBTRegionFile implements AutoCloseable {
         private final Path temporary;
         /// Canonical companion path currently holding the replacement payload.
         private final Path target;
-        /// Forced backup of the previous owned companion, if one existed.
+        /// Deterministic backup of the previous owned companion, if one existed.
         private final @Nullable Path backupPath;
         /// Whether header publication made this swap permanent.
         private boolean committed;
 
         /// Creates a reversible companion swap after its target was atomically replaced.
-        ///
         /// @param temporary staging path, normally absent after the atomic move
         /// @param target canonical companion path
         /// @param backupPath previous companion backup, if one existed
@@ -1016,7 +1205,6 @@ public final class NBTRegionFile implements AutoCloseable {
         }
 
         /// Marks the replacement permanent and removes no-longer-needed temporary files.
-        ///
         /// @param localIndex committed local chunk slot
         /// @throws IOException if post-commit cleanup fails
         private void commit(int localIndex) throws IOException {
@@ -1028,6 +1216,10 @@ public final class NBTRegionFile implements AutoCloseable {
                 }
                 Files.deleteIfExists(temporary);
             } catch (IOException | RuntimeException exception) {
+                if (backupPath != null) {
+                    pendingCleanup.remember(backupPath);
+                }
+                pendingCleanup.remember(temporary);
                 throw new ChunkCommittedException(
                         localIndex,
                         asIOException("Committed companion swap cleanup failed", exception));
@@ -1035,7 +1227,6 @@ public final class NBTRegionFile implements AutoCloseable {
         }
 
         /// Restores the prior companion, or removes a newly created companion, before header commit.
-        ///
         /// @param localIndex affected local chunk slot
         /// @throws IOException if the prior companion state cannot be restored atomically
         private void restore(int localIndex) throws IOException {
@@ -1044,10 +1235,10 @@ public final class NBTRegionFile implements AutoCloseable {
             }
             reach(CommitStage.COMPANION_ROLLBACK, localIndex);
             if (backupPath != null) {
-                if (!Files.isRegularFile(backupPath)) {
+                if (!NBTRegionFileIO.isRegularNonSymbolicFile(backupPath)) {
                     throw new IOException("External chunk backup disappeared before rollback: " + backupPath);
                 }
-                moveAtomically(backupPath, target);
+                NBTRegionFileIO.moveAtomically(backupPath, target);
             } else {
                 Files.deleteIfExists(target);
             }
@@ -1056,7 +1247,6 @@ public final class NBTRegionFile implements AutoCloseable {
     }
 
     /// Parses one region frame and resolves its inline or external compressed payload.
-    ///
     /// @param localIndex local chunk slot used for diagnostics and companion lookup
     /// @param sector complete allocated sector bytes
     /// @param sectorLength allocated sector count
@@ -1092,112 +1282,94 @@ public final class NBTRegionFile implements AutoCloseable {
         return new ChunkPayload(compression, payload);
     }
 
+    /// Parses one frame conservatively so a malformed slot can be isolated and recovered.
+    /// Unlike [#readPayload(int, byte[], int)], this method clamps a damaged inline length to
+    /// the bytes physically present in the allocated sectors and records the loss instead of
+    /// aborting the whole region session.
+    /// @param localIndex local chunk slot
+    /// @param sector complete allocated sector bytes
+    /// @param sectorLength allocated sector count
+    /// @param limits bounded companion-input policy
+    /// @param issues diagnostic sink
+    /// @return recoverable payload, or `null` when its marker cannot be interpreted
+    private @Nullable ChunkPayload readPayloadTolerant(int localIndex, byte[] sector, int sectorLength,
+                                                        NBTReadLimits limits,
+                                                        List<NBTReadIssue> issues) {
+        if (sector.length < Integer.BYTES + 1) {
+            issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                    "REGION_FRAME_TRUNCATED", slotPath(localIndex), "槽位帧缺少完整头部"));
+            return null;
+        }
+        ByteBuffer frame = ByteBuffer.wrap(sector).order(ByteOrder.BIG_ENDIAN);
+        long declaredLength = Integer.toUnsignedLong(frame.getInt());
+        int marker = Byte.toUnsignedInt(frame.get());
+        boolean isExternal = (marker & 0x80) != 0;
+        int compressionId = marker & 0x7F;
+        @Nullable CompressionType compression;
+        try {
+            compression = CompressionType.fromId(compressionId);
+        } catch (IOException unsupported) {
+            issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                    "REGION_COMPRESSION_UNSUPPORTED", slotPath(localIndex),
+                    "槽位使用不受支持的压缩标记 " + compressionId));
+            return null;
+        }
+
+        long maximumFrameLength = (long) sectorLength * ChunkUtils.SECTOR_BYTES - Integer.BYTES;
+        if (declaredLength < 1L) {
+            issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                    "REGION_FRAME_LENGTH_INVALID", slotPath(localIndex), "槽位帧长度小于 1"));
+            return null;
+        }
+        if (declaredLength > maximumFrameLength) {
+            issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                    "REGION_FRAME_LENGTH_CLAMPED", slotPath(localIndex),
+                    "槽位帧长度超过已分配扇区，已按实际数据截断"));
+            declaredLength = maximumFrameLength;
+        }
+        if (isExternal) {
+            if (declaredLength != 1L) {
+                issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                        "REGION_EXTERNAL_FRAME_INVALID", slotPath(localIndex),
+                        "外部槽位帧长度不是 1，仍尝试读取伴随文件"));
+            }
+            try {
+                byte[] companion = readCompanionTolerant(localIndex, limits, issues);
+                if (companion.length == 0) {
+                    return null;
+                }
+                return new ChunkPayload(compression, companion);
+            } catch (IOException | RuntimeException failure) {
+                issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                        "REGION_EXTERNAL_READ_FAILED", slotPath(localIndex),
+                        "外部槽位伴随文件无法读取：" + NBTRegionFileIO.failureMessage(failure)));
+                return null;
+            }
+        }
+
+        long payloadLengthLong = declaredLength - 1L;
+        int available = frame.remaining();
+        int payloadLength = (int) Math.min(payloadLengthLong, available);
+        if ((long) payloadLength < payloadLengthLong) {
+            issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                    "REGION_INLINE_TRUNCATED", slotPath(localIndex),
+                    "内联槽位数据在扇区末尾截断"));
+        }
+        byte[] payload = new byte[payloadLength];
+        frame.get(payload);
+        return new ChunkPayload(compression, payload);
+    }
+
     /// Decompresses one validated chunk payload with a bounded output size.
-    ///
     /// @param compression payload compression type
     /// @param payload compressed payload bytes
     /// @return detached uncompressed NBT bytes
     /// @throws IOException if the payload is malformed, truncated, trailing, or too large
-    private byte[] decompress(CompressionType compression, byte[] payload) throws IOException {
-        return switch (compression) {
-            case UNCOMPRESSED -> {
-                if (payload.length > MAX_DECOMPRESSED_BYTES) {
-                    throw new IOException("Uncompressed chunk payload exceeds the size limit");
-                }
-                yield payload.clone();
-            }
-            case GZIP -> readGzip(payload);
-            case LZ4 -> readLz4(payload);
-            case ZLIB -> inflate(payload);
-        };
-    }
-
-    /// Strictly expands one GZIP payload.
-    ///
-    /// @param payload complete compressed bytes
-    /// @return uncompressed bytes
-    /// @throws IOException if GZIP validation or bounded reading fails
-    private byte[] readGzip(byte[] payload) throws IOException {
-        return NBTCodec.decodeGzipStrict(payload, MAX_DECOMPRESSED_BYTES);
-    }
-
-    /// Strictly expands one LZ4 block-stream payload.
-    ///
-    /// @param payload complete compressed bytes
-    /// @return uncompressed bytes
-    /// @throws IOException if LZ4 validation or bounded reading fails
-    private byte[] readLz4(byte[] payload) throws IOException {
-        ByteArrayInputStream source = new ByteArrayInputStream(payload);
-        return readCompressedStream(new LZ4BlockInputStream(source), source, payload);
-    }
-
-    /// Strictly inflates one zlib payload and rejects unused trailing input.
-    ///
-    /// @param payload complete compressed bytes
-    /// @return uncompressed bytes
-    /// @throws IOException if the payload is malformed, truncated, trailing, or too large
-    private byte[] inflate(byte[] payload) throws IOException {
-        Inflater inflater = new Inflater();
-        try {
-            inflater.setInput(payload);
-            ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(payload.length * 2, 8192));
-            byte[] buffer = new byte[8192];
-            while (!inflater.finished()) {
-                int count;
-                try {
-                    count = inflater.inflate(buffer);
-                } catch (java.util.zip.DataFormatException exception) {
-                    throw new IOException("Invalid ZLIB chunk payload", exception);
-                }
-                if (count > 0) {
-                    if (output.size() > MAX_DECOMPRESSED_BYTES - count) {
-                        throw new IOException("Chunk payload is too large after decompression");
-                    }
-                    output.write(buffer, 0, count);
-                } else if (inflater.needsDictionary() || inflater.needsInput()) {
-                    throw new IOException("Truncated ZLIB chunk payload");
-                }
-            }
-            if (inflater.getRemaining() != 0) {
-                throw new IOException("Trailing bytes after ZLIB chunk payload");
-            }
-            return output.toByteArray();
-        } finally {
-            inflater.end();
-        }
-    }
-
-    /// Reads a stream decompressor to EOF while enforcing the chunk output and input boundaries.
-    ///
-    /// @param input decompressor layered over `source`
-    /// @param source compressed byte source used to detect trailing data
-    /// @param compressed original compressed bytes used to size the output buffer
-    /// @return complete uncompressed bytes
-    /// @throws IOException if decompression fails, input remains, or output exceeds the limit
-    private byte[] readCompressedStream(InputStream input, ByteArrayInputStream source,
-                                        byte[] compressed) throws IOException {
-        try (InputStream stream = input) {
-            ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(compressed.length * 2, 8192));
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = stream.read(buffer)) >= 0) {
-                if (count == 0) {
-                    continue;
-                }
-                if (output.size() > MAX_DECOMPRESSED_BYTES - count) {
-                    throw new IOException("Chunk payload is too large after decompression");
-                }
-                output.write(buffer, 0, count);
-            }
-            if (source.available() != 0) {
-                throw new IOException("Trailing bytes after compressed chunk payload");
-            }
-            return output.toByteArray();
-        }
+    private byte[] decompress(CompressionType compression, byte[] payload, int maximumBytes) throws IOException {
+        return NBTRegionCompression.decompress(compression, payload, maximumBytes);
     }
 
     /// Parses exactly one detached compound root and validates its complete NBT structure.
-    ///
     /// @param bytes complete uncompressed NBT payload
     /// @param localIndex local chunk slot used for diagnostics
     /// @return validated detached compound root
@@ -1222,18 +1394,17 @@ public final class NBTRegionFile implements AutoCloseable {
     }
 
     /// Reads every occupied slot once so open fails before exposing malformed payloads.
-    ///
     /// @throws IOException if any existing chunk cannot be read and validated
     private void validateExistingPayloads() throws IOException {
+        NBTReadLimits.Budget budget = NBTReadLimits.defaults().newDocumentBudget();
         for (int localIndex = 0; localIndex < ChunkUtils.CHUNKS_PRE_REGION; localIndex++) {
             if (sectorLengths[localIndex] != 0) {
-                readChunk(localIndex);
+                readChunk(localIndex, budget);
             }
         }
     }
 
     /// Selects pending or existing compression, defaulting new chunks to zlib.
-    ///
     /// @param localIndex local chunk slot
     /// @return compression to retain or use by default
     private CompressionType preferredCompression(int localIndex) {
@@ -1252,51 +1423,98 @@ public final class NBTRegionFile implements AutoCloseable {
         return CompressionType.ZLIB;
     }
 
+    /// Chooses the marker for a publication while preserving an existing slot's profile.
+    /// An explicit compression argument is meaningful for a new slot. Once a slot is occupied,
+    /// its low-seven-bit marker is part of the captured storage profile and must remain stable;
+    /// this rule applies equally to inline and external slots.
+    /// @param localIndex local chunk slot
+    /// @param requested caller-requested compression
+    /// @return existing known compression, or the requested compression for a new/unknown slot
+    private CompressionType compressionForPublication(int localIndex, CompressionType requested) {
+        if (sectorLengths[localIndex] != 0) {
+            @Nullable CompressionType existing = compressionType(Byte.toUnsignedInt(compressionTypes[localIndex]));
+            if (existing != null) {
+                return existing;
+            }
+        }
+        return requested;
+    }
+
+    /// Rejects an untouched slot whose marker is outside the known compression set.
+    /// Tolerant opening intentionally keeps such a slot visible as an isolated diagnostic, but
+    /// silently rewriting it as ZLIB would destroy an extension that this library cannot decode.
+    /// An explicit pending replacement is allowed because the caller has selected a new known
+    /// compression profile for that slot.
+    /// @throws IOException if an occupied slot has an unknown marker and no explicit replacement
+    private void rejectUnknownCompressionMarkers() throws IOException {
+        for (int localIndex = 0; localIndex < compressionTypes.length; localIndex++) {
+            if (sectorLengths[localIndex] == 0) {
+                continue;
+            }
+            int marker = Byte.toUnsignedInt(compressionTypes[localIndex]);
+            @Nullable PendingChunk change = pending.get(localIndex);
+            if (compressionType(marker) == null && (change == null || !change.explicitReplacement())) {
+                throw new IOException("Unknown region compression marker at local index " + localIndex
+                        + "; replace or clear the slot explicitly before saving");
+            }
+        }
+    }
+
+    /// Resolves one stored compression identifier without silently selecting a replacement.
+    /// @param id low-seven-bit compression identifier
+    /// @return known compression type, or null for an extension marker
+    private static @Nullable CompressionType compressionType(int id) {
+        for (CompressionType type : CompressionType.values()) {
+            if (type.id == id) {
+                return type;
+            }
+        }
+        return null;
+    }
+
     /// Compresses serialized NBT bytes with the selected region compression method.
-    ///
     /// @param compression output compression type
     /// @param input complete serialized NBT bytes
     /// @return compressed payload bytes without a region frame prefix
     /// @throws IOException if compression fails
     private byte[] compress(CompressionType compression, byte[] input) throws IOException {
-        if (compression == CompressionType.UNCOMPRESSED) {
-            return input.clone();
-        }
-        ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(input.length, 8192));
-        OutputStream compressor = switch (compression) {
-            case GZIP -> new GZIPOutputStream(output);
-            case ZLIB -> new DeflaterOutputStream(output);
-            case LZ4 -> new LZ4BlockOutputStream(output);
-            case UNCOMPRESSED -> throw new AssertionError();
-        };
-        try (compressor) {
-            compressor.write(input);
-        }
-        return output.toByteArray();
+        return NBTRegionCompression.compress(compression, input);
     }
 
     /// Reads the complete region header and validates all location ranges and chunk markers.
-    ///
     /// @param path region path used for diagnostics and companion discovery
     /// @param channel open region channel
     /// @param accessor external companion accessor
     /// @return validated header arrays and occupied-sector bitmap
     /// @throws IOException if header structure, ranges, markers, or companions are invalid
     private static HeaderData readAndValidateHeader(Path path, FileChannel channel,
-                                                     ExternalChunkAccessor accessor) throws IOException {
+                                                     ExternalChunkAccessor accessor,
+                                                     boolean tolerant) throws IOException {
         long size = channel.size();
-        if (size < HEADER_BYTES || (size & (ChunkUtils.SECTOR_BYTES - 1L)) != 0L) {
+        if (size < HEADER_BYTES || (!tolerant && (size & (ChunkUtils.SECTOR_BYTES - 1L)) != 0L)) {
             throw new IOException("Region file must be at least two sector-aligned header sectors: " + path);
         }
+        long usableSize = size - (size & (ChunkUtils.SECTOR_BYTES - 1L));
         ByteBuffer buffer = ByteBuffer.allocate(HEADER_BYTES).order(ByteOrder.BIG_ENDIAN);
-        readFully(channel, buffer, 0L);
+        NBTRegionFileIO.readFully(channel, buffer, 0L);
         buffer.flip();
         int[] offsets = new int[ChunkUtils.CHUNKS_PRE_REGION];
         int[] lengths = new int[ChunkUtils.CHUNKS_PRE_REGION];
         int[] timestamps = new int[ChunkUtils.CHUNKS_PRE_REGION];
         byte[] compression = new byte[ChunkUtils.CHUNKS_PRE_REGION];
         boolean[] external = new boolean[ChunkUtils.CHUNKS_PRE_REGION];
-        BitSet usedSectors = new BitSet(Math.toIntExact(size / ChunkUtils.SECTOR_BYTES));
+        boolean[] isolatedSlots = new boolean[ChunkUtils.CHUNKS_PRE_REGION];
+        List<NBTReadIssue> issues = new ArrayList<>();
+        if (usableSize != size) {
+            issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                    "REGION_FILE_TRAILING_TRUNCATION", "region",
+                    "文件末尾不是完整扇区，已忽略不完整尾部并隔离受影响槽位"));
+        }
+        long sectorCount = usableSize / ChunkUtils.SECTOR_BYTES;
+        if (sectorCount > 0x1_000000L) {
+            throw new IOException("Region file exceeds the 24-bit sector address space: " + path);
+        }
+        BitSet usedSectors = new BitSet(Math.toIntExact(sectorCount));
         usedSectors.set(0, 2);
         for (int i = 0; i < offsets.length; i++) {
             int offset = ((Byte.toUnsignedInt(buffer.get()) << 16)
@@ -1304,10 +1522,46 @@ public final class NBTRegionFile implements AutoCloseable {
                     | Byte.toUnsignedInt(buffer.get()));
             int length = Byte.toUnsignedInt(buffer.get());
             if ((offset == 0) != (length == 0)) {
-                throw new IOException("Region header has a half-empty entry at local index " + i);
+                if (!tolerant) {
+                    throw new IOException("Region header has a half-empty entry at local index " + i);
+                }
+                issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                        "REGION_HEADER_SLOT_INVALID", slotPath(i),
+                        "槽位头部的扇区偏移和长度不一致，已隔离该槽位"));
+                isolatedSlots[i] = true;
+                if (offset >= 2 && (long) offset < sectorCount) {
+                    // A non-zero offset with a missing length may still own one sector. Keep a
+                    // conservative reservation so a repair of another slot cannot overwrite it.
+                    length = Math.max(length, 1);
+                } else {
+                    // An offset of zero (or one beyond EOF) has no safely attributable bytes.
+                    offset = 0;
+                    length = 0;
+                }
             }
-            if (length > 0 && (offset < 2 || (long) offset + length > size / ChunkUtils.SECTOR_BYTES)) {
-                throw new IOException("Region header points outside the file at local index " + i);
+            long declaredEnd = 0L;
+            boolean declaredRangeOverflow = false;
+            if (length > 0 && offset >= 2) {
+                try {
+                    declaredEnd = Math.addExact((long) offset, (long) length);
+                } catch (ArithmeticException overflow) {
+                    declaredRangeOverflow = true;
+                }
+            }
+            if (length > 0 && (offset < 2 || declaredRangeOverflow || declaredEnd > sectorCount)) {
+                if (!tolerant) {
+                    throw new IOException("Region header points outside the file at local index " + i);
+                }
+                issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                        "REGION_HEADER_SLOT_OUT_OF_RANGE", slotPath(i),
+                        "槽位头部指向文件范围之外，已隔离该槽位"));
+                isolatedSlots[i] = true;
+                if (offset < 2 || (long) offset >= sectorCount) {
+                    offset = 0;
+                    length = 0;
+                }
+                // When the start is inside the file, retain the declared range. The slot is
+                // isolated from reads, while the in-file prefix remains reserved for safety.
             }
             offsets[i] = offset;
             lengths[i] = length;
@@ -1316,53 +1570,158 @@ public final class NBTRegionFile implements AutoCloseable {
             timestamps[i] = buffer.getInt();
         }
 
-        List<int[]> ranges = new ArrayList<>();
+        List<SectorRange> ranges = new ArrayList<>();
         for (int i = 0; i < offsets.length; i++) {
             if (lengths[i] != 0) {
-                ranges.add(new int[]{offsets[i], offsets[i] + lengths[i], i});
-                usedSectors.set(offsets[i], offsets[i] + lengths[i]);
+                long start = Integer.toUnsignedLong(offsets[i]);
+                long end;
+                try {
+                    end = Math.addExact(start, Integer.toUnsignedLong(lengths[i]));
+                } catch (ArithmeticException overflow) {
+                    if (!tolerant) {
+                        throw new IOException("Region sector range overflows at local index " + i, overflow);
+                    }
+                    isolatedSlots[i] = true;
+                    issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                            "REGION_HEADER_RANGE_OVERFLOW", slotPath(i),
+                            "槽位扇区范围发生整数溢出，已隔离该槽位"));
+                    continue;
+                }
+                ranges.add(new SectorRange(start, end, i));
+                long reservedEnd = Math.min(end, sectorCount);
+                if (reservedEnd > start) {
+                    usedSectors.set(offsets[i], Math.toIntExact(reservedEnd));
+                }
             }
         }
-        ranges.sort((a, b) -> Integer.compare(a[0], b[0]));
-        int previousEnd = 2;
-        for (int[] range : ranges) {
-            if (range[0] < previousEnd) {
-                throw new IOException("Overlapping region sectors at local index " + range[2]);
+        ranges.sort((a, b) -> Long.compare(a.start(), b.start()));
+        boolean[] overlapReported = new boolean[offsets.length];
+        for (int currentIndex = 0; currentIndex < ranges.size(); currentIndex++) {
+            SectorRange current = ranges.get(currentIndex);
+            for (int previousIndex = 0; previousIndex < currentIndex; previousIndex++) {
+                SectorRange previous = ranges.get(previousIndex);
+                if (previous.end() <= current.start()) {
+                    continue;
+                }
+                if (!tolerant) {
+                    throw new IOException("Overlapping region sectors at local index " + current.localIndex());
+                }
+                isolatedSlots[current.localIndex()] = true;
+                isolatedSlots[previous.localIndex()] = true;
+                if (!overlapReported[current.localIndex()]) {
+                    issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                            "REGION_HEADER_OVERLAP", slotPath(current.localIndex()),
+                            "槽位扇区与其他槽位重叠，已隔离该槽位"));
+                    overlapReported[current.localIndex()] = true;
+                }
+                if (!overlapReported[previous.localIndex()]) {
+                    issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                            "REGION_HEADER_OVERLAP", slotPath(previous.localIndex()),
+                            "槽位扇区与其他槽位重叠，已隔离该槽位"));
+                    overlapReported[previous.localIndex()] = true;
+                }
+                // Keep the original ranges reserved. This prevents a later repair of one
+                // slot from overwriting bytes which may still be useful to another slot.
             }
-            previousEnd = range[1];
         }
 
         for (int i = 0; i < offsets.length; i++) {
             if (lengths[i] == 0) {
                 continue;
             }
+            long framePosition = (long) offsets[i] * ChunkUtils.SECTOR_BYTES;
+            long frameHeaderEnd;
+            try {
+                frameHeaderEnd = Math.addExact(framePosition, Integer.BYTES + 1L);
+            } catch (ArithmeticException overflow) {
+                frameHeaderEnd = Long.MAX_VALUE;
+            }
+            if (frameHeaderEnd > usableSize) {
+                if (!tolerant) {
+                    throw new IOException("Region chunk frame is truncated at local index " + i);
+                }
+                issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                        "REGION_FRAME_TRUNCATED", slotPath(i),
+                        "槽位帧头不完整，已隔离该槽位"));
+                compression[i] = 0;
+                external[i] = false;
+                isolatedSlots[i] = true;
+                continue;
+            }
             ByteBuffer frame = ByteBuffer.allocate(5).order(ByteOrder.BIG_ENDIAN);
-            readFully(channel, frame, (long) offsets[i] * ChunkUtils.SECTOR_BYTES);
+            try {
+                NBTRegionFileIO.readFully(channel, frame, framePosition);
+            } catch (IOException failure) {
+                if (!tolerant) {
+                    throw failure;
+                }
+                issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                        "REGION_FRAME_TRUNCATED", slotPath(i),
+                        "槽位帧头无法完整读取，已隔离该槽位"));
+                compression[i] = 0;
+                external[i] = false;
+                isolatedSlots[i] = true;
+                continue;
+            }
             frame.flip();
             long length = Integer.toUnsignedLong(frame.getInt());
             if (length < 1L || length > (long) lengths[i] * ChunkUtils.SECTOR_BYTES - 4L) {
-                throw new IOException("Invalid chunk frame length at local index " + i);
+                if (!tolerant) {
+                    throw new IOException("Invalid chunk frame length at local index " + i);
+                }
+                issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                        "REGION_FRAME_INVALID", slotPath(i),
+                        "槽位帧长度无效，已保留槽位并延迟恢复"));
+                compression[i] = 0;
+                external[i] = false;
+                isolatedSlots[i] = true;
+                continue;
             }
             int marker = Byte.toUnsignedInt(frame.get());
             int compressionId = marker & 0x7F;
-            CompressionType.fromId(compressionId);
+            try {
+                CompressionType.fromId(compressionId);
+            } catch (IOException unsupported) {
+                if (!tolerant) {
+                    throw unsupported;
+                }
+                issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                        "REGION_COMPRESSION_UNSUPPORTED", slotPath(i),
+                        "槽位使用不受支持的压缩标记 " + compressionId + "，已隔离读取"));
+                isolatedSlots[i] = true;
+                compression[i] = (byte) compressionId;
+                external[i] = (marker & 0x80) != 0;
+                continue;
+            }
             boolean isExternal = (marker & 0x80) != 0;
             if (isExternal && length != 1L) {
-                throw new IOException("External chunk has inline bytes at local index " + i);
+                if (!tolerant) {
+                    throw new IOException("External chunk has inline bytes at local index " + i);
+                }
+                issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                        "REGION_EXTERNAL_FRAME_INVALID", slotPath(i),
+                        "外部槽位仍包含内联数据，已延迟恢复"));
+                isolatedSlots[i] = true;
             }
             compression[i] = (byte) compressionId;
             external[i] = isExternal;
             if (isExternal) {
                 if (!companionExists(path, accessor, i)) {
-                    throw new IOException("Missing external chunk companion for local index " + i);
+                    if (!tolerant) {
+                        throw new IOException("Missing external chunk companion for local index " + i);
+                    }
+                    issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                            "REGION_EXTERNAL_COMPANION_MISSING", slotPath(i),
+                            "外部槽位伴随文件缺失，已隔离该槽位"));
+                    isolatedSlots[i] = true;
                 }
             }
         }
-        return new HeaderData(offsets, lengths, timestamps, compression, external, usedSectors);
+        return new HeaderData(offsets, lengths, timestamps, compression, external, isolatedSlots,
+                usedSectors, size - usableSize, issues);
     }
 
     /// Resolves a writable filesystem path for one external chunk companion when available.
-    ///
     /// @param localIndex local chunk slot
     /// @return companion path, or `null` when the accessor exposes only streams
     /// @throws IOException if standard coordinate parsing fails
@@ -1374,18 +1733,21 @@ public final class NBTRegionFile implements AutoCloseable {
     }
 
     /// Reads all compressed payload bytes from one referenced companion.
-    ///
     /// @param localIndex local chunk slot
     /// @return complete companion payload bytes
     /// @throws IOException if the companion is unavailable or cannot be read
     private byte[] readCompanion(int localIndex) throws IOException {
         @Nullable Path knownPath = companionPath(localIndex);
         if (knownPath != null) {
+            if (!NBTRegionFileIO.isRegularNonSymbolicFile(knownPath)) {
+                throw new IOException("External chunk companion is not a regular file");
+            }
             if (Files.size(knownPath) > MAX_COMPRESSED_BYTES) {
                 throw new IOException("External chunk companion is too large");
             }
-            try (InputStream input = Files.newInputStream(knownPath)) {
-                return readBounded(input, MAX_COMPRESSED_BYTES, "External chunk companion is too large");
+            try (InputStream input = Files.newInputStream(knownPath, LinkOption.NOFOLLOW_LINKS)) {
+                return NBTRegionFileIO.readBounded(input, MAX_COMPRESSED_BYTES,
+                        "External chunk companion is too large");
             }
         }
         try (@Nullable InputStream input = accessor.openInputStream(
@@ -1393,12 +1755,73 @@ public final class NBTRegionFile implements AutoCloseable {
             if (input == null) {
                 throw new IOException("External accessor cannot read local index " + localIndex);
             }
-            return readBounded(input, MAX_COMPRESSED_BYTES, "External chunk companion is too large");
+            return NBTRegionFileIO.readBounded(input, MAX_COMPRESSED_BYTES,
+                    "External chunk companion is too large");
+        }
+    }
+
+    /// Reads an external companion with the caller's encoded-byte limit.
+    /// A tolerant read keeps the bounded prefix when the stream is longer than the policy and
+    /// reports the truncation through the supplied issue list.
+    /// @param localIndex local chunk slot
+    /// @param limits bounded input policy
+    /// @param issues diagnostic sink
+    /// @return bounded companion bytes, possibly empty when unavailable
+    private byte[] readCompanionTolerant(int localIndex, NBTReadLimits limits,
+                                         List<NBTReadIssue> issues) throws IOException {
+        long configuredMaximum = Math.min(limits.maxEncodedBytes(), MAX_COMPRESSED_BYTES);
+        int maximum = Math.toIntExact(Math.min(configuredMaximum, Integer.MAX_VALUE));
+        @Nullable Path knownPath = companionPath(localIndex);
+        @Nullable InputStream input;
+        if (knownPath != null) {
+            if (!NBTRegionFileIO.isRegularNonSymbolicFile(knownPath)) {
+                issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                        "REGION_EXTERNAL_COMPANION_MISSING", slotPath(localIndex),
+                        "外部槽位伴随文件不存在"));
+                return new byte[0];
+            }
+            input = Files.newInputStream(knownPath, LinkOption.NOFOLLOW_LINKS);
+        } else {
+            input = accessor.openInputStream(ChunkUtils.getLocalX(localIndex), ChunkUtils.getLocalZ(localIndex));
+            if (input == null) {
+                issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                        "REGION_EXTERNAL_COMPANION_MISSING", slotPath(localIndex),
+                        "外部槽位伴随文件不可用"));
+                return new byte[0];
+            }
+        }
+        try (InputStream source = input) {
+            ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(maximum, 8192));
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = source.read(buffer)) >= 0) {
+                if (count == 0) {
+                    int single = source.read();
+                    if (single < 0) {
+                        break;
+                    }
+                    if (output.size() >= maximum) {
+                        issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                                "REGION_EXTERNAL_COMPANION_LIMIT", slotPath(localIndex),
+                                "外部槽位伴随文件超过读取限额，已截断"));
+                        break;
+                    }
+                    output.write(single);
+                    continue;
+                }
+                if (output.size() > maximum - count) {
+                    issues.add(readIssue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS,
+                            "REGION_EXTERNAL_COMPANION_LIMIT", slotPath(localIndex),
+                            "外部槽位伴随文件超过读取限额，已截断"));
+                    break;
+                }
+                output.write(buffer, 0, count);
+            }
+            return output.toByteArray();
         }
     }
 
     /// Checks that a referenced companion exists and contains at least one byte.
-    ///
     /// @param source region path
     /// @param accessor companion accessor
     /// @param localIndex local chunk slot
@@ -1413,7 +1836,7 @@ public final class NBTRegionFile implements AutoCloseable {
             knownPath = null;
         }
         if (knownPath != null) {
-            return Files.isRegularFile(knownPath) && Files.size(knownPath) > 0L;
+            return NBTRegionFileIO.isRegularNonSymbolicFile(knownPath) && Files.size(knownPath) > 0L;
         }
         try (@Nullable InputStream input = accessor.openInputStream(
                 ChunkUtils.getLocalX(localIndex), ChunkUtils.getLocalZ(localIndex))) {
@@ -1421,94 +1844,113 @@ public final class NBTRegionFile implements AutoCloseable {
         }
     }
 
-    /// Reads a stream into memory while rejecting input beyond a strict byte limit.
-    ///
-    /// @param input source stream
-    /// @param maximumBytes largest accepted byte count
-    /// @param limitMessage diagnostic message for oversized input
-    /// @return complete bounded bytes
-    /// @throws IOException if the stream cannot be read or exceeds the limit
-    private static byte @Unmodifiable [] readBounded(InputStream input, int maximumBytes, String limitMessage)
-            throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(maximumBytes, 8192));
-        byte[] buffer = new byte[8192];
-        int count;
-        while ((count = input.read(buffer)) >= 0) {
-            if (count == 0) {
-                continue;
+    /// Builds the current report for one slot, including header diagnostics discovered at open.
+    private synchronized NBTReadReport slotReport(int localIndex, List<NBTReadIssue> extra) {
+        List<NBTReadIssue> issues = new ArrayList<>();
+        String prefix = slotPath(localIndex);
+        for (NBTReadIssue issue : readIssues) {
+            if (issue.path().equals(prefix) || issue.path().startsWith(prefix + ".")) {
+                issues.add(issue);
             }
-            if (output.size() > maximumBytes - count) {
-                throw new IOException(limitMessage);
+        }
+        for (NBTReadIssue issue : extra) {
+            if (!issues.contains(issue)) {
+                issues.add(issue);
             }
-            output.write(buffer, 0, count);
         }
-        return output.toByteArray();
+        return issues.isEmpty()
+                ? NBTReadReport.clean(NBTFileEncoding.REGION)
+                : new NBTReadReport(NBTFileEncoding.REGION, false, issues);
     }
 
-    /// Converts one stored unsigned timestamp into an instant.
-    ///
+    /// Returns whether a slot still needs a strict repair publication.
+    /// LZ4 is an intentional extension marker which remains valid for this library and is only
+    /// reported as an informational warning. Every other opening/recovery diagnostic represents
+    /// bytes which should be rewritten once the user confirms repair.
     /// @param localIndex local chunk slot
-    /// @return timestamp instant
-    private Instant timestamp(int localIndex) {
-        return Instant.ofEpochSecond(Integer.toUnsignedLong(timestamps[localIndex]));
-    }
-
-    /// Clamps an instant to the unsigned 32-bit timestamp representation used by region headers.
-    ///
-    /// @param instant timestamp to encode
-    /// @return raw unsigned epoch-second bits
-    private static int epochSeconds(Instant instant) {
-        long seconds = instant.getEpochSecond();
-        if (seconds <= 0L) {
-            return 0;
+    /// @return whether the current in-memory slot must be published even when unchanged
+    private synchronized boolean slotNeedsRepair(int localIndex) {
+        String prefix = slotPath(localIndex);
+        boolean unknownCompression = readIssues.stream()
+                .filter(issue -> issue.path().equals(prefix) || issue.path().startsWith(prefix + "."))
+                .anyMatch(issue -> "REGION_COMPRESSION_UNSUPPORTED".equals(issue.code()));
+        if (unknownCompression) {
+            return false;
         }
-        return seconds >= 0xFFFF_FFFFL ? -1 : (int) seconds;
+        if (isolatedSlots[localIndex]) {
+            return true;
+        }
+        return readIssues.stream()
+                .filter(issue -> issue.path().equals(prefix) || issue.path().startsWith(prefix + "."))
+                .anyMatch(issue -> !"REGION_LZ4_EXTENSION".equals(issue.code()));
     }
 
-    /// Validates one local chunk coordinate.
-    ///
-    /// @param coordinate local X or Z coordinate
-    /// @return the validated coordinate
-    /// @throws IndexOutOfBoundsException if the coordinate is outside 0 through 31
-    private static int checkedCoordinate(int coordinate) {
-        return Objects.checkIndex(coordinate, ChunkUtils.CHUNKS_PER_REGION_SIDE);
+    /// Removes completed repair diagnostics while retaining informational extension warnings.
+    /// @param localIndex successfully published local chunk slot
+    private synchronized void clearRepairIssues(int localIndex) {
+        isolatedSlots[localIndex] = false;
+        String prefix = slotPath(localIndex);
+        boolean keepLz4Warning = sectorLengths[localIndex] != 0
+                && Byte.toUnsignedInt(compressionTypes[localIndex]) == CompressionType.LZ4.id;
+        readIssues.removeIf(issue -> (issue.path().equals(prefix) || issue.path().startsWith(prefix + "."))
+                && (!"REGION_LZ4_EXTENSION".equals(issue.code()) || !keepLz4Warning));
     }
 
-    /// Validates one fixed region slot index.
-    ///
-    /// @param localIndex local chunk slot
-    /// @throws IndexOutOfBoundsException if the index is outside 0 through 1023
-    private static void checkIndex(int localIndex) {
-        Objects.checkIndex(localIndex, ChunkUtils.CHUNKS_PRE_REGION);
+    /// Truncates an ignored partial tail once a tolerant session is explicitly saved.
+    /// The tail is outside every complete region sector and therefore cannot be attributed to a
+    /// slot. Removing it is the only deterministic repair; no force call is made, matching the
+    /// editor's ordinary publication durability contract.
+    /// @throws IOException if the source is no longer a regular file or cannot be truncated
+    private void normalizeTrailingTail() throws IOException {
+        if (!trailingTailNeedsRepair) {
+            return;
+        }
+        NBTRegionFileIO.requireRegularFile(path);
+        long size = channel.size();
+        long aligned = size - (size & (ChunkUtils.SECTOR_BYTES - 1L));
+        if (aligned < HEADER_BYTES) {
+            throw new IOException("Region file no longer contains a complete header");
+        }
+        channel.truncate(aligned);
+    }
+
+    /// Clears the aggregate diagnostic after the ignored tail has been normalized.
+    private synchronized void clearTrailingTailIssue() {
+        trailingTailNeedsRepair = false;
+        readIssues.removeIf(issue -> "REGION_FILE_TRAILING_TRUNCATION".equals(issue.code())
+                && "region".equals(issue.path()));
+    }
+
+    /// Remembers newly observed issues without exposing mutable state to callers.
+    private synchronized void rememberIssues(List<NBTReadIssue> issues) {
+        for (NBTReadIssue issue : issues) {
+            if (!readIssues.contains(issue)) {
+                readIssues.add(issue);
+            }
+        }
     }
 
     /// Requires a usable session for checked I/O operations.
-    ///
-    /// @throws IOException if the channel is closed or commit state requires reopening
+    /// @throws IOException if the channel is closed or a prior publication left its state uncertain
     private void ensureOpen() throws IOException {
-        if (closed) {
-            throw new IOException("Region file is closed");
-        }
-        if (commitStateUncertain) {
-            throw new IOException("Region commit state is uncertain; close and reopen the file before continuing");
+        if (closed || commitLocked) {
+            throw new IOException(commitLocked
+                    ? "Region file publication state is uncertain; reopen it"
+                    : "Region file is closed");
         }
     }
 
     /// Requires a usable session for mutation methods which do not declare checked exceptions.
-    ///
-    /// @throws IllegalStateException if the channel is closed or commit state requires reopening
+    /// @throws IllegalStateException if the channel is closed or a prior publication left its state uncertain
     private void ensureOpenUnchecked() {
-        if (closed) {
-            throw new IllegalStateException("Region file is closed");
-        }
-        if (commitStateUncertain) {
-            throw new IllegalStateException(
-                    "Region commit state is uncertain; close and reopen the file before continuing");
+        if (closed || commitLocked) {
+            throw new IllegalStateException(commitLocked
+                    ? "Region file publication state is uncertain; reopen it"
+                    : "Region file is closed");
         }
     }
 
     /// Notifies the configured deterministic commit-stage observer.
-    ///
     /// @param stage stage just reached
     /// @param localIndex affected local chunk slot
     /// @throws IOException when the test hook injects a failure
@@ -1516,360 +1958,40 @@ public final class NBTRegionFile implements AutoCloseable {
         commitHook.reach(stage, localIndex);
     }
 
-    /// Computes a fingerprint over the entire region and every currently referenced companion.
-    ///
-    /// @return current source fingerprint
-    /// @throws IOException if any owned source byte cannot be read
-    private RegionFingerprint computeFingerprint() throws IOException {
-        reach(CommitStage.FINGERPRINT_CAPTURE, -1);
-        ensurePathIdentity();
-        MessageDigest digest = newSha256();
-        ByteBuffer buffer = ByteBuffer.allocate(8192);
-        long size = channel.size();
-        updateLong(digest, size);
-        long position = 0L;
-        while (position < size) {
-            buffer.clear();
-            buffer.limit((int) Math.min(buffer.capacity(), size - position));
-            readFully(channel, buffer, position);
-            digest.update(buffer.array(), 0, buffer.limit());
-            position += buffer.limit();
-        }
-        for (int localIndex = 0; localIndex < ChunkUtils.CHUNKS_PRE_REGION; localIndex++) {
-            if (!external[localIndex]) {
-                continue;
-            }
-            updateInt(digest, localIndex);
-            @Nullable Path companionPath = companionPath(localIndex);
-            byte[] identity = companionPath == null
-                    ? ("accessor:" + accessor.getClass().getName()).getBytes(java.nio.charset.StandardCharsets.UTF_8)
-                    : companionPath.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            updateInt(digest, identity.length);
-            digest.update(identity);
-            byte[] companion = readCompanion(localIndex);
-            updateInt(digest, companion.length);
-            digest.update(companion);
-        }
-        ensurePathIdentity();
-        return new RegionFingerprint(size, digest.digest());
-    }
-
-    /// Creates an empty region source when necessary and rejects unsafe existing paths.
-    ///
-    /// @param file normalized region path
-    /// @throws IOException if creation fails or the visible path is not a regular non-symbolic file
-    private static void ensureRegionFileExists(Path file) throws IOException {
-        try {
-            Files.createFile(file);
-        } catch (FileAlreadyExistsException existing) {
-            // The complete no-follow attribute check below decides whether the occupant is safe.
-        }
-        requireRegularFile(file);
-    }
-
-    /// Creates a session-owned hard link which pins the region channel to one file identity.
-    ///
-    /// The link lives beside the source so it necessarily belongs to the same filesystem. Its
-    /// unpredictable temporary name is not a valid region or companion name and is removed when
-    /// the session closes. Filesystems without hard-link support fail closed here.
-    ///
-    /// @param file regular region source
-    /// @return newly created hard-link path
-    /// @throws IOException if a stable same-filesystem identity cannot be created
-    private static Path createIdentityLink(Path file) throws IOException {
-        Path parent = Objects.requireNonNull(file.getParent(), "Absolute region path has no parent");
-        for (int attempt = 0; attempt < 32; attempt++) {
-            Path candidate = parent.resolve(".xoyz-nbt-session-" + UUID.randomUUID() + ".identity");
-            try {
-                Files.createLink(candidate, file);
-                return candidate;
-            } catch (FileAlreadyExistsException collision) {
-                // A collided path is foreign content and must never be removed by this session.
-                continue;
-            }
-        }
-        throw new IOException("Could not reserve a unique region identity link beside: " + file);
-    }
-
-    /// Requires a regular file without following or accepting a symbolic link.
-    ///
-    /// @param file candidate source or identity link
-    /// @throws IOException if the path is missing, symbolic, or not a regular file
-    private static void requireRegularFile(Path file) throws IOException {
-        BasicFileAttributes attributes = Files.readAttributes(
-                file,
-                BasicFileAttributes.class,
-                LinkOption.NOFOLLOW_LINKS);
-        if (!attributes.isRegularFile() || Files.isSymbolicLink(file)) {
-            throw new IOException("Region path is not a regular non-symbolic file: " + file);
-        }
-    }
-
-    /// Confirms that the visible path still identifies the file owned by this session.
-    ///
-    /// @throws RegionPathChangedException if the path was deleted, replaced, or made unsafe
-    private void ensurePathIdentity() throws RegionPathChangedException {
-        try {
-            requireRegularFile(path);
-            requireRegularFile(identityLink);
-            if (!Files.isSameFile(path, identityLink)) {
-                throw new RegionPathChangedException(path, null);
-            }
-        } catch (RegionPathChangedException failure) {
-            commitStateUncertain = true;
-            throw failure;
-        } catch (IOException | RuntimeException failure) {
-            commitStateUncertain = true;
-            throw new RegionPathChangedException(
-                    path,
-                    asIOException("Region path identity check failed", failure));
-        }
-    }
-
-    /// Creates the SHA-256 digest required by every supported Java runtime.
-    ///
-    /// @return fresh SHA-256 digest
-    private static MessageDigest newSha256() {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException exception) {
-            throw new AssertionError("SHA-256 is required by the Java platform", exception);
-        }
-    }
-
-    /// Adds one big-endian integer boundary to a source fingerprint.
-    ///
-    /// @param digest destination digest
-    /// @param value integer value
-    private static void updateInt(MessageDigest digest, int value) {
-        digest.update((byte) (value >>> 24));
-        digest.update((byte) (value >>> 16));
-        digest.update((byte) (value >>> 8));
-        digest.update((byte) value);
-    }
-
-    /// Adds one big-endian long boundary to a source fingerprint.
-    ///
-    /// @param digest destination digest
-    /// @param value long value
-    private static void updateLong(MessageDigest digest, long value) {
-        updateInt(digest, (int) (value >>> 32));
-        updateInt(digest, (int) value);
-    }
-
-    /// Rejects publication when the source changed since the last known-good state.
-    ///
-    /// @throws IOException if the current source fingerprint differs or cannot be computed
-    private void checkFingerprint() throws IOException {
-        if (fingerprint != null && !fingerprint.equals(computeFingerprint())) {
-            throw new IOException("Region file or an external chunk changed after opening");
-        }
-    }
-
-    /// Reports that the path no longer names the file bound to the persistent region channel.
-    @NotNullByDefault
-    private static final class RegionPathChangedException extends IOException {
-        /// Creates a path-identity conflict with optional filesystem context.
-        ///
-        /// @param path replaced or inaccessible path
-        /// @param cause underlying attribute failure, or `null` for a key mismatch
-        private RegionPathChangedException(Path path, @Nullable IOException cause) {
-            super("Region path was replaced or became inaccessible: " + path, cause);
-        }
-    }
-
-    /// Fills a buffer from an absolute channel position without changing shared channel position.
-    ///
-    /// @param channel source channel
-    /// @param buffer destination buffer
-    /// @param position absolute starting byte position
-    /// @throws IOException if EOF is reached or the channel makes no progress
-    private static void readFully(FileChannel channel, ByteBuffer buffer, long position) throws IOException {
-        while (buffer.hasRemaining()) {
-            int read = channel.read(buffer, position);
-            if (read < 0) {
-                throw new IOException("Unexpected end of region file");
-            }
-            if (read == 0) {
-                throw new IOException("Region channel made no progress");
-            }
-            position += read;
-        }
-    }
-
-    /// Reads one bounded absolute byte range from the region channel.
-    ///
-    /// @param position absolute starting byte position
-    /// @param length number of bytes to read
-    /// @return exact range bytes
-    /// @throws IOException if the length is unsupported or the range cannot be read completely
-    private byte[] readBytes(long position, long length) throws IOException {
-        if (length < 0L || length > Integer.MAX_VALUE) {
-            throw new IOException("Region sector range is too large: " + length);
-        }
-        ByteBuffer buffer = ByteBuffer.allocate((int) length);
-        readFully(channel, buffer, position);
-        return buffer.array();
-    }
-
-    /// Drains a buffer to an absolute channel position without changing shared channel position.
-    ///
-    /// @param channel destination channel
-    /// @param buffer source buffer
-    /// @param position absolute starting byte position
-    /// @throws IOException if the channel makes no write progress
-    private static void writeFully(FileChannel channel, ByteBuffer buffer, long position) throws IOException {
-        while (buffer.hasRemaining()) {
-            int written = channel.write(buffer, position);
-            if (written <= 0) {
-                throw new IOException("Region channel made no progress while writing");
-            }
-            position += written;
-        }
-    }
-
-    /// Writes a zero-filled absolute range, extending the file when needed.
-    ///
-    /// @param channel destination channel
-    /// @param position absolute starting byte position
-    /// @param bytes number of zero bytes to write
-    /// @throws IOException if the range cannot be written completely
-    private static void writeZeros(FileChannel channel, long position, long bytes) throws IOException {
-        ByteBuffer zeros = ByteBuffer.allocate(8192);
-        long remaining = bytes;
-        while (remaining > 0L) {
-            zeros.clear();
-            zeros.limit((int) Math.min(remaining, zeros.capacity()));
-            writeFully(channel, zeros, position);
-            int written = zeros.limit();
-            position += written;
-            remaining -= written;
-        }
-    }
-
-    /// Encodes one four-byte region location entry.
-    ///
-    /// @param offset 24-bit sector offset
-    /// @param length unsigned eight-bit sector count
-    /// @return flipped buffer containing exactly one location entry
-    private static ByteBuffer encodeLocation(int offset, int length) {
-        ByteBuffer location = ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.BIG_ENDIAN);
-        location.put((byte) (offset >>> 16));
-        location.put((byte) (offset >>> 8));
-        location.put((byte) offset);
-        location.put((byte) length);
-        location.flip();
-        return location;
-    }
-
-    /// Forces a staged companion or backup file to stable storage.
-    ///
-    /// @param file file to force
-    /// @throws IOException if the file cannot be opened or forced
-    private static void forceFile(Path file) throws IOException {
-        try (FileChannel output = FileChannel.open(file, StandardOpenOption.WRITE)) {
-            output.force(true);
-        }
-    }
-
-    /// Atomically replaces a companion path and fails closed when the filesystem lacks support.
-    ///
-    /// @param source fully written staging path
-    /// @param target canonical companion path
-    /// @throws IOException if an atomic replacement cannot be completed
-    private static void moveAtomically(Path source, Path target) throws IOException {
-        try {
-            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException exception) {
-            throw new IOException("Atomic companion publication is not supported", exception);
-        }
-    }
-
-    /// Validated header arrays and the allocation bitmap transferred into a new session.
-    ///
-    /// @param offsets sector offsets by local chunk slot
-    /// @param lengths sector counts by local chunk slot
-    /// @param timestamps raw timestamp values by local chunk slot
-    /// @param compressionTypes compression identifiers by local chunk slot
-    /// @param external external-payload flags by local chunk slot
-    /// @param usedSectors bitmap of reserved region sectors
+    /// Validated header arrays and allocation bitmap transferred into a new session.
     @NotNullByDefault
     private record HeaderData(int[] offsets, int[] lengths, int[] timestamps,
-                              byte[] compressionTypes, boolean[] external, BitSet usedSectors) {
+                              byte[] compressionTypes, boolean[] external, boolean[] isolatedSlots,
+                              BitSet usedSectors, long trailingBytes,
+                              List<NBTReadIssue> issues) {
+    }
+
+    /// One validated half-open sector interval in a region file.
+    @NotNullByDefault
+    private record SectorRange(long start, long end, int localIndex) {
     }
 
     /// One newly reserved contiguous sector range.
-    ///
-    /// @param sectorOffset first reserved sector
-    /// @param sectorCount number of reserved sectors
     @NotNullByDefault
     private record Allocation(int sectorOffset, int sectorCount) {
         /// Returns the absolute byte offset of the first reserved sector.
-        ///
-        /// @return absolute byte offset
         private long byteOffset() {
             return (long) sectorOffset * ChunkUtils.SECTOR_BYTES;
         }
     }
 
-    /// Internal signal that header publication succeeded before a later step failed.
+    /// Signals that header publication succeeded before a later step failed.
     @NotNullByDefault
     private static final class ChunkCommittedException extends IOException {
         /// Creates a committed-state signal with the original post-commit failure.
-        ///
-        /// @param localIndex committed local chunk slot
-        /// @param cause post-commit failure
         private ChunkCommittedException(int localIndex, IOException cause) {
             super("Region chunk " + localIndex + " was committed, but post-commit work failed", cause);
         }
     }
 
-    /// Parsed chunk-frame metadata and its detached compressed payload.
-    ///
-    /// @param compression payload compression type
-    /// @param compressed compressed payload bytes without a frame prefix
+    /// Parsed chunk-frame metadata and detached compressed payload.
     @NotNullByDefault
     private record ChunkPayload(CompressionType compression, byte[] compressed) {
     }
 
-    /// Strong framed fingerprint of a region file and all currently referenced companions.
-    ///
-    /// @param size current region byte size
-    /// @param digest SHA-256 over framed region and referenced companion identities and bytes
-    @NotNullByDefault
-    private static final class RegionFingerprint {
-        /// Current region byte size.
-        private final long size;
-        /// SHA-256 over framed region and referenced companion identities and bytes.
-        private final byte @Unmodifiable [] digest;
-
-        /// Creates a defensive immutable source fingerprint.
-        ///
-        /// @param size current region byte size
-        /// @param digest SHA-256 digest
-        private RegionFingerprint(long size, byte @Unmodifiable [] digest) {
-            this.size = size;
-            this.digest = digest.clone();
-        }
-
-        /// Returns whether another fingerprint describes identical framed source bytes.
-        ///
-        /// @param object candidate fingerprint
-        /// @return whether source size and digest match
-        @Override
-        public boolean equals(Object object) {
-            return this == object
-                    || object instanceof RegionFingerprint other
-                    && size == other.size
-                    && Arrays.equals(digest, other.digest);
-        }
-
-        /// Returns a hash code consistent with [#equals(Object)].
-        ///
-        /// @return fingerprint hash code
-        @Override
-        public int hashCode() {
-            return 31 * Long.hashCode(size) + Arrays.hashCode(digest);
-        }
-    }
 }

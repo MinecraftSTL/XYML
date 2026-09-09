@@ -24,9 +24,9 @@ import java.util.Objects;
 
 /// Reports that a region header write and its attempted rollback both failed.
 ///
-/// The current session refuses further reads and writes. Callers must retain
-/// their in-memory edits, close the session, and reopen the file to discover which complete
-/// header state is visible before deciding whether to retry.
+/// This exception describes one failed publication operation. The storage session does not keep a
+/// source fingerprint or conflict state; callers may inspect the file and decide whether to retry
+/// after handling the reported rollback failure.
 @NotNullByDefault
 public final class NBTCommitUncertainException extends IOException {
     /// Region whose visible header state must be rediscovered.

@@ -25,11 +25,12 @@ import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Objects;
 
-/// Identifies the three NBT file families supported by the former launcher NBT page.
+/// Identifies the three NBT file families supported by the launcher NBT page.
 @NotNullByDefault
 public enum NBTFileType {
-    /// A standalone NBT tag, whose bytes may be raw, GZIP-compressed, or LZ4-compressed.
-    TAG("nbt", "dat", "dat_old"),
+    /// A standalone NBT tag, whose bytes may be raw, GZIP-, ZLIB-, or LZ4-compressed.
+    /// The `.xyml_old` suffix is the launcher's rolling recovery copy and remains directly openable.
+    TAG("nbt", "dat", "dat_old", "xyml_old"),
 
     /// A modern Anvil chunk-region file.
     ANVIL("mca"),

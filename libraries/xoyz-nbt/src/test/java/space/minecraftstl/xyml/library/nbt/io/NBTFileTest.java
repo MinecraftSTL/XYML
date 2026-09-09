@@ -26,6 +26,7 @@ import space.minecraftstl.xyml.library.nbt.edit.NBTEditor;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -37,6 +38,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -44,16 +46,18 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.zip.CRC32;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.GZIPOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies strict opening, encoding preservation, stale-write rejection, and safe publication.
+/// Verifies strict opening, encoding preservation, default backups, and safe publication.
 @NotNullByDefault
 public final class NBTFileTest {
     /// Real filesystem directory used to exercise atomic sibling replacement.
@@ -107,24 +111,77 @@ public final class NBTFileTest {
         assertEquals(2, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
     }
 
-    /// Rejects an independently changed source and retains both disk and editor state.
+    /// Treats a first-generation `.xyml_old` file as an ordinary source and creates the next
+    /// backup generation beside it.
     ///
-    /// @throws Exception if fixture creation or opening unexpectedly fails
+    /// @throws Exception if fixture creation or safe publication unexpectedly fails
     @Test
-    void refusesToOverwriteChangedSource() throws Exception {
-        Path source = temporaryDirectory.resolve("stale.dat");
-        Files.write(source, encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.ZLIB));
+    void backsUpAnOldFileWithoutOverwritingItsSource() throws Exception {
+        Path source = temporaryDirectory.resolve("level.dat.xyml_old");
+        byte[] original = encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.RAW);
+        Files.write(source, original);
 
         try (NBTFile<CompoundTag> file = NBTFile.openTag(source, TagType.COMPOUND)) {
             NBTEditor<CompoundTag> editor = file.getEditor();
             editor.setScalar(editor.resolve(NBTAddress.root().appendName("value")), "2");
-            Files.write(source, encode(new CompoundTag().addInt("value", 9), NBTFileEncoding.ZLIB));
-
-            assertThrows(IOException.class, file::save);
-            assertTrue(editor.isDirty());
+            file.save();
         }
 
-        assertEquals(9, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
+        assertArrayEquals(original, Files.readAllBytes(source.resolveSibling("level.dat.xyml_old.xyml_old")));
+        assertEquals(2, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
+    }
+
+    /// Keeps deterministic staging files out of the ordinary editor target set.
+    ///
+    /// @throws Exception if fixture creation unexpectedly fails
+    @Test
+    void rejectsDeterministicNewFileAsEditTarget() throws Exception {
+        Path source = temporaryDirectory.resolve("level.dat.xyml_new");
+        Files.write(source, encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.RAW));
+
+        assertThrows(IOException.class, () -> NBTFile.openTag(source, TagType.COMPOUND));
+        assertThrows(IOException.class, () -> NBTFile.openTagTolerant(source, TagType.COMPOUND));
+    }
+
+    /// Rejects a source reached through a symbolic-link parent directory.
+    @Test
+    void rejectsStandaloneSourceUnderSymbolicParent() throws Exception {
+        Path realDirectory = temporaryDirectory.resolve("real-source");
+        Files.createDirectories(realDirectory);
+        Path linkedDirectory = temporaryDirectory.resolve("linked-source");
+        try {
+            Files.createSymbolicLink(linkedDirectory, realDirectory);
+        } catch (UnsupportedOperationException | IOException | SecurityException unsupported) {
+            Assumptions.abort("symbolic links are unavailable on this filesystem");
+        }
+        Path source = linkedDirectory.resolve("level.dat");
+        Files.write(source, encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.RAW));
+
+        assertThrows(IOException.class, () -> NBTFile.openTag(source, TagType.COMPOUND));
+    }
+
+    /// Allows an independently changed source and backs up its exact bytes before replacement.
+    ///
+    /// @throws Exception if fixture creation or opening unexpectedly fails
+    @Test
+    void allowsChangedSourceAndCreatesDefaultBackup() throws Exception {
+        Path source = temporaryDirectory.resolve("stale.dat");
+        byte[] initial = encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.ZLIB);
+        byte[] externallyUpdated = encode(new CompoundTag().addInt("value", 9), NBTFileEncoding.ZLIB);
+        Files.write(source, initial);
+
+        try (NBTFile<CompoundTag> file = NBTFile.openTag(source, TagType.COMPOUND)) {
+            NBTEditor<CompoundTag> editor = file.getEditor();
+            editor.setScalar(editor.resolve(NBTAddress.root().appendName("value")), "2");
+            Files.write(source, externallyUpdated);
+
+            file.save();
+            assertFalse(editor.isDirty());
+        }
+
+        Path backup = temporaryDirectory.resolve("stale.dat.xyml_old");
+        assertArrayEquals(externallyUpdated, Files.readAllBytes(backup));
+        assertEquals(2, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
     }
 
     /// Rejects trailing or truncated data before an editable session is returned.
@@ -167,6 +224,82 @@ public final class NBTFileTest {
         assertThrows(IOException.class, () -> NBTFile.openTag(source));
     }
 
+    /// Recovers a complete GZIP payload when only its eight-byte footer is missing.
+    ///
+    /// @throws Exception if fixture creation or tolerant opening unexpectedly fails
+    @Test
+    void classifiesMissingGzipFooterAsRecovered() throws Exception {
+        Path source = temporaryDirectory.resolve("missing-gzip-footer.dat");
+        byte[] encoded = encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.GZIP);
+        Files.write(source, Arrays.copyOf(encoded, encoded.length - 8));
+
+        try (NBTFile<CompoundTag> file = NBTFile.openTagTolerant(source, TagType.COMPOUND)) {
+            assertEquals(NBTReadReport.Severity.RECOVERED, file.readReport().severity());
+            assertTrue(file.requiresRepair());
+            assertEquals(1, file.getEditor().snapshot().getInt("value"));
+        }
+    }
+
+    /// Recovers a GZIP member whose optional header checksum is wrong while preserving its payload.
+    ///
+    /// @throws Exception if fixture creation or tolerant opening unexpectedly fails
+    @Test
+    void classifiesDamagedGzipHeaderChecksumAsRecovered() throws Exception {
+        Path source = temporaryDirectory.resolve("damaged-gzip-header-checksum.dat");
+        byte[] encoded = encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.GZIP);
+        byte[] withHeaderChecksum = new byte[encoded.length + 2];
+        System.arraycopy(encoded, 0, withHeaderChecksum, 0, 10);
+        withHeaderChecksum[3] |= 0x02;
+        CRC32 checksum = new CRC32();
+        checksum.update(withHeaderChecksum, 0, 10);
+        int checksumValue = (int) checksum.getValue();
+        withHeaderChecksum[10] = (byte) checksumValue;
+        withHeaderChecksum[11] = (byte) (checksumValue >>> 8);
+        System.arraycopy(encoded, 10, withHeaderChecksum, 12, encoded.length - 10);
+        withHeaderChecksum[10] ^= 0x01;
+        Files.write(source, withHeaderChecksum);
+
+        try (NBTFile<CompoundTag> file = NBTFile.openTagTolerant(source, TagType.COMPOUND)) {
+            assertEquals(NBTReadReport.Severity.RECOVERED, file.readReport().severity());
+            assertTrue(file.readReport().issues().stream()
+                    .anyMatch(issue -> "GZIP_HEADER_CHECKSUM_INVALID".equals(issue.code())));
+            assertEquals(1, file.getEditor().snapshot().getInt("value"));
+        }
+    }
+
+    /// Classifies non-zero bytes after a complete LZ4 member as possible data loss.
+    ///
+    /// @throws Exception if fixture creation or tolerant opening unexpectedly fails
+    @Test
+    void classifiesLz4TrailingBytesAsPartialDataLoss() throws Exception {
+        Path source = temporaryDirectory.resolve("trailing-lz4.dat");
+        byte[] encoded = encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.LZ4);
+        byte[] trailing = Arrays.copyOf(encoded, encoded.length + 3);
+        Arrays.fill(trailing, encoded.length, trailing.length, (byte) 0x55);
+        Files.write(source, trailing);
+
+        try (NBTFile<CompoundTag> file = NBTFile.openTagTolerant(source, TagType.COMPOUND)) {
+            assertEquals(NBTReadReport.Severity.PARTIAL_DATA_LOSS, file.readReport().severity());
+            assertTrue(file.requiresRepair());
+            assertEquals(1, file.getEditor().snapshot().getInt("value"));
+        }
+    }
+
+    /// Stops tolerant recovery at a truncated list element instead of parsing a residual sibling tag.
+    @Test
+    void doesNotScanPastUncertainListBoundary() throws Exception {
+        NBTReadResult<CompoundTag> result = NBTRepairReader.read(
+                truncatedListWithResidualSibling(), CompoundTag.class, NBTCodec.of(), NBTReadLimits.defaults());
+
+        assertNotNull(result.root().get("list"));
+        assertTrue(result.root().get("after") == null,
+                "bytes after an uncertain list boundary must not become a sibling tag");
+        assertTrue(result.report().issues().stream()
+                .anyMatch(issue -> "COMPOUND_CHILD_TRUNCATED".equals(issue.code())));
+        assertTrue(result.report().issues().stream()
+                .anyMatch(issue -> "TRAILING_BYTES".equals(issue.code())));
+    }
+
     /// Rejects a backup destination equal to the source without publishing either state.
     ///
     /// @throws Exception if fixture creation or opening unexpectedly fails
@@ -184,6 +317,41 @@ public final class NBTFileTest {
             assertArrayEquals(original, Files.readAllBytes(source));
             assertTrue(editor.isDirty());
         }
+    }
+
+    /// Rejects an explicit backup path in the reserved deterministic staging namespace.
+    ///
+    /// @throws Exception if fixture creation or opening unexpectedly fails
+    @Test
+    void rejectsStagingFileAsBackupDestination() throws Exception {
+        Path source = temporaryDirectory.resolve("staging-backup.dat");
+        Path backup = temporaryDirectory.resolve("staging-backup.dat.xyml_new");
+        byte[] original = encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.RAW);
+        Files.write(source, original);
+
+        try (NBTFile<CompoundTag> file = NBTFile.openTag(source, TagType.COMPOUND)) {
+            NBTEditor<CompoundTag> editor = file.getEditor();
+            editor.setScalar(editor.resolve(NBTAddress.root().appendName("value")), "2");
+
+            assertThrows(IOException.class, () -> file.save(NBTSaveOptions.withBackup(backup)));
+            assertArrayEquals(original, Files.readAllBytes(source));
+            assertFalse(Files.exists(backup));
+            assertTrue(editor.isDirty());
+        }
+    }
+
+    /// Rejects an oversized source before allocating an input snapshot.
+    @Test
+    void rejectsOversizedStandaloneBeforeReading() throws Exception {
+        Path source = temporaryDirectory.resolve("oversized.dat");
+        long oversizedPosition = NBTReadLimits.defaults().maxEncodedBytes();
+        try (FileChannel channel = FileChannel.open(source, StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.WRITE)) {
+            channel.position(oversizedPosition);
+            channel.write(ByteBuffer.wrap(new byte[]{0}));
+        }
+
+        assertThrows(IOException.class, () -> NBTFile.openTagTolerant(source));
     }
 
     /// Rejects publication after close while leaving the detached editor state intact.
@@ -233,9 +401,9 @@ public final class NBTFileTest {
         }
     }
 
-    /// Rejects an external Region change when editor history is dirty but semantically unchanged.
+    /// Ignores an external Region header change when editor history is dirty but semantically unchanged.
     @Test
-    void noOpRegionSaveStillChecksSourceFingerprint() throws Exception {
+    void noOpRegionSaveIgnoresExternalHeaderChange() throws Exception {
         Path source = temporaryDirectory.resolve("r.0.0.mca");
         try (NBTRegionFile storage = NBTRegionFile.open(source)) {
             storage.writeChunk(0, new Chunk(new CompoundTag().addInt("value", 1)));
@@ -250,8 +418,8 @@ public final class NBTFileTest {
             assertTrue(editor.isDirty());
             overwriteTimestampByte(source, 0, (byte) 0x55);
 
-            assertThrows(IOException.class, file::save);
-            assertTrue(editor.isDirty());
+            file.save();
+            assertFalse(editor.isDirty());
         }
     }
 
@@ -314,6 +482,34 @@ public final class NBTFileTest {
                 .appendChunk(localIndex)
                 .appendChunkRoot()
                 .appendName("value");
+    }
+
+    /// Builds a root compound containing a truncated nested list element followed by a plausible sibling.
+    ///
+    /// @return malformed raw Java Edition NBT bytes
+    private static byte[] truncatedListWithResidualSibling() throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(10); // root compound
+        output.write(0);
+        output.write(0); // root name
+        output.write(9); // list tag
+        output.write(0);
+        output.write(4);
+        output.write("list".getBytes(StandardCharsets.UTF_8));
+        output.write(10); // list element type: compound
+        output.write(new byte[]{0, 0, 0, 1}); // one element
+        output.write(1); // nested byte child
+        output.write(0);
+        output.write(0); // nested child name
+        output.write(42); // nested byte value
+        output.write(99); // invalid child type; leaves the following bytes as residual
+        output.write(3); // plausible sibling int tag
+        output.write(0);
+        output.write(5);
+        output.write("after".getBytes(StandardCharsets.UTF_8));
+        output.write(new byte[]{0, 0, 0, 7});
+        output.write(0); // root TAG_End (must remain unconsumed after uncertainty)
+        return output.toByteArray();
     }
 
     /// Simulates a valid external timestamp-header change.

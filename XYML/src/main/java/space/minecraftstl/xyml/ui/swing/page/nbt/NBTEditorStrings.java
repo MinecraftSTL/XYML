@@ -191,6 +191,69 @@ final class NBTEditorStrings {
         return locale.i18n("swing.nbt_editor.clear_chunk_message", localIndex);
     }
 
+    /// Returns the warning shown when tolerant reading recovered a source without losing data.
+    String recoveredReadWarning() {
+        return locale.i18n("swing.nbt_editor.read_recovered_warning");
+    }
+
+    /// Returns the stronger warning shown when tolerant reading could not reconstruct all data.
+    String partialReadWarning() {
+        return locale.i18n("swing.nbt_editor.read_partial_warning");
+    }
+
+    /// Returns the command which expands diagnostic details.
+    String showReadDetailsText() {
+        return locale.i18n("swing.nbt_editor.read_show_details");
+    }
+
+    /// Returns the command which collapses diagnostic details.
+    String hideReadDetailsText() {
+        return locale.i18n("swing.nbt_editor.read_hide_details");
+    }
+
+    /// Returns the label for the detected outer storage algorithm in diagnostics.
+    String readDetailsEncodingLabel() {
+        return locale.i18n("swing.nbt_editor.read_details_encoding");
+    }
+
+    /// Returns the label for strict-envelope validity in diagnostics.
+    String readDetailsStrictLabel() {
+        return locale.i18n("swing.nbt_editor.read_details_strict");
+    }
+
+    /// Formats one region-slot storage profile for the diagnostic details view.
+    ///
+    /// @param x local chunk X coordinate
+    /// @param z local chunk Z coordinate
+    /// @param marker raw low-seven-bit compression marker
+    /// @param external whether the slot uses an external companion
+    /// @param occupied whether its location entry is occupied
+    /// @return localized slot metadata
+    String readDetailsRegionSlot(int x, int z, int marker, boolean external, boolean occupied) {
+        return locale.i18n("swing.nbt_editor.read_details_region_slot", x, z, marker, external, occupied);
+    }
+
+    /// Returns the repair-save confirmation title.
+    String repairSaveTitle() {
+        return locale.i18n("swing.nbt_editor.repair_save_title");
+    }
+
+    /// Formats a repair-save confirmation message for a recovered source.
+    ///
+    /// @param file source being rewritten
+    /// @return localized confirmation text
+    String repairSaveMessage(Path file) {
+        return locale.i18n("swing.nbt_editor.repair_save_message", Objects.requireNonNull(file, "file"));
+    }
+
+    /// Formats a repair-save confirmation message for a source with partial data loss.
+    ///
+    /// @param file source being rewritten
+    /// @return localized confirmation text
+    String partialRepairSaveMessage(Path file) {
+        return locale.i18n("swing.nbt_editor.repair_save_partial_message", Objects.requireNonNull(file, "file"));
+    }
+
     /// Returns the empty-state text.
     String emptyText() {
         return locale.i18n("swing.nbt_editor.empty");
@@ -224,11 +287,6 @@ final class NBTEditorStrings {
     /// Returns the dirty ready-state text.
     String modifiedText() {
         return locale.i18n("swing.nbt_editor.modified");
-    }
-
-    /// Returns the external-conflict recovery text.
-    String conflictText() {
-        return locale.i18n("swing.nbt_editor.conflict");
     }
 
     /// Returns the partial-save recovery text.

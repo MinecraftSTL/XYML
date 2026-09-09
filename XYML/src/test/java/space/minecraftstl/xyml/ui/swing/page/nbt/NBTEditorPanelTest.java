@@ -22,6 +22,7 @@ import com.formdev.flatlaf.FlatLightLaf;
 import space.minecraftstl.xyml.library.nbt.chunk.Chunk;
 import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
 import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
+import space.minecraftstl.xyml.library.nbt.io.NBTReadReport;
 import space.minecraftstl.xyml.library.nbt.tag.ByteArrayTag;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
 import space.minecraftstl.xyml.library.nbt.tag.IntTag;
@@ -107,10 +108,63 @@ final class NBTEditorPanelTest {
         assertEquals("No NBT file open.", NBTEditorStrings.english().emptyText());
         assertEquals("未打开 NBT 文件。", NBTEditorStrings.simplifiedChinese().emptyText());
         assertTrue(NBTEditorStrings.english().fileFilter().contains("*.nbt"));
+        assertTrue(NBTEditorStrings.english().fileFilter().contains("*.xyml_old"));
         assertEquals("new_tag", NBTEditorStrings.traditionalChinese().defaultTagName());
         assertEquals(
                 "Editing was interrupted. Reload this file before continuing.",
                 NBTEditorStrings.english().editUncertainText());
+    }
+
+    /// Keeps tolerant-read diagnostics visible and requires explicit approval before a repair-only save.
+    @Test
+    void requiresRepairConfirmationForRecoveredSource() throws Exception {
+        Path source = temporaryDirectory.resolve("recovered.dat");
+        writeTag(source, new CompoundTag().addInt("value", 1));
+        byte[] damaged = Files.readAllBytes(source);
+        damaged[damaged.length - 8] ^= 1;
+        Files.write(source, damaged);
+
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualExecutor iconExecutor = new ManualExecutor();
+        RecordingInteractions interactions = new RecordingInteractions(source);
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                interactions,
+                () -> { },
+                iconExecutor));
+        try {
+            onEdt(() -> panel.open(source));
+            ioExecutor.runNext();
+            iconExecutor.runAll();
+            flushEdt();
+
+            assertTrue(controller.snapshot().document().requiresRepair());
+            assertTrue(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
+            assertTrue(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+
+            onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
+            assertEquals(1, interactions.repairConfirmations());
+            assertFalse(interactions.repairApproved());
+            assertEquals(0, ioExecutor.pendingCount());
+
+            interactions.setRepairApproved(true);
+            onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
+            assertEquals(2, interactions.repairConfirmations());
+            ioExecutor.runNext();
+            awaitControllerStatus(controller, NBTEditorStatus.READY);
+            assertFalse(controller.snapshot().document().requiresRepair());
+            assertFalse(findNamed(panel, "nbtEditorReadWarning", JComponent.class).isVisible());
+            assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+            assertEquals(1, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            flushEdt();
+        }
     }
 
     /// Exercises the complete headless page workflow without performing NBT I/O on the EDT.
@@ -424,9 +478,9 @@ final class NBTEditorPanelTest {
         });
     }
 
-    /// Requires reload after a stale save and never queues a repeated doomed save.
+    /// Reports an externally replaced source as an ordinary failed save and does not queue a redundant clean save.
     @Test
-    void disablesSaveAfterAStaleSourceConflict() throws Exception {
+    void disablesSaveAfterAStaleSourceFailure() throws Exception {
         Path source = temporaryDirectory.resolve("conflict.dat");
         writeTag(source, new CompoundTag().addInt("value", 1));
         ManualExecutor ioExecutor = new ManualExecutor();
@@ -455,12 +509,11 @@ final class NBTEditorPanelTest {
             writeTag(source, new CompoundTag().addInt("value", 99));
             onEdt(() -> findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick());
             ioExecutor.runNext();
-            awaitControllerStatus(controller, NBTEditorStatus.CONFLICT);
+            awaitControllerStatus(controller, NBTEditorStatus.READY);
             flushEdt();
             onEdt(() -> {
-                assertEquals(NBTEditorStatus.CONFLICT, controller.snapshot().status());
+                assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
                 assertFalse(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
-                assertTrue(findNamed(panel, "nbtEditorReload", AbstractButton.class).isEnabled());
                 findNamed(panel, "nbtEditorSave", AbstractButton.class).doClick();
             });
             assertEquals(0, ioExecutor.pendingCount());
@@ -1489,6 +1542,12 @@ final class NBTEditorPanelTest {
         /// Number of destructive chunk-root confirmations requested.
         private int clearChunkConfirmations;
 
+        /// Whether tolerant-read repair publication is approved.
+        private boolean repairApproved;
+
+        /// Number of repair-save confirmations requested.
+        private int repairConfirmations;
+
         /// Creates interactions with one initial chooser result.
         ///
         /// @param chosenFile initial chooser result
@@ -1544,6 +1603,42 @@ final class NBTEditorPanelTest {
             }
             clearChunkConfirmations++;
             return confirmClearChunk;
+        }
+
+        /// Returns the configured repair-save decision and records the prompt.
+        ///
+        /// @param source source to rewrite
+        /// @param report tolerant-read report
+        /// @return configured approval
+        @Override
+        public boolean confirmRepairSave(
+                Path source,
+                NBTReadReport report) {
+            Objects.requireNonNull(source, "source");
+            Objects.requireNonNull(report, "report");
+            repairConfirmations++;
+            return repairApproved;
+        }
+
+        /// Updates the repair-save decision for the next prompt.
+        ///
+        /// @param approved whether repair publication is approved
+        private void setRepairApproved(boolean approved) {
+            repairApproved = approved;
+        }
+
+        /// Returns the number of repair-save prompts.
+        ///
+        /// @return prompt count
+        private int repairConfirmations() {
+            return repairConfirmations;
+        }
+
+        /// Returns the current repair-save decision.
+        ///
+        /// @return whether repair publication is approved
+        private boolean repairApproved() {
+            return repairApproved;
         }
     }
 }

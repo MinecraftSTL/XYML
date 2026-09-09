@@ -16,10 +16,14 @@
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 package space.minecraftstl.xyml.library.nbt.internal.input;
 
+import org.jetbrains.annotations.NotNullByDefault;
+
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+/// Growable byte buffer retaining unread primitive input between source fills.
+@NotNullByDefault
 public final class InputBuffer {
     public static InputBuffer allocate(int size, boolean direct, ByteOrder byteOrder) {
         ByteBuffer bytesBuffer = direct
@@ -45,9 +49,18 @@ public final class InputBuffer {
         return bytesBuffer.order();
     }
 
+    /// Ensures that at least the requested number of unread bytes can be buffered.
+    ///
+    /// @param required required unread capacity
+    /// @throws IllegalArgumentException if required is negative
     public void ensureCapacity(int required) {
+        if (required < 0) {
+            throw new IllegalArgumentException("required must not be negative");
+        }
         if (bytesBuffer.capacity() < required) {
-            ByteBuffer newBuffer = ByteBuffer.allocate(Math.max(required, bytesBuffer.capacity() * 2))
+            long doubled = (long) bytesBuffer.capacity() * 2L;
+            int capacity = (int) Math.min(Integer.MAX_VALUE, Math.max((long) required, doubled));
+            ByteBuffer newBuffer = ByteBuffer.allocate(capacity)
                     .order(bytesBuffer.order());
             newBuffer.put(bytesBuffer);
             newBuffer.flip();

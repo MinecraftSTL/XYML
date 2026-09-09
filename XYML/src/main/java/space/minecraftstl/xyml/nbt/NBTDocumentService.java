@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.library.nbt.NBTElement;
 import space.minecraftstl.xyml.library.nbt.io.NBTFile;
+import space.minecraftstl.xyml.library.nbt.io.NBTReadLimits;
 import space.minecraftstl.xyml.library.nbt.io.NBTSaveOptions;
 import space.minecraftstl.xyml.task.CompletableFutureTask;
 import space.minecraftstl.xyml.task.Schedulers;
@@ -38,7 +39,6 @@ import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
@@ -56,12 +56,12 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 ///
 /// A document session is represented by one [CompletableFutureTask] whose resource lease remains held from the
 /// asynchronous open through [#close(NBTDocument)]. Saves are serialized behind that session owner, so a region
-/// channel, identity link, external companion, backup, or staging sibling cannot race another launcher task. Pure
+/// channel, external companion, backup, or staging sibling cannot race another launcher task. Pure
 /// in-memory editor operations continue to use [#supplyAsync(Supplier)] and do not claim a filesystem resource.
 ///
-/// Compression detection, strict parsing, structural validation, fingerprints, staging, region copy-on-write
-/// publication, and savepoint handling remain inside [NBTFile]. This adapter only chooses the file entry point and
-/// launcher backup policy.
+/// Compression detection, tolerant/strict parsing, structural validation, staging, region copy-on-write publication,
+/// and savepoint handling remain inside [NBTFile]. This adapter only chooses the file entry point and launcher backup
+/// policy.
 @NotNullByDefault
 public final class NBTDocumentService {
     /// Executor that owns all blocking NBT and filesystem operations.
@@ -121,12 +121,13 @@ public final class NBTDocumentService {
 
     /// Saves one document through its owning session task.
     ///
-    /// Standalone files ending in `.dat` receive a single rolling sibling backup ending in `.dat_old`. Region
-    /// sessions claim their containing region directory because publication may touch external `.mcc` companions,
-    /// temporary siblings, and the session identity link.
+    /// Every standalone TAG file receives a single rolling sibling backup ending in `.xyml_old`. When the source
+    /// itself ends in `.xyml_old`, the next generation is retained as `<source>.xyml_old` as well. Region sessions
+    /// claim their containing region directory because publication may touch external `.mcc` companions, temporary
+    /// siblings.
     ///
     /// @param document open document
-    /// @return future completed after publication and force operations finish
+    /// @return future completed after publication finishes
     public CompletableFuture<Void> save(NBTDocument document) {
         NBTDocument selected = Objects.requireNonNull(document, "document");
         @Nullable DocumentSession session = SESSIONS.get(selected);
@@ -147,7 +148,7 @@ public final class NBTDocumentService {
     /// Closes one document through its owning session task without publishing pending edits.
     ///
     /// Closure is idempotent. A session task retains its resource lease until this operation has closed all library
-    /// channels and deleted its identity link.
+    /// channels and removed its owned publication sidecars.
     ///
     /// @param document document whose file session must be released
     /// @return future completed after all owned file handles are closed
@@ -218,11 +219,11 @@ public final class NBTDocumentService {
         return result;
     }
 
-    /// Selects the semantic resource set for one NBT file transaction.
+    /// Selects the resource declarations for one NBT file transaction.
     ///
     /// Region publication is directory-scoped because the library may create or replace files whose names are not
-    /// known before reading the region header. Standalone publication names every deterministic source and backup;
-    /// its temporary sibling is private to that exact publication transaction.
+    /// known before reading the region header. Standalone publication names every deterministic source, staging
+    /// sibling, and backup so independent sessions cannot target the same sidecar concurrently.
     ///
     /// @param file normalized NBT path
     /// @param fileType filename-derived type
@@ -237,8 +238,13 @@ public final class NBTDocumentService {
             addParentDirectoryResource(resources, file);
         }
         resources.add(TaskResource.nbtFile(file));
+        if (fileType == NBTFileType.TAG && options != null) {
+            resources.add(TaskResource.nbtFile(stagingPath(file)));
+        }
         if (options != null && options.backupPath() != null) {
-            resources.add(TaskResource.nbtFile(options.backupPath()));
+            Path backup = Objects.requireNonNull(options.backupPath(), "backupPath");
+            resources.add(TaskResource.nbtFile(backup));
+            resources.add(TaskResource.nbtFile(stagingPath(backup)));
         }
         return List.copyOf(resources);
     }
@@ -270,7 +276,7 @@ public final class NBTDocumentService {
     ///
     /// @param file normalized absolute path
     /// @return lifecycle-bound launcher document
-    /// @throws IOException if type detection or the selected strict open fails
+    /// @throws IOException if type detection or bounded tolerant recovery fails
     private static NBTDocument openOnExecutor(Path file) throws IOException {
         @Nullable NBTFileType fileType = NBTFileType.detect(file);
         if (fileType == null) {
@@ -278,8 +284,8 @@ public final class NBTDocumentService {
         }
         validateExistingSource(file);
         NBTFile<? extends NBTElement> session = switch (fileType) {
-            case TAG -> NBTFile.openTag(file);
-            case ANVIL, REGION -> NBTFile.openRegion(file);
+            case TAG -> NBTFile.openTagTolerant(file);
+            case ANVIL, REGION -> NBTFile.openRegionTolerant(file, NBTReadLimits.defaults());
         };
         return new NBTDocument(fileType, session);
     }
@@ -319,14 +325,30 @@ public final class NBTDocumentService {
             return NBTSaveOptions.withoutBackup();
         }
         String name = fileName.toString();
-        if (!name.toLowerCase(Locale.ROOT).endsWith(".dat")) {
-            return NBTSaveOptions.withoutBackup();
-        }
         @Nullable Path parent = file.getParent();
         if (parent == null) {
             return NBTSaveOptions.withoutBackup();
         }
-        return NBTSaveOptions.withBackup(parent.resolve(name + "_old"));
+        return NBTSaveOptions.withBackup(parent.resolve(name + ".xyml_old"));
+    }
+
+    /// Returns the deterministic standalone staging sibling used by the library publication path.
+    ///
+    /// The library owns creation and cleanup of this path. The service declares it as a task resource so a second
+    /// process-local session cannot observe or overwrite an in-flight staged document.
+    ///
+    /// @param file normalized standalone source
+    /// @return deterministic staging sibling
+    private static Path stagingPath(Path file) {
+        @Nullable Path fileName = Objects.requireNonNull(file, "file").getFileName();
+        if (fileName == null) {
+            throw new IllegalArgumentException("NBT source must have a filename: " + file);
+        }
+        @Nullable Path parent = file.getParent();
+        if (parent == null) {
+            throw new IllegalArgumentException("NBT source must have a parent directory: " + file);
+        }
+        return parent.resolve(fileName.toString() + ".xyml_new");
     }
 
     /// Returns the terminal failure recorded by one task executor, preserving cancellation classification.
@@ -393,6 +415,24 @@ public final class NBTDocumentService {
         /// was cleared before invoking the library.
         private @Nullable NBTDocument closingDocument;
 
+        /// Document being closed as part of a reload before a replacement is published.
+        ///
+        /// Its physical close callback must not terminate the session: the original document remains the current
+        /// pointer until the close succeeds and the replacement is installed atomically.
+        private @Nullable NBTDocument reloadingDocument;
+
+        /// Replacement or late-open documents whose physical cleanup failed and remains retryable in this session.
+        ///
+        /// Keeping the actual document object here is important: a failed close may still own a region channel or a
+        /// publication sidecar. The session lease must not be released, and a later close/reload/save must retry this
+        /// exact handle instead of opening a second untracked handle for the same path.
+        private final List<NBTDocument> pendingCleanupDocuments = new ArrayList<>();
+
+        /// Current document whose close completed while one or more pending cleanup documents remained.
+        ///
+        /// Physical session completion is deferred until [#pendingCleanupDocuments] becomes empty.
+        private @Nullable NBTDocument deferredClosedDocument;
+
         /// Whether cancellation or close has been requested.
         private boolean closeRequested;
 
@@ -411,8 +451,11 @@ public final class NBTDocumentService {
         /// close instead of being discarded by the reload boundary.
         private @Nullable Throwable replacementCloseFailure;
 
-        /// Physical close failure reported by the library session, or null after a successful close.
+        /// Most recent physical close failure, or null after a successful close/while no attempt failed.
         private @Nullable Throwable physicalCloseFailure;
+
+        /// Terminal failure visible to the open caller but deferred until physical document closure releases the lease.
+        private @Nullable Throwable deferredTerminalFailure;
 
         /// Creates one session with a stable resource snapshot.
         ///
@@ -462,6 +505,7 @@ public final class NBTDocumentService {
                 return CompletableFuture.failedFuture(failure);
             }
             return enqueue(() -> {
+                retryPendingCleanup();
                 selected.saveFromService(options);
                 return null;
             }, operationExecutor);
@@ -469,8 +513,9 @@ public final class NBTDocumentService {
 
         /// Reopens the current source under this session's already-held resource lease.
         ///
-        /// The old document remains available if opening the replacement fails. On success the current pointer is
-        /// switched before the old handle is closed, so its close callback is treated as a non-terminal replacement.
+        /// The old document remains available if opening or closing the replacement fails. The old handle is closed
+        /// while the session lease remains held, and the current pointer is switched only after physical closure
+        /// succeeds; a failed close therefore leaves the exact old handle available for a later retry.
         ///
         /// @param selected document expected to be the current session document
         /// @param operationExecutor executor for blocking replacement work
@@ -522,10 +567,9 @@ public final class NBTDocumentService {
             @Nullable NBTDocument replacement = null;
             boolean installed = false;
             try {
+                retryPendingCleanup();
                 NBTDocument created = NBTDocumentService.openOnExecutor(path);
                 replacement = created;
-                created.setClosedListener(failure -> documentClosed(created, failure));
-                SESSIONS.put(created, this);
                 synchronized (operationLock) {
                     if (closeRequested
                             || document != selected
@@ -533,37 +577,130 @@ public final class NBTDocumentService {
                             || !visible.beginCommit()) {
                         throw new CancellationException("NBT document reload was cancelled");
                     }
-                    document = created;
-                    installed = true;
+                    reloadingDocument = selected;
                 }
+                Throwable closeFailure = null;
                 try {
                     selected.close();
-                } catch (IOException | RuntimeException closeFailure) {
-                    // The old handle is already marked closed by NBTDocument. Preserve the usable replacement and
-                    // retain the cleanup failure for the session's eventual close result.
+                } catch (Throwable failure) {
+                    closeFailure = failure;
+                }
+                if (closeFailure != null && !selected.isClosed()) {
+                    synchronized (operationLock) {
+                        reloadingDocument = null;
+                    }
+                    if (closeFailure instanceof IOException) {
+                        throw (IOException) closeFailure;
+                    }
+                    if (closeFailure instanceof RuntimeException) {
+                        throw (RuntimeException) closeFailure;
+                    }
+                    if (closeFailure instanceof Error) {
+                        throw (Error) closeFailure;
+                    }
+                    throw new IOException("NBT reload could not close the old document", closeFailure);
+                }
+                if (closeFailure != null) {
+                    // A listener can throw after the library has physically closed the old handle. The replacement
+                    // is still safe to publish, while the callback failure remains visible at session close.
                     synchronized (operationLock) {
                         replacementCloseFailure = mergeFailures(replacementCloseFailure, closeFailure);
                     }
                     LOG.warning("NBT reload replaced a document whose old handle reported a close failure",
                             closeFailure);
-                } catch (Error closeFailure) {
-                    // Fatal failures still propagate, but queue replacement cleanup so the session lease cannot leak.
-                    synchronized (operationLock) {
-                        replacementCloseFailure = mergeFailures(replacementCloseFailure, closeFailure);
+                }
+                synchronized (operationLock) {
+                    if (!selected.isClosed()) {
+                        reloadingDocument = null;
+                        throw new IOException("NBT reload closed the old document without observing closure");
                     }
-                    close(ioExecutor);
-                    throw closeFailure;
+                    created.setClosedListener(failure -> documentClosed(created, failure));
+                    SESSIONS.put(created, this);
+                    document = created;
+                    installed = true;
+                    reloadingDocument = null;
+                }
+                if (closeFailure instanceof Error) {
+                    throw (Error) closeFailure;
+                }
+                if (closeFailure != null) {
+                    // Keep the replacement usable; the physical close already succeeded and only its callback
+                    // presentation failed.
+                    return created;
                 }
                 return created;
             } catch (IOException | RuntimeException | Error failure) {
+                boolean selectedClosed = false;
+                synchronized (operationLock) {
+                    if (reloadingDocument == selected) {
+                        reloadingDocument = null;
+                    }
+                    if (!installed && document == selected && selected.isClosed()) {
+                        // The old handle can be physically closed before a replacement-installation callback throws.
+                        // Mark it as the close target so the normal completion path cannot mistake it for a live
+                        // current document and leave the session future pending forever.
+                        closingDocument = selected;
+                        selectedClosed = true;
+                    }
+                }
                 if (replacement != null && !installed) {
-                    SESSIONS.remove(replacement, this);
                     @Nullable Throwable cleanupFailure = closeAfterCancelledOpen(replacement);
                     if (cleanupFailure != null && cleanupFailure != failure) {
                         failure.addSuppressed(cleanupFailure);
+                        retainPendingCleanup(replacement, cleanupFailure);
                     }
                 }
+                if (selectedClosed) {
+                    documentClosed(selected, null);
+                }
                 throw failure;
+            }
+        }
+
+        /// Retries every retained replacement cleanup before another operation can touch the source.
+        ///
+        /// A failed cleanup is deliberately surfaced to the caller. The corresponding document remains in the
+        /// pending list, so a later retry uses the same handle and does not release the task resource lease early.
+        ///
+        /// @throws IOException when a retained document cannot be closed
+        private void retryPendingCleanup() throws IOException {
+            @Unmodifiable List<NBTDocument> pending;
+            synchronized (operationLock) {
+                pending = List.copyOf(pendingCleanupDocuments);
+            }
+            @Nullable Throwable firstFailure = null;
+            for (NBTDocument pendingDocument : pending) {
+                try {
+                    pendingDocument.close();
+                } catch (Throwable failure) {
+                    if (firstFailure == null) {
+                        firstFailure = failure;
+                    } else if (firstFailure != failure) {
+                        firstFailure.addSuppressed(failure);
+                    }
+                }
+                if (pendingDocument.isClosed()) {
+                    documentClosed(pendingDocument, null);
+                }
+            }
+            if (firstFailure == null) {
+                synchronized (operationLock) {
+                    if (!pendingCleanupDocuments.isEmpty()) {
+                        firstFailure = new IOException("NBT replacement cleanup remains pending");
+                    }
+                }
+            }
+            if (firstFailure != null) {
+                if (firstFailure instanceof IOException failure) {
+                    throw failure;
+                }
+                if (firstFailure instanceof RuntimeException failure) {
+                    throw failure;
+                }
+                if (firstFailure instanceof Error failure) {
+                    throw failure;
+                }
+                throw new IOException("NBT replacement cleanup failed", firstFailure);
             }
         }
 
@@ -584,6 +721,8 @@ public final class NBTDocumentService {
                 alreadyClosed = physicalCloseObserved;
                 if (alreadyClosed) {
                     observedFailure = physicalCloseFailure;
+                } else {
+                    physicalCloseFailure = null;
                 }
                 if (!alreadyClosed) {
                     predecessor = operationTail;
@@ -764,9 +903,10 @@ public final class NBTDocumentService {
                     CancellationException cancellation = new CancellationException("NBT document open was cancelled");
                     @Nullable Throwable closeFailure = closeAfterCancelledOpen(created);
                     if (closeFailure != null) {
-                        cancellation.addSuppressed(closeFailure);
+                        deferFailureUntilDocumentClosed(created, cancellation, closeFailure);
+                    } else {
+                        openFailed(cancellation);
                     }
-                    openFailed(cancellation);
                     return;
                 }
                 created.setClosedListener(failure -> documentClosed(created, failure));
@@ -778,50 +918,133 @@ public final class NBTDocumentService {
             } catch (Throwable failure) {
                 @Nullable Throwable cleanupFailure = null;
                 if (opened != null) {
+                    cleanupFailure = closeAfterCancelledOpen(opened);
+                    if (cleanupFailure != null) {
+                        deferFailureUntilDocumentClosed(opened, failure, cleanupFailure);
+                        return;
+                    }
                     SESSIONS.remove(opened, this);
                     synchronized (operationLock) {
                         if (document == opened) {
                             document = null;
                         }
                     }
-                    cleanupFailure = closeAfterCancelledOpen(opened);
-                }
-                if (cleanupFailure != null && cleanupFailure != failure) {
-                    failure.addSuppressed(cleanupFailure);
                 }
                 openFailed(failure);
             }
         }
 
         /// Closes the owned document after all queued saves have terminated.
-        private void closeOnExecutor() {
+        private void closeOnExecutor() throws IOException {
             @Nullable NBTDocument selected;
+            @Unmodifiable List<NBTDocument> pending;
             boolean alreadyClosed;
             synchronized (operationLock) {
                 selected = document;
-                document = null;
+                pending = List.copyOf(pendingCleanupDocuments);
                 closingDocument = selected;
                 alreadyClosed = physicalCloseObserved;
             }
+            @Nullable Throwable firstFailure = null;
+            for (NBTDocument pendingDocument : pending) {
+                try {
+                    pendingDocument.close();
+                } catch (Throwable failure) {
+                    retainPendingCleanup(pendingDocument, failure);
+                    if (firstFailure == null) {
+                        firstFailure = failure;
+                    } else if (firstFailure != failure) {
+                        firstFailure.addSuppressed(failure);
+                    }
+                }
+                if (pendingDocument.isClosed()) {
+                    documentClosed(pendingDocument, null);
+                }
+            }
             if (selected == null) {
-                if (!alreadyClosed) {
-                    closeFailure(new CancellationException("NBT document was not opened"));
+                boolean observedAfterPending;
+                synchronized (operationLock) {
+                    observedAfterPending = physicalCloseObserved;
+                }
+                if (!alreadyClosed && !observedAfterPending) {
+                    if (firstFailure == null) {
+                        closeFailure(new CancellationException("NBT document was not opened"));
+                    } else {
+                        closeFailure(firstFailure);
+                    }
                 }
                 return;
             }
             try {
                 selected.close();
             } catch (Throwable failure) {
-                boolean observed;
-                synchronized (operationLock) {
-                    observed = physicalCloseObserved;
-                }
-                if (!observed) {
-                    // NBTDocument normally reports the physical outcome through its listener before rethrowing. Only
-                    // synthesize terminal failure when that callback itself could not record the close.
-                    closeFailure(failure);
+                closeAttemptFailed(selected, failure);
+                if (firstFailure == null) {
+                    firstFailure = failure;
+                } else if (firstFailure != failure) {
+                    firstFailure.addSuppressed(failure);
                 }
             }
+            if (selected.isClosed()) {
+                // A callback can be absent after a late installation failure. Reconcile the closed handle explicitly;
+                // pending cleanup keeps physical session completion deferred until every sidecar is gone.
+                documentClosed(selected, null);
+            }
+            boolean pendingRemaining;
+            synchronized (operationLock) {
+                pendingRemaining = !pendingCleanupDocuments.isEmpty();
+            }
+            if (firstFailure != null && pendingRemaining && !physicalCloseObserved) {
+                if (firstFailure instanceof IOException failure) {
+                    throw failure;
+                }
+                if (firstFailure instanceof RuntimeException failure) {
+                    throw failure;
+                }
+                if (firstFailure instanceof Error failure) {
+                    throw failure;
+                }
+                throw new IOException("NBT pending cleanup failed", firstFailure);
+            }
+        }
+
+        /// Records a retryable physical-close failure without terminating the lease-owning session task.
+        ///
+        /// The library document deliberately remains open when its region channel or publication sidecar cannot be
+        /// closed. Keeping it as the current document lets a later [#close(Executor)] retry the exact same handle;
+        /// completing only the caller-visible close future prevents one failed attempt from being mistaken for a
+        /// successful terminal cleanup.
+        ///
+        /// @param attempted document whose close failed
+        /// @param failure physical close failure
+        private void closeAttemptFailed(NBTDocument attempted, Throwable failure) {
+            Objects.requireNonNull(attempted, "attempted");
+            Throwable checkedFailure = Objects.requireNonNull(failure, "failure");
+            @Nullable CompletableFuture<Void> result;
+            Throwable terminalFailure;
+            synchronized (operationLock) {
+                if (physicalCloseObserved) {
+                    // A listener may have completed a successful close before propagating a presentation callback
+                    // failure. The successful physical outcome remains authoritative in that race.
+                    return;
+                }
+                if (document == null) {
+                    document = attempted;
+                }
+                if (closingDocument == attempted) {
+                    closingDocument = null;
+                }
+                terminalFailure = mergeFailures(replacementCloseFailure, checkedFailure);
+                replacementCloseFailure = null;
+                physicalCloseFailure = terminalFailure;
+                result = closeResult;
+                // A retry must create a fresh visible future while the internal operation tail remains serialized.
+                closeResult = null;
+            }
+            if (result != null) {
+                completeCloseResult(result, terminalFailure);
+            }
+            LOG.warning("NBT document physical close failed; the session remains retryable", terminalFailure);
         }
 
         /// Retains the session lease until every save queued before a direct or service-managed close terminates.
@@ -829,9 +1052,90 @@ public final class NBTDocumentService {
         /// @param closedDocument document whose physical file session has closed
         /// @param failure physical close failure, or null
         private void documentClosed(NBTDocument closedDocument, @Nullable Throwable failure) {
-            SESSIONS.remove(closedDocument, this);
-            CompletableFuture<Void> tail;
-            @Nullable Throwable terminalFailure;
+            boolean reloadClose;
+            boolean pendingClose;
+            @Nullable NBTDocument deferredDocument = null;
+            boolean schedulePendingClose = false;
+            boolean staleClose = false;
+            boolean deferredForPending = false;
+            boolean scheduleDeferredCleanup = false;
+            @Nullable CompletableFuture<Void> pendingOnlyTail = null;
+            @Nullable Throwable pendingOnlyFailure = null;
+            synchronized (operationLock) {
+                pendingClose = pendingCleanupDocuments.remove(closedDocument);
+                if (pendingClose && failure != null) {
+                    replacementCloseFailure = mergeFailures(replacementCloseFailure, failure);
+                }
+                reloadClose = reloadingDocument == closedDocument;
+                if (reloadClose) {
+                    reloadingDocument = null;
+                    if (failure != null) {
+                        replacementCloseFailure = mergeFailures(replacementCloseFailure, failure);
+                    }
+                }
+            }
+            if (pendingClose) {
+                SESSIONS.remove(closedDocument, this);
+                synchronized (operationLock) {
+                    if (pendingCleanupDocuments.isEmpty() && deferredClosedDocument != null) {
+                        deferredDocument = deferredClosedDocument;
+                        deferredClosedDocument = null;
+                    }
+                    if (!closeRequested && document != null && document.isClosed()) {
+                        closeRequested = true;
+                        schedulePendingClose = !pendingCleanupDocuments.isEmpty();
+                    }
+                    if (pendingCleanupDocuments.isEmpty()
+                            && deferredClosedDocument == null
+                            && document == null
+                            && closeRequested
+                            && !physicalCloseObserved) {
+                        physicalCloseObserved = true;
+                        @Nullable Throwable deferredFailure = deferredTerminalFailure;
+                        deferredTerminalFailure = null;
+                        if (deferredFailure == null) {
+                            pendingOnlyFailure = failure == null
+                                    ? replacementCloseFailure
+                                    : mergeFailures(replacementCloseFailure, failure);
+                        } else if (failure == null) {
+                            pendingOnlyFailure = mergeFailures(deferredFailure, replacementCloseFailure);
+                        } else {
+                            pendingOnlyFailure = mergeFailures(deferredFailure,
+                                    mergeFailures(replacementCloseFailure, failure));
+                        }
+                        replacementCloseFailure = null;
+                        physicalCloseFailure = pendingOnlyFailure;
+                        pendingOnlyTail = operationTail;
+                    }
+                }
+                if (deferredDocument != null) {
+                    documentClosed(deferredDocument, null);
+                } else if (schedulePendingClose) {
+                    close(ioExecutor);
+                } else if (pendingOnlyTail != null) {
+                    @Nullable Throwable completedFailure = pendingOnlyFailure;
+                    CompletableFuture<Void> completedTail = pendingOnlyTail;
+                    completedTail.whenComplete((@Nullable Void ignored, @Nullable Throwable operationFailure) -> {
+                        if (completedFailure == null && operationFailure == null) {
+                            terminal.complete(null);
+                        } else if (completedFailure == null) {
+                            terminal.completeExceptionally(operationFailure);
+                        } else if (operationFailure == null) {
+                            terminal.completeExceptionally(completedFailure);
+                        } else {
+                            completedFailure.addSuppressed(operationFailure);
+                            terminal.completeExceptionally(completedFailure);
+                        }
+                    });
+                }
+                return;
+            }
+            if (reloadClose) {
+                SESSIONS.remove(closedDocument, this);
+                return;
+            }
+            @Nullable CompletableFuture<Void> tail = null;
+            @Nullable Throwable terminalFailure = null;
             synchronized (operationLock) {
                 if (document != closedDocument && closingDocument != closedDocument) {
                     // A replacement or a cancelled replacement closes a stale handle after the new/current pointer has
@@ -840,30 +1144,142 @@ public final class NBTDocumentService {
                     if (failure != null) {
                         replacementCloseFailure = mergeFailures(replacementCloseFailure, failure);
                     }
-                    return;
+                    staleClose = true;
+                } else if (!pendingCleanupDocuments.isEmpty()) {
+                    // Keep the lease and remember the closed current handle. The pending replacement cleanup is
+                    // attempted first by closeOnExecutor; its callback will re-enter this method once the list empties.
+                    // Preserve the document-to-session mapping so a failed attempt remains explicitly retryable.
+                    deferredClosedDocument = closedDocument;
+                    deferredForPending = true;
+                    scheduleDeferredCleanup = !closeRequested;
+                    closeRequested = true;
+                } else {
+                    if (document == closedDocument) {
+                        document = null;
+                    }
+                    if (closingDocument == closedDocument) {
+                        closingDocument = null;
+                    }
+                    closeRequested = true;
+                    physicalCloseObserved = true;
+                    @Nullable Throwable deferredFailure = deferredTerminalFailure;
+                    deferredTerminalFailure = null;
+                    if (deferredFailure == null) {
+                        terminalFailure = failure == null
+                                ? replacementCloseFailure
+                                : mergeFailures(replacementCloseFailure, failure);
+                    } else if (failure == null) {
+                        terminalFailure = mergeFailures(deferredFailure, replacementCloseFailure);
+                    } else {
+                        terminalFailure = mergeFailures(deferredFailure,
+                                mergeFailures(replacementCloseFailure, failure));
+                    }
+                    replacementCloseFailure = null;
+                    physicalCloseFailure = terminalFailure;
+                    tail = operationTail;
                 }
-                if (document == closedDocument) {
-                    document = null;
-                }
-                if (closingDocument == closedDocument) {
-                    closingDocument = null;
-                }
-                closeRequested = true;
-                physicalCloseObserved = true;
-                terminalFailure = failure == null
-                        ? replacementCloseFailure
-                        : mergeFailures(replacementCloseFailure, failure);
-                replacementCloseFailure = null;
-                physicalCloseFailure = terminalFailure;
-                tail = operationTail;
             }
-            tail.whenComplete((@Nullable Void ignored, @Nullable Throwable operationFailure) -> {
-                if (terminalFailure == null) {
+            if (staleClose) {
+                SESSIONS.remove(closedDocument, this);
+                return;
+            }
+            if (deferredForPending) {
+                if (scheduleDeferredCleanup) {
+                    close(ioExecutor);
+                }
+                return;
+            }
+            SESSIONS.remove(closedDocument, this);
+            @Nullable Throwable completedFailure = terminalFailure;
+            Objects.requireNonNull(tail, "terminal operation tail")
+                    .whenComplete((@Nullable Void ignored, @Nullable Throwable operationFailure) -> {
+                if (completedFailure == null) {
                     terminal.complete(closedDocument);
                 } else {
-                    terminal.completeExceptionally(terminalFailure);
+                    terminal.completeExceptionally(completedFailure);
                 }
             });
+        }
+
+        /// Keeps a document-created failure pending until its physical close callback releases the task lease.
+        ///
+        /// Open cancellation and late setup failures can occur after the library has created a file handle. Completing
+        /// the task future at that point would release its resource lease while the handle is still usable. The caller
+        /// sees the original failure immediately, while the internal terminal future remains pending until a close
+        /// succeeds (or a later close failure is retried).
+        ///
+        /// @param leaked document which still owns the file session
+        /// @param failure primary operation failure
+        /// @param cleanupFailure first physical cleanup failure, or null when no close was attempted
+        private void deferFailureUntilDocumentClosed(
+                NBTDocument leaked,
+                Throwable failure,
+                @Nullable Throwable cleanupFailure) {
+            Objects.requireNonNull(leaked, "leaked");
+            Objects.requireNonNull(failure, "failure");
+            Throwable combined = cleanupFailure == null ? failure : mergeFailures(failure, cleanupFailure);
+            boolean alreadyObserved;
+            synchronized (operationLock) {
+                alreadyObserved = physicalCloseObserved;
+                if (!alreadyObserved) {
+                    document = leaked;
+                    closeRequested = true;
+                    deferredTerminalFailure = mergeFailures(deferredTerminalFailure, combined);
+                }
+            }
+            if (alreadyObserved) {
+                completeOpenFailure(combined);
+                return;
+            }
+
+            ensureSessionCloseListener(leaked);
+            completeOpenFailure(combined);
+            if (leaked.isClosed()) {
+                // A listener may have been absent when a previous close succeeded. Reconcile that state explicitly so
+                // the deferred terminal future cannot remain pending forever.
+                documentClosed(leaked, null);
+            } else {
+                close(ioExecutor);
+            }
+        }
+
+        /// Ensures that a retained document reports its eventual physical close to this session.
+        ///
+        /// @param document retained document
+        private void ensureSessionCloseListener(NBTDocument document) {
+            @Nullable DocumentSession owner = SESSIONS.get(document);
+            if (owner != null) {
+                if (owner != this) {
+                    throw new IllegalStateException("NBT document is already managed by another session");
+                }
+                return;
+            }
+            try {
+                document.setClosedListener(failure -> documentClosed(document, failure));
+            } catch (IllegalStateException expected) {
+                // The document already has a listener, or it closed between the state check and registration. The
+                // subsequent isClosed reconciliation handles the latter case.
+            }
+            SESSIONS.put(document, this);
+        }
+
+        /// Retains one document whose cleanup failed, including its original failure for the eventual close result.
+        ///
+        /// @param pending document that still owns a physical file session
+        /// @param failure cleanup failure
+        private void retainPendingCleanup(NBTDocument pending, Throwable failure) {
+            Objects.requireNonNull(pending, "pending");
+            Objects.requireNonNull(failure, "failure");
+            synchronized (operationLock) {
+                if (!pendingCleanupDocuments.contains(pending)) {
+                    pendingCleanupDocuments.add(pending);
+                }
+                replacementCloseFailure = mergeFailures(replacementCloseFailure, failure);
+            }
+            ensureSessionCloseListener(pending);
+            if (pending.isClosed()) {
+                documentClosed(pending, null);
+            }
         }
 
         /// Retains two cleanup failures without replacing the first failure identity.
@@ -948,8 +1364,7 @@ public final class NBTDocumentService {
 
             Throwable failure = terminalFailure(stoppedExecutor);
             closeLeakedDocument();
-            openReady.completeExceptionally(failure);
-            openResult.completeExceptionally(failure);
+            completeOpenFailure(failure);
             @Nullable CompletableFuture<Void> result;
             synchronized (operationLock) {
                 result = closeResult;
@@ -964,28 +1379,84 @@ public final class NBTDocumentService {
             @Nullable NBTDocument leaked;
             synchronized (operationLock) {
                 leaked = document;
-                document = null;
+                closingDocument = leaked;
             }
             if (leaked == null) {
                 return;
             }
-            SESSIONS.remove(leaked, this);
             try {
+                ensureSessionCloseListener(leaked);
                 leaked.close();
             } catch (Throwable failure) {
+                synchronized (operationLock) {
+                    if (!physicalCloseObserved) {
+                        document = leaked;
+                        closingDocument = null;
+                        physicalCloseFailure = mergeFailures(replacementCloseFailure, failure);
+                        deferredTerminalFailure = mergeFailures(deferredTerminalFailure, failure);
+                        replacementCloseFailure = null;
+                    }
+                }
                 LOG.warning("Failed to close an NBT document after task termination", failure);
+            }
+            if (leaked.isClosed()) {
+                SESSIONS.remove(leaked, this);
             }
         }
 
-        /// Completes all open-side futures exceptionally and stops the internal task source.
+        /// Completes open-side futures exceptionally, retaining a live document until physical cleanup if necessary.
         private void openFailed(Throwable failure) {
+            Objects.requireNonNull(failure, "failure");
+            @Nullable NBTDocument current;
+            synchronized (operationLock) {
+                current = physicalCloseObserved ? null : document;
+            }
+            if (current != null) {
+                deferFailureUntilDocumentClosed(current, failure, null);
+                return;
+            }
             terminal.completeExceptionally(failure);
-            openReady.completeExceptionally(failure);
+            completeOpenFailure(failure);
+        }
+
+        /// Completes the caller-visible open views without releasing the internal session lease.
+        ///
+        /// @param failure open-side failure
+        private void completeOpenFailure(Throwable failure) {
+            openReady.completeExceptionally(Objects.requireNonNull(failure, "failure"));
             openResult.completeExceptionally(failure);
         }
 
         /// Completes close and terminal futures after a scheduling or close failure.
         private void closeFailure(Throwable failure) {
+            @Nullable NBTDocument current;
+            boolean pendingCleanup;
+            synchronized (operationLock) {
+                current = physicalCloseObserved ? null : document;
+                pendingCleanup = !pendingCleanupDocuments.isEmpty();
+            }
+            if (current != null) {
+                closeAttemptFailed(current, failure);
+                return;
+            }
+            if (pendingCleanup) {
+                @Nullable CompletableFuture<Void> result;
+                Throwable retryableFailure;
+                synchronized (operationLock) {
+                    retryableFailure = mergeFailures(replacementCloseFailure, Objects.requireNonNull(failure, "failure"));
+                    replacementCloseFailure = null;
+                    physicalCloseFailure = retryableFailure;
+                    result = closeResult;
+                    // A retry must create a fresh visible future while the pending document remains owned by this
+                    // session. The terminal task stays pending until documentClosed observes its cleanup.
+                    closeResult = null;
+                }
+                if (result != null) {
+                    completeCloseResult(result, retryableFailure);
+                }
+                LOG.warning("NBT pending document cleanup failed; the session remains retryable", retryableFailure);
+                return;
+            }
             @Nullable CompletableFuture<Void> result;
             Throwable terminalFailure;
             synchronized (operationLock) {

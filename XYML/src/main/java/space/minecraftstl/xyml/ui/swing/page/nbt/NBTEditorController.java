@@ -186,7 +186,7 @@ public final class NBTEditorController implements AutoCloseable {
         startReload(operation, previous, file);
     }
 
-    /// Saves the current dirty document with library-owned conflict and publication checks.
+    /// Saves the current dirty or repair-required document with library-owned strict publication checks.
     public void save() {
         requireUiThread();
         ensureOpen();
@@ -195,7 +195,6 @@ public final class NBTEditorController implements AutoCloseable {
         if (document == null
                 || previous.busy()
                 || !previous.requiresSave()
-                || previous.status() == NBTEditorStatus.CONFLICT
                 || previous.status() == NBTEditorStatus.EDIT_UNCERTAIN
                 || previous.status() == NBTEditorStatus.COMMIT_UNCERTAIN) {
             return;
@@ -1167,8 +1166,7 @@ public final class NBTEditorController implements AutoCloseable {
             NBTDocument document,
             NBTEditorStatus previousStatus,
             @Nullable String previousMessage) {
-        boolean retainRecovery = previousStatus == NBTEditorStatus.CONFLICT
-                || previousStatus == NBTEditorStatus.PARTIAL_SAVE;
+        boolean retainRecovery = previousStatus == NBTEditorStatus.PARTIAL_SAVE;
         publish(new NBTEditorSnapshot(
                 retainRecovery ? previousStatus : NBTEditorStatus.READY,
                 snapshot.file(),
@@ -1498,9 +1496,6 @@ public final class NBTEditorController implements AutoCloseable {
                 || normalizedMessage(failure).contains("commit state is uncertain")) {
             return NBTEditorStatus.COMMIT_UNCERTAIN;
         }
-        if (isConflict(failure)) {
-            return NBTEditorStatus.CONFLICT;
-        }
         if (containsCause(failure, NBTPartialSaveException.class)) {
             return NBTEditorStatus.PARTIAL_SAVE;
         }
@@ -1510,8 +1505,8 @@ public final class NBTEditorController implements AutoCloseable {
     /// Classifies a failed save without losing an earlier partial-publication recovery boundary.
     ///
     /// A generic retry failure cannot prove that the disk and current editor snapshot agree. Only
-    /// success clears `PARTIAL_SAVE`; conflicts and uncertain commits may upgrade it to stricter
-    /// recovery states.
+    /// success clears `PARTIAL_SAVE`; an uncertain commit may upgrade it to a stricter recovery
+    /// state.
     ///
     /// @param previousStatus state from which the save was started
     /// @param failure unwrapped save failure
@@ -1537,7 +1532,7 @@ public final class NBTEditorController implements AutoCloseable {
             return NBTEditorStatus.ERROR;
         }
         return switch (Objects.requireNonNull(previousStatus, "previousStatus")) {
-            case CONFLICT, PARTIAL_SAVE, EDIT_UNCERTAIN, COMMIT_UNCERTAIN -> previousStatus;
+            case PARTIAL_SAVE, EDIT_UNCERTAIN, COMMIT_UNCERTAIN -> previousStatus;
             default -> NBTEditorStatus.ERROR;
         };
     }
@@ -1552,28 +1547,6 @@ public final class NBTEditorController implements AutoCloseable {
         while (current != null) {
             if (type.isInstance(current)) {
                 return true;
-            }
-            current = current.getCause();
-        }
-        return false;
-    }
-
-    /// Classifies stale-source and path-identity failures as external conflicts.
-    ///
-    /// @param failure unwrapped failure
-    /// @return whether reload is required before another save
-    private static boolean isConflict(Throwable failure) {
-        @Nullable Throwable current = Objects.requireNonNull(failure, "failure");
-        while (current != null) {
-            if (current instanceof IOException) {
-                String message = normalizedMessage(current);
-                if (message.contains("changed since it was opened")
-                        || message.contains("changed while it was being read")
-                        || message.contains("changed while a save was being staged")
-                        || message.contains("changed after opening")
-                        || message.contains("path was replaced")) {
-                    return true;
-                }
             }
             current = current.getCause();
         }

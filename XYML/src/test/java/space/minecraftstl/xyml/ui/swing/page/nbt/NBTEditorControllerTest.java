@@ -63,14 +63,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/// Verifies UI dispatch, typed mutation, stale conflicts, reload, and late-result suppression.
+/// Verifies UI dispatch, typed mutation, rolling-backup saves, reload, and late-result suppression.
 @NotNullByDefault
 final class NBTEditorControllerTest {
     /// Temporary filesystem root used for real atomic backend transactions.
     @TempDir
     private Path temporaryDirectory;
 
-    /// Opens, edits, saves, detects an external replacement, and reloads without EDT filesystem work.
+    /// Opens, edits, saves over an external replacement, and reloads without EDT filesystem work.
     @Test
     void editsSavesAndRecoversFromAStaleSource() throws Exception {
         Path source = temporaryDirectory.resolve("level.dat");
@@ -113,12 +113,12 @@ final class NBTEditorControllerTest {
         ui.run(controller::save);
         ioExecutor.runNext();
         ui.runNext();
-        assertEquals(NBTEditorStatus.CONFLICT, controller.snapshot().status());
-        assertTrue(controller.snapshot().dirty());
-        assertEquals(99, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
+        assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
+        assertFalse(controller.snapshot().dirty());
+        assertEquals(3, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
         ui.run(controller::save);
         assertEquals(0, ioExecutor.pendingCount());
-        assertEquals(NBTEditorStatus.CONFLICT, controller.snapshot().status());
+        assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
 
         ui.run(controller::reload);
         ioExecutor.runNext();
@@ -126,8 +126,8 @@ final class NBTEditorControllerTest {
         assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
         assertFalse(controller.snapshot().dirty());
         CompoundTag reloaded = (CompoundTag) requiredDocument(controller).rootSnapshot();
-        assertEquals(99, reloaded.getInt("value"));
-        assertEquals("external", reloaded.getString("name"));
+        assertEquals(3, reloaded.getInt("value"));
+        assertEquals("old", reloaded.getString("name"));
         ui.run(controller::close);
         ioExecutor.runAll();
     }
@@ -590,18 +590,18 @@ final class NBTEditorControllerTest {
         ui.run(controller::close);
     }
 
-    /// Treats the library's strict-open fingerprint race as an external source conflict.
+    /// Classifies source and publication failures without a separate source-fingerprint state.
     @Test
-    void classifiesSourceChangesDuringReadAsConflicts() {
+    void classifiesSourceChangesDuringReadAsOrdinaryFailures() {
         assertSame(
-                NBTEditorStatus.CONFLICT,
+                NBTEditorStatus.ERROR,
                 NBTEditorController.classifySaveFailure(
                         new IOException("NBT source changed while it was being read")));
         assertSame(
                 NBTEditorStatus.ERROR,
                 NBTEditorController.classifySaveFailure(new IOException("Disk is unavailable")));
         assertSame(
-                NBTEditorStatus.CONFLICT,
+                NBTEditorStatus.PARTIAL_SAVE,
                 NBTEditorController.classifySaveFailure(new NBTPartialSaveException(
                         java.util.List.of(0),
                         1,
@@ -617,7 +617,7 @@ final class NBTEditorControllerTest {
                         NBTEditorStatus.PARTIAL_SAVE,
                         new IOException("Disk is unavailable")));
         assertSame(
-                NBTEditorStatus.CONFLICT,
+                NBTEditorStatus.PARTIAL_SAVE,
                 NBTEditorController.classifySaveFailure(
                         NBTEditorStatus.PARTIAL_SAVE,
                         new IOException("Region path was replaced")));
@@ -649,9 +649,6 @@ final class NBTEditorControllerTest {
         assertSame(
                 NBTEditorStatus.COMMIT_UNCERTAIN,
                 NBTEditorController.retainedOpenFailureStatus(NBTEditorStatus.COMMIT_UNCERTAIN, true));
-        assertSame(
-                NBTEditorStatus.CONFLICT,
-                NBTEditorController.retainedOpenFailureStatus(NBTEditorStatus.CONFLICT, true));
         assertSame(
                 NBTEditorStatus.PARTIAL_SAVE,
                 NBTEditorController.retainedOpenFailureStatus(NBTEditorStatus.PARTIAL_SAVE, true));

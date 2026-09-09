@@ -258,11 +258,11 @@ final class NBTBackendTest {
         }
     }
 
-    /// Protects the deterministic `.dat_old` target for the complete level-data editing session.
+    /// Protects the deterministic `.xyml_old` target for the complete level-data editing session.
     @Test
     void holdsRollingBackupResourceUntilDocumentClose() throws Exception {
         Path source = temporaryDirectory.resolve("level.dat");
-        Path backup = temporaryDirectory.resolve("level.dat_old");
+        Path backup = temporaryDirectory.resolve("level.dat.xyml_old");
         writeTag(source, NBTFileEncoding.GZIP, sampleRoot());
         NBTDocumentService service = new NBTDocumentService(Runnable::run);
         NBTDocument document = service.open(source).get(5L, TimeUnit.SECONDS);
@@ -502,11 +502,11 @@ final class NBTBackendTest {
         assertEquals(1002L, assertInstanceOf(LongArrayTag.class, saved.get("longs")).get(1));
     }
 
-    /// Publishes one exact rolling `.dat_old` copy of the source that each save replaces.
+    /// Publishes one exact rolling `.xyml_old` copy of the source that each save replaces.
     @Test
     void maintainsExactRollingBackupForMainDatFiles() throws Exception {
         Path source = temporaryDirectory.resolve("level.dat");
-        Path backup = temporaryDirectory.resolve("level.dat_old");
+        Path backup = temporaryDirectory.resolve("level.dat.xyml_old");
         writeTag(source, NBTFileEncoding.GZIP, sampleRoot());
         byte[] initialBytes = Files.readAllBytes(source);
         NBTDocumentService service = new NBTDocumentService(Runnable::run);
@@ -524,7 +524,7 @@ final class NBTBackendTest {
         assertEquals(3, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
     }
 
-    /// Preserves the source filename's exact spelling when deriving its `_old` backup.
+    /// Preserves the source filename's exact spelling when deriving its `.xyml_old` backup.
     @Test
     void preservesFilenameCaseInDatBackupPath() throws Exception {
         Path source = temporaryDirectory.resolve("LEVEL.DAT");
@@ -537,14 +537,14 @@ final class NBTBackendTest {
             assertTrue(files
                     .map(Path::getFileName)
                     .map(Path::toString)
-                    .anyMatch("LEVEL.DAT_old"::equals));
+                    .anyMatch("LEVEL.DAT.xyml_old"::equals));
         }
     }
 
-    /// Does not recursively create backups for `.dat_old` or `.nbt` documents.
+    /// Creates the next deterministic backup generation when the source is already `.xyml_old`.
     @Test
-    void doesNotCreateRecursiveBackupHistory() throws Exception {
-        Path oldSource = temporaryDirectory.resolve("level.dat_old");
+    void createsNextRecursiveBackupGeneration() throws Exception {
+        Path oldSource = temporaryDirectory.resolve("level.dat.xyml_old");
         Path nbtSource = temporaryDirectory.resolve("structure.nbt");
         writeTag(oldSource, NBTFileEncoding.GZIP, sampleRoot());
         writeTag(nbtSource, NBTFileEncoding.RAW, sampleRoot());
@@ -553,8 +553,8 @@ final class NBTBackendTest {
         editAndSaveValue(service, oldSource, 4);
         editAndSaveValue(service, nbtSource, 5);
 
-        assertFalse(Files.exists(temporaryDirectory.resolve("level.dat_old_old")));
-        assertFalse(Files.exists(temporaryDirectory.resolve("structure.nbt_old")));
+        assertTrue(Files.exists(temporaryDirectory.resolve("level.dat.xyml_old.xyml_old")));
+        assertTrue(Files.exists(temporaryDirectory.resolve("structure.nbt.xyml_old")));
     }
 
     /// Delegates changed region slots to the XoyzNBT copy-on-write session.
@@ -582,9 +582,9 @@ final class NBTBackendTest {
         assertEquals(2, root.getInt("DataVersion"));
     }
 
-    /// Rejects a stale document and retains independently replaced source bytes.
+    /// Rewrites a source that changed after open and retains the replaced bytes in the rolling backup.
     @Test
-    void refusesToOverwriteAFileChangedAfterOpen() throws Exception {
+    void rewritesAFileChangedAfterOpen() throws Exception {
         Path source = temporaryDirectory.resolve("stale.dat");
         writeTag(source, NBTFileEncoding.GZIP, sampleRoot());
         NBTDocumentService service = new NBTDocumentService(Runnable::run);
@@ -595,14 +595,12 @@ final class NBTBackendTest {
             replacement.setInt("value", 99);
             writeTag(source, NBTFileEncoding.GZIP, replacement);
 
-            CompletionException failure = assertThrows(
-                    CompletionException.class,
-                    () -> service.save(document).join());
-            assertInstanceOf(IOException.class, failure.getCause());
-            assertTrue(document.isDirty());
+            service.save(document).join();
+            assertFalse(document.isDirty());
         }
-        assertEquals(99, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
-        assertFalse(Files.exists(temporaryDirectory.resolve("stale.dat_old")));
+        assertEquals(2, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
+        assertEquals(99, NBTCodec.of().readTag(
+                temporaryDirectory.resolve("stale.dat.xyml_old"), TagType.COMPOUND).getInt("value"));
     }
 
     /// Releases region resources on close and rejects later document operations.

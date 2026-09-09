@@ -18,6 +18,9 @@
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
 import space.minecraftstl.xyml.ui.swing.dialog.EditablePathChooser;
+import space.minecraftstl.xyml.library.nbt.io.NBTFileEncoding;
+import space.minecraftstl.xyml.library.nbt.io.NBTReadReport;
+import space.minecraftstl.xyml.library.nbt.io.StorageProfile;
 
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -27,8 +30,14 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
+import javax.swing.JToggleButton;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import java.awt.BorderLayout;
 import java.awt.Component;
+import java.awt.Dimension;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
@@ -67,6 +76,7 @@ final class SwingNBTEditorInteractions implements NBTEditorInteractions {
                 "nbt",
                 "dat",
                 "dat_old",
+                "xyml_old",
                 "mca",
                 "mcr"));
         if (currentFile != null) {
@@ -105,6 +115,79 @@ final class SwingNBTEditorInteractions implements NBTEditorInteractions {
                 strings.discardTitle(),
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /// Shows a repair-save confirmation with a collapsed plain-text diagnostic view.
+    ///
+    /// @param currentFile source that will be rewritten
+    /// @param report immutable tolerant-read diagnostics
+    /// @return whether the user explicitly approved strict repair publication
+    @Override
+    public boolean confirmRepairSave(Path currentFile, NBTReadReport report) {
+        NBTReadReport diagnostics = Objects.requireNonNull(report, "report");
+        StorageProfile profile = diagnostics.encoding() == NBTFileEncoding.REGION
+                ? StorageProfile.region(new byte[StorageProfile.REGION_SLOT_COUNT],
+                        new boolean[StorageProfile.REGION_SLOT_COUNT], new boolean[StorageProfile.REGION_SLOT_COUNT])
+                : new StorageProfile(diagnostics.encoding());
+        return confirmRepairSave(currentFile, diagnostics, profile);
+    }
+
+    /// Shows a repair-save confirmation with region marker metadata when available.
+    ///
+    /// @param currentFile source that will be rewritten
+    /// @param report immutable tolerant-read diagnostics
+    /// @param storageProfile immutable storage profile
+    /// @return whether the user explicitly approved strict repair publication
+    @Override
+    public boolean confirmRepairSave(Path currentFile, NBTReadReport report, StorageProfile storageProfile) {
+        EdtDispatcher.requireEventDispatchThread();
+        Path source = Objects.requireNonNull(currentFile, "currentFile");
+        NBTReadReport diagnostics = Objects.requireNonNull(report, "report");
+        StorageProfile profile = Objects.requireNonNull(storageProfile, "storageProfile");
+        String summary = diagnostics.hasPartialDataLoss()
+                ? strings.partialRepairSaveMessage(source)
+                : strings.repairSaveMessage(source);
+        JTextArea summaryArea = new JTextArea(summary);
+        summaryArea.setEditable(false);
+        summaryArea.setLineWrap(true);
+        summaryArea.setWrapStyleWord(true);
+        summaryArea.setOpaque(false);
+
+        JTextArea detailsArea = new JTextArea(NBTReadWarningView.formatReadReport(
+                diagnostics, profile, strings));
+        detailsArea.setEditable(false);
+        detailsArea.setLineWrap(true);
+        detailsArea.setWrapStyleWord(true);
+        detailsArea.setCaretPosition(0);
+        JScrollPane detailsScroll = new JScrollPane(detailsArea);
+        detailsScroll.setPreferredSize(new Dimension(620, 180));
+        detailsScroll.setVisible(false);
+
+        JPanel content = new JPanel(new BorderLayout(0, 8));
+        content.setPreferredSize(new Dimension(660, 150));
+        JToggleButton detailsToggle = new JToggleButton(strings.showReadDetailsText());
+        detailsToggle.addActionListener(event -> {
+            boolean expanded = detailsToggle.isSelected();
+            detailsScroll.setVisible(expanded);
+            detailsToggle.setText(expanded
+                    ? strings.hideReadDetailsText()
+                    : strings.showReadDetailsText());
+            content.revalidate();
+            content.repaint();
+        });
+
+        content.add(summaryArea, BorderLayout.NORTH);
+        content.add(detailsScroll, BorderLayout.CENTER);
+        JPanel footer = new JPanel(new BorderLayout());
+        footer.add(detailsToggle, BorderLayout.WEST);
+        content.add(footer, BorderLayout.SOUTH);
+        int option = JOptionPane.showConfirmDialog(
+                owner,
+                content,
+                strings.repairSaveTitle(),
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+        return option == JOptionPane.YES_OPTION;
     }
 
     /// Shows a second explicit warning before clearing one fixed Region chunk root.

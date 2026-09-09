@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.library.nbt.edit.NBTAddress;
 import space.minecraftstl.xyml.library.nbt.edit.NBTEditException;
 import space.minecraftstl.xyml.library.nbt.edit.NBTNode;
+import space.minecraftstl.xyml.library.nbt.io.NBTReadReport;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import space.minecraftstl.xyml.library.nbt.tag.ValueTag;
 import space.minecraftstl.xyml.nbt.NBTDocument;
@@ -93,7 +94,9 @@ import static space.minecraftstl.xyml.util.logging.Logger.LOG;
 ///
 /// The panel performs no filesystem I/O on the EDT and never receives a mutable working-tree
 /// element. Every edit passes an immutable node handle to [NBTEditorController], which delegates to
-/// the transactional XoyzNBT editor before this panel rebuilds the affected revision.
+/// the transactional XoyzNBT editor before this panel rebuilds the affected revision. Tolerant-read
+/// diagnostics remain visible in a persistent warning band and must be explicitly approved before
+/// a strict repair save is started.
 @NotNullByDefault
 public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Serialization identifier for the Swing component superclass contract.
@@ -156,6 +159,9 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
 
     /// Displays the exact selected source path.
     private final JLabel pathLabel = new JLabel();
+
+    /// Persistent warning band for tolerant-read recovery diagnostics.
+    private final NBTReadWarningView readWarningView;
 
     /// Renders only rows requested by the Swing tree viewport.
     private final JTree tree = new JTree(emptyTreeModel());
@@ -323,6 +329,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         EdtDispatcher.requireEventDispatchThread();
         this.controller = Objects.requireNonNull(controller, "controller");
         this.strings = Objects.requireNonNull(strings, "strings");
+        this.readWarningView = new NBTReadWarningView(this.strings);
         this.interactions = interactions == null
                 ? new SwingNBTEditorInteractions(this, this.strings)
                 : interactions;
@@ -355,7 +362,11 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         setName("nbtEditorPage");
         setOpaque(false);
         setBorder(BorderFactory.createEmptyBorder());
-        add(createHeadingBand(), BorderLayout.NORTH);
+        JPanel northBand = new JPanel(new BorderLayout());
+        northBand.setOpaque(false);
+        northBand.add(createHeadingBand(), BorderLayout.NORTH);
+        northBand.add(readWarningView.component(), BorderLayout.CENTER);
+        add(northBand, BorderLayout.NORTH);
         add(createEditorSurface(), BorderLayout.CENTER);
         add(createStatusBand(), BorderLayout.SOUTH);
         configureTree();
@@ -494,7 +505,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 "nbtEditorSave",
                 "assets/swing/icons/save.svg",
                 strings.saveTooltip(),
-                controller::save);
+                this::requestSave);
         heading.add(saveButton, "w 40!, h 40!");
         return heading;
     }
@@ -726,7 +737,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
 
     /// Installs Save, Undo, Redo, Delete, Rename, Copy, and Paste shortcuts.
     private void configureKeyboardActions() {
-        bind(this, "save", KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK), controller::save);
+        bind(this, "save", KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK), this::requestSave);
         bind(this, "undo", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK), this::undo);
         bind(this, "redo", KeyStroke.getKeyStroke(KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK), this::redo);
         bind(tree, "delete", KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0), this::deleteSelected);
@@ -760,6 +771,32 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         if (selected != null) {
             open(selected);
         }
+    }
+
+    /// Routes every visible save command through the tolerant-read repair confirmation boundary.
+    ///
+    /// A clean document delegates immediately. A recovered document is never silently rewritten: the interaction
+    /// policy must explicitly approve the strict repair save, and a headless/default policy therefore leaves the
+    /// source untouched.
+    private void requestSave() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get()) {
+            return;
+        }
+        NBTEditorSnapshot current = controller.snapshot();
+        if (current.busy() || !current.requiresSave()) {
+            return;
+        }
+        @Nullable NBTDocument document = current.document();
+        @Nullable Path file = current.file();
+        if (document == null || file == null) {
+            return;
+        }
+        NBTReadReport report = document.readReport();
+        if (report.requiresRepair() && !interactions.confirmRepairSave(file, report, document.storageProfile())) {
+            return;
+        }
+        controller.save();
     }
 
     /// Reloads after confirming a dirty replacement.
@@ -1016,7 +1053,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         }
         NBTEditorTreeNode submitted = selected;
         String draft = valueArea.getText();
-        handleAsyncResult(controller.applyStructuredValueAsync(submitted, draft, selectedNumberRadix()), submitted,
+        handleAsyncResult(controller.applyStructuredValueAsync(submitted, draft, numberRadixEditor.selectedRadix()), submitted,
                 () -> valueArea.setText(draft));
     }
 
@@ -1042,7 +1079,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Applies a Compound child rename.
     private void renameSelected() {
         @Nullable NBTEditorTreeNode selected = selectedNode();
-        if (selected != null && nameEditable(selected) && mutationsAllowed()) {
+        if (selected != null && NBTEditorPanelSupport.nameEditable(selected) && mutationsAllowed()) {
             NBTEditorTreeNode submitted = selected;
             String draft = nameField.getText();
             handleAsyncResult(controller.renameAsync(submitted, draft), submitted, () -> nameField.setText(draft));
@@ -1065,7 +1102,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Applies the declared type of one empty List.
     private void applyListType() {
         @Nullable NBTEditorTreeNode selected = selectedNode();
-        if (selected == null || !emptyListSelected(selected) || !mutationsAllowed()) {
+        if (selected == null || !NBTEditorPanelSupport.emptyListSelected(selected) || !mutationsAllowed()) {
             return;
         }
         int selectedIndex = listTypeCombo.getSelectedIndex();
@@ -1218,7 +1255,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Focuses and selects the Compound child name when rename is available.
     private void focusNameEditor() {
         @Nullable NBTEditorTreeNode selected = selectedNode();
-        if (selected != null && nameEditable(selected) && mutationsAllowed()) {
+        if (selected != null && NBTEditorPanelSupport.nameEditable(selected) && mutationsAllowed()) {
             nameField.requestFocusInWindow();
             nameField.selectAll();
         }
@@ -1410,7 +1447,8 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         String pathText = file == null ? "" : file.toString();
         pathLabel.setText(pathText);
         pathLabel.setToolTipText(pathText.isEmpty() ? null : pathText);
-        statusLabel.setText(statusText(current));
+        readWarningView.render(document);
+        statusLabel.setText(NBTEditorPanelSupport.statusText(strings, current));
         statusLabel.setToolTipText(current.message());
         progressBar.setVisible(current.busy());
         boolean active = current.status() != NBTEditorStatus.CLOSED;
@@ -1420,7 +1458,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 && !current.busy()
                 && document != null
                 && current.requiresSave()
-                && current.status() != NBTEditorStatus.CONFLICT
                 && current.status() != NBTEditorStatus.EDIT_UNCERTAIN
                 && current.status() != NBTEditorStatus.COMMIT_UNCERTAIN);
         undoButton.setEnabled(active && mutationsAllowed() && controller.canUndo());
@@ -1439,24 +1476,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         }
     }
 
-    /// Returns localized lifecycle status text.
-    /// @param current current state
-    /// @return visible status text
-    private String statusText(NBTEditorSnapshot current) {
-        return switch (current.status()) {
-            case EMPTY, CLOSED -> strings.emptyText();
-            case OPENING -> strings.openingText();
-            case READY -> current.dirty() ? strings.modifiedText() : strings.readyText();
-            case EDITING -> strings.editingText();
-            case EDIT_UNCERTAIN -> strings.editUncertainText();
-            case SAVING -> strings.savingText();
-            case CONFLICT -> strings.conflictText();
-            case PARTIAL_SAVE -> strings.partialSaveText();
-            case COMMIT_UNCERTAIN -> strings.commitUncertainText();
-            case ERROR -> strings.errorText();
-        };
-    }
-
     /// Updates selected-node metadata and every contextual command.
     private void updateSelectedNodeDetails() {
         @Nullable NBTEditorTreeNode selected = selectedNode();
@@ -1470,7 +1489,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         @Nullable TagType<?> tagType = node.getType();
         childrenField.setText(strings.entries(selected.childCount()));
         boolean mutable = mutationsAllowed();
-        boolean renameEditable = mutable && nameEditable(selected);
+        boolean renameEditable = mutable && NBTEditorPanelSupport.nameEditable(selected);
         boolean snbtEditable = mutable && tagType != null;
         updateTypeChoices(selected, tagType, mutable);
         boolean structuredValueEditable = updateValueEditor(selected, tagType, mutable);
@@ -1478,7 +1497,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         nameField.setEditable(renameEditable);
         renameButton.setEnabled(renameEditable);
         updateSnbtEditor(selected, tagType, mutable);
-        boolean emptyList = mutable && emptyListSelected(selected);
+        boolean emptyList = mutable && NBTEditorPanelSupport.emptyListSelected(selected);
         listTypeCombo.setEnabled(emptyList);
         listTypeButton.setEnabled(emptyList);
         if (emptyList) {
@@ -1559,7 +1578,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         numberRadixCombo.setVisible(numeric);
         numberRadixCombo.setEnabled(numeric && !controller.snapshot().busy());
         if (aggregate) {
-            NBTNumberRadix radix = selectedNumberRadix();
+            NBTNumberRadix radix = numberRadixEditor.selectedRadix();
             ValueLoadKey key = new ValueLoadKey(selected, radix);
             valueTextLoader.reset(key);
             @Nullable NBTDocument document = controller.snapshot().document();
@@ -1586,7 +1605,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         valueTextLoader.reset(null);
         @Nullable String scalar = selected.currentScalarValue();
         if (tagType != null && scalar != null) {
-            NBTNumberRadix radix = selectedNumberRadix();
+            NBTNumberRadix radix = numberRadixEditor.selectedRadix();
             valueArea.setText(NBTStructuredValueCodec.formatScalar(tagType, scalar, radix));
             numberRadixEditor.markDisplayed(radix);
             valueArea.setEnabled(mutable);
@@ -1639,7 +1658,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         try {
             return !closed.get()
                     && selectedKey.node() == selectedNode()
-                    && selectedKey.radix() == selectedNumberRadix()
+                    && selectedKey.radix() == numberRadixEditor.selectedRadix()
                     && document != null
                     && selectedKey.node().belongsTo(document)
                     && selectedKey.node().node().getRevision() == document.editor().getRevision();
@@ -1841,13 +1860,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         showEditFailure(NBTEditException.Reason.TYPE_MISMATCH, Objects.requireNonNull(detail, "detail"));
     }
 
-    /// Returns the numeric radix selected by the structured value form.
-    ///
-    /// @return hexadecimal for the second option, otherwise decimal
-    private NBTNumberRadix selectedNumberRadix() {
-        return numberRadixEditor.selectedRadix();
-    }
-
     /// Resolves the type-combo display value to one standard non-END tag type.
     ///
     /// @return selected target type, or `null` for a non-tag row
@@ -1933,23 +1945,6 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         return selected == null
                 ? null
                 : NBTEditorPanelSupport.insertionTarget(selected, selectedParentNode(), controller);
-    }
-
-    /// Returns whether the selected row is an empty List.
-    ///
-    /// @param selected selected row
-    /// @return whether its declared element type can change
-    private static boolean emptyListSelected(NBTEditorTreeNode selected) {
-        return selected.node().getType() == TagType.LIST && selected.childCount() == 0;
-    }
-
-    /// Returns whether the selected address is a Compound name segment.
-    ///
-    /// @param selected selected row
-    /// @return whether rename is structurally valid
-    private static boolean nameEditable(NBTEditorTreeNode selected) {
-        @Unmodifiable List<NBTAddress.Segment> segments = selected.address().segments();
-        return !segments.isEmpty() && segments.get(segments.size() - 1) instanceof NBTAddress.NameSegment;
     }
 
     /// Returns whether one selected row can move by an offset.

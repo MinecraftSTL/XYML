@@ -16,6 +16,7 @@
 // Modified by MinecraftSTL in 2026 for the XYML namespace and monorepo build.
 package space.minecraftstl.xyml.library.nbt.internal.input;
 
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.Closeable;
@@ -26,6 +27,8 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SeekableByteChannel;
 
+/// Position-tracking source used to fill raw NBT input buffers.
+@NotNullByDefault
 public sealed abstract class InputSource implements Closeable {
     private boolean closed = false;
 
@@ -54,6 +57,10 @@ public sealed abstract class InputSource implements Closeable {
     public final void fillBuffer(InputBuffer buffer, int required) throws IOException {
         ensureOpen();
 
+        if (required < 0) {
+            throw new IllegalArgumentException("required must not be negative");
+        }
+
         if (buffer.remaining() >= required) {
             return;
         }
@@ -66,6 +73,8 @@ public sealed abstract class InputSource implements Closeable {
 
     public abstract void skip(long bytes) throws IOException;
 
+    /// Source backed by a detached view of a caller-supplied byte buffer or array.
+    @NotNullByDefault
     public static final class OfByteBuffer extends InputSource {
 
         private final ByteBuffer buffer;
@@ -110,6 +119,9 @@ public sealed abstract class InputSource implements Closeable {
 
         @Override
         public void skip(long bytes) throws IOException {
+            if (bytes < 0L) {
+                throw new IllegalArgumentException("bytes must be non-negative");
+            }
             if (buffer.remaining() < bytes) {
                 throw new EOFException("Unexpected end of stream");
             }
@@ -118,6 +130,8 @@ public sealed abstract class InputSource implements Closeable {
         }
     }
 
+    /// Source backed by an input stream with explicit close ownership.
+    @NotNullByDefault
     public static final class OfInputStream extends InputSource {
         private final InputStream inputStream;
         private final boolean closeInputStream;
@@ -152,18 +166,39 @@ public sealed abstract class InputSource implements Closeable {
                 if (read < 0) {
                     throw new EOFException("Unexpected end of stream");
                 }
+                if (read == 0) {
+                    int single = inputStream.read();
+                    if (single < 0) {
+                        throw new EOFException("Unexpected end of stream");
+                    }
+                    target.array()[offset] = (byte) single;
+                    read = 1;
+                }
                 target.limit(target.limit() + read);
-                position += read;
+                try {
+                    position = Math.addExact(position, read);
+                } catch (ArithmeticException overflow) {
+                    throw new IOException("Input position overflows", overflow);
+                }
             }
         }
 
         @Override
         public void skip(long bytes) throws IOException {
+            if (bytes < 0L) {
+                throw new IllegalArgumentException("bytes must be non-negative");
+            }
             inputStream.skipNBytes(bytes);
-            position += bytes;
+            try {
+                position = Math.addExact(position, bytes);
+            } catch (ArithmeticException overflow) {
+                throw new IOException("Input position overflows", overflow);
+            }
         }
     }
 
+    /// Source backed by a readable channel with explicit close ownership.
+    @NotNullByDefault
     public static final class OfByteChannel extends InputSource {
         private final ReadableByteChannel channel;
         private final boolean closeChannel;
@@ -200,7 +235,11 @@ public sealed abstract class InputSource implements Closeable {
                 while (target.position() < required) {
                     int n = channel.read(target);
                     if (n > 0) {
-                        position += n;
+                        try {
+                            position = Math.addExact(position, n);
+                        } catch (ArithmeticException overflow) {
+                            throw new IOException("Input position overflows", overflow);
+                        }
                     } else {
                         throw new EOFException("Unexpected end of stream");
                     }
@@ -212,12 +251,15 @@ public sealed abstract class InputSource implements Closeable {
 
         @Override
         public void skip(long bytes) throws IOException {
+            if (bytes < 0L) {
+                throw new IllegalArgumentException("bytes must be non-negative");
+            }
             if (channel instanceof SeekableByteChannel seekableChannel) {
                 try {
                     long channelCurrentPosition = seekableChannel.position();
                     long channelTargetPosition = Math.addExact(channelCurrentPosition, bytes);
                     seekableChannel.position(channelTargetPosition);
-                    position += bytes;
+                    position = Math.addExact(position, bytes);
                     return;
                 } catch (ArithmeticException e) {
                     throw new IOException("Overflow when skip " + bytes + " bytes", e);
@@ -234,7 +276,11 @@ public sealed abstract class InputSource implements Closeable {
 
                 int n = channel.read(skipBuffer);
                 if (n > 0) {
-                    position += n;
+                    try {
+                        position = Math.addExact(position, n);
+                    } catch (ArithmeticException overflow) {
+                        throw new IOException("Input position overflows", overflow);
+                    }
                     remainingSkip -= n;
                 } else {
                     throw new EOFException("Unexpected end of stream");
