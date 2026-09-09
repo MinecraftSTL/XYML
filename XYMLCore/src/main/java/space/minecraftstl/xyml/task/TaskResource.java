@@ -42,6 +42,7 @@ public final class TaskResource {
     static final Comparator<TaskResource> ORDER = Comparator
             .comparingInt((TaskResource resource) -> resource.scope.order)
             .thenComparing(resource -> resource.kind.name())
+            .thenComparing(resource -> resource.accessMode.name())
             .thenComparing(TaskResource::comparisonText);
 
     /// Whether the default filesystem treats path names case-insensitively.
@@ -63,6 +64,9 @@ public final class TaskResource {
     /// Filesystem coverage represented by this key.
     private final Scope scope;
 
+    /// Access mode requested for the represented resource range.
+    private final AccessMode accessMode;
+
     /// Normalized absolute path, or null for non-path resources.
     private final @Nullable Path path;
 
@@ -75,9 +79,20 @@ public final class TaskResource {
     /// @param scope represented filesystem coverage
     /// @param path normalized path, or null for conservative and global resources
     private TaskResource(Kind kind, Scope scope, @Nullable Path path) {
+        this(kind, scope, path, AccessMode.WRITE);
+    }
+
+    /// Creates one immutable resource key with an explicit access mode.
+    ///
+    /// @param kind semantic resource category
+    /// @param scope represented filesystem coverage
+    /// @param path normalized path, or null for non-path resources
+    /// @param accessMode requested access mode
+    private TaskResource(Kind kind, Scope scope, @Nullable Path path, AccessMode accessMode) {
         this.kind = Objects.requireNonNull(kind, "kind");
         this.scope = Objects.requireNonNull(scope, "scope");
         this.path = path;
+        this.accessMode = Objects.requireNonNull(accessMode, "accessMode");
         this.comparisonPath = path == null ? null : comparisonPath(path);
     }
 
@@ -306,6 +321,39 @@ public final class TaskResource {
         return path;
     }
 
+    /// Returns the requested access mode.
+    ///
+    /// @return read or write access
+    public AccessMode getAccessMode() {
+        return accessMode;
+    }
+
+    /// Returns an equivalent declaration which participates only in read/read sharing.
+    ///
+    /// Existing factory methods intentionally remain write declarations for compatibility. Callers that only inspect
+    /// a resource may opt into this mode explicitly; a read declaration never authorizes a nested write.
+    ///
+    /// @return read-only resource declaration
+    public TaskResource readOnly() {
+        return accessMode == AccessMode.READ
+                ? this
+                : new TaskResource(kind, scope, path, AccessMode.READ);
+    }
+
+    /// Returns whether this declaration is read-only.
+    ///
+    /// @return whether the declaration permits only read/read sharing
+    boolean isReadOnly() {
+        return accessMode == AccessMode.READ;
+    }
+
+    /// Returns whether this declaration reserves the range for writes.
+    ///
+    /// @return whether the declaration is write-capable
+    private boolean isWrite() {
+        return accessMode == AccessMode.WRITE;
+    }
+
     /// Creates an equivalent resource with a canonical filesystem path for lock-manager use.
     ///
     /// The logical kind and coverage shape are preserved; callers should keep the original resource for diagnostics.
@@ -316,7 +364,7 @@ public final class TaskResource {
         if (path == null) {
             throw new IllegalStateException("Non-path task resources cannot be assigned a path");
         }
-        return new TaskResource(kind, scope, normalizePath(canonicalPath));
+        return new TaskResource(kind, scope, normalizePath(canonicalPath), accessMode);
     }
 
     /// Returns whether this declaration is the conservative unresolved default.
@@ -329,7 +377,7 @@ public final class TaskResource {
     /// Logical repository coordination scopes deliberately return false: they coordinate a known metadata or
     /// operation phase, but do not promise to protect arbitrary filesystem writes made by a conservative child.
     boolean isExclusiveCoverage() {
-        return scope == Scope.GLOBAL || scope == Scope.DIRECTORY;
+        return isWrite() && (scope == Scope.GLOBAL || scope == Scope.DIRECTORY);
     }
 
     /// Returns whether this declaration is a complete boundary for an unknown nested write.
@@ -342,7 +390,7 @@ public final class TaskResource {
     ///
     /// @return whether this resource can safely bound an unknown descendant
     boolean isCompleteBoundary() {
-        return scope == Scope.GLOBAL || scope == Scope.DIRECTORY;
+        return isWrite() && (scope == Scope.GLOBAL || scope == Scope.DIRECTORY);
     }
 
     /// Returns whether this resource conflicts with another normalized resource.
@@ -378,11 +426,25 @@ public final class TaskResource {
         return thisPath.equals(otherPath);
     }
 
+    /// Returns whether two declarations require mutually exclusive leases.
+    ///
+    /// Geometric conflict remains available through [#conflictsWith(TaskResource)] for diagnostics and ancestry
+    /// checks. Only two read-only declarations may share a range concurrently.
+    ///
+    /// @param other other declaration
+    /// @return whether the two access modes conflict
+    boolean locksConflict(TaskResource other) {
+        return conflictsWith(other) && (isWrite() || other.isWrite());
+    }
+
     /// Returns whether this resource fully protects the other resource's represented range.
     boolean covers(TaskResource other) {
         Objects.requireNonNull(other, "other");
         requireResolved();
         other.requireResolved();
+        if (isReadOnly() && other.isWrite()) {
+            return false;
+        }
         if (scope == Scope.GLOBAL) {
             return true;
         }
@@ -445,6 +507,9 @@ public final class TaskResource {
     /// against the ancestor's complete resource set by the lock manager, rather than by one key in isolation.
     boolean permitsNested(TaskResource other) {
         Objects.requireNonNull(other, "other");
+        if (isReadOnly() && other.isWrite()) {
+            return false;
+        }
         // An orchestration node has no filesystem coverage. It can be nested beneath any owner as a marker, but it
         // cannot by itself authorize an arbitrary filesystem child; the owner-level check handles a pure orchestration
         // parent separately so a marker cannot mask a narrower directory held by an older ancestor.
@@ -535,6 +600,9 @@ public final class TaskResource {
     /// directory with another semantic kind may cover the same path range, but replacing the game-directory marker
     /// would make that nested permission unavailable. Global coverage remains a true replacement for every resource.
     private static boolean coversForNormalization(TaskResource covering, TaskResource covered) {
+        if (covering.isReadOnly() && covered.isWrite()) {
+            return false;
+        }
         if (covering.scope == Scope.GLOBAL) {
             return true;
         }
@@ -679,19 +747,23 @@ public final class TaskResource {
         }
         return kind == resource.kind
                 && scope == resource.scope
+                && accessMode == resource.accessMode
                 && Objects.equals(comparisonPath, resource.comparisonPath);
     }
 
     /// Returns a hash code consistent with [#equals(Object)].
     @Override
     public int hashCode() {
-        return Objects.hash(kind, scope, comparisonPath);
+        return Objects.hash(kind, scope, accessMode, comparisonPath);
     }
 
     /// Returns a diagnostic representation without exposing lock state.
     @Override
     public String toString() {
-        return path == null ? "TaskResource[" + kind + "]" : "TaskResource[" + kind + ":" + path + "]";
+        String suffix = accessMode == AccessMode.WRITE ? "" : ":READ";
+        return path == null
+                ? "TaskResource[" + kind + suffix + "]"
+                : "TaskResource[" + kind + ":" + path + suffix + "]";
     }
 
     /// Public semantic categories supported by the first resource-locking phase.
@@ -739,6 +811,15 @@ public final class TaskResource {
         ARCHIVE,
         /// Exact export destination.
         EXPORT_TARGET
+    }
+
+    /// Access mode used by the process-local task arbiter.
+    @NotNullByDefault
+    public enum AccessMode {
+        /// Shared inspection that may overlap another read-only lease.
+        READ,
+        /// Mutation or an operation whose side effects are not fully audited.
+        WRITE
     }
 
     /// Internal filesystem coverage used for conflict and ordering rules.

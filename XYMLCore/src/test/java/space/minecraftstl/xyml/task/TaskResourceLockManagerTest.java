@@ -1302,6 +1302,28 @@ public final class TaskResourceLockManagerTest {
         assertEquals(0, manager.trackedResourceCount());
     }
 
+    /// Verifies explicit read declarations share a range while a writer remains blocked.
+    @Test
+    public void readResourcesShareButWriterWaits() throws Exception {
+        TaskResourceLockManager manager = new TaskResourceLockManager();
+        TaskResource writeResource = TaskResource.downloadTarget(temporaryDirectory.resolve("shared-read.jar"));
+        TaskResource readResource = writeResource.readOnly();
+        TaskResourceLockManager.Lease firstRead = manager.acquire(rootOwner(manager, readResource))
+                .get(5, TimeUnit.SECONDS);
+        TaskResourceLockManager.Lease secondRead = manager.acquire(rootOwner(manager, readResource))
+                .get(5, TimeUnit.SECONDS);
+
+        CompletableFuture<TaskResourceLockManager.Lease> writer = manager.acquire(rootOwner(manager, writeResource));
+        assertFalse(writer.isDone());
+
+        secondRead.close();
+        assertFalse(writer.isDone());
+        firstRead.close();
+        writer.get(5, TimeUnit.SECONDS).close();
+        assertEquals(0, manager.pendingWaiterCount());
+        assertEquals(0, manager.trackedResourceCount());
+    }
+
     /// Verifies a failed lease release blocks a conflicting writer until bounded residual cleanup succeeds.
     @Test
     public void failedReleaseRetainsWriteBlockUntilRetry() throws Exception {

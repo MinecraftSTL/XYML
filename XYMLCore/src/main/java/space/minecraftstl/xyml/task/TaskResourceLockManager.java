@@ -626,7 +626,7 @@ final class TaskResourceLockManager {
     private boolean isBlockedByCurrentAncestor(Waiter earlier, Owner currentOwner) {
         for (TaskResource requested : earlier.owner.requestedResources) {
             for (Map.Entry<TaskResource, ResourceState> entry : resourceStates.entrySet()) {
-                if (!entry.getValue().holders.isEmpty() && requested.conflictsWith(entry.getKey())) {
+                if (!entry.getValue().holders.isEmpty() && requested.locksConflict(entry.getKey())) {
                     for (Owner holder : entry.getValue().holders.keySet()) {
                         if (!holder.isAncestorOf(earlier.owner) && holder.isAncestorOf(currentOwner)) {
                             return true;
@@ -660,11 +660,12 @@ final class TaskResourceLockManager {
     /// Returns whether every conflicting holder belongs to the requester or one of its ancestors.
     private boolean canAcquire(Owner owner) {
         for (TaskResource requested : owner.requestedResources) {
-            if (residualResources.stream().anyMatch(requested::conflictsWith)) {
+            if (requested.getAccessMode() == TaskResource.AccessMode.WRITE
+                    && residualResources.stream().anyMatch(requested::conflictsWith)) {
                 return false;
             }
             for (Map.Entry<TaskResource, ResourceState> entry : resourceStates.entrySet()) {
-                if (!entry.getValue().holders.isEmpty() && requested.conflictsWith(entry.getKey())) {
+                if (!entry.getValue().holders.isEmpty() && requested.locksConflict(entry.getKey())) {
                     for (Owner holder : entry.getValue().holders.keySet()) {
                         if (!holder.isAncestorOf(owner)) {
                             return false;
@@ -732,7 +733,7 @@ final class TaskResourceLockManager {
         if (waiter != null && waiter.prepared) {
             for (TaskResource requested : owner.requestedResources) {
                 for (Map.Entry<TaskResource, ResourceState> entry : resourceStates.entrySet()) {
-                    if (!entry.getValue().holders.isEmpty() && requested.conflictsWith(entry.getKey())) {
+                    if (!entry.getValue().holders.isEmpty() && requested.locksConflict(entry.getKey())) {
                         for (Owner holder : entry.getValue().holders.keySet()) {
                             if (!holder.isAncestorOf(owner)) {
                                 dependencies.add(holder);
@@ -785,7 +786,7 @@ final class TaskResourceLockManager {
     private static boolean requestsConflict(Waiter first, Waiter second) {
         for (TaskResource firstResource : first.owner.requestedResources) {
             for (TaskResource secondResource : second.owner.requestedResources) {
-                if (firstResource.conflictsWith(secondResource)) {
+                if (firstResource.locksConflict(secondResource)) {
                     return true;
                 }
             }
