@@ -20,6 +20,7 @@ package space.minecraftstl.xyml.mcp;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import space.minecraftstl.xyml.game.analyzer.RepairCheckpoint;
 import space.minecraftstl.xyml.game.analyzer.RepairTaskFactory;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.task.Task;
@@ -167,7 +168,7 @@ public final class McpTaskOperationRegistry implements AutoCloseable {
             String actionType,
             boolean cancellable,
             RepairTaskFactory taskFactory) {
-        return startInternal(actionType, cancellable, taskFactory, false);
+        return startInternal(actionType, cancellable, RepairCheckpoint.initial(), taskFactory, false);
     }
 
     /// Creates one fresh repair task while reserving its operation for an application owner.
@@ -184,7 +185,30 @@ public final class McpTaskOperationRegistry implements AutoCloseable {
             String actionType,
             boolean cancellable,
             RepairTaskFactory taskFactory) {
-        return startInternal(actionType, cancellable, taskFactory, true);
+        return startForOwner(actionType, cancellable, RepairCheckpoint.initial(), taskFactory);
+    }
+
+    /// Creates one fresh repair task for an application owner using a prior progress checkpoint.
+    ///
+    /// The checkpoint is copied into the operation snapshot before task creation, so a task-factory failure still
+    /// leaves the caller with enough information to retry from the same failed step.
+    ///
+    /// @param actionType stable repair action type
+    /// @param cancellable whether an MCP client may request cooperative cancellation
+    /// @param checkpoint progress retained from the previous attempt
+    /// @param taskFactory factory creating exactly one fresh stopped task
+    /// @return immutable initial or terminal operation snapshot
+    @Unmodifiable Map<String, Object> startForOwner(
+            String actionType,
+            boolean cancellable,
+            RepairCheckpoint checkpoint,
+            RepairTaskFactory taskFactory) {
+        return startInternal(
+                actionType,
+                cancellable,
+                Objects.requireNonNull(checkpoint, "checkpoint"),
+                taskFactory,
+                true);
     }
 
     /// Creates, observes, and starts one task with an optional owner retention reservation.
@@ -197,9 +221,11 @@ public final class McpTaskOperationRegistry implements AutoCloseable {
     private @Unmodifiable Map<String, Object> startInternal(
             String actionType,
             boolean cancellable,
+            RepairCheckpoint checkpoint,
             RepairTaskFactory taskFactory,
             boolean retainForOwner) {
         Objects.requireNonNull(actionType, "actionType");
+        Objects.requireNonNull(checkpoint, "checkpoint");
         Objects.requireNonNull(taskFactory, "taskFactory");
 
         Operation operation;
@@ -207,7 +233,12 @@ public final class McpTaskOperationRegistry implements AutoCloseable {
             requireOpenLocked();
             pruneLocked();
             ensureCapacityLocked();
-            operation = new Operation(UUID.randomUUID().toString(), actionType, cancellable, clock.instant());
+            operation = new Operation(
+                    UUID.randomUUID().toString(),
+                    actionType,
+                    cancellable,
+                    clock.instant(),
+                    checkpoint);
             operation.ownerRetained = retainForOwner;
             operations.put(operation.id, operation);
         }
@@ -216,7 +247,9 @@ public final class McpTaskOperationRegistry implements AutoCloseable {
         final TaskExecutor executor;
         final Subscription subscription;
         try {
-            task = Objects.requireNonNull(taskFactory.createTask(), "repair task factory returned null");
+            task = Objects.requireNonNull(
+                    taskFactory.createTask(checkpoint),
+                    "repair task factory returned null");
             executor = Objects.requireNonNull(
                     executorFactory.apply(task),
                     "task executor factory returned null");
@@ -590,6 +623,11 @@ public final class McpTaskOperationRegistry implements AutoCloseable {
                         : operation.failedSteps.get(0));
             }
             result.put("failed_steps", operation.failedSteps);
+            result.put("completed_steps", completedStepNamesLocked(operation));
+            if (!operation.failedSteps.isEmpty()) {
+                result.put("resume_from_step", operation.failedSteps.get(0));
+            }
+            result.put("retained_completed_steps", operation.checkpoint.completedSteps());
             result.put("residual_resources", operation.residualResources);
             result.put("steps", stepSnapshotsLocked(operation));
             return java.util.Collections.unmodifiableMap(new LinkedHashMap<>(result));
@@ -609,6 +647,20 @@ public final class McpTaskOperationRegistry implements AutoCloseable {
             snapshots.add(java.util.Collections.unmodifiableMap(new LinkedHashMap<>(snapshot)));
         }
         return List.copyOf(snapshots);
+    }
+
+    /// Returns successful task names in the order in which they were retained or observed.
+    ///
+    /// @param operation operation whose state lock is held by the caller
+    /// @return immutable ordered completed-step names
+    private static @Unmodifiable List<String> completedStepNamesLocked(Operation operation) {
+        List<String> completed = new ArrayList<>(operation.checkpoint.completedSteps());
+        for (Step step : operation.stepOrder) {
+            if (step.status == StepStatus.SUCCEEDED && !completed.contains(step.name)) {
+                completed.add(step.name);
+            }
+        }
+        return List.copyOf(completed);
     }
 
     /// Captures task-owned cleanup diagnostics without taking ownership of task cleanup itself.
@@ -742,6 +794,9 @@ public final class McpTaskOperationRegistry implements AutoCloseable {
         /// Registration timestamp.
         private final Instant createdAt;
 
+        /// Progress retained from an earlier attempt.
+        private final RepairCheckpoint checkpoint;
+
         /// Current lifecycle state.
         private Status status = Status.QUEUED;
 
@@ -803,11 +858,17 @@ public final class McpTaskOperationRegistry implements AutoCloseable {
         private final Object cleanupLock = new Object();
 
         /// Creates one queued operation.
-        private Operation(String id, String actionType, boolean cancellable, Instant createdAt) {
+        private Operation(
+                String id,
+                String actionType,
+                boolean cancellable,
+                Instant createdAt,
+                RepairCheckpoint checkpoint) {
             this.id = Objects.requireNonNull(id, "id");
             this.actionType = Objects.requireNonNull(actionType, "actionType");
             this.cancellable = cancellable;
             this.createdAt = Objects.requireNonNull(createdAt, "createdAt");
+            this.checkpoint = Objects.requireNonNull(checkpoint, "checkpoint");
         }
     }
 

@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import space.minecraftstl.xyml.game.analyzer.RepairCheckpoint;
 import space.minecraftstl.xyml.task.Task;
 
 import java.io.IOException;
@@ -81,6 +82,29 @@ public final class McpTaskOperationRegistryTest {
             assertEquals("java.lang.IllegalStateException", failed.get("failure_type"));
             assertEquals("runtime unavailable retry later", failed.get("failure_message"));
             assertEquals(failed, registry.status(operationId(failed)));
+        }
+    }
+
+    /// Confirms a retry checkpoint survives task creation failure and is returned to the caller.
+    @Test
+    public void retainsRetryCheckpointWhenFactoryFails() {
+        RepairCheckpoint checkpoint = new RepairCheckpoint(
+                List.of("validate source"),
+                List.of("install dependency"),
+                "install dependency");
+        try (McpTaskOperationRegistry registry = new McpTaskOperationRegistry()) {
+            Map<String, Object> failed = registry.startForOwner(
+                    "OPEN_MOD_SEARCH",
+                    true,
+                    checkpoint,
+                    () -> {
+                        throw new IllegalStateException("factory unavailable");
+                    });
+
+            assertEquals(List.of("validate source"), failed.get("retained_completed_steps"));
+            assertEquals(List.of("validate source"), failed.get("completed_steps"));
+            assertEquals(List.of("OPEN_MOD_SEARCH"), failed.get("failed_steps"));
+            assertEquals("OPEN_MOD_SEARCH", failed.get("resume_from_step"));
         }
     }
 

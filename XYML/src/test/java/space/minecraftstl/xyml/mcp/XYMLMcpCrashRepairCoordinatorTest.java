@@ -259,10 +259,14 @@ final class XYMLMcpCrashRepairCoordinatorTest {
             assertEquals("FAILED", firstTerminal.get("status"));
             assertEquals("FAILED_RETRYABLE", firstTerminal.get("plan_state"));
             assertEquals(1, taskCreations.get());
+            @SuppressWarnings("unchecked")
+            List<String> completedBeforeRetry = (List<String>) firstTerminal.get("completed_steps");
+            assertFalse(completedBeforeRetry.isEmpty());
 
             Map<String, Object> retryOperation = coordinator.retry(planId);
             assertTrue(!String.valueOf(firstOperation.get("operation_id")).equals(
                     String.valueOf(retryOperation.get("operation_id"))));
+            assertEquals(completedBeforeRetry, retryOperation.get("retained_completed_steps"));
             Map<String, Object> retryTerminal = awaitTerminal(
                     coordinator,
                     String.valueOf(retryOperation.get("operation_id")));

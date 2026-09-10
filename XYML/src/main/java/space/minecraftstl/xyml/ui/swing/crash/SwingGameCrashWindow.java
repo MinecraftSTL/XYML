@@ -585,10 +585,17 @@ public final class SwingGameCrashWindow implements AutoCloseable {
                     diagnosis.solver().messageArguments().stream()
                             .map(GameCrashReasonFormatter::escapeHtmlArgument)
                             .toArray());
+            String evidence = i18n(
+                    "game.crash.repair.evidence",
+                    boundedEvidence(String.join(
+                            ", ",
+                            analysis.logEvidenceSources().getOrDefault(
+                                    diagnosis.resultId(),
+                                    List.of(i18n("game.crash.repair.log_evidence"))))));
             rows.add(createRepairRowOnEdt(
                     resultId,
                     reason,
-                    i18n("game.crash.repair.log_evidence"),
+                    evidence,
                     diagnosis.solver(),
                     analysis.runtimeCandidates(diagnosis.resultId())));
             rows.add(Box.createVerticalStrut(6));
@@ -599,7 +606,12 @@ public final class SwingGameCrashWindow implements AutoCloseable {
                 continue;
             }
             String reason = reasonFormatter.format(new GameCrashAnalysis(List.of(diagnosis), Set.of()));
-            String evidence = boundedEvidence(diagnosis.matcher().group());
+            List<String> sources = analysis.evidenceSources().getOrDefault(diagnosis.rule(), List.of());
+            String evidence = i18n(
+                    "game.crash.repair.evidence",
+                    boundedEvidence(sources.isEmpty()
+                            ? diagnosis.matcher().group()
+                            : String.join(", ", sources)));
             rows.add(createRepairRowOnEdt(
                     resultId,
                     reason,

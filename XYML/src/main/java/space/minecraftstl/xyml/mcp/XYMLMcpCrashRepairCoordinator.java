@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.game.CrashReportAnalyzer;
 import space.minecraftstl.xyml.game.analyzer.AnalyzeResult;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzable;
 import space.minecraftstl.xyml.game.analyzer.LogAnalyzer;
+import space.minecraftstl.xyml.game.analyzer.RepairCheckpoint;
 import space.minecraftstl.xyml.game.analyzer.RepairActionDescriptor;
 import space.minecraftstl.xyml.game.analyzer.ResultID;
 import space.minecraftstl.xyml.game.analyzer.Solver;
@@ -301,6 +302,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         AnalysisSession session;
         Solution solution;
         @Nullable RepairPlan claimedPlan = null;
+        RepairCheckpoint checkpoint = RepairCheckpoint.initial();
         try {
             synchronized (stateLock) {
                 requireOpenLocked();
@@ -341,6 +343,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                 // The previous operation must not be allowed to publish a late terminal state while this fresh
                 // attempt is being registered. The new operation ID is installed atomically below.
                 plan.lastOperationId = null;
+                checkpoint = plan.checkpoint();
             }
         } catch (RuntimeException failure) {
             if (claimedPlan != null) {
@@ -369,6 +372,7 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             operation = operations.startForOwner(
                     descriptor.actionType().name(),
                     descriptor.actionType() == RepairActionDescriptor.ActionType.OPEN_MOD_SEARCH,
+                    checkpoint,
                     () -> Objects.requireNonNull(
                             validator.createTask(),
                             "Crash source validator did not create a task")
@@ -471,6 +475,8 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
                         plan.state = PlanState.SUCCEEDED;
                         plan.failureType = null;
                         plan.failureMessage = null;
+                        plan.failedSteps = List.of();
+                        plan.resumeFromStep = null;
                         plan.retryInProgress = false;
                     }
                     return operationWithPlan(cleanup, plan);
@@ -746,6 +752,18 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             if (plan.retryInProgress || plan.state != PlanState.RUNNING || !operationId.equals(plan.lastOperationId)) {
                 return;
             }
+            List<String> operationCompleted = stringList(operation.get("completed_steps"));
+            if (!operationCompleted.isEmpty()) {
+                List<String> completed = new ArrayList<>(plan.completedSteps);
+                for (String step : operationCompleted) {
+                    if (!completed.contains(step)) {
+                        completed.add(step);
+                    }
+                }
+                plan.completedSteps = List.copyOf(completed);
+            }
+            plan.failedSteps = stringList(operation.get("failed_steps"));
+            plan.resumeFromStep = plan.failedSteps.isEmpty() ? null : plan.failedSteps.get(0);
             switch (status) {
                 case "SUCCEEDED" -> {
                     plan.state = PlanState.SUCCEEDED;
@@ -778,6 +796,23 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         }
     }
 
+    /// Copies a JSON-safe string list returned by the operation registry.
+    ///
+    /// @param value untrusted operation value
+    /// @return immutable non-blank string list
+    private static @Unmodifiable List<String> stringList(@Nullable Object value) {
+        if (!(value instanceof List<?> values)) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>();
+        for (Object item : values) {
+            if (item instanceof String string && !string.isBlank() && !result.contains(string)) {
+                result.add(string);
+            }
+        }
+        return List.copyOf(result);
+    }
+
     /// Adds plan lifecycle metadata to an operation response while preserving its insertion order.
     private @Unmodifiable Map<String, Object> operationWithPlan(
             Map<String, Object> operation,
@@ -793,6 +828,11 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             }
             if (plan.candidateId != null) {
                 result.put("candidate_id", plan.candidateId);
+            }
+            result.put("completed_steps", plan.completedSteps);
+            result.put("failed_steps", plan.failedSteps);
+            if (plan.resumeFromStep != null) {
+                result.put("resume_from_step", plan.resumeFromStep);
             }
             if (plan.failureType != null) {
                 result.put("plan_failure_type", plan.failureType);
@@ -970,6 +1010,11 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             result.put("plan_state", plan.state.name());
             result.put("retryable", plan.state.retryable());
             result.put("attempt", plan.attempts);
+            result.put("completed_steps", plan.completedSteps);
+            result.put("failed_steps", plan.failedSteps);
+            if (plan.resumeFromStep != null) {
+                result.put("resume_from_step", plan.resumeFromStep);
+            }
             if (plan.candidateId != null) {
                 result.put("selected_candidate_id", plan.candidateId);
             }
@@ -1327,6 +1372,15 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         /// Whether one caller has reserved the plan between residual cleanup and fresh task registration.
         private boolean retryInProgress;
 
+        /// Ordered steps that have completed successfully across attempts.
+        private @Unmodifiable List<String> completedSteps = List.of();
+
+        /// Ordered steps reported as failed by the most recent attempt.
+        private @Unmodifiable List<String> failedSteps = List.of();
+
+        /// First step that should be resumed on the next attempt, or null when none is known.
+        private @Nullable String resumeFromStep;
+
         /// Creates one available plan.
         private RepairPlan(
                 String id,
@@ -1341,6 +1395,13 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
             this.createdAt = Objects.requireNonNull(createdAt, "createdAt");
             this.expiresAt = Objects.requireNonNull(expiresAt, "expiresAt");
             this.candidateId = candidateId;
+        }
+
+        /// Creates the immutable retry checkpoint currently retained by this plan.
+        ///
+        /// @return checkpoint for a fresh task attempt
+        private RepairCheckpoint checkpoint() {
+            return new RepairCheckpoint(completedSteps, failedSteps, resumeFromStep);
         }
     }
 
