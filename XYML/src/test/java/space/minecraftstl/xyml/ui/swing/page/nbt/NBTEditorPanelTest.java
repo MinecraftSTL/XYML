@@ -109,10 +109,50 @@ final class NBTEditorPanelTest {
         assertEquals("未打开 NBT 文件。", NBTEditorStrings.simplifiedChinese().emptyText());
         assertTrue(NBTEditorStrings.english().fileFilter().contains("*.nbt"));
         assertTrue(NBTEditorStrings.english().fileFilter().contains("*.xyml_old"));
+        assertEquals("Create NBT file", NBTEditorStrings.english().newTooltip());
+        assertEquals("新建 NBT 文件", NBTEditorStrings.simplifiedChinese().newTooltip());
         assertEquals("new_tag", NBTEditorStrings.traditionalChinese().defaultTagName());
         assertEquals(
                 "Editing was interrupted. Reload this file before continuing.",
                 NBTEditorStrings.english().editUncertainText());
+    }
+
+    /// Routes the independent new-file command through the controller and leaves the target absent until save.
+    @Test
+    void createsNewFileFromTheToolbar() throws Exception {
+        Path target = temporaryDirectory.resolve("toolbar-created.nbt");
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualExecutor iconExecutor = new ManualExecutor();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                SwingUiDispatcher.INSTANCE);
+        RecordingInteractions interactions = new RecordingInteractions(target);
+        interactions.chosenNewFile = target;
+        NBTEditorPanel panel = onEdt(() -> new NBTEditorPanel(
+                controller,
+                NBTEditorStrings.english(),
+                interactions,
+                () -> { },
+                iconExecutor));
+        try {
+            iconExecutor.runAll();
+            onEdt(() -> {
+                AbstractButton create = findNamed(panel, "nbtEditorNew", AbstractButton.class);
+                assertTrue(create.isEnabled());
+                create.doClick();
+            });
+            assertEquals(NBTEditorStatus.OPENING, controller.snapshot().status());
+            ioExecutor.runNext();
+            flushEdt();
+            assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
+            assertTrue(controller.snapshot().dirty());
+            assertFalse(Files.exists(target));
+            assertTrue(findNamed(panel, "nbtEditorSave", AbstractButton.class).isEnabled());
+        } finally {
+            panel.close();
+            ioExecutor.runAll();
+            flushEdt();
+        }
     }
 
     /// Keeps tolerant-read diagnostics visible and requires explicit approval before a repair-only save.
@@ -1527,6 +1567,9 @@ final class NBTEditorPanelTest {
         /// Source returned by the chooser, or `null` to simulate cancellation.
         private @Nullable Path chosenFile;
 
+        /// Target returned by the new-document chooser, or `null` to simulate cancellation.
+        private @Nullable Path chosenNewFile;
+
         /// Whether dirty-document replacement is confirmed.
         private boolean confirmDiscard = true;
 
@@ -1562,6 +1605,15 @@ final class NBTEditorPanelTest {
         @Override
         public @Nullable Path chooseFile(@Nullable Path currentFile) {
             return chosenFile;
+        }
+
+        /// Returns the configured new-document target.
+        ///
+        /// @param currentFile current source, or `null`
+        /// @return configured target
+        @Override
+        public @Nullable Path chooseNewFile(@Nullable Path currentFile) {
+            return chosenNewFile;
         }
 
         /// Accepts exactly one supported lexical path.

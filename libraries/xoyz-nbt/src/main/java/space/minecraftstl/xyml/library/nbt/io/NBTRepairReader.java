@@ -642,9 +642,16 @@ final class NBTRepairReader {
                 budget.consume(count);
                 output.write(buffer, 0, count);
             }
-            if (source.available() != 0) {
-                issues.add(issue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, "COMPRESSED_TRAILING_BYTES", "",
-                        "LZ4 流末尾包含无法归属的附加字节，已保留主体内容但无法确认附加数据"));
+            int remaining = source.available();
+            if (remaining != 0) {
+                int paddingStart = encoded.length - remaining;
+                if (allZero(encoded, paddingStart, encoded.length)) {
+                    issues.add(issue(NBTReadIssue.Severity.RECOVERED, "LZ4_ZERO_PADDING", "",
+                            "LZ4 成员后存在零填充，已忽略"));
+                } else {
+                    issues.add(issue(NBTReadIssue.Severity.PARTIAL_DATA_LOSS, "COMPRESSED_TRAILING_BYTES", "",
+                            "LZ4 流末尾包含无法归属的附加字节，已保留主体内容但无法确认附加数据"));
+                }
             }
         } catch (LinkageError error) {
             throw new IOException("LZ4 support is unavailable", error);

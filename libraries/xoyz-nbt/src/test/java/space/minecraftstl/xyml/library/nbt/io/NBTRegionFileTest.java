@@ -199,6 +199,39 @@ public final class NBTRegionFileTest {
         }
     }
 
+    /// Repairs an external marker in an `.mcr` file by publishing a small replacement inline.
+    ///
+    /// `.mcr` has no `.mcc` companion contract. A tolerant session may still encounter a stale
+    /// external bit, but it must not attempt to create an inaccessible companion during repair.
+    ///
+    /// @throws Exception if fixture preparation or the bounded repair publication fails
+    @Test
+    void repairsMcrExternalMarkerWithInlineReplacement() throws Exception {
+        Path mca = initialTwoChunkRegion();
+        Path file = temporaryDirectory.resolve("r.0.0.mcr");
+        Files.copy(mca, file);
+        byte[] bytes = Files.readAllBytes(file);
+        int frameOffset = sectorOffset(bytes, 0) * ChunkUtils.SECTOR_BYTES;
+        bytes[frameOffset + Integer.BYTES] |= (byte) 0x80;
+        Files.write(file, bytes);
+
+        CompoundTag replacement = new CompoundTag().addInt("value", 42);
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            NBTReadResult<Chunk> damaged = region.readChunkTolerant(0);
+            assertNull(damaged.root().getRootTag());
+            assertTrue(damaged.report().issues().stream()
+                    .anyMatch(issue -> "REGION_EXTERNAL_COMPANION_MISSING".equals(issue.code())));
+
+            region.writeChunk(0, new Chunk(replacement));
+            region.flush();
+            assertEquals(0, compressionMarker(file, 0) & 0x80);
+        }
+
+        try (NBTRegionFile reopened = NBTRegionFile.open(file)) {
+            assertEquals(replacement, reopened.readChunk(0).getRootTag());
+        }
+    }
+
     /// Uses signed region coordinates when deriving a standard external companion filename.
     @Test
     void derivesExternalCompanionFromSignedCoordinates() throws Exception {
@@ -677,6 +710,40 @@ public final class NBTRegionFileTest {
 
         try (NBTRegionFile reopened = NBTRegionFile.open(file)) {
             assertEquals(1, reopened.readChunk(0).getRootTag().getInt("value"));
+        }
+    }
+
+    /// Treats a physically truncated inline frame as an empty repairable slot instead of publishing a guessed prefix.
+    @Test
+    void isolatesTruncatedInlineFrameAndClearsItOnSave() throws Exception {
+        Path file = initialTwoChunkRegion();
+        byte[] bytes = Files.readAllBytes(file);
+        int slotOffset = sectorOffset(bytes, 0);
+        int frameOffset = slotOffset * ChunkUtils.SECTOR_BYTES;
+        ByteBuffer.wrap(bytes, frameOffset, Integer.BYTES).putInt(Integer.MAX_VALUE);
+        Files.write(file, bytes);
+
+        try (NBTRegionFile region = NBTRegionFile.openTolerant(file)) {
+            NBTReadResult<Chunk> result = region.readChunkTolerant(0);
+            assertNull(result.root().getRootTag());
+            assertTrue(result.report().issues().stream()
+                    .anyMatch(issue -> "REGION_FRAME_LENGTH_CLAMPED".equals(issue.code())
+                            || "REGION_FRAME_INVALID".equals(issue.code())
+                            || "REGION_SLOT_ISOLATED".equals(issue.code())),
+                    result.report().issues().toString());
+
+            ChunkRegion snapshot = new ChunkRegion();
+            ChunkRegion baseline = new ChunkRegion();
+            snapshot.setChunk(0, result.root());
+            baseline.setChunk(0, result.root());
+            region.synchronizePendingChanges(snapshot, baseline);
+            assertTrue(region.isDirty());
+            region.flush();
+        }
+
+        try (NBTRegionFile reopened = NBTRegionFile.open(file)) {
+            assertNull(reopened.readChunk(0).getRootTag());
+            assertEquals(1, reopened.readChunk(1).getRootTag().getInt("value"));
         }
     }
 

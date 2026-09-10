@@ -192,7 +192,7 @@ public final class NBTDocument implements AutoCloseable {
     /// @throws IllegalStateException if this document is closed
     public synchronized boolean isDirty() {
         ensureOpen();
-        return fileSession.getEditor().isDirty();
+        return fileSession.isDirty();
     }
 
     /// Saves through the underlying safe XoyzNBT session.

@@ -60,6 +60,33 @@ final class SwingNBTEditorInteractions implements NBTEditorInteractions {
         this.strings = Objects.requireNonNull(strings, "strings");
     }
 
+    /// Opens a save-style chooser for one new NBT target without touching the filesystem.
+    ///
+    /// A filename without a supported suffix receives `.nbt`, whose backend default is RAW.
+    ///
+    /// @param currentFile current source used to select the initial directory, or `null`
+    /// @return normalized target path, or `null` when cancelled
+    @Override
+    public @Nullable Path chooseNewFile(@Nullable Path currentFile) {
+        EdtDispatcher.requireEventDispatchThread();
+        JFileChooser chooser = createFileChooser(strings.newChooserTitle());
+        if (currentFile != null) {
+            @Nullable Path parent = currentFile.toAbsolutePath().normalize().getParent();
+            if (parent != null) {
+                chooser.setCurrentDirectory(parent.toFile());
+            }
+        }
+        if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        Path selected = chooser.getSelectedFile().toPath().toAbsolutePath().normalize();
+        if (NBTFileType.supports(selected)) {
+            return selected;
+        }
+        @Nullable Path fileName = selected.getFileName();
+        return fileName == null ? null : selected.resolveSibling(fileName + ".nbt");
+    }
+
     /// Opens a native chooser and returns only the selected lexical path.
     ///
     /// @param currentFile current source, or `null`
@@ -67,8 +94,23 @@ final class SwingNBTEditorInteractions implements NBTEditorInteractions {
     @Override
     public @Nullable Path chooseFile(@Nullable Path currentFile) {
         EdtDispatcher.requireEventDispatchThread();
+        JFileChooser chooser = createFileChooser(strings.chooserTitle());
+        if (currentFile != null) {
+            chooser.setSelectedFile(currentFile.toFile());
+        }
+        if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        return chooser.getSelectedFile().toPath().toAbsolutePath().normalize();
+    }
+
+    /// Creates the shared constrained chooser used for opening and creating NBT files.
+    ///
+    /// @param title localized dialog title
+    /// @return configured chooser
+    private JFileChooser createFileChooser(String title) {
         JFileChooser chooser = new EditablePathChooser();
-        chooser.setDialogTitle(strings.chooserTitle());
+        chooser.setDialogTitle(Objects.requireNonNull(title, "title"));
         chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         chooser.setAcceptAllFileFilterUsed(false);
         chooser.setFileFilter(new FileNameExtensionFilter(
@@ -79,13 +121,7 @@ final class SwingNBTEditorInteractions implements NBTEditorInteractions {
                 "xyml_old",
                 "mca",
                 "mcr"));
-        if (currentFile != null) {
-            chooser.setSelectedFile(currentFile.toFile());
-        }
-        if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) {
-            return null;
-        }
-        return chooser.getSelectedFile().toPath().toAbsolutePath().normalize();
+        return chooser;
     }
 
     /// Accepts exactly one lexically supported dropped source.
@@ -164,7 +200,7 @@ final class SwingNBTEditorInteractions implements NBTEditorInteractions {
         detailsScroll.setVisible(false);
 
         JPanel content = new JPanel(new BorderLayout(0, 8));
-        content.setPreferredSize(new Dimension(660, 150));
+        content.setPreferredSize(new Dimension(660, 230));
         JToggleButton detailsToggle = new JToggleButton(strings.showReadDetailsText());
         detailsToggle.addActionListener(event -> {
             boolean expanded = detailsToggle.isSelected();

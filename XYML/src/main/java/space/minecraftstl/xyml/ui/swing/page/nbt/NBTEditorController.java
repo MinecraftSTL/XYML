@@ -73,8 +73,11 @@ public final class NBTEditorController implements AutoCloseable {
     /// Current open, edit, or save future, or `null` while idle.
     private @Nullable CompletableFuture<?> activeOperation;
 
-    /// Latest open request deferred behind an operation that has already crossed its commit point.
+    /// Latest open or create request deferred behind an operation that has already crossed its commit point.
     private @Nullable Path deferredOpen;
+
+    /// Whether [#deferredOpen] represents creation instead of opening an existing source.
+    private boolean deferredCreate;
 
     /// Detached in-process clipboard tag, or `null` before a successful copy.
     private @Nullable Tag clipboard;
@@ -146,15 +149,35 @@ public final class NBTEditorController implements AutoCloseable {
     ///
     /// @param file candidate source path
     public void open(Path file) {
+        beginDocumentRequest(file, false);
+    }
+
+    /// Replaces the current selection with one asynchronously created source.
+    ///
+    /// The target must be absent. It remains unpublished until the user explicitly saves a standalone document;
+    /// region creation follows the backend's initialized-header contract.
+    ///
+    /// @param file absent target path
+    public void create(Path file) {
+        beginDocumentRequest(file, true);
+    }
+
+    /// Starts or defers one open/create request while retaining the current document until success.
+    ///
+    /// @param file requested source or target
+    /// @param create whether to create an absent target
+    private void beginDocumentRequest(Path file, boolean create) {
         requireUiThread();
         ensureOpen();
         Path target = Objects.requireNonNull(file, "file").toAbsolutePath().normalize();
         NBTEditorSnapshot previous = snapshot;
         if (!tryBeginOperation()) {
             deferredOpen = target;
+            deferredCreate = create;
             return;
         }
         deferredOpen = null;
+        deferredCreate = false;
         long operation = operationRevision;
         publish(new NBTEditorSnapshot(
                 NBTEditorStatus.OPENING,
@@ -163,7 +186,11 @@ public final class NBTEditorController implements AutoCloseable {
                 previous.dirty(),
                 null,
                 nextRevision()));
-        startOpen(operation, previous, target);
+        if (create) {
+            startCreate(operation, previous, target);
+        } else {
+            startOpen(operation, previous, target);
+        }
     }
 
     /// Reopens the current source and discards the old in-memory document only after success.
@@ -744,6 +771,24 @@ public final class NBTEditorController implements AutoCloseable {
                     && previousDocument.file().equals(target)
                     ? documentService.reload(previousDocument)
                     : documentService.open(target);
+            activeOperation = future;
+            future.whenComplete((@Nullable NBTDocument document, @Nullable Throwable failure) ->
+                    dispatchCompletion(
+                            () -> finishOpen(operation, previous, target, document, failure),
+                            document));
+        } catch (RuntimeException failure) {
+            finishOpen(operation, previous, target, null, failure);
+        }
+    }
+
+    /// Starts one background create and routes completion back to the UI dispatcher.
+    ///
+    /// @param operation operation identity
+    /// @param previous state restored on failure
+    /// @param target normalized absent target
+    private void startCreate(long operation, NBTEditorSnapshot previous, Path target) {
+        try {
+            CompletableFuture<NBTDocument> future = documentService.create(target);
             activeOperation = future;
             future.whenComplete((@Nullable NBTDocument document, @Nullable Throwable failure) ->
                     dispatchCompletion(
@@ -1374,9 +1419,11 @@ public final class NBTEditorController implements AutoCloseable {
     /// Starts the latest open request deferred behind a committed operation, if any.
     private void startDeferredOpen() {
         @Nullable Path target = deferredOpen;
+        boolean create = deferredCreate;
         deferredOpen = null;
+        deferredCreate = false;
         if (target != null && !closed) {
-            open(target);
+            beginDocumentRequest(target, create);
         }
     }
 
@@ -1413,6 +1460,7 @@ public final class NBTEditorController implements AutoCloseable {
         closed = true;
         operationRevision++;
         deferredOpen = null;
+        deferredCreate = false;
         @Nullable CompletableFuture<?> current = activeOperation;
         activeOperation = null;
         if (current != null) {

@@ -22,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.library.nbt.NBTElement;
 import space.minecraftstl.xyml.library.nbt.io.NBTFile;
+import space.minecraftstl.xyml.library.nbt.io.NBTFileEncoding;
 import space.minecraftstl.xyml.library.nbt.io.NBTReadLimits;
 import space.minecraftstl.xyml.library.nbt.io.NBTSaveOptions;
 import space.minecraftstl.xyml.task.CompletableFutureTask;
@@ -97,7 +98,20 @@ public final class NBTDocumentService {
     /// @return cancellable future loaded document
     public CompletableFuture<NBTDocument> open(Path file) {
         Path normalized = Objects.requireNonNull(file, "file").toAbsolutePath().normalize();
-        return new DocumentSession(normalized).start();
+        return new DocumentSession(normalized, false).start();
+    }
+
+    /// Creates a new supported NBT document without reading an existing source.
+    ///
+    /// Standalone `.nbt` targets default to RAW while `.dat`, `.dat_old`, and `.xyml_old` targets default to GZIP.
+    /// Region targets are initialized with an empty two-sector header. The target must be absent; the library checks
+    /// that condition again immediately before first publication.
+    ///
+    /// @param file absent target with a supported NBT extension
+    /// @return cancellable future loaded new document
+    public CompletableFuture<NBTDocument> create(Path file) {
+        Path normalized = Objects.requireNonNull(file, "file").toAbsolutePath().normalize();
+        return new DocumentSession(normalized, true).start();
     }
 
     /// Reopens a document within its existing resource-owning session.
@@ -278,16 +292,69 @@ public final class NBTDocumentService {
     /// @return lifecycle-bound launcher document
     /// @throws IOException if type detection or bounded tolerant recovery fails
     private static NBTDocument openOnExecutor(Path file) throws IOException {
+        return openOnExecutor(file, false);
+    }
+
+    /// Opens or creates one normalized source on the blocking executor.
+    ///
+    /// @param file normalized source path
+    /// @param create whether an absent target must be initialized
+    /// @return lifecycle-bound document
+    /// @throws IOException if type detection, path validation, or bounded recovery fails
+    private static NBTDocument openOnExecutor(Path file, boolean create) throws IOException {
         @Nullable NBTFileType fileType = NBTFileType.detect(file);
         if (fileType == null) {
             throw new IOException("Unsupported NBT file extension: " + file);
         }
-        validateExistingSource(file);
-        NBTFile<? extends NBTElement> session = switch (fileType) {
-            case TAG -> NBTFile.openTagTolerant(file);
-            case ANVIL, REGION -> NBTFile.openRegionTolerant(file, NBTReadLimits.defaults());
-        };
+        NBTFile<? extends NBTElement> session;
+        if (create) {
+            validateNewSource(file);
+            session = switch (fileType) {
+                case TAG -> NBTFile.createTag(file, defaultStandaloneEncoding(file));
+                case ANVIL, REGION -> NBTFile.openRegionTolerant(file, NBTReadLimits.defaults());
+            };
+        } else {
+            validateExistingSource(file);
+            session = switch (fileType) {
+                case TAG -> NBTFile.openTagTolerant(file);
+                case ANVIL, REGION -> NBTFile.openRegionTolerant(file, NBTReadLimits.defaults());
+            };
+        }
         return new NBTDocument(fileType, session);
+    }
+
+    /// Rejects every existing filesystem object before a new document session starts.
+    ///
+    /// @param file normalized candidate target
+    /// @throws IOException if the parent is unsafe or the target is occupied
+    private static void validateNewSource(Path file) throws IOException {
+        @Nullable Path parent = file.getParent();
+        if (parent == null) {
+            throw new IOException("NBT target has no parent directory: " + file);
+        }
+        BasicFileAttributes parentAttributes = Files.readAttributes(
+                parent,
+                BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS);
+        if (!parentAttributes.isDirectory() || parentAttributes.isSymbolicLink()) {
+            throw new IOException("NBT target parent is not a regular directory: " + parent);
+        }
+        try {
+            Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            throw new IOException("NBT creation target already exists: " + file);
+        } catch (java.nio.file.NoSuchFileException ignored) {
+            // The library performs the final no-follow existence check during creation/publication.
+        }
+    }
+
+    /// Selects the default standalone envelope from the filename family.
+    ///
+    /// @param file normalized standalone target
+    /// @return RAW for ordinary `.nbt`, GZIP for world/dat-style files
+    private static NBTFileEncoding defaultStandaloneEncoding(Path file) {
+        @Nullable Path fileName = file.getFileName();
+        String name = fileName == null ? "" : fileName.toString().toLowerCase(java.util.Locale.ROOT);
+        return name.endsWith(".nbt") ? NBTFileEncoding.RAW : NBTFileEncoding.GZIP;
     }
 
     /// Rejects missing, special, and symbolic-link sources before a region open can create or follow them.
@@ -461,6 +528,14 @@ public final class NBTDocumentService {
         ///
         /// @param path normalized source path
         private DocumentSession(Path path) {
+            this(path, false);
+        }
+
+        /// Creates one session for an existing source or an explicitly requested new target.
+        ///
+        /// @param path normalized source path
+        /// @param create whether the session initializes an absent target
+        private DocumentSession(Path path, boolean create) {
             this.path = Objects.requireNonNull(path, "path");
             @Nullable NBTFileType detected = NBTFileType.detect(path);
             @Nullable NBTSaveOptions options = detected == NBTFileType.TAG
@@ -470,9 +545,13 @@ public final class NBTDocumentService {
                     path,
                     detected == null ? NBTFileType.TAG : detected,
                     options);
+            this.create = create;
             this.openResult = new CancellationAwareFuture<>(this::requestCancel);
             this.task = new SessionTask();
         }
+
+        /// Whether this session initializes a new target instead of opening an existing source.
+        private final boolean create;
 
         /// Starts the session task and returns its early document-publication view.
         private CompletableFuture<NBTDocument> start() {
@@ -890,7 +969,7 @@ public final class NBTDocumentService {
             }
             @Nullable NBTDocument opened = null;
             try {
-                NBTDocument created = NBTDocumentService.openOnExecutor(path);
+                NBTDocument created = NBTDocumentService.openOnExecutor(path, create);
                 opened = created;
                 boolean reject;
                 synchronized (operationLock) {

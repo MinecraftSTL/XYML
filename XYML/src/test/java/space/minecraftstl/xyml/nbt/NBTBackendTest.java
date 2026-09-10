@@ -112,6 +112,36 @@ final class NBTBackendTest {
         }
     }
 
+    /// Creates a new standalone document through the service and preserves the filename-derived default envelope.
+    @Test
+    void createsNewStandaloneDocumentWithDefaultEncoding() throws Exception {
+        Path source = temporaryDirectory.resolve("new-level.dat");
+        NBTDocumentService service = new NBTDocumentService(Runnable::run);
+        try (NBTDocument document = service.create(source).join()) {
+            assertEquals(NBTFileType.TAG, document.fileType());
+            assertEquals(NBTFileEncoding.GZIP, document.encoding());
+            assertTrue(document.isDirty());
+            service.save(document).join();
+            assertFalse(document.isDirty());
+        }
+        assertTrue(Files.isRegularFile(source));
+        assertEquals(NBTFileEncoding.GZIP, NBTFileEncoding.detectStandalone(Files.readAllBytes(source)));
+    }
+
+    /// Keeps a new `.nbt` document uncompressed by default and rejects an occupied target.
+    @Test
+    void createsRawNbtAndRejectsOccupiedTarget() throws Exception {
+        Path source = temporaryDirectory.resolve("new-structure.nbt");
+        NBTDocumentService service = new NBTDocumentService(Runnable::run);
+        try (NBTDocument document = service.create(source).join()) {
+            assertEquals(NBTFileEncoding.RAW, document.encoding());
+            service.save(document).join();
+        }
+        assertEquals(NBTFileEncoding.RAW, NBTFileEncoding.detectStandalone(Files.readAllBytes(source)));
+
+        assertThrows(CompletionException.class, () -> service.create(source).join());
+    }
+
     /// Defers a save and leaves source bytes unchanged until the supplied executor runs it.
     @Test
     void dispatchesSaveWorkToTheCallerOwnedExecutor() throws Exception {

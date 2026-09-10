@@ -18,6 +18,7 @@
 package space.minecraftstl.xyml.ui.swing.page.nbt;
 
 import space.minecraftstl.xyml.library.nbt.io.NBTCodec;
+import space.minecraftstl.xyml.library.nbt.io.NBTFileEncoding;
 import space.minecraftstl.xyml.library.nbt.io.NBTPartialSaveException;
 import space.minecraftstl.xyml.library.nbt.edit.NBTAddress;
 import space.minecraftstl.xyml.library.nbt.edit.NBTEditException;
@@ -128,6 +129,41 @@ final class NBTEditorControllerTest {
         CompoundTag reloaded = (CompoundTag) requiredDocument(controller).rootSnapshot();
         assertEquals(3, reloaded.getInt("value"));
         assertEquals("old", reloaded.getString("name"));
+        ui.run(controller::close);
+        ioExecutor.runAll();
+    }
+
+    /// Creates a new standalone document without publishing bytes until its explicit first save.
+    @Test
+    void createsNewDocumentAndPublishesOnExplicitSave() throws Exception {
+        Path source = temporaryDirectory.resolve("created.nbt");
+        ManualExecutor ioExecutor = new ManualExecutor();
+        ManualUiDispatcher ui = new ManualUiDispatcher();
+        NBTEditorController controller = new NBTEditorController(
+                new NBTDocumentService(ioExecutor),
+                ui);
+
+        ui.run(() -> controller.create(source));
+        assertEquals(NBTEditorStatus.OPENING, controller.snapshot().status());
+        ioExecutor.awaitPendingCount(1);
+        ioExecutor.runNext();
+        ui.awaitPendingCount(1);
+        ui.runNext();
+
+        assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
+        assertTrue(controller.snapshot().dirty());
+        assertFalse(Files.exists(source));
+
+        ui.run(controller::save);
+        assertEquals(NBTEditorStatus.SAVING, controller.snapshot().status());
+        ioExecutor.runNext();
+        ui.awaitPendingCount(1);
+        ui.runNext();
+        assertEquals(NBTEditorStatus.READY, controller.snapshot().status());
+        assertFalse(controller.snapshot().dirty());
+        assertTrue(Files.isRegularFile(source));
+        assertEquals(NBTFileEncoding.RAW, NBTFileEncoding.detectStandalone(Files.readAllBytes(source)));
+
         ui.run(controller::close);
         ioExecutor.runAll();
     }

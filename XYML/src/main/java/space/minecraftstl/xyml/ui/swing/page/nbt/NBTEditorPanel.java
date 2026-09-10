@@ -102,70 +102,50 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     /// Serialization identifier for the Swing component superclass contract.
     @Serial
     private static final long serialVersionUID = 1L;
-
     /// Maximum SNBT characters inserted during one EDT turn.
     private static final int SNBT_INSERT_CHUNK_SIZE = 16_384;
-
     /// Controller that serializes document state on the EDT.
     private final NBTEditorController controller;
-
     /// Stable localized visible text.
     private final NBTEditorStrings strings;
-
     /// File chooser, drop policy, and confirmation boundary.
     private final NBTEditorInteractions interactions;
-
     /// Parent-owned navigation callback.
     private final Listener listener;
-
     /// Tree renderer that receives already-decoded icons on the EDT.
     private final NBTTreeCellRenderer treeCellRenderer;
-
     /// Opens the native source chooser.
     private final JButton openButton = new JButton();
-
+    /// Selects an absent target for a new NBT document.
+    private final JButton newButton = new JButton();
     /// Reloads the selected source from disk.
     private final JButton reloadButton = new JButton();
-
     /// Safely saves the dirty document.
     private final JButton saveButton = new JButton();
-
     /// Undoes the most recent transaction.
     private final JButton undoButton = new JButton();
-
     /// Redoes the most recently undone transaction.
     private final JButton redoButton = new JButton();
-
     /// Requests return navigation after dirty-state confirmation.
     private final JButton backButton = new JButton();
-
     /// Adds a constrained child tag.
     private final JButton addButton = new JButton();
-
     /// Copies a detached selected tag.
     private final JButton copyButton = new JButton();
-
     /// Pastes a detached copied tag.
     private final JButton pasteButton = new JButton();
-
     /// Deletes the selected non-root tag.
     private final JButton deleteButton = new JButton();
-
     /// Moves an ordered child toward index zero.
     private final JButton moveUpButton = new JButton();
-
     /// Moves an ordered child away from index zero.
     private final JButton moveDownButton = new JButton();
-
     /// Displays the exact selected source path.
     private final JLabel pathLabel = new JLabel();
-
     /// Persistent warning band for tolerant-read recovery diagnostics.
     private final NBTReadWarningView readWarningView;
-
     /// Renders only rows requested by the Swing tree viewport.
     private final JTree tree = new JTree(emptyTreeModel());
-
     /// Switches between structured fields and the lazily loaded subtree SNBT editor.
     private final JTabbedPane editorTabs = new JTabbedPane();
 
@@ -455,7 +435,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
     private JComponent createHeadingBand() {
         JPanel heading = new JPanel(new MigLayout(
                 "insets 12 16 8 16, fillx",
-                "[]10[][grow,fill]8[]4[]8[]4[]4[]",
+                "[]10[][grow,fill]8[]4[]8[]4[]4[]4[]",
                 "[40!]"));
         heading.setOpaque(false);
         configureIconButton(
@@ -486,6 +466,13 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
                 strings.redoTooltip(),
                 this::redo);
         heading.add(redoButton, "w 40!, h 40!");
+        configureIconButton(
+                newButton,
+                "nbtEditorNew",
+                "assets/swing/icons/add.svg",
+                strings.newTooltip(),
+                this::chooseAndCreate);
+        heading.add(newButton, "w 40!, h 40!");
         configureIconButton(
                 openButton,
                 "nbtEditorOpen",
@@ -770,6 +757,18 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         @Nullable Path selected = interactions.chooseFile(controller.snapshot().file());
         if (selected != null) {
             open(selected);
+        }
+    }
+
+    /// Selects an absent target and creates a new in-memory document after replacement confirmation.
+    private void chooseAndCreate() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed.get() || controller.snapshot().busy()) {
+            return;
+        }
+        @Nullable Path selected = interactions.chooseNewFile(controller.snapshot().file());
+        if (selected != null && confirmReplacement() && !closed.get()) {
+            controller.create(selected.toAbsolutePath().normalize());
         }
     }
 
@@ -1452,6 +1451,7 @@ public final class NBTEditorPanel extends JPanel implements AutoCloseable {
         statusLabel.setToolTipText(current.message());
         progressBar.setVisible(current.busy());
         boolean active = current.status() != NBTEditorStatus.CLOSED;
+        newButton.setEnabled(active && !current.busy());
         openButton.setEnabled(active && !current.busy());
         reloadButton.setEnabled(active && !current.busy() && document != null);
         saveButton.setEnabled(active

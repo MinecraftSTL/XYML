@@ -80,7 +80,7 @@ final class NBTReadWarningView {
     ///
     /// @param document current document, or null before a successful open
     void render(@Nullable NBTDocument document) {
-        if (document == null || !document.requiresRepair()) {
+        if (document == null || (!document.requiresRepair() && !document.readReport().hasInformationalIssues())) {
             band.setVisible(false);
             detailsScroll.setVisible(false);
             detailsToggle.setSelected(false);
@@ -89,7 +89,9 @@ final class NBTReadWarningView {
         }
         NBTReadReport report = document.readReport();
         boolean partial = report.hasPartialDataLoss();
-        label.setText(partial ? strings.partialReadWarning() : strings.recoveredReadWarning());
+        label.setText(partial
+                ? strings.partialReadWarning()
+                : report.requiresRepair() ? strings.recoveredReadWarning() : strings.extensionReadWarning());
         detailsArea.setText(formatReadReport(report, document.storageProfile(), strings));
         detailsArea.setCaretPosition(0);
         band.setBackground(partial
@@ -151,6 +153,8 @@ final class NBTReadWarningView {
     /// Formats bounded report diagnostics for the expandable details body.
     ///
     /// @param report immutable read report
+    /// @param profile immutable storage profile, or `null` when unavailable
+    /// @param strings localized text provider
     /// @return plain-text diagnostics
     static String formatReadReport(NBTReadReport report, @Nullable StorageProfile profile,
                                    NBTEditorStrings strings) {
@@ -160,14 +164,11 @@ final class NBTReadWarningView {
         details.append(strings.readDetailsEncodingLabel()).append(": ").append(report.encoding()).append('\n');
         details.append(strings.readDetailsStrictLabel()).append(": ").append(report.strictValid()).append('\n');
         for (NBTReadIssue issue : report.issues()) {
-            details.append(issue.severity())
-                    .append(" [")
-                    .append(issue.code())
-                    .append(']');
+            details.append(strings.readDetailsIssue(issue));
             if (!issue.path().isEmpty()) {
                 details.append(" ").append(issue.path());
             }
-            details.append(": ").append(issue.message()).append('\n');
+            details.append('\n');
             if (profile != null && profile.isRegion()) {
                 int localIndex = parseRegionSlot(issue.path());
                 if (localIndex >= 0 && localIndex < StorageProfile.REGION_SLOT_COUNT) {

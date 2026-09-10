@@ -24,6 +24,7 @@ import space.minecraftstl.xyml.library.nbt.chunk.ChunkRegion;
 import space.minecraftstl.xyml.library.nbt.edit.NBTAddress;
 import space.minecraftstl.xyml.library.nbt.edit.NBTEditor;
 import space.minecraftstl.xyml.library.nbt.tag.CompoundTag;
+import space.minecraftstl.xyml.library.nbt.tag.IntTag;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Assumptions;
@@ -88,6 +89,69 @@ public final class NBTFileTest {
 
         assertEquals(encoding, NBTFileEncoding.detectStandalone(Files.readAllBytes(source)));
         assertEquals(3, NBTCodec.of().readTag(source, TagType.COMPOUND).getInt("value"));
+    }
+
+    /// Creates a new standalone source and publishes its first generation using the selected envelope.
+    ///
+    /// @param encoding standalone envelope under test
+    /// @throws Exception if creation or strict first-save publication fails
+    @ParameterizedTest
+    @EnumSource(value = NBTFileEncoding.class, names = {"RAW", "GZIP", "ZLIB", "LZ4"})
+    void createsStandaloneSourceWithSelectedEncoding(NBTFileEncoding encoding) throws Exception {
+        Path source = temporaryDirectory.resolve("new-" + encoding.name().toLowerCase(Locale.ROOT) + ".nbt");
+        try (NBTFile<CompoundTag> file = NBTFile.createTag(source, encoding)) {
+            assertTrue(file.isDirty());
+            assertEquals(encoding, file.getEncoding());
+            file.save();
+            assertFalse(file.isDirty());
+        }
+
+        assertTrue(Files.isRegularFile(source));
+        assertEquals(encoding, NBTFileEncoding.detectStandalone(Files.readAllBytes(source)));
+        assertFalse(Files.exists(source.resolveSibling(source.getFileName() + ".xyml_old")));
+        try (NBTFile<CompoundTag> reopened = NBTFile.openTag(source, TagType.COMPOUND)) {
+            assertFalse(reopened.isDirty());
+        }
+    }
+
+    /// Selects RAW for `.nbt` and GZIP for Minecraft standalone data-file names when no envelope is supplied.
+    ///
+    /// @param extension target filename extension without its leading dot
+    /// @throws Exception if creation or strict first-save publication fails
+    @ParameterizedTest
+    @ValueSource(strings = {"nbt", "dat", "dat_old", "xyml_old"})
+    void createsStandaloneSourceWithFilenameDefault(String extension) throws Exception {
+        Path source = temporaryDirectory.resolve("default." + extension);
+        NBTFileEncoding expected = "nbt".equals(extension) ? NBTFileEncoding.RAW : NBTFileEncoding.GZIP;
+        try (NBTFile<CompoundTag> file = NBTFile.createTag(source)) {
+            assertEquals(expected, file.getEncoding());
+            file.save(NBTSaveOptions.withoutBackup());
+        }
+        assertEquals(expected, NBTFileEncoding.detectStandalone(Files.readAllBytes(source)));
+    }
+
+    /// Refuses to create a source when another filesystem object occupies the requested target.
+    @Test
+    void rejectsCreatingOverExistingStandaloneSource() throws Exception {
+        Path source = temporaryDirectory.resolve("already-present.nbt");
+        Files.write(source, new byte[]{1});
+        assertThrows(IOException.class, () -> NBTFile.createTag(source));
+    }
+
+    /// Creates and reopens a standalone scalar root without imposing Anvil's compound-root rule.
+    @Test
+    void createsStandaloneNamedScalarRoot() throws Exception {
+        Path source = temporaryDirectory.resolve("scalar-root.nbt");
+        IntTag root = new IntTag(42);
+        root.setName("answer");
+        try (NBTFile<IntTag> file = NBTFile.createTag(source, root, NBTFileEncoding.RAW)) {
+            file.save(NBTSaveOptions.withoutBackup());
+        }
+
+        try (NBTFile<IntTag> reopened = NBTFile.openTag(source, IntTag.class, NBTCodec.of())) {
+            assertEquals("answer", reopened.getEditor().snapshot().getName());
+            assertEquals(42, reopened.getEditor().snapshot().get());
+        }
     }
 
     /// Replaces one rolling backup with the exact previous encoded source bytes.
@@ -282,6 +346,45 @@ public final class NBTFileTest {
             assertEquals(NBTReadReport.Severity.PARTIAL_DATA_LOSS, file.readReport().severity());
             assertTrue(file.requiresRepair());
             assertEquals(1, file.getEditor().snapshot().getInt("value"));
+        }
+    }
+
+    /// Treats zero padding after a complete LZ4 member as a recoverable framing defect.
+    ///
+    /// @throws Exception if fixture creation or tolerant opening unexpectedly fails
+    @Test
+    void classifiesLz4ZeroPaddingAsRecovered() throws Exception {
+        Path source = temporaryDirectory.resolve("padded-lz4.dat");
+        byte[] encoded = encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.LZ4);
+        byte[] padded = Arrays.copyOf(encoded, encoded.length + 3);
+        Files.write(source, padded);
+
+        try (NBTFile<CompoundTag> file = NBTFile.openTagTolerant(source, TagType.COMPOUND)) {
+            assertEquals(NBTReadReport.Severity.RECOVERED, file.readReport().severity());
+            assertTrue(file.readReport().issues().stream()
+                    .anyMatch(issue -> "LZ4_ZERO_PADDING".equals(issue.code())));
+            assertTrue(file.requiresRepair());
+            assertEquals(1, file.getEditor().snapshot().getInt("value"));
+        }
+    }
+
+    /// Keeps the informational LZ4 extension warning visible through a strict open and save.
+    ///
+    /// @throws Exception if fixture creation or publication unexpectedly fails
+    @Test
+    void retainsStandaloneLz4ExtensionWarningAfterSave() throws Exception {
+        Path source = temporaryDirectory.resolve("extension-lz4.dat");
+        Files.write(source, encode(new CompoundTag().addInt("value", 1), NBTFileEncoding.LZ4));
+
+        try (NBTFile<CompoundTag> file = NBTFile.openTag(source, TagType.COMPOUND)) {
+            assertTrue(file.readReport().hasInformationalIssues());
+            assertTrue(file.readReport().issues().stream()
+                    .anyMatch(issue -> "LZ4_EXTENSION".equals(issue.code())));
+            assertFalse(file.requiresRepair());
+            file.save(NBTSaveOptions.withoutBackup());
+            assertTrue(file.readReport().hasInformationalIssues());
+            assertTrue(file.readReport().issues().stream()
+                    .anyMatch(issue -> "LZ4_EXTENSION".equals(issue.code())));
         }
     }
 

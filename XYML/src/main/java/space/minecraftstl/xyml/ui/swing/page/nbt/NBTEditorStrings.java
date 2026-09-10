@@ -21,6 +21,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import space.minecraftstl.xyml.library.nbt.edit.NBTAddress;
 import space.minecraftstl.xyml.library.nbt.edit.NBTEditException;
+import space.minecraftstl.xyml.library.nbt.io.NBTReadIssue;
 import space.minecraftstl.xyml.library.nbt.tag.TagType;
 import space.minecraftstl.xyml.nbt.NBTNodeType;
 import space.minecraftstl.xyml.util.i18n.I18n;
@@ -100,6 +101,11 @@ final class NBTEditorStrings {
         return locale.i18n("swing.nbt_editor.back");
     }
 
+    /// Returns the new-document command tooltip.
+    String newTooltip() {
+        return locale.i18n("swing.nbt_editor.new");
+    }
+
     /// Returns the open command tooltip.
     String openTooltip() {
         return locale.i18n("swing.nbt_editor.open");
@@ -160,6 +166,11 @@ final class NBTEditorStrings {
         return locale.i18n("swing.nbt_editor.chooser_title");
     }
 
+    /// Returns the new-document chooser title.
+    String newChooserTitle() {
+        return locale.i18n("swing.nbt_editor.new_chooser_title");
+    }
+
     /// Returns the file-filter description.
     String fileFilter() {
         return locale.i18n("swing.nbt_editor.file_filter");
@@ -201,6 +212,11 @@ final class NBTEditorStrings {
         return locale.i18n("swing.nbt_editor.read_partial_warning");
     }
 
+    /// Returns the warning shown when a supported XoyzNBT extension may not be readable by the official game.
+    String extensionReadWarning() {
+        return locale.i18n("swing.nbt_editor.read_extension_warning");
+    }
+
     /// Returns the command which expands diagnostic details.
     String showReadDetailsText() {
         return locale.i18n("swing.nbt_editor.read_show_details");
@@ -219,6 +235,24 @@ final class NBTEditorStrings {
     /// Returns the label for strict-envelope validity in diagnostics.
     String readDetailsStrictLabel() {
         return locale.i18n("swing.nbt_editor.read_details_strict");
+    }
+
+    /// Formats one parser diagnostic without exposing library-local prose that may not match the UI locale.
+    ///
+    /// The stable code remains visible for support and log correlation.  Detailed parser text stays in the immutable
+    /// report and is not copied into the localized Swing surface.
+    ///
+    /// @param issue immutable parser diagnostic
+    /// @return localized diagnostic summary
+    String readDetailsIssue(NBTReadIssue issue) {
+        NBTReadIssue checked = Objects.requireNonNull(issue, "issue");
+        String severity = switch (checked.severity()) {
+            case INFORMATIONAL -> locale.i18n("swing.nbt_editor.read_issue_severity_informational");
+            case RECOVERED -> locale.i18n("swing.nbt_editor.read_issue_severity_recovered");
+            case PARTIAL_DATA_LOSS -> locale.i18n("swing.nbt_editor.read_issue_severity_partial");
+            case ERROR -> locale.i18n("swing.nbt_editor.read_issue_severity_error");
+        };
+        return locale.i18n("swing.nbt_editor.read_details_issue", severity, checked.code());
     }
 
     /// Formats one region-slot storage profile for the diagnostic details view.

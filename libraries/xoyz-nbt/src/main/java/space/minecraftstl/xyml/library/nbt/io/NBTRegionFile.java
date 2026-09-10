@@ -104,7 +104,6 @@ public final class NBTRegionFile implements AutoCloseable {
     /// Production hook which never injects a failure.
     private static final CommitHook NO_COMMIT_HOOK = (stage, localIndex) -> {
     };
-
     /// Combined byte size of the location and timestamp header sectors.
     private static final int HEADER_BYTES = 2 * ChunkUtils.SECTOR_BYTES;
     /// Largest sector count representable by one region location entry.
@@ -112,12 +111,9 @@ public final class NBTRegionFile implements AutoCloseable {
     /// Largest complete chunk frame which can be stored inside the region file.
     private static final int MAX_INLINE_BYTES = MAX_SECTOR_COUNT * ChunkUtils.SECTOR_BYTES;
     /// Shared default limit for one decompressed chunk payload.
-    private static final int MAX_DECOMPRESSED_BYTES = Math.toIntExact(
-            NBTReadLimits.defaults().maxDecompressedBytes());
+    private static final int MAX_DECOMPRESSED_BYTES = Math.toIntExact(NBTReadLimits.defaults().maxDecompressedBytes());
     /// Shared default limit for one encoded chunk payload, including external companions.
-    private static final int MAX_COMPRESSED_BYTES = Math.toIntExact(
-            NBTReadLimits.defaults().maxEncodedBytes());
-
+    private static final int MAX_COMPRESSED_BYTES = Math.toIntExact(NBTReadLimits.defaults().maxEncodedBytes());
     /// Normalized path of the open region file.
     private final Path path;
     /// Channel owning all reads, copy-on-write payload writes, and header publication.
@@ -165,7 +161,6 @@ public final class NBTRegionFile implements AutoCloseable {
         UNCOMPRESSED(3),
         /// LZ4 block compression.
         LZ4(4);
-
         /// Numeric compression identifier stored in the chunk frame marker.
         private final int id;
 
@@ -550,7 +545,12 @@ public final class NBTRegionFile implements AutoCloseable {
                     for (NBTReadIssue issue : recovered.report().issues()) {
                         issues.add(withSlotPath(localIndex, issue));
                     }
-                    Chunk result = new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex), recovered.root());
+                    boolean structurallyTruncated = issues.stream().anyMatch(issue ->
+                            "REGION_FRAME_LENGTH_CLAMPED".equals(issue.code())
+                                    || "REGION_INLINE_TRUNCATED".equals(issue.code())
+                                    || "REGION_FRAME_TRUNCATED".equals(issue.code()));
+                    Chunk result = structurallyTruncated ? new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex))
+                            : new Chunk(NBTRegionFileIO.timestamp(timestamps, localIndex), recovered.root());
                     NBTReadReport report = slotReport(localIndex, issues);
                     rememberIssues(report.issues());
                     return new NBTReadResult<>(result, report);
@@ -822,10 +822,13 @@ public final class NBTRegionFile implements AutoCloseable {
                     + compressed.length);
         }
         long framedBytes = compressed.length + 5L;
-        // An existing external slot keeps its representation even when the replacement would fit
-        // inline. This preserves the source marker/companion contract and avoids silently
-        // deleting a companion merely because the payload became smaller.
-        boolean keepExternal = oldExternal || framedBytes > MAX_INLINE_BYTES;
+        // Keep external storage when a companion path exists. An `.mcr` repair may become inline;
+        // an oversized replacement fails before any visible mutation.
+        @Nullable Path companionTarget = oldExternal ? previousCompanion : companionPath(localIndex);
+        boolean keepExternal = (oldExternal && companionTarget != null) || framedBytes > MAX_INLINE_BYTES;
+        if (keepExternal && companionTarget == null) {
+            throw new IOException("External chunk companion is unavailable for region format: " + path);
+        }
         if (!keepExternal) {
             int sectors = Math.toIntExact((framedBytes + ChunkUtils.SECTOR_BYTES - 1) / ChunkUtils.SECTOR_BYTES);
             Allocation allocation = allocateSectors(sectors, localIndex);

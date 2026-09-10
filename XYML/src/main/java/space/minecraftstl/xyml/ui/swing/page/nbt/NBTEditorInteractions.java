@@ -30,6 +30,17 @@ import java.util.Objects;
 /// Toolkit-neutral boundary for file selection, drop choice, and destructive replacement prompts.
 @NotNullByDefault
 public interface NBTEditorInteractions {
+    /// Selects an absent target for a new NBT document without creating it.
+    ///
+    /// The compatibility default represents cancellation. Graphical implementations should use a save-style chooser
+    /// and leave final target validation to the document service.
+    ///
+    /// @param currentFile current source used only to choose an initial directory, or `null`
+    /// @return selected target, or `null` when cancelled
+    default @Nullable Path chooseNewFile(@Nullable Path currentFile) {
+        return null;
+    }
+
     /// Selects one candidate NBT source without reading it.
     ///
     /// @param currentFile current source, or `null` before a successful open
