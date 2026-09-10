@@ -29,6 +29,7 @@ import javax.swing.ListCellRenderer;
 import javax.swing.SwingConstants;
 import javax.swing.UIManager;
 import javax.swing.border.Border;
+import java.awt.AlphaComposite;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -132,6 +133,9 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
 
     /// Whether the represented row owns keyboard focus.
     private boolean focused;
+
+    /// Whether an unselected loaded row needs the disabled wash during painting.
+    private boolean muted;
 
     /// Current icon slot size after responsive geometry negotiation.
     private int iconSlotSize = ICON_SIZE;
@@ -242,10 +246,10 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         selected = isSelected;
         focused = cellHasFocus;
         @Nullable T value = entry.value();
-        boolean muted = entry.status() == ChoiceLoadStatus.LOADED
+        boolean rowMuted = entry.status() == ChoiceLoadStatus.LOADED
                 && value != null
                 && disabledProvider.test(value);
-        configurePalette(list, isSelected, muted);
+        configurePalette(list, isSelected, rowMuted);
         Font baseFont = list.getFont();
         primaryLabel.setFont(baseFont.deriveFont(Font.BOLD));
         secondaryLabel.setFont(baseFont.deriveFont(Math.max(9.0F, baseFont.getSize2D() - 1.0F)));
@@ -332,6 +336,16 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
                     getHeight(),
                     getBackground());
         }
+        if (muted && !selected) {
+            Graphics2D washGraphics = (Graphics2D) graphics.create();
+            try {
+                washGraphics.setComposite(AlphaComposite.SrcOver);
+                washGraphics.setColor(DISABLED_ROW_BACKGROUND);
+                washGraphics.fillRect(0, 0, getWidth(), getHeight());
+            } finally {
+                washGraphics.dispose();
+            }
+        }
         if (focused && owner != null) {
             RoundedListSelectionPainter.paintFocusOutline(owner, graphics, getWidth(), getHeight());
         }
@@ -349,11 +363,9 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             boolean muted) {
         Color listBackground = list.getBackground();
         Color background = isSelected ? list.getSelectionBackground() : listBackground;
-        if (muted && !isSelected) {
-            background = DISABLED_ROW_BACKGROUND;
-        }
         Color foreground = isSelected ? list.getSelectionForeground() : list.getForeground();
-        setOpaque(muted && !isSelected);
+        this.muted = muted && !isSelected;
+        setOpaque(false);
         setBackground(background);
         setForeground(foreground);
         primaryLabel.setForeground(foreground);

@@ -25,13 +25,17 @@ import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import javax.swing.Icon;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.Rectangle;
+import java.awt.image.BufferedImage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -147,6 +151,47 @@ public final class RichChoiceListCellRendererTest {
                     false);
             assertTrue(label(renderer, "richChoiceListBadge").getText().startsWith("D"));
             assertChildrenInsideRow(renderer);
+        });
+    }
+
+    /// Paints a disabled row as a translucent wash over the list surface rather than a solid gray fill.
+    @Test
+    public void paintsDisabledSurfaceAsTranslucentWash() {
+        RichChoiceListCellRenderer<String> renderer = new RichChoiceListCellRenderer<>(
+                value -> "Disabled mod",
+                value -> "disabled metadata",
+                value -> "",
+                value -> new TestIcon(),
+                value -> "tooltip",
+                value -> true);
+        JList<ChoiceListEntry<String>> list = new JList<>();
+        Color listBackground = new Color(220, 220, 220);
+        list.setBackground(listBackground);
+        list.setSize(new Dimension(240, RichChoiceListCellRenderer.ROW_HEIGHT));
+        EdtDispatcher.executeAndWait(() -> {
+            renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loaded(0, "disabled"),
+                    0,
+                    false,
+                    false);
+            BufferedImage image = new BufferedImage(
+                    renderer.getWidth(),
+                    renderer.getHeight(),
+                    BufferedImage.TYPE_INT_ARGB);
+            Graphics2D graphics = image.createGraphics();
+            try {
+                graphics.setColor(listBackground);
+                graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
+                renderer.paint(graphics);
+            } finally {
+                graphics.dispose();
+            }
+            Color painted = new Color(image.getRGB(image.getWidth() - 2, image.getHeight() - 2), true);
+            assertFalse(renderer.isOpaque());
+            assertTrue(painted.getRed() > 128 && painted.getRed() < listBackground.getRed());
+            assertEquals(painted.getRed(), painted.getGreen());
+            assertEquals(painted.getGreen(), painted.getBlue());
         });
     }
 

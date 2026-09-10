@@ -210,8 +210,8 @@ public final class ModCatalogPanelTest {
                     0,
                     false,
                     false);
-            assertTrue(row.isOpaque());
-            assertFalse(list.getBackground().equals(row.getBackground()));
+            assertFalse(row.isOpaque());
+            assertEquals(list.getBackground(), row.getBackground());
             assertEquals("", findLabel(row, "richChoiceListBadge").getText());
             assertEquals(1, findLabel(row, "richChoiceListIcon").getIcon().getIconWidth());
             panel.close();
@@ -477,7 +477,6 @@ public final class ModCatalogPanelTest {
         SwingUtilities.invokeAndWait(() -> {
             ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
             JSplitPane split = findComponent(panel, "modsCatalogSplit", JSplitPane.class);
-
             assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
 
             panel.setSize(new Dimension(960, 620));
