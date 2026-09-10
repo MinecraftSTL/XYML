@@ -38,6 +38,7 @@ import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
@@ -129,8 +130,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Optional project keyword editor.
     private final JTextField searchField = new JTextField();
 
-    /// Optional Minecraft-version source filter editor.
-    private final JTextField gameVersionField = new JTextField();
+    /// Editable Minecraft-version source filter with common launcher versions as suggestions.
+    private final JComboBox<String> gameVersionField = new JComboBox<>();
 
     /// Provider category selector populated asynchronously after the panel becomes displayable.
     private final JComboBox<RemoteCatalogCategoryOption> categoryBox = new JComboBox<>();
@@ -140,6 +141,10 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
     /// Selected project-version selector populated only after a loaded row is selected.
     private final JComboBox<RemoteAddon.Version> versionBox = new JComboBox<>();
+
+    /// Explicit ordering selector for the selected project's installable versions.
+    private final JComboBox<RemoteAddonVersionSortMode> versionSortBox = new JComboBox<>(
+            RemoteAddonVersionSortMode.values());
 
     /// Renderer that keeps the recommended version visible while the selector is open or closed.
     private final RemoteAddonVersionRenderer versionRenderer = new RemoteAddonVersionRenderer();
@@ -247,6 +252,12 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
     /// Whether sort selector mutations are internal source publication rather than user criteria edits.
     private boolean applyingSortOptions;
+
+    /// Provider versions retained for local reordering after the user changes version sort mode.
+    private @Unmodifiable List<RemoteAddon.Version> loadedVersions = List.of();
+
+    /// Suppresses version-combo callbacks while a new local order is being published.
+    private boolean applyingVersionSort;
 
     /// Missing-dependency query waiting for the first layout to establish a result-list viewport, or null when none is
     /// pending.
@@ -572,8 +583,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         gameVersionLabel.setLabelFor(gameVersionField);
         criteriaBand.add(gameVersionLabel);
         gameVersionField.setName("remoteAddonGameVersion");
-        SwingTextFields.showClearButton(gameVersionField);
-        gameVersionField.getDocument().addDocumentListener(criteriaListener);
+        configureGameVersionSelector();
         gameVersionField.setMinimumSize(new Dimension(0, 0));
         criteriaBand.add(gameVersionField, "growx, wmin 0, h 40!");
 
@@ -653,7 +663,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         JPanel installBand = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 2",
                 "[grow,fill][grow,fill]",
-                "[40!]8[40!]"));
+                "[40!]8[40!]8[40!]"));
         installBand.setOpaque(false);
         installBand.setMinimumSize(new Dimension(0, 0));
         JLabel versionLabel = new JLabel(strings.versionLabel());
@@ -664,6 +674,14 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         versionBox.addActionListener(event -> versionChanged());
         versionBox.setMinimumSize(new Dimension(0, 0));
         installBand.add(versionBox, "growx, wmin 0, h 40!");
+        JLabel versionSortLabel = new JLabel(filterStrings.versionSortLabel());
+        versionSortLabel.setLabelFor(versionSortBox);
+        installBand.add(versionSortLabel);
+        versionSortBox.setName("remoteAddonVersionSort");
+        versionSortBox.setRenderer(new RemoteAddonVersionSortRenderer(filterStrings));
+        versionSortBox.addActionListener(event -> versionSortChanged());
+        versionSortBox.setMinimumSize(new Dimension(0, 0));
+        installBand.add(versionSortBox, "growx, wmin 0, h 40!");
         changelogButton.setName("remoteAddonChangelog");
         changelogButton.setText(i18n("update.changelog"));
         changelogButton.addActionListener(event -> showSelectedChangelog());
@@ -681,6 +699,29 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         add(statusLabel, "growx, h 24!");
         progressHost.setName("remoteAddonInstallProgress");
         add(progressHost, "growx");
+    }
+
+    /// Configures the editable game-version selector with the launcher's common version choices.
+    ///
+    /// The empty first item preserves the unfiltered query. The editor remains free-form so a
+    /// provider-specific or newly released version can still be entered before the local list is
+    /// refreshed.
+    private void configureGameVersionSelector() {
+        EdtDispatcher.requireEventDispatchThread();
+        gameVersionField.setEditable(true);
+        gameVersionField.setMaximumRowCount(12);
+        if (gameVersionField.getItemCount() == 0) {
+            gameVersionField.addItem("");
+            for (String version : GameVersionNumber.getDefaultGameVersions()) {
+                if (!version.isBlank()) {
+                    gameVersionField.addItem(version);
+                }
+            }
+            gameVersionField.setSelectedItem("");
+        }
+        SwingTextFields.showClearButton(gameVersionField);
+        SwingTextFields.textEditor(gameVersionField).getDocument().addDocumentListener(criteriaListener);
+        gameVersionField.addActionListener(event -> criteriaChanged());
     }
 
     /// Formats the description, author, and provider tags already present in one remote result.
@@ -788,7 +829,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             summary.add(description);
         }
         if (version != null) {
-            summary.add(RemoteAddonVersionOrdering.gameVersionText(version, gameVersionField.getText())
+            summary.add(RemoteAddonVersionOrdering.gameVersionText(
+                    version,
+                    SwingTextFields.comboText(gameVersionField))
                     + " | " + version.version());
         }
         projectSummaryLabel.setText(String.join(" | ", summary));
@@ -882,9 +925,55 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Updates project details after the user changes the selected installable version.
     private void versionChanged() {
         EdtDispatcher.requireEventDispatchThread();
+        if (applyingVersionSort) {
+            return;
+        }
         @Nullable RemoteAddon.Version version = (RemoteAddon.Version) versionBox.getSelectedItem();
         updateProjectDetails(selectedItem, version);
         updateControls();
+    }
+
+    /// Reorders the retained selected-project versions without issuing another provider request.
+    private void versionSortChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (applyingVersionSort || loadedVersions.isEmpty() || selectedItem == null) {
+            return;
+        }
+        @Nullable RemoteAddon.Version previousSelection =
+                (RemoteAddon.Version) versionBox.getSelectedItem();
+        @Unmodifiable List<RemoteAddon.Version> orderedVersions = orderedLoadedVersions();
+        @Nullable RemoteAddon.Version recommendedVersion = RemoteAddonVersionOrdering.recommended(
+                orderedVersions,
+                SwingTextFields.comboText(gameVersionField));
+        versionRenderer.setSelectionContext(recommendedVersion, SwingTextFields.comboText(gameVersionField));
+        applyingVersionSort = true;
+        try {
+            versionBox.removeAllItems();
+            for (RemoteAddon.Version version : orderedVersions) {
+                versionBox.addItem(version);
+            }
+            if (previousSelection != null && orderedVersions.contains(previousSelection)) {
+                versionBox.setSelectedItem(previousSelection);
+            } else if (recommendedVersion != null) {
+                versionBox.setSelectedItem(recommendedVersion);
+            }
+        } finally {
+            applyingVersionSort = false;
+        }
+        updateProjectDetails(selectedItem, (RemoteAddon.Version) versionBox.getSelectedItem());
+        updateControls();
+    }
+
+    /// Returns the retained versions in the currently selected user-facing order.
+    ///
+    /// @return immutable ordered version snapshot
+    private @Unmodifiable List<RemoteAddon.Version> orderedLoadedVersions() {
+        return RemoteAddonVersionOrdering.order(
+                loadedVersions,
+                SwingTextFields.comboText(gameVersionField),
+                Objects.requireNonNull(
+                        (RemoteAddonVersionSortMode) versionSortBox.getSelectedItem(),
+                        "remote add-on version sort mode"));
     }
 
     /// Returns a validated HTTP(S) URI for an upstream page.
@@ -1130,7 +1219,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 kind,
                 source,
                 searchField.getText(),
-                gameVersionField.getText(),
+                SwingTextFields.comboText(gameVersionField),
                 selectedCategory(),
                 selectedSortType(),
                 pageOffset,
@@ -1226,6 +1315,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         selectedItem = item;
         updateProjectDetails(item, null);
         versionLoading = true;
+        loadedVersions = List.of();
         versionBox.removeAllItems();
         setStatus(strings.loadingVersionsStatus());
         updateControls();
@@ -1255,6 +1345,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
         long requestRevision = selectionRequestRevision.incrementAndGet();
         versionLoading = true;
+        loadedVersions = List.of();
         versionBox.removeAllItems();
         setStatus(strings.loadingVersionsStatus());
         updateControls();
@@ -1323,13 +1414,12 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             return;
         }
         versionLoading = false;
-        @Unmodifiable List<RemoteAddon.Version> orderedVersions = RemoteAddonVersionOrdering.order(
-                List.copyOf(Objects.requireNonNull(versions, "versions")),
-                gameVersionField.getText());
+        loadedVersions = List.copyOf(Objects.requireNonNull(versions, "versions"));
+        @Unmodifiable List<RemoteAddon.Version> orderedVersions = orderedLoadedVersions();
         @Nullable RemoteAddon.Version recommendedVersion = RemoteAddonVersionOrdering.recommended(
                 orderedVersions,
-                gameVersionField.getText());
-        versionRenderer.setSelectionContext(recommendedVersion, gameVersionField.getText());
+                SwingTextFields.comboText(gameVersionField));
+        versionRenderer.setSelectionContext(recommendedVersion, SwingTextFields.comboText(gameVersionField));
         for (RemoteAddon.Version version : orderedVersions) {
             versionBox.addItem(version);
         }
@@ -1411,6 +1501,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 return;
             }
             versionLoading = false;
+            loadedVersions = List.of();
             versionBox.removeAllItems();
             updateProjectDetails(item, null);
             setStatus(strings.versionLoadFailedStatus(), this::retrySelectedVersions);
@@ -1557,6 +1648,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         updateProjectDetails(null, null);
         versionLoading = false;
         changelogLoading = false;
+        loadedVersions = List.of();
         versionBox.removeAllItems();
         versionRenderer.setSelectionContext(null, "");
     }
@@ -1637,6 +1729,10 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 && selectedItem != null
                 && !versionLoading
                 && versionBox.getItemCount() > 0);
+        versionSortBox.setEnabled(inputsEnabled
+                && selectedItem != null
+                && !versionLoading
+                && !loadedVersions.isEmpty());
         upstreamButton.setEnabled(inputsEnabled && upstreamButton.isVisible()
                 && upstreamButton.getClientProperty("remoteAddonUpstreamUri") instanceof URI);
         for (Component component : prerequisiteButtons.getComponents()) {
@@ -1721,7 +1817,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             presentation.close();
         }
         searchField.getDocument().removeDocumentListener(criteriaListener);
-        gameVersionField.getDocument().removeDocumentListener(criteriaListener);
+        SwingTextFields.textEditor(gameVersionField).getDocument().removeDocumentListener(criteriaListener);
         choiceList.getViewport().removeChangeListener(viewportListener);
         choiceList.getChoiceModel().removeListDataListener(listDataListener);
         choiceList.close();
@@ -1733,6 +1829,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         categoryBox.setEnabled(false);
         sortBox.setEnabled(false);
         versionBox.setEnabled(false);
+        versionSortBox.setEnabled(false);
         changelogButton.setEnabled(false);
         searchButton.setEnabled(false);
         firstPageButton.setEnabled(false);

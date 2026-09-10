@@ -59,6 +59,62 @@ final class RemoteAddonVersionOrderingTest {
         assertSame(release, RemoteAddonVersionOrdering.recommended(ordered, ""));
     }
 
+    /// Selects either game-version grouping or mod-version ordering without changing compatibility semantics.
+    @Test
+    void supportsExplicitGameAndModVersionOrdering() {
+        RemoteAddon.Version newerGame = version(
+                "newer-game",
+                "1.0.0",
+                "1.21",
+                RemoteAddon.VersionType.Release);
+        RemoteAddon.Version newerMod = version(
+                "newer-mod",
+                "3.0.0",
+                "1.20.1",
+                RemoteAddon.VersionType.Release);
+
+        assertEquals(
+                List.of(newerGame, newerMod),
+                RemoteAddonVersionOrdering.order(
+                        List.of(newerMod, newerGame),
+                        "",
+                        RemoteAddonVersionSortMode.GAME_VERSION));
+        assertEquals(
+                List.of(newerMod, newerGame),
+                RemoteAddonVersionOrdering.order(
+                        List.of(newerGame, newerMod),
+                        "",
+                        RemoteAddonVersionSortMode.MOD_VERSION));
+    }
+
+    /// Keeps the recommendation order distinct from game-version browsing when release channels conflict.
+    @Test
+    void separatesRecommendedAndGameVersionOrdering() {
+        RemoteAddon.Version newerGamePreview = version(
+                "newer-game-preview",
+                "9.0.0",
+                "1.21",
+                RemoteAddon.VersionType.Beta);
+        RemoteAddon.Version olderGameRelease = version(
+                "older-game-release",
+                "1.0.0",
+                "1.20.1",
+                RemoteAddon.VersionType.Release);
+
+        assertEquals(
+                List.of(olderGameRelease, newerGamePreview),
+                RemoteAddonVersionOrdering.order(
+                        List.of(newerGamePreview, olderGameRelease),
+                        "",
+                        RemoteAddonVersionSortMode.RECOMMENDED));
+        assertEquals(
+                List.of(newerGamePreview, olderGameRelease),
+                RemoteAddonVersionOrdering.order(
+                        List.of(olderGameRelease, newerGamePreview),
+                        "",
+                        RemoteAddonVersionSortMode.GAME_VERSION));
+    }
+
     /// Creates one minimal provider version for ordering assertions.
     private static RemoteAddon.Version version(
             String id,

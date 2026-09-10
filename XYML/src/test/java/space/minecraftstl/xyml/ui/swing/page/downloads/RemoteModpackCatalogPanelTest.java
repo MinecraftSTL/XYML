@@ -365,6 +365,8 @@ final class RemoteModpackCatalogPanelTest {
                 JPanel pageBand = findNamed(panel, "remoteModpackPageBand", JPanel.class);
                 JComboBox<?> categoryBox = findNamed(panel, "remoteModpackCategory", JComboBox.class);
                 JComboBox<?> sortBox = findNamed(panel, "remoteModpackSort", JComboBox.class);
+                JComboBox<?> versionSortBox = findNamed(panel, "remoteModpackVersionSort", JComboBox.class);
+                JComboBox<?> gameVersionBox = findNamed(panel, "remoteModpackGameVersion", JComboBox.class);
                 JButton search = findNamed(panel, "remoteModpackSearchAction", JButton.class);
                 JButton previous = findNamed(panel, "remoteModpackPreviousPage", JButton.class);
                 assertNotNull(searchBand);
@@ -374,6 +376,8 @@ final class RemoteModpackCatalogPanelTest {
                 assertNotSame(criteriaBand, pageBand);
                 assertNotNull(categoryBox);
                 assertNotNull(sortBox);
+                assertNotNull(versionSortBox);
+                assertNotNull(gameVersionBox);
                 assertNotNull(search);
                 assertNotNull(previous);
                 assertEquals(searchBand, search.getParent());
@@ -382,6 +386,9 @@ final class RemoteModpackCatalogPanelTest {
                 assertEquals(pageBand, previous.getParent());
                 assertEquals(3, categoryBox.getItemCount());
                 assertEquals(6, sortBox.getItemCount());
+                assertEquals(3, versionSortBox.getItemCount());
+                assertTrue(gameVersionBox.isEditable());
+                assertTrue(gameVersionBox.getItemCount() > 1);
                 categoryBox.setSelectedIndex(2);
                 sortBox.setSelectedItem(RemoteAddonRepository.SortType.TOTAL_DOWNLOADS);
                 search.doClick();

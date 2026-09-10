@@ -40,6 +40,7 @@ import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
+import space.minecraftstl.xyml.util.versioning.GameVersionNumber;
 
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
@@ -109,8 +110,8 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
     /// Optional project-name or keyword filter editor.
     private final JTextField searchField = new JTextField();
 
-    /// Optional exact Minecraft-version filter editor.
-    private final JTextField gameVersionField = new JTextField();
+    /// Editable Minecraft-version filter with common launcher versions as suggestions.
+    private final JComboBox<String> gameVersionField = new JComboBox<>();
 
     /// Provider category selector populated asynchronously after the panel becomes displayable.
     private final JComboBox<RemoteCatalogCategoryOption> categoryBox = new JComboBox<>();
@@ -123,6 +124,10 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
 
     /// Version selector populated only after a loaded project is selected.
     private final JComboBox<RemoteAddon.Version> versionBox = new JComboBox<>();
+
+    /// Explicit ordering selector for the selected project's installable versions.
+    private final JComboBox<RemoteAddonVersionSortMode> versionSortBox = new JComboBox<>(
+            RemoteAddonVersionSortMode.values());
 
     /// Renderer that keeps the recommended version visible while the selector is open or closed.
     private final RemoteModpackVersionRenderer versionRenderer = new RemoteModpackVersionRenderer();
@@ -215,6 +220,12 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
 
     /// Whether sort combo-box changes are internal source publication rather than user edits.
     private boolean applyingSortOptions;
+
+    /// Provider versions retained for local reordering after the user changes version sort mode.
+    private @Unmodifiable List<RemoteAddon.Version> loadedVersions = List.of();
+
+    /// Suppresses version-combo callbacks while a new local order is being published.
+    private boolean applyingVersionSort;
 
     /// Whether programmatic destination suggestions should not be treated as user edits.
     private boolean applyingSuggestedInstanceName;
@@ -463,8 +474,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         gameVersionLabel.setLabelFor(gameVersionField);
         criteriaBand.add(gameVersionLabel);
         gameVersionField.setName("remoteModpackGameVersion");
-        SwingTextFields.showClearButton(gameVersionField);
-        gameVersionField.getDocument().addDocumentListener(criteriaListener);
+        configureGameVersionSelector();
         gameVersionField.setMinimumSize(new Dimension(0, 0));
         criteriaBand.add(gameVersionField, "growx, wmin 0, h 40!");
 
@@ -540,7 +550,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         JPanel installBand = new JPanel(new MigLayout(
                 "insets 0, fillx, wrap 2",
                 "[grow,fill][grow,fill]",
-                "[40!]8[40!]"));
+                "[40!]8[40!]8[40!]8[40!]"));
         installBand.setOpaque(false);
         installBand.setMinimumSize(new Dimension(0, 0));
         JLabel versionLabel = new JLabel(strings.versionLabel());
@@ -551,6 +561,15 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         versionBox.addActionListener(event -> updateControls());
         versionBox.setMinimumSize(new Dimension(0, 0));
         installBand.add(versionBox, "growx, wmin 0, h 40!");
+
+        JLabel versionSortLabel = new JLabel(filterStrings.versionSortLabel());
+        versionSortLabel.setLabelFor(versionSortBox);
+        installBand.add(versionSortLabel);
+        versionSortBox.setName("remoteModpackVersionSort");
+        versionSortBox.setRenderer(new RemoteAddonVersionSortRenderer(filterStrings));
+        versionSortBox.addActionListener(event -> versionSortChanged());
+        versionSortBox.setMinimumSize(new Dimension(0, 0));
+        installBand.add(versionSortBox, "growx, wmin 0, h 40!");
 
         JLabel instanceNameLabel = new JLabel(strings.instanceNameLabel());
         instanceNameLabel.setLabelFor(instanceNameField);
@@ -577,6 +596,29 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         add(statusLabel, "growx, h 24!");
         progressHost.setName("remoteModpackInstallProgress");
         add(progressHost, "growx");
+    }
+
+    /// Configures the editable game-version selector with the launcher's common version choices.
+    ///
+    /// The empty first item preserves the unfiltered query. The editor remains free-form so a
+    /// provider-specific or newly released version can still be entered before the local list is
+    /// refreshed.
+    private void configureGameVersionSelector() {
+        EdtDispatcher.requireEventDispatchThread();
+        gameVersionField.setEditable(true);
+        gameVersionField.setMaximumRowCount(12);
+        if (gameVersionField.getItemCount() == 0) {
+            gameVersionField.addItem("");
+            for (String version : GameVersionNumber.getDefaultGameVersions()) {
+                if (!version.isBlank()) {
+                    gameVersionField.addItem(version);
+                }
+            }
+            gameVersionField.setSelectedItem("");
+        }
+        SwingTextFields.showClearButton(gameVersionField);
+        SwingTextFields.textEditor(gameVersionField).getDocument().addDocumentListener(criteriaListener);
+        gameVersionField.addActionListener(event -> criteriaChanged());
     }
 
     /// Formats the description, author, and provider tags already present in one remote modpack.
@@ -811,7 +853,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         RemoteModpackCatalogQuery query = new RemoteModpackCatalogQuery(
                 source,
                 searchField.getText(),
-                gameVersionField.getText(),
+                SwingTextFields.comboText(gameVersionField),
                 selectedCategory(),
                 selectedSortType(),
                 pageOffset,
@@ -897,6 +939,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         long requestRevision = selectionRequestRevision.incrementAndGet();
         selectedItem = item;
         versionLoading = true;
+        loadedVersions = List.of();
         versionBox.removeAllItems();
         suggestInstanceName(item);
         setStatus(strings.loadingVersionsStatus());
@@ -927,6 +970,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         }
         long requestRevision = selectionRequestRevision.incrementAndGet();
         versionLoading = true;
+        loadedVersions = List.of();
         versionBox.removeAllItems();
         setStatus(strings.loadingVersionsStatus());
         updateControls();
@@ -967,6 +1011,48 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         action.run();
     }
 
+    /// Reorders the retained selected-project versions without issuing another provider request.
+    private void versionSortChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (applyingVersionSort || loadedVersions.isEmpty() || selectedItem == null) {
+            return;
+        }
+        @Nullable RemoteAddon.Version previousSelection =
+                (RemoteAddon.Version) versionBox.getSelectedItem();
+        @Unmodifiable List<RemoteAddon.Version> orderedVersions = orderedLoadedVersions();
+        @Nullable RemoteAddon.Version recommendedVersion = RemoteAddonVersionOrdering.recommended(
+                orderedVersions,
+                SwingTextFields.comboText(gameVersionField));
+        versionRenderer.setSelectionContext(recommendedVersion, SwingTextFields.comboText(gameVersionField));
+        applyingVersionSort = true;
+        try {
+            versionBox.removeAllItems();
+            for (RemoteAddon.Version version : orderedVersions) {
+                versionBox.addItem(version);
+            }
+            if (previousSelection != null && orderedVersions.contains(previousSelection)) {
+                versionBox.setSelectedItem(previousSelection);
+            } else if (recommendedVersion != null) {
+                versionBox.setSelectedItem(recommendedVersion);
+            }
+        } finally {
+            applyingVersionSort = false;
+        }
+        updateControls();
+    }
+
+    /// Returns the retained versions in the currently selected user-facing order.
+    ///
+    /// @return immutable ordered version snapshot
+    private @Unmodifiable List<RemoteAddon.Version> orderedLoadedVersions() {
+        return RemoteAddonVersionOrdering.order(
+                loadedVersions,
+                SwingTextFields.comboText(gameVersionField),
+                Objects.requireNonNull(
+                        (RemoteAddonVersionSortMode) versionSortBox.getSelectedItem(),
+                        "remote modpack version sort mode"));
+    }
+
     /// Loads versions for one user-selected project away from the EDT.
     ///
     /// @param item selected loaded project
@@ -995,13 +1081,12 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             return;
         }
         versionLoading = false;
-        @Unmodifiable List<RemoteAddon.Version> orderedVersions = RemoteAddonVersionOrdering.order(
-                List.copyOf(Objects.requireNonNull(versions, "versions")),
-                gameVersionField.getText());
+        loadedVersions = List.copyOf(Objects.requireNonNull(versions, "versions"));
+        @Unmodifiable List<RemoteAddon.Version> orderedVersions = orderedLoadedVersions();
         @Nullable RemoteAddon.Version recommendedVersion = RemoteAddonVersionOrdering.recommended(
                 orderedVersions,
-                gameVersionField.getText());
-        versionRenderer.setSelectionContext(recommendedVersion, gameVersionField.getText());
+                SwingTextFields.comboText(gameVersionField));
+        versionRenderer.setSelectionContext(recommendedVersion, SwingTextFields.comboText(gameVersionField));
         for (RemoteAddon.Version version : orderedVersions) {
             versionBox.addItem(version);
         }
@@ -1028,6 +1113,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 return;
             }
             versionLoading = false;
+            loadedVersions = List.of();
             versionBox.removeAllItems();
             setStatus(strings.versionLoadFailedStatus(), this::retrySelectedVersions);
             updateControls();
@@ -1163,6 +1249,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         choiceList.getList().clearSelection();
         selectedItem = null;
         versionLoading = false;
+        loadedVersions = List.of();
         versionBox.removeAllItems();
         versionRenderer.setSelectionContext(null, "");
         suggestedInstanceName = null;
@@ -1252,6 +1339,10 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
                 && selectedItem != null
                 && !versionLoading
                 && versionBox.getItemCount() > 0);
+        versionSortBox.setEnabled(inputsEnabled
+                && selectedItem != null
+                && !versionLoading
+                && !loadedVersions.isEmpty());
         instanceNameField.setEnabled(inputsEnabled);
         installButton.setEnabled(inputsEnabled
                 && !catalogLoading
@@ -1314,7 +1405,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
             presentation.close();
         }
         searchField.getDocument().removeDocumentListener(criteriaListener);
-        gameVersionField.getDocument().removeDocumentListener(criteriaListener);
+        SwingTextFields.textEditor(gameVersionField).getDocument().removeDocumentListener(criteriaListener);
         if (fixedInstanceId == null) {
             instanceNameField.getDocument().removeDocumentListener(instanceNameListener);
         }
@@ -1327,6 +1418,7 @@ public final class RemoteModpackCatalogPanel extends JPanel implements AutoClose
         categoryBox.setEnabled(false);
         sortBox.setEnabled(false);
         versionBox.setEnabled(false);
+        versionSortBox.setEnabled(false);
         instanceNameField.setEnabled(false);
         searchButton.setEnabled(false);
         firstPageButton.setEnabled(false);

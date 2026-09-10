@@ -19,7 +19,9 @@ package space.minecraftstl.xyml.ui.swing;
 
 import com.formdev.flatlaf.FlatClientProperties;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
+import javax.swing.JComboBox;
 import javax.swing.JTextField;
 import java.util.Objects;
 
@@ -39,5 +41,44 @@ public final class SwingTextFields {
     public static void showClearButton(JTextField field) {
         JTextField target = Objects.requireNonNull(field, "field");
         target.putClientProperty(FlatClientProperties.TEXT_FIELD_SHOW_CLEAR_BUTTON, true);
+    }
+
+    /// Adds the same clear action to an editable combo-box and its text editor.
+    ///
+    /// The combo-box property keeps the control discoverable by shared Swing layout tests, while
+    /// the editor property is the one consumed by FlatLaf when the user types a custom value.
+    ///
+    /// @param combo editable search or version combo-box
+    public static void showClearButton(JComboBox<?> combo) {
+        JComboBox<?> target = Objects.requireNonNull(combo, "combo");
+        target.putClientProperty(FlatClientProperties.TEXT_FIELD_SHOW_CLEAR_BUTTON, true);
+        if (target.isEditable() && target.getEditor().getEditorComponent() instanceof JTextField editor) {
+            showClearButton(editor);
+        }
+    }
+
+    /// Returns the text editor owned by a combo-box.
+    ///
+    /// @param combo combo-box whose editor is required
+    /// @return text editor component
+    /// @throws IllegalStateException when the installed editor is not a text field
+    public static JTextField textEditor(JComboBox<?> combo) {
+        JComboBox<?> target = Objects.requireNonNull(combo, "combo");
+        if (target.getEditor().getEditorComponent() instanceof JTextField editor) {
+            return editor;
+        }
+        throw new IllegalStateException("Combo-box must use a text editor");
+    }
+
+    /// Returns normalized text from an editable combo-box editor or its selected item.
+    ///
+    /// @param combo combo-box supplying the current text
+    /// @return trimmed text, or an empty string when no item is selected
+    public static String comboText(JComboBox<?> combo) {
+        JComboBox<?> target = Objects.requireNonNull(combo, "combo");
+        @Nullable Object value = target.isEditable()
+                ? target.getEditor().getItem()
+                : target.getSelectedItem();
+        return value == null ? "" : value.toString().trim();
     }
 }

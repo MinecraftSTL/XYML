@@ -38,8 +38,8 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 ///
 /// Providers return versions in different orders and often mix versions for several Minecraft
 /// releases. This utility presents one stable sequence: an exact requested game version first,
-/// then newer game-version groups, release channels, mod versions, publication dates, and finally
-/// stable identifiers. The first release in that sequence is the recommendation shown by Swing.
+/// then the selected game-version or mod-version dimension, release channels, publication dates,
+/// and finally stable identifiers. The first release in that sequence is the recommendation shown by Swing.
 @NotNullByDefault
 final class RemoteAddonVersionOrdering {
     /// Prevents construction of this stateless ordering utility.
@@ -54,9 +54,22 @@ final class RemoteAddonVersionOrdering {
     static @Unmodifiable List<RemoteAddon.Version> order(
             @Unmodifiable List<RemoteAddon.Version> versions,
             String requestedGameVersion) {
+        return order(versions, requestedGameVersion, RemoteAddonVersionSortMode.RECOMMENDED);
+    }
+
+    /// Sorts a provider response using the selected user-facing version dimension.
+    ///
+    /// @param versions provider-returned installable versions
+    /// @param requestedGameVersion optional exact game-version filter
+    /// @param sortMode selected version ordering mode
+    /// @return immutable ordered snapshot
+    static @Unmodifiable List<RemoteAddon.Version> order(
+            @Unmodifiable List<RemoteAddon.Version> versions,
+            String requestedGameVersion,
+            RemoteAddonVersionSortMode sortMode) {
         String requested = Objects.requireNonNull(requestedGameVersion, "requestedGameVersion").trim();
         List<RemoteAddon.Version> ordered = new ArrayList<>(Objects.requireNonNull(versions, "versions"));
-        ordered.sort(comparator(requested));
+        ordered.sort(comparator(requested, Objects.requireNonNull(sortMode, "sortMode")));
         return List.copyOf(ordered);
     }
 
@@ -136,20 +149,41 @@ final class RemoteAddonVersionOrdering {
     /// Builds the complete ordering comparator for one requested game-version context.
     ///
     /// @param requested exact requested game version, or empty
+    /// @param sortMode selected version ordering mode
     /// @return descending stable comparator
-    private static Comparator<RemoteAddon.Version> comparator(String requested) {
-        return Comparator
-                .comparingInt((RemoteAddon.Version version) -> exactGameVersionRank(version, requested))
-                .thenComparing(version -> groupedGameVersion(version, requested),
-                        RemoteAddonVersionOrdering::compareGameVersionDescending)
-                .thenComparingInt(version -> channelRank(version.versionType()))
-                .thenComparing(RemoteAddonVersionOrdering::modVersion,
-                        RemoteAddonVersionOrdering::compareModVersionDescending)
-                .thenComparing(RemoteAddonVersionOrdering::publishedAt,
-                        Comparator.reverseOrder())
+    private static Comparator<RemoteAddon.Version> comparator(
+            String requested,
+            RemoteAddonVersionSortMode sortMode) {
+        Comparator<RemoteAddon.Version> compatibility = Comparator.comparingInt(
+                (RemoteAddon.Version version) -> exactGameVersionRank(version, requested));
+        Comparator<RemoteAddon.Version> stableTieBreakers = Comparator
+                .comparing(RemoteAddonVersionOrdering::publishedAt, Comparator.reverseOrder())
                 .thenComparing(RemoteAddon.Version::version, String.CASE_INSENSITIVE_ORDER.reversed())
                 .thenComparing(RemoteAddon.Version::name, String.CASE_INSENSITIVE_ORDER)
                 .thenComparing(RemoteAddon.Version::versionId, String.CASE_INSENSITIVE_ORDER);
+        return switch (Objects.requireNonNull(sortMode, "sortMode")) {
+            case RECOMMENDED -> compatibility
+                    .thenComparingInt(version -> channelRank(version.versionType()))
+                    .thenComparing(RemoteAddonVersionOrdering::modVersion,
+                            RemoteAddonVersionOrdering::compareModVersionDescending)
+                    .thenComparing(version -> groupedGameVersion(version, requested),
+                            RemoteAddonVersionOrdering::compareGameVersionDescending)
+                    .thenComparing(stableTieBreakers);
+            case GAME_VERSION -> compatibility
+                    .thenComparing(version -> groupedGameVersion(version, requested),
+                            RemoteAddonVersionOrdering::compareGameVersionDescending)
+                    .thenComparingInt(version -> channelRank(version.versionType()))
+                    .thenComparing(RemoteAddonVersionOrdering::modVersion,
+                            RemoteAddonVersionOrdering::compareModVersionDescending)
+                    .thenComparing(stableTieBreakers);
+            case MOD_VERSION -> compatibility
+                    .thenComparing(RemoteAddonVersionOrdering::modVersion,
+                            RemoteAddonVersionOrdering::compareModVersionDescending)
+                    .thenComparingInt(version -> channelRank(version.versionType()))
+                    .thenComparing(version -> groupedGameVersion(version, requested),
+                            RemoteAddonVersionOrdering::compareGameVersionDescending)
+                    .thenComparing(stableTieBreakers);
+        };
     }
 
     /// Gives exact game-version matches precedence without excluding other compatible releases.
