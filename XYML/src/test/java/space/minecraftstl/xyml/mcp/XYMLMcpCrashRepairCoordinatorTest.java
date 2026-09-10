@@ -563,6 +563,54 @@ final class XYMLMcpCrashRepairCoordinatorTest {
         }
     }
 
+    /// Retains a cleanup executor when a failed retry temporarily reports no residual descriptions.
+    @Test
+    void retainsCleanupHandleWhenFailedRetryReportsNoResidualDescription() throws Exception {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-03T00:00:00Z"));
+        AtomicInteger cleanupAttempts = new AtomicInteger();
+        McpTaskOperationRegistry operations = new McpTaskOperationRegistry(
+                clock,
+                Duration.ofMinutes(1),
+                8,
+                task -> new EmptyResidualFailureExecutor(task, cleanupAttempts));
+        try (XYMLMcpCrashRepairCoordinator coordinator = new XYMLMcpCrashRepairCoordinator(
+                clock,
+                Duration.ofMinutes(10),
+                Duration.ofMinutes(10),
+                8,
+                8,
+                operations)) {
+            Map<String, Object> analysis = coordinator.analyze(
+                    "demo",
+                    XYMLMcpCrashRepairCoordinator.AnalysisSource.LAUNCHER_LATEST_LOG,
+                    "sha256:residual-empty-description",
+                    missingDependencyInput(ignoredIds -> Task.completed(null)),
+                    () -> Task.completed(null));
+            Map<String, Object> solution = solution(firstDiagnosis(analysis));
+            Map<String, Object> plan = coordinator.plan(
+                    String.valueOf(analysis.get("analysis_id")),
+                    String.valueOf(solution.get("solution_id")));
+            String planId = String.valueOf(plan.get("plan_id"));
+
+            Map<String, Object> firstOperation = coordinator.execute(planId);
+            String operationId = String.valueOf(firstOperation.get("operation_id"));
+            assertEquals("BLOCKED_RESIDUAL", awaitTerminal(coordinator, operationId).get("status"));
+
+            clock.advance(Duration.ofMinutes(2));
+            Map<String, Object> failedCleanup = coordinator.retry(planId);
+            assertEquals(operationId, failedCleanup.get("operation_id"));
+            assertEquals("BLOCKED_RESIDUAL", failedCleanup.get("plan_state"));
+            assertEquals(false, failedCleanup.get("cleanup_succeeded"));
+            assertEquals(List.of(), failedCleanup.get("residual_resources"));
+
+            Map<String, Object> cleaned = coordinator.retry(planId);
+            assertEquals(operationId, cleaned.get("operation_id"));
+            assertEquals("SUCCEEDED", cleaned.get("plan_state"));
+            assertEquals(true, cleaned.get("cleanup_succeeded"));
+            assertEquals(2, cleanupAttempts.get());
+        }
+    }
+
     /// Confirms Java selection is exposed as one confirmed, executable repair solution.
     @Test
     void plansAndExecutesNonDestructiveJavaRepair() throws Exception {
@@ -916,6 +964,52 @@ final class XYMLMcpCrashRepairCoordinatorTest {
         public boolean retryResourceCleanup() {
             residual = false;
             return true;
+        }
+    }
+
+    /// Reports a residual lease, then fails once after clearing its description before succeeding on retry.
+    @NotNullByDefault
+    private static final class EmptyResidualFailureExecutor extends TaskExecutor {
+        /// Shared cleanup-attempt counter used by the deterministic test.
+        private final AtomicInteger cleanupAttempts;
+
+        /// Creates the executor around a shared cleanup-attempt counter.
+        private EmptyResidualFailureExecutor(Task<?> task, AtomicInteger cleanupAttempts) {
+            super(task);
+            this.cleanupAttempts = cleanupAttempts;
+        }
+
+        /// Publishes one successful task completion while retaining a synthetic residual lease.
+        @Override
+        public TaskExecutor start() {
+            notifyTaskListeners(TaskListener::onStart);
+            notifyTaskListeners(listener -> listener.onStop(true, this));
+            return this;
+        }
+
+        /// Runs the same deterministic completion path synchronously.
+        @Override
+        public boolean test() {
+            start();
+            return true;
+        }
+
+        /// This fixture has no active work to cancel.
+        @Override
+        public void cancel() {
+            cancelled = true;
+        }
+
+        /// Clears the description on the first cleanup attempt even though that attempt fails.
+        @Override
+        public @Unmodifiable List<String> getResidualResources() {
+            return cleanupAttempts.get() == 0 ? List.of("synthetic residual") : List.of();
+        }
+
+        /// Fails once so the registry must retain the executor despite an empty description list.
+        @Override
+        public boolean retryResourceCleanup() {
+            return cleanupAttempts.incrementAndGet() > 1;
         }
     }
 

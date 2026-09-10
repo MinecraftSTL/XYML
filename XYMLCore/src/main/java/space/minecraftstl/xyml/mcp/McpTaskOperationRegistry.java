@@ -536,11 +536,13 @@ public final class McpTaskOperationRegistry implements AutoCloseable {
 
     /// Keeps operations whose task-owned lease cleanup still needs a bounded retry in this process.
     ///
-    /// Evicting such an operation would leave the lock manager holding a residual lease without any public operation
-    /// identifier through which the coordinator could call [#retryResourceCleanup(String)].
+    /// The executor handle is authoritative even when a custom executor temporarily reports no residual descriptions:
+    /// evicting it would leave the lock manager holding a residual lease without any public operation identifier
+    /// through which the coordinator could call [#retryResourceCleanup(String)].
     private static boolean canEvictTerminal(Operation operation) {
         return !operation.ownerRetained
-                && (operation.status != Status.BLOCKED_RESIDUAL || operation.residualResources.isEmpty());
+                && (operation.status != Status.BLOCKED_RESIDUAL
+                        || operation.residualResources.isEmpty() && operation.cleanupExecutor == null);
     }
 
     /// Records a task-creation failure before an executor exists.

@@ -606,9 +606,13 @@ public final class SwingGameCrashWindow implements AutoCloseable {
                 continue;
             }
             String reason = reasonFormatter.format(new GameCrashAnalysis(List.of(diagnosis), Set.of()));
+            List<String> sources = analysis.evidenceSources().getOrDefault(diagnosis.rule(), List.of());
+            String sourceAndMatch = String.join(", ", sources);
+            String match = boundedEvidence(diagnosis.matcher().group());
+            String evidenceText = sourceAndMatch.isEmpty() ? match : sourceAndMatch + "; " + match;
             String evidence = i18n(
                     "game.crash.repair.evidence",
-                    boundedEvidence(diagnosis.matcher().group()));
+                    boundedEvidence(evidenceText));
             rows.add(createRepairRowOnEdt(
                     resultId,
                     reason,
