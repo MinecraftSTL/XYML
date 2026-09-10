@@ -1028,6 +1028,39 @@ public final class XYMLGameRepository extends DefaultGameRepository {
         });
     }
 
+    /// Backs up and synchronously overwrites the instance-specific game settings file with the loaded settings.
+    ///
+    /// This entry point is intended for resource-aware mutation tasks. It keeps the complete recovery transition under
+    /// the repository's instance-settings locks and does not enqueue the final write in [FileSaver].
+    ///
+    /// @param instanceId the instance ID
+    /// @throws IOException if the recovered settings file cannot be written
+    public void forceOverwriteInstanceGameSettingsSync(GameInstanceID instanceId) throws IOException {
+        withInstanceSettingsLocks(List.of(instanceId), () -> {
+            loadInstanceGameSettings(instanceId);
+
+            InstanceSettingsState state = Objects.requireNonNull(
+                    instanceGameSettings.get(instanceId), "loaded instance settings state");
+            @Nullable GameSettings.Instance setting = state.setting();
+            if (setting == null) {
+                setting = new GameSettings.Instance();
+            }
+
+            boolean installAutoSave = !setting.isSavable();
+            Path file = getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
+            SettingFileUtils.backupInvalidConfig(file);
+            setting.setSchema(GameSettings.Instance.CURRENT_SCHEMA);
+            setting.setSavable(true);
+            setting.setBackupOnNextSave(false);
+            instanceGameSettings.put(instanceId, new InstanceSettingsState(setting, false));
+            saveGameSettingsSyncLocked(instanceId);
+            if (installAutoSave) {
+                setting.changes().subscribe(change -> saveGameSettings(instanceId));
+            }
+            return null;
+        });
+    }
+
     /// Returns the explicit parent preset of the instance, falling back to the default preset.
     public GameSettings.Preset getParentGameSettings(@Nullable GameSettings.Instance instance) {
         @Nullable GameSettingsPresetID parent = instance != null ? instance.parentProperty().getValue() : null;
@@ -1182,23 +1215,31 @@ public final class XYMLGameRepository extends DefaultGameRepository {
     ///
     /// @param instanceId the instance ID
     /// @throws IOException if saving the file fails
-    void saveGameSettingsSync(GameInstanceID instanceId) throws IOException {
+    public void saveGameSettingsSync(GameInstanceID instanceId) throws IOException {
         withInstanceSettingsLocks(List.of(instanceId), () -> {
-            @Nullable InstanceSettingsState state = instanceGameSettings.get(instanceId);
-            if (state == null || state.readOnly() || state.setting() == null) {
-                return null;
-            }
-            GameSettings.Instance setting = state.setting();
-
-            Path file = getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
-            Files.createDirectories(file.getParent());
-            if (setting.isBackupOnNextSave()) {
-                setting.setBackupOnNextSave(false);
-                SettingFileUtils.backupInvalidConfig(file);
-            }
-            FileUtils.saveSafely(file, LauncherSettings.SETTINGS_GSON.toJson(setting));
+            saveGameSettingsSyncLocked(instanceId);
             return null;
         });
+    }
+
+    /// Writes one loaded instance-settings object while its caller already owns the lifecycle and instance locks.
+    ///
+    /// @param instanceId the instance ID
+    /// @throws IOException if the settings file cannot be written
+    private void saveGameSettingsSyncLocked(GameInstanceID instanceId) throws IOException {
+        @Nullable InstanceSettingsState state = instanceGameSettings.get(instanceId);
+        if (state == null || state.readOnly() || state.setting() == null) {
+            return;
+        }
+        GameSettings.Instance setting = state.setting();
+
+        Path file = getInstanceGameSettingsFile(instanceId).toAbsolutePath().normalize();
+        Files.createDirectories(file.getParent());
+        if (setting.isBackupOnNextSave()) {
+            setting.setBackupOnNextSave(false);
+            SettingFileUtils.backupInvalidConfig(file);
+        }
+        FileUtils.saveSafely(file, LauncherSettings.SETTINGS_GSON.toJson(setting));
     }
 
     /// Result of loading an instance-specific game settings file.

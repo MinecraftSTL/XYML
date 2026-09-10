@@ -25,6 +25,9 @@ import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.game.XYMLGameRepository;
 import space.minecraftstl.xyml.setting.GameInstanceIconType;
+import space.minecraftstl.xyml.task.Task;
+import space.minecraftstl.xyml.task.TaskExecutor;
+import space.minecraftstl.xyml.task.TaskListener;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
 
@@ -660,12 +663,12 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
             return;
         }
         if (choice instanceof InstanceIconChoice.BuiltIn builtIn) {
-            submitRepositoryOperation(
-                    () -> localIconStore.selectBuiltIn(builtIn.iconType()),
+            submitRepositoryTask(
+                    localIconStore.selectBuiltInTask(builtIn.iconType(), executor),
                     () -> iconChanged(localIconStore));
         } else if (choice instanceof InstanceIconChoice.Custom custom) {
-            submitRepositoryOperation(
-                    () -> localIconStore.selectCustom(custom.file()),
+            submitRepositoryTask(
+                    localIconStore.selectCustomTask(custom.file(), executor),
                     () -> iconChanged(localIconStore));
         }
     }
@@ -684,9 +687,40 @@ public final class InstanceOverviewPanel extends JPanel implements AutoCloseable
         if (!interactions.confirmDeleteIcon(this, instanceId)) {
             return;
         }
-        submitRepositoryOperation(
-                localIconStore::deleteCustom,
+        submitRepositoryTask(
+                localIconStore.deleteCustomTask(executor),
                 () -> iconChanged(localIconStore));
+    }
+
+    /// Starts a resource-aware repository task and delivers its terminal state on the EDT.
+    ///
+    /// @param task prepared mutation task
+    /// @param success EDT action after successful completion
+    private void submitRepositoryTask(Task<?> task, Runnable success) {
+        EdtDispatcher.requireEventDispatchThread();
+        Objects.requireNonNull(task, "task");
+        Objects.requireNonNull(success, "success");
+        if (!beginOperation()) {
+            return;
+        }
+        TaskExecutor taskExecutor;
+        try {
+            taskExecutor = task.executor();
+            taskExecutor.subscribeTaskListener(new TaskListener() {
+                /// Delivers the resource-aware mutation outcome to the EDT.
+                @Override
+                public void onStop(boolean successful, TaskExecutor completedExecutor) {
+                    @Nullable Throwable failure = successful ? null : completedExecutor.getFailure();
+                    EdtDispatcher.execute(() -> operationCompleted(failure, success));
+                }
+            });
+            taskExecutor.start();
+        } catch (RuntimeException failure) {
+            operationCompleted(failure, success);
+        } catch (Error failure) {
+            operationCompleted(failure, success);
+            throw failure;
+        }
     }
 
     /// Runs one repository mutation outside the EDT and posts its terminal state to the panel.
