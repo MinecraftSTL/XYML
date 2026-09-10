@@ -70,20 +70,14 @@ public enum RemoteAddonCatalogSource {
         return source.getRepoForType(kind.repositoryType()) != null;
     }
 
-    /// Returns only result orderings that the selected provider maps to distinct server behavior.
+    /// Returns every result ordering exposed by the shared catalog control.
     ///
-    /// Modrinth maps name and author to the same relevance index as popularity, so those misleading
-    /// duplicates are omitted while CurseForge exposes every Core sort field directly.
+    /// Modrinth maps name and author to its relevance endpoint internally, but keeping those
+    /// choices visible preserves the complete catalog contract and lets the provider decide how
+    /// the requested ordering is interpreted.
     ///
     /// @return immutable provider-supported result orderings
     public @Unmodifiable List<RemoteAddonRepository.SortType> supportedSortTypes() {
-        if (this == MODRINTH) {
-            return List.of(
-                    RemoteAddonRepository.SortType.POPULARITY,
-                    RemoteAddonRepository.SortType.DATE_CREATED,
-                    RemoteAddonRepository.SortType.LAST_UPDATED,
-                    RemoteAddonRepository.SortType.TOTAL_DOWNLOADS);
-        }
         return List.of(RemoteAddonRepository.SortType.values());
     }
 

@@ -32,6 +32,7 @@ import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
+import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
@@ -52,11 +53,15 @@ import java.awt.Rectangle;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -175,9 +180,9 @@ public final class ModCatalogPanelTest {
         assertNotNull(panelReference.get());
     }
 
-    /// Renders an explicitly disabled Mod row with a visible state badge at a narrow width.
+    /// Renders an explicitly disabled Mod row with a muted surface and its embedded logo.
     @Test
-    public void rendersDisabledModBadgeInPanelRow() throws Exception {
+    public void rendersDisabledModSurfaceAndArchiveIcon() throws Exception {
         ModCatalogItem disabledItem = new ModCatalogItem(
                 "disabled",
                 Path.of("mods", "disabled.jar"),
@@ -189,6 +194,7 @@ public final class ModCatalogPanelTest {
                 "1.21.1",
                 ModLoaderType.FABRIC,
                 "disabled.jar",
+                onePixelLogo(),
                 false);
         RecordingModel model = new RecordingModel(List.of(disabledItem));
         SwingUtilities.invokeAndWait(() -> {
@@ -203,9 +209,22 @@ public final class ModCatalogPanelTest {
                     0,
                     false,
                     false);
-            assertTrue(findLabel(row, "richChoiceListBadge").getText().startsWith("-"));
+            assertTrue(row.isOpaque());
+            assertFalse(list.getBackground().equals(row.getBackground()));
+            assertEquals("", findLabel(row, "richChoiceListBadge").getText());
+            assertEquals(1, findLabel(row, "richChoiceListIcon").getIcon().getIconWidth());
             panel.close();
         });
+    }
+
+    /// Creates a deterministic one-pixel PNG payload for the archive-logo row test.
+    ///
+    /// @return Base64-encoded one-pixel PNG
+    private static String onePixelLogo() throws IOException {
+        BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", output);
+        return Base64.getEncoder().encodeToString(output.toByteArray());
     }
 
     /// Same-key imports prompt for a decision and submit that exact decision with the source batch.

@@ -44,6 +44,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.WeakHashMap;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /// Renders a viewport row with an icon, two clipped metadata lines, and a compact state badge.
 ///
@@ -95,6 +96,9 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
 
     /// Loaded-row tooltip provider.
     private final Function<? super T, String> tooltipProvider;
+
+    /// Predicate identifying loaded rows that should use the muted disabled-row surface.
+    private final Predicate<? super T> disabledProvider;
 
     /// Fixed icon host.
     private final JLabel iconLabel = new JLabel();
@@ -148,12 +152,40 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             Function<? super T, String> badgeTextProvider,
             Function<? super T, Icon> iconProvider,
             Function<? super T, String> tooltipProvider) {
+        this(
+                primaryTextProvider,
+                secondaryTextProvider,
+                badgeTextProvider,
+                iconProvider,
+                tooltipProvider,
+                value -> false);
+    }
+
+    /// Creates a reusable rich row renderer with an optional muted disabled-row surface.
+    ///
+    /// The predicate only affects the unselected background of loaded rows. Selection remains
+    /// controlled by the owning list, so keyboard and mouse selection keeps its normal contrast.
+    ///
+    /// @param primaryTextProvider primary row title provider
+    /// @param secondaryTextProvider secondary description and metadata provider
+    /// @param badgeTextProvider right-aligned state or version provider
+    /// @param iconProvider loaded-row icon provider
+    /// @param tooltipProvider loaded-row tooltip provider
+    /// @param disabledProvider predicate for rows rendered with a muted background
+    public RichChoiceListCellRenderer(
+            Function<? super T, String> primaryTextProvider,
+            Function<? super T, String> secondaryTextProvider,
+            Function<? super T, String> badgeTextProvider,
+            Function<? super T, Icon> iconProvider,
+            Function<? super T, String> tooltipProvider,
+            Predicate<? super T> disabledProvider) {
         super(new BorderLayout(NORMAL_HORIZONTAL_GAP, 0));
         this.primaryTextProvider = Objects.requireNonNull(primaryTextProvider, "primaryTextProvider");
         this.secondaryTextProvider = Objects.requireNonNull(secondaryTextProvider, "secondaryTextProvider");
         this.badgeTextProvider = Objects.requireNonNull(badgeTextProvider, "badgeTextProvider");
         this.iconProvider = Objects.requireNonNull(iconProvider, "iconProvider");
         this.tooltipProvider = Objects.requireNonNull(tooltipProvider, "tooltipProvider");
+        this.disabledProvider = Objects.requireNonNull(disabledProvider, "disabledProvider");
 
         setOpaque(false);
         setPreferredSize(new Dimension(320, ROW_HEIGHT));
@@ -206,7 +238,11 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         selectionIndex = index;
         selected = isSelected;
         focused = cellHasFocus;
-        configurePalette(list, isSelected);
+        @Nullable T value = entry.value();
+        boolean muted = entry.status() == ChoiceLoadStatus.LOADED
+                && value != null
+                && disabledProvider.test(value);
+        configurePalette(list, isSelected, muted);
         Font baseFont = list.getFont();
         primaryLabel.setFont(baseFont.deriveFont(Font.BOLD));
         secondaryLabel.setFont(baseFont.deriveFont(Math.max(9.0F, baseFont.getSize2D() - 1.0F)));
@@ -215,7 +251,6 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
                 baseFont.getSize2D() - 1.0F)));
         setToolTipText(null);
 
-        @Nullable T value = entry.value();
         String badgeText = "";
         if (entry.status() == ChoiceLoadStatus.LOADED && value != null) {
             badgeText = Objects.requireNonNull(badgeTextProvider.apply(value), "badgeTextProvider result");
@@ -304,10 +339,18 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
     ///
     /// @param list owning list
     /// @param isSelected whether the row is selected
-    private void configurePalette(JList<? extends ChoiceListEntry<T>> list, boolean isSelected) {
-        Color background = isSelected ? list.getSelectionBackground() : list.getBackground();
+    /// @param muted whether the loaded row represents a disabled local item
+    private void configurePalette(
+            JList<? extends ChoiceListEntry<T>> list,
+            boolean isSelected,
+            boolean muted) {
+        Color listBackground = list.getBackground();
+        Color background = isSelected ? list.getSelectionBackground() : listBackground;
+        if (muted && !isSelected) {
+            background = blendWithGray(listBackground);
+        }
         Color foreground = isSelected ? list.getSelectionForeground() : list.getForeground();
-        setOpaque(false);
+        setOpaque(muted && !isSelected);
         setBackground(background);
         setForeground(foreground);
         primaryLabel.setForeground(foreground);
@@ -327,6 +370,26 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         setBorder(BorderFactory.createCompoundBorder(
                 cellInsetsBorder,
                 BorderFactory.createEmptyBorder(6, horizontalPadding, 6, horizontalPadding)));
+    }
+
+    /// Blends a neutral gray wash into the list background for disabled local rows.
+    ///
+    /// @param background list background
+    /// @return muted background color with the source alpha preserved
+    private static Color blendWithGray(Color background) {
+        int red = blendChannel(background.getRed(), 128);
+        int green = blendChannel(background.getGreen(), 128);
+        int blue = blendChannel(background.getBlue(), 128);
+        return new Color(red, green, blue, background.getAlpha());
+    }
+
+    /// Applies a restrained 18 percent gray overlay to one color channel.
+    ///
+    /// @param source source channel
+    /// @param overlay neutral gray channel
+    /// @return blended channel
+    private static int blendChannel(int source, int overlay) {
+        return Math.round(source * 0.82F + overlay * 0.18F);
     }
 
     /// Computes the center-label width from the list's current allocated width.

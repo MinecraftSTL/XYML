@@ -381,7 +381,7 @@ final class RemoteModpackCatalogPanelTest {
                 assertEquals(criteriaBand, sortBox.getParent());
                 assertEquals(pageBand, previous.getParent());
                 assertEquals(3, categoryBox.getItemCount());
-                assertEquals(4, sortBox.getItemCount());
+                assertEquals(6, sortBox.getItemCount());
                 categoryBox.setSelectedIndex(2);
                 sortBox.setSelectedItem(RemoteAddonRepository.SortType.TOTAL_DOWNLOADS);
                 search.doClick();

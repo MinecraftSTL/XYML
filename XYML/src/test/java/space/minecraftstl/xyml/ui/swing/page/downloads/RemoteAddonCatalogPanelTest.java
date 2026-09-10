@@ -810,7 +810,7 @@ final class RemoteAddonCatalogPanelTest {
                 assertNotNull(sortBox);
                 assertNotNull(search);
                 assertEquals(3, categoryBox.getItemCount());
-                assertEquals(4, sortBox.getItemCount());
+                assertEquals(6, sortBox.getItemCount());
                 categoryBox.setSelectedIndex(2);
                 sortBox.setSelectedItem(RemoteAddonRepository.SortType.LAST_UPDATED);
                 search.doClick();
