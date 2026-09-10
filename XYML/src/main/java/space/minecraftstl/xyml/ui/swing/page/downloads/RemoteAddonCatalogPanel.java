@@ -34,6 +34,7 @@ import space.minecraftstl.xyml.ui.swing.SwingAnimator;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingUiDispatcher;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressHostPanel;
 import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
@@ -44,22 +45,32 @@ import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JList;
-import javax.swing.JPanel;
 import javax.swing.JOptionPane;
+import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.event.ChangeListener;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import javax.swing.event.ChangeListener;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 import java.awt.Component;
+import java.awt.Cursor;
+import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.IOException;
+import java.net.URI;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -92,6 +103,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
     /// Caller-owned worker executor for searches and selected-project version loading.
     private final Executor workerExecutor;
+
+    /// Lazy provider-icon cache sharing the catalog worker boundary.
+    private final RemoteAddonIconCache iconCache;
 
     /// Explicit visible text bundle for this catalog surface.
     private final RemoteAddonCatalogStrings strings;
@@ -127,6 +141,9 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Selected project-version selector populated only after a loaded row is selected.
     private final JComboBox<RemoteAddon.Version> versionBox = new JComboBox<>();
 
+    /// Renderer that keeps the recommended version visible while the selector is open or closed.
+    private final RemoteAddonVersionRenderer versionRenderer = new RemoteAddonVersionRenderer();
+
     /// Explicit provider first-page command.
     private final JButton searchButton = new JButton();
 
@@ -148,8 +165,31 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// On-demand changelog and exact provider-page command.
     private final JButton changelogButton = new JButton();
 
+    /// Selected-project summary shown above the installation controls.
+    private final JLabel projectSummaryLabel = new JLabel();
+
+    /// Opens the selected project's public upstream page.
+    private final JButton upstreamButton = new JButton();
+
+    /// Label introducing downloadable prerequisite mods for the selected version.
+    private final JLabel prerequisitesLabel = new JLabel();
+
+    /// Wrapped prerequisite search commands for the selected version.
+    private final JPanel prerequisiteButtons = new JPanel();
+
     /// Current catalog, version, selected-target, and task feedback.
     private final JLabel statusLabel = new JLabel();
+
+    /// Action exposed by the current retryable or returnable status, or null for ordinary feedback.
+    private @Nullable Runnable statusAction;
+
+    /// Handles primary clicks on the status text without changing the label-based panel API.
+    private final MouseAdapter statusMouseListener = new MouseAdapter() {
+        @Override
+        public void mouseClicked(MouseEvent event) {
+            activateStatusAction(event);
+        }
+    };
 
     /// Monotonic request identity that makes stale search callbacks harmless.
     private final AtomicLong catalogRequestRevision = new AtomicLong();
@@ -310,13 +350,14 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         super(new MigLayout(
                 "insets 0, fill, wrap 1",
                 "[grow,fill]",
-                "[]8[]8[grow,fill]8[]8[]"));
+                "[]8[]8[grow,fill]8[]8[]8[]"));
         EdtDispatcher.requireEventDispatchThread();
         this.kind = Objects.requireNonNull(kind, "kind");
         this.backend = Objects.requireNonNull(backend, "backend");
         this.installLauncher = Objects.requireNonNull(installLauncher, "installLauncher");
         this.targetResolver = Objects.requireNonNull(targetResolver, "targetResolver");
         this.workerExecutor = Objects.requireNonNull(workerExecutor, "workerExecutor");
+        iconCache = new RemoteAddonIconCache(this.workerExecutor);
         this.strings = Objects.requireNonNull(strings, "strings");
         TaskProgressStrings resolvedTaskProgressStrings = Objects.requireNonNull(
                 taskProgressStrings,
@@ -327,7 +368,14 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         if (resolvedProgressAnimationDuration.isNegative()) {
             throw new IllegalArgumentException("progressAnimationDuration must not be negative");
         }
-        choiceList = new ViewportChoiceList<>(dataSource, RemoteAddonCatalogItem::displayText);
+        choiceList = new ViewportChoiceList<>(
+                dataSource,
+                new RichChoiceListCellRenderer<>(
+                        item -> item.addon().title().isBlank() ? item.addon().slug() : item.addon().title(),
+                        item -> remoteAddonRowDetail(item.addon()),
+                        item -> item.source().displayName(),
+                        item -> iconCache.icon(item.addon().iconUrl(), this::repaint),
+                        item -> item.addon().pageUrl()));
         choiceList.getViewport().addChangeListener(viewportListener);
         progressHost = new TaskProgressHostPanel(
                 resolvedTaskProgressStrings,
@@ -453,6 +501,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     private void configureComponents() {
         setName("remoteAddonCatalog" + kind.name());
         setOpaque(false);
+        setMinimumSize(new Dimension(0, 0));
 
         sourceBox.removeAllItems();
         for (RemoteAddonCatalogSource source : RemoteAddonCatalogSource.values()) {
@@ -466,6 +515,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
 
         JPanel headingBand = new JPanel(new MigLayout("insets 0, fillx", "[grow,fill]", "[]"));
         headingBand.setOpaque(false);
+        headingBand.setMinimumSize(new Dimension(0, 0));
         JLabel heading = new JLabel(strings.pageTitle());
         heading.setName("remoteAddonCatalogTitle");
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 28.0F));
@@ -479,18 +529,20 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         filterBand.setName("remoteAddonFilterBand");
         filterBand.setOpaque(false);
         JPanel searchBand = new JPanel(new MigLayout(
-                "insets 0, fill",
-                "[][150!]12[][grow,fill]8[110!]",
-                "[40!]"));
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[40!]8[40!]8[40!]"));
         searchBand.setName("remoteAddonSearchBand");
         searchBand.setOpaque(false);
+        searchBand.setMinimumSize(new Dimension(0, 0));
 
         JLabel sourceLabel = new JLabel(strings.sourceLabel());
         sourceLabel.setLabelFor(sourceBox);
         searchBand.add(sourceLabel);
         sourceBox.setName("remoteAddonSource");
         sourceBox.addActionListener(event -> sourceChanged());
-        searchBand.add(sourceBox, "growx, h 40!");
+        sourceBox.setMinimumSize(new Dimension(0, 0));
+        searchBand.add(sourceBox, "growx, wmin 0, h 40!");
 
         JLabel searchLabel = new JLabel(strings.searchLabel());
         searchLabel.setLabelFor(searchField);
@@ -498,20 +550,23 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         searchField.setName("remoteAddonSearch");
         SwingTextFields.showClearButton(searchField);
         searchField.getDocument().addDocumentListener(criteriaListener);
-        searchBand.add(searchField, "growx, h 40!");
+        searchField.setMinimumSize(new Dimension(0, 0));
+        searchBand.add(searchField, "growx, wmin 0, h 40!");
 
         searchButton.setName("remoteAddonSearchAction");
         searchButton.setText(strings.searchAction());
         searchButton.addActionListener(event -> submitFirstPageSearch());
-        searchBand.add(searchButton, "grow, h 40!");
+        searchButton.setMinimumSize(new Dimension(0, 0));
+        searchBand.add(searchButton, "span 2, growx, wmin 0, h 40!");
         filterBand.add(searchBand, "growx");
 
         JPanel criteriaBand = new JPanel(new MigLayout(
-                "insets 0, fill",
-                "[][grow,fill]12[][grow,fill]12[][180!]",
-                "[40!]"));
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[40!]8[40!]8[40!]"));
         criteriaBand.setName("remoteAddonCriteriaBand");
         criteriaBand.setOpaque(false);
+        criteriaBand.setMinimumSize(new Dimension(0, 0));
 
         JLabel gameVersionLabel = new JLabel(strings.gameVersionLabel());
         gameVersionLabel.setLabelFor(gameVersionField);
@@ -519,7 +574,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         gameVersionField.setName("remoteAddonGameVersion");
         SwingTextFields.showClearButton(gameVersionField);
         gameVersionField.getDocument().addDocumentListener(criteriaListener);
-        criteriaBand.add(gameVersionField, "growx, h 40!");
+        gameVersionField.setMinimumSize(new Dimension(0, 0));
+        criteriaBand.add(gameVersionField, "growx, wmin 0, h 40!");
 
         RemoteCatalogFilterStrings filterStrings = strings.filterStrings();
         JLabel categoryLabel = new JLabel(filterStrings.categoryLabel());
@@ -531,7 +587,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 filterStrings));
         resetCategoryOptions();
         categoryBox.addActionListener(event -> categoryChanged());
-        criteriaBand.add(categoryBox, "growx, h 40!");
+        categoryBox.setMinimumSize(new Dimension(0, 0));
+        criteriaBand.add(categoryBox, "growx, wmin 0, h 40!");
 
         JLabel sortLabel = new JLabel(filterStrings.sortLabel());
         sortLabel.setLabelFor(sortBox);
@@ -540,33 +597,38 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         sortBox.setRenderer(new RemoteCatalogSortRenderer(filterStrings));
         resetSortOptions();
         sortBox.addActionListener(event -> sortChanged());
-        criteriaBand.add(sortBox, "growx, h 40!");
+        sortBox.setMinimumSize(new Dimension(0, 0));
+        criteriaBand.add(sortBox, "growx, wmin 0, h 40!");
         filterBand.add(criteriaBand, "growx");
 
         JPanel pageBand = new JPanel(new MigLayout(
-                "insets 0, fill",
-                "[grow,fill][120!]8[120!]8[120!]8[120!]",
+                "insets 0, fillx",
+                "[grow,fill][120,shrink 100]8[120,shrink 100]8[120,shrink 100]8[120,shrink 100]",
                 "[40!]"));
         pageBand.setName("remoteAddonPageBand");
         pageBand.setOpaque(false);
-        pageBand.add(new JLabel(), "growx");
+        pageBand.setMinimumSize(new Dimension(0, 0));
 
         firstPageButton.setName("remoteAddonFirstPage");
         firstPageButton.setText(i18n("search.first_page"));
         firstPageButton.addActionListener(event -> submitBoundaryPage(false));
-        pageBand.add(firstPageButton, "grow, h 40!");
+        firstPageButton.setMinimumSize(new Dimension(0, 0));
+        pageBand.add(firstPageButton, "grow, wmin 0, h 40!");
         previousPageButton.setName("remoteAddonPreviousPage");
         previousPageButton.setText(strings.previousPageAction());
         previousPageButton.addActionListener(event -> submitRelativePage(-1));
-        pageBand.add(previousPageButton, "grow, h 40!");
+        previousPageButton.setMinimumSize(new Dimension(0, 0));
+        pageBand.add(previousPageButton, "grow, wmin 0, h 40!");
         nextPageButton.setName("remoteAddonNextPage");
         nextPageButton.setText(strings.nextPageAction());
         nextPageButton.addActionListener(event -> submitRelativePage(1));
-        pageBand.add(nextPageButton, "grow, h 40!");
+        nextPageButton.setMinimumSize(new Dimension(0, 0));
+        pageBand.add(nextPageButton, "grow, wmin 0, h 40!");
         lastPageButton.setName("remoteAddonLastPage");
         lastPageButton.setText(i18n("search.last_page"));
         lastPageButton.addActionListener(event -> submitBoundaryPage(true));
-        pageBand.add(lastPageButton, "grow, h 40!");
+        lastPageButton.setMinimumSize(new Dimension(0, 0));
+        pageBand.add(lastPageButton, "grow, wmin 0, h 40!");
         filterBand.add(pageBand, "growx");
         add(filterBand, "growx");
 
@@ -585,32 +647,281 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         choiceList.getChoiceModel().addListDataListener(listDataListener);
         add(choiceList, "grow");
 
+        configureProjectDetails();
+        add(createProjectDetailsBand(), "growx, wmin 0");
+
         JPanel installBand = new JPanel(new MigLayout(
-                "insets 0, fillx",
-                "[][grow,fill][140!][220!]",
-                "[40!]"));
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[40!]8[40!]"));
         installBand.setOpaque(false);
+        installBand.setMinimumSize(new Dimension(0, 0));
         JLabel versionLabel = new JLabel(strings.versionLabel());
         versionLabel.setLabelFor(versionBox);
         installBand.add(versionLabel);
         versionBox.setName("remoteAddonVersion");
-        versionBox.setRenderer(new RemoteAddonVersionRenderer());
-        versionBox.addActionListener(event -> updateControls());
-        installBand.add(versionBox, "growx, h 40!");
+        versionBox.setRenderer(versionRenderer);
+        versionBox.addActionListener(event -> versionChanged());
+        versionBox.setMinimumSize(new Dimension(0, 0));
+        installBand.add(versionBox, "growx, wmin 0, h 40!");
         changelogButton.setName("remoteAddonChangelog");
         changelogButton.setText(i18n("update.changelog"));
         changelogButton.addActionListener(event -> showSelectedChangelog());
-        installBand.add(changelogButton, "grow, h 40!");
+        changelogButton.setMinimumSize(new Dimension(0, 0));
+        installBand.add(changelogButton, "grow, wmin 0, h 40!");
         installButton.setName("remoteAddonInstall");
         installButton.setText(strings.installAction());
         installButton.addActionListener(event -> beginInstall());
-        installBand.add(installButton, "grow, h 40!");
+        installButton.setMinimumSize(new Dimension(0, 0));
+        installBand.add(installButton, "grow, wmin 0, h 40!");
         add(installBand, "growx");
 
         statusLabel.setName("remoteAddonStatus");
+        statusLabel.addMouseListener(statusMouseListener);
         add(statusLabel, "growx, h 24!");
         progressHost.setName("remoteAddonInstallProgress");
         add(progressHost, "growx");
+    }
+
+    /// Formats the description, author, and provider tags already present in one remote result.
+    ///
+    /// @param addon loaded remote project metadata
+    /// @return compact metadata line suitable for a narrow result row
+    private static String remoteAddonRowDetail(RemoteAddon addon) {
+        RemoteAddon selected = Objects.requireNonNull(addon, "addon");
+        List<String> values = new ArrayList<>();
+        String description = selected.description().lines()
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .findFirst()
+                .orElse("");
+        if (!description.isBlank()) {
+            values.add(description);
+        }
+        if (!selected.author().isBlank()) {
+            values.add(selected.author());
+        }
+        if (!selected.categories().isEmpty()) {
+            values.add(String.join(", ", selected.categories()));
+        }
+        if (values.isEmpty()) {
+            values.add(selected.slug());
+        }
+        return String.join(" | ", values);
+    }
+
+    /// Configures the selected-project summary and prerequisite command surface.
+    private void configureProjectDetails() {
+        projectSummaryLabel.setName("remoteAddonProjectSummary");
+        projectSummaryLabel.setMinimumSize(new Dimension(0, 0));
+        projectSummaryLabel.setToolTipText(null);
+
+        upstreamButton.setName("remoteAddonUpstream");
+        upstreamButton.setText(i18n("swing.download.upstream"));
+        upstreamButton.setMinimumSize(new Dimension(0, 0));
+        upstreamButton.setVisible(false);
+        upstreamButton.addActionListener(event -> openUpstreamPage());
+
+        prerequisitesLabel.setName("remoteAddonPrerequisites");
+        prerequisitesLabel.setText(i18n("swing.download.prerequisites"));
+        prerequisitesLabel.setMinimumSize(new Dimension(0, 0));
+        prerequisitesLabel.setVisible(false);
+
+        prerequisiteButtons.setName("remoteAddonDependencyButtons");
+        prerequisiteButtons.setOpaque(false);
+        prerequisiteButtons.setMinimumSize(new Dimension(0, 0));
+        prerequisiteButtons.setVisible(false);
+        prerequisiteButtons.setLayout(new MigLayout(
+                "insets 0, fillx, wrap 1",
+                "[grow,fill]",
+                "[]"));
+    }
+
+    /// Creates the unframed project-details band shown between results and install controls.
+    ///
+    /// @return responsive project-details container
+    private JPanel createProjectDetailsBand() {
+        JPanel details = new JPanel(new MigLayout(
+                "insets 0, fillx, wrap 2",
+                "[grow,fill][grow,fill]",
+                "[]6[]"));
+        details.setName("remoteAddonProjectDetails");
+        details.setOpaque(false);
+        details.setMinimumSize(new Dimension(0, 0));
+        details.add(projectSummaryLabel, "growx, wmin 0");
+        details.add(upstreamButton, "growx, wmin 0, h 32!");
+        details.add(prerequisitesLabel, "growx, wmin 0");
+        details.add(prerequisiteButtons, "growx, wmin 0");
+        return details;
+    }
+
+    /// Updates project metadata, upstream availability, and version-specific prerequisite buttons.
+    ///
+    /// @param item selected remote project, or null when no row is selected
+    /// @param version selected installable version, or null while versions are loading
+    private void updateProjectDetails(
+            @Nullable RemoteAddonCatalogItem item,
+            @Nullable RemoteAddon.Version version) {
+        if (item == null) {
+            projectSummaryLabel.setText("");
+            projectSummaryLabel.setToolTipText(null);
+            upstreamButton.putClientProperty("remoteAddonUpstreamUri", null);
+            upstreamButton.setToolTipText(null);
+            upstreamButton.setVisible(false);
+            prerequisitesLabel.setVisible(false);
+            prerequisiteButtons.setVisible(false);
+            prerequisiteButtons.removeAll();
+            return;
+        }
+
+        RemoteAddon addon = item.addon();
+        List<String> summary = new ArrayList<>();
+        String title = addon.title().isBlank() ? addon.slug() : addon.title();
+        if (!title.isBlank()) {
+            summary.add(title);
+        }
+        if (!addon.author().isBlank()) {
+            summary.add(addon.author());
+        }
+        String description = firstNonBlankLine(addon.description());
+        if (!description.isBlank()) {
+            summary.add(description);
+        }
+        if (version != null) {
+            summary.add(RemoteAddonVersionOrdering.gameVersionText(version, gameVersionField.getText())
+                    + " | " + version.version());
+        }
+        projectSummaryLabel.setText(String.join(" | ", summary));
+        projectSummaryLabel.setToolTipText(addon.description().isBlank() ? null : addon.description());
+
+        @Nullable URI upstream = httpUri(addon.pageUrl());
+        upstreamButton.putClientProperty("remoteAddonUpstreamUri", upstream);
+        upstreamButton.setToolTipText(upstream == null ? null : upstream.toString());
+        upstreamButton.setVisible(upstream != null);
+        upstreamButton.setEnabled(upstream != null && !closed && activeExecutor == null);
+
+        prerequisiteButtons.removeAll();
+        if (kind == RemoteAddonCatalogKind.MOD && version != null) {
+            addDependencyButtons(version);
+        }
+        boolean hasDependencies = prerequisiteButtons.getComponentCount() > 0;
+        prerequisitesLabel.setVisible(hasDependencies);
+        prerequisiteButtons.setVisible(hasDependencies);
+        prerequisiteButtons.revalidate();
+        prerequisiteButtons.repaint();
+    }
+
+    /// Adds one button for each downloadable prerequisite in the selected version.
+    ///
+    /// Embedded, incompatible, and broken entries are intentionally omitted because they cannot
+    /// be acquired through the mod search route.
+    ///
+    /// @param version selected provider version
+    private void addDependencyButtons(RemoteAddon.Version version) {
+        Set<RemoteAddon.DependencyType> downloadable = EnumSet.of(
+                RemoteAddon.DependencyType.REQUIRED,
+                RemoteAddon.DependencyType.OPTIONAL,
+                RemoteAddon.DependencyType.TOOL);
+        Set<String> identifiers = new LinkedHashSet<>();
+        for (RemoteAddon.Dependency dependency : version.dependencies()) {
+            RemoteAddon.DependencyType type = dependency.getType();
+            @Nullable String rawId = dependency.getId();
+            if (!downloadable.contains(type) || rawId == null || rawId.isBlank()) {
+                continue;
+            }
+            String id = rawId.trim();
+            if (!identifiers.add(id)) {
+                continue;
+            }
+            JButton dependencyButton = new JButton(id);
+            dependencyButton.setName("remoteAddonDependency_" + dependencyComponentName(id));
+            dependencyButton.setToolTipText(i18n(
+                    "addon.dependency." + type.name().toLowerCase(Locale.ROOT)));
+            dependencyButton.setMinimumSize(new Dimension(0, 32));
+            dependencyButton.addActionListener(event -> openDependencySearch(dependency, id));
+            prerequisiteButtons.add(dependencyButton, "growx, wmin 0, h 32!");
+        }
+    }
+
+    /// Selects a dependency's provider when available, then opens its Mod search route.
+    ///
+    /// @param dependency provider dependency represented by the command
+    /// @param identifier non-blank provider project identifier
+    private void openDependencySearch(RemoteAddon.Dependency dependency, String identifier) {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable RemoteAddon.Source dependencySource = dependency.getSource();
+        if (dependencySource != null) {
+            for (RemoteAddonCatalogSource candidate : RemoteAddonCatalogSource.values()) {
+                if (candidate.coreSource() == dependencySource
+                        && candidate.supports(RemoteAddonCatalogKind.MOD)) {
+                    sourceBox.setSelectedItem(candidate);
+                    break;
+                }
+            }
+        }
+        openSearch(identifier);
+    }
+
+    /// Opens a selected project's upstream page in the platform browser.
+    private void openUpstreamPage() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable Object property = upstreamButton.getClientProperty("remoteAddonUpstreamUri");
+        if (!(property instanceof URI uri) || closed) {
+            return;
+        }
+        if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+            return;
+        }
+        try {
+            Desktop.getDesktop().browse(uri);
+        } catch (IOException | RuntimeException browseFailure) {
+            LOG.warning("Failed to open remote add-on upstream page", browseFailure);
+        }
+    }
+
+    /// Updates project details after the user changes the selected installable version.
+    private void versionChanged() {
+        EdtDispatcher.requireEventDispatchThread();
+        @Nullable RemoteAddon.Version version = (RemoteAddon.Version) versionBox.getSelectedItem();
+        updateProjectDetails(selectedItem, version);
+        updateControls();
+    }
+
+    /// Returns a validated HTTP(S) URI for an upstream page.
+    ///
+    /// @param rawUrl provider page value
+    /// @return HTTP(S) URI, or null when the provider value is malformed or unsafe
+    private static @Nullable URI httpUri(String rawUrl) {
+        try {
+            URI uri = URI.create(Objects.requireNonNull(rawUrl, "rawUrl").trim());
+            String scheme = uri.getScheme();
+            return scheme != null && (scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))
+                    ? uri
+                    : null;
+        } catch (IllegalArgumentException failure) {
+            return null;
+        }
+    }
+
+    /// Converts a provider dependency id into a stable Swing component name fragment.
+    ///
+    /// @param id dependency identifier
+    /// @return non-blank name-safe fragment
+    private static String dependencyComponentName(String id) {
+        String normalized = Objects.requireNonNull(id, "id").replaceAll("[^A-Za-z0-9_.-]", "_");
+        return normalized.isBlank() ? "dependency" : normalized;
+    }
+
+    /// Returns the first meaningful line from optional multiline metadata.
+    ///
+    /// @param text complete description
+    /// @return trimmed first line, or an empty string
+    private static String firstNonBlankLine(String text) {
+        return Objects.requireNonNull(text, "text").lines()
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .findFirst()
+                .orElse("");
     }
 
     /// Invalidates source-specific categories, clears stale results, and loads the new tree when visible.
@@ -895,7 +1206,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                 return;
             }
             catalogLoading = false;
-            setStatus(strings.searchFailedStatus());
+            setStatus(strings.searchFailedStatus(), this::retryCatalogSearch);
             updateControls();
             schedulePendingSearchCheck();
         });
@@ -913,6 +1224,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         }
         long requestRevision = selectionRequestRevision.incrementAndGet();
         selectedItem = item;
+        updateProjectDetails(item, null);
         versionLoading = true;
         versionBox.removeAllItems();
         setStatus(strings.loadingVersionsStatus());
@@ -923,6 +1235,64 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             LOG.warning("Failed to schedule remote add-on version loading", schedulingFailure);
             applyVersionFailure(item, requestRevision);
         }
+    }
+
+    /// Retries the failed first-page search using the current criteria and measured viewport.
+    private void retryCatalogSearch() {
+        EdtDispatcher.requireEventDispatchThread();
+        submitFirstPageSearch();
+    }
+
+    /// Retries loading versions for the currently selected project.
+    private void retrySelectedVersions() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || catalogLoading || activeExecutor != null || versionLoading) {
+            return;
+        }
+        @Nullable RemoteAddonCatalogItem item = selectedItem;
+        if (item == null) {
+            return;
+        }
+        long requestRevision = selectionRequestRevision.incrementAndGet();
+        versionLoading = true;
+        versionBox.removeAllItems();
+        setStatus(strings.loadingVersionsStatus());
+        updateControls();
+        try {
+            workerExecutor.execute(() -> loadSelectedVersions(item, requestRevision));
+        } catch (RuntimeException schedulingFailure) {
+            LOG.warning("Failed to schedule remote add-on version loading retry", schedulingFailure);
+            applyVersionFailure(item, requestRevision);
+        }
+    }
+
+    /// Returns from an empty selected-project version list to the loaded project results.
+    private void returnFromEmptyVersions() {
+        EdtDispatcher.requireEventDispatchThread();
+        if (closed || catalogLoading || activeExecutor != null) {
+            return;
+        }
+        selectionRequestRevision.incrementAndGet();
+        clearSelectedProject();
+        setStatus("");
+        updateControls();
+    }
+
+    /// Dispatches one primary status-label click to its current retry or return action.
+    ///
+    /// @param event mouse event delivered by the status label
+    private void activateStatusAction(MouseEvent event) {
+        EdtDispatcher.requireEventDispatchThread();
+        if (event.getClickCount() != 1 || event.getButton() != MouseEvent.BUTTON1) {
+            return;
+        }
+        @Nullable Runnable action = statusAction;
+        if (action == null || closed) {
+            return;
+        }
+        statusAction = null;
+        statusLabel.setCursor(Cursor.getDefaultCursor());
+        action.run();
     }
 
     /// Loads a selected project's available versions away from the EDT.
@@ -953,14 +1323,27 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             return;
         }
         versionLoading = false;
-        for (RemoteAddon.Version version : List.copyOf(Objects.requireNonNull(versions, "versions"))) {
+        @Unmodifiable List<RemoteAddon.Version> orderedVersions = RemoteAddonVersionOrdering.order(
+                List.copyOf(Objects.requireNonNull(versions, "versions")),
+                gameVersionField.getText());
+        @Nullable RemoteAddon.Version recommendedVersion = RemoteAddonVersionOrdering.recommended(
+                orderedVersions,
+                gameVersionField.getText());
+        versionRenderer.setSelectionContext(recommendedVersion, gameVersionField.getText());
+        for (RemoteAddon.Version version : orderedVersions) {
             versionBox.addItem(version);
         }
         if (versionBox.getItemCount() > 0) {
-            versionBox.setSelectedIndex(0);
+            if (recommendedVersion == null) {
+                versionBox.setSelectedIndex(0);
+            } else {
+                versionBox.setSelectedItem(recommendedVersion);
+            }
+            updateProjectDetails(item, (RemoteAddon.Version) versionBox.getSelectedItem());
             setStatus("");
         } else {
-            setStatus(strings.noVersionsStatus());
+            updateProjectDetails(item, null);
+            setStatus(strings.noVersionsStatus(), this::returnFromEmptyVersions);
         }
         updateControls();
     }
@@ -1029,7 +1412,8 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             }
             versionLoading = false;
             versionBox.removeAllItems();
-            setStatus(strings.versionLoadFailedStatus());
+            updateProjectDetails(item, null);
+            setStatus(strings.versionLoadFailedStatus(), this::retrySelectedVersions);
             updateControls();
         });
     }
@@ -1108,6 +1492,7 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
             unsubscribe(activeCompletionSubscription);
             activeCompletionSubscription = null;
             activeExecutor = null;
+            releaseCompletedPresentation();
             setStatus(succeeded ? strings.installSucceededStatus() : strings.installFailedStatus());
             updateControls();
             schedulePendingSearchCheck();
@@ -1169,9 +1554,11 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         EdtDispatcher.requireEventDispatchThread();
         choiceList.getList().clearSelection();
         selectedItem = null;
+        updateProjectDetails(null, null);
         versionLoading = false;
         changelogLoading = false;
         versionBox.removeAllItems();
+        versionRenderer.setSelectionContext(null, "");
     }
 
     /// Resolves the current selected target only after an explicit acquisition command.
@@ -1246,7 +1633,15 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         nextPageButton.setEnabled(pageButtonsEnabled && page.pageOffset() + 1 < page.totalPages());
         lastPageButton.setEnabled(pageButtonsEnabled && page.pageOffset() + 1 < page.totalPages());
 
-        versionBox.setEnabled(inputsEnabled && selectedItem != null && !versionLoading && versionBox.getItemCount() > 0);
+        versionBox.setEnabled(inputsEnabled
+                && selectedItem != null
+                && !versionLoading
+                && versionBox.getItemCount() > 0);
+        upstreamButton.setEnabled(inputsEnabled && upstreamButton.isVisible()
+                && upstreamButton.getClientProperty("remoteAddonUpstreamUri") instanceof URI);
+        for (Component component : prerequisiteButtons.getComponents()) {
+            component.setEnabled(inputsEnabled);
+        }
         changelogButton.setEnabled(inputsEnabled
                 && selectedItem != null
                 && !versionLoading
@@ -1277,14 +1672,36 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// @param status non-null current feedback text, or empty to clear it
     private void setStatus(String status) {
         EdtDispatcher.requireEventDispatchThread();
+        setStatus(status, null);
+    }
+
+    /// Updates visible feedback and installs the optional primary-click action for that state.
+    ///
+    /// @param status non-null current feedback text, or empty to clear it
+    /// @param action retry or return action, or null for ordinary feedback
+    private void setStatus(String status, @Nullable Runnable action) {
+        EdtDispatcher.requireEventDispatchThread();
         String text = Objects.requireNonNull(status, "status");
+        statusAction = action;
+        statusLabel.setCursor(action == null
+                ? Cursor.getDefaultCursor()
+                : Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         statusLabel.setText(text);
         statusLabel.setToolTipText(text.isBlank() ? null : text);
+    }
+
+    /// Clears status interaction when the panel releases its Swing resources.
+    private void clearStatusAction() {
+        statusAction = null;
+        statusLabel.removeMouseListener(statusMouseListener);
+        statusLabel.setCursor(Cursor.getDefaultCursor());
     }
 
     /// Cancels live task state and releases all owned listeners and child presentation resources on the EDT.
     private void closeOnEventDispatchThread() {
         EdtDispatcher.requireEventDispatchThread();
+        clearStatusAction();
+        iconCache.close();
         pendingSearchText = null;
         pendingSearchCheckQueued = false;
         @Nullable TaskExecutor executor = activeExecutor;
@@ -1323,6 +1740,11 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
         nextPageButton.setEnabled(false);
         lastPageButton.setEnabled(false);
         installButton.setEnabled(false);
+        upstreamButton.setEnabled(false);
+        upstreamButton.setVisible(false);
+        prerequisitesLabel.setVisible(false);
+        prerequisiteButtons.setVisible(false);
+        prerequisiteButtons.removeAll();
     }
 
     /// Removes one optional task terminal-listener registration.
@@ -1418,6 +1840,25 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
     /// Renders selected Core versions as concise name and identifier text.
     @NotNullByDefault
     private static final class RemoteAddonVersionRenderer extends DefaultListCellRenderer {
+        /// Version selected as the current compatibility recommendation, or null before loading.
+        private @Nullable RemoteAddon.Version recommendedVersion;
+
+        /// Game-version search context placed first in every compatible selector row.
+        private String requestedGameVersion = "";
+
+        /// Updates recommendation and game-version context without replacing the combo-box model.
+        ///
+        /// @param version recommended version, or null when no project is selected
+        /// @param requestedGameVersion optional exact game-version search context
+        private void setSelectionContext(
+                @Nullable RemoteAddon.Version version,
+                String requestedGameVersion) {
+            recommendedVersion = version;
+            this.requestedGameVersion = Objects.requireNonNull(
+                    requestedGameVersion,
+                    "requestedGameVersion").trim();
+        }
+
         /// Renders one provider version while preserving an empty selector display before selection.
         ///
         /// @param list owning selector list
@@ -1440,16 +1881,13 @@ public final class RemoteAddonCatalogPanel extends JPanel implements AutoCloseab
                     isSelected,
                     cellHasFocus);
             setIcon(null);
+            setText("");
             if (value instanceof RemoteAddon.Version version) {
-                String displayName = version.name().isBlank() ? version.version() : version.name();
-                @Nullable RemoteAddon.VersionType versionType = version.versionType();
-                if (versionType == null) {
-                    setText(displayName + " (" + version.version() + ")");
-                } else {
-                    setText(displayName + " (" + version.version() + ") - "
-                            + RemoteVersionChannelPresentation.label(versionType));
-                    setIcon(RemoteVersionChannelPresentation.icon(versionType));
-                }
+                setText(RemoteAddonVersionOrdering.displayText(
+                        version,
+                        Objects.equals(version, recommendedVersion),
+                        requestedGameVersion));
+                setIcon(RemoteVersionChannelPresentation.icon(version.versionType()));
             }
             return component;
         }

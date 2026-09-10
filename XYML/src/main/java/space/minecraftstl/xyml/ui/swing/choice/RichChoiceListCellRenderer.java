@@ -235,7 +235,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             badgeLabel.setPreferredSize(new Dimension(badgeWidth, ROW_HEIGHT - 12));
             badgeLabel.setText(clip(badgeText, badgeLabel.getFontMetrics(
                     badgeLabel.getFont()), badgeWidth));
-            iconLabel.setIcon(iconFor(value));
+            iconLabel.setIcon(fitIcon(iconFor(value), iconSlotSize));
             String tooltip = Objects.requireNonNull(tooltipProvider.apply(value), "tooltipProvider result");
             setToolTipText(tooltip.isBlank() ? null : tooltip);
             primaryLabel.getAccessibleContext().setAccessibleName(primaryText);
@@ -249,7 +249,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             secondaryLabel.setText(" ");
             badgeLabel.setText("");
             badgeLabel.setPreferredSize(new Dimension(0, ROW_HEIGHT - 12));
-            iconLabel.setIcon(ERROR_ICON);
+            iconLabel.setIcon(fitIcon(ERROR_ICON, iconSlotSize));
             @Nullable Throwable failure = entry.failure();
             setToolTipText(failure == null ? null : failure.getMessage());
             primaryLabel.getAccessibleContext().setAccessibleName("!");
@@ -263,7 +263,7 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             secondaryLabel.setText(" ");
             badgeLabel.setText("");
             badgeLabel.setPreferredSize(new Dimension(0, ROW_HEIGHT - 12));
-            iconLabel.setIcon(LOADING_ICON);
+            iconLabel.setIcon(fitIcon(LOADING_ICON, iconSlotSize));
             setToolTipText(null);
             primaryLabel.getAccessibleContext().setAccessibleName("...");
             secondaryLabel.getAccessibleContext().setAccessibleName(null);
@@ -321,7 +321,9 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             cellInsetsBorder = BorderFactory.createEmptyBorder();
             availableWidth = width;
         }
-        int horizontalPadding = Math.min(10, Math.max(0, availableWidth / 4));
+        int horizontalPadding = availableWidth < 96
+                ? Math.min(2, Math.max(0, availableWidth / 8))
+                : Math.min(10, Math.max(0, availableWidth / 4));
         setBorder(BorderFactory.createCompoundBorder(
                 cellInsetsBorder,
                 BorderFactory.createEmptyBorder(6, horizontalPadding, 6, horizontalPadding)));
@@ -420,6 +422,21 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
         return icon;
     }
 
+    /// Fits a provider icon into the negotiated slot without allowing its paint operation to overlap labels.
+    ///
+    /// @param source source icon with a stable positive size
+    /// @param slotSize current square icon slot size
+    /// @return source icon or a bounded scaling wrapper
+    private static Icon fitIcon(Icon source, int slotSize) {
+        Icon selected = Objects.requireNonNull(source, "source");
+        int targetSize = Math.max(0, slotSize);
+        if (targetSize == 0
+                || (selected.getIconWidth() <= targetSize && selected.getIconHeight() <= targetSize)) {
+            return selected;
+        }
+        return new ScaledIcon(selected, targetSize);
+    }
+
     /// Clips text to a measured pixel budget without allowing a label to widen the list.
     ///
     /// @param text source text
@@ -449,6 +466,60 @@ public final class RichChoiceListCellRenderer<T extends Object> extends JPanel
             fittingCharacters++;
         }
         return fittingCharacters == 0 ? "" : value.substring(0, fittingCharacters);
+    }
+
+    /// Delegates one icon paint through a fixed square scale negotiated by the row geometry.
+    @NotNullByDefault
+    private static final class ScaledIcon implements Icon {
+        /// Original icon retained without mutating provider-owned state.
+        private final Icon source;
+
+        /// Target square edge in logical pixels.
+        private final int size;
+
+        /// Creates a bounded icon wrapper.
+        ///
+        /// @param source source icon
+        /// @param size target square edge
+        private ScaledIcon(Icon source, int size) {
+            this.source = Objects.requireNonNull(source, "source");
+            this.size = Math.max(0, size);
+        }
+
+        /// Paints the source icon in the negotiated square without changing the caller graphics state.
+        ///
+        /// @param component owning Swing component
+        /// @param graphics destination graphics
+        /// @param x horizontal origin
+        /// @param y vertical origin
+        @Override
+        public void paintIcon(@Nullable Component component, Graphics graphics, int x, int y) {
+            int sourceWidth = source.getIconWidth();
+            int sourceHeight = source.getIconHeight();
+            if (size <= 0 || sourceWidth <= 0 || sourceHeight <= 0) {
+                return;
+            }
+            Graphics2D copy = (Graphics2D) graphics.create();
+            try {
+                copy.translate(x, y);
+                copy.scale((double) size / sourceWidth, (double) size / sourceHeight);
+                source.paintIcon(component, copy, 0, 0);
+            } finally {
+                copy.dispose();
+            }
+        }
+
+        /// Returns the negotiated square width.
+        @Override
+        public int getIconWidth() {
+            return size;
+        }
+
+        /// Returns the negotiated square height.
+        @Override
+        public int getIconHeight() {
+            return size;
+        }
     }
 
     /// Fixed-size placeholder icon used while loading and after a failed range request.

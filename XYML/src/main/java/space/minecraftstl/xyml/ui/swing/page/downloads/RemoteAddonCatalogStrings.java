@@ -191,7 +191,7 @@ public record RemoteAddonCatalogStrings(
                 i18n("wizard.prev"),
                 i18n("wizard.next"),
                 i18n("button.install"),
-                i18n("swing.download.no_versions"),
+                i18n("swing.download.initial"),
                 i18n("message.doing"),
                 i18n("message.doing"),
                 i18n("swing.download.no_versions"),

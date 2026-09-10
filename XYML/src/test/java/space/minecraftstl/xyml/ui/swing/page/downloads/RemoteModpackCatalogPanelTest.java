@@ -35,12 +35,14 @@ import space.minecraftstl.xyml.ui.swing.task.TaskProgressStrings;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
@@ -50,6 +52,7 @@ import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
@@ -98,6 +101,9 @@ final class RemoteModpackCatalogPanelTest {
                 assertFalse(list.isOpaque());
                 assertFalse(unselectedOpaque);
                 assertFalse(selectedOpaque);
+                JLabel status = findNamed(panel, "remoteModpackStatus", JLabel.class);
+                assertNotNull(status);
+                assertEquals(RemoteModpackCatalogStrings.english().initialStatus(), status.getText());
             });
         } finally {
             @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
@@ -178,11 +184,96 @@ final class RemoteModpackCatalogPanelTest {
             });
             drainEdt();
 
+            awaitInstallCompletion(panel);
+            EdtDispatcher.executeAndWait(() -> {
+                JComponent progressHost = findNamed(panel, "remoteModpackInstallProgress", JComponent.class);
+                JTextField searchField = findNamed(panel, "remoteModpackSearch", JTextField.class);
+                JButton search = findNamed(panel, "remoteModpackSearchAction", JButton.class);
+                assertNotNull(progressHost);
+                assertNotNull(searchField);
+                assertNotNull(search);
+                assertEquals(0, progressHost.getComponentCount());
+                searchField.setText("fixture-pack-again");
+                prepareViewport(panel.choiceList());
+                assertTrue(search.isEnabled());
+                search.doClick();
+            });
+            awaitBackgroundWork(executor);
+            EdtDispatcher.executeAndWait(() -> assertEquals(
+                    1,
+                    panel.choiceList().getList().getModel().getSize()));
+
             RemoteModpackInstallRequest request = installLauncher.request.get();
             assertNotNull(request);
             assertEquals(addon, request.item().addon());
             assertEquals(version, request.version());
             assertEquals(new GameInstanceID("fixture-pack"), request.instanceId());
+        } finally {
+            @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
+            if (panel != null) {
+                panel.close();
+            }
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /// Retries failed catalog and selected-version requests when their status text is clicked.
+    @Test
+    void retriesFailedCatalogAndVersionLoadsFromStatusLabel() throws Exception {
+        RecordingBackend backend = new RecordingBackend(fixtureAddon(), fixtureVersion());
+        backend.failNextSearchRequest();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<@Nullable RemoteModpackCatalogPanel> panelReference = new AtomicReference<>();
+        try {
+            EdtDispatcher.executeAndWait(() -> panelReference.set(new RemoteModpackCatalogPanel(
+                    backend,
+                    request -> Task.completed(null),
+                    executor,
+                    RemoteModpackCatalogStrings.english(),
+                    TaskProgressStrings.english(),
+                    null,
+                    Duration.ZERO)));
+            RemoteModpackCatalogPanel panel = Objects.requireNonNull(panelReference.get());
+
+            EdtDispatcher.executeAndWait(() -> {
+                prepareViewport(panel.choiceList());
+                JButton search = findNamed(panel, "remoteModpackSearchAction", JButton.class);
+                assertNotNull(search);
+                search.doClick();
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JLabel status = findNamed(panel, "remoteModpackStatus", JLabel.class);
+                assertNotNull(status);
+                assertEquals(RemoteModpackCatalogStrings.english().searchFailedStatus(), status.getText());
+                status.dispatchEvent(primaryClick(status));
+            });
+            awaitBackgroundWork(executor);
+
+            backend.failNextVersionRequest();
+            EdtDispatcher.executeAndWait(() -> {
+                prepareViewport(panel.choiceList());
+                panel.choiceList().getList().setSelectedIndex(0);
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JLabel status = findNamed(panel, "remoteModpackStatus", JLabel.class);
+                assertNotNull(status);
+                assertEquals(RemoteModpackCatalogStrings.english().versionLoadFailedStatus(), status.getText());
+                status.dispatchEvent(primaryClick(status));
+            });
+            awaitBackgroundWork(executor);
+
+            EdtDispatcher.executeAndWait(() -> {
+                JComboBox<?> versionBox = findNamed(panel, "remoteModpackVersion", JComboBox.class);
+                assertNotNull(versionBox);
+                assertEquals(2, backend.searchRequests.get());
+                assertEquals(2, backend.versionRequests.get());
+                assertEquals(1, versionBox.getItemCount());
+            });
         } finally {
             @Nullable RemoteModpackCatalogPanel panel = panelReference.get();
             if (panel != null) {
@@ -418,9 +509,45 @@ final class RemoteModpackCatalogPanelTest {
         drainEdt();
     }
 
+    /// Waits until the completed installation callback has re-enabled catalog controls.
+    ///
+    /// @param panel catalog panel whose installation must reach a terminal callback
+    /// @throws InterruptedException when the test thread is interrupted while polling
+    private static void awaitInstallCompletion(RemoteModpackCatalogPanel panel) throws InterruptedException {
+        for (int attempt = 0; attempt < 500; attempt++) {
+            AtomicBoolean enabled = new AtomicBoolean();
+            EdtDispatcher.executeAndWait(() -> {
+                @Nullable JButton install = findNamed(panel, "remoteModpackInstall", JButton.class);
+                enabled.set(install != null && install.isEnabled());
+            });
+            if (enabled.get()) {
+                return;
+            }
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("Timed out waiting for remote modpack installation completion");
+    }
+
     /// Flushes callbacks already queued on the Swing event dispatch thread.
     private static void drainEdt() {
         EdtDispatcher.executeAndWait(() -> { });
+    }
+
+    /// Creates a primary-button mouse event for status-label retry tests.
+    ///
+    /// @param source status label receiving the event
+    /// @return deterministic single-click event
+    private static MouseEvent primaryClick(Component source) {
+        return new MouseEvent(
+                source,
+                MouseEvent.MOUSE_CLICKED,
+                System.currentTimeMillis(),
+                0,
+                1,
+                1,
+                1,
+                false,
+                MouseEvent.BUTTON1);
     }
 
     /// Finds one named descendant of the requested Swing component type.
@@ -494,8 +621,14 @@ final class RemoteModpackCatalogPanelTest {
         /// Count of explicit search calls observed by the backend.
         private final AtomicInteger searchRequests = new AtomicInteger();
 
+        /// Causes exactly one subsequent source search to fail.
+        private final AtomicBoolean failNextSearch = new AtomicBoolean();
+
         /// Count of selected-item version calls observed by the backend.
         private final AtomicInteger versionRequests = new AtomicInteger();
+
+        /// Causes exactly one subsequent selected-item version request to fail.
+        private final AtomicBoolean failNextVersion = new AtomicBoolean();
 
         /// Count of display-triggered provider category requests.
         private final AtomicInteger categoryRequests = new AtomicInteger();
@@ -510,6 +643,16 @@ final class RemoteModpackCatalogPanelTest {
         private RecordingBackend(RemoteAddon addon, RemoteAddon.Version version) {
             item = new RemoteModpackCatalogItem(addon, RemoteModpackCatalogSource.MODRINTH);
             this.version = Objects.requireNonNull(version, "version");
+        }
+
+        /// Marks the next source search as a deterministic failure for retry tests.
+        private void failNextSearchRequest() {
+            failNextSearch.set(true);
+        }
+
+        /// Marks the next selected-version request as a deterministic failure for retry tests.
+        private void failNextVersionRequest() {
+            failNextVersion.set(true);
         }
 
         /// Records and returns a nested provider category tree for selector tests.
@@ -539,6 +682,9 @@ final class RemoteModpackCatalogPanelTest {
         public RemoteModpackCatalogPage search(RemoteModpackCatalogQuery query) {
             lastQuery.set(Objects.requireNonNull(query, "query"));
             searchRequests.incrementAndGet();
+            if (failNextSearch.compareAndSet(true, false)) {
+                throw new IllegalStateException("recorded catalog failure");
+            }
             return new RemoteModpackCatalogPage(List.of(item), query.pageOffset(), 5);
         }
 
@@ -550,6 +696,9 @@ final class RemoteModpackCatalogPanelTest {
         public List<RemoteAddon.Version> loadVersions(RemoteModpackCatalogItem item) {
             assertEquals(this.item, item);
             versionRequests.incrementAndGet();
+            if (failNextVersion.compareAndSet(true, false)) {
+                throw new IllegalStateException("recorded version failure");
+            }
             return List.of(version);
         }
     }
@@ -574,7 +723,8 @@ final class RemoteModpackCatalogPanelTest {
     /// Provides the unused Core add-on data contract required to build a realistic fixture result.
     @NotNullByDefault
     private static final class FixtureAddonData implements RemoteAddon.IAddon {
-        /// Rejects dependency resolution because the focused catalog test supplies versions through its backend boundary.
+        /// Rejects dependency resolution because the focused catalog test supplies versions
+        /// through its backend boundary.
         ///
         /// @param repo unused source repository
         /// @param downloadProvider unused Core download provider

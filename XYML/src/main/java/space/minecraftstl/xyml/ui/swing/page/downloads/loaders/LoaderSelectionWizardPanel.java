@@ -516,6 +516,7 @@ public final class LoaderSelectionWizardPanel extends JPanel implements AutoClos
             return;
         }
         statusAction = null;
+        statusLabel.setCursor(Cursor.getDefaultCursor());
         action.run();
     }
 

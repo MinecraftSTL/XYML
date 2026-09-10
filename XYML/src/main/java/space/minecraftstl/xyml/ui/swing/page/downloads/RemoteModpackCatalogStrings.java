@@ -164,7 +164,7 @@ public record RemoteModpackCatalogStrings(
                 i18n("modpack.choose.repository"),
                 i18n("message.doing"),
                 i18n("message.doing"),
-                i18n("swing.download.no_versions"),
+                i18n("swing.download.initial"),
                 i18n("search.no_results_found"),
                 i18n("download.curseforge.unavailable"),
                 i18n("message.doing"),
