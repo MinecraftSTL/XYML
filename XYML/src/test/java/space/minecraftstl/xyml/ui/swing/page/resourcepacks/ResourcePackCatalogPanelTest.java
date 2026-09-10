@@ -32,11 +32,13 @@ import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
 
 import javax.swing.AbstractButton;
+import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
+import javax.swing.ListCellRenderer;
 import java.awt.CardLayout;
 import java.awt.Component;
 import java.awt.Container;
@@ -431,6 +433,35 @@ public final class ResourcePackCatalogPanelTest {
                     () -> assertTrue(detailsScroll.getViewport().getExtentSize().height > 0),
                     () -> assertTrue(detailsScroll.getVerticalScrollBar().getMaximum()
                             > detailsScroll.getVerticalScrollBar().getVisibleAmount()));
+            panel.close();
+        });
+    }
+
+    /// Uses a muted row surface for disabled packs while retaining the compatibility explanation.
+    @Test
+    public void rendersDisabledPackWithCompatibilityBadgeAndMutedSurface() {
+        @Unmodifiable List<ResourcePackCatalogItem> rows = items(2);
+        FakeResourcePackCatalogModel model = FakeResourcePackCatalogModel.immediate(
+                rows,
+                snapshot(OptionalInt.empty(), OptionalInt.of(rows.size()), 1L,
+                        ResourcePackCatalogStatus.READY, "Ready", true, true));
+        ResourcePackCatalogPanel panel = onEventDispatchThread(
+                () -> newPanel(model));
+
+        onEventDispatchThread(() -> {
+            JList<ChoiceListEntry<ResourcePackCatalogItem>> list = panel.choiceList().getList();
+            list.setSize(new Dimension(420, 68));
+            ListCellRenderer<? super ChoiceListEntry<ResourcePackCatalogItem>> renderer = list.getCellRenderer();
+            Component row = renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loaded(1, rows.get(1)),
+                    1,
+                    false,
+                    false);
+            JLabel badge = findComponent((Container) row, "richChoiceListBadge", JLabel.class);
+            assertTrue(row.isOpaque());
+            assertFalse(list.getBackground().equals(row.getBackground()));
+            assertEquals(STRINGS.compatibleText(), badge.getText());
             panel.close();
         });
     }

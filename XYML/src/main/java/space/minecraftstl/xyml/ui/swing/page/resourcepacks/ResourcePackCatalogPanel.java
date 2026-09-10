@@ -346,7 +346,8 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
                             item -> resourcePackRowDetail(item),
                             item -> resourcePackRowBadge(item),
                             item -> RESOURCE_PACK_ROW_ICON,
-                            ResourcePackCatalogItem::description));
+                            ResourcePackCatalogItem::description,
+                            item -> !item.enabled()));
             choiceList = acquiredChoiceList;
             catalogSplit = new ResponsiveCatalogSplitPane(choiceList, createDetailsPanel());
             configureComponents();
@@ -696,14 +697,12 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         return description + " | " + item.fileName();
     }
 
-    /// Formats the explicit enabled state and compatibility badge for one resource pack.
+    /// Formats the compatibility badge for one resource pack.
     ///
     /// @param item loaded resource-pack row
-    /// @return localized state and compatibility text
+    /// @return localized compatibility text
     private String resourcePackRowBadge(ResourcePackCatalogItem item) {
-        return strings.enabledText(item.enabled())
-                + " | "
-                + strings.compatibilityText(item.compatibility());
+        return strings.compatibilityText(item.compatibility());
     }
 
     /// Returns the first meaningful line from a potentially multiline pack description.
