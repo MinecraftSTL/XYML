@@ -396,6 +396,7 @@ public final class ResourcePackCatalogPanelTest {
                     panel,
                     "resourcePacksDetailsScroll",
                     JScrollPane.class);
+            assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
             panel.setSize(new Dimension(980, 620));
             layoutRecursively(panel);
             assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());
@@ -459,8 +460,8 @@ public final class ResourcePackCatalogPanelTest {
                     false,
                     false);
             JLabel badge = findComponent((Container) row, "richChoiceListBadge", JLabel.class);
-            assertTrue(row.isOpaque());
-            assertFalse(list.getBackground().equals(row.getBackground()));
+            assertFalse(row.isOpaque());
+            assertEquals(list.getBackground(), row.getBackground());
             assertEquals(STRINGS.compatibleText(), badge.getText());
             panel.close();
         });

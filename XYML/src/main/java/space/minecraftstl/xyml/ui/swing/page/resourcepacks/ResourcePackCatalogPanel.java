@@ -1811,7 +1811,7 @@ public final class ResourcePackCatalogPanel extends JPanel implements AutoClosea
         private ResponsiveCatalogSplitPane(
                 ViewportChoiceList<ResourcePackCatalogItem> list,
                 JComponent details) {
-            super(JSplitPane.HORIZONTAL_SPLIT, list, details);
+            super(JSplitPane.VERTICAL_SPLIT, list, details);
             setName("resourcePacksCatalogSplit");
             setOpaque(false);
             setBorder(BorderFactory.createEmptyBorder());
