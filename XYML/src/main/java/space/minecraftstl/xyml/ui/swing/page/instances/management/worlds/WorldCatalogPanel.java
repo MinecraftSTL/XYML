@@ -1692,7 +1692,8 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         /// @param list list and filter surface
         /// @param details selected-world details surface
         private ResponsiveCatalogSplitPane(JComponent list, JComponent details) {
-            super(JSplitPane.HORIZONTAL_SPLIT, list, details);
+            // Start stacked so the first preferred-size calculation cannot add both wide child surfaces.
+            super(JSplitPane.VERTICAL_SPLIT, list, details);
             setName("worldsCatalogSplit");
             setOpaque(false);
             setBorder(BorderFactory.createEmptyBorder());

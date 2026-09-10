@@ -335,6 +335,8 @@ final class WorldCatalogPanelQuickPlayTest {
                     WorldQuickPlayActions.unavailable());
             JSplitPane split = findNamed(panel, "worldsCatalogSplit", JSplitPane.class);
 
+            assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
+
             panel.setSize(960, 620);
             layoutRecursively(panel);
             assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());

@@ -478,6 +478,8 @@ public final class ModCatalogPanelTest {
             ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS, interactions);
             JSplitPane split = findComponent(panel, "modsCatalogSplit", JSplitPane.class);
 
+            assertEquals(JSplitPane.VERTICAL_SPLIT, split.getOrientation());
+
             panel.setSize(new Dimension(960, 620));
             layoutRecursively(panel);
             assertEquals(JSplitPane.HORIZONTAL_SPLIT, split.getOrientation());

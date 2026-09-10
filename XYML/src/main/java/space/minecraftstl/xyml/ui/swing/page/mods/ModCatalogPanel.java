@@ -1194,7 +1194,8 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         /// @param list list and filter surface
         /// @param details selected-Mod details surface
         private ResponsiveCatalogSplitPane(JComponent list, JComponent details) {
-            super(JSplitPane.HORIZONTAL_SPLIT, list, details);
+            // Start stacked so the first preferred-size calculation cannot add both wide child surfaces.
+            super(JSplitPane.VERTICAL_SPLIT, list, details);
             setName("modsCatalogSplit");
             setOpaque(false);
             setBorder(BorderFactory.createEmptyBorder());
