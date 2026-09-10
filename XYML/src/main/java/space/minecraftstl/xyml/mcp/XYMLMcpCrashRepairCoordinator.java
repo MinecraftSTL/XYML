@@ -460,7 +460,32 @@ public final class XYMLMcpCrashRepairCoordinator implements AutoCloseable {
         }
         try {
             if (cleanupOperationId != null) {
-                Map<String, Object> cleanup = operations.retryResourceCleanup(cleanupOperationId);
+                Map<String, Object> cleanup;
+                try {
+                    cleanup = operations.retryResourceCleanup(cleanupOperationId);
+                } catch (IllegalArgumentException cleanupUnavailable) {
+                    // A residual operation must never be treated as an available plan: its leases may still be held
+                    // even when the registry link is unavailable. Surface a structured retryable failure and keep
+                    // the residual state so a later bounded cleanup attempt can recover it.
+                    String cleanupMessage =
+                            "Crash repair residual cleanup is unavailable; retry cleanup before repair";
+                    synchronized (stateLock) {
+                        plan.state = PlanState.BLOCKED_RESIDUAL;
+                        plan.failureType = cleanupUnavailable.getClass().getName();
+                        plan.failureMessage = cleanupMessage;
+                        plan.retryInProgress = false;
+                    }
+                    Map<String, Object> unavailable = new LinkedHashMap<>();
+                    unavailable.put("operation_id", cleanupOperationId);
+                    unavailable.put("status", "FAILED");
+                    unavailable.put("retryable", true);
+                    unavailable.put("cleanup_succeeded", false);
+                    unavailable.put("cleanup_unavailable", true);
+                    unavailable.put("failure_type", cleanupUnavailable.getClass().getName());
+                    unavailable.put("failure_message", cleanupMessage);
+                    unavailable.put("residual_resources", List.of("resource cleanup operation unavailable"));
+                    return operationWithPlan(unavailable, plan);
+                }
                 if (!Boolean.TRUE.equals(cleanup.get("cleanup_succeeded"))) {
                     synchronized (stateLock) {
                         plan.state = PlanState.BLOCKED_RESIDUAL;

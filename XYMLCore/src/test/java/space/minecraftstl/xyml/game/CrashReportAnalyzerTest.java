@@ -49,6 +49,22 @@ public class CrashReportAnalyzerTest {
         assertEquals(completeReport, CrashReportAnalyzer.extractCrashReport(rawLog));
     }
 
+    /// Ensures mutating one compatibility matcher cannot alter the retained crash snapshot.
+    @Test
+    public void resultMatcherIsRecreatedFromImmutableSnapshot() {
+        CrashReportAnalyzer.Result result = CrashReportAnalyzer.analyze(
+                "Could not reserve enough space for 1048576KB object heap")
+                .stream()
+                .filter(candidate -> candidate.rule() == CrashReportAnalyzer.Rule.JVM_32BIT)
+                .findFirst()
+                .orElseThrow();
+
+        assertFalse(result.matcher().group().isEmpty());
+        assertFalse(result.matcher().find());
+        assertEquals("JVM_32BIT", result.rule().name());
+        assertEquals("Could not reserve enough space for 1048576KB object heap", result.matcher().group());
+    }
+
     private String loadLog(String path) throws IOException {
         List<Pair<String, Log4jLevel>> logs = new ArrayList<>();
         InputStream is = CrashReportAnalyzerTest.class.getResourceAsStream(path);
