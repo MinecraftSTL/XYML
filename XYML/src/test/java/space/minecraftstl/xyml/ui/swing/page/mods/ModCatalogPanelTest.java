@@ -27,6 +27,7 @@ import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.observable.ValueChangeListener;
 import space.minecraftstl.xyml.observable.ValueChangeSupport;
+import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
 import space.minecraftstl.xyml.ui.swing.choice.ChoicePage;
 import space.minecraftstl.xyml.ui.swing.choice.IndexRange;
 import space.minecraftstl.xyml.ui.swing.choice.LoadCancellation;
@@ -38,6 +39,7 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
+import javax.swing.ListCellRenderer;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.TransferHandler;
@@ -171,6 +173,39 @@ public final class ModCatalogPanelTest {
 
         assertTrue(model.closed());
         assertNotNull(panelReference.get());
+    }
+
+    /// Renders an explicitly disabled Mod row with a visible state badge at a narrow width.
+    @Test
+    public void rendersDisabledModBadgeInPanelRow() throws Exception {
+        ModCatalogItem disabledItem = new ModCatalogItem(
+                "disabled",
+                Path.of("mods", "disabled.jar"),
+                "disabled",
+                "Disabled Mod",
+                "Description",
+                "Author",
+                "1.0",
+                "1.21.1",
+                ModLoaderType.FABRIC,
+                "disabled.jar",
+                false);
+        RecordingModel model = new RecordingModel(List.of(disabledItem));
+        SwingUtilities.invokeAndWait(() -> {
+            ModCatalogPanel panel = new ModCatalogPanel(model, STRINGS, ACTION_STRINGS,
+                    new RecordingInteractions());
+            JList<ChoiceListEntry<ModCatalogItem>> list = panel.choiceList().getList();
+            list.setSize(new Dimension(48, 68));
+            ListCellRenderer<? super ChoiceListEntry<ModCatalogItem>> renderer = list.getCellRenderer();
+            Component row = renderer.getListCellRendererComponent(
+                    list,
+                    ChoiceListEntry.loaded(0, disabledItem),
+                    0,
+                    false,
+                    false);
+            assertTrue(findLabel(row, "richChoiceListBadge").getText().startsWith("-"));
+            panel.close();
+        });
     }
 
     /// Same-key imports prompt for a decision and submit that exact decision with the source batch.

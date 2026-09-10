@@ -28,6 +28,7 @@ import space.minecraftstl.xyml.game.launch.LaunchSession;
 import space.minecraftstl.xyml.observable.Subscription;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.shell.RoundedPopupMenu;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
@@ -35,6 +36,7 @@ import space.minecraftstl.xyml.util.io.FileUtils;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
+import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -59,6 +61,7 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Image;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.nio.file.Path;
@@ -68,7 +71,9 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.CompletionException;
@@ -86,6 +91,12 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// actual visible rows and keeps its adaptive bounded cache independent of this panel.
 @NotNullByDefault
 public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
+    /// Fallback icon used when a world has no readable embedded PNG.
+    private static final Icon WORLD_ROW_ICON = new FlatSVGIcon(
+            "assets/swing/icons/image.svg",
+            32,
+            32);
+
     /// Pure background model owned and closed by this page.
     private final WorldCatalogModel model;
 
@@ -301,7 +312,14 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.quickPlayActions = Objects.requireNonNull(quickPlayActions, "quickPlayActions");
         displayedSnapshot = this.model.snapshot();
-        choiceList = new ViewportChoiceList<>(this.model, WorldCatalogItem::displayText);
+        choiceList = new ViewportChoiceList<>(
+                this.model,
+                new RichChoiceListCellRenderer<>(
+                        WorldCatalogItem::displayText,
+                        this::worldRowDetail,
+                        this::worldRowBadge,
+                        this::worldRowIcon,
+                        this::worldRowTooltip));
         listDataListener = createListDataListener();
         selectionListener = this::selectionChanged;
 
@@ -696,6 +714,78 @@ public final class WorldCatalogPanel extends JPanel implements AutoCloseable {
     private void configureList() {
         choiceList.getList().addListSelectionListener(selectionListener);
         choiceList.getChoiceModel().addListDataListener(listDataListener);
+    }
+
+    /// Formats the compact world metadata shown beside the row title.
+    ///
+    /// @param world loaded world row
+    /// @return game-version and last-played metadata, or retained failure detail
+    private String worldRowDetail(WorldCatalogItem world) {
+        if (!world.readable()) {
+            return firstNonBlankLine(world.failureDetail());
+        }
+        List<String> values = new ArrayList<>();
+        if (world.gameVersion() != null) {
+            values.add(strings.gameVersionLabel() + ": " + world.gameVersion());
+        }
+        values.add(strings.lastPlayedLabel() + ": " + formatLastPlayed(world.lastPlayed()));
+        return String.join(" | ", values);
+    }
+
+    /// Formats the lock/readability badge for one world row.
+    ///
+    /// @param world loaded world row
+    /// @return localized readability and lock state
+    private String worldRowBadge(WorldCatalogItem world) {
+        if (!world.readable()) {
+            return strings.unreadableValue();
+        }
+        return world.locked() ? strings.lockedValue() : strings.unlockedValue();
+    }
+
+    /// Returns a decoded and row-sized embedded world icon when available.
+    ///
+    /// @param world loaded world row
+    /// @return fixed-size icon, or the bundled fallback icon
+    private Icon worldRowIcon(WorldCatalogItem world) {
+        @Nullable WorldCatalogDetails details = world.details();
+        if (details == null || details.iconPngBase64() == null) {
+            return WORLD_ROW_ICON;
+        }
+        try {
+            ImageIcon source = new ImageIcon(Base64.getDecoder().decode(details.iconPngBase64()));
+            if (source.getIconWidth() <= 0 || source.getIconHeight() <= 0) {
+                return WORLD_ROW_ICON;
+            }
+            Image scaled = source.getImage().getScaledInstance(40, 40, Image.SCALE_SMOOTH);
+            return new ImageIcon(scaled);
+        } catch (IllegalArgumentException failure) {
+            return WORLD_ROW_ICON;
+        }
+    }
+
+    /// Supplies a useful tooltip without forcing another world read.
+    ///
+    /// @param world loaded world row
+    /// @return full path and optional failure detail
+    private String worldRowTooltip(WorldCatalogItem world) {
+        return world.failureDetail() == null
+                ? world.path().toString()
+                : world.path() + "\n" + world.failureDetail();
+    }
+
+    /// Returns the first meaningful line from a potentially multiline failure message.
+    ///
+    /// @param text nullable failure detail
+    /// @return trimmed first line, or an empty string
+    private static String firstNonBlankLine(@Nullable String text) {
+        return text == null
+                ? ""
+                : text.lines()
+                        .map(String::trim)
+                        .filter(line -> !line.isBlank())
+                        .findFirst()
+                        .orElse("");
     }
 
     /// Configures transparent detail controls and localized enum rendering.

@@ -23,17 +23,22 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import space.minecraftstl.xyml.addon.mod.ModManager;
+import space.minecraftstl.xyml.addon.mod.ModLoaderType;
 import space.minecraftstl.xyml.game.GameInstanceID;
 import space.minecraftstl.xyml.game.GameRepository;
 import space.minecraftstl.xyml.observable.Subscription;
+import space.minecraftstl.xyml.setting.GameInstanceIconType;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTextFields;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
@@ -58,8 +63,10 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Image;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -77,6 +84,15 @@ import static space.minecraftstl.xyml.util.i18n.I18n.i18n;
 /// interaction contracts. No JavaFX type or network-capable service is referenced.
 @NotNullByDefault
 public final class ModCatalogPanel extends JPanel implements AutoCloseable {
+    /// Shared row icon that remains available in headless and high-DPI Swing sessions.
+    private static final Icon MOD_ROW_ICON = new FlatSVGIcon(
+            "assets/swing/icons/format-list-bulleted.svg",
+            32,
+            32);
+
+    /// Loader-specific fallback icons used when a Mod archive has no exposed logo payload.
+    private static final @Unmodifiable Map<ModLoaderType, Icon> MOD_LOADER_ICONS = createModLoaderIcons();
+
     /// Toolkit-neutral installed-Mod model owned by this page.
     private final ModCatalogModel model;
 
@@ -237,7 +253,14 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
         modsDirectory = model.modsDirectory().toAbsolutePath().normalize();
         displayedSnapshot = model.snapshot();
         enabledToggle = new JCheckBox(strings.enabledLabel());
-        choiceList = new ViewportChoiceList<>(model, ModCatalogItem::displayText);
+        choiceList = new ViewportChoiceList<>(
+                model,
+                new RichChoiceListCellRenderer<>(
+                        ModCatalogItem::displayText,
+                        item -> modRowDetail(item, strings),
+                        item -> modRowBadge(item, strings),
+                        ModCatalogPanel::modRowIcon,
+                        ModCatalogItem::description));
         searchListener = createSearchListener();
         listDataListener = createListDataListener();
         selectionListener = this::selectionChanged;
@@ -279,6 +302,83 @@ public final class ModCatalogPanel extends JPanel implements AutoCloseable {
     /// @return displayed snapshot
     public ModCatalogSnapshot displayedSnapshot() {
         return displayedSnapshot;
+    }
+
+    /// Formats the installed Mod's compact metadata line without reading the file system.
+    ///
+    /// @param item loaded Mod row
+    /// @param strings localized field labels
+    /// @return one-line description, identifier, version, and author metadata
+    private static String modRowDetail(ModCatalogItem item, ModCatalogStrings strings) {
+        List<String> values = new ArrayList<>();
+        String description = firstNonBlankLine(item.description());
+        if (!description.isBlank()) {
+            values.add(description);
+        }
+        if (!item.modId().isBlank()) {
+            values.add(strings.idLabel() + ": " + item.modId());
+        }
+        if (!item.version().isBlank()) {
+            values.add(strings.versionLabel() + ": " + item.version());
+        }
+        if (!item.authors().isBlank()) {
+            values.add(strings.authorsLabel() + ": " + item.authors());
+        }
+        if (!item.gameVersion().isBlank()) {
+            values.add(strings.gameVersionLabel() + ": " + item.gameVersion());
+        }
+        if (values.isEmpty()) {
+            values.add(item.fileName());
+        }
+        return String.join(" | ", values);
+    }
+
+    /// Formats the explicit enabled-state badge and detected loader label.
+    ///
+    /// @param item loaded Mod row
+    /// @param strings localized state labels
+    /// @return enabled-state and loader badge text
+    private static String modRowBadge(ModCatalogItem item, ModCatalogStrings strings) {
+        String state = item.enabled() ? strings.enabledLabel() : strings.disabledFilterLabel();
+        String marker = item.enabled() ? "+" : "-";
+        return marker + " " + state + " | " + item.loaderType().name();
+    }
+
+    /// Returns the bundled icon associated with the detected Mod loader.
+    ///
+    /// @param item loaded Mod row
+    /// @return loader icon, or the generic catalog icon
+    private static Icon modRowIcon(ModCatalogItem item) {
+        @Nullable Icon icon = MOD_LOADER_ICONS.get(item.loaderType());
+        return icon == null ? MOD_ROW_ICON : icon;
+    }
+
+    /// Loads and scales the small immutable loader icon table once per class loader.
+    ///
+    /// @return immutable loader-to-icon map
+    private static @Unmodifiable Map<ModLoaderType, Icon> createModLoaderIcons() {
+        EnumMap<ModLoaderType, Icon> icons = new EnumMap<>(ModLoaderType.class);
+        for (ModLoaderType loader : ModLoaderType.values()) {
+            GameInstanceIconType iconType = GameInstanceIconType.getIconType(loader);
+            ImageIcon source = new ImageIcon(Objects.requireNonNull(
+                    ModCatalogPanel.class.getResource(iconType.resourcePath()),
+                    "Missing bundled Mod loader icon: " + iconType.resourcePath()));
+            Image scaled = source.getImage().getScaledInstance(32, 32, Image.SCALE_SMOOTH);
+            icons.put(loader, new ImageIcon(scaled));
+        }
+        return Map.copyOf(icons);
+    }
+
+    /// Returns the first meaningful line from a potentially multiline description.
+    ///
+    /// @param text complete description
+    /// @return trimmed first line, or an empty string
+    private static String firstNonBlankLine(String text) {
+        return text.lines()
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .findFirst()
+                .orElse("");
     }
 
     /// Creates the title and global icon-command band.

@@ -28,12 +28,15 @@ import space.minecraftstl.xyml.schematic.LitematicFile;
 import space.minecraftstl.xyml.ui.swing.EdtDispatcher;
 import space.minecraftstl.xyml.ui.swing.SwingTransparency;
 import space.minecraftstl.xyml.ui.swing.choice.ChoiceListEntry;
+import space.minecraftstl.xyml.ui.swing.choice.RichChoiceListCellRenderer;
 import space.minecraftstl.xyml.ui.swing.choice.ViewportChoiceList;
 import space.minecraftstl.xyml.ui.swing.shell.ShellFileDropHandler;
 import space.minecraftstl.xyml.util.i18n.I18n;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
@@ -49,9 +52,11 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridLayout;
+import java.awt.Image;
 import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -73,6 +78,21 @@ import java.util.function.Supplier;
 /// All worker-published model changes are coalesced and applied through [EdtDispatcher].
 @NotNullByDefault
 public final class SchematicBrowserPanel extends JPanel implements AutoCloseable {
+    /// Maximum preview side decoded for a single row icon.
+    private static final int MAX_ROW_PREVIEW_SIDE = 128;
+
+    /// Fallback icon for a parsed Litematic without preview pixels.
+    private static final Icon SCHEMATIC_ROW_ICON = new FlatSVGIcon(
+            "assets/swing/icons/image.svg",
+            32,
+            32);
+
+    /// Folder icon used for child-directory rows.
+    private static final Icon SCHEMATIC_DIRECTORY_ICON = new FlatSVGIcon(
+            "assets/swing/icons/folder-fill.svg",
+            32,
+            32);
+
     /// Card shown before loading and while a directory scan is active.
     private static final String LOADING_CARD = "loading";
 
@@ -233,7 +253,14 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         this.model = Objects.requireNonNull(model, "model");
         this.strings = Objects.requireNonNull(strings, "strings");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
-        choiceList = new ViewportChoiceList<>(model, this::rowText);
+        choiceList = new ViewportChoiceList<>(
+                model,
+                new RichChoiceListCellRenderer<>(
+                        this::rowText,
+                        this::rowDetail,
+                        this::rowBadge,
+                        this::rowIcon,
+                        this::rowTooltip));
 
         configureComponents();
         modelSubscription = model.subscribe(this::modelChanged);
@@ -1067,6 +1094,112 @@ public final class SchematicBrowserPanel extends JPanel implements AutoCloseable
         return fileName.length() > suffixLength
                 ? fileName.substring(0, fileName.length() - suffixLength)
                 : fileName;
+    }
+
+    /// Formats author, description, and dimensions already present in parsed metadata.
+    ///
+    /// @param item loaded schematic browser row
+    /// @return compact metadata line
+    private String rowDetail(SchematicBrowserItem item) {
+        if (item instanceof SchematicDirectoryItem directory) {
+            return directory.fileName();
+        }
+        SchematicFileItem file = (SchematicFileItem) item;
+        @Nullable LitematicFile metadata = file.metadata();
+        if (metadata == null) {
+            return firstNonBlankLine(file.failureMessage());
+        }
+        SchematicMetadataStrings labels = strings.metadata();
+        List<String> values = new ArrayList<>();
+        @Nullable String author = metadata.getAuthor();
+        if (author != null && !author.isBlank()) {
+            values.add(labels.authorLabel() + ": " + author);
+        }
+        @Nullable String description = metadata.getDescription();
+        String firstDescriptionLine = firstNonBlankLine(description);
+        if (!firstDescriptionLine.isBlank()) {
+            values.add(firstDescriptionLine);
+        }
+        @Nullable LitematicFile.EnclosingSize size = metadata.getEnclosingSize();
+        if (size != null) {
+            values.add(labels.enclosingSizeLabel() + ": " + size.x() + "x" + size.y() + "x" + size.z());
+        }
+        return values.isEmpty() ? file.fileName() : String.join(" | ", values);
+    }
+
+    /// Formats a compact format/block-count badge for a parsed schematic row.
+    ///
+    /// @param item loaded schematic browser row
+    /// @return format version or unreadable marker
+    private String rowBadge(SchematicBrowserItem item) {
+        if (item instanceof SchematicDirectoryItem) {
+            return "";
+        }
+        SchematicFileItem file = (SchematicFileItem) item;
+        @Nullable LitematicFile metadata = file.metadata();
+        if (metadata == null) {
+            return strings.unreadableText();
+        }
+        String version = formatVersion(metadata);
+        return metadata.getTotalBlocks() > 0
+                ? version + " | " + metadata.getTotalBlocks()
+                : version;
+    }
+
+    /// Converts an optional Litematic preview into a fixed-size Swing icon.
+    ///
+    /// @param item loaded schematic browser row
+    /// @return preview icon, folder icon, or fallback icon
+    private Icon rowIcon(SchematicBrowserItem item) {
+        if (item instanceof SchematicDirectoryItem) {
+            return SCHEMATIC_DIRECTORY_ICON;
+        }
+        @Nullable LitematicFile metadata = ((SchematicFileItem) item).metadata();
+        if (metadata == null) {
+            return SCHEMATIC_ROW_ICON;
+        }
+        int @Nullable [] pixels = metadata.getPreviewImageData();
+        if (pixels == null || pixels.length == 0) {
+            return SCHEMATIC_ROW_ICON;
+        }
+        int side = (int) Math.sqrt(pixels.length);
+        if (side <= 0 || side > MAX_ROW_PREVIEW_SIDE || (long) side * side != pixels.length) {
+            return SCHEMATIC_ROW_ICON;
+        }
+        BufferedImage image = new BufferedImage(side, side, BufferedImage.TYPE_INT_ARGB);
+        image.setRGB(0, 0, side, side, pixels, 0, side);
+        Image scaled = image.getScaledInstance(40, 40, Image.SCALE_SMOOTH);
+        return new ImageIcon(scaled);
+    }
+
+    /// Supplies a tooltip containing the exact path and complete parsed description.
+    ///
+    /// @param item loaded schematic browser row
+    /// @return durable path and optional description/failure
+    private String rowTooltip(SchematicBrowserItem item) {
+        if (item instanceof SchematicDirectoryItem directory) {
+            return directory.path().toString();
+        }
+        SchematicFileItem file = (SchematicFileItem) item;
+        @Nullable LitematicFile metadata = file.metadata();
+        String detail = metadata == null ? file.failureMessage() : metadata.getDescription();
+        return detail == null || detail.isBlank()
+                ? file.path().toString()
+                : file.path() + "\n" + detail;
+    }
+
+    /// Returns the first meaningful line from optional multiline metadata.
+    ///
+    /// @param text nullable source text
+    /// @return trimmed first line, or an empty string
+    private static String firstNonBlankLine(@Nullable String text) {
+        return text == null
+                ? ""
+                : text.lines()
+                        .map(String::trim)
+                        .filter(line -> !line.isBlank())
+                        .findFirst()
+                        .orElse("");
     }
 
     /// Returns whether commands may still reach the owned model.
